@@ -71,6 +71,7 @@ const engine = if (HEADLESS) struct {
     pub fn windowMaximize() void {}
     pub fn windowClose() void {}
     pub fn dispatchScrollChanged(_: anytype, _: anytype) void {}
+    pub fn setPanelRootProvider(_: anytype) void {}
 } else @import("framework/engine.zig");
 const gpu = if (HEADLESS) struct {
     pub fn frameCounter() u64 {
@@ -78,6 +79,14 @@ const gpu = if (HEADLESS) struct {
     }
     pub fn scene3dResetForReload() void {}
 } else @import("framework/gpu/gpu.zig");
+// PANELWIN-0628: the editor-panel pop-out (2D React subtree → 2nd OS window).
+const panel_window = if (HEADLESS) struct {
+    pub fn open(_: u32, _: u32) !void {}
+    pub fn close() void {}
+    pub fn isOpen() bool {
+        return false;
+    }
+} else @import("framework/gpu/panel_window.zig");
 const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_options.has_game_camera) @import("framework/game/camera.zig") else struct {
     pub const Solved = struct {};
     pub fn activeNodeId() u32 {
@@ -233,8 +242,17 @@ const WindowBinding = struct {
     slot: usize,
     kind: windows.WindowKind,
     title: ?[:0]u8 = null,
+    // PANELWIN-0628: a <Window kind="popout"> renders into the wgpu pop-out
+    // (framework/gpu/panel_window.zig), NOT a windows.zig SDL3 slot. We still
+    // register it here so the main paint excludes its subtree (the existing
+    // g_window_by_node_id.contains gate), but skip every windows.* call.
+    is_popout: bool = false,
 };
 var g_window_by_node_id: std.AutoHashMap(u32, WindowBinding) = undefined;
+// The single popped-out window's node id (0 = none). The panel root provider
+// re-materializes this subtree each frame for the engine to render + hit-test.
+var g_popout_node_id: u32 = 0;
+var g_panel_arena: std.heap.ArenaAllocator = undefined;
 var g_is_window_child: bool = false;
 var g_child_window_id: u32 = 0;
 var g_child_client: ?ipc.Client = null;
@@ -1535,6 +1553,40 @@ fn openHostWindowForNode(id: u32, type_name: []const u8, props: ?std.json.Value)
     const default_height: i32 = if (is_notification) 100 else 480;
     const width = propInt(p, "width") orelse default_width;
     const height = propInt(p, "height") orelse default_height;
+
+    // PANELWIN-0628: kind="popout" → the wgpu editor-panel window. Registered in
+    // g_window_by_node_id (so the main paint excludes its subtree) but bound to
+    // NO windows.zig slot — the engine renders + hit-tests it via the panel
+    // root provider. Only one pop-out at a time; ignore extras.
+    if (!is_notification) {
+        if (propString(p, "kind")) |k| {
+            if (std.mem.eql(u8, k, "popout")) {
+                if (g_popout_node_id != 0) {
+                    g_alloc.free(title);
+                    return;
+                }
+                panel_window.open(@intCast(@max(1, width)), @intCast(@max(1, height))) catch {
+                    std.debug.print("[panel-window/parent] open FAILED node={d}\n", .{id});
+                    g_alloc.free(title);
+                    return;
+                };
+                g_window_by_node_id.put(id, .{
+                    .slot = 0,
+                    .kind = .in_process, // unused; routeCommandToHostWindow ignores non-independent
+                    .title = title,
+                    .is_popout = true,
+                }) catch {
+                    panel_window.close();
+                    g_alloc.free(title);
+                    return;
+                };
+                g_popout_node_id = id;
+                std.debug.print("[panel-window/parent] open node={d} size={d}x{d}\n", .{ id, width, height });
+                return;
+            }
+        }
+    }
+
     const duration_ms: u32 = if (propFloat(p, "duration")) |sec|
         @intFromFloat(@max(0, sec) * 1000.0)
     else
@@ -2695,6 +2747,7 @@ fn installHostTreeHooks() void {
         .before_destroy = beforeNodeDestroy,
     });
     host_tree.setMutationHook(hostTreeMutationHook);
+    engine.setPanelRootProvider(providePanelRoot); // PANELWIN-0628
 }
 
 /// Per-batch reconciler drain. Delegates the actual mutation work to
@@ -2927,6 +2980,17 @@ fn materializeWindowRoot(arena: std.mem.Allocator, window_node_id: u32) ?*Node {
     return root;
 }
 
+// PANELWIN-0628: hand the engine a freshly materialized + owner-filtered copy of
+// the popped-out subtree each frame. The engine lays it out at the 2nd window's
+// size, paints it into a gpu RT, and keeps the pointer alive (the arena resets
+// only on the NEXT call) so this window's mouse events hit-test real rects.
+fn providePanelRoot() ?*Node {
+    if (g_popout_node_id == 0) return null;
+    if (g_node_by_id.get(g_popout_node_id) == null) return null;
+    _ = g_panel_arena.reset(.retain_capacity);
+    return materializeWindowRoot(g_panel_arena.allocator(), g_popout_node_id);
+}
+
 fn syncRenderedNodeState(node: *const Node) void {
     if (node.scroll_persist_slot != 0) {
         if (g_node_by_id.get(node.scroll_persist_slot)) |stable| {
@@ -2951,7 +3015,12 @@ fn markReachable(reachable: *std.AutoHashMap(u32, void), id: u32) void {
 
 fn destroyDetachedNode(id: u32) void {
     if (g_window_by_node_id.fetchRemove(id)) |entry| {
-        windows.close(entry.value.slot);
+        if (entry.value.is_popout) {
+            panel_window.close();
+            if (g_popout_node_id == id) g_popout_node_id = 0;
+        } else {
+            windows.close(entry.value.slot);
+        }
         if (entry.value.title) |title| g_alloc.free(title);
     }
     releaseInputSlot(id);
@@ -3199,6 +3268,9 @@ fn rebuildTree() void {
 
     var win_it = g_window_by_node_id.iterator();
     while (win_it.next()) |entry| {
+        // The pop-out has no windows.zig slot — the engine renders it via the
+        // panel root provider (providePanelRoot), not setRoot here.
+        if (entry.value_ptr.is_popout) continue;
         if (materializeWindowRoot(arena, entry.key_ptr.*)) |window_root| {
             windows.setRoot(entry.value_ptr.slot, window_root);
         }
@@ -3931,6 +4003,14 @@ fn hostTickDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     info.getReturnValue().set(v8.Number.init(info.getIsolate(), if (drained) @as(f64, 1) else @as(f64, 0)));
 }
 
+// PANELWIN-0628: the cart polls this to re-dock its rail when the user closes
+// the pop-out via the OS window button (the <Window> node is still mounted, but
+// panel_window.isOpen() has flipped). Returns 1 = open, 0 = closed.
+fn hostPanelWindowStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    info.getReturnValue().set(v8.Number.init(info.getIsolate(), if (panel_window.isOpen()) @as(f64, 1) else @as(f64, 0)));
+}
+
 fn runHeadless() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -3985,6 +4065,7 @@ fn runHeadless() !void {
     host_window.register();
 
     v8_runtime.registerHostFn("__tickDrain", hostTickDrain);
+    v8_runtime.registerHostFn("__panel_window_status", hostPanelWindowStatus);
 
     // Same console + process shim v8_cli installs. The cart bundle
     // then layers tui/v8-preamble.js on top via its first line.
@@ -4064,6 +4145,7 @@ pub fn main() !void {
     g_latch_bottom_nodes = std.AutoHashMap(u32, void).init(g_alloc);
     g_window_owner_by_node_id = std.AutoHashMap(u32, u32).init(g_alloc);
     g_window_by_node_id = std.AutoHashMap(u32, WindowBinding).init(g_alloc);
+    g_panel_arena = std.heap.ArenaAllocator.init(g_alloc); // PANELWIN-0628
     g_scroll_prop_slots = std.AutoHashMap(u32, void).init(g_alloc);
     g_input_slot_by_node_id = std.AutoHashMap(u32, u8).init(g_alloc);
     g_menu_items_by_node = std.AutoHashMap(u32, []context_menu.MenuItem).init(g_alloc);

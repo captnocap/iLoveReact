@@ -34,6 +34,9 @@ export function EditorLayout(props: {
   onSwapFocus: () => void;
   /** the left rail: selected-piece inspector + the objects/paint rail. */
   rail: React.ReactNode;
+  /** override the rail width (PANELWIN-0628: narrow it when the panel is
+   *  popped out to its own window, giving the build map more room). */
+  railWidth?: number;
   /** the iso-3D build pane (LoaderIsoView / IsoAuthor + its corner toggles). */
   map3d: React.ReactNode;
   /** the 2D tile-paint canvas. */
@@ -42,7 +45,7 @@ export function EditorLayout(props: {
   const big3d = props.focus === '3d';
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'row', backgroundColor: '#080d16' }}>
-      <Box style={{ width: RAIL_W, height: '100%', flexDirection: 'column', borderRightWidth: 1, borderRightColor: '#1c2940', minWidth: 0 }}>
+      <Box style={{ width: props.railWidth ?? RAIL_W, height: '100%', flexDirection: 'column', borderRightWidth: 1, borderRightColor: '#1c2940', minWidth: 0 }}>
         {props.rail}
       </Box>
       <Box style={{ flexGrow: 1, height: '100%', position: 'relative', minWidth: 0 }}>

@@ -1,6 +1,7 @@
 import { startupMark, startupWatchSettle, navStart, navReady } from './startupTimer';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, Pressable } from '@reactjit/primitives';
+import { Box, Text, Pressable, Window } from '@reactjit/primitives';
+import { callHost } from '@reactjit/ffi';
 import { execAsync, envGet } from '@reactjit/runtime/hooks/process';
 import { nsGet, nsSet } from '@reactjit/hooks/localstore';
 import type { GameState } from './design';
@@ -241,6 +242,18 @@ function EditorShell() {
   // drives the pill icon, the status is a readable one-liner in the chrome.
   const [compileState, setCompileState] = useState<'idle' | 'compiling' | 'done' | 'error'>('idle');
   const [compileStatus, setCompileStatus] = useState('');
+  // PANELWIN-0628: pop the left rail out into a 2nd OS window (2nd monitor). The
+  // rail's <Window kind="popout"> mounts when true; the engine renders that
+  // subtree into the pop-out's own wgpu surface. Poll the host so closing the
+  // window via its OS button re-docks the rail here.
+  const [panelPoppedOut, setPanelPoppedOut] = useState(false);
+  useEffect(() => {
+    if (!panelPoppedOut) return;
+    const t = setInterval(() => {
+      if (Number(callHost('__panel_window_status', 0)) === 0) setPanelPoppedOut(false);
+    }, 600);
+    return () => clearInterval(t);
+  }, [panelPoppedOut]);
   // The two toolbar popovers are mutually exclusive; opening one closes the other.
   const toggleMenu = useCallback(() => { setMenuOpen((o) => !o); setLogOpen(false); }, []);
   const toggleLog = useCallback(() => { setLogOpen((o) => !o); setMenuOpen(false); }, []);
@@ -862,6 +875,59 @@ function EditorShell() {
 
   // req_1965 diag: body done — the rest of `shell` is the children rendered before the loader pane.
   (globalThis as any).__shellBodyEnd = (globalThis as any).performance?.now?.() ?? Date.now();
+
+  // PANELWIN-0628: the rail content + a pop-out/dock toggle bar. Rendered EITHER
+  // in EditorLayout's rail slot (docked) OR inside <Window kind="popout"> (on a
+  // 2nd monitor). The toggle rides the top of the rail so it works in both.
+  const railInner = (
+    <>
+      <Pressable
+        onPress={() => setPanelPoppedOut((v) => !v)}
+        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 26, flexShrink: 0, backgroundColor: '#0e1a2e', borderBottomWidth: 1, borderBottomColor: '#1c2940' }}
+      >
+        <Text fontSize={10} color="#7dd3fc" style={{ fontWeight: 700, fontFamily: 'monospace' }}>
+          {panelPoppedOut ? '⤓  DOCK PANEL' : '⤢  POP OUT  →  2nd monitor'}
+        </Text>
+      </Pressable>
+      {/* selected piece — fills the rail in 2D mode (the build tools below hide,
+          and the tile-paint tools live in the 2D map's own left rail). */}
+      {MINIMAL_REPRO ? null : <Box style={{ flexGrow: mapFocus === '3d' ? 2 : 1, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+        <PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />
+      </Box>}
+      {/* CONTEXTUAL (req_1890): the build tools (paint/skins + prop/piece) show only
+          when the 3D build map is up. When the 2D tile map is pulled up they give way
+          to the tile-paint tools, which currently ride the 2D map's own left rail. */}
+      {mapFocus === '3d' ? (
+        <>
+          {MINIMAL_REPRO ? null : <Box style={{ flexGrow: 5, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
+            <RightPanel
+              paintPieces={stablePaintPieces}
+              paintSelectedIds={isoSelectedIds}
+              armed={armed}
+              armedDraft={armedDraft}
+              onArmedDraftChange={setArmedDraft}
+              onPaintCommit={commitBuildEvents}
+              onOpenPainter={openPainter}
+            />
+          </Box>}
+          <Box style={{ flexGrow: 6, flexBasis: 0, minHeight: 0 }}>
+            <CatalogRail armed={armed} onArm={armCatalog} prefabs={buildingPrefabs} />
+          </Box>
+        </>
+      ) : null}
+    </>
+  );
+  // When popped out, the editor's own rail slot shows a slim dock affordance and
+  // gives the build map more width.
+  const railDockedSlot = panelPoppedOut ? (
+    <Box style={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 14, gap: 10 }}>
+      <Text fontSize={11} color="#94a3b8" style={{ textAlign: 'center' }}>Panel is on its own window.</Text>
+      <Pressable onPress={() => setPanelPoppedOut(false)} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, borderWidth: 1, borderColor: '#334155', backgroundColor: '#16233a' }}>
+        <Text fontSize={10} color="#7dd3fc" style={{ fontWeight: 700 }}>⤓ DOCK PANEL</Text>
+      </Pressable>
+    </Box>
+  ) : railInner;
+
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', position: 'relative', backgroundColor: '#080d16' }}>
       {MINIMAL_REPRO ? null : <Chrome
@@ -910,43 +976,8 @@ function EditorShell() {
           <EditorLayout
             focus={mapFocus}
             onSwapFocus={() => setMapFocus((f) => (f === '3d' ? '2d' : '3d'))}
-            rail={
-              <>
-                {/* selected piece — fills the rail in 2D mode (the build tools below hide,
-                    and the tile-paint tools live in the 2D map's own left rail). */}
-                {MINIMAL_REPRO ? null : <Box style={{ flexGrow: mapFocus === '3d' ? 2 : 1, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
-                  <PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />
-                </Box>}
-                {/* CONTEXTUAL (req_1890): the build tools (paint/skins + prop/piece) show only
-                    when the 3D build map is up. When the 2D tile map is pulled up they give way
-                    to the tile-paint tools, which currently ride the 2D map's own left rail. */}
-                {mapFocus === '3d' ? (
-                  <>
-                    {/* paint / skins above, prop / piece below — flexGrow WEIGHTS (not %
-                        flexBasis, which wasn't resolving → content-sized panes + a dead
-                        void at the bottom, req_1946). flexBasis:0 + weights divide the
-                        column so both fill it; the fitted grids then measure real height
-                        and show many tiles instead of three. */}
-                    {MINIMAL_REPRO ? null : <Box style={{ flexGrow: 5, flexBasis: 0, flexShrink: 1, minHeight: 0, borderBottomWidth: 1, borderBottomColor: '#1c2940' }}>
-                      <RightPanel
-                        paintPieces={stablePaintPieces}
-                        paintSelectedIds={isoSelectedIds}
-                        armed={armed}
-                        armedDraft={armedDraft}
-                        onArmedDraftChange={setArmedDraft}
-                        onPaintCommit={commitBuildEvents}
-                        onOpenPainter={openPainter}
-                      />
-                    </Box>}
-                    {/* prop / piece menu — OFF the map, in the rail (req_1888). Heaviest
-                        weight so the prop/piece grid gets the most room (req_1946). */}
-                    <Box style={{ flexGrow: 6, flexBasis: 0, minHeight: 0 }}>
-                      <CatalogRail armed={armed} onArm={armCatalog} prefabs={buildingPrefabs} />
-                    </Box>
-                  </>
-                ) : null}
-              </>
-            }
+            railWidth={panelPoppedOut ? 150 : undefined}
+            rail={railDockedSlot}
             map2d={
               MINIMAL_REPRO ? null : <MemoPaintCanvas
                 key={`${ws.stem}#${worldEpoch}`}
@@ -1034,6 +1065,17 @@ function EditorShell() {
         <Route path="/workbench">{() => <WorkbenchRoute sources={wbSources} onExit={() => nav.push('/')} />}</Route>
         <Route path="/compiled">{() => <CompiledWorldRoute onExit={() => nav.push('/')} reloadKey={compiledReloadKey} status={compiledStatus} />}</Route>
       </Box>
+
+      {/* PANELWIN-0628: the popped-out rail. <Window kind="popout"> is excluded
+          from the main paint and rendered by the engine into its own wgpu OS
+          window (a 2nd monitor). Only while on /editor — it carries the rail. */}
+      {panelPoppedOut && atEditor ? (
+        <Window kind="popout" title="hmsc · editor panel" width={440} height={1000}>
+          <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#0b1320' }}>
+            {railInner}
+          </Box>
+        </Window>
+      ) : null}
 
       {/* Root overlays live here so they paint on top of the editor panes (this
           engine hit-tests later siblings first). */}

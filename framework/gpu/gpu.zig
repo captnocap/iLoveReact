@@ -2048,6 +2048,263 @@ pub fn resize(width: u32, height: u32) void {
     }
 }
 
+/// The scissor-segmented 2D draw — every primitive batch (rects/text/curves/
+/// capsules/polys/images/icons) clipped by the boundaries recorded during the
+/// paint walk, then g-curve fills and filter composites. Shared by the main
+/// frame() and renderPanelInto() so the pop-out window draws byte-identically
+/// to the main window. Reads g_width/g_height + the batch counts; the caller
+/// owns the render pass + globals + uploads.
+fn drawSegmented2D(render_pass: *wgpu.RenderPassEncoder) void {
+    const total_rects: u32 = @intCast(rects.count());
+    const total_glyphs: u32 = @intCast(text.count());
+    const total_curves: u32 = @intCast(curves.count());
+    const total_capsules: u32 = @intCast(capsules.count());
+    const total_polys: u32 = @intCast(polys.count());
+    const total_images: u32 = @intCast(images.count());
+    const total_icons: u32 = @intCast(sdf_icons.count());
+
+    if (g_scissor_count == 0) {
+        // Fast path — no clip or ordering boundaries, single draw for all primitives
+        render_pass.setScissorRect(0, 0, g_width, g_height);
+        drawRectsSkipping(render_pass, 0, total_rects);
+        drawTextSkipping(render_pass, 0, total_glyphs);
+        drawCurvesSkipping(render_pass, 0, total_curves);
+        drawCapsulesSkipping(render_pass, 0, total_capsules);
+        drawPolysSkipping(render_pass, 0, total_polys);
+        drawImagesSkipping(render_pass, 0, total_images);
+        if (total_icons > 0) sdf_icons.drawBatch(render_pass, 0, total_icons);
+    } else {
+        // Boundary-segmented rendering
+        var segments: [MAX_SCISSOR_SEGMENTS + 1]ScissorSegment = undefined;
+        const seg_count = g_scissor_count;
+        @memcpy(segments[0..seg_count], g_scissor_segments[0..seg_count]);
+
+        var prev_rect: u32 = 0;
+        var prev_glyph: u32 = 0;
+        var prev_curve: u32 = 0;
+        var prev_capsule: u32 = 0;
+        var prev_poly: u32 = 0;
+        var prev_image: u32 = 0;
+        var prev_icon: u32 = 0;
+        var prev_sx: u32 = 0;
+        var prev_sy: u32 = 0;
+        var prev_sw: u32 = g_width;
+        var prev_sh: u32 = g_height;
+
+        for (0..seg_count) |si| {
+            const seg = segments[si];
+            const rect_end = seg.rect_start;
+            const glyph_end = seg.glyph_start;
+            const curve_end = seg.curve_start;
+            const capsule_end = seg.capsule_start;
+            const poly_end = seg.poly_start;
+            const image_end = seg.image_start;
+            const icon_end = seg.sdf_icon_start;
+
+            if (rect_end > prev_rect or glyph_end > prev_glyph or curve_end > prev_curve or capsule_end > prev_capsule or poly_end > prev_poly or image_end > prev_image or icon_end > prev_icon) {
+                if (setClampedScissor(render_pass, prev_sx, prev_sy, prev_sw, prev_sh, g_width, g_height)) {
+                    if (rect_end > prev_rect) drawRectsSkipping(render_pass, prev_rect, rect_end);
+                    if (glyph_end > prev_glyph) drawTextSkipping(render_pass, prev_glyph, glyph_end);
+                    if (curve_end > prev_curve) drawCurvesSkipping(render_pass, prev_curve, curve_end);
+                    if (capsule_end > prev_capsule) drawCapsulesSkipping(render_pass, prev_capsule, capsule_end);
+                    if (poly_end > prev_poly) drawPolysSkipping(render_pass, prev_poly, poly_end);
+                    if (image_end > prev_image) drawImagesSkipping(render_pass, prev_image, image_end);
+                    if (icon_end > prev_icon) sdf_icons.drawBatch(render_pass, prev_icon, icon_end);
+                }
+            }
+
+            prev_rect = rect_end;
+            prev_glyph = glyph_end;
+            prev_curve = curve_end;
+            prev_capsule = capsule_end;
+            prev_poly = poly_end;
+            prev_image = image_end;
+            prev_icon = icon_end;
+            prev_sx = seg.x;
+            prev_sy = seg.y;
+            prev_sw = seg.w;
+            prev_sh = seg.h;
+        }
+
+        // Draw remaining after last segment
+        if (total_rects > prev_rect or total_glyphs > prev_glyph or total_curves > prev_curve or total_capsules > prev_capsule or total_polys > prev_poly or total_images > prev_image or total_icons > prev_icon) {
+            if (setClampedScissor(render_pass, prev_sx, prev_sy, prev_sw, prev_sh, g_width, g_height)) {
+                if (total_rects > prev_rect) drawRectsSkipping(render_pass, prev_rect, total_rects);
+                if (total_glyphs > prev_glyph) drawTextSkipping(render_pass, prev_glyph, total_glyphs);
+                if (total_curves > prev_curve) drawCurvesSkipping(render_pass, prev_curve, total_curves);
+                if (total_capsules > prev_capsule) drawCapsulesSkipping(render_pass, prev_capsule, total_capsules);
+                if (total_polys > prev_poly) drawPolysSkipping(render_pass, prev_poly, total_polys);
+                if (total_images > prev_image) drawImagesSkipping(render_pass, prev_image, total_images);
+                if (total_icons > prev_icon) sdf_icons.drawBatch(render_pass, prev_icon, total_icons);
+            }
+        }
+    }
+
+    // G-curve fill — Loop-Blinn quadratic-bezier-triangle fills.
+    {
+        const total_gcurves: u32 = @intCast(gcurve_fill.count());
+        if (total_gcurves > 0) {
+            render_pass.setScissorRect(0, 0, g_width, g_height);
+            gcurve_fill.drawBatch(render_pass, 0, total_gcurves);
+        }
+    }
+
+    // Filter composites — run AFTER all primitive draws so the filter shader
+    // samples its captured offscreen texture and writes over the area where
+    // the captured primitives would have appeared.
+    render_pass.setScissorRect(0, 0, g_width, g_height);
+    filters.drawComposites(render_pass);
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Panel pop-out RT (PANELWIN-0628) — render an arbitrary 2D React subtree into
+// an offscreen RT in the MAIN surface format, so framework/gpu/panel_window.zig
+// can blit it into a second OS window's swapchain. Same device, sibling target.
+// ════════════════════════════════════════════════════════════════════════
+
+var g_panel_rt_tex: ?*wgpu.Texture = null;
+var g_panel_rt_view: ?*wgpu.TextureView = null;
+var g_panel_rt_w: u32 = 0;
+var g_panel_rt_h: u32 = 0;
+
+fn ensurePanelTarget(w: u32, h: u32) ?*wgpu.TextureView {
+    if (g_panel_rt_view != null and g_panel_rt_w == w and g_panel_rt_h == h) return g_panel_rt_view;
+    const device = g_device orelse return null;
+    if (g_panel_rt_view) |v| v.release();
+    g_panel_rt_view = null;
+    if (g_panel_rt_tex) |t| t.release();
+    g_panel_rt_tex = null;
+    const tex = device.createTexture(&.{
+        .label = wgpu.StringView.fromSlice("panel_window_rt"),
+        .size = .{ .width = @max(1, w), .height = @max(1, h), .depth_or_array_layers = 1 },
+        .mip_level_count = 1,
+        .sample_count = 1,
+        .dimension = .@"2d",
+        .format = g_format,
+        .usage = wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.texture_binding,
+    }) orelse return null;
+    const view = tex.createView(null) orelse {
+        tex.release();
+        return null;
+    };
+    g_panel_rt_tex = tex;
+    g_panel_rt_view = view;
+    g_panel_rt_w = w;
+    g_panel_rt_h = h;
+    return view;
+}
+
+pub fn releasePanelTarget() void {
+    if (g_panel_rt_view) |v| v.release();
+    g_panel_rt_view = null;
+    if (g_panel_rt_tex) |t| t.release();
+    g_panel_rt_tex = null;
+    g_panel_rt_w = 0;
+    g_panel_rt_h = 0;
+}
+
+/// Render a 2D subtree into the panel RT and return its view (or null on
+/// failure). `paint_cb` is the engine's paint walk over the panel root, which
+/// must already be laid out at (0,0,w,h). MUST be called AFTER the main frame()
+/// has drawn + reset the shared 2D batches (they are ours, empty, for this
+/// pass). Mirrors frame()'s upload→captures→pass→reset sequence, but targets
+/// the offscreen RT and never touches a surface. Globals + g_width/g_height are
+/// swapped to the panel's dims for the pass and restored before returning, so
+/// the next main frame is unaffected.
+pub fn renderPanelInto(w: u32, h: u32, paint_cb: *const fn () void) ?*wgpu.TextureView {
+    const device = g_device orelse return null;
+    const queue = g_queue orelse return null;
+    const target = ensurePanelTarget(w, h) orelse return null;
+
+    const saved_w = g_width;
+    const saved_h = g_height;
+    g_width = w;
+    g_height = h;
+
+    // Defensive — frame() resets these at its tail, but never assume.
+    rects.reset();
+    text.reset();
+    curves.reset();
+    capsules.reset();
+    polys.reset();
+    images.reset();
+    sdf_icons.reset();
+    gcurve_fill.reset();
+    g_static_capture_count = 0;
+    g_scissor_count = 0;
+    g_scissor_depth = 0;
+
+    // Paint the panel subtree → fills the batches + queues its static/effect
+    // captures + records scissor boundaries.
+    paint_cb();
+
+    // Force-upload everything (the panel is small; skip the dirty-hash gate).
+    writeGlobals(queue, w, h);
+    rects.upload(queue);
+    text.upload(queue);
+    curves.upload(queue);
+    capsules.upload(queue);
+    polys.upload(queue);
+    if (images.count() > 0) images.upload(queue);
+    if (sdf_icons.count() > 0) sdf_icons.upload(queue);
+    if (gcurve_fill.count() > 0) gcurve_fill.upload(queue);
+
+    renderStaticSurfaceCaptures(device, queue);
+    scene3d.flushPending();
+
+    const encoder = device.createCommandEncoder(&.{ .label = wgpu.StringView.fromSlice("panel_rt") }) orelse {
+        restorePanelGlobals(saved_w, saved_h);
+        return null;
+    };
+    const render_pass = encoder.beginRenderPass(&.{
+        .color_attachment_count = 1,
+        .color_attachments = @ptrCast(&wgpu.ColorAttachment{
+            .view = target,
+            .load_op = .clear,
+            .store_op = .store,
+            .clear_value = .{ .r = 0.043, .g = 0.075, .b = 0.125, .a = 1.0 },
+        }),
+    }) orelse {
+        encoder.release();
+        restorePanelGlobals(saved_w, saved_h);
+        return null;
+    };
+    drawSegmented2D(render_pass);
+    render_pass.end();
+    render_pass.release();
+
+    const command = encoder.finish(null) orelse {
+        encoder.release();
+        restorePanelGlobals(saved_w, saved_h);
+        return null;
+    };
+    encoder.release();
+    queue.submit(&.{command});
+    command.release();
+
+    // Leave the shared state exactly as the next main frame expects: empty
+    // batches + main dims/globals.
+    rects.reset();
+    text.reset();
+    curves.reset();
+    capsules.reset();
+    polys.reset();
+    images.reset();
+    sdf_icons.reset();
+    gcurve_fill.reset();
+    g_static_capture_count = 0;
+    g_scissor_count = 0;
+    g_scissor_depth = 0;
+    restorePanelGlobals(saved_w, saved_h);
+    return target;
+}
+
+fn restorePanelGlobals(saved_w: u32, saved_h: u32) void {
+    g_width = saved_w;
+    g_height = saved_h;
+    if (g_queue) |q| writeGlobals(q, saved_w, saved_h);
+}
+
 /// Render all queued primitives and present.
 pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     const device = g_device orelse return;
@@ -2201,103 +2458,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         g_width, g_height, total_rects, total_glyphs, total_curves, total_capsules, total_polys, total_images, g_scissor_count,
     });
 
-    const total_icons: u32 = @intCast(sdf_icons.count());
-
-    if (g_scissor_count == 0) {
-        // Fast path — no clip or ordering boundaries, single draw for all primitives
-        render_pass.setScissorRect(0, 0, g_width, g_height);
-        drawRectsSkipping(render_pass, 0, total_rects);
-        drawTextSkipping(render_pass, 0, total_glyphs);
-        drawCurvesSkipping(render_pass, 0, total_curves);
-        drawCapsulesSkipping(render_pass, 0, total_capsules);
-        drawPolysSkipping(render_pass, 0, total_polys);
-        drawImagesSkipping(render_pass, 0, total_images);
-        if (total_icons > 0) sdf_icons.drawBatch(render_pass, 0, total_icons);
-    } else {
-        // Boundary-segmented rendering
-        var segments: [MAX_SCISSOR_SEGMENTS + 1]ScissorSegment = undefined;
-        const seg_count = g_scissor_count;
-        @memcpy(segments[0..seg_count], g_scissor_segments[0..seg_count]);
-
-        var prev_rect: u32 = 0;
-        var prev_glyph: u32 = 0;
-        var prev_curve: u32 = 0;
-        var prev_capsule: u32 = 0;
-        var prev_poly: u32 = 0;
-        var prev_image: u32 = 0;
-        var prev_icon: u32 = 0;
-        var prev_sx: u32 = 0;
-        var prev_sy: u32 = 0;
-        var prev_sw: u32 = g_width;
-        var prev_sh: u32 = g_height;
-
-        for (0..seg_count) |si| {
-            const seg = segments[si];
-            const rect_end = seg.rect_start;
-            const glyph_end = seg.glyph_start;
-            const curve_end = seg.curve_start;
-            const capsule_end = seg.capsule_start;
-            const poly_end = seg.poly_start;
-            const image_end = seg.image_start;
-            const icon_end = seg.sdf_icon_start;
-
-            if (rect_end > prev_rect or glyph_end > prev_glyph or curve_end > prev_curve or capsule_end > prev_capsule or poly_end > prev_poly or image_end > prev_image or icon_end > prev_icon) {
-                if (setClampedScissor(render_pass, prev_sx, prev_sy, prev_sw, prev_sh, g_width, g_height)) {
-                    if (rect_end > prev_rect) drawRectsSkipping(render_pass, prev_rect, rect_end);
-                    if (glyph_end > prev_glyph) drawTextSkipping(render_pass, prev_glyph, glyph_end);
-                    if (curve_end > prev_curve) drawCurvesSkipping(render_pass, prev_curve, curve_end);
-                    if (capsule_end > prev_capsule) drawCapsulesSkipping(render_pass, prev_capsule, capsule_end);
-                    if (poly_end > prev_poly) drawPolysSkipping(render_pass, prev_poly, poly_end);
-                    if (image_end > prev_image) drawImagesSkipping(render_pass, prev_image, image_end);
-                    if (icon_end > prev_icon) sdf_icons.drawBatch(render_pass, prev_icon, icon_end);
-                }
-            }
-
-            prev_rect = rect_end;
-            prev_glyph = glyph_end;
-            prev_curve = curve_end;
-            prev_capsule = capsule_end;
-            prev_poly = poly_end;
-            prev_image = image_end;
-            prev_icon = icon_end;
-            prev_sx = seg.x;
-            prev_sy = seg.y;
-            prev_sw = seg.w;
-            prev_sh = seg.h;
-        }
-
-        // Draw remaining after last segment
-        if (total_rects > prev_rect or total_glyphs > prev_glyph or total_curves > prev_curve or total_capsules > prev_capsule or total_polys > prev_poly or total_images > prev_image or total_icons > prev_icon) {
-            if (setClampedScissor(render_pass, prev_sx, prev_sy, prev_sw, prev_sh, g_width, g_height)) {
-                if (total_rects > prev_rect) drawRectsSkipping(render_pass, prev_rect, total_rects);
-                if (total_glyphs > prev_glyph) drawTextSkipping(render_pass, prev_glyph, total_glyphs);
-                if (total_curves > prev_curve) drawCurvesSkipping(render_pass, prev_curve, total_curves);
-                if (total_capsules > prev_capsule) drawCapsulesSkipping(render_pass, prev_capsule, total_capsules);
-                if (total_polys > prev_poly) drawPolysSkipping(render_pass, prev_poly, total_polys);
-                if (total_images > prev_image) drawImagesSkipping(render_pass, prev_image, total_images);
-                if (total_icons > prev_icon) sdf_icons.drawBatch(render_pass, prev_icon, total_icons);
-            }
-        }
-    }
-
-    // G-curve fill — Loop-Blinn quadratic-bezier-triangle fills. Same one-
-    // batched-draw pattern as sdf_icons; sits outside the static-surface
-    // capture / scissor segmentation system for now (acceptable v0 limit:
-    // gcurves inside scrollviews don't clip cleanly at scroll edges).
-    {
-        const total_gcurves: u32 = @intCast(gcurve_fill.count());
-        if (total_gcurves > 0) {
-            render_pass.setScissorRect(0, 0, g_width, g_height);
-            gcurve_fill.drawBatch(render_pass, 0, total_gcurves);
-        }
-    }
-
-    // Filter composites — run AFTER all primitive draws so the filter
-    // shader samples its captured offscreen texture and writes the result
-    // over the area where the captured primitives would have appeared
-    // (those primitives were skipped by drawRectsSkipping et al).
-    render_pass.setScissorRect(0, 0, g_width, g_height);
-    filters.drawComposites(render_pass);
+    drawSegmented2D(render_pass);
 
     render_pass.end();
     render_pass.release();

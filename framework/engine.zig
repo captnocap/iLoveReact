@@ -393,6 +393,9 @@ const world_window = if (HAS_3D and HAS_COMPILED_WORLD) @import("gpu/world_windo
     pub fn frame() void {}
     pub fn deinitAll() void {}
 };
+// PANELWIN-0628: the editor-panel pop-out window — renders a 2D React subtree
+// into a second OS window (2nd monitor). Pure 2D, so no HAS_3D gate.
+const panel_window = @import("gpu/panel_window.zig");
 const transition = if (HAS_TRANSITIONS) @import("gpu/transition.zig") else struct {
     pub fn tick(_: f32) bool {
         return false;
@@ -2118,6 +2121,102 @@ fn paintChildrenInZOrder(node: *Node) void {
     }
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// Panel pop-out window (PANELWIN-0628) — render an editor subtree into a 2nd
+// OS window and route its input. The subtree's nodes carry their real
+// reconciler ids (the window root is re-materialized each frame from the shared
+// host tree by the provider the app installs), so input dispatches through the
+// SAME JS event path as the main window → shared editor React state.
+// ════════════════════════════════════════════════════════════════════════
+
+var g_panel_root_provider: ?*const fn () ?*Node = null;
+// The last materialized + laid-out panel root, kept alive between renders so
+// mouse events (which arrive between frames) can hit-test against real rects.
+var g_panel_root_cached: ?*Node = null;
+var g_panel_paint_root: ?*Node = null;
+
+/// The app installs a provider that re-materializes the pop-out window's subtree
+/// from the shared host tree (or returns null when nothing is popped out).
+pub fn setPanelRootProvider(f: *const fn () ?*Node) void {
+    g_panel_root_provider = f;
+}
+
+fn panelPaintCallback() void {
+    const root = g_panel_paint_root orelse return;
+    selection.resetWalkState();
+    g_paint_count = 0;
+    g_budget_exceeded = false;
+    g_hidden_count = 0;
+    g_paint_opacity = 1.0;
+    paintNode(root);
+}
+
+/// Called from the main loop AFTER gpu.frame() (the shared 2D batches are reset
+/// and ours for this pass). Lays out the popped-out subtree at the 2nd window's
+/// size, paints it into a gpu RT, and blits that RT into the window's swapchain.
+fn renderPanelWindow() void {
+    if (!panel_window.isOpen()) return;
+    const provider = g_panel_root_provider orelse return;
+    const root = provider() orelse {
+        g_panel_root_cached = null;
+        return;
+    };
+    const sz = panel_window.size();
+    if (sz[0] == 0 or sz[1] == 0) return;
+    layout.layoutNode(root, 0, 0, @floatFromInt(sz[0]), @floatFromInt(sz[1]));
+    g_panel_root_cached = root;
+    g_panel_paint_root = root;
+    if (gpu.renderPanelInto(sz[0], sz[1], panelPaintCallback)) |view| {
+        panel_window.blitView(view);
+    }
+}
+
+// ── pop-out window input (installed as panel_window's EventHook) ─────────────
+fn panelHover(x: f32, y: f32) void {
+    const root = g_panel_root_cached orelse return;
+    updateHover(root, x, y);
+}
+
+fn panelPress(x: f32, y: f32, button: u8, down: bool) void {
+    const root = g_panel_root_cached orelse return;
+    if (!down or button != c.SDL_BUTTON_LEFT) return;
+    const events = @import("events.zig");
+    const hit = events.hitTest(root, x, y) orelse return;
+    if (hit.handlers.js_on_mouse_down) |expr| {
+        js_vm.callGlobal("__beginJsEvent");
+        js_vm.evalExpr(std.mem.span(expr));
+        js_vm.callGlobal("__endJsEvent");
+    }
+    if (hit.handlers.js_on_press) |expr| {
+        input.unfocus();
+        js_vm.callGlobal("__beginJsEvent");
+        js_vm.evalExpr(std.mem.span(expr));
+        js_vm.callGlobal("__endJsEvent");
+        state_mod.markDirty();
+    }
+}
+
+fn panelWheel(x: f32, y: f32, dx: f32, dy: f32) void {
+    const root = g_panel_root_cached orelse return;
+    const events = @import("events.zig");
+    const scroll_node = events.findScrollContainer(root, x, y) orelse {
+        // No scroll container — deliver the raw delta to an onScroll handler.
+        if (events.hitTestScroll(root, x, y)) |sn| fireScrollHandlers(sn, dx, dy);
+        return;
+    };
+    const scale: f32 = if (comptime @import("builtin").os.tag == .macos) 10.0 else 30.0;
+    if (dy != 0) scroll_node.scroll_y -= dy * scale;
+    if (dx != 0) scroll_node.scroll_x -= dx * @max(scroll_node.computed.h * 0.8, 60.0);
+    const max_sx = @max(0.0, scroll_node.content_width - scroll_node.computed.w);
+    const max_sy = @max(0.0, scroll_node.content_height - scroll_node.computed.h);
+    scroll_node.scroll_x = @max(0.0, @min(scroll_node.scroll_x, max_sx));
+    scroll_node.scroll_y = @max(0.0, @min(scroll_node.scroll_y, max_sy));
+    markScrollActivity(scroll_node);
+    luajit_runtime.persistScrollSlot(scroll_node.scroll_persist_slot, scroll_node.scroll_y);
+    fireScrollHandlers(scroll_node, dx, dy);
+    state_mod.markDirty();
+}
+
 fn paintNode(node: *Node) void {
     if (node.style.display == .none) {
         g_hidden_count += 1;
@@ -3677,6 +3776,10 @@ pub fn run(config_in: AppConfig) !void {
     defer c.SDL_DestroyWindow(window);
     defer windows.deinitAll(); // close all secondary windows before SDL_Quit
     defer world_window.deinitAll(); // the compiled-world pop-out too (WORLDWIN-0611)
+    defer panel_window.deinitAll(); // the editor-panel pop-out (PANELWIN-0628)
+    defer gpu.releasePanelTarget();
+    // PANELWIN-0628: route the pop-out window's UI input through engine dispatch.
+    panel_window.setEventHook(.{ .hover = panelHover, .press = panelPress, .wheel = panelWheel });
     // SDL3: position is set after creation (not in CreateWindow)
     _ = c.SDL_SetWindowPosition(window, init_x, init_y);
     if (config.always_on_top) _ = c.SDL_SetWindowAlwaysOnTop(window, true);
@@ -3885,6 +3988,7 @@ pub fn run(config_in: AppConfig) !void {
             // Route to secondary windows first — if consumed, skip main window handling
             if (windows.routeEvent(&event)) continue;
             if (world_window.routeEvent(&event)) continue;
+            if (panel_window.routeEvent(&event)) continue;
 
             switch (event.type) {
                 c.SDL_EVENT_QUIT => {
@@ -5116,6 +5220,10 @@ pub fn run(config_in: AppConfig) !void {
         // after the main frame — fully self-contained (own RT, own encoder),
         // a no-op while the window is closed.
         world_window.frame();
+        // PANELWIN-0628: the editor-panel pop-out renders its 2D subtree into a
+        // gpu RT and blits to its own swapchain — also after the main frame, also
+        // a no-op while closed.
+        renderPanelWindow();
         if (g_input_latency_ts_us != 0) {
             const since_click = phase_t_postframe - g_input_latency_ts_us;
             if (since_click > 50000) {
