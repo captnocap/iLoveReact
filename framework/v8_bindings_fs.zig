@@ -377,7 +377,11 @@ fn fsRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer path_alloc.free(path_buf);
 
-    const data = std.fs.cwd().readFileAlloc(path_alloc, path_buf, 16 * 1024 * 1024) catch {
+    // 256MB ceiling (was 16MB): the V20 store reads its model snapshot through this
+    // door, and a snapshot with many painted models legitimately exceeds 16MB — the
+    // old cap returned null, the store saw "no snapshot", FULL-REPLAYED the event log
+    // and OOM'd, degrading the model roster to one entry (req_2089). Sanity cap only.
+    const data = std.fs.cwd().readFileAlloc(path_alloc, path_buf, 256 * 1024 * 1024) catch {
         setNull(info);
         return;
     };
@@ -766,7 +770,7 @@ fn fsReadfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(path_buf);
 
-    const data = std.fs.cwd().readFileAlloc(alloc, path_buf, 16 * 1024 * 1024) catch {
+    const data = std.fs.cwd().readFileAlloc(alloc, path_buf, 256 * 1024 * 1024) catch {
         setString(info, "");
         return;
     };
