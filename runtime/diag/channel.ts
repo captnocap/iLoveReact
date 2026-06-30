@@ -38,6 +38,10 @@ export interface DiagChannel {
   defaultOn: boolean;
   /** Allowed sinks for this channel. */
   sinks: Sink[];
+  /** Optional 1-of-N sample divisor for high-frequency channels (default: 16 for
+   *  'sampled', 1 otherwise). Mirrored to the host at registration so host-side
+   *  emitters throttle without crossing the bridge. */
+  sampleDiv?: number;
 }
 
 const REGISTRY = new Map<string, DiagChannel>();
@@ -52,7 +56,27 @@ declare module '../ffi' {
     /** Mirror a channel's enabled state to the host so host-side emitters can
      *  branch cheaply without crossing the bridge. */
     __diag_set_enabled(channelId: string, on: number): void;
+    /** Mirror a channel's 1-of-N sample divisor to the host so high-frequency
+     *  host-side emitters throttle without crossing the bridge. */
+    __diag_set_sample(channelId: string, divisor: number): void;
   }
+}
+
+/** Default sample divisor: throttle 'sampled' channels, full detail otherwise. */
+function defaultSampleDiv(def: DiagChannel): number {
+  if (typeof def.sampleDiv === 'number' && def.sampleDiv > 0) return def.sampleDiv;
+  return def.costTier === 'sampled' ? 16 : 1;
+}
+
+/** Mirror a channel's registration state (enabled + sample divisor) to the host.
+ *  defineChannel is the one-time registration point, so host-side emitters can
+ *  branch a defaultOn:false channel and throttle a sampled tier from the first
+ *  frame — without waiting for a JS toggle. No-ops when the doors aren't wired. */
+function mirrorToHost(def: DiagChannel): void {
+  const setEnabled = (globalThis as any).__diag_set_enabled;
+  if (typeof setEnabled === 'function') setEnabled(def.id, def.defaultOn ? 1 : 0);
+  const setSample = (globalThis as any).__diag_set_sample;
+  if (typeof setSample === 'function') setSample(def.id, defaultSampleDiv(def));
 }
 
 /** A bound emitter for one channel. */
@@ -74,6 +98,7 @@ export function defineChannel(def: DiagChannel): ChannelLogger {
   }
   REGISTRY.set(def.id, def);
   _enabled.set(def.id, def.defaultOn);
+  mirrorToHost(def);
 
   const logger: ChannelLogger = {
     id: def.id,
