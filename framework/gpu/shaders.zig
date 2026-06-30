@@ -963,7 +963,13 @@ pub const scene3d_wgsl =
     \\    let bw = fwidth(bmin) * 1.5;
     \\    if (S.wire > 0.5) {
     \\        let edge = 1.0 - smoothstep(0.0, max(bw, 1e-5), bmin);
-    \\        let lines = mix(final_rgb, vec3f(0.80, 0.88, 1.0), edge);
+    \\        // Adaptive contrast: a dark line over a light surface, a light line over a dark
+    \\        // one — so the wireframe never vanishes (e.g. white lines on a white model).
+    \\        let wire_lum = dot(final_rgb, vec3f(0.299, 0.587, 0.114));
+    \\        // Threshold biased low (0.32) so the default light-grey model gets DARK wires —
+    \\        // only genuinely dark surfaces flip to a light line.
+    \\        let wire_col = select(vec3f(0.94, 0.96, 1.0), vec3f(0.01, 0.02, 0.06), wire_lum > 0.32);
+    \\        let lines = mix(final_rgb, wire_col, edge);
     \\        // Edges stay opaque even over alpha-cut texels, so the wire is unbroken.
     \\        let wa = max(out_a, edge);
     \\        if (wa <= 0.01) { discard; }

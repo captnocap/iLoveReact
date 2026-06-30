@@ -473,12 +473,26 @@ pub fn meshClearMarquee() void {
     g_mq_active = false;
 }
 
-// Overlay colours (0..1) + sizes (px). Orange matches the face tint.
-const OV_ORANGE = [3]f32{ 1.0, 0.54, 0.24 };
-const OV_VERT_FAINT = [4]f32{ 0.86, 0.91, 1.0, 0.92 };
-const OV_MARQUEE = [4]f32{ 0.50, 0.66, 0.88, 0.95 };
+// Overlay colours (0..1) + sizes (px). Orange matches the face tint. Each dot/line is drawn
+// twice — a dark HALO under a bright fill — so it pops on a white model AND a dark void (a
+// single colour can't contrast with both).
+const OV_ORANGE = [3]f32{ 1.0, 0.52, 0.16 }; // selected
+const OV_VERT = [3]f32{ 0.95, 0.97, 1.0 }; // unselected vertex fill
+const OV_HALO = [4]f32{ 0.02, 0.03, 0.07, 0.95 }; // dark outline behind every marker
+const OV_MARQUEE = [4]f32{ 0.62, 0.78, 1.0, 0.98 };
 const OV_MAX_VERT_DOTS: u32 = 80000; // beyond this draw only selected dots (wireframe still
 // shows topology) — a generous fps guard, not a data cap.
+
+/// A haloed dot: a dark disc, then the bright fill on top — visible on any background.
+fn overlayDot(px: f32, py: f32, r: f32, g: f32, b: f32, size: f32) void {
+    capsules.drawCapsule(px, py, px, py, OV_HALO[0], OV_HALO[1], OV_HALO[2], OV_HALO[3], size + 3.5);
+    capsules.drawCapsule(px, py, px, py, r, g, b, 1.0, size);
+}
+/// A haloed line — dark stroke under a bright one, so selected edges read on any surface.
+fn overlayLine(ax: f32, ay: f32, bx: f32, by: f32, r: f32, g: f32, b: f32, w: f32) void {
+    capsules.drawCapsule(ax, ay, bx, by, OV_HALO[0], OV_HALO[1], OV_HALO[2], OV_HALO[3], w + 2.5);
+    capsules.drawCapsule(ax, ay, bx, by, r, g, b, 1.0, w);
+}
 
 /// Draw the editor overlay (vertex dots / edge highlights / marquee box) as screen-space
 /// capsules projected with the EXACT last-drawn camera, so every dot sits on the pixel its
@@ -493,15 +507,15 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
         const y0 = g_mq[1];
         const x1 = g_mq[2];
         const y1 = g_mq[3];
-        capsules.drawCapsule(x0, y0, x1, y0, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], OV_MARQUEE[3], 1.5);
-        capsules.drawCapsule(x1, y0, x1, y1, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], OV_MARQUEE[3], 1.5);
-        capsules.drawCapsule(x1, y1, x0, y1, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], OV_MARQUEE[3], 1.5);
-        capsules.drawCapsule(x0, y1, x0, y0, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], OV_MARQUEE[3], 1.5);
+        overlayLine(x0, y0, x1, y0, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
+        overlayLine(x1, y0, x1, y1, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
+        overlayLine(x1, y1, x0, y1, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
+        overlayLine(x0, y1, x0, y0, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
     }
     if (!model_paint.hasTarget()) return;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const mode = meshEditModeRaw();
-    if (mode == 1) { // vertex: every vert as a dot, selected ones orange + bigger
+    if (mode == 1) { // vertex: every vert as a haloed dot, selected ones orange + bigger
         if (!mesh_edit.ensureTopologyPub()) return;
         const n = mesh_edit.vertCount();
         const draw_all = n <= OV_MAX_VERT_DOTS;
@@ -511,12 +525,12 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
             if (!selected and !draw_all) continue;
             const sp = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(i)) orelse continue;
             if (selected) {
-                capsules.drawCapsule(sp[0] + ox, sp[1] + oy, sp[0] + ox, sp[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 1.0, 9);
+                overlayDot(sp[0] + ox, sp[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 13);
             } else {
-                capsules.drawCapsule(sp[0] + ox, sp[1] + oy, sp[0] + ox, sp[1] + oy, OV_VERT_FAINT[0], OV_VERT_FAINT[1], OV_VERT_FAINT[2], OV_VERT_FAINT[3], 6.5);
+                overlayDot(sp[0] + ox, sp[1] + oy, OV_VERT[0], OV_VERT[1], OV_VERT[2], 8);
             }
         }
-    } else if (mode == 2) { // edge: selected edges as orange lines (wireframe shows the rest)
+    } else if (mode == 2) { // edge: selected edges as bold orange lines (wireframe shows the rest)
         if (!mesh_edit.ensureTopologyPub()) return;
         const n = mesh_edit.edgeCount();
         var e: u32 = 0;
@@ -525,7 +539,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
             const ep = mesh_edit.edgeEndpointsPub(e);
             const a = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(ep[0])) orelse continue;
             const b = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(ep[1])) orelse continue;
-            capsules.drawCapsule(a[0] + ox, a[1] + oy, b[0] + ox, b[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 1.0, 3.0);
+            overlayLine(a[0] + ox, a[1] + oy, b[0] + ox, b[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 4.0);
         }
     }
 }
