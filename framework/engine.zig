@@ -398,6 +398,9 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     }
     pub fn meshEditSnapshot() void {}
     pub fn meshEditRevert() void {}
+    pub fn drawEditorOverlay(_: f32, _: f32) void {}
+    pub fn meshSetMarquee(_: f32, _: f32, _: f32, _: f32) void {}
+    pub fn meshClearMarquee() void {}
 };
 const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("../world_loader.zig") else struct {
     pub fn renderEmbedded(_: std.mem.Allocator, _: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
@@ -3142,6 +3145,8 @@ noinline fn paintNodeVisuals(node: *Node) void {
     // 3D.View — 3D viewport rendered offscreen, composited here
     if (node.scene3d) {
         _ = r3d.render(node, r.x, r.y, r.w, r.h, g_paint_opacity);
+        // Editor overlay (vertex dots / edge highlights / marquee) on top of the composite.
+        r3d.drawEditorOverlay(r.x, r.y);
     }
 
     selection.paintHighlight(node, r.x, r.y);
@@ -4597,7 +4602,10 @@ pub fn run(config_in: AppConfig) !void {
                                 me_marquee = true; // the press became a drag → revert the press-pick, switch to marquee
                                 r3d.meshEditRevert();
                             }
-                            if (me_marquee) _ = r3d.meshEditBox(me_down_x, me_down_y, mx, my, me_shift);
+                            if (me_marquee) {
+                                _ = r3d.meshEditBox(me_down_x, me_down_y, mx, my, me_shift);
+                                r3d.meshSetMarquee(me_down_x, me_down_y, mx, my); // draw the box outline
+                            }
                             state_mod.markDirty();
                             continue;
                         }
@@ -4802,6 +4810,7 @@ pub fn run(config_in: AppConfig) !void {
                             if (me_selecting) {
                                 me_selecting = false;
                                 me_marquee = false;
+                                r3d.meshClearMarquee(); // drop the box outline on release
                                 js_vm.callGlobal("__beginJsEvent");
                                 js_vm.callGlobal("__meshEditSelChanged");
                                 js_vm.callGlobal("__endJsEvent");

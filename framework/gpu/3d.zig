@@ -17,6 +17,7 @@ const effect_assemble = @import("effect_assemble.zig");
 const static_instance_policy = @import("static_instance_policy.zig");
 const model_paint = @import("model_paint.zig");
 const mesh_edit = @import("mesh_edit.zig");
+const capsules = @import("capsules.zig");
 const Node = layout.Node;
 
 // ════════════════════════════════════════════════════════════════════════
@@ -460,6 +461,73 @@ pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
 }
 pub fn meshEditClear() void {
     mesh_edit.clearSelection();
+}
+// Marquee rectangle (window px), set by the native input loop during a left drag-select.
+var g_mq_active: bool = false;
+var g_mq: [4]f32 = .{ 0, 0, 0, 0 };
+pub fn meshSetMarquee(x0: f32, y0: f32, x1: f32, y1: f32) void {
+    g_mq = .{ x0, y0, x1, y1 };
+    g_mq_active = true;
+}
+pub fn meshClearMarquee() void {
+    g_mq_active = false;
+}
+
+// Overlay colours (0..1) + sizes (px). Orange matches the face tint.
+const OV_ORANGE = [3]f32{ 1.0, 0.54, 0.24 };
+const OV_VERT_FAINT = [4]f32{ 0.86, 0.91, 1.0, 0.92 };
+const OV_MARQUEE = [4]f32{ 0.50, 0.66, 0.88, 0.95 };
+const OV_MAX_VERT_DOTS: u32 = 80000; // beyond this draw only selected dots (wireframe still
+// shows topology) — a generous fps guard, not a data cap.
+
+/// Draw the editor overlay (vertex dots / edge highlights / marquee box) as screen-space
+/// capsules projected with the EXACT last-drawn camera, so every dot sits on the pixel its
+/// raycast shoots back through — pixel-locked at any zoom. Capsules ride the 2D draw-command
+/// z-order, so emitting right after the Scene3D composite lands them on top. (ox,oy) is the
+/// viewport origin (0,0 full-window). Lives here, not in mesh_edit, to keep that GPU-free.
+pub fn drawEditorOverlay(ox: f32, oy: f32) void {
+    if (!g_me_capture) return;
+    // Marquee box (any mode) — four thin capsules forming the rect outline.
+    if (g_mq_active) {
+        const x0 = g_mq[0];
+        const y0 = g_mq[1];
+        const x1 = g_mq[2];
+        const y1 = g_mq[3];
+        capsules.drawCapsule(x0, y0, x1, y0, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], OV_MARQUEE[3], 1.5);
+        capsules.drawCapsule(x1, y0, x1, y1, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], OV_MARQUEE[3], 1.5);
+        capsules.drawCapsule(x1, y1, x0, y1, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], OV_MARQUEE[3], 1.5);
+        capsules.drawCapsule(x0, y1, x0, y0, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], OV_MARQUEE[3], 1.5);
+    }
+    if (!model_paint.hasTarget()) return;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const mode = meshEditModeRaw();
+    if (mode == 1) { // vertex: every vert as a dot, selected ones orange + bigger
+        if (!mesh_edit.ensureTopologyPub()) return;
+        const n = mesh_edit.vertCount();
+        const draw_all = n <= OV_MAX_VERT_DOTS;
+        var i: u32 = 0;
+        while (i < n) : (i += 1) {
+            const selected = mesh_edit.vertSelectedPub(i);
+            if (!selected and !draw_all) continue;
+            const sp = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(i)) orelse continue;
+            if (selected) {
+                capsules.drawCapsule(sp[0] + ox, sp[1] + oy, sp[0] + ox, sp[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 1.0, 9);
+            } else {
+                capsules.drawCapsule(sp[0] + ox, sp[1] + oy, sp[0] + ox, sp[1] + oy, OV_VERT_FAINT[0], OV_VERT_FAINT[1], OV_VERT_FAINT[2], OV_VERT_FAINT[3], 6.5);
+            }
+        }
+    } else if (mode == 2) { // edge: selected edges as orange lines (wireframe shows the rest)
+        if (!mesh_edit.ensureTopologyPub()) return;
+        const n = mesh_edit.edgeCount();
+        var e: u32 = 0;
+        while (e < n) : (e += 1) {
+            if (!mesh_edit.edgeSelectedPub(e)) continue;
+            const ep = mesh_edit.edgeEndpointsPub(e);
+            const a = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(ep[0])) orelse continue;
+            const b = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(ep[1])) orelse continue;
+            capsules.drawCapsule(a[0] + ox, a[1] + oy, b[0] + ox, b[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 1.0, 3.0);
+        }
+    }
 }
 /// Marquee (rubber-band) select every element inside the screen rect (Alt+drag).
 pub fn meshEditBox(x0: f32, y0: f32, x1: f32, y1: f32, additive: bool) i32 {

@@ -55,6 +55,31 @@ var g_face_base: std.AutoHashMapUnmanaged(u32, [4]u8) = .{};
 var g_snap: ?[]bool = null;
 var g_snap_mode: Mode = .none;
 
+// ── Read accessors for the overlay renderer (3d.zig owns the GPU/capsule emit; this module
+// stays GPU-free so its topology/selection logic is unit-testable without wgpu). ──────────
+/// Build the welded topology if needed (so entering vertex/edge mode shows dots immediately).
+pub fn ensureTopologyPub() bool {
+    return ensureTopology();
+}
+pub fn vertPosPub(i: u32) [3]f32 {
+    const v = g_verts orelse return .{ 0, 0, 0 };
+    if (@as(usize, i) * 3 + 2 >= v.len) return .{ 0, 0, 0 };
+    return .{ v[i * 3], v[i * 3 + 1], v[i * 3 + 2] };
+}
+pub fn vertSelectedPub(i: u32) bool {
+    const s = g_sel_vert orelse return false;
+    return i < s.len and s[i];
+}
+pub fn edgeEndpointsPub(e: u32) [2]u32 {
+    const ed = g_edges orelse return .{ 0, 0 };
+    if (@as(usize, e) * 2 + 1 >= ed.len) return .{ 0, 0 };
+    return .{ ed[e * 2], ed[e * 2 + 1] };
+}
+pub fn edgeSelectedPub(e: u32) bool {
+    const s = g_sel_edge orelse return false;
+    return e < s.len and s[e];
+}
+
 fn activeSet() ?[]bool {
     return switch (g_mode) {
         .vertex => g_sel_vert,

@@ -291,6 +291,10 @@ export default function ModelView() {
       setSelMode(3);
       setSelInfo(readSelInfo() ?? { mode: 3, verts: 0, edges: 0, sel: 1 });
     }
+    // RJIT_MESHMODE=1|2|3 enters vertex/edge/face mode at boot — the headless proof that
+    // the vertex dots / edge highlights / overlay draw (vertex mode shows every vert).
+    const mm = Number(callHost<string | null>('__env_get', null, 'RJIT_MESHMODE') ?? 0);
+    if (mm >= 1 && mm <= 3) chooseSelMode(mm);
   }, []);
 
   useFileDrop(applyPath);
