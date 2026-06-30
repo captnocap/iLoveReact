@@ -1,28 +1,7 @@
-// editor/data/telemetry.ts — authoring-cost telemetry helpers over edit history.
-//
-// Cloned from the hmsc-workspace-mock god-file. Pure helpers.
-// The HistoryEvent type lives in ./types (it is also referenced by MockState).
+// editor/data/telemetry.ts — authoring-cost telemetry over REAL measured edit
+// history. No fabricated timings: editMs is the actual Date.now()-measured apply
+// time of each edit (stamped in AppFrame). Empty history → avg/p95/delta all 0.
 import type { HistoryEvent } from './types';
-
-export function editTimingFor(seq: number, commandId: string): Pick<HistoryEvent, 'editMs' | 'emptyMs' | 'richMs'> {
-  const baseByCommand: Record<string, number> = {
-    'place-piece': 14,
-    'move-selection': 8,
-    'paint-material': 11,
-    'duplicate-selection': 12,
-    'delete-selection': 9,
-    'add-trigger': 13,
-    'set-spawn': 10,
-    'mission-point': 12,
-    'author-sequence': 15,
-    'compile-rle': 21,
-    favorite: 4,
-  };
-  const base = baseByCommand[commandId] ?? 7;
-  const emptyMs = base + (seq % 4) * 0.6;
-  const richMs = emptyMs + 0.2 + (seq % 3) * 0.1;
-  return { editMs: richMs, emptyMs, richMs };
-}
 
 export function editSamples(history: HistoryEvent[]): Array<HistoryEvent & { editMs: number; emptyMs: number; richMs: number }> {
   return history.filter((event): event is HistoryEvent & { editMs: number; emptyMs: number; richMs: number } =>

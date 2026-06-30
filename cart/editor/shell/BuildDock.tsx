@@ -1,4 +1,5 @@
 import { Icon } from '../../../runtime/icons/Icon';
+import { useTelemetry } from '../../../runtime/hooks/useTelemetry';
 import { C, accentFor } from '../workspace.cls';
 import { ACTIVE_BUILD, BUILD_NOTES } from '../data/journal';
 import { editTelemetry, formatMs } from '../data/telemetry';
@@ -7,6 +8,14 @@ import type { MockState } from '../data/types';
 export default function BuildDock({ state, onBuild, onEventbus }: { state: MockState; onBuild: () => void; onEventbus: () => void }) {
   const reversible = state.history.filter((event) => event.undoable).length;
   const telemetry = editTelemetry(state.history);
+  // Real render perf from the host frame telemetry — polled at 2Hz (cheap; never
+  // per-frame). FPS reads the true refresh, not a mocked 60. Frame/GPU are the
+  // honest µs→ms timings; 3D triangle/draw-call/mem readouts await their own
+  // world-render doors (no host source yet — shown as '—' rather than faked).
+  const { value: fps } = useTelemetry({ kind: 'fps', pollMs: 500 });
+  const { data: frame } = useTelemetry<{ frame_total_us?: number; gpu_us?: number }>({ kind: 'frame', pollMs: 500 });
+  const frameMs = frame?.frame_total_us ? frame.frame_total_us / 1000 : 0;
+  const gpuMs = frame?.gpu_us ? frame.gpu_us / 1000 : 0;
   return (
     <C.HW_BuildDock>
       <C.HW_DockBuild onPress={onBuild}>
@@ -56,12 +65,12 @@ export default function BuildDock({ state, onBuild, onEventbus }: { state: MockS
       </C.HW_DockGroup>
       <C.HW_DockDivider />
       <C.HW_DockGroup>
-        <C.HW_DockLabel>Triangles:</C.HW_DockLabel>
-        <C.HW_DockValue>12,846</C.HW_DockValue>
-        <C.HW_DockLabel>Draw Calls:</C.HW_DockLabel>
-        <C.HW_DockValue>7</C.HW_DockValue>
         <C.HW_DockLabel>FPS:</C.HW_DockLabel>
-        <C.HW_DockValue>60</C.HW_DockValue>
+        <C.HW_DockCoord>{fps > 0 ? Math.round(fps) : '—'}</C.HW_DockCoord>
+        <C.HW_DockLabel>FRAME</C.HW_DockLabel>
+        <C.HW_DockValue>{frameMs > 0 ? formatMs(frameMs) : '—'}</C.HW_DockValue>
+        <C.HW_DockLabel>GPU</C.HW_DockLabel>
+        <C.HW_DockValue>{gpuMs > 0 ? formatMs(gpuMs) : '—'}</C.HW_DockValue>
       </C.HW_DockGroup>
       <C.HW_DockDivider />
       <C.HW_DockGroup>

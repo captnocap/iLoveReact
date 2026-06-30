@@ -21,7 +21,6 @@ import { commandById } from '../data/commands';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
-import { editTimingFor } from '../data/telemetry';
 import { ACTIVE_BUILD } from '../data/journal';
 import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFileById } from '../data/fileExplorer';
 
@@ -43,9 +42,12 @@ export default function AppFrame() {
       .sort(rankAssets);
   }, [catalogAssets, panelMode, state.contentFolder, state.search]);
 
-  const pushHistory = (prev: MockState, command: Command, target: string, meta: string): Pick<MockState, 'history' | 'redo' | 'seq'> => ({
+  // editMs is the REAL measured apply time of this edit (Date.now around the
+  // reducer). emptyMs/richMs mirror it — we don't yet measure the empty-vs-rich
+  // distinction, so that delta is an honest 0 (never a fabricated number).
+  const pushHistory = (prev: MockState, command: Command, target: string, meta: string, editMs: number): Pick<MockState, 'history' | 'redo' | 'seq'> => ({
     history: [
-      { id: `h-${prev.seq}`, verb: command.name.split(' ')[0]!.toLowerCase(), target, meta, undoable: command.undoable, ...editTimingFor(prev.seq, command.id) },
+      { id: `h-${prev.seq}`, verb: command.name.split(' ')[0]!.toLowerCase(), target, meta, undoable: command.undoable, editMs, emptyMs: editMs, richMs: editMs },
       ...prev.history,
     ].slice(0, 8),
     redo: command.undoable ? [] : prev.redo,
@@ -77,6 +79,7 @@ export default function AppFrame() {
     }
 
     setState((prev) => {
+      const t0 = Date.now();
       const object = selectedObject(prev);
       const asset = assetById(prev.activeAssetId, prev.assetOverrides);
       let next: MockState = {
@@ -141,9 +144,10 @@ export default function AppFrame() {
       }
 
       const target = command.id === 'paint-material' || command.id === 'place-piece' ? asset.name : object.name;
+      const editMs = Date.now() - t0;
       const event = command.id === 'sample-material'
         ? { history: prev.history, redo: prev.redo, seq: prev.seq }
-        : pushHistory(prev, command, target, `${source} - ${command.native ? 'native-ready' : 'design-only'}`);
+        : pushHistory(prev, command, target, `${source} - ${command.native ? 'native-ready' : 'design-only'}`, editMs);
       return { ...next, ...event };
     });
   };
@@ -223,8 +227,10 @@ export default function AppFrame() {
 
   const toggleFavorite = (assetId: string) => {
     setState((prev) => {
+      const t0 = Date.now();
       const asset = assetById(assetId, prev.assetOverrides);
       const nextFavorite = !asset.favorite;
+      const editMs = Date.now() - t0;
       return {
         ...prev,
         assetOverrides: {
@@ -232,7 +238,7 @@ export default function AppFrame() {
           [assetId]: { ...prev.assetOverrides[assetId], favorite: nextFavorite },
         },
         history: [
-          { id: `h-${prev.seq}`, verb: nextFavorite ? 'favorite' : 'unfavorite', target: asset.name, meta: 'catalog metadata override', undoable: true, ...editTimingFor(prev.seq, 'favorite') },
+          { id: `h-${prev.seq}`, verb: nextFavorite ? 'favorite' : 'unfavorite', target: asset.name, meta: 'catalog metadata override', undoable: true, editMs, emptyMs: editMs, richMs: editMs },
           ...prev.history,
         ].slice(0, 8),
         redo: [],
@@ -370,15 +376,17 @@ export default function AppFrame() {
 
   const fillColorStudioSlot = (color: string, source: string) => {
     setState((prev) => {
+      const t0 = Date.now();
       const material = colorStudioMaterial(prev);
       const slot = Math.min(prev.colorStudioActiveSlot, material.slots.length - 1);
       const slotName = material.slots[slot]?.name ?? 'slot';
       const key = colorStudioOverrideKey(material.key, prev.colorStudioVariant, slot);
+      const editMs = Date.now() - t0;
       return {
         ...prev,
         colorStudioOverrides: { ...prev.colorStudioOverrides, [key]: color },
         history: [
-          { id: `h-${prev.seq}`, verb: 'slot', target: `${material.name} ${slotName}`, meta: `${source} -> ${color}`, undoable: true, ...editTimingFor(prev.seq, 'paint-material') },
+          { id: `h-${prev.seq}`, verb: 'slot', target: `${material.name} ${slotName}`, meta: `${source} -> ${color}`, undoable: true, editMs, emptyMs: editMs, richMs: editMs },
           ...prev.history,
         ].slice(0, 8),
         redo: [],
@@ -390,14 +398,16 @@ export default function AppFrame() {
 
   const resetColorStudioSlots = () => {
     setState((prev) => {
+      const t0 = Date.now();
       const material = colorStudioMaterial(prev);
       const nextOverrides = { ...prev.colorStudioOverrides };
       material.slots.forEach((_, slot) => delete nextOverrides[colorStudioOverrideKey(material.key, prev.colorStudioVariant, slot)]);
+      const editMs = Date.now() - t0;
       return {
         ...prev,
         colorStudioOverrides: nextOverrides,
         history: [
-          { id: `h-${prev.seq}`, verb: 'reset', target: `${material.name} v${prev.colorStudioVariant}`, meta: 'Color Studio reset to baked vec3f defaults', undoable: true, ...editTimingFor(prev.seq, 'paint-material') },
+          { id: `h-${prev.seq}`, verb: 'reset', target: `${material.name} v${prev.colorStudioVariant}`, meta: 'Color Studio reset to baked vec3f defaults', undoable: true, editMs, emptyMs: editMs, richMs: editMs },
           ...prev.history,
         ].slice(0, 8),
         redo: [],
