@@ -16,7 +16,7 @@
 // buildId / capture id), never by display name. Renaming a thread changes only
 // its semanticName — every link keeps pointing at the same stableId.
 
-/** One handled request, presented as a build version in the journal stream.
+/** One delivered request resolution, presented as a build version in the journal stream.
  *  Derived from a request-ledger entry; `buildId` is `deriveBuildNumber(requestId)`. */
 export interface BuildNote {
   /** Source request id, e.g. 'req_2163'. The ledger key this note was ingested from. */
@@ -25,7 +25,7 @@ export interface BuildNote {
   buildId: string;
   /** Who handled it (the agent/actor that resolved the request). */
   agent: string;
-  /** Compact human summary of how it was handled (the resolution, or the ask). */
+  /** Compact human summary of how it was delivered (the request resolution). */
   summary: string;
   /** Free trace tags carried for filtering the journal. */
   traceTags: string[];

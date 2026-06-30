@@ -58,6 +58,7 @@ export type BuildNote = {
   title: string;
   status: string;
   agent: string;
+  ask: string;
   handled: string;
   trace: string[];
 };
@@ -74,6 +75,7 @@ export type BuildJournalSnapshot = {
   notes: BuildNote[];
   threads: BuildThread[];
   requestCount: number;
+  deliveryCount: number;
   source: string;
   loadedAt: string;
   error?: string;

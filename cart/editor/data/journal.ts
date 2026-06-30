@@ -20,6 +20,7 @@ const EMPTY_SNAPSHOT: BuildJournalSnapshot = {
   notes: [],
   threads: [],
   requestCount: 0,
+  deliveryCount: 0,
   source: REQUEST_LEDGER_DIR,
   loadedAt: 'unavailable',
 };
@@ -39,23 +40,26 @@ export function loadBuildJournalSnapshot(): BuildJournalSnapshot {
     return { ...EMPTY_SNAPSHOT, loadedAt: timestampLabel() };
   }
 
-  const entries = filenames
-    .slice(0, RECENT_NOTE_LIMIT)
-    .map(readLedgerEntry)
-    .filter(Boolean) as LedgerEntry[];
+  const entries = collectDeliveredEntries(filenames);
 
   const journal = new BuildJournal();
   const journalNotes = new Map<string, JournalNote>();
   for (const entry of entries) {
     const note = journal.ingestRequest(entry);
-    journalNotes.set(entry.id, note);
+    if (note) journalNotes.set(entry.id, note);
   }
 
   return {
-    activeBuild: deriveBuildNumber(requestIdFromFilename(filenames[0]!)),
-    notes: entries.map((entry) => toEditorNote(entry, journalNotes.get(entry.id)!)),
+    activeBuild: entries[0] ? deriveBuildNumber(entries[0].id) : '-',
+    notes: entries
+      .map((entry) => {
+        const note = journalNotes.get(entry.id);
+        return note ? toEditorNote(entry, note) : null;
+      })
+      .filter(Boolean) as BuildNote[],
     threads: journal.threads().map(toEditorThread),
     requestCount: filenames.length,
+    deliveryCount: entries.length,
     source: REQUEST_LEDGER_DIR,
     loadedAt: timestampLabel(),
   };
@@ -86,6 +90,16 @@ function readLedgerEntry(filename: string): LedgerEntry | null {
   }
 }
 
+function collectDeliveredEntries(filenames: string[]): LedgerEntry[] {
+  const entries: LedgerEntry[] = [];
+  for (const filename of filenames) {
+    const entry = readLedgerEntry(filename);
+    if (entry && entry.resolution?.trim()) entries.push(entry);
+    if (entries.length >= RECENT_NOTE_LIMIT) break;
+  }
+  return entries;
+}
+
 function toEditorNote(entry: LedgerEntry, note: JournalNote): BuildNote {
   return {
     request: entry.id,
@@ -93,6 +107,7 @@ function toEditorNote(entry: LedgerEntry, note: JournalNote): BuildNote {
     title: titleFor(entry, note),
     status: statusFor(entry),
     agent: note.agent,
+    ask: compact(firstUsefulLine(entry.text) || entry.id, 110),
     handled: note.summary,
     trace: traceFor(entry, note),
   };
@@ -112,8 +127,7 @@ function toEditorThread(thread: BugThread): BuildThread {
 }
 
 function titleFor(entry: LedgerEntry, note: JournalNote): string {
-  const taskSummary = tagValue(entry.text, 'summary');
-  const line = taskSummary || firstUsefulLine(entry.text) || firstUsefulLine(note.summary);
+  const line = firstUsefulLine(note.summary) || tagValue(entry.text, 'summary');
   return compact(line || entry.id, 92);
 }
 

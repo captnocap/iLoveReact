@@ -15,19 +15,19 @@ export default function BuildJournalDialog({ journal, onClose }: { journal: Buil
         </C.HW_DialogHead>
         <C.HW_DialogBody>
           <C.HW_JournalIntro>
-            <C.HW_HeadTitle>Request ledger build stream</C.HW_HeadTitle>
-            <C.HW_StatusText>{journal.requestCount} request files loaded from {journal.source} at {journal.loadedAt}. The build number is derived from the newest request id.</C.HW_StatusText>
+            <C.HW_HeadTitle>Delivered request build stream</C.HW_HeadTitle>
+            <C.HW_StatusText>Showing {journal.deliveryCount} recent deliveries from {journal.requestCount} request files loaded at {journal.loadedAt}. The build number follows the newest resolved delivery, not open bug or feature requests.</C.HW_StatusText>
           </C.HW_JournalIntro>
           <C.HW_JournalLayout>
             <C.HW_JournalColumn>
               <C.HW_GroupTitle>
                 <Icon name="ListChecks" size={12} color={accentFor('primary')} />
-                <C.HW_GroupText>RECENT BUILD NOTES</C.HW_GroupText>
+                <C.HW_GroupText>RECENT DELIVERIES</C.HW_GroupText>
               </C.HW_GroupTitle>
               {journal.notes.length === 0 ? (
                 <C.HW_BuildNoteCard>
-                  <C.HW_HistoryTitle>No request ledger entries available</C.HW_HistoryTitle>
-                  <C.HW_HistoryMeta>The editor could not read any req_*.json files from the live ledger path.</C.HW_HistoryMeta>
+                  <C.HW_HistoryTitle>No delivered request resolutions available</C.HW_HistoryTitle>
+                  <C.HW_HistoryMeta>The editor found no request entries with a resolution field in the live ledger path.</C.HW_HistoryMeta>
                 </C.HW_BuildNoteCard>
               ) : null}
               {journal.notes.map((note) => (
@@ -39,7 +39,8 @@ export default function BuildJournalDialog({ journal, onClose }: { journal: Buil
                     <C.HW_Tag><C.HW_TagText>{note.status}</C.HW_TagText></C.HW_Tag>
                   </C.HW_BuildNoteHead>
                   <C.HW_HistoryTitle>{note.title}</C.HW_HistoryTitle>
-                  <C.HW_HistoryMeta>{note.agent}: {note.handled}</C.HW_HistoryMeta>
+                  <C.HW_HistoryMeta>delivery by {note.agent}: {note.handled}</C.HW_HistoryMeta>
+                  <C.HW_HistoryMeta>request: {note.ask}</C.HW_HistoryMeta>
                   <C.HW_TraceRow>
                     {note.trace.map((trace) => <C.HW_TraceChip key={`${note.request}-${trace}`}><C.HW_KeyText>{trace}</C.HW_KeyText></C.HW_TraceChip>)}
                   </C.HW_TraceRow>

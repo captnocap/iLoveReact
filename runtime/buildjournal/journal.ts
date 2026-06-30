@@ -44,15 +44,19 @@ export class BuildJournal {
 
   // ── ingest: request ledger → build notes ───────────────────────────────────
 
-  /** Ingest one request-ledger entry into a BuildNote (idempotent by request id;
-   *  re-ingesting refreshes the derived fields but preserves accumulated links). */
-  ingestRequest(entry: RequestEntry): BuildNote {
+  /** Ingest one resolved request-ledger entry into a BuildNote (idempotent by
+   *  request id; re-ingesting refreshes the delivery fields but preserves
+   *  accumulated links). Unresolved asks are bug/feature reports, not builds. */
+  ingestRequest(entry: RequestEntry): BuildNote | undefined {
+    const resolution = entry.resolution?.trim();
+    if (!resolution) return undefined;
+
     const existing = this.notesByRequest.get(entry.id);
     const note: BuildNote = {
       requestId: entry.id,
       buildId: deriveBuildNumber(entry.id),
       agent: agentOf(entry),
-      summary: (entry.resolution && entry.resolution.trim()) || entry.text,
+      summary: resolution,
       traceTags: existing?.traceTags ?? [],
       threadIds: existing?.threadIds ?? [],
       captureIds: existing?.captureIds ?? [],
@@ -61,9 +65,14 @@ export class BuildJournal {
     return note;
   }
 
-  /** Ingest a batch of ledger entries. */
+  /** Ingest a batch of ledger entries. Unresolved entries are skipped. */
   ingestRequests(entries: RequestEntry[]): BuildNote[] {
-    return entries.map((e) => this.ingestRequest(e));
+    const notes: BuildNote[] = [];
+    for (const entry of entries) {
+      const note = this.ingestRequest(entry);
+      if (note) notes.push(note);
+    }
+    return notes;
   }
 
   /** A build note by its source request id. */

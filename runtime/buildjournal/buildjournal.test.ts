@@ -65,21 +65,32 @@ test('a request id with no counter is rejected, not silently zeroed', () => {
 });
 
 // ── ingest: ledger entries → build notes ─────────────────────────────────────
-test('ingest turns a ledger entry into a build note with derived fields', () => {
+test('ingest turns a resolved ledger entry into a delivery build note', () => {
   const j = new BuildJournal();
   const note = j.ingestRequest(req2163);
-  assert(note.buildId === '1.0.0.2163', 'buildId derived from request id');
-  assert(note.agent === 'e008', 'agent is the last state actor');
-  assert(note.summary.startsWith('Orbit moved'), 'summary prefers the resolution');
-  assert(j.noteByRequest('req_2163') === note, 'looked up by request id');
-  assert(j.noteByBuild('1.0.0.2163') === note, 'looked up by build number');
+  assert(note !== undefined, 'resolved request registers a note');
+  const delivered = note!;
+  assert(delivered.buildId === '1.0.0.2163', 'buildId derived from request id');
+  assert(delivered.agent === 'e008', 'agent is the last state actor');
+  assert(delivered.summary.startsWith('Orbit moved'), 'summary is the delivery resolution');
+  assert(j.noteByRequest('req_2163') === delivered, 'looked up by request id');
+  assert(j.noteByBuild('1.0.0.2163') === delivered, 'looked up by build number');
 });
 
-test('latestBuildNumber tracks the highest request counter ingested', () => {
+test('unresolved asks do not register as build notes', () => {
+  const j = new BuildJournal();
+  const note = j.ingestRequest(req0007);
+  assert(note === undefined, 'no resolution means no build note');
+  assert(j.notes().length === 0, 'journal stream stays empty');
+  assert(j.latestBuildNumber() === undefined, 'open request does not advance build');
+});
+
+test('latestBuildNumber tracks the highest delivered request counter ingested', () => {
   const j = new BuildJournal();
   j.ingestRequests([req0007, req2163]);
-  assert(j.latestBuildNumber() === '1.0.0.2163', 'newest request leads the stream');
+  assert(j.latestBuildNumber() === '1.0.0.2163', 'newest delivered request leads the stream');
   assert(j.notes()[0]!.requestId === 'req_2163', 'notes() is newest-first');
+  assert(j.noteByRequest('req_0007') === undefined, 'unresolved request was skipped');
 });
 
 // ── threads: create, rename-preserves-links ──────────────────────────────────
@@ -93,18 +104,18 @@ test('createThread mints a stable id distinct from the display name', () => {
 
 test('renaming a thread preserves its stableId and every link', () => {
   const j = new BuildJournal();
-  j.ingestRequest(req0007);
+  j.ingestRequest(req2163);
   const t = j.createThread({ semanticName: 'water walk', tags: ['water'] });
-  j.attachToThread(t.stableId, { requestId: 'req_0007' });
+  j.attachToThread(t.stableId, { requestId: 'req_2163' });
   const id = t.stableId;
 
   const renamed = j.renameThread(id, 'jesus water walking');
   assert(renamed.stableId === id, 'stable id unchanged across rename');
   assert(renamed.semanticName === 'jesus water walking', 'name updated');
   assert(renamed.aliases.includes('water walk'), 'old name kept as a searchable alias');
-  assert(renamed.linkedRequests.includes('req_0007'), 'links survive the rename');
+  assert(renamed.linkedRequests.includes('req_2163'), 'links survive the rename');
   // and the back-reference on the note is still intact
-  assert(j.noteByRequest('req_0007')!.threadIds.includes(id), 'note still points back at the thread');
+  assert(j.noteByRequest('req_2163')!.threadIds.includes(id), 'note still points back at the thread');
 });
 
 // ── attach: bidirectional wiring ─────────────────────────────────────────────
