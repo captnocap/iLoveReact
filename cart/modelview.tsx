@@ -70,6 +70,9 @@ const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 const meshPick = (x: number, y: number, additive: boolean): number =>
   (host.__mesh_edit_pick?.(x, y, additive ? 1 : 0) as number) ?? -1;
 const meshClearSel = () => host.__mesh_edit_clear?.();
+// Snapshot before an instant press-pick; revert if the press turns into an orbit-drag.
+const meshSnapshot = () => host.__mesh_edit_snapshot?.();
+const meshRevert = () => host.__mesh_edit_revert?.();
 const readSelInfo = (): SelInfo | null => {
   try {
     const j = host.__mesh_edit_counts?.();
@@ -324,8 +327,12 @@ export default function ModelView() {
             paintAt(x, y, color);
             return;
           }
-          // Mesh select mode: defer the pick to mouse-up so a moving press can orbit.
+          // Mesh select mode: pick on PRESS for paint-like immediacy. Snapshot first so a
+          // press that becomes an orbit-drag can revert the pick (see onMouseMove). No
+          // setState here — the highlight is a host repaint, instant and React-free.
           if (selMode !== 0 && !focusMode) {
+            meshSnapshot();
+            meshPick(x, y, currentModifiers().shift);
             downRef.current = { x, y };
             movedRef.current = false;
             draggingRef.current = true;
@@ -354,9 +361,13 @@ export default function ModelView() {
             return;
           }
           if (!draggingRef.current || !lastRef.current) return;
-          // In select mode a press that travels past a few px becomes an orbit, not a pick.
-          if (selMode !== 0 && !focusMode && downRef.current) {
-            if (Math.abs(x - downRef.current.x) > 4 || Math.abs(y - downRef.current.y) > 4) movedRef.current = true;
+          // In select mode a press that travels past a few px is really an orbit: revert the
+          // instant press-pick (once) so rotating the view doesn't change the selection.
+          if (selMode !== 0 && !focusMode && downRef.current && !movedRef.current) {
+            if (Math.abs(x - downRef.current.x) > 4 || Math.abs(y - downRef.current.y) > 4) {
+              movedRef.current = true;
+              meshRevert();
+            }
           }
           // Focus tool pans the pivot; otherwise the drag orbits (even while selecting).
           if (focusMode) orbitPan(x - lastRef.current.x, y - lastRef.current.y);
@@ -364,9 +375,9 @@ export default function ModelView() {
           lastRef.current = { x, y };
         }}
         onMouseUp={() => {
-          // A non-moving press in select mode is a pick (shift extends/toggles the set).
-          if (selMode !== 0 && !focusMode && draggingRef.current && !movedRef.current && downRef.current) {
-            meshPick(downRef.current.x, downRef.current.y, currentModifiers().shift);
+          // The pick already happened on press; if it stayed a click (no drag), refresh the
+          // count HUD now (one render, off the hot path — the highlight was already instant).
+          if (selMode !== 0 && !focusMode && draggingRef.current && !movedRef.current) {
             setSelInfo(readSelInfo() ?? selInfo);
           }
           draggingRef.current = false;

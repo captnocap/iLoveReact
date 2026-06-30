@@ -437,6 +437,13 @@ pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
 pub fn meshEditClear() void {
     mesh_edit.clearSelection();
 }
+/// Snapshot the selection before an instant mousedown pick; revert if the press drags.
+pub fn meshEditSnapshot() void {
+    mesh_edit.snapshotSelection();
+}
+pub fn meshEditRevert() void {
+    mesh_edit.revertSelection();
+}
 /// Select a face by index (no raycast) — programmatic / headless. Returns true on success.
 pub fn meshEditSelectFace(idx: u32, additive: bool) bool {
     return mesh_edit.selectFaceByIndex(idx, additive);

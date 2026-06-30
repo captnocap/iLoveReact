@@ -50,6 +50,19 @@ var g_sel_edge: ?[]bool = null;
 var g_sel_face: ?[]bool = null;
 // Faces currently tinted as selected, with the base colour to restore on deselect.
 var g_face_base: std.AutoHashMapUnmanaged(u32, [4]u8) = .{};
+// Pre-press snapshot of the active set, so a press that turns into an orbit-drag can
+// undo its instant pick (select on mousedown for paint-like immediacy, revert if you drag).
+var g_snap: ?[]bool = null;
+var g_snap_mode: Mode = .none;
+
+fn activeSet() ?[]bool {
+    return switch (g_mode) {
+        .vertex => g_sel_vert,
+        .edge => g_sel_edge,
+        .face => g_sel_face,
+        .none => null,
+    };
+}
 
 pub fn mode() Mode {
     return g_mode;
@@ -100,6 +113,8 @@ pub fn reset() void {
     if (g_sel_vert) |s| alloc.free(s);
     if (g_sel_edge) |s| alloc.free(s);
     if (g_sel_face) |s| alloc.free(s);
+    if (g_snap) |s| alloc.free(s);
+    g_snap = null;
     g_verts = null;
     g_corner_vert = null;
     g_edges = null;
@@ -118,11 +133,39 @@ pub fn clearSelection() void {
     if (g_sel_face) |s| @memset(s, false);
 }
 
+/// Snapshot the active mode's selection before an instant (mousedown) pick.
+pub fn snapshotSelection() void {
+    const set = activeSet() orelse {
+        if (g_snap) |s| alloc.free(s);
+        g_snap = null;
+        return;
+    };
+    if (g_snap) |s| {
+        if (s.len != set.len) {
+            alloc.free(s);
+            g_snap = null;
+        }
+    }
+    if (g_snap == null) g_snap = alloc.alloc(bool, set.len) catch return;
+    @memcpy(g_snap.?, set);
+    g_snap_mode = g_mode;
+}
+
+/// Restore the snapshot — the press became an orbit-drag, so undo its pick.
+pub fn revertSelection() void {
+    const snap = g_snap orelse return;
+    if (g_snap_mode != g_mode) return;
+    const set = activeSet() orelse return;
+    if (set.len != snap.len) return;
+    @memcpy(set, snap);
+    if (g_mode == .face) applyFaceHighlight();
+}
+
 /// Select a face by index (no raycast) — programmatic selection (select-all, scripting)
 /// and the headless highlight proof. Switches to face mode so the tint shows. Returns false
 /// if there's no mesh or the index is out of range.
 pub fn selectFaceByIndex(idx: u32, additive: bool) bool {
-    if (!ensureTopology()) return false;
+    if (!ensureFaceSel()) return false;
     g_mode = .face;
     const sel = g_sel_face orelse return false;
     if (idx >= sel.len) return false;
@@ -136,6 +179,22 @@ pub fn selectFaceByIndex(idx: u32, additive: bool) bool {
 }
 
 // ── Topology ─────────────────────────────────────────────────────────────────────
+/// Face mode needs ONLY a per-face selection bit array — never the welded vertex/edge
+/// topology. Building the weld on the first face click is wasted work that made selection
+/// feel laggy; this is the cheap path (a memset, no hashing). The raycast itself uses
+/// model_paint's CPU positions directly, so face picking costs exactly what paint costs.
+fn ensureFaceSel() bool {
+    const fc = model_paint.faceCount();
+    if (fc == 0) return false;
+    if (g_sel_face) |s| {
+        if (s.len == fc) return true; // already sized (from here or a prior weld)
+    }
+    reset(); // facecount changed / first use → everything stale
+    g_sel_face = alloc.alloc(bool, fc) catch return false;
+    @memset(g_sel_face.?, false);
+    return true;
+}
+
 fn weldKey(p: [3]f32) u64 {
     const xi: i64 = @intFromFloat(@round(p[0] * WELD_Q));
     const yi: i64 = @intFromFloat(@round(p[1] * WELD_Q));
@@ -233,7 +292,10 @@ fn vertPos(i: u32) [3]f32 {
 /// this mode, or -1 if there's no mesh. A miss with !additive clears (Blockbench rule).
 pub fn pick(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, additive: bool) i32 {
     if (g_mode == .none) return -1;
-    if (!ensureTopology()) return -1;
+    // Face mode never needs the weld — the cheap face-set path keeps picking as fast as
+    // paint. Vertex/edge modes build (once) the welded topology they project against.
+    const ready = if (g_mode == .face) ensureFaceSel() else ensureTopology();
+    if (!ready) return -1;
 
     const hit: i32 = switch (g_mode) {
         .face => model_paint.pick(cam, vp_w, vp_h, mx, my),

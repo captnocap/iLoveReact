@@ -418,6 +418,19 @@ fn hostMeshEditClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     state.markDirty();
 }
 
+/// __mesh_edit_snapshot() — save the selection before an instant mousedown pick.
+fn hostMeshEditSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    _ = info_c;
+    scene3d.meshEditSnapshot();
+}
+
+/// __mesh_edit_revert() — restore the snapshot (the press became an orbit-drag). Repaints.
+fn hostMeshEditRevert(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    _ = info_c;
+    scene3d.meshEditRevert();
+    state.markDirty();
+}
+
 /// __mesh_edit_select_face(idx, additive) → bool. Select a face by index (no raycast) —
 /// programmatic selection (select-all / scripting) and the headless highlight proof.
 fn hostMeshEditSelectFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1265,6 +1278,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);
     v8_runtime.registerHostFn("__mesh_edit_pick", hostMeshEditPick);
     v8_runtime.registerHostFn("__mesh_edit_clear", hostMeshEditClear);
+    v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
+    v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);
     v8_runtime.registerHostFn("__mesh_edit_counts", hostMeshEditCounts);
     v8_runtime.registerHostFn("__model_paint_at", hostModelPaintAt);
