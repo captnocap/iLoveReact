@@ -86,6 +86,7 @@ export function modelPackagesForFolder(folder: ContentFolderId, search: string):
         model.kind,
         model.semanticKind ?? '',
         model.source,
+        model.viewerPath ?? '',
         model.rig,
         model.data,
         ...model.decompositions,

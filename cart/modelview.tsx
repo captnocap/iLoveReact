@@ -30,6 +30,12 @@ import {
 const host = globalThis as any;
 
 type Loaded = { key: string; count: number; radius: number; name: string };
+export type ModelViewProps = {
+  initialPath?: string;
+  initialTitle?: string;
+  allowFilePicker?: boolean;
+  trackAttribution?: boolean;
+};
 
 /** sha256 of the file bytes (host door) — keys attribution to the content. */
 const fileSha = (path: string): string => {
@@ -137,7 +143,7 @@ const PALETTE: RGB[] = [
 ];
 const rgbCss = (c: RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
-export default function ModelView() {
+export default function ModelView({ initialPath, initialTitle, allowFilePicker = true, trackAttribution = true }: ModelViewProps = {}) {
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(false);
@@ -156,6 +162,7 @@ export default function ModelView() {
 
   // Record (or fetch) the attribution for a just-loaded file, keyed by its content sha.
   const recordAttribution = (path: string) => {
+    if (!trackAttribution) return;
     const sha = fileSha(path);
     if (!sha) { setAttribution(null); return; }
     const next = { ...ledger };
@@ -293,7 +300,7 @@ export default function ModelView() {
     // NOT per drag-move) so the count HUD refreshes without any JS in the interaction loop.
     (globalThis as any).__meshEditSelChanged = () => setSelInfo(readSelInfo() ?? { mode: 0, verts: 0, edges: 0, sel: 0 });
     (globalThis as any).__meshEditGuardChanged = () => setGuard(readGuard());
-    const path = callHost<string | null>('__env_get', null, 'RJIT_MODEL');
+    const path = initialPath ?? callHost<string | null>('__env_get', null, 'RJIT_MODEL');
     if (path) applyPath(path);
     // RJIT_WIRE=1 boots in wireframe mode — the headless self-shot path for it.
     if (callHost<string | null>('__env_get', null, 'RJIT_WIRE')) setWire(true);
@@ -383,6 +390,11 @@ export default function ModelView() {
     // the vertex dots / edge highlights / overlay draw (vertex mode shows every vert).
     const mm = Number(callHost<string | null>('__env_get', null, 'RJIT_MESHMODE') ?? 0);
     if (mm >= 1 && mm <= 3) chooseSelMode(mm);
+    return () => {
+      paintingRef.current = false;
+      meshFocusTool(false);
+      meshCapture(false);
+    };
   }, []);
 
   useFileDrop(applyPath);
@@ -427,7 +439,7 @@ export default function ModelView() {
         }}
       >
         <Text style={{ color: '#e8edf6', fontSize: 13, fontWeight: 600 }}>
-          {model ? model.name : 'Model Viewer'}
+          {model ? model.name : initialTitle ?? 'Model Viewer'}
         </Text>
         {model && (
           <Text style={{ color: '#7d899c', fontSize: 12, marginLeft: 12 }}>
@@ -486,15 +498,17 @@ export default function ModelView() {
             <Text style={{ color: wire ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Wireframe</Text>
           </Pressable>
         )}
-        <Pressable
-          onPress={chooseModel}
-          style={{
-            paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
-            backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a',
-          }}
-        >
-          <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Open…</Text>
-        </Pressable>
+        {allowFilePicker ? (
+          <Pressable
+            onPress={chooseModel}
+            style={{
+              paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+              backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a',
+            }}
+          >
+            <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Open…</Text>
+          </Pressable>
+        ) : null}
       </Row>
 
       {/* Palette strip — appears under the title bar in paint mode. Click a swatch to
@@ -698,18 +712,24 @@ export default function ModelView() {
       {/* Center prompt until something is loaded. */}
       {!model && (
         <Col style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#9aa6ba', fontSize: 22, fontWeight: 600 }}>Open a model to view</Text>
+          <Text style={{ color: '#9aa6ba', fontSize: 22, fontWeight: 600 }}>
+            {error ? 'Model could not load' : initialPath ? `Loading ${initialTitle ?? 'model'}` : 'Open a model to view'}
+          </Text>
           <Text style={{ color: '#5d6878', fontSize: 14, marginTop: 8 }}>.glb · .obj — parsed and rendered entirely in the host</Text>
-          <Pressable
-            onPress={chooseModel}
-            style={{
-              marginTop: 22, paddingLeft: 22, paddingRight: 22, paddingTop: 11, paddingBottom: 11, borderRadius: 8,
-              backgroundColor: '#1d3a5fee', borderWidth: 1, borderColor: '#3a5f8a',
-            }}
-          >
-            <Text style={{ color: '#e6f0fb', fontSize: 15, fontWeight: 600 }}>Choose a model…</Text>
-          </Pressable>
-          <Text style={{ color: '#465162', fontSize: 12, marginTop: 14 }}>…or drop a file anywhere</Text>
+          {allowFilePicker ? (
+            <>
+              <Pressable
+                onPress={chooseModel}
+                style={{
+                  marginTop: 22, paddingLeft: 22, paddingRight: 22, paddingTop: 11, paddingBottom: 11, borderRadius: 8,
+                  backgroundColor: '#1d3a5fee', borderWidth: 1, borderColor: '#3a5f8a',
+                }}
+              >
+                <Text style={{ color: '#e6f0fb', fontSize: 15, fontWeight: 600 }}>Choose a model…</Text>
+              </Pressable>
+              <Text style={{ color: '#465162', fontSize: 12, marginTop: 14 }}>…or drop a file anywhere</Text>
+            </>
+          ) : null}
           {error && <Text style={{ color: '#e2706a', fontSize: 13, marginTop: 16 }}>{error}</Text>}
         </Col>
       )}

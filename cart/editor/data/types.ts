@@ -170,6 +170,7 @@ export type ModelPackage = {
   stage: 'wip' | 'ready' | 'locked';
   color: string;
   source: string;
+  viewerPath?: string;
   rig: string;
   data: string;
   triangles: number;
@@ -177,7 +178,7 @@ export type ModelPackage = {
   decompositions: string[];
   atlases: ModelAtlas[];
   paints: ModelPaintVariant[];
-  sourceKind?: 'cooked-asset' | 'studio-model';
+  sourceKind?: 'cooked-asset' | 'studio-model' | 'imported-prop' | 'source-file';
   semanticKind?: string;
 };
 

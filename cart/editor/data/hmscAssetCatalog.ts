@@ -11,6 +11,8 @@ import type { Asset, ContentNode, ModelAtlas, ModelPackage, ModelPaintVariant } 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
 const COOKED_SNAPSHOT = 'cart/hmsc-int/data/domains/cooked-asset/snapshots/cooked-asset.snapshot.json';
 const MATERIALS_SNAPSHOT = 'cart/hmsc-int/data/domains/materials/snapshots/materials.snapshot.json';
+const IMPORTED_PROPS_DATA = 'cart/hmsc-int/game/kinds/importedProps.data.json';
+const MODEL_SOURCE_DIR = 'cart/hmsc-int';
 const TEXTURE_DIR = 'cart/hmsc-int/assets/tex';
 const SHADER_SOURCE = 'cart/hmsc-int/game/textures/shaders.ts';
 
@@ -114,6 +116,23 @@ type ModelSnapshot = {
   };
 };
 
+type ImportedPropSource = {
+  kind?: string;
+  label?: string;
+  source?: string;
+  heightMeters?: number;
+  footprintWidthMeters?: number;
+  footprintDepthMeters?: number;
+  footprintRadiusMeters?: number;
+  color?: number[];
+  solid?: boolean;
+  coverClass?: string;
+};
+
+type ImportedPropsData = {
+  props?: ImportedPropSource[];
+};
+
 export type CatalogDiagnostics = {
   source: string;
   loadedMs: number;
@@ -153,6 +172,7 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
   const materials = readJson<MaterialsSnapshot>(MATERIALS_SNAPSHOT, errors);
   const cooked = readJson<CookedSnapshot>(COOKED_SNAPSHOT, errors);
   const models = readJson<ModelSnapshot>(MODEL_SNAPSHOT, errors);
+  const importedProps = readJson<ImportedPropsData>(IMPORTED_PROPS_DATA, errors);
   cookedTextureBlobs = cooked?.state?.textureBlobs ?? {};
 
   const materialAssets = [
@@ -162,7 +182,12 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
     ...shaderPresetAssets(),
   ];
   const cookedAssets = cookedAssetRows(cooked);
+  const importedViewerSources = importedPropViewerSources(importedProps);
+  const looseViewerSources = looseModelSources(importedViewerSources);
+  const viewerModelCount = importedViewerSources.size + looseViewerSources.length;
   const modelPackages = [
+    ...importedPropModelPackages(importedProps),
+    ...looseModelFilePackages(looseViewerSources),
     ...cookedModelPackages(cooked),
     ...storedModelPackages(models),
   ].sort((a, b) => modelRank(a) - modelRank(b) || a.name.localeCompare(b.name));
@@ -183,19 +208,126 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
     defaultAssetId: defaultAsset?.id ?? '',
     defaultContentFolder,
     diagnostics: {
-      source: 'hmsc-int snapshots + shader registry',
+      source: 'hmsc-int snapshots + shader registry + source model files',
       loadedMs: Date.now() - started,
       shaderRecipes: HMSC_SHADERS.length,
       shaderPresets: HMSC_BROWSE_SHADER_PRESETS.length,
       storedMaterials: Object.keys(materials?.state?.materials ?? {}).length,
       textureFiles: textureFilenames().length,
       cookedAssets: Object.keys(cooked?.state?.assets ?? {}).length,
-      savedModels: Object.keys(models?.state?.models ?? {}).length,
+      savedModels: Object.keys(models?.state?.models ?? {}).length + viewerModelCount,
       meshBlobs: Object.keys(cooked?.state?.meshBlobs ?? {}).length,
       textureBlobs: Object.keys(cooked?.state?.textureBlobs ?? {}).length,
       errors,
     },
   };
+}
+
+function importedPropViewerSources(data: ImportedPropsData | null): Set<string> {
+  const sources = new Set<string>();
+  (data?.props ?? []).forEach((prop) => {
+    const source = prop.source ?? '';
+    const info = source ? stat(source) : null;
+    if (info && !info.isDir && isViewerFile(source)) sources.add(source);
+  });
+  return sources;
+}
+
+function importedPropModelPackages(data: ImportedPropsData | null): ModelPackage[] {
+  return (data?.props ?? []).flatMap((prop) => {
+    const source = prop.source ?? '';
+    const info = source ? stat(source) : null;
+    if (!info || info.isDir || !isViewerFile(source)) return [];
+    const label = prop.label || prop.kind || source.split('/').pop() || 'Imported Model';
+    const kind = prop.kind || slug(label);
+    const sourceFile = source.split('/').pop() || source;
+    return [{
+      id: `imported:${kind}`,
+      folderId: modelFolderId(`imported-${kind}`),
+      name: label,
+      path: `/Game/Models/Imported/${label}`,
+      kind: 'prop',
+      stage: 'ready',
+      color: colorFromFloatRgb(prop.color) ?? colorFor(kind),
+      source,
+      viewerPath: source,
+      rig: prop.solid ? 'solid imported prop' : 'visual imported prop',
+      data: `file ${sourceFile}`,
+      triangles: 0,
+      lods: 0,
+      decompositions: [
+        `kind:${kind}`,
+        `source:${sourceFile}`,
+        prop.coverClass ? `cover:${prop.coverClass}` : 'cover:-',
+        prop.heightMeters ? `height:${prop.heightMeters}m` : 'height:-',
+      ],
+      atlases: [],
+      paints: [],
+      sourceKind: 'imported-prop',
+      semanticKind: 'imported prop',
+    }];
+  });
+}
+
+function looseModelSources(skip: Set<string>): string[] {
+  return listDir(MODEL_SOURCE_DIR)
+    .map((name) => `${MODEL_SOURCE_DIR}/${name}`)
+    .filter((path) => !skip.has(path) && isViewerFile(path))
+    .filter((path) => {
+      const info = stat(path);
+      return Boolean(info && !info.isDir);
+    });
+}
+
+function looseModelFilePackages(sources: string[]): ModelPackage[] {
+  return sources.map((source) => {
+    const sourceFile = source.split('/').pop() || source;
+    const name = titleFromFilename(sourceFile);
+    const semantic = semanticKindFromText(name);
+    return {
+      id: `source:${slug(source)}`,
+      folderId: modelFolderId(`source-${source}`),
+      name,
+      path: `/Game/Models/Source/${sourceFile}`,
+      kind: cookedUiCategory(semantic),
+      stage: 'ready',
+      color: colorFor(source),
+      source,
+      viewerPath: source,
+      rig: 'source model file',
+      data: `file ${sourceFile}`,
+      triangles: 0,
+      lods: 0,
+      decompositions: [
+        `semantic:${semantic}`,
+        `format:${sourceFile.split('.').pop()?.toLowerCase() ?? '-'}`,
+        'source:hmsc-int',
+      ],
+      atlases: [],
+      paints: [],
+      sourceKind: 'source-file',
+      semanticKind: semantic,
+    };
+  });
+}
+
+function isViewerFile(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.endsWith('.glb') || lower.endsWith('.obj');
+}
+
+function colorFromFloatRgb(rgb: number[] | undefined): string | null {
+  if (!rgb || rgb.length < 3) return null;
+  const toByte = (value: number) => Math.max(0, Math.min(255, Math.round(value * 255)));
+  const hex = (value: number) => toByte(value).toString(16).padStart(2, '0');
+  return `#${hex(rgb[0] ?? 0)}${hex(rgb[1] ?? 0)}${hex(rgb[2] ?? 0)}`;
+}
+
+function titleFromFilename(filename: string): string {
+  const base = filename.replace(/\.[^.]+$/, '');
+  return base
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function readJson<T>(path: string, errors: string[]): T | null {
