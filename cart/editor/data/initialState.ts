@@ -28,6 +28,7 @@ export function initialState(): MockState {
     buildDialogOpen: false,
     eventbusPopoverOpen: false,
     perfPopoverOpen: false,
+    memoryPopoverOpen: false,
     fileExplorerOpen: false,
     fileExplorerQuery: '',
     fileExplorerFolder: 'imports-models',

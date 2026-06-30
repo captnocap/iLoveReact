@@ -241,6 +241,7 @@ export type MockState = {
   buildDialogOpen: boolean;
   eventbusPopoverOpen: boolean;
   perfPopoverOpen: boolean;
+  memoryPopoverOpen: boolean;
   fileExplorerOpen: boolean;
   fileExplorerQuery: string;
   fileExplorerFolder: ExplorerFolderId;

@@ -12,12 +12,14 @@ export default function BuildDock({
   onBuild,
   onEventbus,
   onPerf,
+  onMemory,
 }: {
   state: MockState;
   journal: BuildJournalSnapshot;
   onBuild: () => void;
   onEventbus: () => void;
   onPerf: () => void;
+  onMemory: () => void;
 }) {
   const telemetry = editTelemetry(state.history);
   const activeObject = selectedObject(state);
@@ -84,6 +86,7 @@ export default function BuildDock({
         <C.HW_DockLabel>PARITY</C.HW_DockLabel>
         <C.HW_DockValue>{telemetry.parity}</C.HW_DockValue>
       </C.HW_DockGroup>
+      <C.HW_Spacer />
       <C.HW_DockDivider />
       <C.HW_DockPerfButton onPress={onPerf}>
         <C.HW_DockLabel>FPS:</C.HW_DockLabel>
@@ -97,9 +100,8 @@ export default function BuildDock({
         <C.HW_DockLabel>DC</C.HW_DockLabel>
         <C.HW_DockValue>{formatCount(drawCalls)}</C.HW_DockValue>
       </C.HW_DockPerfButton>
-      <C.HW_Spacer />
-      <C.HW_DockPerfButton onPress={onPerf}>
-        <Icon name="Activity" size={13} color={accentFor('textFaint')} />
+      <C.HW_DockPerfButton onPress={onMemory}>
+        <Icon name="Activity" size={13} color={accentFor(state.memoryPopoverOpen ? 'primary' : 'textFaint')} />
         <C.HW_DockLabel>MEM</C.HW_DockLabel>
         <C.HW_DockLabel>{formatBytes(system?.process_rss_bytes)}/{formatBytes(system?.mem_total_bytes)}</C.HW_DockLabel>
       </C.HW_DockPerfButton>

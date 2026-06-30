@@ -4,6 +4,8 @@ import { useTelemetry } from '../../../runtime/hooks/useTelemetry';
 import { C, accentFor } from '../workspace.cls';
 import { formatMs } from '../data/telemetry';
 import { formatBytes, formatCount } from '../data/readouts';
+import DiagnosticConsumerRow from './DiagnosticConsumerRow';
+import type { DiagnosticConsumer as Consumer } from './diagnosticConsumers';
 
 type FrameTelemetry = {
   fps?: number;
@@ -55,24 +57,6 @@ type HostFlushTelemetry = {
   total_drained_batches?: number;
 };
 
-type SystemTelemetry = {
-  process_rss_bytes?: number;
-  process_rss_peak_bytes?: number;
-  process_rss_anon_bytes?: number;
-  process_rss_file_bytes?: number;
-  process_rss_shmem_bytes?: number;
-  process_vsize_bytes?: number;
-  process_vsize_peak_bytes?: number;
-  process_vm_data_bytes?: number;
-  process_vm_stack_bytes?: number;
-  process_vm_exe_bytes?: number;
-  process_vm_lib_bytes?: number;
-  process_vm_swap_bytes?: number;
-  process_threads?: number;
-  mem_total_bytes?: number;
-  mem_available_bytes?: number;
-};
-
 type RenderStat = {
   id: string;
   commits: number;
@@ -119,105 +103,7 @@ type Bucket = {
   note: string;
 };
 
-type Consumer = {
-  id: string;
-  source: string;
-  label: string;
-  value: string;
-  detail: string;
-  score: number;
-  hot: boolean;
-};
-
-type MemoryField = {
-  id: string;
-  key: keyof SystemTelemetry;
-  label: string;
-  detail: string;
-  warnBytes?: number;
-  warnDeltaBytes?: number;
-};
-
 const EMPTY_CHURN: JsChurnSnapshot = { renders: { top: [], summary: undefined }, effects: [], effectsByRuns: [] };
-const KiB = 1024;
-const MiB = KiB * 1024;
-const GiB = MiB * 1024;
-
-const MEMORY_FIELDS: MemoryField[] = [
-  {
-    id: 'rss',
-    key: 'process_rss_bytes',
-    label: 'process rss',
-    detail: 'total resident memory held by the editor process',
-    warnBytes: GiB,
-    warnDeltaBytes: 64 * MiB,
-  },
-  {
-    id: 'anon',
-    key: 'process_rss_anon_bytes',
-    label: 'anon rss',
-    detail: 'private anonymous resident pages: JS/native heaps, stacks, JIT pages',
-    warnBytes: 512 * MiB,
-    warnDeltaBytes: 32 * MiB,
-  },
-  {
-    id: 'file',
-    key: 'process_rss_file_bytes',
-    label: 'file rss',
-    detail: 'file-backed resident pages: libraries, mapped assets, caches',
-    warnBytes: 512 * MiB,
-    warnDeltaBytes: 64 * MiB,
-  },
-  {
-    id: 'shmem',
-    key: 'process_rss_shmem_bytes',
-    label: 'shared rss',
-    detail: 'shared resident pages owned with the OS or GPU stack',
-    warnDeltaBytes: 32 * MiB,
-  },
-  {
-    id: 'rss-peak',
-    key: 'process_rss_peak_bytes',
-    label: 'rss peak',
-    detail: 'OS high-water resident set since this process started',
-    warnBytes: GiB,
-  },
-  {
-    id: 'vm-data',
-    key: 'process_vm_data_bytes',
-    label: 'vm data',
-    detail: 'virtual data/heap reservation reported by the kernel',
-    warnDeltaBytes: 64 * MiB,
-  },
-  {
-    id: 'vm-size',
-    key: 'process_vsize_bytes',
-    label: 'vm size',
-    detail: 'total virtual address space reservation, not all resident',
-    warnDeltaBytes: 128 * MiB,
-  },
-  {
-    id: 'swap',
-    key: 'process_vm_swap_bytes',
-    label: 'swap',
-    detail: 'process memory currently swapped out',
-    warnBytes: MiB,
-  },
-  {
-    id: 'vm-stack',
-    key: 'process_vm_stack_bytes',
-    label: 'vm stack',
-    detail: 'thread stack reservation',
-    warnDeltaBytes: 8 * MiB,
-  },
-  {
-    id: 'vm-lib',
-    key: 'process_vm_lib_bytes',
-    label: 'vm libs',
-    detail: 'mapped library reservation',
-    warnDeltaBytes: 32 * MiB,
-  },
-];
 
 function readJsChurn(): JsChurnSnapshot {
   const g = globalThis as any;
@@ -244,62 +130,6 @@ function msFromUs(value: number | undefined): number {
 
 function msFromNs(value: number | undefined): number {
   return value ? value / 1000000 : 0;
-}
-
-function memoryNumber(system: SystemTelemetry | null | undefined, key: keyof SystemTelemetry): number {
-  const value = system?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
-}
-
-function formatMemory(bytes: number | undefined): string {
-  const n = Math.max(0, Math.round(bytes ?? 0));
-  if (n >= GiB) return `${(n / GiB).toFixed(n >= 10 * GiB ? 1 : 2)}G`;
-  if (n >= MiB) return `${(n / MiB).toFixed(n >= 100 * MiB ? 0 : 1)}M`;
-  if (n >= KiB) return `${(n / KiB).toFixed(n >= 100 * KiB ? 0 : 1)}K`;
-  return `${n}B`;
-}
-
-function formatSignedMemory(bytes: number): string {
-  if (!bytes) return '+0B';
-  return `${bytes > 0 ? '+' : '-'}${formatMemory(Math.abs(bytes))}`;
-}
-
-function memoryBaselineFor(system: SystemTelemetry | null | undefined): Record<string, number> {
-  const baseline: Record<string, number> = {};
-  for (const field of MEMORY_FIELDS) {
-    baseline[field.id] = memoryNumber(system, field.key);
-  }
-  return baseline;
-}
-
-function memorySignature(system: SystemTelemetry | null): string {
-  if (!system) return 'none';
-  return MEMORY_FIELDS.map((field) => `${field.id}:${memoryNumber(system, field.key)}`).join('|');
-}
-
-function memoryConsumers(system: SystemTelemetry | null, baseline: Record<string, number> | null): Consumer[] {
-  if (!system) return [];
-  const rows: Consumer[] = [];
-  const base = baseline ?? memoryBaselineFor(system);
-  for (const field of MEMORY_FIELDS) {
-    const current = memoryNumber(system, field.key);
-    if (current <= 0) continue;
-    const start = base[field.id] ?? current;
-    const delta = current - start;
-    const growthScore = Math.max(0, delta) / MiB;
-    const residentScore = current / (128 * MiB);
-    const score = growthScore * 8 + residentScore;
-    rows.push({
-      id: `memory:${field.id}`,
-      source: 'mem',
-      label: field.label,
-      value: formatMemory(current),
-      detail: `${formatSignedMemory(delta)} since reset · ${field.detail}`,
-      score,
-      hot: current >= (field.warnBytes ?? Number.POSITIVE_INFINITY) || delta >= (field.warnDeltaBytes ?? Number.POSITIVE_INFINITY),
-    });
-  }
-  return rows.sort((a, b) => b.score - a.score).slice(0, 12);
 }
 
 function frameBuckets(frame: FrameTelemetry | null): Bucket[] {
@@ -519,27 +349,11 @@ function BucketRow({ bucket, maxMs }: { bucket: Bucket; maxMs: number }) {
   );
 }
 
-function ConsumerRow({ consumer, maxScore, rank }: { consumer: Consumer; maxScore: number; rank: number }) {
-  const pct = maxScore > 0 ? Math.max(2, Math.min(100, (consumer.score / maxScore) * 100)) : 0;
-  const color = consumer.hot ? accentFor('warning') : accentFor('primary');
-  return (
-    <C.HW_TopConsumerRow style={{ borderColor: consumer.hot ? accentFor('warning') : accentFor('borderSoft') }}>
-      <C.HW_DockLabel style={{ width: 22, color }}>#{rank}</C.HW_DockLabel>
-      <C.HW_FormValue numberOfLines={1} noWrap style={{ width: 112 }}>{consumer.label}</C.HW_FormValue>
-      <C.HW_DockValue style={{ width: 58, textAlign: 'right', color }}>{consumer.value}</C.HW_DockValue>
-      <C.HW_ChurnBar><C.HW_ChurnFill style={{ width: `${pct}%`, backgroundColor: color }} /></C.HW_ChurnBar>
-      <C.HW_DockLabel style={{ width: 48 }}>{consumer.source}</C.HW_DockLabel>
-      <C.HW_StatusText numberOfLines={1} noWrap style={{ flexGrow: 1, minWidth: 0 }}>{consumer.detail}</C.HW_StatusText>
-    </C.HW_TopConsumerRow>
-  );
-}
-
 export default function PerformancePopover({ onClose }: { onClose: () => void }) {
   const { data: frame } = useTelemetry<FrameTelemetry>({ kind: 'frame', pollMs: 500 });
   const { data: gpu } = useTelemetry<GpuTelemetry>({ kind: 'gpu', pollMs: 500 });
   const { data: nodes } = useTelemetry<NodeTelemetry>({ kind: 'nodes', pollMs: 500 });
   const { data: hostFlush } = useTelemetry<HostFlushTelemetry>({ kind: 'hostFlush', pollMs: 500 });
-  const { data: system } = useTelemetry<SystemTelemetry>({ kind: 'system', pollMs: 1000 });
   const js = useJsChurn();
   const buckets = frameBuckets(frame);
   const secondary = secondaryBuckets(frame, hostFlush);
@@ -549,18 +363,9 @@ export default function PerformancePopover({ onClose }: { onClose: () => void })
   const renderStats = js.renders.top ?? [];
   const topRender = js.renders.top?.[0];
   const topEffect = js.effects[0] ?? js.effectsByRuns[0];
-  const [memoryBaseline, setMemoryBaseline] = useState<Record<string, number> | null>(null);
-  const memoryKey = memorySignature(system);
-  const memoryRows = memoryConsumers(system, memoryBaseline);
-  const perfConsumers = rankedConsumers({ buckets, secondary, gpu, nodes, renderSummary, renderStats, topEffect });
-  const consumers = [...perfConsumers, ...memoryRows].sort((a, b) => b.score - a.score).slice(0, 18);
+  const consumers = rankedConsumers({ buckets, secondary, gpu, nodes, renderSummary, renderStats, topEffect });
   const [peakConsumers, setPeakConsumers] = useState<Record<string, Consumer>>({});
   const consumersKey = consumerSignature(consumers);
-
-  useEffect(() => {
-    if (memoryBaseline || !system) return;
-    setMemoryBaseline(memoryBaselineFor(system));
-  }, [memoryBaseline, memoryKey]);
 
   useEffect(() => {
     setPeakConsumers((prev) => {
@@ -578,21 +383,18 @@ export default function PerformancePopover({ onClose }: { onClose: () => void })
 
   const ranked = mergePeakConsumers(consumers, peakConsumers);
   const maxConsumer = Math.max(1, ...ranked.map((consumer) => consumer.score));
-  const maxMemoryConsumer = Math.max(1, ...memoryRows.map((consumer) => consumer.score));
   const resetAll = () => {
     resetChurn();
     setPeakConsumers({});
-    setMemoryBaseline(system ? memoryBaselineFor(system) : null);
   };
 
   return (
     <C.HW_PerfPopover>
       <C.HW_DockPopoverHead>
         <Icon name="Activity" size={14} color={accentFor('primary')} />
-        <C.HW_HeadTitle>Performance / Memory Churn</C.HW_HeadTitle>
+        <C.HW_HeadTitle>Performance Churn</C.HW_HeadTitle>
         <C.HW_PillOn><C.HW_PillTextOn>{frame?.fps ? `${Math.round(frame.fps)} fps` : 'fps -'}</C.HW_PillTextOn></C.HW_PillOn>
         <C.HW_Pill><C.HW_PillText>{dominant ? `${dominant.label} ${formatMs(dominant.ms)}` : 'no frame sample'}</C.HW_PillText></C.HW_Pill>
-        <C.HW_Pill><C.HW_PillText>rss {formatMemory(system?.process_rss_bytes)}</C.HW_PillText></C.HW_Pill>
         <C.HW_Spacer />
         <C.HW_Pill onPress={resetAll}><C.HW_PillText>reset</C.HW_PillText></C.HW_Pill>
         <C.HW_Pill onPress={onClose}><C.HW_PillText>close</C.HW_PillText></C.HW_Pill>
@@ -612,8 +414,8 @@ export default function PerformancePopover({ onClose }: { onClose: () => void })
             <C.HW_PerfLabel>React updates</C.HW_PerfLabel>
           </C.HW_PerfTile>
           <C.HW_PerfTile>
-            <C.HW_PerfValue>{formatMemory(system?.process_rss_bytes)}</C.HW_PerfValue>
-            <C.HW_PerfLabel>process rss</C.HW_PerfLabel>
+            <C.HW_PerfValue>{topRender ? formatMs(topRender.maxMs) : '0.0ms'}</C.HW_PerfValue>
+            <C.HW_PerfLabel>{topRender?.id ?? 'top render'}</C.HW_PerfLabel>
           </C.HW_PerfTile>
           <C.HW_PerfTile>
             <C.HW_PerfValue>{formatCount(nodes?.visible ?? 0)}</C.HW_PerfValue>
@@ -633,23 +435,6 @@ export default function PerformancePopover({ onClose }: { onClose: () => void })
           <C.HW_StatusText numberOfLines={1} noWrap>flush {formatMs(msFromUs(hostFlush?.last_drain_us))} · {formatBytes(hostFlush?.last_drain_bytes)} · {formatCount(hostFlush?.queued_batches ?? 0)} queued</C.HW_StatusText>
         </C.HW_ChurnSummary>
       </C.HW_ChurnSummarySurface>
-      <C.HW_MemoryConsumers>
-        <C.HW_GroupTitle>
-          <Icon name="MemoryStick" size={12} color={accentFor(memoryRows[0]?.hot ? 'warning' : 'primary')} />
-          <C.HW_GroupText>MEMORY ACCUMULATION</C.HW_GroupText>
-          <C.HW_Spacer />
-          <C.HW_StatusText numberOfLines={1} noWrap>
-            growth since reset · avail {formatMemory(system?.mem_available_bytes)} · threads {formatCount(system?.process_threads ?? 0)}
-          </C.HW_StatusText>
-        </C.HW_GroupTitle>
-        <C.HW_TopConsumerScroll showScrollbar>
-          <C.HW_TopConsumerRows>
-            {memoryRows.map((consumer, index) => (
-              <ConsumerRow key={consumer.id} consumer={consumer} maxScore={maxMemoryConsumer} rank={index + 1} />
-            ))}
-          </C.HW_TopConsumerRows>
-        </C.HW_TopConsumerScroll>
-      </C.HW_MemoryConsumers>
       <C.HW_TopConsumers>
         <C.HW_GroupTitle>
           <Icon name="ListOrdered" size={12} color={accentFor(ranked[0]?.hot ? 'warning' : 'primary')} />
@@ -660,7 +445,7 @@ export default function PerformancePopover({ onClose }: { onClose: () => void })
         <C.HW_TopConsumerScroll showScrollbar>
           <C.HW_TopConsumerRows>
             {ranked.map((consumer, index) => (
-              <ConsumerRow key={consumer.id} consumer={consumer} maxScore={maxConsumer} rank={index + 1} />
+              <DiagnosticConsumerRow key={consumer.id} consumer={consumer} maxScore={maxConsumer} rank={index + 1} />
             ))}
           </C.HW_TopConsumerRows>
         </C.HW_TopConsumerScroll>

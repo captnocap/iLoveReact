@@ -11,6 +11,7 @@ import BuildDock from './BuildDock';
 import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
 import PerformancePopover from './PerformancePopover';
+import MemoryPopover from './MemoryPopover';
 import LibraryPanel from '../library/LibraryPanel';
 import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
@@ -611,9 +612,10 @@ export default function AppFrame() {
         <BuildDock
           state={state}
           journal={journal}
-          onBuild={() => setState((prev) => ({ ...prev, buildDialogOpen: true, eventbusPopoverOpen: false, perfPopoverOpen: false, status: `opened build journal ${journal.activeBuild}` }))}
-          onEventbus={() => setState((prev) => ({ ...prev, eventbusPopoverOpen: !prev.eventbusPopoverOpen, perfPopoverOpen: false, status: prev.eventbusPopoverOpen ? 'eventbus review closed' : 'eventbus review opened' }))}
-          onPerf={() => setState((prev) => ({ ...prev, perfPopoverOpen: !prev.perfPopoverOpen, eventbusPopoverOpen: false, buildDialogOpen: false, status: prev.perfPopoverOpen ? 'performance churn closed' : 'performance churn opened' }))}
+          onBuild={() => setState((prev) => ({ ...prev, buildDialogOpen: true, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: `opened build journal ${journal.activeBuild}` }))}
+          onEventbus={() => setState((prev) => ({ ...prev, eventbusPopoverOpen: !prev.eventbusPopoverOpen, perfPopoverOpen: false, memoryPopoverOpen: false, status: prev.eventbusPopoverOpen ? 'eventbus review closed' : 'eventbus review opened' }))}
+          onPerf={() => setState((prev) => ({ ...prev, perfPopoverOpen: !prev.perfPopoverOpen, memoryPopoverOpen: false, eventbusPopoverOpen: false, buildDialogOpen: false, status: prev.perfPopoverOpen ? 'performance churn closed' : 'performance churn opened' }))}
+          onMemory={() => setState((prev) => ({ ...prev, memoryPopoverOpen: !prev.memoryPopoverOpen, perfPopoverOpen: false, eventbusPopoverOpen: false, buildDialogOpen: false, status: prev.memoryPopoverOpen ? 'memory accumulation closed' : 'memory accumulation opened' }))}
         />
       </RenderProbe>
       {state.eventbusPopoverOpen ? (
@@ -631,9 +633,16 @@ export default function AppFrame() {
           />
         </RenderProbe>
       ) : null}
+      {state.memoryPopoverOpen ? (
+        <RenderProbe id="Memory Popover">
+          <MemoryPopover
+            onClose={() => setState((prev) => ({ ...prev, memoryPopoverOpen: false, status: 'memory accumulation closed' }))}
+          />
+        </RenderProbe>
+      ) : null}
       {state.buildDialogOpen ? (
         <RenderProbe id="Build Journal Dialog">
-          <BuildJournalDialog journal={journal} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, perfPopoverOpen: false, status: 'build journal closed' }))} />
+          <BuildJournalDialog journal={journal} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: 'build journal closed' }))} />
         </RenderProbe>
       ) : null}
       {state.fileExplorerOpen ? (
