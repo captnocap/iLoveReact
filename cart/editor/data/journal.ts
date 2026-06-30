@@ -1,181 +1,176 @@
-// editor/data/journal.ts — build-journal notes, bug threads, and active build.
-//
-// Cloned from the hmsc-workspace-mock god-file. Pure data.
-import { deriveBuildNumber, requestNumber } from '../../../runtime/buildjournal';
-import type { BuildNote, BuildThread } from './types';
+// editor/data/journal.ts - build-journal snapshot backed by the real request
+// ledger, not seeded editor fixtures.
+import { useEffect, useState } from 'react';
+import {
+  BuildJournal,
+  deriveBuildNumber,
+  requestNumber,
+  type BuildNote as JournalNote,
+  type BugThread,
+  type RequestEntry,
+} from '../../../runtime/buildjournal';
+import { listDir, readFile } from '../../../runtime/hooks/fs';
+import type { BuildJournalSnapshot, BuildNote, BuildThread } from './types';
 
-export const BUILD_NOTES: BuildNote[] = [
-  {
-    request: 'req_2172',
-    build: deriveBuildNumber('req_2172'),
-    title: 'V8 layout validation gate',
-    status: 'mocked',
-    agent: 'codex',
-    handled: 'Added a no-Python TS/V8 layout validator that checks the mock breakpoint, fixed workspace budgets, menu dropdown reachability, fixed page slots, scroll reachability, and wrap allow-list before visual review.',
-    trace: ['layout validation', 'v8 cli', 'fixed budgets', 'reachable menus'],
-  },
-  {
-    request: 'req_2171',
-    build: deriveBuildNumber('req_2171'),
-    title: 'Workspace reachability checks',
-    status: 'mocked',
-    agent: 'codex',
-    handled: 'Formalized the layout expectation that fixed panels, dropdowns, paged content, and scroll containers must be verifiable at the target breakpoint before opening the app.',
-    trace: ['layout gate', 'scroll containers', 'content reachability', 'fixed sizes'],
-  },
-  {
-    request: 'req_2170',
-    build: deriveBuildNumber('req_2170'),
-    title: 'Shitty Games platform framing',
-    status: 'mocked',
-    agent: 'codex',
-    handled: 'Reframed the workspace mock around Shitty Games as an engine-first nogame release: the editor/tooling can ship independently while hmsc becomes a loadable game data package.',
-    trace: ['branding', 'nogame release', 'loader', 'engine as platform'],
-  },
-  {
-    request: 'req_2169',
-    build: deriveBuildNumber('req_2169'),
-    title: 'Color Studio material palette',
-    status: 'mocked',
-    agent: 'codex',
-    handled: 'Turned the focused material surface into a shader-slot Color Studio mock where baked vec3f defaults are exposed per material, variant, seed, and quality with reset and fill-assist flows.',
-    trace: ['color studio', 'material palette', 'shader slots', 'vec3f defaults'],
-  },
-  {
-    request: 'req_2168',
-    build: deriveBuildNumber('req_2168'),
-    title: 'Model package content browser',
-    status: 'mocked',
-    agent: 'codex',
-    handled: 'Changed the content browser architecture so model folders own source mesh, rig data, decompositions, atlas sets, paint variants, and captured shader/image references while global materials remain separate.',
-    trace: ['content browser', 'models folder', 'texture atlas', 'paint variants'],
-  },
-  {
-    request: 'req_2118',
-    build: deriveBuildNumber('req_2118'),
-    title: 'Eventbus dock popover',
-    status: 'mocked',
-    agent: 'codex',
-    handled: 'Moved the always-visible Eventbus strip into the bottom dock as an expandable review popover so event data is available without permanently consuming workspace height.',
-    trace: ['eventbus', 'bottom dock', 'popover', 'workspace space'],
-  },
-  {
-    request: 'req_2113',
-    build: deriveBuildNumber('req_2113'),
-    title: 'Inspector preset dropdown',
-    status: 'mocked',
-    agent: 'codex',
-    handled: 'Replaced surface-default pill selectors with a compact dropdown select so dense property panels do not become button fields.',
-    trace: ['inspector', 'dropdown select', 'surface defaults', 'density'],
-  },
-  {
-    request: 'req_2112',
-    build: deriveBuildNumber('req_2112'),
-    title: 'Authoring telemetry dock',
-    status: 'mocked',
-    agent: 'codex',
-    handled: 'Added an expandable in-memory edit history and live authoring-cost readout to watch average edit time and rich-map placement delta.',
-    trace: ['bottom dock', 'edit history', 'authoring latency', 'placement parity'],
-  },
-  {
-    request: 'req_2111',
-    build: deriveBuildNumber('req_2111'),
-    title: 'Fixed material browser pages',
-    status: 'mocked',
-    agent: 'codex',
-    handled: 'Packed the content browser into fixed material page slots so selected-material controls stay visible without scrolling.',
-    trace: ['content browser', 'fixed pages', 'materials', 'no scroll'],
-  },
-  {
-    request: 'req_2108',
-    build: deriveBuildNumber('req_2108'),
-    title: 'Bottom dock and build journal',
-    status: 'mocked',
-    agent: 'codex',
-    handled: 'Promoted request-ledger visibility into a thin bottom dock with clickable build notes.',
-    trace: ['bottom dock', 'request journal', 'build number', 'bug threads'],
-  },
-  {
-    request: 'req_2107',
-    build: deriveBuildNumber('req_2107'),
-    title: 'Concept art absorbed',
-    status: 'review',
-    agent: 'codex',
-    handled: 'Captured concept-art direction into design intake: professional content suite, dense panels, rich scoped asset browsers.',
-    trace: ['concept art', 'content browser', 'density'],
-  },
-  {
-    request: 'req_2106',
-    build: deriveBuildNumber('req_2106'),
-    title: 'Traditional content browser',
-    status: 'review',
-    agent: 'codex',
-    handled: 'Added /Game folder tree and scoped material/build/prop content renderers.',
-    trace: ['asset hierarchy', 'materials', 'no context leakage'],
-  },
-  {
-    request: 'req_2105',
-    build: deriveBuildNumber('req_2105'),
-    title: 'Material scale and vertical usage',
-    status: 'review',
-    agent: 'codex',
-    handled: 'Expanded material rows with visible variants, usage stats, favorite, and rename controls.',
-    trace: ['materials', 'variants', 'rename', 'favorite'],
-  },
-  {
-    request: 'req_2104',
-    build: deriveBuildNumber('req_2104'),
-    title: 'Large material catalog',
-    status: 'review',
-    agent: 'codex',
-    handled: 'Generated hundreds of mock materials to stress pagination, search, and visual catalog density.',
-    trace: ['materials', 'catalog size', 'performance'],
-  },
-];
+const REQUEST_LEDGER_DIR = 'docs/game/_requests';
+const RECENT_NOTE_LIMIT = 48;
 
-export const BUILD_THREADS: BuildThread[] = [
-  {
-    id: 'bug-gpu-bind-groups',
-    title: 'GPU bind-group creation cliff',
-    status: 'watch',
-    history: ['req_1739 root cause: 240 -> 4fps cliff', 'future repeats attach here instead of creating isolated memory'],
-  },
-  {
-    id: 'ux-request-ledger',
-    title: 'Request ledger visibility and closure burden',
-    status: 'active',
-    history: ['req_2108 turns requests into build notes', 'manual review becomes journal state, not a blocking chore'],
-  },
-  {
-    id: 'ux-material-browser',
-    title: 'Material browser scale and usability',
-    status: 'active',
-    history: ['req_2104 generated catalog scale', 'req_2105 added stats/variants/actions', 'req_2106 moved it under content browser hierarchy', 'req_2111 fixed page slots keep controls visible', 'req_2168 splits model-owned paint/atlas data from global materials', 'req_2169 exposes shader color constants as named slots'],
-  },
-  {
-    id: 'platform-nogame-release',
-    title: 'Shitty Games engine-first release',
-    status: 'active',
-    history: ['req_2170 frames the public release as a nogame engine/tooling build', 'hmsc remains the first loadable game package, not the whole platform', 'engine data formats should keep serving other games built on the loader'],
-  },
-  {
-    id: 'ux-layout-validation',
-    title: 'Layout reachability must be preflighted',
-    status: 'active',
-    history: ['req_2171 defines fixed breakpoint validation for menus/content', 'req_2172 locks the validator to the repo TS/V8 CLI toolchain, no Python'],
-  },
-  {
-    id: 'perf-authoring-parity',
-    title: 'Authoring cost must not scale with map richness',
-    status: 'watch',
-    history: ['req_2112 exposes avg/p95 edit timing in the dock', 'placement on an empty map and a rich map should stay the same delta'],
-  },
-  {
-    id: 'ux-eventbus-review',
-    title: 'Eventbus review should not occupy permanent workspace space',
-    status: 'active',
-    history: ['req_2118 moves event stream review into a dock popover', 'event data stays one click away without shrinking the editor stage'],
-  },
-];
+const EMPTY_SNAPSHOT: BuildJournalSnapshot = {
+  activeBuild: '-',
+  notes: [],
+  threads: [],
+  requestCount: 0,
+  source: REQUEST_LEDGER_DIR,
+  loadedAt: 'unavailable',
+};
 
-export const ACTIVE_BUILD = [...BUILD_NOTES].sort((a, b) => requestNumber(b.request) - requestNumber(a.request))[0]!;
+type LedgerEntry = RequestEntry & {
+  sessionId?: string;
+  captureMode?: string;
+  status?: string;
+};
+
+export function loadBuildJournalSnapshot(): BuildJournalSnapshot {
+  const filenames = listDir(REQUEST_LEDGER_DIR)
+    .filter((name) => /^req_\d+\.json$/.test(name))
+    .sort((a, b) => requestNumber(requestIdFromFilename(b)) - requestNumber(requestIdFromFilename(a)));
+
+  if (filenames.length === 0) {
+    return { ...EMPTY_SNAPSHOT, loadedAt: timestampLabel() };
+  }
+
+  const entries = filenames
+    .slice(0, RECENT_NOTE_LIMIT)
+    .map(readLedgerEntry)
+    .filter(Boolean) as LedgerEntry[];
+
+  const journal = new BuildJournal();
+  const journalNotes = new Map<string, JournalNote>();
+  for (const entry of entries) {
+    const note = journal.ingestRequest(entry);
+    journalNotes.set(entry.id, note);
+  }
+
+  return {
+    activeBuild: deriveBuildNumber(requestIdFromFilename(filenames[0]!)),
+    notes: entries.map((entry) => toEditorNote(entry, journalNotes.get(entry.id)!)),
+    threads: journal.threads().map(toEditorThread),
+    requestCount: filenames.length,
+    source: REQUEST_LEDGER_DIR,
+    loadedAt: timestampLabel(),
+  };
+}
+
+export function useBuildJournalSnapshot(): BuildJournalSnapshot {
+  const [snapshot, setSnapshot] = useState<BuildJournalSnapshot>(loadBuildJournalSnapshot);
+
+  useEffect(() => {
+    setSnapshot(loadBuildJournalSnapshot());
+  }, []);
+
+  return snapshot;
+}
+
+function readLedgerEntry(filename: string): LedgerEntry | null {
+  const raw = readFile(`${REQUEST_LEDGER_DIR}/${filename}`);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<LedgerEntry>;
+    if (typeof parsed.id !== 'string' || typeof parsed.text !== 'string') return null;
+    return {
+      ...parsed,
+      events: Array.isArray(parsed.events) ? parsed.events : [],
+    } as LedgerEntry;
+  } catch {
+    return null;
+  }
+}
+
+function toEditorNote(entry: LedgerEntry, note: JournalNote): BuildNote {
+  return {
+    request: entry.id,
+    build: note.buildId,
+    title: titleFor(entry, note),
+    status: statusFor(entry),
+    agent: note.agent,
+    handled: note.summary,
+    trace: traceFor(entry, note),
+  };
+}
+
+function toEditorThread(thread: BugThread): BuildThread {
+  return {
+    id: thread.stableId,
+    title: thread.semanticName,
+    status: thread.tags[0] ?? 'linked',
+    history: [
+      ...thread.linkedRequests,
+      ...thread.linkedBuilds,
+      ...thread.attachedCaptures,
+    ],
+  };
+}
+
+function titleFor(entry: LedgerEntry, note: JournalNote): string {
+  const taskSummary = tagValue(entry.text, 'summary');
+  const line = taskSummary || firstUsefulLine(entry.text) || firstUsefulLine(note.summary);
+  return compact(line || entry.id, 92);
+}
+
+function statusFor(entry: LedgerEntry): string {
+  if (entry.status) return entry.status;
+  const events = entry.events ?? [];
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]!;
+    if (event.kind === 'state' && event.to) return event.to;
+  }
+  return entry.resolution ? 'resolved' : 'unknown';
+}
+
+function traceFor(entry: LedgerEntry, note: JournalNote): string[] {
+  const tags = new Set<string>();
+  for (const tag of note.traceTags) tags.add(tag);
+  if (entry.at) tags.add(dayLabel(entry.at));
+  if (entry.origin) tags.add(`origin:${entry.origin.split(':')[0]}`);
+  if (entry.shas?.length) tags.add(`${entry.shas.length} sha${entry.shas.length === 1 ? '' : 's'}`);
+  for (const event of entry.events ?? []) {
+    if (event.kind === 'state' && event.from && event.to) tags.add(`${event.from}->${event.to}`);
+  }
+  return Array.from(tags).slice(0, 6);
+}
+
+function firstUsefulLine(value: string): string {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && !line.startsWith('<')) ?? '';
+}
+
+function tagValue(value: string, tag: string): string {
+  const match = value.match(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'i'));
+  return match?.[1]?.trim() ?? '';
+}
+
+function compact(value: string, max: number): string {
+  const oneLine = value.replace(/\s+/g, ' ').trim();
+  return oneLine.length > max ? `${oneLine.slice(0, Math.max(0, max - 3)).trim()}...` : oneLine;
+}
+
+function requestIdFromFilename(filename: string): string {
+  return filename.replace(/\.json$/, '');
+}
+
+function timestampLabel(): string {
+  const d = new Date();
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+function dayLabel(value: string): string {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value.slice(0, 10);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}

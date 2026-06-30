@@ -69,6 +69,16 @@ export type BuildThread = {
   history: string[];
 };
 
+export type BuildJournalSnapshot = {
+  activeBuild: string;
+  notes: BuildNote[];
+  threads: BuildThread[];
+  requestCount: number;
+  source: string;
+  loadedAt: string;
+  error?: string;
+};
+
 export type Asset = {
   id: string;
   tab: LibraryTab;

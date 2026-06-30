@@ -21,11 +21,12 @@ import { commandById } from '../data/commands';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
-import { ACTIVE_BUILD } from '../data/journal';
+import { useBuildJournalSnapshot } from '../data/journal';
 import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFileById } from '../data/fileExplorer';
 
 export default function AppFrame() {
   const [state, setState] = useState<MockState>(initialState);
+  const journal = useBuildJournalSnapshot();
 
   const activeCommand = commandById(state.activeCommandId);
   const activeObject = selectedObject(state);
@@ -507,7 +508,8 @@ export default function AppFrame() {
       </C.HW_Body>
       <BuildDock
         state={state}
-        onBuild={() => setState((prev) => ({ ...prev, buildDialogOpen: true, eventbusPopoverOpen: false, status: `opened build journal ${ACTIVE_BUILD.build}` }))}
+        journal={journal}
+        onBuild={() => setState((prev) => ({ ...prev, buildDialogOpen: true, eventbusPopoverOpen: false, status: `opened build journal ${journal.activeBuild}` }))}
         onEventbus={() => setState((prev) => ({ ...prev, eventbusPopoverOpen: !prev.eventbusPopoverOpen, status: prev.eventbusPopoverOpen ? 'eventbus review closed' : 'eventbus review opened' }))}
       />
       {state.eventbusPopoverOpen ? (
@@ -517,7 +519,7 @@ export default function AppFrame() {
         />
       ) : null}
       {state.buildDialogOpen ? (
-        <BuildJournalDialog onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, status: 'build journal closed' }))} />
+        <BuildJournalDialog journal={journal} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, status: 'build journal closed' }))} />
       ) : null}
       {state.fileExplorerOpen ? (
         <FileExplorerDialog

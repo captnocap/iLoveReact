@@ -1,13 +1,12 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { useTelemetry } from '../../../runtime/hooks/useTelemetry';
 import { C, accentFor } from '../workspace.cls';
-import { ACTIVE_BUILD } from '../data/journal';
 import { editTelemetry, formatMs } from '../data/telemetry';
 import { selectedObject } from '../data/content';
 import { formatBytes, formatCount, formatMeters, selectionPosition, snapReadout, validationReadout } from '../data/readouts';
-import type { MockState } from '../data/types';
+import type { BuildJournalSnapshot, MockState } from '../data/types';
 
-export default function BuildDock({ state, onBuild, onEventbus }: { state: MockState; onBuild: () => void; onEventbus: () => void }) {
+export default function BuildDock({ state, journal, onBuild, onEventbus }: { state: MockState; journal: BuildJournalSnapshot; onBuild: () => void; onEventbus: () => void }) {
   const telemetry = editTelemetry(state.history);
   const activeObject = selectedObject(state);
   const position = selectionPosition(state, activeObject);
@@ -27,7 +26,7 @@ export default function BuildDock({ state, onBuild, onEventbus }: { state: MockS
     <C.HW_BuildDock>
       <C.HW_DockBuild onPress={onBuild}>
         <C.HW_DockLabel>Build:</C.HW_DockLabel>
-        <C.HW_DockValue>{ACTIVE_BUILD.build}</C.HW_DockValue>
+        <C.HW_DockValue>{journal.activeBuild}</C.HW_DockValue>
         <Icon name="CircleCheck" size={15} color={accentFor('success')} />
       </C.HW_DockBuild>
       <C.HW_DockDivider />
