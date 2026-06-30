@@ -1,0 +1,90 @@
+// editorbus/bus.ts — the runtime DOOR onto the authoring eventbus.
+//
+// This file is the CONTRACT for the host side: workstream A implements the
+// `__editor_bus_*` doors in Zig (framework/events/). Until it lands, this door
+// degrades to an in-process local log so the TS workstreams (commands, defaults,
+// build-journal) can build, emit, and unit-test against the real surface now.
+//
+// The seam: callers NEVER mutate editor state directly. They `dispatch()` an
+// event; the authority assigns its `seq`; subscribers (the hot index, the dock,
+// the console) fold the ordered stream. That is what makes the editor
+// multiplayer-shaped and the placement-latency doctrine achievable.
+
+import { callHost, callHostJson, hasHost, subscribe as ffiSubscribe, emit as ffiEmit } from '../ffi';
+import { type EditorEvent, type Seq, SEQ_PENDING } from './event';
+
+// The ffi listener channel the host fans confirmed events out on (via __ffiEmit),
+// and that the local fallback uses too, so subscribers don't care which is live.
+export const EDITOR_BUS_CHANNEL = 'editor.bus';
+
+// ── Host-door contract (workstream A implements these in Zig) ───────────────
+declare module '../ffi' {
+  interface HostCalls {
+    /** Append one event (JSON envelope). Returns the authoritative seq assigned,
+     *  or -1 if rejected. The host stamps `seq` and re-broadcasts the confirmed
+     *  envelope on EDITOR_BUS_CHANNEL via __ffiEmit. */
+    __editor_bus_emit(json: string): number;
+    /** JSON array of confirmed events with seq > `afterSeq` (for catch-up/replay). */
+    __editor_bus_since(afterSeq: number): string;
+    /** Highest authoritative seq currently committed (0 if empty). */
+    __editor_bus_head(): number;
+  }
+}
+
+// ── Local fallback (only used until the Zig door exists) ────────────────────
+const _localLog: EditorEvent[] = [];
+let _localSeq = 0;
+
+function hostLive(): boolean {
+  return hasHost('__editor_bus_emit');
+}
+
+function localEmit(e: EditorEvent): Seq {
+  const confirmed: EditorEvent = { ...e, seq: ++_localSeq };
+  _localLog.push(confirmed);
+  // Local-origin events fan out synchronously (the ffi JS-origin convention).
+  // The host-backed path instead re-broadcasts confirmed events itself via
+  // __ffiEmit (deferred), so subscribers stay transport-agnostic either way.
+  ffiEmit(EDITOR_BUS_CHANNEL, confirmed);
+  return confirmed.seq;
+}
+
+/**
+ * Dispatch an authoring event. Returns the authoritative seq (or SEQ_PENDING if
+ * the host rejected it). The returned event is also broadcast on
+ * EDITOR_BUS_CHANNEL, so a subscriber that applied it optimistically can
+ * reconcile by seq.
+ */
+export function dispatch(e: EditorEvent): Seq {
+  if (hostLive()) {
+    const seq = callHost<number>('__editor_bus_emit', SEQ_PENDING, JSON.stringify(e));
+    return typeof seq === 'number' ? seq : SEQ_PENDING;
+  }
+  return localEmit(e);
+}
+
+/** Subscribe to confirmed events as they commit. Returns an unsubscribe fn.
+ *  Listener receives the confirmed envelope (with its real `seq`). */
+export function onEvent(fn: (e: EditorEvent) => void): () => void {
+  return ffiSubscribe(EDITOR_BUS_CHANNEL, fn as (p: any) => void);
+}
+
+/** Confirmed events with seq > afterSeq, oldest first — for catch-up / replay. */
+export function since(afterSeq = 0): EditorEvent[] {
+  if (hostLive()) return callHostJson<EditorEvent[]>('__editor_bus_since', [], afterSeq);
+  return _localLog.filter((e) => e.seq > afterSeq);
+}
+
+/** Highest committed seq (0 if empty). */
+export function head(): Seq {
+  if (hostLive()) return callHost<number>('__editor_bus_head', 0);
+  return _localSeq;
+}
+
+/** True when the authoritative Zig bus is wired (vs the local fallback). */
+export function isHostBacked(): boolean {
+  return hostLive();
+}
+
+export const editorBus = { dispatch, onEvent, since, head, isHostBacked };
+export default editorBus;
