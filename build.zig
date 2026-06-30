@@ -24,6 +24,8 @@ pub fn build(b: *std.Build) void {
     const sysroot = b.option([]const u8, "sysroot", "Optional sysroot for cross-builds");
     const dev_mode = b.option(bool, "dev-mode", "Read bundle.js from disk and hot-reload on change") orelse false;
     const dev_build_id = b.option([]const u8, "dev-build-id", "Content fingerprint of native inputs embedded in dev-mode hosts") orelse "unknown";
+    const dev_socket_path = b.option([]const u8, "dev-socket-path", "Unix socket path for dev-mode bundle pushes") orelse "/tmp/reactjit.sock";
+    const dev_bundle_path = b.option([]const u8, "dev-bundle-path", "Bundle path polled by dev-mode hot reload") orelse "bundle.js";
     const custom_chrome = b.option(bool, "custom-chrome", "Cart draws its own window chrome (borderless)") orelse false;
     // -Dhas-gpu=false ships the app binary in headless (TUI) mode: no
     // SDL3/wgpu/freetype/X11 link, no engine.run call, framework/gpu/*
@@ -132,6 +134,8 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_gpu", has_gpu_cli);
     options.addOption(bool, "dev_mode", dev_mode);
     options.addOption([]const u8, "dev_build_id", dev_build_id);
+    options.addOption([]const u8, "dev_socket_path", dev_socket_path);
+    options.addOption([]const u8, "dev_bundle_path", dev_bundle_path);
     options.addOption(bool, "custom_chrome", custom_chrome);
     options.addOption(bool, "has_physics", has_physics);
     options.addOption(bool, "has_terminal", has_terminal);

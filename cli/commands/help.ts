@@ -4,7 +4,7 @@ import { tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 
 const TEMPLATES = ['basic', 'routes', 'dashboard', 'taskboard', 'canvas', 'stdlib'];
-const SUBCOMMANDS = ['init', 'dev', 'tui', 'ship', 'ship-tui', 'pack', 'play', 'shot', 'autotest', 'classify', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
+const SUBCOMMANDS = ['init', 'dev', 'gdev', 'tui', 'ship', 'ship-tui', 'pack', 'play', 'shot', 'autotest', 'classify', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
 
 type HelpCommand = typeof SUBCOMMANDS[number];
 
@@ -36,6 +36,20 @@ const SUBCOMMAND_DOC: Record<HelpCommand, { summary: string; usage: string[]; de
       '',
       '--tui (alias --headless) runs the headless substrate; --gui is the',
       'default unless cart.json declares "surface": "tui".',
+    ],
+  },
+  gdev: {
+    summary: 'iterate on game carts with a lean hot-reload host',
+    usage: ['rjit gdev [cart-name] [--gui|--tui]'],
+    detail: [
+      'Game-focused sibling of rjit dev. Defaults to cart/hmsc-int, bundles',
+      'to .cache/gdev-bundle-<name>.js, and starts a separate game dev host',
+      'on /tmp/reactjit-gdev.sock.',
+      '',
+      'Unlike rjit dev, this builds native flags from the cart metafile',
+      'instead of linking every dev feature, and it does not bootstrap',
+      'embedded Postgres. Future game-only services should slot into this',
+      'command instead of the general cart dev path.',
     ],
   },
   ship: {

@@ -6522,8 +6522,8 @@ if (failures.length > 0) {
       `ZIGOS_SCREENSHOT_OUTPUT='${root}/${outPath}'`,
       "ZIGOS_SCREENSHOT_FRAMES=8"
     ].join(" ");
-    const run25 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
-    const runOut = run25.stdout.trim();
+    const run26 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
+    const runOut = run26.stdout.trim();
     if (runOut) out(runOut);
     if (!assertPng(root, outPath)) return false;
     const match = runOut.match(/built (\d+) mesh instances/);
@@ -6589,10 +6589,10 @@ if (failures.length > 0) {
       return 1;
     }
     out("[game] launching live window \u2014 close it or press ESC to exit...");
-    const run25 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
-    if (run25.stdout.trim()) out(run25.stdout.trim());
-    if (run25.stderr.trim()) err(run25.stderr.trim());
-    return run25.code === 0 ? 0 : 1;
+    const run26 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
+    if (run26.stdout.trim()) out(run26.stdout.trim());
+    if (run26.stderr.trim()) err(run26.stderr.trim());
+    return run26.code === 0 ? 0 : 1;
   }
   function verify(root) {
     if (bundleVerifyHarness(root) !== 0) {
@@ -6639,14 +6639,286 @@ if (failures.length > 0) {
     return 0;
   }
 
+  // cli/commands/gdev.ts
+  var gdev_exports = {};
+  __export(gdev_exports, {
+    run: () => run12
+  });
+  var DEFAULT_GAME_CART = "hmsc-int";
+  var PROFILE_VERSION = "gdev-v1";
+  var GDEV_SOCKET_GUI = "/tmp/reactjit-gdev.sock";
+  var GDEV_SOCKET_TUI = "/tmp/reactjit-gdev-tui.sock";
+  async function run12(argv) {
+    const parsed = parseGdevArgs(argv);
+    if (typeof parsed === "number") return parsed;
+    const cartRoot = __cwd();
+    const rjitHome = __env("RJIT_HOME") || cartRoot;
+    const cart = resolveCart3(cartRoot, parsed.name);
+    if (!cart) return fail5(`[gdev] not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
+    const substrate = resolveSubstrate2(parsed.substrateFlag, cart.manifest);
+    const socket = substrate === "tui" ? GDEV_SOCKET_TUI : GDEV_SOCKET_GUI;
+    const bundleMode = substrate === "tui" ? "tui-host" : "gpu-host";
+    const perCartBundle = `${cartRoot}/.cache/gdev-bundle-${parsed.name}.js`;
+    const binName = substrate === "tui" ? "reactjit-gdev-tui" : "reactjit-gdev";
+    const bin = `${rjitHome}/zig-out/bin/${binName}`;
+    fsMkdir(`${cartRoot}/.cache`);
+    runFixReactImports2(rjitHome, cartRoot);
+    const bakedIcons = bakeIconAtlas({ root: rjitHome, ifNeeded: true, quiet: true });
+    if (bakedIcons !== 0) return bakedIcons;
+    out(`[gdev] bundling ${cart.entry} -> ${perCartBundle}`);
+    const term = terminalSize2();
+    const bundle2 = bundleCart({
+      rjitHome,
+      cartEntry: cart.entry,
+      outFile: perCartBundle,
+      mode: bundleMode,
+      termCols: term.cols,
+      termRows: term.rows
+    });
+    writeSpawnOutput3(bundle2);
+    if (bundle2.code !== 0) return bundle2.code || 1;
+    const zigFlags = resolveGameZigFlags(rjitHome, `${perCartBundle}.metafile.json`);
+    const nativeFingerprint = gdevFingerprint(nativeBuildFingerprint(rjitHome), substrate, socket, zigFlags);
+    const hostInfo = readDevHostInfo(socket);
+    if (hostInfo) {
+      if (hostInfo.build_id !== nativeFingerprint.hash) {
+        const stale = { current: nativeFingerprint, host: hostInfo };
+        sendRebuildNotice(stale, socket);
+        err("[gdev] STALE GAME DEV HOST - running native build id differs from disk.");
+        err("[gdev] refusing to push: bundle would talk to incompatible native code.");
+        err(`[gdev] kill the running game dev host (ctrl-c its terminal) and rerun this command.`);
+        err(`[gdev] running build id: ${shortHash(stale.host.build_id)}`);
+        err(`[gdev] disk build id:    ${shortHash(stale.current.hash)} (${stale.current.inputCount} inputs + game profile)`);
+        return 1;
+      }
+      out(`[gdev] host detected @ ${socket} - pushing '${parsed.name}'`);
+      const push2 = pushBundle(socket, parsed.name, perCartBundle);
+      if (push2 === 0) {
+        out(`[gdev] host switched to tab '${parsed.name}'`);
+        return 0;
+      }
+      if (fsExists(socket)) fsRemove(socket);
+    } else if (fsExists(socket)) {
+      fsRemove(socket);
+    }
+    if (devHostNeedsBuild2(bin, nativeFingerprint)) {
+      const built = buildGdevHost(rjitHome, cartRoot, binName, substrate, perCartBundle, socket, zigFlags, nativeFingerprint);
+      if (built !== 0) return built;
+      writeDevBuildInfo(bin, nativeFingerprint);
+    }
+    const child = spawn("env", [`RJIT_DEV_CART_DIR=${cart.dir}`, bin]);
+    out(`[gdev] host child=${child.id} socket=${socket}`);
+    const watcher = spawnBundleWatcher(rjitHome, cart.entry, perCartBundle, bundleMode, term);
+    drainUntilExit2(child.id, watcher.id);
+    return 0;
+  }
+  function parseGdevArgs(argv) {
+    let name = "";
+    let substrateFlag = null;
+    for (const arg of argv) {
+      if (arg === "--help" || arg === "-h") return usage2(0);
+      if (arg === "--tui" || arg === "--headless") {
+        substrateFlag = "tui";
+      } else if (arg === "--gui") {
+        substrateFlag = "gui";
+      } else if (arg.startsWith("--")) {
+        err(`[gdev] unknown flag: ${arg}`);
+        return usage2(1);
+      } else if (name) {
+        err(`[gdev] unexpected positional arg: ${arg}`);
+        return usage2(1);
+      } else {
+        name = arg;
+      }
+    }
+    return { name: name || DEFAULT_GAME_CART, substrateFlag };
+  }
+  function usage2(code = 1) {
+    err("Usage: rjit gdev [cart-name] [--gui|--tui]");
+    err(`  Default cart: ${DEFAULT_GAME_CART}`);
+    err("  Game dev host: source-driven native flags, separate gdev socket, no embedded Postgres bootstrap.");
+    return code;
+  }
+  function resolveCart3(cartRoot, name) {
+    const dirEntry = `${cartRoot}/cart/${name}/index.tsx`;
+    if (fsExists(dirEntry)) return { entry: dirEntry, dir: dirname4(dirEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
+    const fileEntry = `${cartRoot}/cart/${name}.tsx`;
+    if (fsExists(fileEntry)) return { entry: fileEntry, dir: dirname4(fileEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
+    return null;
+  }
+  function resolveSubstrate2(flag, manifestPath) {
+    if (flag) return flag;
+    if (fsExists(manifestPath)) {
+      const surface = loadManifest(manifestPath).surface;
+      if (surface === "tui" || surface === "gui") return surface;
+    }
+    return "gui";
+  }
+  function runFixReactImports2(rjitHome, cartRoot) {
+    const script = `${rjitHome}/scripts/fix-react-imports`;
+    if (!fsExists(script)) return;
+    const result = spawnSync("env", [`RJIT_HOME=${rjitHome}`, `CART_ROOT=${cartRoot}`, script]);
+    writeSpawnOutput3(result);
+  }
+  function resolveGameZigFlags(rjitHome, metafilePath) {
+    if (!fsExists(metafilePath)) {
+      err(`[gdev] WARNING: no metafile at ${metafilePath} - only base V8 dev flags enabled`);
+      return ensureBaseFlags([]);
+    }
+    const result = spawnSync(`${rjitHome}/tools/rjit`, ["metafile-gate", "--metafile", metafilePath, "--format", "zig-flags"]);
+    if (result.stderr) __writeStderr(result.stderr);
+    if (result.code !== 0) throw new Error("metafile-gate failed");
+    return ensureBaseFlags(result.stdout.trim() ? result.stdout.trim().split(/\s+/) : []);
+  }
+  function ensureBaseFlags(flags) {
+    const out2 = new Set(flags.filter(Boolean));
+    out2.add("-Duse-v8=true");
+    out2.add("-Ddev-mode=true");
+    if (out2.has("-Dhas-embed=true")) out2.add("-Dhas-pg=true");
+    return Array.from(out2);
+  }
+  function gdevFingerprint(native, substrate, socket, zigFlags) {
+    const body = [
+      PROFILE_VERSION,
+      native.hash,
+      substrate,
+      socket,
+      ...zigFlags.slice().sort()
+    ].join("\n") + "\n";
+    const digest = spawnSync("sha256sum", [], body);
+    if (digest.code !== 0) throw new Error(`gdev input digest failed
+${digest.stderr || digest.stdout}`);
+    const hash = digest.stdout.trim().split(/\s+/)[0] || "";
+    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(`gdev input digest malformed: ${digest.stdout.trim()}`);
+    return { hash, inputCount: native.inputCount + zigFlags.length + 3 };
+  }
+  function devHostNeedsBuild2(bin, fingerprint) {
+    if (!fsExists(bin)) return true;
+    return readDevBuildId(bin) !== fingerprint.hash;
+  }
+  function buildGdevHost(rjitHome, cartRoot, binName, substrate, bundlePath, socket, zigFlags, fingerprint) {
+    out(`[gdev] compiling game dev binary (${rjitHome}/zig-out/bin/${binName}, ${substrate}, ReleaseFast)...`);
+    out(`[gdev] native flags: ${zigFlags.join(" ") || "(base only)"}`);
+    const zig = resolveZig2(rjitHome);
+    const args = [
+      "build",
+      "app",
+      "-p",
+      `${rjitHome}/zig-out`,
+      `-Dapp-name=${binName}`,
+      "-Dapp-source=v8_app.zig",
+      `-Dbundle-path=${bundlePath}`,
+      `-Ddev-bundle-path=${bundlePath}`,
+      `-Ddev-socket-path=${socket}`,
+      `-Ddev-build-id=${fingerprint.hash}`,
+      ...zigFlags,
+      "-Doptimize=ReleaseFast"
+    ];
+    if (substrate === "tui") args.push("-Dhas-gpu=false");
+    const cmd = cartRoot === rjitHome ? zig : "env";
+    const finalArgs = cartRoot === rjitHome ? args : [`ZIG_GLOBAL_CACHE_DIR=${rjitHome}/tools/zig/cache`, zig, ...args];
+    const build = spawnSync(cmd, finalArgs);
+    writeSpawnOutput3(build);
+    return build.code === 0 ? 0 : build.code || 1;
+  }
+  function spawnBundleWatcher(rjitHome, cartEntry, outFile, mode, term) {
+    const flags = bundleFlags({
+      rjitHome,
+      cartEntry,
+      outFile,
+      mode,
+      watch: true,
+      metafile: false,
+      termCols: term.cols,
+      termRows: term.rows
+    });
+    const watcher = spawn(`${rjitHome}/tools/esbuild`, flags);
+    out(`[gdev] watching ${cartEntry} - edits rebuild ${outFile} (ctrl-c to stop)`);
+    return watcher;
+  }
+  function pushBundle(socket, tabName, bundlePath) {
+    const bundle2 = fsRead(bundlePath);
+    if (!fsExists(socket)) return 2;
+    const fd = tryUnixConnect(socket);
+    if (fd === null) return 2;
+    try {
+      unixWrite(fd, `PUSH ${tabName} ${utf8ByteLength2(bundle2)}
+`);
+      unixWrite(fd, bundle2);
+      const line = unixReadLine(fd, __nowMs() + 3e3).trim();
+      if (line.startsWith("OK")) return 0;
+      err(`[gdev] host error: ${line}`);
+      return 1;
+    } catch (error) {
+      if (error instanceof SocketError) {
+        err(`[gdev] push failed: ${error.message}`);
+        return 2;
+      }
+      throw error;
+    } finally {
+      unixClose(fd);
+    }
+  }
+  function terminalSize2() {
+    try {
+      const parsed = JSON.parse(__termSize());
+      return { cols: parsed[0] || 80, rows: parsed[1] || 24 };
+    } catch {
+      return { cols: 80, rows: 24 };
+    }
+  }
+  function resolveZig2(rjitHome) {
+    const bundled = __env("REACTJIT_ZIG") || `${rjitHome}/tools/zig/zig`;
+    if (fsExists(bundled)) return bundled;
+    return "zig";
+  }
+  function drainUntilExit2(hostId, watcherId) {
+    while (true) {
+      const hostLine = __childReadLine(hostId, 50);
+      if (hostLine !== null) __writeStdout(`${hostLine}
+`);
+      const watcherLine = __childReadLine(watcherId, 50);
+      if (watcherLine !== null) __writeStdout(`${watcherLine}
+`);
+      __sleepMs(50);
+    }
+  }
+  function writeSpawnOutput3(result) {
+    if (result.stdout) __writeStdout(result.stdout);
+    if (result.stderr) __writeStderr(result.stderr);
+  }
+  function dirname4(path) {
+    const idx = path.lastIndexOf("/");
+    return idx <= 0 ? "/" : path.slice(0, idx);
+  }
+  function fail5(message, code) {
+    err(message);
+    return code;
+  }
+  function utf8ByteLength2(value) {
+    let bytes = 0;
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i);
+      if (code < 128) bytes += 1;
+      else if (code < 2048) bytes += 2;
+      else if (code >= 55296 && code <= 56319) {
+        bytes += 4;
+        i++;
+      } else {
+        bytes += 3;
+      }
+    }
+    return bytes;
+  }
+
   // cli/commands/help.ts
   var help_exports = {};
   __export(help_exports, {
     printTopLevel: () => printTopLevel,
-    run: () => run12
+    run: () => run13
   });
   var TEMPLATES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  var SUBCOMMANDS = ["init", "dev", "tui", "ship", "ship-tui", "pack", "play", "shot", "autotest", "classify", "bake-icons", "pack-sdk", "firecracker-build", "help"];
+  var SUBCOMMANDS = ["init", "dev", "gdev", "tui", "ship", "ship-tui", "pack", "play", "shot", "autotest", "classify", "bake-icons", "pack-sdk", "firecracker-build", "help"];
   var SUBCOMMAND_DOC = {
     init: {
       summary: "scaffold a new cart from a template",
@@ -6675,6 +6947,20 @@ if (failures.length > 0) {
         "",
         "--tui (alias --headless) runs the headless substrate; --gui is the",
         'default unless cart.json declares "surface": "tui".'
+      ]
+    },
+    gdev: {
+      summary: "iterate on game carts with a lean hot-reload host",
+      usage: ["rjit gdev [cart-name] [--gui|--tui]"],
+      detail: [
+        "Game-focused sibling of rjit dev. Defaults to cart/hmsc-int, bundles",
+        "to .cache/gdev-bundle-<name>.js, and starts a separate game dev host",
+        "on /tmp/reactjit-gdev.sock.",
+        "",
+        "Unlike rjit dev, this builds native flags from the cart metafile",
+        "instead of linking every dev feature, and it does not bootstrap",
+        "embedded Postgres. Future game-only services should slot into this",
+        "command instead of the general cart dev path."
       ]
     },
     ship: {
@@ -6809,7 +7095,7 @@ if (failures.length > 0) {
       detail: []
     }
   };
-  async function run12(argv) {
+  async function run13(argv) {
     const target = argv[0];
     const registry = readRegistry();
     if (!target) {
@@ -6850,7 +7136,7 @@ if (failures.length > 0) {
     }
     const doc = SUBCOMMAND_DOC[name];
     const lines = [`rjit ${name} - ${doc.summary}`, "", "Usage:"];
-    for (const usage6 of doc.usage) lines.push(`  ${usage6}`);
+    for (const usage7 of doc.usage) lines.push(`  ${usage7}`);
     if (doc.detail.length) {
       lines.push("");
       lines.push(...doc.detail);
@@ -6888,19 +7174,19 @@ if (failures.length > 0) {
   // cli/commands/init.ts
   var init_exports = {};
   __export(init_exports, {
-    run: () => run13
+    run: () => run14
   });
   var TEMPLATE_NAMES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  async function run13(argv) {
+  async function run14(argv) {
     const parsed = parseArgs3(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
     const template = TEMPLATES2[parsed.template];
     const targetDir = resolveTarget(root, parsed.directory);
-    if (fsExists(targetDir)) return fail5(`target already exists: ${displayPath(root, targetDir)}`, 1);
+    if (fsExists(targetDir)) return fail6(`target already exists: ${displayPath(root, targetDir)}`, 1);
     const name = cartNameFor(targetDir);
     const title = titleForName(name);
-    const inCart = dirname4(targetDir) === joinPath2(root, "cart");
+    const inCart = dirname5(targetDir) === joinPath2(root, "cart");
     const ctx = {
       targetDir,
       name,
@@ -6920,12 +7206,12 @@ if (failures.length > 0) {
       files["README.md"] = readme(root, ctx, parsed.template);
       for (const [fileName, content] of Object.entries(files)) {
         const path = joinPath2(targetDir, fileName);
-        const parent = dirname4(path);
+        const parent = dirname5(path);
         if (!fsExists(parent)) fsMkdir(parent);
         fsWrite(path, content);
       }
     } catch (error) {
-      return fail5(error.message, 1);
+      return fail6(error.message, 1);
     }
     out(`[init] created ${displayPath(root, targetDir)}`);
     out(`[init] template ${parsed.template}`);
@@ -6935,11 +7221,11 @@ if (failures.length > 0) {
   }
   function parseArgs3(argv) {
     if (argv.length === 0) {
-      usage2();
+      usage3();
       return 2;
     }
     for (const arg of argv) {
-      if (arg.startsWith("-")) return fail5("flags are not supported by init", 2);
+      if (arg.startsWith("-")) return fail6("flags are not supported by init", 2);
     }
     if (argv.length === 1) return { directory: argv[0], template: "basic" };
     if (argv.length === 2) {
@@ -6950,11 +7236,11 @@ if (failures.length > 0) {
       if (aIsTemplate && !bIsTemplate) return { directory: b, template: a };
       if (bIsTemplate && !aIsTemplate) return { directory: a, template: b };
       if (bIsTemplate) return { directory: a, template: b };
-      return fail5(`unknown template: ${b}`, 2);
+      return fail6(`unknown template: ${b}`, 2);
     }
-    return fail5("too many positional arguments", 2);
+    return fail6("too many positional arguments", 2);
   }
-  function usage2() {
+  function usage3() {
     out([
       "usage:",
       "  tools/v8cli scripts/init.js <directory>",
@@ -6967,7 +7253,7 @@ if (failures.length > 0) {
       "The one-argument form uses the basic template."
     ].join("\n"));
   }
-  function fail5(message, code) {
+  function fail6(message, code) {
     err(`[init] ${message}`);
     return code || 1;
   }
@@ -6990,7 +7276,7 @@ if (failures.length > 0) {
     if (!b) return normalizePath3(a);
     return normalizePath3(a.replace(/\/+$/, "") + "/" + b.replace(/^\/+/, ""));
   }
-  function dirname4(path) {
+  function dirname5(path) {
     const normalized = normalizePath3(path);
     const index = normalized.lastIndexOf("/");
     if (index <= 0) return normalized.startsWith("/") ? "/" : ".";
@@ -7246,7 +7532,7 @@ export default function App() {
   // cli/commands/lab.ts
   var lab_exports = {};
   __export(lab_exports, {
-    run: () => run14
+    run: () => run15
   });
   var LABS_DIR = "cart/hmsc-int/labs";
   var SCAFFOLD_SCENE = `${LABS_DIR}/_scaffold.tsx`;
@@ -7254,7 +7540,7 @@ export default function App() {
   var REGISTRY = `${LABS_DIR}/index.ts`;
   var IMPORTS_MARKER = "// rjit:lab-imports";
   var ENTRIES_MARKER = "// rjit:lab-entries";
-  async function run14(argv) {
+  async function run15(argv) {
     if (argv[0] !== "new" && argv[0] !== "remove") {
       err("Usage: rjit lab new <name>");
       err("       rjit lab remove <name>");
@@ -7338,7 +7624,7 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/metafile-gate.ts
   var metafile_gate_exports = {};
   __export(metafile_gate_exports, {
-    run: () => run15
+    run: () => run16
   });
 
   // cli/cart/metafile.ts
@@ -7463,7 +7749,7 @@ ${IMPORTS_MARKER}`).replace(
   }
 
   // cli/commands/metafile-gate.ts
-  async function run15(argv) {
+  async function run16(argv) {
     let registryPath = "sdk/dependency-registry.json";
     let metafilePath = "";
     let format = "ship-gate";
@@ -7551,9 +7837,9 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/pack.ts
   var pack_exports = {};
   __export(pack_exports, {
-    run: () => run16
+    run: () => run17
   });
-  async function run16(argv) {
+  async function run17(argv) {
     const name = argv[0];
     let outDir = "";
     for (let i = 1; i < argv.length; i += 1) {
@@ -7561,11 +7847,11 @@ ${IMPORTS_MARKER}`).replace(
       if (arg === "--out" || arg === "-o") {
         outDir = argv[++i] ?? "";
       } else {
-        return usage3(`unknown argument: ${arg}`);
+        return usage4(`unknown argument: ${arg}`);
       }
     }
-    if (!name) return usage3("missing package name");
-    if (name !== "hmsc") return usage3(`unsupported package for slice 1: ${name}`);
+    if (!name) return usage4("missing package name");
+    if (name !== "hmsc") return usage4(`unsupported package for slice 1: ${name}`);
     const root = __cwd();
     const rjitHome = __env("RJIT_HOME") || root;
     const packageDir = outDir || `${root}/cart/hmsc-int/exports/hmsc.rjpkg`;
@@ -7582,7 +7868,7 @@ ${IMPORTS_MARKER}`).replace(
       `--alias:@reactjit=${root}/runtime`,
       "--log-level=warning"
     ]);
-    writeSpawnOutput3(helper);
+    writeSpawnOutput4(helper);
     if (helper.code !== 0) return helper.code || 1;
     const runHelper = spawnSync(`${root}/tools/v8cli`, [helperOut]);
     if (runHelper.stderr) __writeStderr(runHelper.stderr);
@@ -7594,7 +7880,7 @@ ${IMPORTS_MARKER}`).replace(
 `);
     const mapPath = `${packageDir}/maps/city.map`;
     const mapWrite = spawnSync("sh", ["-c", `base64 -d > ${shellQuote2(mapPath)}`], emitted.mapBase64);
-    writeSpawnOutput3(mapWrite);
+    writeSpawnOutput4(mapWrite);
     if (mapWrite.code !== 0) return mapWrite.code || 1;
     const bundleOut = `${packageDir}/bundle.js`;
     const bundle2 = bundleCart({
@@ -7603,17 +7889,17 @@ ${IMPORTS_MARKER}`).replace(
       outFile: bundleOut,
       mode: "cartridge"
     });
-    writeSpawnOutput3(bundle2);
+    writeSpawnOutput4(bundle2);
     if (bundle2.code !== 0) return bundle2.code || 1;
     out(`[pack] done -> ${packageDir}`);
     return 0;
   }
-  function usage3(message) {
+  function usage4(message) {
     err(`[pack] ${message}`);
     err("Usage: rjit pack hmsc [--out path/to/hmsc.rjpkg]");
     return 2;
   }
-  function writeSpawnOutput3(result) {
+  function writeSpawnOutput4(result) {
     if (result.stdout) __writeStdout(result.stdout);
     if (result.stderr) __writeStderr(result.stderr);
   }
@@ -7624,7 +7910,7 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/pack-sdk.ts
   var pack_sdk_exports = {};
   __export(pack_sdk_exports, {
-    run: () => run17
+    run: () => run18
   });
   var ROOT = __cwd();
   var EXCLUDES = [
@@ -7689,11 +7975,11 @@ ${IMPORTS_MARKER}`).replace(
     "/lib/x86_64-linux-gnu/libresolv.so.2",
     "/lib64/ld-linux-x86-64.so.2"
   ];
-  async function run17(argv) {
+  async function run18(argv) {
     const parsed = parsePackArgs(argv);
     if (typeof parsed === "number") return parsed;
     const registryPath = `${ROOT}/sdk/dependency-registry.json`;
-    if (!fsExists(registryPath)) return fail6(`registry missing: ${registryPath}`, 1);
+    if (!fsExists(registryPath)) return fail7(`registry missing: ${registryPath}`, 1);
     const registry = fsReadJson(registryPath);
     const stage = `/tmp/rjit-stage-${Date.now()}`;
     fsMkdir(stage);
@@ -7710,7 +7996,7 @@ ${IMPORTS_MARKER}`).replace(
       const missing = stageAlwaysNativeLibraries(stage, registry);
       if (missing.length) {
         for (const item of missing) err(`  - ${item}`);
-        return fail6("cannot pack SDK with missing foundational libs", 3);
+        return fail7("cannot pack SDK with missing foundational libs", 3);
       }
       const tarball = `/tmp/rjit-payload-${Date.now()}.tar.gz`;
       log3(`compressing -> ${tarball}`);
@@ -7735,7 +8021,7 @@ ${IMPORTS_MARKER}`).replace(
       const arg = argv[i];
       if (arg === "--out" || arg === "-o") {
         const value = argv[++i];
-        if (!value) return fail6("flag requires value: --out", 2);
+        if (!value) return fail7("flag requires value: --out", 2);
         outPath = value;
       } else if (arg === "--keep-stage") {
         keepStage = true;
@@ -7743,7 +8029,7 @@ ${IMPORTS_MARKER}`).replace(
         out("Usage: rjit pack-sdk [--out path] [--keep-stage]");
         return 0;
       } else {
-        return fail6(`unknown flag: ${arg}`, 2);
+        return fail7(`unknown flag: ${arg}`, 2);
       }
     }
     if (!outPath.startsWith("/")) outPath = `${ROOT}/${outPath}`;
@@ -7930,7 +8216,7 @@ ${IMPORTS_MARKER}`).replace(
   function log3(message) {
     out(`[pack-sdk] ${message}`);
   }
-  function fail6(message, code) {
+  function fail7(message, code) {
     err(`[pack-sdk] ${message}`);
     return code;
   }
@@ -7938,29 +8224,29 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/play.ts
   var play_exports = {};
   __export(play_exports, {
-    run: () => run18
+    run: () => run19
   });
-  async function run18(argv) {
+  async function run19(argv) {
     const pkg = argv[0];
-    if (!pkg || argv.length > 1) return usage4(pkg ? "too many arguments" : "missing package path");
+    if (!pkg || argv.length > 1) return usage5(pkg ? "too many arguments" : "missing package path");
     const root = __cwd();
     const binary = `${root}/zig-out/bin/rjit-player`;
     if (!fsExists(binary)) {
       out("[play] rjit-player binary missing \u2014 building via rjit ship...");
       const build = spawnSync("env", ["SHIP_RUN_PACKAGE=0", `${root}/tools/rjit`, "ship", "rjit-player"]);
-      writeSpawnOutput4(build);
+      writeSpawnOutput5(build);
       if (build.code !== 0) return build.code || 1;
     }
     const result = spawnSync(binary, [pkg]);
-    writeSpawnOutput4(result);
+    writeSpawnOutput5(result);
     return result.code;
   }
-  function usage4(message) {
+  function usage5(message) {
     err(`[play] ${message}`);
     err("Usage: rjit play path/to/game.rjpkg");
     return 2;
   }
-  function writeSpawnOutput4(result) {
+  function writeSpawnOutput5(result) {
     if (result.stdout) __writeStdout(result.stdout);
     if (result.stderr) __writeStderr(result.stderr);
   }
@@ -7968,11 +8254,11 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/push-bundle.ts
   var push_bundle_exports = {};
   __export(push_bundle_exports, {
-    run: () => run19
+    run: () => run20
   });
   var SOCKET_PATH = "/tmp/reactjit.sock";
   var TIMEOUT_MS2 = 3e3;
-  async function run19(argv) {
+  async function run20(argv) {
     let parsed;
     try {
       parsed = parseArgs(argv.slice(0, 2), { positional: ["tabName", "bundlePath"] });
@@ -7996,7 +8282,7 @@ ${IMPORTS_MARKER}`).replace(
     if (fd === null) return 2;
     try {
       try {
-        unixWrite(fd, `PUSH ${tabName} ${utf8ByteLength2(bundle2)}
+        unixWrite(fd, `PUSH ${tabName} ${utf8ByteLength3(bundle2)}
 `);
       } catch (error) {
         if (error instanceof SocketError) {
@@ -8032,7 +8318,7 @@ ${IMPORTS_MARKER}`).replace(
       unixClose(fd);
     }
   }
-  function utf8ByteLength2(value) {
+  function utf8ByteLength3(value) {
     let bytes = 0;
     for (let i = 0; i < value.length; i++) {
       const code = value.charCodeAt(i);
@@ -8051,23 +8337,23 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/ship.ts
   var ship_exports = {};
   __export(ship_exports, {
-    run: () => run20
+    run: () => run21
   });
-  async function run20(argv) {
+  async function run21(argv) {
     const parsed = parseShipArgs(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
     const rjitHome = __env("RJIT_HOME") || root;
     const cartRoot = root;
-    const zig = resolveZig2(rjitHome);
-    const cart = resolveCart3(cartRoot, parsed.name);
-    if (!cart) return fail7(`not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
-    const substrate = resolveSubstrate2(parsed.substrateFlag, cart.manifest);
+    const zig = resolveZig3(rjitHome);
+    const cart = resolveCart4(cartRoot, parsed.name);
+    if (!cart) return fail8(`not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
+    const substrate = resolveSubstrate3(parsed.substrateFlag, cart.manifest);
     const bundleOut = `${cartRoot}/bundle-${parsed.name}.js`;
     const embedBundle = cartRoot === rjitHome ? bundleOut : `${rjitHome}/bundles/bundle-${parsed.name}.js`;
     const icon = resolveIcon(cartRoot, cart, parsed.name);
     if (icon) out(`[ship] app icon: ${icon}`);
-    runFixReactImports2(rjitHome, cartRoot);
+    runFixReactImports3(rjitHome, cartRoot);
     const restoreGeometrySeed = bakeGeometryForCart(rjitHome, parsed.name, cart);
     if (!restoreGeometrySeed) return 1;
     out(`[ship] bundling ${cart.entry} -> ${bundleOut}...`);
@@ -8077,13 +8363,13 @@ ${IMPORTS_MARKER}`).replace(
       outFile: bundleOut,
       mode: substrate === "tui" ? "tui-host" : "gpu-host"
     });
-    writeSpawnOutput5(bundle2);
+    writeSpawnOutput6(bundle2);
     restoreGeometrySeed();
     if (bundle2.code !== 0) return bundle2.code || 1;
     if (embedBundle !== bundleOut) {
-      fsMkdir(dirname5(embedBundle));
+      fsMkdir(dirname6(embedBundle));
       const copy = spawnSync("cp", ["-f", bundleOut, embedBundle]);
-      writeSpawnOutput5(copy);
+      writeSpawnOutput6(copy);
       if (copy.code !== 0) return copy.code || 1;
     }
     const customChromeFlag = customChromeFlagFor(cart.manifest, bundleOut);
@@ -8108,10 +8394,10 @@ ${IMPORTS_MARKER}`).replace(
     out("[ship] compiling native binary...");
     out(`[ship]   zig flags: ${flags.slice(2).join(" ")}`);
     const build = runLockedBuild(rjitHome, buildCommand(rjitHome, cartRoot, zig, flags));
-    writeSpawnOutput5(build);
+    writeSpawnOutput6(build);
     if (build.code !== 0) return build.code || 1;
     const buildBin = `${cartRoot}/zig-out/bin/${parsed.name}`;
-    if (!fsExists(buildBin)) return fail7(`build produced no binary: ${buildBin}`, 1);
+    if (!fsExists(buildBin)) return fail8(`build produced no binary: ${buildBin}`, 1);
     if (!verifyIngredientLabels(cartRoot, buildBin, flags)) return 1;
     if (__env("SHIP_RUN_PACKAGE") === "0") {
       out(`[ship] done (packaging skipped) -> ${buildBin}`);
@@ -8159,23 +8445,23 @@ ${IMPORTS_MARKER}`).replace(
     }
     return { name, fat, substrateFlag };
   }
-  function resolveCart3(cartRoot, name) {
+  function resolveCart4(cartRoot, name) {
     const dirEntry = `${cartRoot}/cart/${name}/index.tsx`;
-    if (fsExists(dirEntry)) return { entry: dirEntry, dir: dirname5(dirEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
+    if (fsExists(dirEntry)) return { entry: dirEntry, dir: dirname6(dirEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
     const fileEntry = `${cartRoot}/cart/${name}.tsx`;
-    if (fsExists(fileEntry)) return { entry: fileEntry, dir: dirname5(fileEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
+    if (fsExists(fileEntry)) return { entry: fileEntry, dir: dirname6(fileEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
     return null;
   }
-  function resolveZig2(rjitHome) {
+  function resolveZig3(rjitHome) {
     const bundled = __env("REACTJIT_ZIG") || `${rjitHome}/tools/zig/zig`;
     if (fsExists(bundled)) return bundled;
     return "zig";
   }
-  function runFixReactImports2(rjitHome, cartRoot) {
+  function runFixReactImports3(rjitHome, cartRoot) {
     const script = `${rjitHome}/scripts/fix-react-imports`;
     if (!fsExists(script)) return;
     const result = spawnSync("env", [`RJIT_HOME=${rjitHome}`, `CART_ROOT=${cartRoot}`, script]);
-    writeSpawnOutput5(result);
+    writeSpawnOutput6(result);
     if (result.code !== 0) throw new Error(`fix-react-imports exited ${result.code}`);
   }
   function bakeGeometryForCart(rjitHome, name, cart) {
@@ -8184,10 +8470,10 @@ ${IMPORTS_MARKER}`).replace(
     const previousSeed = tryFsRead(seedPath);
     out("[ship] baking static Scene3D geometry...");
     const scan2 = spawnSync(`${rjitHome}/tools/rjit`, ["bake-geometry-auto", cart.entry, "--out", manifestPath]);
-    writeSpawnOutput5(scan2);
+    writeSpawnOutput6(scan2);
     if (scan2.code !== 0) return null;
     const bake2 = spawnSync(`${rjitHome}/tools/rjit`, ["bake-geometry", "--manifest", manifestPath, "--out", seedPath]);
-    writeSpawnOutput5(bake2);
+    writeSpawnOutput6(bake2);
     if (bake2.code !== 0) return null;
     return () => {
       if (previousSeed !== null) {
@@ -8200,7 +8486,7 @@ ${IMPORTS_MARKER}`).replace(
   function sanitizeName(name) {
     return name.replace(/[^A-Za-z0-9_.-]/g, "_");
   }
-  function resolveSubstrate2(flag, manifestPath) {
+  function resolveSubstrate3(flag, manifestPath) {
     if (flag) return flag;
     if (fsExists(manifestPath)) {
       const surface = loadManifest(manifestPath).surface;
@@ -8286,7 +8572,7 @@ ${IMPORTS_MARKER}`).replace(
     const target = ldconfig.stdout.trim();
     if (!target || !fsExists(target)) return;
     const result = spawnSync("ln", ["-sfn", target, link]);
-    writeSpawnOutput5(result);
+    writeSpawnOutput6(result);
     if (result.code === 0) out(`[ship] sysroot: linked lib${name}.so -> ${target}`);
   }
   function buildCommand(rjitHome, cartRoot, zig, flags) {
@@ -8295,7 +8581,7 @@ ${IMPORTS_MARKER}`).replace(
   }
   function runLockedBuild(rjitHome, command) {
     const lockFile = `${rjitHome}/.zig-cache/.ship.lock`;
-    fsMkdir(dirname5(lockFile));
+    fsMkdir(dirname6(lockFile));
     const first = spawnSync("flock", ["-n", "-E", "75", lockFile, ...command]);
     if (first.code !== 75) return first;
     out("[ship] another build in progress - waiting for lock...");
@@ -8571,18 +8857,18 @@ __ARCHIVE__
   }
   function runOrThrow(cmd, args) {
     const result = spawnSync(cmd, args);
-    writeSpawnOutput5(result);
+    writeSpawnOutput6(result);
     if (result.code !== 0) throw new Error(`${cmd} exited ${result.code}`);
   }
-  function writeSpawnOutput5(result) {
+  function writeSpawnOutput6(result) {
     if (result.stderr) __writeStderr(result.stderr);
     if (result.stdout) __writeStdout(result.stdout);
   }
-  function fail7(message, code) {
+  function fail8(message, code) {
     err(`[ship] ${message}`);
     return code;
   }
-  function dirname5(path) {
+  function dirname6(path) {
     const index = path.lastIndexOf("/");
     return index <= 0 ? "/" : path.slice(0, index);
   }
@@ -8594,18 +8880,18 @@ __ARCHIVE__
   // cli/commands/ship-tui.ts
   var ship_tui_exports = {};
   __export(ship_tui_exports, {
-    run: () => run21
+    run: () => run22
   });
-  async function run21(argv) {
-    return run20([...argv, "--tui"]);
+  async function run22(argv) {
+    return run21([...argv, "--tui"]);
   }
 
   // cli/commands/shot.ts
   var shot_exports = {};
   __export(shot_exports, {
-    run: () => run22
+    run: () => run23
   });
-  async function run22(argv) {
+  async function run23(argv) {
     let name = null;
     let outPath = null;
     let route = null;
@@ -8634,27 +8920,27 @@ __ARCHIVE__
         timeoutS = Math.max(5, Number(argv[++i] ?? 120) || 120);
         continue;
       }
-      if (arg.startsWith("-")) return usage5(`unknown flag: ${arg}`);
+      if (arg.startsWith("-")) return usage6(`unknown flag: ${arg}`);
       if (name === null) {
         name = arg;
         continue;
       }
-      return usage5("too many positional args");
+      return usage6("too many positional args");
     }
-    if (!name) return usage5("missing cart name");
+    if (!name) return usage6("missing cart name");
     const root = __cwd();
     const cartEntry = resolveCartEntry(root, name);
-    if (!cartEntry) return fail8(`[shot] no cart found for ${name} (expected cart/${name}/index.tsx or cart/${name}.tsx)`);
+    if (!cartEntry) return fail9(`[shot] no cart found for ${name} (expected cart/${name}/index.tsx or cart/${name}.tsx)`);
     const binary = `${root}/zig-out/bin/${name}`;
     if (!binaryCurrent2(binary, cartEntry)) {
       out(`[shot] ${name} binary is stale/missing \u2014 building via ship...`);
       const build = spawnSync(`${root}/tools/rjit`, ["ship", name]);
       if (build.stderr) __writeStderr(build.stderr);
-      if (build.code !== 0) return fail8("[shot] BUILD FAILED");
+      if (build.code !== 0) return fail9("[shot] BUILD FAILED");
     }
-    if (!fsExists(binary)) return fail8(`[shot] binary not found at zig-out/bin/${name}`);
+    if (!fsExists(binary)) return fail9(`[shot] binary not found at zig-out/bin/${name}`);
     const png = outPath ?? `${root}/shots/${name}-${dateStamp2()}.png`;
-    fsMkdir(dirname6(png));
+    fsMkdir(dirname7(png));
     const env = [
       "ZIGOS_HEADLESS=1",
       "ZIGOS_SCREENSHOT=1",
@@ -8668,11 +8954,11 @@ __ARCHIVE__
     out(`[shot] command: ${cmd}`);
     const result = spawnSync("sh", ["-c", `${cmd} 2>&1 | grep -E "SCREENSHOT|capture|RJIT_PLAYER_ARGV" || true`]);
     if (result.stdout) __writeStdout(result.stdout);
-    if (!fsExists(png)) return fail8(`[shot] FAIL \u2014 no PNG at ${png} (did the app crash before frame ${frames}?)`);
+    if (!fsExists(png)) return fail9(`[shot] FAIL \u2014 no PNG at ${png} (did the app crash before frame ${frames}?)`);
     const size = fsStat(png).size;
-    if (size < 1024) return fail8(`[shot] FAIL \u2014 ${png} is ${size} bytes (implausibly small for a rendered frame)`);
+    if (size < 1024) return fail9(`[shot] FAIL \u2014 ${png} is ${size} bytes (implausibly small for a rendered frame)`);
     const dims = pngDims(png);
-    if (!dims) return fail8(`[shot] FAIL \u2014 ${png} is not a well-formed PNG (bad magic/IHDR)`);
+    if (!dims) return fail9(`[shot] FAIL \u2014 ${png} is not a well-formed PNG (bad magic/IHDR)`);
     out(`[shot] PASS \u2014 ${png} (${dims.w}x${dims.h}, ${size} bytes)`);
     return 0;
   }
@@ -8703,21 +8989,21 @@ __ARCHIVE__
     const result = spawnSync("date", ["+%Y%m%d_%H%M%S"]);
     return result.stdout.trim() || String(Math.floor(__nowMs()));
   }
-  function dirname6(path) {
+  function dirname7(path) {
     const idx = path.lastIndexOf("/");
     return idx <= 0 ? "/" : path.slice(0, idx);
   }
   function shellQuote3(value) {
     return `'${value.replace(/'/g, `'\\''`)}'`;
   }
-  function usage5(message) {
+  function usage6(message) {
     err(`[shot] ${message}`);
     err("Usage: rjit shot <cart> [--out path.png] [--route /r] [--frames N] [--timeout S] [-- app-args...]");
     err("  Captures the cart's OWN rendered frame headless (hidden window \u2014 the");
     err("  user's desktop is never touched). Asserts a well-formed PNG; exit 0 = PASS.");
     return 2;
   }
-  function fail8(message) {
+  function fail9(message) {
     err(message);
     return 1;
   }
@@ -8725,19 +9011,19 @@ __ARCHIVE__
   // cli/commands/tui.ts
   var tui_exports = {};
   __export(tui_exports, {
-    run: () => run23
+    run: () => run24
   });
-  async function run23(argv) {
+  async function run24(argv) {
     return run9([...argv, "--tui"]);
   }
 
   // cli/commands/watch-and-push.ts
   var watch_and_push_exports = {};
   __export(watch_and_push_exports, {
-    run: () => run24
+    run: () => run25
   });
   var POLL_MS = 200;
-  async function run24(argv) {
+  async function run25(argv) {
     const cartName = argv[0];
     const cartFile = argv[1];
     const outPath = argv[2];
@@ -8819,6 +9105,7 @@ __ARCHIVE__
     "dev": dev_exports,
     "firecracker-build": firecracker_build_exports,
     "game": game_exports,
+    "gdev": gdev_exports,
     "help": help_exports,
     "init": init_exports,
     "lab": lab_exports,

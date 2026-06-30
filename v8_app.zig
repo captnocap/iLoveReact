@@ -281,7 +281,7 @@ const DEV_MODE = if (@hasDecl(build_options, "dev_mode")) build_options.dev_mode
 const DEV_BUILD_ID = if (@hasDecl(build_options, "dev_build_id")) build_options.dev_build_id else "unknown";
 const CUSTOM_CHROME_MODE = if (@hasDecl(build_options, "custom_chrome")) build_options.custom_chrome else false;
 const BORDERLESS_MODE = DEV_MODE or CUSTOM_CHROME_MODE;
-const DEV_BUNDLE_PATH = "bundle.js";
+const DEV_BUNDLE_PATH = if (@hasDecl(build_options, "dev_bundle_path")) build_options.dev_bundle_path else "bundle.js";
 
 var g_dev_bundle_buf: []u8 = &.{};
 var g_last_bundle_mtime: i128 = 0;
@@ -4222,7 +4222,7 @@ pub fn main() !void {
         dev_ipc.setBuildId(DEV_BUILD_ID);
         dev_ipc.start();
 
-        std.log.info("[dev] dev mode — watching bundle.js ({d} bytes), IPC @ {s}", .{ g_dev_bundle_buf.len, dev_ipc.SOCKET_PATH });
+        std.log.info("[dev] dev mode — watching {s} ({d} bytes), IPC @ {s}", .{ DEV_BUNDLE_PATH, g_dev_bundle_buf.len, dev_ipc.SOCKET_PATH });
         break :blk g_dev_bundle_buf;
     } else BUNDLE_BYTES;
 

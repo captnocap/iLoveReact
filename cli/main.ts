@@ -12,6 +12,7 @@ import * as codegenBindings from './commands/codegen-bindings.ts';
 import * as dev from './commands/dev.ts';
 import * as firecrackerBuild from './commands/firecracker-build.ts';
 import * as game from './commands/game.ts';
+import * as gdev from './commands/gdev.ts';
 import * as help from './commands/help.ts';
 import * as init from './commands/init.ts';
 import * as lab from './commands/lab.ts';
@@ -42,6 +43,7 @@ const COMMANDS: Record<string, Command> = {
   'dev': dev,
   'firecracker-build': firecrackerBuild,
   'game': game,
+  'gdev': gdev,
   'help': help,
   'init': init,
   'lab': lab,

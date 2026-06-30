@@ -28,11 +28,12 @@ const event_bus = @import("event_bus.zig");
 const frame_telemetry = @import("frame_telemetry.zig");
 const telemetry = @import("telemetry.zig");
 const sock_util = @import("sock_util.zig");
+const build_options = @import("build_options");
 const log = std.log.scoped(.dev_ipc);
 
 const writeAll = sock_util.writeAll;
 
-pub const SOCKET_PATH = "/tmp/reactjit.sock";
+pub const SOCKET_PATH = if (@hasDecl(build_options, "dev_socket_path")) build_options.dev_socket_path else "/tmp/reactjit.sock";
 
 pub const PushMessage = struct {
     name: []u8, // heap-allocated, owned by the caller after take()
