@@ -128,7 +128,7 @@ export default function LibraryPanel(props: {
               <Card key={asset.id} onPress={() => props.onAsset(asset)}>
                 <C.HW_AssetSwatch style={{ backgroundColor: asset.color }} />
                 <C.HW_AssetLabel>{asset.name}</C.HW_AssetLabel>
-                <C.HW_AssetMeta>{asset.favorite ? 'favorite' : asset.recent ? 'recent' : `${asset.used} uses`}</C.HW_AssetMeta>
+                <C.HW_AssetMeta>{asset.favorite ? 'favorite' : asset.recent ? 'recent' : 'catalog'}</C.HW_AssetMeta>
               </Card>
             );
           })}

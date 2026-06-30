@@ -16,9 +16,9 @@ export default function ModelPackageDetail({ model, onAction }: { model: ModelPa
             </C.HW_MaterialTitleRow>
             <C.HW_ModelPath>{model.path}</C.HW_ModelPath>
             <C.HW_ModelMetaRow>
-              <C.HW_MaterialStat>{model.triangles.toLocaleString()} tris</C.HW_MaterialStat>
-              <C.HW_MaterialStat>{model.lods} LoD</C.HW_MaterialStat>
-              <C.HW_MaterialStat>{model.paints.reduce((sum, paint) => sum + paint.used, 0)} uses</C.HW_MaterialStat>
+              <C.HW_MaterialStat>tris —</C.HW_MaterialStat>
+              <C.HW_MaterialStat>LoD —</C.HW_MaterialStat>
+              <C.HW_MaterialStat>uses 0</C.HW_MaterialStat>
             </C.HW_ModelMetaRow>
           </C.HW_ModelCardMain>
         </C.HW_ModelTop>
@@ -52,11 +52,11 @@ export default function ModelPackageDetail({ model, onAction }: { model: ModelPa
                 <C.HW_MaterialTitleRow>
                   <C.HW_ToolValue>{atlas.label}</C.HW_ToolValue>
                   <C.HW_Spacer />
-                  <C.HW_MaterialStat>{atlas.resolution}px</C.HW_MaterialStat>
+                  <C.HW_MaterialStat>resolution —</C.HW_MaterialStat>
                 </C.HW_MaterialTitleRow>
                 <C.HW_ModelMetaRow>
                   <C.HW_MaterialStat>{atlas.scope}</C.HW_MaterialStat>
-                  <C.HW_MaterialStat>{atlas.paints} paints</C.HW_MaterialStat>
+                  <C.HW_MaterialStat>paints —</C.HW_MaterialStat>
                 </C.HW_ModelMetaRow>
               </C.HW_ModelCardMain>
             </C.HW_ModelAtlasCard>

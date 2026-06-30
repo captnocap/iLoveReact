@@ -17,7 +17,7 @@ export default function FileResultRow(props: {
         <C.HW_FileResultTitleRow>
           <C.HW_FileName>{props.file.name}</C.HW_FileName>
           <C.HW_Spacer />
-          <C.HW_FileStat>{props.file.opens} opens</C.HW_FileStat>
+          <C.HW_FileStat>0 opens</C.HW_FileStat>
           {props.recent ? <C.HW_FileBadge><C.HW_KeyText>recent</C.HW_KeyText></C.HW_FileBadge> : null}
         </C.HW_FileResultTitleRow>
         <C.HW_FilePath>{props.file.path}</C.HW_FilePath>

@@ -24,7 +24,7 @@ export default function FilePreview(props: {
         ) : (
           <C.HW_FileMetaGrid>
             <C.HW_StatCell>
-              <C.HW_StatValue>{props.file.opens}</C.HW_StatValue>
+              <C.HW_StatValue>0</C.HW_StatValue>
               <C.HW_StatLabel>opens</C.HW_StatLabel>
             </C.HW_StatCell>
             <C.HW_StatCell>

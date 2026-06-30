@@ -18,6 +18,7 @@ export default function MaterialControls({
 }) {
   const variants = asset.variants ?? ['v0', 'v1', 'v2'];
   const seed = asset.seed ?? 0;
+  const usageCount = 0;
   return (
     <C.HW_ToolPanel>
       <C.HW_GroupTitle>
@@ -32,11 +33,11 @@ export default function MaterialControls({
       </C.HW_RenameRow>
       <C.HW_StatGrid>
         <C.HW_StatCell>
-          <C.HW_StatValue>{asset.used}</C.HW_StatValue>
+          <C.HW_StatValue>{usageCount}</C.HW_StatValue>
           <C.HW_StatLabel>uses</C.HW_StatLabel>
         </C.HW_StatCell>
         <C.HW_StatCell>
-          <C.HW_StatValue>{Math.max(2, Math.floor(asset.used / 9))}</C.HW_StatValue>
+          <C.HW_StatValue>{usageCount}</C.HW_StatValue>
           <C.HW_StatLabel>maps</C.HW_StatLabel>
         </C.HW_StatCell>
         <C.HW_StatCell>

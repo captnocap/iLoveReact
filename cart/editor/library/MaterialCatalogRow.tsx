@@ -13,7 +13,6 @@ export default function MaterialCatalogRow(props: {
   const Row = props.active ? C.HW_MaterialCardOn : C.HW_MaterialCard;
   const variants = props.asset.variants ?? ['base', 'aged', 'wet'];
   const bank = props.asset.favorite ? 'favorite' : props.asset.recent ? 'recent' : 'catalog';
-  const seed = props.asset.seed ?? 0;
   return (
     <Row onPress={() => props.onAsset(props.asset)}>
       <C.HW_MaterialSwatch style={{ backgroundColor: props.asset.color }} />
@@ -21,11 +20,10 @@ export default function MaterialCatalogRow(props: {
         <C.HW_MaterialTitleRow>
           <C.HW_MaterialName>{props.asset.name}</C.HW_MaterialName>
           <C.HW_Spacer />
-          <C.HW_MaterialStat>{props.asset.used} uses</C.HW_MaterialStat>
+          <C.HW_MaterialStat>{props.asset.tab}</C.HW_MaterialStat>
         </C.HW_MaterialTitleRow>
         <C.HW_MaterialStatsRow>
           <C.HW_MaterialStat>{props.asset.recipe ?? 'catalog asset'}</C.HW_MaterialStat>
-          <C.HW_MaterialStat>seed {seed}</C.HW_MaterialStat>
           <C.HW_MaterialStat>{bank}</C.HW_MaterialStat>
         </C.HW_MaterialStatsRow>
         <C.HW_VariantStrip>
