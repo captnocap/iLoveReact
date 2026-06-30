@@ -1737,13 +1737,14 @@ var g_paint_view: ?*wgpu.TextureView = null;
 var g_paint_bg: ?*wgpu.BindGroup = null;
 var g_paint_tex_w: u32 = 0;
 var g_paint_tex_h: u32 = 0;
-var g_paint_uploaded_ver: u64 = std.math.maxInt(u64);
 
 fn paintBindGroup() ?*wgpu.BindGroup {
     const a = model_paint.atlas() orelse return null;
     const device = core.getDevice() orelse return null;
     const queue = core.getQueue() orelse return null;
+    var recreated = false;
     if (g_paint_tex == null or g_paint_tex_w != a.w or g_paint_tex_h != a.h) {
+        recreated = true;
         if (g_paint_bg) |bg| bg.release();
         if (g_paint_view) |v| v.release();
         if (g_paint_tex) |t| t.destroy();
@@ -1799,18 +1800,33 @@ fn paintBindGroup() ?*wgpu.BindGroup {
         g_paint_bg = bg;
         g_paint_tex_w = a.w;
         g_paint_tex_h = a.h;
-        g_paint_uploaded_ver = std.math.maxInt(u64); // force the first upload below
     }
-    const ver = model_paint.version();
-    if (ver != g_paint_uploaded_ver) {
+    // A fresh texture needs the whole atlas; otherwise upload only the row band that
+    // changed since last frame (one row for a single stroke, not the whole 1.6 MB).
+    var lo: u32 = 0;
+    var hi: u32 = 0;
+    var upload = false;
+    if (recreated) {
+        lo = 0;
+        hi = a.h - 1;
+        upload = true;
+        _ = model_paint.consumeDirtyRows(); // the full upload below covers any pending
+    } else if (model_paint.consumeDirtyRows()) |rows| {
+        lo = rows[0];
+        hi = @min(rows[1], a.h - 1);
+        upload = true;
+    }
+    if (upload) {
+        const band_rows = hi - lo + 1;
+        const row_bytes: usize = @as(usize, a.w) * 4;
+        const start = @as(usize, lo) * row_bytes;
         queue.writeTexture(
-            &.{ .texture = g_paint_tex.?, .mip_level = 0, .origin = .{}, .aspect = .all },
-            @ptrCast(a.rgba.ptr),
-            a.rgba.len,
-            &.{ .offset = 0, .bytes_per_row = a.w * 4, .rows_per_image = a.h },
-            &.{ .width = a.w, .height = a.h, .depth_or_array_layers = 1 },
+            &.{ .texture = g_paint_tex.?, .mip_level = 0, .origin = .{ .x = 0, .y = lo, .z = 0 }, .aspect = .all },
+            @ptrCast(a.rgba[start..].ptr),
+            band_rows * row_bytes,
+            &.{ .offset = 0, .bytes_per_row = a.w * 4, .rows_per_image = band_rows },
+            &.{ .width = a.w, .height = band_rows, .depth_or_array_layers = 1 },
         );
-        g_paint_uploaded_ver = ver;
     }
     return g_paint_bg;
 }

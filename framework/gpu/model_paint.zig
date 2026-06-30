@@ -25,21 +25,38 @@ var g_positions: ?[]f32 = null; // facecount*9 floats: 3 verts (xyz) per face, m
 var g_facecount: u32 = 0;
 var g_atlas_w: u32 = 0;
 var g_atlas_h: u32 = 0;
-var g_colors: ?[]u8 = null; // facecount*4 rgba — the per-face paint
-var g_rgba: ?[]u8 = null; // atlas_w*atlas_h*4 — the diffuse texture, rebuilt on dirty
-var g_dirty: bool = true;
-// Bumped on every change (paint / new target / clear). The GPU side compares this to
-// know when to re-upload the paint texture — content-hashing the atlas would alias on
-// single-face changes (only a sparse fingerprint is sampled), which made paint appear
-// only after a "threshold" of strokes. A monotonic version never aliases.
-var g_version: u64 = 0;
-pub fn version() u64 {
-    return g_version;
-}
+// The atlas IS the source of truth — face f's colour lives at its texel (f%W, f/W), so
+// a paint writes straight here (no separate per-face array, no full rebuild). The GPU
+// re-uploads only the DIRTY ROW BAND since the last frame, so painting a 400k-tri model
+// uploads one row, not the whole 1.6 MB texture every stroke.
+var g_rgba: ?[]u8 = null; // atlas_w*atlas_h*4 — the diffuse texture, mutated in place
+var g_dirty_lo: u32 = 0; // inclusive dirty-row range; lo > hi ⇒ nothing to upload
+var g_dirty_hi: u32 = 0;
+var g_has_dirty: bool = false;
 
 /// Unpainted faces read as this neutral light grey, so a freshly-loaded model looks
 /// the same as the plain shaded viewer until you paint it.
 pub const DEFAULT_FACE: [4]u8 = .{ 200, 200, 205, 255 };
+
+fn markRows(lo: u32, hi: u32) void {
+    if (!g_has_dirty) {
+        g_dirty_lo = lo;
+        g_dirty_hi = hi;
+        g_has_dirty = true;
+    } else {
+        if (lo < g_dirty_lo) g_dirty_lo = lo;
+        if (hi > g_dirty_hi) g_dirty_hi = hi;
+    }
+}
+
+/// The atlas rows changed since the last call (inclusive [lo,hi]), or null if none.
+/// The GPU side uploads exactly this band and nothing else. Clears the pending range.
+pub fn consumeDirtyRows() ?[2]u32 {
+    if (!g_has_dirty) return null;
+    const r = [2]u32{ g_dirty_lo, g_dirty_hi };
+    g_has_dirty = false;
+    return r;
+}
 
 pub fn hasTarget() bool {
     return g_positions != null;
@@ -100,19 +117,21 @@ pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
     }
     g_positions = pos;
 
-    // Default paint = grey for every face.
-    const cols = alloc.alloc(u8, @as(usize, fc) * 4) catch {
+    // Atlas: every texel starts at the default grey (this also covers the tail texels
+    // past facecount, which no face maps to).
+    const need = @as(usize, dims[0]) * @as(usize, dims[1]) * 4;
+    const rgba = alloc.alloc(u8, need) catch {
         clear();
         return;
     };
     var i: usize = 0;
-    while (i < fc) : (i += 1) {
-        cols[i * 4 + 0] = DEFAULT_FACE[0];
-        cols[i * 4 + 1] = DEFAULT_FACE[1];
-        cols[i * 4 + 2] = DEFAULT_FACE[2];
-        cols[i * 4 + 3] = DEFAULT_FACE[3];
+    while (i < need) : (i += 4) {
+        rgba[i + 0] = DEFAULT_FACE[0];
+        rgba[i + 1] = DEFAULT_FACE[1];
+        rgba[i + 2] = DEFAULT_FACE[2];
+        rgba[i + 3] = DEFAULT_FACE[3];
     }
-    g_colors = cols;
+    g_rgba = rgba;
 
     // Overwrite the mesh's UVs with the per-face atlas mapping.
     var vi: u32 = 0;
@@ -121,72 +140,44 @@ pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
         verts[vi * 8 + 6] = uv[0];
         verts[vi * 8 + 7] = uv[1];
     }
-    g_dirty = true;
-    g_version +%= 1;
+    g_has_dirty = false;
+    markRows(0, dims[1] - 1); // the whole fresh atlas needs its first upload
 }
 
 pub fn clear() void {
     if (g_positions) |p| alloc.free(p);
-    if (g_colors) |c| alloc.free(c);
     if (g_rgba) |r| alloc.free(r);
     g_positions = null;
-    g_colors = null;
     g_rgba = null;
     g_facecount = 0;
     g_atlas_w = 0;
     g_atlas_h = 0;
     g_key_hash = 0;
-    g_dirty = true;
-    g_version +%= 1;
+    g_has_dirty = false;
 }
 
-/// Paint one face. `face` out of range is ignored (a raycast miss passes -1 up the
-/// stack and never reaches here).
+/// Paint one face — writes straight to its atlas texel and marks that row dirty. `face`
+/// out of range is ignored (a raycast miss passes -1 up the stack, never here).
 pub fn paintFace(face: u32, rgba: [4]u8) void {
-    const cols = g_colors orelse return;
+    const buf = g_rgba orelse return;
     if (face >= g_facecount) return;
-    cols[face * 4 + 0] = rgba[0];
-    cols[face * 4 + 1] = rgba[1];
-    cols[face * 4 + 2] = rgba[2];
-    cols[face * 4 + 3] = rgba[3];
-    g_dirty = true;
-    g_version +%= 1;
+    const tx = face % g_atlas_w;
+    const ty = face / g_atlas_w;
+    const dst = (@as(usize, ty) * g_atlas_w + tx) * 4;
+    buf[dst + 0] = rgba[0];
+    buf[dst + 1] = rgba[1];
+    buf[dst + 2] = rgba[2];
+    buf[dst + 3] = rgba[3];
+    markRows(ty, ty);
 }
 
 pub const Atlas = struct { rgba: []const u8, w: u32, h: u32 };
 
-/// The diffuse-texture bytes for the active target (rebuilt only when paint changed),
-/// or null if there is no target. 3d.zig feeds this to getOrCreateTexBindGroup.
+/// The live diffuse-texture bytes for the active target, or null if none. Always
+/// current (paints mutate it in place); the GPU side uploads only consumeDirtyRows().
 pub fn atlas() ?Atlas {
-    const cols = g_colors orelse return null;
-    if (g_dirty or g_rgba == null) {
-        const need = @as(usize, g_atlas_w) * @as(usize, g_atlas_h) * 4;
-        if (g_rgba == null or g_rgba.?.len != need) {
-            if (g_rgba) |r| alloc.free(r);
-            g_rgba = alloc.alloc(u8, need) catch return null;
-        }
-        const rgba = g_rgba.?;
-        // Default-fill (covers the atlas tail past facecount), then stamp each face.
-        var i: usize = 0;
-        while (i < g_atlas_w * g_atlas_h) : (i += 1) {
-            rgba[i * 4 + 0] = DEFAULT_FACE[0];
-            rgba[i * 4 + 1] = DEFAULT_FACE[1];
-            rgba[i * 4 + 2] = DEFAULT_FACE[2];
-            rgba[i * 4 + 3] = DEFAULT_FACE[3];
-        }
-        var f: u32 = 0;
-        while (f < g_facecount) : (f += 1) {
-            const tx = f % g_atlas_w;
-            const ty = f / g_atlas_w;
-            const dst = (@as(usize, ty) * g_atlas_w + tx) * 4;
-            rgba[dst + 0] = cols[f * 4 + 0];
-            rgba[dst + 1] = cols[f * 4 + 1];
-            rgba[dst + 2] = cols[f * 4 + 2];
-            rgba[dst + 3] = cols[f * 4 + 3];
-        }
-        g_dirty = false;
-    }
-    return .{ .rgba = g_rgba.?, .w = g_atlas_w, .h = g_atlas_h };
+    const buf = g_rgba orelse return null;
+    return .{ .rgba = buf, .w = g_atlas_w, .h = g_atlas_h };
 }
 
 // ── Raycast (Möller–Trumbore) ───────────────────────────────────────────────────

@@ -21,6 +21,20 @@ const latches = @import("state/latches.zig");
 const animations = @import("gpu/animations.zig");
 const scene3d = @import("gpu/3d.zig");
 const mesh_import = @import("world/mesh_import.zig");
+
+// Retained FULL-RES source mesh + its path, so the live quality slider can re-decimate
+// from the original at any level (model_set_quality) without re-reading the file.
+var g_source_verts: ?[]f32 = null;
+var g_source_count: u32 = 0;
+var g_source_path: ?[]u8 = null;
+
+fn retainSource(path: []const u8, verts: []const f32, count: u32) void {
+    if (g_source_verts) |v| std.heap.c_allocator.free(v);
+    if (g_source_path) |p| std.heap.c_allocator.free(p);
+    g_source_verts = std.heap.c_allocator.dupe(f32, verts) catch null;
+    g_source_path = std.heap.c_allocator.dupe(u8, path) catch null;
+    g_source_count = if (g_source_verts != null) count else 0;
+}
 const system_signals = @import("ifttt/system_signals.zig");
 const selection_watch = @import("ifttt/selection_watch.zig");
 const event_bus = @import("diag/event_bus.zig");
@@ -244,6 +258,10 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     };
     defer mesh.deinit(std.heap.c_allocator);
 
+    // Keep the pristine full-res mesh for the quality slider (before setPaintTarget
+    // rewrites UVs — positions are untouched, but copy now to be unambiguous).
+    retainSource(path, mesh.verts, mesh.vert_count);
+
     // Adopt this mesh as the paint target FIRST — it rewrites the verts' UVs to the
     // per-face paint atlas in place, so the stash (next) ships the paint-ready UVs.
     scene3d.setPaintTarget(path, mesh.verts, mesh.vert_count);
@@ -329,6 +347,62 @@ fn hostModelPaintFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 fn hostModelFaceCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     setReturnNumber(info, @floatFromInt(scene3d.paintFaceCount()));
+}
+
+/// __model_set_quality(grid) → JSON {"key","count"} | "". Re-decimate the retained
+/// full-res source mesh to clustering resolution `grid` (2..1024; higher = more
+/// detail), swap it in as the resident + paint target under a quality-specific key, and
+/// return it for the cart to mount. The camera is left alone (no re-frame) so the model
+/// doesn't jump while you scrub. Resets paint (the topology changed).
+fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const grid: u32 = @intCast(std.math.clamp(argToI32(info, 0) orelse 64, 2, 1024));
+    const src = g_source_verts orelse {
+        setReturnString(info, "");
+        return;
+    };
+    const base = g_source_path orelse "model";
+
+    var dec = mesh_import.decimateExpanded(std.heap.c_allocator, src, g_source_count, grid) catch {
+        setReturnString(info, "");
+        return;
+    };
+    defer dec.deinit(std.heap.c_allocator);
+
+    // Quality-specific key so each level interns as its own resident geometry.
+    const key = std.fmt.allocPrint(std.heap.c_allocator, "{s}#q{d}", .{ base, grid }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    defer std.heap.c_allocator.free(key);
+
+    scene3d.setPaintTarget(key, dec.verts, dec.vert_count);
+    if (!scene3d.stashHostMesh(key, dec.verts, dec.vert_count)) {
+        setReturnString(info, "");
+        return;
+    }
+    state.markDirty();
+
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(std.heap.c_allocator);
+    const w = buf.writer(std.heap.c_allocator);
+    w.writeAll("{\"key\":\"") catch {
+        setReturnString(info, "");
+        return;
+    };
+    for (key) |ch| {
+        switch (ch) {
+            '"' => w.writeAll("\\\"") catch return,
+            '\\' => w.writeAll("\\\\") catch return,
+            0...8, 9...10, 11...31 => w.print("\\u{x:0>4}", .{ch}) catch return,
+            else => w.writeByte(ch) catch return,
+        }
+    }
+    w.print("\",\"count\":{d}}}", .{dec.vert_count}) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, buf.items);
 }
 
 fn hostReleaseFileBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1011,6 +1085,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_paint_at", hostModelPaintAt);
     v8_runtime.registerHostFn("__model_paint_face", hostModelPaintFace);
     v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);
+    v8_runtime.registerHostFn("__model_set_quality", hostModelSetQuality);
     v8_runtime.registerHostFn("__hostReleaseFileBuffer", hostReleaseFileBuffer);
     v8_runtime.registerHostFn("__hostLog", hostLog);
     v8_runtime.registerHostFn("__js_eval", hostJsEval);

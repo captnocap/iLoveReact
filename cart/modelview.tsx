@@ -17,7 +17,7 @@
 // model under `./tools/rjit dev modelview`, or `RJIT_MODEL=path ./tools/rjit shot
 // modelview` to render one headlessly.
 import { useState, useRef, useEffect } from 'react';
-import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Text, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
@@ -46,6 +46,22 @@ function loadModelFile(path: string): Loaded | null {
 
 const orbitDrag = (dx: number, dy: number) => host.__model_orbit_drag?.(dx, dy);
 const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
+// Re-decimate the model to clustering resolution `grid` (8..256, higher = more detail)
+// and return the new {key,count}, or null. The host re-meshes from the retained full-res
+// source — nothing but the key + count crosses the bridge.
+function setModelQuality(grid: number): { key: string; count: number } | null {
+  const json = host.__model_set_quality?.(grid);
+  if (typeof json !== 'string' || !json) return null;
+  try {
+    const o = JSON.parse(json);
+    return typeof o?.key === 'string' ? { key: o.key, count: o.count | 0 } : null;
+  } catch {
+    return null;
+  }
+}
+// Slider position 0..1 → clustering grid. Squared so the low end (coarse "just the
+// shape") gets fine control, which is where the game LoD lives.
+const qualityToGrid = (q: number) => Math.round(8 + q * q * 248);
 // Paint the face under viewport pixel (x,y) — the host raycasts the resident mesh and
 // colours exactly the face hit. No verts or UVs cross the bridge.
 const paintAt = (x: number, y: number, rgb: RGB) => host.__model_paint_at?.(x, y, rgb[0], rgb[1], rgb[2]) === 1;
@@ -65,6 +81,15 @@ export default function ModelView() {
   const [wire, setWire] = useState(false);
   const [paintMode, setPaintMode] = useState(false);
   const [color, setColor] = useState<RGB>(PALETTE[0]);
+  const [quality, setQuality] = useState(1); // slider 0..1; 1 = full detail on load
+
+  // Apply a new quality (slider 0..1): re-decimate in the host and swap the resident
+  // mesh. Repainting resets (the topology changed) — quality is a pre-paint step.
+  const applyQuality = (q: number) => {
+    setQuality(q);
+    const r = setModelQuality(qualityToGrid(q));
+    if (r) setModel((m) => (m ? { ...m, key: r.key, count: r.count } : m));
+  };
 
   // Drag state lives in refs, NOT useState: orbiting/painting must not trigger a React
   // render (the host repaints itself off the doors). A re-render per mouse-move is
@@ -93,6 +118,7 @@ export default function ModelView() {
     if (loaded) {
       setModel(loaded);
       setError(null);
+      setQuality(1); // a fresh model loads full-res
     } else {
       setError(`Could not load ${path.split('/').pop()}`);
     }
@@ -140,6 +166,12 @@ export default function ModelView() {
     if (callHost<string | null>('__env_get', null, 'RJIT_PAINTONE')) {
       setPaintMode(true);
       host.__model_paint_face?.(40, 230, 40, 40);
+    }
+    // RJIT_QUALITY=grid re-decimates at boot — the headless proof the quality knob works.
+    const q = Number(callHost<string | null>('__env_get', null, 'RJIT_QUALITY') ?? 0);
+    if (q > 0) {
+      const r = setModelQuality(q);
+      if (r) setModel((m) => (m ? { ...m, key: r.key, count: r.count } : m));
     }
   }, []);
 
@@ -279,6 +311,34 @@ export default function ModelView() {
               />
             );
           })}
+        </Row>
+      )}
+
+      {/* Quality strip — live decimation. Drag to trade detail for triangles; the host
+          re-meshes from the retained full-res source. Lower end is "just the shape" for
+          the game (and the basis for baked LoD by render distance). */}
+      {model && (
+        <Row
+          style={{
+            position: 'absolute', left: 0, right: 0, bottom: 0, height: 46,
+            alignItems: 'center', paddingLeft: 14, paddingRight: 16,
+            backgroundColor: 'rgba(12,14,20,0.82)', borderTopWidth: 1, borderColor: '#1d2330',
+          }}
+        >
+          <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 600, marginRight: 12 }}>Quality</Text>
+          <Box style={{ flexGrow: 1, marginRight: 14 }}>
+            <Slider
+              value={quality}
+              min={0}
+              max={1}
+              onChange={(v: number) => applyQuality(v)}
+              onCommit={(v: number) => applyQuality(v)}
+              style={{ height: 24 }}
+            />
+          </Box>
+          <Text style={{ color: '#7d899c', fontSize: 12, fontFamily: 'monospace' }}>
+            {`${(model.count / 3).toLocaleString()} tris`}
+          </Text>
         </Row>
       )}
 

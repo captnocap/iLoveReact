@@ -609,6 +609,102 @@ fn emitObjFace(alloc: std.mem.Allocator, b: *Builder, line: []const u8, pos: []c
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
+// Decimation — the live "quality" knob (vertex clustering)
+// ════════════════════════════════════════════════════════════════════════════════
+// Snap every vertex onto a grid³ lattice over the model's bounding box, collapse each
+// cell's vertices to their average, and drop triangles that fold flat. Higher `grid` =
+// finer cells = more surviving detail. One pass over verts + one over faces, memory-
+// flat — this is what turns a 400k-tri scan into its general shape for the game (and
+// what makes painting/raycasting on a huge model cheap: you edit the reduced mesh).
+// The Zig sibling of importMesh.ts decimateSoup, but it works directly on the expanded
+// (non-indexed) Vertex stream this module produces and re-emits the same stream.
+pub fn decimateExpanded(alloc: std.mem.Allocator, verts: []const f32, vert_count: u32, grid: u32) Error!ParsedMesh {
+    const fc = vert_count / 3;
+    if (fc == 0) return Error.NoGeometry;
+    const R: u32 = @min(1024, @max(2, grid));
+
+    // Bounding box over every input position.
+    var lo: [3]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) };
+    var hi: [3]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) };
+    var i: u32 = 0;
+    while (i < vert_count) : (i += 1) {
+        inline for (0..3) |k| {
+            const v = verts[i * 8 + k];
+            if (v < lo[k]) lo[k] = v;
+            if (v > hi[k]) hi[k] = v;
+        }
+    }
+    const ext = @max(@max(hi[0] - lo[0], hi[1] - lo[1]), hi[2] - lo[2]);
+    const inv: f32 = if (ext > 1e-9) @as(f32, @floatFromInt(R)) / ext else 0;
+
+    // Cluster: cell key → centroid accumulator. remap[v] = the input vert's cell index.
+    var cell_map = std.AutoHashMap(u64, u32).init(alloc);
+    defer cell_map.deinit();
+    var sum = std.ArrayList([3]f64){};
+    defer sum.deinit(alloc);
+    var cnt = std.ArrayList(u32){};
+    defer cnt.deinit(alloc);
+    const remap = try alloc.alloc(u32, vert_count);
+    defer alloc.free(remap);
+
+    i = 0;
+    while (i < vert_count) : (i += 1) {
+        const x = verts[i * 8 + 0];
+        const y = verts[i * 8 + 1];
+        const z = verts[i * 8 + 2];
+        const cellOf = struct {
+            fn f(val: f32, base: f32, scale: f32, r: u32) u64 {
+                var c: i64 = @intFromFloat((val - base) * scale);
+                if (c < 0) c = 0;
+                if (c >= r) c = @as(i64, r) - 1;
+                return @intCast(c);
+            }
+        }.f;
+        const ix = cellOf(x, lo[0], inv, R);
+        const iy = cellOf(y, lo[1], inv, R);
+        const iz = cellOf(z, lo[2], inv, R);
+        const key = ix + iy * R + iz * @as(u64, R) * R;
+        const gop = try cell_map.getOrPut(key);
+        if (!gop.found_existing) {
+            gop.value_ptr.* = @intCast(sum.items.len);
+            try sum.append(alloc, .{ x, y, z });
+            try cnt.append(alloc, 1);
+        } else {
+            const ci = gop.value_ptr.*;
+            sum.items[ci][0] += x;
+            sum.items[ci][1] += y;
+            sum.items[ci][2] += z;
+            cnt.items[ci] += 1;
+        }
+        remap[i] = gop.value_ptr.*;
+    }
+
+    // Cell centroids.
+    const centroids = try alloc.alloc([3]f32, sum.items.len);
+    defer alloc.free(centroids);
+    for (sum.items, cnt.items, 0..) |s, c, ci| {
+        const inv_c: f64 = 1.0 / @as(f64, @floatFromInt(c));
+        centroids[ci] = .{ @floatCast(s[0] * inv_c), @floatCast(s[1] * inv_c), @floatCast(s[2] * inv_c) };
+    }
+
+    // Re-emit surviving (non-collapsed) triangles, recomputing face normals.
+    var b = Builder{};
+    errdefer b.out.deinit(alloc);
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        const a = remap[f * 3 + 0];
+        const bb = remap[f * 3 + 1];
+        const cc = remap[f * 3 + 2];
+        if (a == bb or bb == cc or a == cc) continue; // folded flat — drop
+        const p: [3][3]f32 = .{ centroids[a], centroids[bb], centroids[cc] };
+        const n: [3][3]f32 = .{ .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 } };
+        const uv: [3][2]f32 = .{ .{ 0, 0 }, .{ 0, 0 }, .{ 0, 0 } };
+        try b.triangle(alloc, p, n, uv, true);
+    }
+    return b.finish(alloc);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 // Tests — headless, no GPU. A hand-built minimal GLB + a tiny OBJ exercise both paths.
 // ════════════════════════════════════════════════════════════════════════════════
 
@@ -644,6 +740,46 @@ test "obj: quad fan-triangulates to two triangles" {
     var mesh = try parseObj(alloc, src);
     defer mesh.deinit(alloc);
     try std.testing.expectEqual(@as(u32, 6), mesh.vert_count); // 2 tris * 3
+}
+
+test "decimate: a fine grid of triangles collapses at low resolution" {
+    const alloc = std.testing.allocator;
+    // A 10×10 grid of vertices → 9×9×2 = 162 triangles spanning a unit square in z=0.
+    var obj = std.ArrayList(u8){};
+    defer obj.deinit(alloc);
+    const w = obj.writer(alloc);
+    var r: u32 = 0;
+    while (r < 10) : (r += 1) {
+        var c: u32 = 0;
+        while (c < 10) : (c += 1) {
+            try w.print("v {d} {d} 0\n", .{ @as(f32, @floatFromInt(c)) / 9.0, @as(f32, @floatFromInt(r)) / 9.0 });
+        }
+    }
+    r = 0;
+    while (r < 9) : (r += 1) {
+        var c: u32 = 0;
+        while (c < 9) : (c += 1) {
+            const a = r * 10 + c + 1;
+            const b = a + 1;
+            const d = a + 10;
+            const e = d + 1;
+            try w.print("f {d} {d} {d}\n", .{ a, b, d });
+            try w.print("f {d} {d} {d}\n", .{ b, e, d });
+        }
+    }
+    var full = try parseObj(alloc, obj.items);
+    defer full.deinit(alloc);
+    try std.testing.expectEqual(@as(u32, 162 * 3), full.vert_count);
+
+    // Decimate to a coarse 3×3 lattice — far fewer triangles, still valid geometry.
+    var low = try decimateExpanded(alloc, full.verts, full.vert_count, 3);
+    defer low.deinit(alloc);
+    try std.testing.expect(low.vert_count > 0);
+    try std.testing.expect(low.vert_count < full.vert_count);
+    // A fine lattice keeps (nearly) everything.
+    var high = try decimateExpanded(alloc, full.verts, full.vert_count, 1024);
+    defer high.deinit(alloc);
+    try std.testing.expect(high.vert_count >= low.vert_count);
 }
 
 test "obj: negative (relative) indices resolve against verts-so-far" {
