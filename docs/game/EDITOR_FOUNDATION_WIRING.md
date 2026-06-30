@@ -1,26 +1,48 @@
 # Editor Foundation — Build-Pass Wiring Checklist
 
 The editor-foundation Zig modules were committed **dormant** (isolated, ast-check
-clean, unit tests authored) so they can't break the tree before a build. To bring
-them live, apply the wiring below and run the build. Each module's authoritative
-`// INTEGRATION:` note lives at the top of its `v8_bindings_*`/test file — this doc
-consolidates them so the build pass is one place.
+clean, unit tests authored) so they can't break the tree before a build.
 
-Status legend: ☐ not yet wired · ☑ wired.
+## Verification status (2026-06-30)
+
+- ☑ **All five modules compile + their unit tests pass** — build.zig now has steps
+  `test-diag-registry`, `test-editor-bus`, `test-world-compile-cache`,
+  `test-hot-index`, `test-bones-loader`. Run any with `zig build <step>`. This is the
+  real compile (ast-check can't resolve cross-module/stdlib calls); all green.
+- ☑ **B (diagnostics — perf + debug logging) is LIVE in the host.** Wired into the
+  always-on INGREDIENTS catalog; verified end-to-end (`SHIP_RUN_PACKAGE=0 ship
+  modelview` compiles + `rjit shot modelview` boots clean). Every cart now has the
+  `__diag_*` doors + the raw-console feed sink.
+- ☑ **F (build versioning) is in** — pure TS (`runtime/buildjournal/`), no host
+  wiring; consumed by the cart shell when it lands.
+- ☐ **A (eventbus) / E (hot index) / D (chunk cache) host-into-cart registration** —
+  deliberately NOT forced always-on (they aren't observability every cart needs;
+  always-on would violate the no-unconditional-imports rule). Wire them **with the
+  editor cart**, where the source-driven trigger lives and they're verifiable in-app.
+  Two options below per module; prefer the opt-in (grep_prefix) form.
+
+Status legend: ☑ done · ☐ pending the editor-cart build.
 
 ## A — Authoring eventbus (`framework/events/`)
 
-☐ **`framework/v8_ingredients.zig`**
-- Import near the `v8_bindings_eventbus` import (~line 98):
-  `const v8_bindings_editor_bus = @import("events/v8_bindings_editor_bus.zig");`
-- Add one INGREDIENTS entry in the always-on block, after the `eventbus` entry (~line 310):
-  `.{ .name = "editor_bus", .required = true, .grep_prefix = "", .reg_fn = "registerEditorBus", .mod = v8_bindings_editor_bus },`
-- `registerEditorBus()` also calls `editor_bus.init()`, so no separate boot line in `v8_app.zig`.
+PREFER opt-in (the editor cart triggers it; don't bloat every cart):
+☐ **`framework/v8_ingredients.zig`** — gated import + a `required = false` row keyed on
+the door prefix, so it includes only when a cart's bundle uses `__editor_bus_`:
+```zig
+const v8_bindings_editor_bus = if (enabledFor("editor_bus"))
+    @import("events/v8_bindings_editor_bus.zig")
+else struct { pub fn registerEditorBus(_: anytype) void {} };
+// INGREDIENTS row:
+.{ .name = "editor_bus", .required = false, .grep_prefix = "__editor_bus_", .reg_fn = "registerEditorBus", .mod = v8_bindings_editor_bus },
+```
+(For an always-on alternative, use `required = true, grep_prefix = ""` like the
+`eventbus` row — simpler but bakes the sqlite-backed bus into every cart.)
 
-☐ **`build.zig`** — no production change (pulled into the root module transitively via
-the `@import`, like `v8_bindings_eventbus`; deps `v8_runtime.zig` + `storage/sqlite.zig`
-already in the graph). To RUN the unit test, add the `test-editor-bus` module/step block
-(exact lines in `framework/events/v8_bindings_editor_bus.zig` header / the test file).
+☐ **`build.zig`** — `editor_bus.zig` now imports `sqlite` as a NAMED module (so it
+builds in isolation). When `has_editor_bus`, the root module must provide it:
+`if (has_editor_bus) root_mod.addImport("sqlite", <module from framework/storage/sqlite.zig>);`
+- `registerEditorBus()` calls `editor_bus.init()`, so no separate boot line in `v8_app.zig`.
+- Unit test step `test-editor-bus` is already wired (passing).
 
 ## B — Diagnostics host + console (`framework/diag/`)
 
