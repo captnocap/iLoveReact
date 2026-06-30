@@ -9,7 +9,18 @@ const builtin = @import("builtin");
 
 pub const ProcStatus = struct {
     rss_bytes: u64 = 0,
+    rss_peak_bytes: u64 = 0,
+    rss_anon_bytes: u64 = 0,
+    rss_file_bytes: u64 = 0,
+    rss_shmem_bytes: u64 = 0,
     vsize_bytes: u64 = 0,
+    vsize_peak_bytes: u64 = 0,
+    data_bytes: u64 = 0,
+    stack_bytes: u64 = 0,
+    exe_bytes: u64 = 0,
+    lib_bytes: u64 = 0,
+    swap_bytes: u64 = 0,
+    threads: u32 = 0,
 };
 
 pub const MemInfo = struct {
@@ -19,7 +30,18 @@ pub const MemInfo = struct {
 
 pub const Snapshot = struct {
     process_rss_bytes: u64 = 0,
+    process_rss_peak_bytes: u64 = 0,
+    process_rss_anon_bytes: u64 = 0,
+    process_rss_file_bytes: u64 = 0,
+    process_rss_shmem_bytes: u64 = 0,
     process_vsize_bytes: u64 = 0,
+    process_vsize_peak_bytes: u64 = 0,
+    process_vm_data_bytes: u64 = 0,
+    process_vm_stack_bytes: u64 = 0,
+    process_vm_exe_bytes: u64 = 0,
+    process_vm_lib_bytes: u64 = 0,
+    process_vm_swap_bytes: u64 = 0,
+    process_threads: u32 = 0,
     total_bytes: u64 = 0,
     available_bytes: u64 = 0,
 };
@@ -39,8 +61,30 @@ pub fn parseProcStatus(text: []const u8) ProcStatus {
     while (line_iter.next()) |line| {
         if (std.mem.startsWith(u8, line, "VmRSS:")) {
             status.rss_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "VmHWM:")) {
+            status.rss_peak_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "RssAnon:")) {
+            status.rss_anon_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "RssFile:")) {
+            status.rss_file_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "RssShmem:")) {
+            status.rss_shmem_bytes = parseFirstU64(line) * 1024;
         } else if (std.mem.startsWith(u8, line, "VmSize:")) {
             status.vsize_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "VmPeak:")) {
+            status.vsize_peak_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "VmData:")) {
+            status.data_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "VmStk:")) {
+            status.stack_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "VmExe:")) {
+            status.exe_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "VmLib:")) {
+            status.lib_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "VmSwap:")) {
+            status.swap_bytes = parseFirstU64(line) * 1024;
+        } else if (std.mem.startsWith(u8, line, "Threads:")) {
+            status.threads = @intCast(@min(parseFirstU64(line), std.math.maxInt(u32)));
         }
     }
     return status;
@@ -84,7 +128,18 @@ pub fn readSnapshot() Snapshot {
 
     return .{
         .process_rss_bytes = status.rss_bytes,
+        .process_rss_peak_bytes = status.rss_peak_bytes,
+        .process_rss_anon_bytes = status.rss_anon_bytes,
+        .process_rss_file_bytes = status.rss_file_bytes,
+        .process_rss_shmem_bytes = status.rss_shmem_bytes,
         .process_vsize_bytes = status.vsize_bytes,
+        .process_vsize_peak_bytes = status.vsize_peak_bytes,
+        .process_vm_data_bytes = status.data_bytes,
+        .process_vm_stack_bytes = status.stack_bytes,
+        .process_vm_exe_bytes = status.exe_bytes,
+        .process_vm_lib_bytes = status.lib_bytes,
+        .process_vm_swap_bytes = status.swap_bytes,
+        .process_threads = status.threads,
         .total_bytes = meminfo.total_bytes,
         .available_bytes = meminfo.available_bytes,
     };

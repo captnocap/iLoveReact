@@ -307,7 +307,18 @@ fn telSystemCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "secondary_windows", s.secondary_window_count);
     const mem = system_memory.readSnapshot();
     setObjectNumber(ctx, obj, "process_rss_bytes", mem.process_rss_bytes);
+    setObjectNumber(ctx, obj, "process_rss_peak_bytes", mem.process_rss_peak_bytes);
+    setObjectNumber(ctx, obj, "process_rss_anon_bytes", mem.process_rss_anon_bytes);
+    setObjectNumber(ctx, obj, "process_rss_file_bytes", mem.process_rss_file_bytes);
+    setObjectNumber(ctx, obj, "process_rss_shmem_bytes", mem.process_rss_shmem_bytes);
     setObjectNumber(ctx, obj, "process_vsize_bytes", mem.process_vsize_bytes);
+    setObjectNumber(ctx, obj, "process_vsize_peak_bytes", mem.process_vsize_peak_bytes);
+    setObjectNumber(ctx, obj, "process_vm_data_bytes", mem.process_vm_data_bytes);
+    setObjectNumber(ctx, obj, "process_vm_stack_bytes", mem.process_vm_stack_bytes);
+    setObjectNumber(ctx, obj, "process_vm_exe_bytes", mem.process_vm_exe_bytes);
+    setObjectNumber(ctx, obj, "process_vm_lib_bytes", mem.process_vm_lib_bytes);
+    setObjectNumber(ctx, obj, "process_vm_swap_bytes", mem.process_vm_swap_bytes);
+    setObjectNumber(ctx, obj, "process_threads", mem.process_threads);
     setObjectNumber(ctx, obj, "mem_total_bytes", mem.total_bytes);
     setObjectNumber(ctx, obj, "mem_available_bytes", mem.available_bytes);
     info.getReturnValue().set(obj.toValue());

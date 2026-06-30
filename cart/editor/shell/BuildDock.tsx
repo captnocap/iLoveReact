@@ -98,11 +98,11 @@ export default function BuildDock({
         <C.HW_DockValue>{formatCount(drawCalls)}</C.HW_DockValue>
       </C.HW_DockPerfButton>
       <C.HW_Spacer />
-      <C.HW_DockGroup>
+      <C.HW_DockPerfButton onPress={onPerf}>
         <Icon name="Activity" size={13} color={accentFor('textFaint')} />
         <C.HW_DockLabel>MEM</C.HW_DockLabel>
         <C.HW_DockLabel>{formatBytes(system?.process_rss_bytes)}/{formatBytes(system?.mem_total_bytes)}</C.HW_DockLabel>
-      </C.HW_DockGroup>
+      </C.HW_DockPerfButton>
     </C.HW_BuildDock>
   );
 }
