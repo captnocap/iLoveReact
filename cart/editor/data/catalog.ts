@@ -3,7 +3,7 @@ import { HMSC_EDITOR_CATALOG } from './hmscAssetCatalog';
 import type { Asset, AssetOverride, LibraryTab, ModelPackage } from './types';
 
 export const ASSET_PAGE_SIZE = 12;
-export const MATERIAL_PAGE_SIZE = 6;
+export const MATERIAL_PAGE_SIZE = 16;
 
 export const ASSETS: Asset[] = HMSC_EDITOR_CATALOG.assets;
 export const MODEL_PACKAGES: ModelPackage[] = HMSC_EDITOR_CATALOG.modelPackages;

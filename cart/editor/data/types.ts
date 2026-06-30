@@ -7,6 +7,7 @@ import type {
   ExplorerFolderId,
   ExplorerHistoryEntry,
 } from './fileExplorer';
+import type { DecalDoc } from '../../hmsc-int/game/textures/decal';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Window' | 'Help';
 export type LibraryTab = 'Build' | 'Props' | 'Skins';
@@ -96,7 +97,15 @@ export type Asset = {
   sourcePath?: string;
   semanticKind?: string;
   stats?: string[];
+  preview?: AssetPreview;
 };
+
+export type AssetPreview =
+  | { kind: 'shader'; shader: string; data: number[] }
+  | { kind: 'image'; source: string }
+  | { kind: 'texture-blob'; ref: string }
+  | { kind: 'decal'; doc: DecalDoc }
+  | { kind: 'color'; color: string };
 
 export type AssetOverride = {
   name?: string;

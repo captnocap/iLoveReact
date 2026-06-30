@@ -5,6 +5,7 @@ import {
   defaultShaderData,
   shaderSpec,
 } from '../../hmsc-int/game/textures/shaders';
+import { validateDecalDoc } from '../../hmsc-int/game/textures/decal';
 import type { Asset, ContentNode, ModelAtlas, ModelPackage, ModelPaintVariant } from './types';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
@@ -18,12 +19,7 @@ type StoredMaterial = {
   label: string;
   shaderId?: string;
   data?: number[];
-  decal?: {
-    width?: number;
-    height?: number;
-    bg?: string;
-    nodes?: Array<{ kind?: string; bg?: string; color?: string }>;
-  };
+  decal?: unknown;
 };
 
 type MaterialsSnapshot = {
@@ -143,12 +139,21 @@ export type HmscEditorCatalog = {
 
 export const HMSC_EDITOR_CATALOG: HmscEditorCatalog = loadHmscEditorCatalog();
 
+let cookedTextureBlobs: Record<string, string> = {};
+
+export function textureBlobDataUrl(ref: string): string | null {
+  const blob = cookedTextureBlobs[ref];
+  if (!blob) return null;
+  return blob.startsWith('data:image/') ? blob : `data:image/png;base64,${blob}`;
+}
+
 function loadHmscEditorCatalog(): HmscEditorCatalog {
   const started = Date.now();
   const errors: string[] = [];
   const materials = readJson<MaterialsSnapshot>(MATERIALS_SNAPSHOT, errors);
   const cooked = readJson<CookedSnapshot>(COOKED_SNAPSHOT, errors);
   const models = readJson<ModelSnapshot>(MODEL_SNAPSHOT, errors);
+  cookedTextureBlobs = cooked?.state?.textureBlobs ?? {};
 
   const materialAssets = [
     ...shaderRecipeAssets(),
@@ -163,11 +168,13 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
   ].sort((a, b) => modelRank(a) - modelRank(b) || a.name.localeCompare(b.name));
   const assets = [...materialAssets, ...cookedAssets].sort((a, b) => sourceRank(a) - sourceRank(b) || a.name.localeCompare(b.name));
   const defaultAsset = assets.find((asset) => asset.tab === 'Skins') ?? assets[0];
-  const defaultContentFolder = modelPackages.some((model) => model.kind === 'build')
-    ? 'models-build'
-    : modelPackages.some((model) => model.kind === 'prop')
-      ? 'models-props'
-      : 'materials-core';
+  const defaultContentFolder = materialAssets.length > 0
+    ? 'materials-core'
+    : modelPackages.some((model) => model.kind === 'build')
+      ? 'models-build'
+      : modelPackages.some((model) => model.kind === 'prop')
+        ? 'models-props'
+        : 'materials-core';
 
   return {
     assets,
@@ -222,6 +229,7 @@ function shaderRecipeAssets(): Asset[] {
       sourcePath: SHADER_SOURCE,
       semanticKind: spec.group,
       stats: [`${spec.base.length} params`, `${spec.variants.length} variants`],
+      preview: { kind: 'shader', shader: spec.shader, data },
     };
   });
 }
@@ -243,6 +251,7 @@ function shaderPresetAssets(): Asset[] {
       sourcePath: SHADER_SOURCE,
       semanticKind: preset.group,
       stats: [`D[${preset.data.length}]`, preset.group],
+      preview: { kind: 'shader', shader: preset.shader, data: preset.data },
     };
   });
 }
@@ -257,6 +266,7 @@ function storedMaterialAssets(snapshot: MaterialsSnapshot | null): Asset[] {
     const isDecal = Boolean(material.decal);
     const data = material.data ?? [];
     const spec = material.shaderId ? shaderSpec(material.shaderId) : undefined;
+    const decal = material.decal ? validateDecalDoc(material.decal) : null;
     const color = isDecal ? decalColor(material) : colorFor(`${material.id}:${data.join(',')}`);
     return [{
       id: `stored-material:${material.id}`,
@@ -272,8 +282,13 @@ function storedMaterialAssets(snapshot: MaterialsSnapshot | null): Asset[] {
       sourcePath: MATERIALS_SNAPSHOT,
       semanticKind: isDecal ? 'Stored Decals' : spec?.group ?? 'Stored Materials',
       stats: isDecal
-        ? [`${material.decal?.nodes?.length ?? 0} nodes`, `${material.decal?.width ?? 0}x${material.decal?.height ?? 0}`]
+        ? [`${decal?.nodes.length ?? 0} nodes`, `${decal?.width ?? 0}x${decal?.height ?? 0}`]
         : [`shader ${material.shaderId ?? '-'}`, `D[${data.length}]`],
+      preview: decal
+        ? { kind: 'decal', doc: decal }
+        : spec
+          ? { kind: 'shader', shader: spec.shader, data }
+          : { kind: 'color', color },
     }];
   });
 }
@@ -296,6 +311,7 @@ function textureFileAssets(): Asset[] {
       sourcePath: path,
       semanticKind: 'Stored Texture Files',
       stats: [info ? `${Math.round(info.size / 1024)} KB` : 'size -', path],
+      preview: { kind: 'image', source: path },
     };
   });
 }
@@ -328,6 +344,7 @@ function cookedAssetRows(snapshot: CookedSnapshot | null): Asset[] {
       sourcePath: COOKED_SNAPSHOT,
       semanticKind: semantic,
       stats: cookedStats(asset, state?.meshBlobs?.[asset.meshRef ?? '']?.length ?? 0),
+      preview: asset.texRef ? { kind: 'texture-blob', ref: asset.texRef } : { kind: 'color', color: cookedColor(asset) },
     }];
   });
 }
@@ -620,13 +637,19 @@ function sourceRank(asset: Asset): number {
 }
 
 function decalColor(material: StoredMaterial): string {
-  const decal = material.decal;
-  const nodeColor = decal?.nodes?.find((node) => /^#[0-9a-f]{6}$/i.test(node.bg ?? node.color ?? ''));
-  return nodeColor?.bg ?? nodeColor?.color ?? decal?.bg ?? colorFor(material.id);
+  const decal = validateDecalDoc(material.decal);
+  const nodeColor = decal?.nodes.find((node) => {
+    const color = node.kind === 'rect' ? node.bg : node.kind === 'text' ? node.color : node.kind === 'path' ? node.stroke : '';
+    return /^#[0-9a-f]{6}$/i.test(color);
+  });
+  if (nodeColor?.kind === 'rect') return nodeColor.bg;
+  if (nodeColor?.kind === 'text') return nodeColor.color;
+  if (nodeColor?.kind === 'path') return nodeColor.stroke;
+  return decal?.bg || colorFor(material.id);
 }
 
 function decalVariants(material: StoredMaterial): string[] {
-  const decal = material.decal;
+  const decal = validateDecalDoc(material.decal);
   const nodes = decal?.nodes ?? [];
   const kinds = Array.from(new Set(nodes.map((node) => node.kind).filter(Boolean))) as string[];
   return (kinds.length ? kinds : ['decal']).slice(0, 3);

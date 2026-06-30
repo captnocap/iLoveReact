@@ -123,7 +123,19 @@ export function rankAssets(a: Asset, b: Asset): number {
   const score = (asset: Asset): number =>
     (asset.favorite ? 3000 : 0) + (asset.recent ? 2000 : 0) + asset.used;
   const byScore = score(b) - score(a);
-  return byScore !== 0 ? byScore : a.name.localeCompare(b.name);
+  if (byScore !== 0) return byScore;
+  const byMaterialSource = materialSourceRank(a) - materialSourceRank(b);
+  if (byMaterialSource !== 0) return byMaterialSource;
+  return a.name.localeCompare(b.name);
+}
+
+function materialSourceRank(asset: Asset): number {
+  if (asset.tab !== 'Skins') return 0;
+  if (asset.sourceKind === 'shader-recipe') return 0;
+  if (asset.sourceKind === 'stored-material') return 1;
+  if (asset.sourceKind === 'texture-file') return 2;
+  if (asset.sourceKind === 'shader-preset') return 3;
+  return 4;
 }
 
 export function selectedObject(state: MockState): WorldObject {

@@ -94,7 +94,7 @@ export default function LibraryPanel(props: {
           onAction={props.onMaterialAction}
         />
       ) : showMaterialCatalog ? (
-        <C.HW_MaterialList>
+        <C.HW_MaterialGrid>
           {pageAssets.length === 0 ? (
             <C.HW_EmptyState>
               <Icon name="SearchX" size={16} color={accentFor('textFaint')} />
@@ -111,12 +111,10 @@ export default function LibraryPanel(props: {
             />
           )).concat(
             Array.from({ length: emptySlots }, (_, index) => (
-              <C.HW_MaterialSlotEmpty key={`empty-slot-${page}-${index}`}>
-                <C.HW_StatusText>empty fixed page slot</C.HW_StatusText>
-              </C.HW_MaterialSlotEmpty>
+              <C.HW_MaterialTileEmpty key={`empty-slot-${page}-${index}`} />
             )),
           )}
-        </C.HW_MaterialList>
+        </C.HW_MaterialGrid>
       ) : folderTab ? (
         <C.HW_AssetGrid>
           {pageAssets.length === 0 ? (
@@ -129,8 +127,8 @@ export default function LibraryPanel(props: {
             return (
               <Card key={asset.id} onPress={() => props.onAsset(asset)}>
                 <C.HW_AssetSwatch style={{ backgroundColor: asset.color }} />
-                <C.HW_AssetLabel>{asset.name}</C.HW_AssetLabel>
-                <C.HW_AssetMeta>{asset.semanticKind ?? asset.sourceKind ?? 'indexed'}</C.HW_AssetMeta>
+                <C.HW_AssetLabel numberOfLines={1} noWrap>{asset.name}</C.HW_AssetLabel>
+                <C.HW_AssetMeta numberOfLines={1} noWrap>{asset.semanticKind ?? asset.sourceKind ?? 'indexed'}</C.HW_AssetMeta>
               </Card>
             );
           })}

@@ -47,17 +47,17 @@ export default function MaterialControls({
       </C.HW_StatGrid>
       <C.HW_ToolRow>
         <C.HW_ToolLabel>recipe</C.HW_ToolLabel>
-        <C.HW_ToolValue>{asset.recipe ?? 'catalog asset'}</C.HW_ToolValue>
+        <C.HW_ToolValue numberOfLines={1} noWrap>{asset.recipe ?? 'catalog asset'}</C.HW_ToolValue>
       </C.HW_ToolRow>
       <C.HW_ToolRow>
         <C.HW_ToolLabel>source</C.HW_ToolLabel>
-        <C.HW_ToolValue>{asset.sourceKind ?? 'indexed'}</C.HW_ToolValue>
+        <C.HW_ToolValue numberOfLines={1} noWrap>{asset.sourceKind ?? 'indexed'}</C.HW_ToolValue>
       </C.HW_ToolRow>
       <C.HW_SelectedVariants>
         {variants.map((variant, index) => (
           <C.HW_SelectedVariant key={variant} onPress={() => onAction(`${asset.name} variant ${variant}`)}>
             <C.HW_SelectedVariantSwatch style={{ backgroundColor: variantColor(asset, index) }} />
-            <C.HW_ToolValue>{variant}</C.HW_ToolValue>
+            <C.HW_ToolValue numberOfLines={1} noWrap>{variant}</C.HW_ToolValue>
             <C.HW_ToolHint>{index === 0 ? 'default' : index === 1 ? 'alt' : 'override'}</C.HW_ToolHint>
           </C.HW_SelectedVariant>
         ))}
@@ -74,7 +74,7 @@ export default function MaterialControls({
       </C.HW_ToolRow>
       <C.HW_ToolRow>
         <C.HW_ToolLabel>bank</C.HW_ToolLabel>
-        <C.HW_ToolValue>{asset.favorite ? 'pinned' : asset.recent ? 'recent' : asset.semanticKind ?? 'indexed'}</C.HW_ToolValue>
+        <C.HW_ToolValue numberOfLines={1} noWrap>{asset.favorite ? 'pinned' : asset.recent ? 'recent' : asset.semanticKind ?? 'indexed'}</C.HW_ToolValue>
         <C.HW_Spacer />
         <C.HW_ToolHint>no route change</C.HW_ToolHint>
       </C.HW_ToolRow>
