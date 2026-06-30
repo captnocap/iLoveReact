@@ -1,24 +1,10 @@
-import { useEffect } from 'react';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
-import { StudioEditor } from '../../hmsc-int/editors/model/studiokit';
-import { studioOpenModel } from '../../hmsc-int/editors/model/studioModel';
 import ModelView from '../../modelview';
 import { cookedMeshBlobData } from '../data/hmscAssetCatalog';
 
-function studioModelId(model: ModelPackage): string | null {
-  return model.sourceKind === 'studio-model' && model.id.startsWith('studio:')
-    ? model.id.slice('studio:'.length)
-    : null;
-}
-
 export default function ModelDocumentSurface({ model }: { model: ModelPackage | null }) {
-  const openId = model ? studioModelId(model) : null;
-  useEffect(() => {
-    if (openId) studioOpenModel(openId);
-  }, [openId]);
-
   if (!model) {
     return (
       <C.HW_ModelDocument>
@@ -26,14 +12,6 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
           <Icon name="SearchX" size={18} color={accentFor('textFaint')} />
           <C.HW_StageSocketTitle>MODEL NOT FOUND</C.HW_StageSocketTitle>
         </C.HW_ModelDocEmpty>
-      </C.HW_ModelDocument>
-    );
-  }
-
-  if (openId) {
-    return (
-      <C.HW_ModelDocument>
-        <StudioEditor />
       </C.HW_ModelDocument>
     );
   }
