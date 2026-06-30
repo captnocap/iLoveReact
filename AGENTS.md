@@ -157,7 +157,6 @@ class appearing after your change is an automatic FAIL of that change.
 
 ## Discipline Rules
 
-- **No subagents.** Do everything inline. The `Agent` / `Explore` tools go blind to supervisor context.
 - **No `git add -A` / `git commit -a`.** Stage explicitly: `git add <specific-path>`. Other workers have in-flight changes.
 - **Commit per file or per logical unit.** Conventional commit messages: `feat: ...`, `fix: ...`, `refactor: ...`.
 - **Main only, no branches.** Safe commands: `git add`, `git commit`, `git push`, `git status`, `git log`, `git diff`. Never `git checkout`, `git stash`, `git reset --hard`, `git branch`, `git switch`.

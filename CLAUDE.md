@@ -4,8 +4,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Claude-Code Specific Warnings
 
-**Task tool is forbidden.** Do not use the `Agent` / `Explore` / `Task` tools. They go blind to supervisor context and have produced materially false reports in this repo (e.g., claimed frozen `tsz/` had `.map()` when it did not; ~57% false-claim rate on prior audits). Read files directly with Read / Grep / Glob / Bash. Treat "does this exist?" as source verification, not delegation.
-
 **Memory persistence:** Claude Code's memory system lives at `~/.claude-overflow/projects/<project-name>/memory/`. Session hints are written to `session-env task.json` for inter-session continuity. If you need to leave a breadcrumb for the next session, write it there.
 
 **This repo uses the supervisor + worker pattern.** Multiple agent sessions run in parallel across kitty terminal panes. The supervisor pane orchestrates workers. If `git status` is unexpectedly clean, run `git log --oneline -5` ONCE — another you committed it. Move on. Do not loop on `git status`.
@@ -33,22 +31,6 @@ Do not build new features on `qjs_app.zig` or QJS bindings. QJS is maintenance-o
 
 ---
 
-# HARD RULE: DO NOT USE EXPLORE IN THIS REPOSITORY
-
-For feature verification, compiler capability checks, and architecture comparisons:
-- NEVER invoke the built-in Explore agent.
-- Read files directly with Read / Grep / Glob / Bash.
-- Treat "does this exist?" and "what is missing?" as source-verification tasks.
-
-Measured evidence:
-- Direct Opus read: ~1m13s, correct result
-- Explore-agent path: ~3m46s, incorrect result
-- Explore has produced materially false feature reports here
-
-Why: this repo contains a custom compiler, DSL, and runtime not represented in training data. Explore summaries are less reliable than direct source inspection.
-
----
-
 # HARD RULE: BANNED SHELL COMMANDS (SESSION-KILL PREVENTION)
 
 On 2026-04-22 a worker ran something that logged the user out of their entire desktop session and killed all 14 parallel worker panes. Recovery took hours. The following must never appear in any worker Bash call, `__exec`, or script:
@@ -71,12 +53,6 @@ To stop a specific known PID use `kill <PID>` with the exact numeric PID. Never 
 # HARD RULE: NO SELF-MATCHING PGREP POLLS
 
 Do not write `until ! pgrep -f "zig build ..."; do sleep 3; done`-style wait loops. `pgrep -f` finds the *current polling shell* whose command line contains the search string — that's a self-matching deadlock. `tools/rjit ship` already has internal flock serialization (the same `.zig-cache/.ship.lock` the legacy `scripts/ship` holds, so all build paths queue against each other); call it directly and let it queue.
-
----
-
-# HARD RULE: NO SUBAGENTS, NO `-A`
-
-No Task / Agent / Explore tool calls. Supervisor goes blind when a worker spawns a subagent. Do all work yourself in your own context. When committing, stage files by name — never `git add -A` or `git add .` (both catch unrelated working-tree state from other workers).
 
 ---
 
