@@ -16,6 +16,7 @@ const layout = @import("../layout.zig");
 const effect_assemble = @import("effect_assemble.zig");
 const static_instance_policy = @import("static_instance_policy.zig");
 const model_paint = @import("model_paint.zig");
+const mesh_edit = @import("mesh_edit.zig");
 const Node = layout.Node;
 
 // ════════════════════════════════════════════════════════════════════════
@@ -413,6 +414,39 @@ var g_paint_probed: bool = false; // RJIT_PAINTPROBE one-shot guard
 /// it. Called by the load door before stashing.
 pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
     model_paint.setTarget(hashKey(key), verts, count);
+    mesh_edit.reset(); // topology changed (load or quality re-mesh) → rebuild lazily
+}
+
+// ── Mesh-element selection (the host-native editor surface) ───────────────────────
+/// Set the selection mode: 0 none, 1 vertex, 2 edge, 3 face. Out-of-range → none.
+pub fn meshEditSetMode(m: u8) void {
+    mesh_edit.setMode(switch (m) {
+        1 => .vertex,
+        2 => .edge,
+        3 => .face,
+        else => .none,
+    });
+}
+/// Pick the element under (mx,my) in the current mode (additive = shift toggle/extend),
+/// fold it into the selection, and repaint. Returns the new selected count, -1 if no mesh.
+pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
+    if (!model_paint.hasTarget()) return -1;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    return mesh_edit.pick(cam, g_paint_vp_w, g_paint_vp_h, mx, my, additive);
+}
+pub fn meshEditClear() void {
+    mesh_edit.clearSelection();
+}
+/// Select a face by index (no raycast) — programmatic / headless. Returns true on success.
+pub fn meshEditSelectFace(idx: u32, additive: bool) bool {
+    return mesh_edit.selectFaceByIndex(idx, additive);
+}
+pub fn meshEditReset() void {
+    mesh_edit.reset();
+}
+/// Topology + selection counts for the HUD: {mode, verts, edges, selected-in-mode}.
+pub fn meshEditCounts() [4]u32 {
+    return .{ @intFromEnum(mesh_edit.mode()), mesh_edit.vertCount(), mesh_edit.edgeCount(), mesh_edit.selCount() };
 }
 
 /// Paint the face under viewport pixel (mx,my) the given colour, using the last-drawn

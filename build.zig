@@ -787,6 +787,31 @@ pub fn build(b: *std.Build) void {
     const v8_cli_step = b.step("v8-cli", "Build standalone V8 script host (zig-out/bin/v8cli)");
     v8_cli_step.dependOn(&b.addInstallArtifact(v8_cli_exe, .{}).step);
 
+    // ── hmsc parity compiler (req_2125) ─────────────────────────
+    // Pure Zig writer for the platform game-file parity benchmark. No V8, no
+    // SDL, no app substrate: it reads a deterministic source spec and emits the
+    // same RJMP/gamefile bytes as the TS workspace writer.
+    const world_gamefile_writer_mod = b.createModule(.{
+        .root_source_file = b.path("framework/world/gamefile_writer.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const hmsc_parity_mod = b.createModule(.{
+        .root_source_file = b.path("framework/tools/hmsc_parity_compile.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    hmsc_parity_mod.addImport("world_gamefile_writer", world_gamefile_writer_mod);
+    const hmsc_parity_exe = b.addExecutable(.{
+        .name = "hmsc_parity_compile",
+        .root_module = hmsc_parity_mod,
+    });
+    hmsc_parity_exe.linkLibC();
+    const hmsc_parity_step = b.step("hmsc-parity-compiler", "Build the hmsc Zig game-file parity compiler");
+    hmsc_parity_step.dependOn(&b.addInstallArtifact(hmsc_parity_exe, .{}).step);
+
     // ── tui-app: DELETED (C3) ────────────────────────────────────
     // The dedicated tui-app build target + v8_tui_app.zig entry point
     // were retired once v8_app.zig grew a runHeadless() branch behind
@@ -960,6 +985,21 @@ pub fn build(b: *std.Build) void {
     const run_model_paint_test = b.addRunArtifact(model_paint_test);
     const model_paint_test_step = b.step("test-model-paint", "Run the model-paint raycast/atlas unit tests");
     model_paint_test_step.dependOn(&run_model_paint_test.step);
+
+    // ── mesh edit (welded topology + vertex/edge/face selection) unit tests ───
+    const mesh_edit_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_edit.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_edit_test = b.addTest(.{
+        .name = "mesh-edit-test",
+        .root_module = mesh_edit_test_mod,
+    });
+    const run_mesh_edit_test = b.addRunArtifact(mesh_edit_test);
+    const mesh_edit_test_step = b.step("test-mesh-edit", "Run the mesh-edit welding/selection unit tests");
+    mesh_edit_test_step.dependOn(&run_mesh_edit_test.step);
 
     // ── GPU attribution unit tests ──────────────────────────────
     // Exercises native text/capture attribution producers without going
@@ -1137,6 +1177,26 @@ pub fn build(b: *std.Build) void {
     run_world_gamefile_test.setCwd(b.path("."));
     const world_gamefile_test_step = b.step("test-world-gamefile", "Run the platform game-file reader + content store tests");
     world_gamefile_test_step.dependOn(&run_world_gamefile_test.step);
+
+    // ── Platform game-file writer behavior tests (req_2125) ─────
+    // Exercises the Zig writer added for TS/Zig compile parity. The writer emits
+    // a real game-file and the existing reader ingests it, proving this is the
+    // same platform wire format rather than a parallel test-only blob.
+    const world_gamefile_writer_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_gamefile_writer.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    world_gamefile_writer_test_mod.addImport("world_gamefile_writer", world_gamefile_writer_mod);
+    world_gamefile_writer_test_mod.addImport("world_gamefile", world_gamefile_mod_for_tests);
+    const world_gamefile_writer_test = b.addTest(.{
+        .name = "world-gamefile-writer-test",
+        .root_module = world_gamefile_writer_test_mod,
+    });
+    const run_world_gamefile_writer_test = b.addRunArtifact(world_gamefile_writer_test);
+    const world_gamefile_writer_test_step = b.step("test-world-gamefile-writer", "Run the platform game-file writer tests");
+    world_gamefile_writer_test_step.dependOn(&run_world_gamefile_writer_test.step);
 
     // ── Key-packing behavior tests (GAME_INPUT hazard close, P4) ──────
     // Exercises framework/key_pack.zig — the one (mod << 32 | sym) key

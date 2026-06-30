@@ -189,6 +189,42 @@ pub fn applyColors(colors: []const u8) void {
     if (g_atlas_h > 0) markRows(0, g_atlas_h - 1);
 }
 
+/// The current colour of one face's atlas texel, or null if no target / out of range.
+/// Lets the selection layer SAVE a face's base colour before tinting it as "selected",
+/// then restore it on deselect — selection rides this same atlas, no second texture.
+pub fn faceColor(face: u32) ?[4]u8 {
+    const buf = g_rgba orelse return null;
+    if (face >= g_facecount) return null;
+    const tx = face % g_atlas_w;
+    const ty = face / g_atlas_w;
+    const d = (@as(usize, ty) * g_atlas_w + tx) * 4;
+    return .{ buf[d], buf[d + 1], buf[d + 2], buf[d + 3] };
+}
+
+/// The CPU triangle positions (facecount*9 f32: 3 verts xyz per face), or null. The
+/// selection layer welds these into vertices/edges; the same array the raycast uses.
+pub fn positions() ?[]const f32 {
+    return g_positions;
+}
+
+/// Project a world point to viewport pixel (x,y), or null if behind the camera. The exact
+/// inverse of cameraRay (same fov/aspect/basis), so a vertex projects to the pixel its
+/// raycast would shoot back through — screen-nearest vertex/edge picking with zero drift.
+pub fn project(cam: Camera, vp_w: f32, vp_h: f32, p: [3]f32) ?[2]f32 {
+    if (vp_w <= 0 or vp_h <= 0) return null;
+    const forward = norm(sub(cam.target, cam.eye));
+    const right = norm(cross(forward, .{ 0, 1, 0 }));
+    const up = cross(right, forward);
+    const rel = sub(p, cam.eye);
+    const z = dot(rel, forward);
+    if (z <= 1e-4) return null; // behind the camera
+    const aspect = vp_w / vp_h;
+    const tan_h = @tan(cam.fov_deg * std.math.pi / 180.0 * 0.5);
+    const ndc_x = (dot(rel, right) / z) / (tan_h * aspect);
+    const ndc_y = (dot(rel, up) / z) / tan_h;
+    return .{ (ndc_x * 0.5 + 0.5) * vp_w, (1.0 - ndc_y) * 0.5 * vp_h };
+}
+
 pub const Atlas = struct { rgba: []const u8, w: u32, h: u32 };
 
 /// The live diffuse-texture bytes for the active target, or null if none. Always

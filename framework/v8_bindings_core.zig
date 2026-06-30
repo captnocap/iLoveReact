@@ -388,6 +388,59 @@ fn hostModelFocusAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __mesh_edit_mode(m) — set the selection mode: 0 none, 1 vertex, 2 edge, 3 face. The
+/// host-native counterpart to the Studio's JS mode toolbar; selection lives in the host.
+fn hostMeshEditMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const m: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 3));
+    scene3d.meshEditSetMode(m);
+    state.markDirty();
+}
+
+/// __mesh_edit_pick(x, y, additive) → selected count. Pick the element under the pixel in
+/// the current mode and fold it in (additive≠0 = shift toggle/extend). Returns the new
+/// selected count in this mode, or -1 if there's no mesh. Repaints (face tint).
+fn hostMeshEditPick(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const additive = (argToI32(info, 2) orelse 0) != 0;
+    const n = scene3d.meshEditPick(x, y, additive);
+    state.markDirty();
+    setReturnNumber(info, @floatFromInt(n));
+}
+
+/// __mesh_edit_clear() — drop the current selection (and its face tint).
+fn hostMeshEditClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    _ = info;
+    scene3d.meshEditClear();
+    state.markDirty();
+}
+
+/// __mesh_edit_select_face(idx, additive) → bool. Select a face by index (no raycast) —
+/// programmatic selection (select-all / scripting) and the headless highlight proof.
+fn hostMeshEditSelectFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const idx: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const additive = (argToI32(info, 1) orelse 0) != 0;
+    const ok = scene3d.meshEditSelectFace(idx, additive);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __mesh_edit_counts() → JSON {"mode","verts","edges","sel"} for the HUD.
+fn hostMeshEditCounts(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const cn = scene3d.meshEditCounts();
+    var buf: [128]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"mode\":{d},\"verts\":{d},\"edges\":{d},\"sel\":{d}}}", .{ cn[0], cn[1], cn[2], cn[3] }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, json);
+}
+
 /// __model_paint_at(x, y, r, g, b) → bool. Raycast the viewport pixel (x,y) against the
 /// resident model and paint the face it hits with (r,g,b). One call covers both
 /// gestures: a click fills one face, a drag fires this per move. Returns 1 on a hit
@@ -1209,6 +1262,11 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
     v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
     v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
+    v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);
+    v8_runtime.registerHostFn("__mesh_edit_pick", hostMeshEditPick);
+    v8_runtime.registerHostFn("__mesh_edit_clear", hostMeshEditClear);
+    v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);
+    v8_runtime.registerHostFn("__mesh_edit_counts", hostMeshEditCounts);
     v8_runtime.registerHostFn("__model_paint_at", hostModelPaintAt);
     v8_runtime.registerHostFn("__model_paint_face", hostModelPaintFace);
     v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);
