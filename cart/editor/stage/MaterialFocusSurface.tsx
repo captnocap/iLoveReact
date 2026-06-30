@@ -119,7 +119,7 @@ export default function MaterialFocusSurface(props: {
                 </C.HW_ColorSeedButton>
               </C.HW_ColorControlGroup>
               <C.HW_ColorControlGroupWide>
-                <C.HW_KeyText>QUALITY - D[3]</C.HW_KeyText>
+                <C.HW_KeyText>QUALITY - D[{props.state.colorStudioQuality}]</C.HW_KeyText>
                 <C.HW_ColorSegmentTrack>
                   {QUALITY_LABELS.map((label, quality) => {
                     const Btn = quality === props.state.colorStudioQuality ? C.HW_ColorSegmentOn : C.HW_ColorSegment;

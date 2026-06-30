@@ -1,6 +1,8 @@
 import { Icon } from '../../../runtime/icons/Icon';
+import { useTelemetry } from '../../../runtime/hooks/useTelemetry';
 import { C, accentFor } from '../workspace.cls';
 import { activeMenuFor, MENUS } from '../data/commands';
+import { formatMs } from '../data/telemetry';
 import type { Command, Menu, MockState } from '../data/types';
 
 export default function Chrome(props: {
@@ -13,6 +15,8 @@ export default function Chrome(props: {
 }) {
   const undoCount = props.state.history.filter((event) => event.undoable).length;
   const activeMenu = activeMenuFor(props.state);
+  const { data: frame } = useTelemetry<{ app_tick_us?: number }>({ kind: 'frame', pollMs: 500 });
+  const shellMs = frame?.app_tick_us ? frame.app_tick_us / 1000 : 0;
   return (
     <C.HW_Chrome>
       <C.HW_Brand>
@@ -47,7 +51,7 @@ export default function Chrome(props: {
         <Icon name="Download" size={13} color={accentFor('primary')} />
         <C.HW_PillTextOn>Compile</C.HW_PillTextOn>
       </C.HW_Compile>
-      <C.HW_StatusText>shell 0.42s</C.HW_StatusText>
+      <C.HW_StatusText>shell {shellMs > 0 ? formatMs(shellMs) : '—'}</C.HW_StatusText>
     </C.HW_Chrome>
   );
 }

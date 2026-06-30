@@ -2,6 +2,7 @@ import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { commandById } from '../data/commands';
 import { FLOORS, PRESETS, RIGHT_PANES, SNAP_MODES } from '../data/content';
+import { missionCounts, objectMetricRows } from '../data/readouts';
 import type { Asset, MockState, WorldObject } from '../data/types';
 import ReadOnlySection from './ReadOnlySection';
 import PresetSection from './PresetSection';
@@ -17,9 +18,10 @@ export default function Inspector(props: {
   onPresetOption: (preset: string) => void;
 }) {
   const activeCommand = commandById(props.state.activeCommandId);
+  const counts = missionCounts(props.state);
   const pathRows = props.activeObject.kind === 'TILE'
     ? [
-      ['walkable', 'yes'],
+      ['walkable', '—'],
       ['surface preset', props.state.surfacePreset],
       ['floor', FLOORS[props.state.floorIndex]!],
     ]
@@ -36,14 +38,14 @@ export default function Inspector(props: {
       ];
   const visibilityRows = props.activeObject.kind === 'PROP'
     ? [
-      ['occlusion', 'object local'],
-      ['bake', 'prop pass'],
-      ['channel', 'decor'],
+      ['occlusion', '—'],
+      ['bake', '—'],
+      ['channel', props.activeObject.kind.toLowerCase()],
     ]
     : [
-      ['conceal', props.activeObject.kind === 'PIECE' ? '0.34' : '0.12'],
-      ['lightThru', props.activeObject.kind === 'CUTOUT' ? '0.88' : '0.97'],
-      ['soundOcc', props.activeObject.kind === 'PIECE' ? '0.80' : '0.04'],
+      ['conceal', '—'],
+      ['lightThru', '—'],
+      ['soundOcc', '—'],
     ];
   const showMission = props.state.rightPane === 'mission' || activeCommand.menu === 'Story';
   return (
@@ -61,7 +63,7 @@ export default function Inspector(props: {
           <C.HW_Swatch style={{ backgroundColor: props.activeAsset.color }} />
         </C.HW_ObjectHead>
         <C.HW_MetricRow>
-          {props.activeObject.metrics.map(([label, value]) => (
+          {objectMetricRows(props.state, props.activeObject).map(([label, value]) => (
             <C.HW_Metric key={label}>
               <C.HW_MetricValue>{value}</C.HW_MetricValue>
               <C.HW_MetricLabel>{label}</C.HW_MetricLabel>
@@ -83,8 +85,8 @@ export default function Inspector(props: {
             onPreset={props.onPreset}
             onOption={props.onPresetOption}
             rows={[
-              ['actual friction', '0.60'],
-              ['actual speed factor', props.state.surfacePreset === 'fast' ? '1.20' : props.state.surfacePreset === 'slow' ? '0.80' : '1.00'],
+              ['actual friction', '—'],
+              ['actual speed factor', '—'],
             ]}
           />
         ) : null}
@@ -94,9 +96,12 @@ export default function Inspector(props: {
           <MissionSection
             rows={[
               ['in mission', 'editing'],
-              ['spawn on', 'Mission 1'],
-              ['render during', 'Night Raid'],
+              ['trigger volumes', String(counts.triggers)],
+              ['mission points', String(counts.points)],
+              ['active sequence', '—'],
             ]}
+            triggerCount={counts.triggers}
+            pointCount={counts.points}
             onCommand={props.onCommand}
           />
         ) : null}

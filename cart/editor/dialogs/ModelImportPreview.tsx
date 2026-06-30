@@ -6,6 +6,7 @@ export default function ModelImportPreview(props: {
 }) {
   const preview = props.file.preview;
   if (!preview) return null;
+  const measured = '—';
   return (
     <C.HW_FileModelBlock>
       <C.HW_FileModelViewport>
@@ -30,21 +31,21 @@ export default function ModelImportPreview(props: {
       <C.HW_ModelMetaColumn>
         <C.HW_FileMetaGrid>
           <C.HW_StatCell>
-            <C.HW_StatValue>{preview.triangles}</C.HW_StatValue>
+            <C.HW_StatValue>{measured}</C.HW_StatValue>
             <C.HW_StatLabel>triangles</C.HW_StatLabel>
           </C.HW_StatCell>
           <C.HW_StatCell>
-            <C.HW_StatValue>{preview.materials}</C.HW_StatValue>
+            <C.HW_StatValue>{measured}</C.HW_StatValue>
             <C.HW_StatLabel>materials</C.HW_StatLabel>
           </C.HW_StatCell>
           <C.HW_StatCell>
-            <C.HW_StatValue>{preview.upAxis}</C.HW_StatValue>
+            <C.HW_StatValue>{measured}</C.HW_StatValue>
             <C.HW_StatLabel>up axis</C.HW_StatLabel>
           </C.HW_StatCell>
         </C.HW_FileMetaGrid>
         <C.HW_FileMiniRow>
           <C.HW_FileDot />
-          <C.HW_ReadValue>{preview.bounds}</C.HW_ReadValue>
+          <C.HW_ReadValue>bounds {measured}</C.HW_ReadValue>
         </C.HW_FileMiniRow>
         <C.HW_FileMiniRow>
           <C.HW_FileDot />

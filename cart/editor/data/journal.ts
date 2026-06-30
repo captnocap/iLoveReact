@@ -1,12 +1,13 @@
 // editor/data/journal.ts — build-journal notes, bug threads, and active build.
 //
 // Cloned from the hmsc-workspace-mock god-file. Pure data.
+import { deriveBuildNumber, requestNumber } from '../../../runtime/buildjournal';
 import type { BuildNote, BuildThread } from './types';
 
 export const BUILD_NOTES: BuildNote[] = [
   {
     request: 'req_2172',
-    build: '1.0.0.2172',
+    build: deriveBuildNumber('req_2172'),
     title: 'V8 layout validation gate',
     status: 'mocked',
     agent: 'codex',
@@ -15,7 +16,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2171',
-    build: '1.0.0.2171',
+    build: deriveBuildNumber('req_2171'),
     title: 'Workspace reachability checks',
     status: 'mocked',
     agent: 'codex',
@@ -24,7 +25,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2170',
-    build: '1.0.0.2170',
+    build: deriveBuildNumber('req_2170'),
     title: 'Shitty Games platform framing',
     status: 'mocked',
     agent: 'codex',
@@ -33,7 +34,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2169',
-    build: '1.0.0.2169',
+    build: deriveBuildNumber('req_2169'),
     title: 'Color Studio material palette',
     status: 'mocked',
     agent: 'codex',
@@ -42,7 +43,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2168',
-    build: '1.0.0.2168',
+    build: deriveBuildNumber('req_2168'),
     title: 'Model package content browser',
     status: 'mocked',
     agent: 'codex',
@@ -51,7 +52,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2118',
-    build: '1.0.0.2118',
+    build: deriveBuildNumber('req_2118'),
     title: 'Eventbus dock popover',
     status: 'mocked',
     agent: 'codex',
@@ -60,7 +61,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2113',
-    build: '1.0.0.2113',
+    build: deriveBuildNumber('req_2113'),
     title: 'Inspector preset dropdown',
     status: 'mocked',
     agent: 'codex',
@@ -69,7 +70,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2112',
-    build: '1.0.0.2112',
+    build: deriveBuildNumber('req_2112'),
     title: 'Authoring telemetry dock',
     status: 'mocked',
     agent: 'codex',
@@ -78,7 +79,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2111',
-    build: '1.0.0.2111',
+    build: deriveBuildNumber('req_2111'),
     title: 'Fixed material browser pages',
     status: 'mocked',
     agent: 'codex',
@@ -87,7 +88,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2108',
-    build: '1.0.0.2108',
+    build: deriveBuildNumber('req_2108'),
     title: 'Bottom dock and build journal',
     status: 'mocked',
     agent: 'codex',
@@ -96,7 +97,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2107',
-    build: '1.0.0.2107',
+    build: deriveBuildNumber('req_2107'),
     title: 'Concept art absorbed',
     status: 'review',
     agent: 'codex',
@@ -105,7 +106,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2106',
-    build: '1.0.0.2106',
+    build: deriveBuildNumber('req_2106'),
     title: 'Traditional content browser',
     status: 'review',
     agent: 'codex',
@@ -114,7 +115,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2105',
-    build: '1.0.0.2105',
+    build: deriveBuildNumber('req_2105'),
     title: 'Material scale and vertical usage',
     status: 'review',
     agent: 'codex',
@@ -123,7 +124,7 @@ export const BUILD_NOTES: BuildNote[] = [
   },
   {
     request: 'req_2104',
-    build: '1.0.0.2104',
+    build: deriveBuildNumber('req_2104'),
     title: 'Large material catalog',
     status: 'review',
     agent: 'codex',
@@ -177,4 +178,4 @@ export const BUILD_THREADS: BuildThread[] = [
   },
 ];
 
-export const ACTIVE_BUILD = BUILD_NOTES[0]!;
+export const ACTIVE_BUILD = [...BUILD_NOTES].sort((a, b) => requestNumber(b.request) - requestNumber(a.request))[0]!;

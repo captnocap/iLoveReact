@@ -4,6 +4,8 @@ import { C, accentFor } from '../workspace.cls';
 
 export default function MissionSection(props: {
   rows: string[][];
+  triggerCount: number;
+  pointCount: number;
   onCommand: (id: string, source: string) => void;
 }) {
   return (
@@ -22,8 +24,8 @@ export default function MissionSection(props: {
         </C.HW_ReadRow>
       ))}
       <C.HW_ButtonRow>
-        <C.HW_SmallButton onPress={() => props.onCommand('add-trigger', 'inspector')}><C.HW_FormValue>triggers - 2</C.HW_FormValue></C.HW_SmallButton>
-        <C.HW_SmallButton onPress={() => props.onCommand('mission-point', 'inspector')}><C.HW_FormValue>points - 3</C.HW_FormValue></C.HW_SmallButton>
+        <C.HW_SmallButton onPress={() => props.onCommand('add-trigger', 'inspector')}><C.HW_FormValue>triggers - {props.triggerCount}</C.HW_FormValue></C.HW_SmallButton>
+        <C.HW_SmallButton onPress={() => props.onCommand('mission-point', 'inspector')}><C.HW_FormValue>points - {props.pointCount}</C.HW_FormValue></C.HW_SmallButton>
       </C.HW_ButtonRow>
     </C.HW_Section>
   );

@@ -77,6 +77,15 @@ export default function AppFrame() {
       }));
       return;
     }
+    if (command.id === 'compile-rle') {
+      setState((prev) => ({
+        ...prev,
+        openMenu: null,
+        actionMenu: 'File',
+        status: 'compile output unavailable - validation 0/0',
+      }));
+      return;
+    }
 
     setState((prev) => {
       const t0 = Date.now();
@@ -109,7 +118,7 @@ export default function AppFrame() {
           top: 112 + (prev.seq % 4) * 32,
           width: asset.tab === 'Props' ? 42 : 64,
           height: asset.tab === 'Props' ? 30 : 52,
-          metrics: [['snap', SNAP_MODES[prev.snapIndex]!], ['floor', FLOORS[prev.floorIndex]!], ['source', 'mock'], ['bake', 'pending']],
+          metrics: [],
         };
         next = { ...next, objects: [...prev.objects, placed], selectedObjectId: placed.id, cursor: { x: placed.left, y: 0, z: placed.top } };
       } else if (command.id === 'move-selection') {
@@ -137,7 +146,20 @@ export default function AppFrame() {
           objects: prev.objects.map((item) => item.id === object.id ? { ...item, hidden: true } : item),
           selectedObjectId: remaining[0]?.id ?? object.id,
         };
-      } else if (command.id === 'add-trigger' || command.id === 'set-spawn' || command.id === 'mission-point' || command.id === 'author-sequence') {
+      } else if (command.id === 'add-trigger' || command.id === 'mission-point') {
+        const placed: WorldObject = {
+          id: `obj-${prev.seq}`,
+          kind: command.id === 'add-trigger' ? 'TRIGGER' : 'MISSION_POINT',
+          name: command.id === 'add-trigger' ? 'Trigger Volume' : 'Mission Point',
+          assetId: object.assetId,
+          left: object.left + 24,
+          top: object.top + 18,
+          width: command.id === 'add-trigger' ? 56 : 24,
+          height: command.id === 'add-trigger' ? 40 : 24,
+          metrics: [],
+        };
+        next = { ...next, rightPane: 'mission', objects: [...prev.objects, placed], selectedObjectId: placed.id, cursor: { x: placed.left, y: prev.floorIndex, z: placed.top } };
+      } else if (command.id === 'set-spawn' || command.id === 'author-sequence') {
         next = { ...next, rightPane: 'mission' };
       } else if (command.id === 'show-pipeline') {
         next = { ...next, activeDomain: 'pipeline', rightPane: 'routes' };
@@ -155,7 +177,7 @@ export default function AppFrame() {
   const undoLocal = () => {
     setState((prev) => {
       const event = prev.history.find((item) => item.undoable);
-      if (!event) return { ...prev, status: 'nothing undoable in mock history' };
+      if (!event) return { ...prev, status: 'nothing undoable in local history' };
       return {
         ...prev,
         history: prev.history.filter((item) => item.id !== event.id),
@@ -168,7 +190,7 @@ export default function AppFrame() {
   const redoLocal = () => {
     setState((prev) => {
       const [event, ...rest] = prev.redo;
-      if (!event) return { ...prev, status: 'nothing to redo in mock history' };
+      if (!event) return { ...prev, status: 'nothing to redo in local history' };
       return {
         ...prev,
         history: [event, ...prev.history].slice(0, 8),
@@ -358,7 +380,7 @@ export default function AppFrame() {
     setState((prev) => ({
       ...prev,
       colorStudioQuality: quality,
-      status: `Color Studio quality D[3]: ${QUALITY_LABELS[quality] ?? quality}`,
+      status: `Color Studio quality D[${quality}]: ${QUALITY_LABELS[quality] ?? quality}`,
     }));
   };
 

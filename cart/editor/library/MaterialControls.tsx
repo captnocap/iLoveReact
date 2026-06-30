@@ -17,6 +17,7 @@ export default function MaterialControls({
   onRename: (assetId: string, name: string) => void;
 }) {
   const variants = asset.variants ?? ['v0', 'v1', 'v2'];
+  const seed = asset.seed ?? 0;
   return (
     <C.HW_ToolPanel>
       <C.HW_GroupTitle>
@@ -58,13 +59,13 @@ export default function MaterialControls({
       </C.HW_SelectedVariants>
       <C.HW_ToolRow>
         <C.HW_ToolLabel>seed</C.HW_ToolLabel>
-        <C.HW_MiniBar><C.HW_MiniFill style={{ width: `${Math.max(18, (asset.seed ?? 80) % 100)}%` }} /></C.HW_MiniBar>
-        <C.HW_ToolValue>{asset.seed ?? 80}</C.HW_ToolValue>
+        <C.HW_MiniBar><C.HW_MiniFill style={{ width: `${Math.min(100, Math.max(0, seed % 100))}%` }} /></C.HW_MiniBar>
+        <C.HW_ToolValue>{seed}</C.HW_ToolValue>
       </C.HW_ToolRow>
       <C.HW_ToolRow>
         <C.HW_ToolLabel>detail</C.HW_ToolLabel>
-        <C.HW_MiniBar><C.HW_MiniFill style={{ width: '58%' }} /></C.HW_MiniBar>
-        <C.HW_ToolValue>preview</C.HW_ToolValue>
+        <C.HW_MiniBar><C.HW_MiniFill style={{ width: '0%' }} /></C.HW_MiniBar>
+        <C.HW_ToolValue>—</C.HW_ToolValue>
       </C.HW_ToolRow>
       <C.HW_ToolRow>
         <C.HW_ToolLabel>bank</C.HW_ToolLabel>

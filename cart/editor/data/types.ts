@@ -218,6 +218,8 @@ export type MockState = {
   search: string;
   surfacePreset: string;
   snapIndex: number;
+  snapGridMeters: number;
+  snapAngleDegrees: number;
   floorIndex: number;
   viewMode: ViewMode;
   rightPane: string;
