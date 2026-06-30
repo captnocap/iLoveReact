@@ -1,0 +1,30 @@
+{
+  "id": "req_2006",
+  "at": "2026-06-26T04:28:08.253Z",
+  "origin": "session:7a3a0337",
+  "text": "wSorry, i know that the new map button use to work. so the fact it does not now, is a real problem. why isnt it just giving us a new map ?",
+  "status": "review",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T04:29:04.691Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T21:05:46.358Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "New Map showed the old map for two proven reasons: (1) the 3D loader pane renders the map-independent baked hmsc.gamefile, so a blank new map (verified 6KB on disk) still showed the old baked city until the next bake — fixed by re-baking the now-empty world on New Map so the loader reloads blank; (2) the autosave intermittently serialized the outgoing map's still-mounted canvas into the incoming file (some new maps came out 420KB+ of the old world) — fixed with a workspace-switch guard in useWorkspace that skips the autosave on the stem-change run. Regression traced to f76513e8a deleting the React build pane. Builds clean; awaiting user verification (restart + New Map → ~5s bake → blank loader).",
+  "shas": [
+    "bb6f63de1"
+  ],
+  "resolvedAt": "2026-06-26T21:05:46.357Z"
+}

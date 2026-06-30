@@ -1,0 +1,30 @@
+{
+  "id": "req_1966",
+  "at": "2026-06-26T00:39:57.903Z",
+  "origin": "session:26c62b07",
+  "text": "so then fuck it up to make it right. dont export shit from files if it needs exporting it needs its own component",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:40:45.501Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:50:37.996Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the dead duplicate build pane entirely. The editor had two iso build surfaces — LoaderIsoView (the live native loader pane the user builds in) and IsoAuthor (an older React-drawn twin), switched by a loader/react toggle — and each carried its OWN copy of the drag-paint placement gate, so a fix in one silently failed to reach the other (the whole req_1944→1964 saga). Deleted IsoAuthor.tsx, its loader/react toggle, and the loaderView state; LoaderIsoView is now the single build pane (auto-compile toggle kept, un-gated). Bundle compiles and shrank; no remaining ./IsoAuthor imports. Done together with req_1967 (the extraction). SHA f76513e8a.",
+  "shas": [
+    "f76513e8a"
+  ],
+  "resolvedAt": "2026-06-26T00:50:37.996Z"
+}

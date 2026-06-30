@@ -1,0 +1,30 @@
+{
+  "id": "req_2051",
+  "at": "2026-06-29T01:11:59.786Z",
+  "origin": "session:81cc249f",
+  "text": "hm there is still a problem. i deleted this wall, and put in two window walls. and the editor still shows this wall in place but i cant select it / it doesnt exist [Image #5] but here is what it really is [Image #7]",
+  "status": "review",
+  "sessionId": "81cc249f-ac65-417c-ab3d-cf88107645a8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T01:12:52.140Z",
+      "actor": "opus-loader-del",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T01:18:34.509Z",
+      "actor": "opus-loader-del",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "A deleted wall kept showing in the editor (un-selectable, since it no longer exists in the piece set) while being correct in /compiled. Root cause: walls render and bake LIFTED onto the floor beneath them (liftedWallBaseY / WALLTOP req_1477), so the baked GPU rows sit at the lifted Y — but the live-erase rect was computed from pieceBounds() on the raw STORED y. For a wall resting on a floor, the erase rect's Y window sat below the baked geometry, so the host's center-in-rect Y-test missed those rows and the wall never collapsed. This is a third latent gap (after the empty-baseline and the persistence ones) that the removed per-edit settle bake used to mask by rebaking the file outright. Fix: pieceEraseRect now lifts the piece via liftedWallBaseY before taking bounds (a no-op for props/floors), and the rect's Y floor straddles both the stored and lifted base to absorb float drift; both baseline paths pass the neighbour set so the lift can resolve the supporting floor. Built clean (SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-int). Needs live retest on a rebuilt dev host: delete a wall resting on a floor and confirm it vanishes instantly. NOTE for the user: if the WHITE CURVED shape specifically persists, that may be a separate LIVESKIN issue (an awning/canopy rendering unskinned-white in the live overlay) rather than stale geometry — need confirmation.",
+  "shas": [
+    "c5a165498"
+  ],
+  "resolvedAt": "2026-06-29T01:18:34.509Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2065",
+  "at": "2026-06-29T04:15:59.396Z",
+  "origin": "session:2eacb40b",
+  "text": "all the cars are driving backwards lmao and then they turn the road and disappear",
+  "status": "review",
+  "sessionId": "2eacb40b-8a1e-4c58-a8d4-b7c3ab9f4aea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T04:17:19.404Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T04:26:21.995Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the two traffic bugs the user saw. (1) BACKWARDS: the buildVehicle model's front is -Z (hood + front_lights baked at -halfLength, trunk at +Z), but the loader faced +Z to travel — world_loader.zig stepTraffic now rotates the body heading+180 so the front leads. (2) VANISH AT TURNS: traceFlowCircuit returned OPEN walks (it preferred straight and ran into dead-ends), and an open route teleport-wraps from its end back to a distant start mid-drive; the tracer now closes on the FIRST REVISITED cell (a guaranteed cycle, lead-in tail discarded) and bakeTrafficVehicles takes CLOSED loops only. To keep density with few clean loops, the bake now collects every DISTINCT closed loop by deterministic straight-follow from each seed cell (an rng-explore attempt was tried and reverted — random turning just dead-ends before cycling on this map) and spreads the vehicle count across them round-robin at random phases. Verified: 8/8 P4 traffic tests, rebuilt loader + re-baked + self-shot — 14 varied cars facing forward on the lane-marked streets, no teleport. NOTE: editor loader pane needs 'rjit ship hmsc-int' to pick up the framework change. SHA 4f5feb912.",
+  "shas": [
+    "4f5feb912"
+  ],
+  "resolvedAt": "2026-06-29T04:26:21.995Z"
+}

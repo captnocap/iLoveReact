@@ -1,0 +1,30 @@
+{
+  "id": "req_2063",
+  "at": "2026-06-29T03:41:36.040Z",
+  "origin": "session:ae81d73a",
+  "text": "can you make the rig behave a bit more sane. like the pivot, i can literally move the pivot around, just do the same rather than this aim x y z",
+  "status": "review",
+  "sessionId": "ae81d73a-006a-4c08-abbc-df81d4a7c032",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T03:42:01.640Z",
+      "actor": "ae81",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T03:52:37.602Z",
+      "actor": "ae81",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the light rig behave like the pivot: a light is now a draggable handle in the viewport instead of aim x/y/z number fields (the user's complaint). Each authored light shows a TIP ring you grab to move it (through the exact 3-axis move gizmo the pivot uses) and, for a spot, an AIM ball on a short arrow you drag to point the cone; the numeric tip/aim fields are removed (a one-line 'drag the tip / aim ball' hint replaces them). Implemented by reusing the pivot/joint machinery end to end rather than a parallel path: meshRig.tsx RigSel gained lightTip/lightAim, lightHandles() projects each light's tip+aim to world space, pickRigHandle picks them, RigOverlay draws the ring (in the light's colour) + aim arrow/ball + label; StudioViewport rigLocalPos/commitRig handle the light kinds (tip->position, aim->normalized dir), the overlay-prep patches the dragged light live so it tracks the cursor, and the move-gizmo anchor + pick + delete-key all route through the existing rigSel path; selectedLightId is now DERIVED from rigSel so the gizmo and side panel can never disagree; helpers.sameRigSel compares light ids. Bundles + ships clean (one transient parallel-build imageops mismatch cleared on a rebuild). The Studio editor can't be headlessly screenshotted (known OOM), so live verification is rjit dev hmsc-int -> rig mode -> + light, then drag the tip/aim. Committed 3fe6aaba7.",
+  "shas": [
+    "3fe6aaba7"
+  ],
+  "resolvedAt": "2026-06-29T03:52:37.602Z"
+}

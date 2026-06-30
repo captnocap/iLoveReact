@@ -1,0 +1,31 @@
+{
+  "id": "req_1906",
+  "at": "2026-06-25T21:12:49.320Z",
+  "origin": "session:4f39ae52",
+  "text": "so. this is how i think you need to do it. first, identify that this is a convuluted set of shit. we have floor, wall, ramp, roof, stairs, elevator, pillar, prop, prefabs, water, tower. this is a shit show supreme. what your going to do is start by decoupling building pieces from props. i want there to be a completely seperate section that holds the building tools because they compliment one another but they are not the same thing after that, and we are left with just prop to start with, prop then has nature, trees (? last i checked trees are nature), rocks (lol) street, signs, furniture, household, media, commerece, junkyard, sport, park, shops (?) imported and studio. and before we even go into then whats the breakdown inside of those which is actually comical we can first start here. seperate these things first",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T21:13:15.037Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T21:16:52.673Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Step one of untangling the catalog rail: decoupled BUILD pieces from PROPS. The rail (IsoAuthor.tsx CatalogRail) previously listed 'prop' as one more tab in the same row as floor/wall/ramp/roof/stairs/elevator/pillar/prefabs/water/tower, so reaching the prop catalog meant navigating a building toolbar — two unrelated activities in one junk drawer. Now CatalogRail opens with a top-level SECTION toggle (BUILD | PROPS) as the first choice: BUILD holds the structural piece tabs + prefabs + tower + water and its pill entry list; PROPS holds the picture browser (PropBrowser) directly. 'prop' is removed from BUILD_TABS; a stale 'prop' route-twig coerces to 'wall' so the old saved state can't strand the build section empty. Water rides with BUILD for now (environmental world-building, not a prop) — flagged for the next pass. Dropped the now-dead propShelf state + unused prop-category/cooked imports in CatalogRail. The inner prop-category breakdown (nature/trees/rocks/street/signs/furniture/household/media/commerce/junkyard/sport/park/shops/imported/studio) is deliberately untouched — that is the explicitly-deferred next step. Built clean via SHIP_RUN_PACKAGE=0 rjit ship hmsc-int; CatalogRail signature unchanged so the LoaderIsoView + index mount sites are unaffected. Also moved on this turn: req_1901 thumbnail framing (real measured AABB) — commit 0c1353c8c. Needs a live rjit dev look to confirm the BUILD/PROPS toggle feels right before tackling the prop-category breakdown.",
+  "shas": [
+    "a33c02795",
+    "0c1353c8c"
+  ],
+  "resolvedAt": "2026-06-25T21:16:52.673Z"
+}

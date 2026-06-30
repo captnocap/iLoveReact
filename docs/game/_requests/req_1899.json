@@ -1,0 +1,30 @@
+{
+  "id": "req_1899",
+  "at": "2026-06-25T20:03:13.282Z",
+  "origin": "session:4f39ae52",
+  "text": "ok pay attention im only going to do it once because its annoying ash to fix. but so in the mesh editor, you can merge layers. ok lets see wwhat happens when we merge layers you can see i have 3 layers here. so lets merge the pipe to the door leaf [Image #1] \n\n[Image #2] and now we are here. what the hell is that",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T20:03:27.436Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T20:06:45.676Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed merge-layers corrupting geometry in the Studio mesh editor. Root cause: studioModel.mergeDown welded the source part's verts into the target mesh with a ZERO delta, but every part renders at its own per-part 'lift' (a Y offset seating its lowest vert on the ground; studioModel render uses position:[0,part.lift,0]). When two independently-seated parts merge — the user's floating Pipe into the grounded Door Leaf — the merged mesh keeps the target's lift, so the source verts were displaced by (target.lift - src.lift), producing the stretched/distorted result. Fix: offset the welded verts by (src.lift - target.lift) so they keep the exact world Y they rendered at before the weld. The prior zero-delta only worked for detached panels (which inherit the body's lift). Built clean via SHIP_RUN_PACKAGE=0 rjit ship hmsc-int. Needs a live rjit dev confirm that merging the 3 layers now keeps the pipe in place.",
+  "shas": [
+    "021b17ccb"
+  ],
+  "resolvedAt": "2026-06-25T20:06:45.676Z"
+}

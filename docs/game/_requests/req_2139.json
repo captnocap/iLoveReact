@@ -1,0 +1,30 @@
+{
+  "id": "req_2139",
+  "at": "2026-06-30T06:21:38.289Z",
+  "origin": "session:47bb26c9",
+  "text": "ok yeah glad i asked then now about that decimate and carry paint approach, yes, lets get that feature in now since it will save us so much time in the long run",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T07:02:52.354Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T07:02:52.363Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built paint-carries-through-decimation: paint is resolution-independent now. The authoritative per-face paint lives at full-res (g_source_colors); every quality level is a projection of it, so lowering quality keeps the paint and any baked LoD inherits it. mesh_import.decimateExpanded returns face_to_source[] (each decimated face -> its source face; unit-tested); painting any displayed face writes back to the source via the current map (writeSourceColor, in both paint_at and paint_face); __model_set_quality re-decimates and derives the new mesh's colours from the source through the new map (applyPaintColors/applyColors), storing the map; paintAt returns the hit face for write-back; DEFAULT_FACE exported. Proven: rainbow-paint the tree at 4,612 tris then decimate to 384 keeps the colours (shots/modelview_carry.png). Limitation: painting at LOW quality only writes the representative source face per cluster (sparse when raised); paint-at-detail-then-drop carries fully. Committed 1408b9ec5.",
+  "shas": [
+    "1408b9ec5"
+  ],
+  "resolvedAt": "2026-06-30T07:02:52.363Z"
+}

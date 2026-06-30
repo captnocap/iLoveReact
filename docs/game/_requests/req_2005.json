@@ -1,0 +1,18 @@
+{
+  "id": "req_2005",
+  "at": "2026-06-26T04:26:23.654Z",
+  "origin": "session:a3e16cb4",
+  "text": "Lets do this instead, inside of the tile map painter, i will use the actual edge tiles of my authored map to place a tile that can declare what i want the skybox void to be in that adjacent direction. so i can for example, make a road, the last tile on the end is a void_road tile, which says from here into the void will be the continuation of this road. or i can put a water void tile, or a grass void tile. that should give some amount of coherency. now, the void tile, still needs to also be a real tile so there isnt some weird small gap at the ends before it steps into the void",
+  "status": "doing",
+  "sessionId": "a3e16cb4-c3df-491f-965f-1cf28de4ce4b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T04:27:50.218Z",
+      "actor": "a3e1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

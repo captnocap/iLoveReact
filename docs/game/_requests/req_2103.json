@@ -1,0 +1,30 @@
+{
+  "id": "req_2103",
+  "at": "2026-06-30T03:26:20.203Z",
+  "origin": "session:47bb26c9",
+  "text": "hey i want you to make me a zig-based obj/glb loader that doesnt have to handle a fk load of data back and forth from react. just load up the model one time and crisp butter smooth viewing is the mvp. drop in a model to view would be hot. lets do it",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T03:26:28.763Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T03:50:40.571Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built a native GLB/OBJ model viewer: drop a file and view it crisp + butter-smooth, with zero geometry crossing the JS bridge (the explicit contrast with the Studio's importMesh.ts EditMesh round-trip). New framework/world/mesh_import.zig parses GLB v2 (node TRS, merged meshes) + Wavefront OBJ into non-indexed interleaved verts + bbox (headless unit tests, verified on real car.obj/Desk.glb/tree.obj). gpu/3d.zig gained a host mesh stash + lazy intern-on-first-draw (geometry resolves by intern key alone, no React verts) and a native orbit camera so moving the view never re-renders the cart. Doors __mesh_load_file/__model_orbit_drag/__model_orbit_zoom parse+upload once and feed the host orbit state via markDirty. Scene3D.Camera orbit + Scene3D.Mesh hostKey props; cart/modelview.tsx (drop, or RJIT_MODEL=path to open from CLI). Self-shot verified all three formats render and auto-frame.",
+  "shas": [
+    "eb22e71a6"
+  ],
+  "resolvedAt": "2026-06-30T03:50:40.571Z"
+}

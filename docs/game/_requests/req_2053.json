@@ -1,0 +1,30 @@
+{
+  "id": "req_2053",
+  "at": "2026-06-29T01:29:18.814Z",
+  "origin": "session:d00df27f",
+  "text": "in the editor i need to have disable wall so i can edit inside of them, we had this before in the js editor just never made it over",
+  "status": "review",
+  "sessionId": "d00df27f-d7b3-480d-a796-dfc75c67193b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T01:29:29.157Z",
+      "actor": "d00d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T02:03:20.261Z",
+      "actor": "d00d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ported the JS editor's 'disable walls' into the native build pane (LoaderIsoView/world_loader), since the old React IsoAuthor view was deleted and the loader had lowered walls to indistinguishable boxes. Bake now tags wall-piece rows in a new WALL_FLAGS lump parallel to INSTANCES (worldGeometry+packageMap, constructor decodes to scene.wall_flags); the loader stamps a sentinel into the GPU-dead post-batch shape slot of wall rows and a new applyWallHide (mirror of applyDirtyErase) collapses just those rows live, no rebake, in both the monolithic and streaming paths. New door __compiled_world_set_hide_walls + a persisted WALLS toggle in the build pane (index.tsx via LoaderIsoView), which also drops wall pieces from the live overlay. Verified: worldGeometry/worldParity/worldColliders suites green incl. 2 new wall-flag tests; gamefile bakes the lump and the native loader renders it GREEN; RJIT_HIDE_WALLS=1 game shot proves walls vanish while floors/props/terrain stay. Live editor-button visual check needs rjit dev (editor pane can't be headless-captured; desktop capture banned).",
+  "shas": [
+    "2eec86601"
+  ],
+  "resolvedAt": "2026-06-29T02:03:20.260Z"
+}

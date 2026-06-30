@@ -1,0 +1,30 @@
+{
+  "id": "req_1963",
+  "at": "2026-06-26T00:35:04.401Z",
+  "origin": "session:26c62b07",
+  "text": "i do not see a paint dbg. are you sure we are looking at the same editor ?",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:35:37.988Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:37:52.922Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User reported no [paintdbg] log appeared on press — proof the IsoAuthor handler I'd instrumented wasn't the one firing. Traced the editor mount (index.tsx): both LoaderIsoView (live loader pane, the primary build surface) and IsoAuthor (React authoring twin) are mounted, and EACH has its own private drag-paint gate. The user places in LoaderIsoView, whose paintKindOf still read the raw 'prop' kind. Identified this as the surface to fix; done in req_1964.",
+  "shas": [
+    "950d8fa4e"
+  ],
+  "resolvedAt": "2026-06-26T00:37:52.922Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2040",
+  "at": "2026-06-28T21:32:58.670Z",
+  "origin": "session:787673f5",
+  "text": "the floor covers it thats not the problem in discussion the problem is that at a certain camera angle you can clearly see the green meaning the building is not even touching the ground",
+  "status": "review",
+  "sessionId": "787673f5-328a-497f-aadb-debe8e93eb92",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T21:48:26.977Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T21:48:26.985Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Continuation of the floors-float-above-ground investigation (req_2024). Confirmed via measurement: floors store at y=0 over height-0 ground (numerically coincident), and the only geometric gap is the 12mm faceSlabLift in pieceShapes.ts plateShapes which lifted the floor's solid core+sides off the ground with a disconnected bottom plate dangling below. Commit 1ba22d852 makes the solid core span from piece.y up so the slab's sides reach the ground — at a ~5deg grazing angle a 12mm under-edge gap exposes ~5in of green behind it, matching the report. Rejected the 'flush-top' tangent (user correctly pointed out a larger floor on top already covers the grass; the issue is the floor not touching the ground, i.e. the under-edge gap). Could not reproduce the exact grazing view headlessly (self-shot camera only frames a wide overview, not a ground-level angle); crafted-session repro baked 0 floors because pieces load from the world stream store, not the session file. Fix is in the bake, so editor loader pane + /compiled show it only after a re-Compile/re-bake of the map (their current view is a stale pre-fix gamefile). Asked the user to re-Compile and verify, or name the test map so its floor Y vs ground height can be read directly if a larger offset remains.",
+  "shas": [
+    "1ba22d852"
+  ],
+  "resolvedAt": "2026-06-28T21:48:26.985Z"
+}

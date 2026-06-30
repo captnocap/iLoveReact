@@ -1,0 +1,30 @@
+{
+  "id": "req_1857",
+  "at": "2026-06-25T07:52:43.401Z",
+  "origin": "session:6ff945f5",
+  "text": "looks all good to me as far as i can see. nice shit so uh, floors. like, floor levels, so i can go up in levels and build. do that",
+  "status": "review",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T07:53:00.270Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T07:59:03.275Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added floor-level controls to the loader iso pane so the user can go up a storey and build on it. The IsoStage already modeled build levels (pose.level: camera target + pick plane rise with it, placeGroundAt lands pieces on the active floor's slab at level*METERS_PER_LEVEL) — the loader pane just had no way to change level. Added: a ▼/Floor N/▲ HUD control pinned top-left (above the pointer-capture layer so its buttons take clicks) + keys ]/PageUp (up) and [/PageDown (down); changeLevel calls stage.setLevel (clamps at ground), mirrors the level into state for the HUD, pushes the new camera so the view follows the floor up, and re-resolves the armed ghost in place. Placement + live preview were already level-aware, so building on an upper floor lands and previews live with no further wiring. TSX-only, hot-reloads. Committed 35d6a1961. NOTE: separately flagged a V8 heap OOM in the dev host on this massive map (892k instances) aggravated by hot reloads + my full-map live-skin scans; proposed a persisted-baseline fix, awaiting the user's go-ahead.",
+  "shas": [
+    "35d6a1961"
+  ],
+  "resolvedAt": "2026-06-25T07:59:03.275Z"
+}

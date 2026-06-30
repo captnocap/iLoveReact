@@ -1,0 +1,30 @@
+{
+  "id": "req_1971",
+  "at": "2026-06-26T01:05:51.921Z",
+  "origin": "session:67264656",
+  "text": "re(2).png') shipped no asset (empty/unreadable src at bake) — MISSING checkerboard\n[js.warn] [edit-latency] place   total ~ 525ms = pre  243 [commit 0 + rerender 243 (shell 243 {body 0 + kids 243} + loaderPane 0)] + scans    0 + push    0 + host-block  282  | host DOMINANT=other tick 0.0 paint 17.0 gpu 2.9 | nodes 7992 inst 6306 draws 771 meshes 6306  | re-rendered: Chrome,PropertiesPanel,RightPanel,CatalogRail\n[js.warn] [edit-latency] place   total ~ 459ms = pre  163 [commit 0 + rerender 163 (shell 163 {body 0 + kids 163} + loaderPane 0)] + scans    0 + push    0 + host-block  296  | host DOMINANT=other tick 0.0 paint 29.0 gpu 2.9 | nodes 7992 inst 6309 draws 771 meshes 6309  | re-rendered: Chrome,RightPanel\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=3 delayMs=1336.75 ms=98.39\n[js.warn] [edit-latency] place   total ~ 566ms = pre  252 [commit 0 + rerender 252 (shell 252 {body 0 + kids 252} + loaderPane 0)] + scans    0 + push    0 + host-block  314  | host DOMINANT=other tick 0.0 paint 29.4 gpu 2.7 | nodes 7992 inst 6312 draws 771 meshes 6312  | re-rendered: Chrome,RightPanel\n[js.warn] [edit-latency] place   total ~ 483ms = pre  180 [commit 0 + rerender 180 (shell 180 {body 0 + kids 180} + loaderPane 0)] + scans    0 + push    0 + host-block  303  | host DOMINANT=other tick 0.0 paint 34.2 gpu 2.9 | nodes 7992 inst 6315 draws 771 meshes 6315  | re-rendered: Chrome,RightPanel\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=1518.27 ms=47.07\n",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T01:07:10.471Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T01:11:46.983Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The render-counter (req_1968) named the exact culprits: 're-rendered: Chrome,RightPanel' on every place. Fixed the two unstable-prop bugs that were silently no-op'ing the memos. (1) scopeBuildEvent in useBuildUndo depended on streamState + buildingsState, which change on every commit — so commitBuildEvent/commitBuildEvents got a fresh identity each place and re-rendered every panel that takes them (RightPanel's onPaintCommit, LoaderIsoView's onCommit, etc.). Now it reads those via refs (streamStateRef/buildingsStateRef) with deps [stem, legacyPieceMapName], stable on a place; behavior identical. (2) Chrome (the shell bar) wasn't memoized and its ~8 nav handlers were inline arrows (fresh every render); memoized Chrome + hoisted the nav handlers to stable useCallbacks (goHome/goEditor/... onNewMap). Since host-block is GC produced by this very re-render, eliminating it should drop pre AND host-block together. The render-counter is left in to confirm on the next place. Bundle clean, cart-side hot-reload. Sha 6341e1b92.",
+  "shas": [
+    "6341e1b92"
+  ],
+  "resolvedAt": "2026-06-26T01:11:46.983Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2106",
+  "at": "2026-06-30T03:42:41.383Z",
+  "origin": "codex:019f1624",
+  "text": "Im looking at concept art and im honestly really feeling this traditional approach as long as when it expands into something like lets say our materials, it shows them like we have now, if u see where im going with that idea [Image #1]",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T03:42:48.541Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T03:50:06.137Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Adapted the mock library panel toward the traditional content-browser concept: added a /Game folder tree with expandable Missions, Materials, Architecture, Props, and other buckets. Material folders still render the rich material rows, while non-material folders show their own scoped/empty surfaces instead of leaking unrelated context. Verified with bundle and raw ReleaseFast ship.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T03:50:06.137Z"
+}

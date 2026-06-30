@@ -1,0 +1,30 @@
+{
+  "id": "req_1956",
+  "at": "2026-06-26T00:18:13.301Z",
+  "origin": "session:67264656",
+  "text": "when im placing im on the prop / piece tab. lets dissect what that means because yes. fundamentally i have to be on one of them to be placing something, so what are u saying",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:18:53.975Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:24:15.151Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Continued driving down the per-place editor render after the dirty-only snapshot + FacePainter cuts. Reading showed the shell number barely moved from the FacePainter cut — because the user clarified all the rail panels (selected-item details / paint tools / prop catalog) are on screen AT ONCE, not tab-swapped, so a place re-renders all of them (~130ms) even though none depends on the placed piece. Cut: memoized PropertiesPanel + RightPanel (the always-visible rail panels) at the import site, and stabilized the props that defeated the shallow prop compare — shownFocus was a fresh object every render (now useMemo), joining the already-stable paintPieces (selected-only stable ref) and openPainter (useCallback); the place/arm callbacks were already useCallback from usePlacements. Net intent: a place that doesn't touch the selection or catalog leaves the panels' props identical, so the rail skips its render and only the loader pane updates. Cart-side, hot-reloads; if a stubborn prop still changes identity the memo silently no-ops (no harm) and the re-measure will surface it. Sha c28ab81b7. Also explained the component names in plain terms (FacePainter=paint panel, ObjectsTab=prop/piece catalog, PropertiesPanel=selected-item details).",
+  "shas": [
+    "c28ab81b7"
+  ],
+  "resolvedAt": "2026-06-26T00:24:15.151Z"
+}

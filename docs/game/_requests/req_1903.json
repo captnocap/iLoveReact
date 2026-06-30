@@ -1,0 +1,30 @@
+{
+  "id": "req_1903",
+  "at": "2026-06-25T20:28:08.665Z",
+  "origin": "session:5dc68f2d",
+  "text": "hey claude so we started once before with a one prop = one file approach. it worked well. except, at some point those making them who were writing the code (not me) got incr3edibly lazy and just started shipping literally just cubes and calling it a crystal, or a sculpture, luggage cart. etc. and then some of them are genuinely decent. regardless. i can shit out a better prop by just editing the mesh for the greater portion of these, so they are right at the cusp of becoming useless. however before i speak too loud and shit gets fucked up. thats still not really true. the mesh props i can make have no capability to be searchable or sitable or any of that. so, we are at a cross roads where you have the capability to make things interactive but no artistic bone in your soul and i have no capability to make anything functional but i can actuall make it look like a thing",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T20:28:31.616Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:25:06.378Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resolved the prop crossroads as a design plus a first build: capability is a uniform geometry-blind data bundle on the prop (seat/container/cover/door), so meshes the user sculpts gain function via a Studio tag/pin bridge (the proven Door-Leaf pattern) — code never edits the mesh, art never edits code. First rung built: the seating rig (req_1930). Full converged design captured in memory project_prop_capability_pins_gates.",
+  "shas": [
+    "8361a3ad0"
+  ],
+  "resolvedAt": "2026-06-25T23:25:06.378Z"
+}

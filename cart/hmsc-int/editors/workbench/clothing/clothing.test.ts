@@ -217,7 +217,7 @@ test('the panel is GENERATED: identity vals + creation verbs; the variant DROPDO
   assert(ks.includes('add material'), 'THE material chooser');
   assert(!ks.includes('variant'), 'the text-chip dropdown is DEAD (the ruled grid selects)');
   const materialPick = tee.groups[1].fields.find((f) => f.k === 'add material') as any;
-  assertEqual(materialPick.opts()[0].group, 'misc', 'garment material pick consumes the shared material chooser grouping');
+  assertEqual(materialPick.opts()[0].group, 'Unsorted Materials', 'garment material pick consumes the shared material chooser grouping');
   const jeans = clothingPanel(store, 'bottom:jeans');
   assertEqual(jeans.groups.length, 1, 'non-printable garments render NO variant section (conditional-sections law)');
   // saved-selection identity fields appear only when a saved variant is selected

@@ -1,0 +1,30 @@
+{
+  "id": "req_2019",
+  "at": "2026-06-28T17:07:51.325Z",
+  "origin": "session:0f02d048",
+  "text": "Ok well lets do grass and flowers and bushes next. pick one or do all 3 since we know it will work",
+  "status": "review",
+  "sessionId": "0f02d048-6266-4c5d-affe-6131b0e17f55",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T17:08:12.247Z",
+      "actor": "opus-foliage",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T17:19:42.424Z",
+      "actor": "opus-foliage",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extended the slim 24-byte instance format from fronds to ALL foliage cards — grass, bush, and flower (req_2019). Generalized the frond-specific infra into shared foliage-card infra (FrondInstance->SlimInstance, g_frond_*->g_slim_*, makeFrondInstance->makeSlimInstance) since it now serves two pipelines (rule-of-two); the frond FAMILY names stay. grass_wgsl now rebuilds the model matrix from TRS like frond_wgsl (grass/bush/flower are yaw-only, pitch=0), and the draw-loop is_slim predicate routes both g_grass_pipeline and g_frond_pipeline through the slim buffers in the static + per-frame paths. Water deliberately stays on the 80B InstanceData path (large oriented surfaces). Grass blades are the single highest-count thing in the world, so this is the biggest memory + despawn win of the series. Editor (v8_app) and no-V8 loader both build green; grass renders correctly (upright, green gradient) in shots/slim_foliage_check.png — user can eyeball live via rjit game play. Shipped in d990ee74f.",
+  "shas": [
+    "d990ee74f"
+  ],
+  "resolvedAt": "2026-06-28T17:19:42.424Z"
+}

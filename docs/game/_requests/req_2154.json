@@ -1,0 +1,28 @@
+{
+  "id": "req_2154",
+  "at": "2026-06-30T08:32:33.897Z",
+  "origin": "codex:019f1624",
+  "text": "ok so let me give u a quick and dirty here: yes you are right basically on all of t hat. what we want is /editor and /play; thats it, thats where we are going. all the code-authored modeling is going away, and all the tooling and the code authored capability is staying, the code authoring capability like, delcaring item, or saying that this prop is searchable, or those sorts of things, as well as any sort of editor tooling is all going to exist, together, in one tool, as all native zig tooling.",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:32:40.700Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T08:33:12.534Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Updated the hmsc-int route inventory with the user's target route contract: only /editor and /play survive. Documented that /editor becomes the unified native Zig tooling workspace, /play becomes runtime/preview validation, code-authored modeling UI goes away, and existing routes/workbench sources are capability inventories rather than final navigation.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T08:33:12.534Z"
+}

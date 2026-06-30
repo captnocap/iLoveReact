@@ -1,0 +1,30 @@
+{
+  "id": "req_1911",
+  "at": "2026-06-25T21:34:47.272Z",
+  "origin": "session:67264656",
+  "text": "right. yes. like ok so when im in t he studio and making something, and i go to press compile on it to import and install into the game. THAT is the time you need to be putting me behind a window that it updates the world editor so that when i go to the route its like playing a game anot like using your traditional editor in a sense. there is no gameplay loop here except for building but it needs all the same performance expectancy of a sims real time build mode",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T21:35:30.278Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:17:26.536Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the FULLRES residency vertical end to end: the /editor route now loads the WHOLE cooked-asset catalog into the loader as resident meshes on entry (and on any cooked-catalog change), so every Studio-compiled asset is placeable/movable/rotatable/deletable/skinnable INSTANTLY off the live-ref path with zero world rebake — killing the compile/debounce gymnastics in the edit loop. Layers: JS buildResidentMeshCatalogLump() encodes the full cooked catalog as a MESH_PROPS lump via the existing cookedPropMesh+encodeMeshProps; LoaderIsoView pushes it via the new __compiled_world_set_resident_meshes door on mount + on cooked-asset changes; the loader (setResidentMeshes/applyResidentMeshes) decodes once per generation with the SAME decodeMeshProps the gamefile uses (so textures/slots/doors come through identically), and meshForHash resolves a live ref against baked meshes THEN the resident catalog, so a never-baked asset draws — appendLiveMeshRef, the placement ghost, and the reskin path all route through it. The lean baked artifact stays the /compiled ship path; Compile leaves the edit loop. Correctness link verified in source: a placement ref hashes fnv1aHash(asset.meshRef) and residency keys liveMeshHash(asset.meshRef) — same key, same FNV-1a. Proof: framework compiles ReleaseFast, the streaming world render proof stays GREEN (rjit game shot), and the MESH_PROPS v7 round-trip suite passes. Live by-feel verification (Studio compile->install, enter /editor, place/move/flip/delete/skin instantly) needs a dev-host restart since Zig changed.",
+  "shas": [
+    "eb6b03b04"
+  ],
+  "resolvedAt": "2026-06-25T22:17:26.536Z"
+}

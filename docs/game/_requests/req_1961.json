@@ -1,0 +1,28 @@
+{
+  "id": "req_1961",
+  "at": "2026-06-26T00:31:24.842Z",
+  "origin": "session:a3e16cb4",
+  "text": "what does it mean when the test fails. and how do i assert that the failure is true from what i can visually see when u say the flower grass emits winded flower-card instances",
+  "status": "review",
+  "sessionId": "a3e16cb4-c3df-491f-965f-1cf28de4ce4b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:32:02.005Z",
+      "actor": "a3e1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:33:19.868Z",
+      "actor": "a3e1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered a question (no code change). Explained what a failing test means: a test asserts that code produces an expected output, and a failure means it did not — which falls into real-regression, stale-test, or flaky. Diagnosed the specific 'compiled flower grass emits winded flower-card instances' failure as STALE, not a regression: commit 37cd768e7 (June 21) added a test asserting flowers bake as INSTANCE_SHAPE_FLOWER rows inside buildWorldInstances, but commit 0c621111f (June 25) deliberately recipe-ized flowers out of buildWorldInstances into the FLORA lump (regenerated at runtime by foliage.zig flowerRow), so the test now counts a code path that was intentionally removed and gets zero. Gave the user the visual-verification method: paint grass-flowers, view in the compiled world (rjit game bake + rjit game shot -> world_loader.png) or rjit dev, and confirm flower heads are flat cards swaying with the grass wind (healthy) vs static spheres or missing (real bug). Did not edit the stale test because another session is concurrently editing worldGeometry.test.ts; offered to fix it or run the bake+shot.",
+  "shas": [],
+  "resolvedAt": "2026-06-26T00:33:19.867Z"
+}

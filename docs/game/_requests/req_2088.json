@@ -1,0 +1,30 @@
+{
+  "id": "req_2088",
+  "at": "2026-06-30T00:35:01.136Z",
+  "origin": "session:344a42f1",
+  "text": "hey this is something that has been a long time coming and now more than ever is it going to be crucial for us to get right. make us a demo and i want you to put text next to a text input and i want you to put the same font size and everything for them both. the text input looks like shit. also, it doesnt trail the text, and a whole host of other annoying things we are going to fix. so start by at minimum putting the same font in a text vs text input side by side and look at the difference",
+  "status": "review",
+  "sessionId": "344a42f1-04d9-4643-a455-06800f8ed61e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T00:35:06.232Z",
+      "actor": "344a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T00:44:23.035Z",
+      "actor": "344a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built cart/text_vs_input.tsx, a side-by-side Text-vs-TextInput demo across five font sizes (12/16/22/32/48) with identical fontSize/family/weight/color on both, shared controlled state so typing mirrors into the Text. The demo immediately exposed the real bug: TextInput ignored fontSize entirely and painted at a fixed ~16px at every size, while Text scaled correctly. Root cause in framework/host_tree.zig inheritTypography: a TextInput parks its controlled value in node.text, so the function mistook it for a bare text instance and (on every APPEND and parent UPDATE) stomped its explicit font_size/family/weight back to the parent box's defaults. Fixed by bailing out of inheritTypography when child.input_id != null — inputs own their own typography like a real <input> carries the UA font. Rebuilt framework, self-shot confirms Text and TextInput now match glyph-for-glyph at all five sizes. The other listed gripes (input doesn't trail/scroll-follow the text, vertical alignment polish) are the agreed next steps and untouched here.",
+  "shas": [
+    "02c296a87"
+  ],
+  "resolvedAt": "2026-06-30T00:44:23.035Z"
+}

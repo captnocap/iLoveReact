@@ -1,0 +1,37 @@
+{
+  "id": "req_1845",
+  "at": "2026-06-25T06:45:36.634Z",
+  "origin": "session:6ff945f5",
+  "text": "hm. even the flat ones like the brick, or concrete, etc, that i have already used, still arnt showing up instantly. they did after i compiled the map but otherwise sat dormant",
+  "status": "done",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T06:49:53.575Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T06:58:02.741Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-25T07:02:13.259Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Root cause (user confirmed: 'I was editing props already on the map'): the live skin path only considered props in the just-placed/unbaked set, so re-skinning an EXISTING (already-baked) prop never reached it — the baked gamefile kept rendering the old look until Compile. Fix: the loader pane now snapshots each baked prop's skin signature (pieceSkinSig over partTextures) at bake/reload time and pushes an existing prop to the live overlay when its skin changed since — rendering the live-skinned copy AND telling the loader to hide the coincident stale baked instance so the two don't z-fight. world_loader build() records each baked mesh-prop instance's kid-node range keyed by world position (meshPosKey); applyLiveMeshProps un-hides last frame's matches then hides any baked range coincident with a live ref (baked mesh-prop nodes are in the static prefix, so toggling scene3d_mesh survives the per-frame stream rebuild). JS meshPropLivePush now takes the full piece set + baked-skin snapshot and emits refs for new placements OR procedural-skin re-skins; a non-procedural re-skin (decal/flat) is deliberately left to Compile rather than hide-then-show-default. Shipped clean, committed 65fac66ed. Still slice-1 scope: procedural skins, whole-prop — flat colors, image decals, per-face, and parts-props are tracked follow-ups.",
+  "shas": [
+    "65fac66ed"
+  ],
+  "resolvedAt": "2026-06-25T06:58:02.741Z"
+}

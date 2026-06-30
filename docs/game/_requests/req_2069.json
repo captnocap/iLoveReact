@@ -1,0 +1,30 @@
+{
+  "id": "req_2069",
+  "at": "2026-06-29T04:32:47.462Z",
+  "origin": "session:2eacb40b",
+  "text": "you should just set them so that they have a random goal oriented behavior. use every intersection as a point. set a point for them to travel to that is not the immediate next one, set them with distance so that the car behavior doesnt feel fixed",
+  "status": "review",
+  "sessionId": "2eacb40b-8a1e-4c58-a8d4-b7c3ab9f4aea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T04:50:50.819Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T04:50:50.828Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the closed-loop tracer (which found the SMALLEST cycle, so every car circled the nearest intersection) with goal-oriented routing per the user's direction: junctions are the nodes, each car drives a TOUR of several random DISTANT intersections (>=minGoalMeters away, varied leg count) then home, so it loops without teleporting and feels un-fixed. Each leg is a real shortest legal path via directed BFS (on-road, never against lane flow). Load-bearing fix: the routing passability mask now means DRIVABLE (traversable + finite vehicleCost) not PREFERRED — crosswalk tiles at every intersection are not 'preferred', so the old mask sealed lanes off from junctions (0 routable tours); including them connects the network and all 14 cars route across the whole city. 9/9 traffic tests; re-baked + self-shot — 14 cars spread across the map on varied routes, no clustering. SHA 63902d3f8.",
+  "shas": [
+    "63902d3f8"
+  ],
+  "resolvedAt": "2026-06-29T04:50:50.828Z"
+}

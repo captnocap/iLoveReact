@@ -1,0 +1,18 @@
+{
+  "id": "req_1977",
+  "at": "2026-06-26T01:51:29.885Z",
+  "origin": "session:7a3a0337",
+  "text": "[js.warn] [edit-latency] place   total ~ 535ms = pre  243 [commit 0 + rerender 243 (shell 243 {body 0 + kids 243} + loaderPane 0)] + scans    0 + push    0 + host-block  292  | host DOMINANT=appTick events 219.0 appTick 267.9 preLayout 0.1 layout 1.3 prePaint 0.3 paint 19.1 gpu 3.0 post 0.0 resid 0.0 | bridge 264.4 | nodes 8121 inst 14096 draws 901 meshes 14096  | re-rendered: Chrome,PropertiesPanel,RightPanel,CatalogRail\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=3 delayMs=1342.67 ms=101.85\n[js.warn] [edit-latency] place   total ~ 445ms = pre  161 [commit 0 + rerender 161 (shell 161 {body 0 + kids 161} + loaderPane 0)] + scans    0 + push    0 + host-block  284  | host DOMINANT=appTick events 136.7 appTick 264.3 preLayout 0.1 layout 1.4 prePaint 0.2 paint 15.6 gpu 3.0 post 0.0 resid 0.0 | bridge 260.9 | nodes 8125 inst 14097 draws 901 meshes 14097  | re-rendered: Chrome,RightPanel\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=1417.40 ms=47.55\n[js.warn] [edit-latency] place   total ~ 450ms = pre  162 [commit 0 + rerender 162 (shell 162 {body 0 + kids 162} + loaderPane 0)] + scans    0 + push    0 + host-block  288  | host DOMINANT=appTick events 137.1 appTick 264.7 preLayout 0.1 layout 1.3 prePaint 0.3 paint 19.1 gpu 2.9 post 0.0 resid 0.0 | bridge 261.2 | nodes 8129 inst 14098 draws 901 meshes 14098  | re-rendered: Chrome,RightPanel\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=1419.21 ms=48.56",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T01:53:02.112Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1927",
+  "at": "2026-06-25T22:42:47.709Z",
+  "origin": "session:26c62b07",
+  "text": "you can not just dunk in a graph.path or we will eat shit. they have to bake as sdf",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:55:40.077Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:55:40.085Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Correction folded into req_1925: I had started toward rendering the category glyphs as live Graph.Path; the user stopped me ('you can not just dunk in a graph.path or we will eat shit. they have to bake as sdf'). Honored it — the glyphs bake into the SDF atlas (cat.<id>) and render via SdfIcon as one quad each, with the live PathIcon only as a stale-atlas fallback. Verified the baked path renders via shot.",
+  "shas": [
+    "e2bf548c7"
+  ],
+  "resolvedAt": "2026-06-25T22:55:40.085Z"
+}

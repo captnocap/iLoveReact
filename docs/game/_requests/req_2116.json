@@ -1,0 +1,30 @@
+{
+  "id": "req_2116",
+  "at": "2026-06-30T04:14:02.975Z",
+  "origin": "session:47bb26c9",
+  "text": "oh! also one other thing i also always forget but in the current editor if you zoom in too much, all of a sudden the wireframe explodes larger than the model and so u can never actually like get in there and do fine tuning so wireframe is the other thing that would be a key spot to land",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:14:36.881Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:29:36.587Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built host-side wireframe on the model viewer, the first step of growing modelview into the Studio mesh editor. Root cause of the old 'wireframe explodes when you zoom in': the Studio drew it as a 2D overlay (meshSelect.tsx) re-projecting every edge with its own hand-rolled copy of the camera math, parallel to the real 3D render — at close zoom the two diverge so the wire detaches and balloons off the mesh. The fix draws the wireframe INSIDE the scene3d pass from each triangle's own barycentric coords (derived from vertex_index%3, so no extra vertex data), with screen-constant line width via fwidth. Because it's the mesh's own triangles in the real pass, it is pixel-locked to the surface and cannot decouple at any zoom. Gated by a repurposed uniform pad (S.wire) so it's a zero-cost no-op for the whole game when off (verified: non-wire render is byte-identical). Exposed as <Scene3D wireframe> (viewport-wide), with a Wireframe button + W key in modelview and RJIT_WIRE/RJIT_ZOOM self-shot hooks. Verified: car + 4.6k-tri tree wireframe clean, a 9-notch close-up keeps the same crisp locked lines, and wireframe-off is unchanged. Proves the host-camera foundation projection painting (req_2115) will reuse next.",
+  "shas": [
+    "9bc433b51"
+  ],
+  "resolvedAt": "2026-06-30T04:29:36.587Z"
+}

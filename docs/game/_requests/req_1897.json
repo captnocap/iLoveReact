@@ -1,0 +1,28 @@
+{
+  "id": "req_1897",
+  "at": "2026-06-25T19:37:32.893Z",
+  "origin": "session:60071ace",
+  "text": "gah. i like the thinking the execution is very bad though, but its ok. we will get there. start next with a /hand-over and they need to start from stepping aside and creating a proper pipeline for getting a proper image of a model since these are just black boxes with tiny little shits in them i can barely see",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T19:38:07.853Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T19:40:36.196Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote a self-contained continuation handoff at /tmp/handoff-20260625-193822-proper-model-to-image-thumbnail-pipeline-for-the-prop-browse.md (original_conversation_id 60071ace-b422-48d8-a844-a6ec2f0f5029) per the user's explicit request. It briefs a fresh session to step aside from the live-Scene3D prop tiles (which render but are tiny unrecognizable black boxes) and build a proper model->image bake pipeline: auto-frame the camera from the model's bounds (ModelViewer already computes this), render once, capture pixels (StaticSurface->readSurfacePixels or framework/gpu/capture.zig), cache content-addressed like the texture/paint blobs, and show cheap Images in the tiles. Captures the full layout-rework state, all commit SHAs, the StaticSurface-can't-bake-3D finding, repo conventions, the parallel-session gotchas (FacePainter lock, shaders.ts ship race), and the horizon (FacePainter redesign, clean PiP).",
+  "shas": [],
+  "resolvedAt": "2026-06-25T19:40:36.196Z"
+}

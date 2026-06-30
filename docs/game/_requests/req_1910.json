@@ -1,0 +1,30 @@
+{
+  "id": "req_1910",
+  "at": "2026-06-25T21:31:16.144Z",
+  "origin": "session:67264656",
+  "text": "no. thats not what i am saying. we do not reintroduce the javascript test route. that shit was aids and i never used it and it ju st theoretically wasted more tokens for work i never used. you missed entirely what i was getting at. \n\nthe editor route, the one where im placing the world pieces and shit on the map from the world_loader approach, that world that it is loading, needs to be a reflection of exactly how im authoring my actual map, but needs t o have all the shits ready to go and stop standing around with its dick in its hand and doing some gymnastics of compile and debouncing and all this bullshit. it needs to be like im playing an rts / the sims. well maybe not rts. in an rts you have to wait for that shit to build, but you get the point. it itself needs to be gameplay level response rates",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:17:38.500Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:17:38.508Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the FULLRES residency vertical end to end (see req_1911): the /editor route loads the WHOLE cooked-asset catalog into the loader as resident meshes on entry + on cooked-catalog change, so every Studio-compiled asset is placeable/movable/rotatable/deletable/skinnable INSTANTLY off the live-ref path with zero world rebake — the all-or-none whole-edit-loop the user demanded, delivered via the residency keystone. JS buildResidentMeshCatalogLump encodes the catalog as a MESH_PROPS lump; LoaderIsoView pushes it via __compiled_world_set_resident_meshes; the loader decodes once per gen (same decodeMeshProps as the gamefile) and meshForHash resolves a live ref against baked THEN resident meshes so a never-baked asset draws. Compile stays the lean /compiled ship path, out of the edit loop. Hash link verified (fnv1aHash(asset.meshRef) == liveMeshHash(asset.meshRef)); framework compiles ReleaseFast; streaming render proof GREEN; MESH_PROPS v7 round-trip passes. Live by-feel check needs a dev-host restart (Zig changed). SHA eb6b03b04.",
+  "shas": [
+    "eb6b03b04"
+  ],
+  "resolvedAt": "2026-06-25T22:17:38.508Z"
+}

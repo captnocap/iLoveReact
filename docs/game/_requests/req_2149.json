@@ -1,0 +1,28 @@
+{
+  "id": "req_2149",
+  "at": "2026-06-30T08:04:30.252Z",
+  "origin": "codex:019f1624",
+  "text": "hey so i was brainstorming and one thing we have had problems with in the past with the rle encoding approach and this touches on what ia sked you about but ok so RLE and storing pixel data for textures fucking HATES dithering. but instead of storing pixel data that is dithered, we treat dithering as a function of data manipulation that lives in the game engine and then we ship in the game data the dithering settings like density, intensity, etc that slot into a formula that gets then ran on a texture that i had put dithering on, that way we are storing our datashapes still as RLE and tiny and then we ship tiny formulas that run dithering functions on those textures. and this can apply to animating the texture and everything. tell me your thoughts on that",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:04:44.758Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T08:05:22.490Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reviewed the RLE/procedural dithering idea against the current oracle rulings and hmsc-int texture pipeline. Answered that dithering should be stored as a deterministic engine/material recipe with tiny params over RLE-friendly base data, not as high-entropy dithered pixels; noted boundaries around shader IDs/data[], content hashes, static vs animated runtime paths, and avoiding arbitrary per-game script blobs.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T08:05:22.490Z"
+}

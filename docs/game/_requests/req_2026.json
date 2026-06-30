@@ -1,0 +1,30 @@
+{
+  "id": "req_2026",
+  "at": "2026-06-28T20:50:25.003Z",
+  "origin": "session:787673f5",
+  "text": "look. so here is the world. with a green patch. [Image #7] im next going to put floors over the top of it [Image #8] so now u cant see it. ok [Image #9] so what is that then :? i see green",
+  "status": "review",
+  "sessionId": "787673f5-328a-497f-aadb-debe8e93eb92",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T21:05:45.471Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T21:05:45.479Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Duplicate of req_2024 (same 'floors float above the painted ground' report — req_2026 is the screenshot follow-up, req_2031 the relayed verbatim log). Fixed in 1ba22d852: the flat-plate decomposition in editors/build/pieceShapes.ts now keeps the solid core flush from piece.y up so floors/flat-roofs touch the ground instead of hanging ~12mm over it. See req_2024 for the full write-up and verification.",
+  "shas": [
+    "1ba22d852"
+  ],
+  "resolvedAt": "2026-06-28T21:05:45.479Z"
+}

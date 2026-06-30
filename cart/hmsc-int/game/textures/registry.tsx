@@ -7,7 +7,7 @@ import type { PerceptionState } from '../../design';
 // renderer — these REACT_TEXTURES entries retire WITH the hand-coded buildings
 // (the V24 build mode replaces them); only the import path keeps them alive.
 import { BUILDING_SKINS, type BuildingSkin, skinCapturePx } from '../../render3d/buildingSkins';
-import { HMSC_SHADERS, defaultShaderData, shaderSpec } from './shaders';
+import { HMSC_BROWSE_SHADER_PRESETS, HMSC_SHADERS, defaultShaderData, shaderSpec } from './shaders';
 import { type CustomTexture, loadCustomTextures } from './materials';
 import { DecalSurface } from './decalRender';
 
@@ -48,6 +48,7 @@ export type TextureSource =
 export type TextureDef = {
   id: string;
   label: string;
+  group?: string;
   source: TextureSource;
 };
 
@@ -70,17 +71,24 @@ const REACT_TEXTURES: TextureDef[] = Object.keys(BUILDING_SKINS).map((id) => ({
   },
 }));
 
-// The shader textures: every catalog recipe (./shaders.ts) at its
-// default look — texture id == spec id, so the editor opens the matching lab and
-// `defaultShaderData` is THE default (no hand-written data arrays). The studio's
-// tuned saves land in customTextures and hydrate below.
+// The shader textures: every catalog recipe (./shaders.ts) at its default look
+// plus the browse preset tier: authored takes at Std quality. Other generated
+// quality ids stay resolvable by shaderTexturePreset() for compile/back-compat
+// without choking the pickers.
 const SHADER_TEXTURES: TextureDef[] = HMSC_SHADERS.map((spec) => ({
   id: spec.id,
   label: spec.label,
+  group: spec.group,
   source: { kind: 'shader', shader: spec.shader, data: defaultShaderData(spec) },
 }));
+const SHADER_PRESET_TEXTURES: TextureDef[] = HMSC_BROWSE_SHADER_PRESETS.map((preset) => ({
+  id: preset.id,
+  label: preset.label,
+  group: preset.group,
+  source: { kind: 'shader', shader: preset.shader, data: preset.data },
+}));
 
-export const TEXTURE_REGISTRY: TextureDef[] = [...SHADER_TEXTURES, ...REACT_TEXTURES];
+export const TEXTURE_REGISTRY: TextureDef[] = [...SHADER_TEXTURES, ...SHADER_PRESET_TEXTURES, ...REACT_TEXTURES];
 
 // A stored material (studio Materialize) → a regular TextureDef: same shader as
 // its recipe, frozen data. Unknown shaderId (a spec that was removed) → null.

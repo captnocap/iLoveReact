@@ -1,0 +1,18 @@
+{
+  "id": "req_1997",
+  "at": "2026-06-26T03:24:09.581Z",
+  "origin": "session:7a3a0337",
+  "text": "sorry what do y ou mean when u say ' but we left an entire javascript pipeline wrapped around it', what exactly is that javascript pipeline. file names. what are they",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T03:24:38.680Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

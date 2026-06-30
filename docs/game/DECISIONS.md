@@ -472,14 +472,18 @@ effect) are deliberate, scriptable knobs.
 SHOW-ME: what counts as a promotion-worthy interaction is a game-feel question
 — a lab, not an architecture ruling.
 
-**V19 — The compile is always green and LLM-callable. (Added 2026-06-04.)**
+**V19 — The compiled game is always green and LLM-callable. (Added 2026-06-04; clarified 2026-06-30.)**
 It would suck ass to build something great and discover at the compile button
 that the game output isn't carrying the feature or doesn't work at all. So:
-- The game compile is a CLI any LLM can run at any time — compile constantly,
-  "make sure it compiles" is a standing duty, not a milestone gate.
-- LLMs can also LOAD RUNTIME TESTS into the output — compile → boot headless →
-  run behavior tests (P4) → exit with a verdict. The dev flow never waits on
-  the user to press a button.
+- The authored/played compile is the data bake: `rjit game bake` and the
+  hmsc-int Compile button write the platform game-file the no-V8 compiled route
+  loads. This is the path the user actually plays; `/test` is not the bar.
+- The old public `rjit game compile` name is retired. V19's command replay
+  remains as a VERIFY HARNESS only: bundle harness → boot headless → replay
+  command scripts → verdict.
+- LLMs can run the bake/verify surface at any time — "make sure it compiles" is
+  a standing duty, not a milestone gate. The dev flow never waits on the user to
+  press a button.
 - A feature isn't "done in the tool" — it's done when the COMPILED GAME carries
   it and the verify run proves it.
 - **GREEN HAS AN EXPLICIT MEANING (clarified 2026-06-04).** The entire testing
@@ -993,11 +997,16 @@ of re-referenced shape" — which is literally the Vice City architecture (IDE
 object definitions + IPL placement lists + shared TXDs; a whole city in 32MB
 of PS2 RAM). Our roster = the IDE; the compiled reference grid = the IPL.
 
-- **Bake by EXECUTION, never by static analysis.** Shapes stay CODE-AUTHORED
-  (TSX def()/pieces/prefabs); the compile RUNS the authoring code in V8 and
-  snapshots the output as an installable asset. (This retires the
-  bake-geometry-auto literal-scanner direction — evaluation handles the
-  .map()/spread/const cases scanning never could.)
+- **Bake current authoring by EXECUTION, never by static analysis.** While the
+  legacy TSX def()/pieces/prefab catalogs still exist, the compile RUNS that
+  authoring code in V8 and snapshots the output as an installable asset. (This
+  retires the bake-geometry-auto literal-scanner direction — evaluation handles
+  the .map()/spread/const cases scanning never could.)
+- **Clarification 2026-06-30: TypeScript prop/item/vehicle files are
+  transitional.** Their baked DATA remains relevant, but those TS-file asset
+  sources phase out. The destination sources are Studio mesh-editor models,
+  world terrain/heightfields, authored buildings/pieces, and UV-unwrapped
+  player/figure models.
 - **Assets are CONTENT-ADDRESSED** (id = hash of baked payload): installs are
   idempotent, maps sharing a lamppost dedup automatically, street + interior
   maps share installed assets, version drift is not a bug class.
@@ -1112,3 +1121,27 @@ the predicate = FULL BEHAVIOR. Compute is O(active bubble), constant in city
 size; disk scales with the asset vocabulary (V29); memory scales with the
 map you're standing in. This is how V4's Vice City scale is paid for —
 the same way Vice City paid for it.
+
+**V31 — Compile cache: manifests over content-addressed compiled chunk
+artifacts (CACHE-0630). (Added 2026-06-30.)**
+
+Every Compile emits an immutable manifest. The manifest is the authority for
+reconstructing the compiled world from content-addressed compiled chunks and
+global summary lumps. Each chunk overview row carries the chunk coordinate, a
+content-hash validation string, dependency/source hashes, edge signatures, byte
+length, summary hash, and a local version pointer. Exact hash match means the
+compiler reuses that cached chunk artifact and the loader may assemble it without
+deep-revalidating the chunk internals; a mismatch means stale/corrupt/different
+inputs, so the chunk is rebuilt or the prior valid artifact is retained. An
+accepted rebuild emits a new validation hash and bumps only that chunk's local
+version. The hash is authority; the version is human/history ordering.
+
+Compiled chunk history is first-class and becomes the practical restore surface:
+restoring "where this area was before" creates a new manifest that points that
+chunk overview at an older valid chunk hash/version, then dirties only affected
+neighbors/global summaries. This avoids replaying a long edit-history chain for
+normal map-direction restores while keeping V20 streams as source/audit history.
+Chunks remain cache/streaming/compile units inside V30's one citywide map, not
+changelevel maps. "Glue together" means manifest assembly through the game-file
+lump/index system, never blind byte concatenation. Details:
+`docs/game/COMPILE_CACHE_ARCHITECTURE.md`.

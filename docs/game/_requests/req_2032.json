@@ -1,0 +1,30 @@
+{
+  "id": "req_2032",
+  "at": "2026-06-28T21:08:34.291Z",
+  "origin": "session:ae81d73a",
+  "text": "hello. i want to start to introduce lighting now that we are so far into the engine. starting with placed light from like a sign/lamp and then progressing into skybox after the fact. Namely, i want to be able to: make spotlights, make lights that are like a bulb (like the edge of a sign), led light strips and the sorts. and have them be colored, and then eventually animated. so we can start with just getting a light. i would treat that inside of the studio mesh editor for some form of light emit rigging system.",
+  "status": "review",
+  "sessionId": "ae81d73a-006a-4c08-abbc-df81d4a7c032",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T21:08:47.702Z",
+      "actor": "ae81",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T21:27:49.029Z",
+      "actor": "ae81",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Phase 0 of the lighting arc: introduced placed (local) point/spot lights on top of the existing single directional sun. Modeled exactly on the user's pyramid idea — a light is one data row: a tip (position), an aim (direction), a spread cone, a reach (range), plus color + intensity; that one factored row gives an omni bulb (sign edge / lamp), a spotlight (narrow cone), and the seed for LED strips. Wired the full path: runtime/primitives.tsx (PointLight gains range; new SpotLight) -> v8_app.zig prop bridge -> layout.zig node fields (scene3d_range/scene3d_spread) -> framework/gpu/3d.zig (64B std430 Light struct, g_lights_buf storage at group0/binding1 on the shared scene bind group, node-walk collection + per-frame upload, MAX_LIGHTS=256 with loud overflow) -> scene3d_wgsl shader (accumulates per-fragment diffuse+spec with quadratic distance falloff to 0 at range and a feathered cone term). Verified headless with a new cart/light_demo.tsx: rjit shot shows a warm omni bulb pool + a cool spotlight cone shaping the floor and lighting pillars on their facing sides, in color. Committed 4ccf3e0ec. STOPPED here for the user to eyeball the first light before Phase 1 (author pyramid light gizmos in the Studio mesh editor) and Phase 2 (bake a LIGHTS lump into the /compiled world); color animation + one-bounce wall reflection follow.",
+  "shas": [
+    "4ccf3e0ec"
+  ],
+  "resolvedAt": "2026-06-28T21:27:49.029Z"
+}

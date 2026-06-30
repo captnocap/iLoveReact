@@ -1,0 +1,31 @@
+{
+  "id": "req_1861",
+  "at": "2026-06-25T08:07:57.177Z",
+  "origin": "session:6ff945f5",
+  "text": "well. im just saying grass but that extends to flowers and the like, the only thing that doesnt hit is trees and for good reason but the fronts on the trees can be. im saying they all should be effectively very small, heavily re-referenced sets and stop this massive hundreds of thousands of single counted blade or pedals",
+  "status": "review",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T08:09:25.951Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T08:28:35.610Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recipe-ized flowers (234k) + palm fronds (614k) so the bake stops enumerating ~850k flora rows into the V8 heap — the actual cause of the dev-host OOM (the map is moderate; the flora population was the bulk). Grass+bush already shipped as the FLORA recipe (loader regenerates via foliage.zig); this finishes the unfinished slice per the user's ruling that ALL flora must be small re-referenced sets, not enumerated blades/petals (trunks excepted, fronds included). foliage.zig gained flowerRow + palmCrown/palmFrondRow — bit-exact Zig twins of grassPopulation emitHead and palmPopulation crownRing, each with a passing parity test against JS golden values. grassPopulation.foliageCells now emits a FLOWER cell per grassFlowers cell; palmPopulation.palmCells emits one PALM cell per spawned palm (eachPalm extracted so the preview, trunk-only bake, and recipe paths can't drift); worldGeometry drops the enumerated flower+frond pushes (encodeFlora ships the cells, trunks stay baked); world_loader buildShapeBatches routes spec 2→flowers batch and spec 3→frond batch. Bake instance buffer drops ~892k→~44k rows; look unchanged (same formulas). Restarting the dev host clears the already-accumulated heap. SHAs 0c621111f (flowers), 018b57b24 (palms). Follow-up the user also wants (separate from the OOM, it's GPU not V8): reduce grass's per-blade loader expansion (~1.1M) to one patch unit per cell.",
+  "shas": [
+    "0c621111f",
+    "018b57b24"
+  ],
+  "resolvedAt": "2026-06-25T08:28:35.609Z"
+}

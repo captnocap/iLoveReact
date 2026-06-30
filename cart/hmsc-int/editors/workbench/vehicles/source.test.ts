@@ -139,7 +139,7 @@ test('C15: population tuning and shared-material color variations author row dat
   assertClose(store.doc!.rarity!, 0.27, 1e-9, 'rarity authors onto the row');
   assertEqual(store.doc!.speed, 44, 'speed authors onto the row');
   const addMaterial = field(vehiclePanel(store), 'COLOR VARIATIONS', 'add material') as any;
-  assertEqual(addMaterial.opts()[0].group, 'a-family', 'vehicle material picker uses the shared material grouping');
+  assertEqual(addMaterial.opts()[0].group, 'Unsorted Materials', 'vehicle material picker uses the shared material grouping');
   addMaterial.set('a-brick');
   assertEqual(store.doc!.colorVariations![0].textureId, 'a-brick', 'color variation stores the chosen material id');
   assertEqual(store.doc!.activeColorVariationId, 'a-brick', 'added material becomes the preview variation');

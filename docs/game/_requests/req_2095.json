@@ -1,0 +1,28 @@
+{
+  "id": "req_2095",
+  "at": "2026-06-30T02:42:08.842Z",
+  "origin": "codex:019f1624",
+  "text": "i dont like how it looks like its configurable but none of it is. either make it feel immutable or make it actually edit values. this is a problem in the current app right now. they would feel valuable if editable, but only if the editing surface is clean and out of the way. not bulky buttons or sliders with massive values or any of that, but it also has value in immutable data.\n\n3: no, none of it should appear unless is applicable to whatever the thing in focus pertains to. sometimes it might be a tile (like we have here) other times it might be a piece of a building, or multiple pieces, or a prop, or a mission marker, or some npc pathing, it can have a million faces",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T02:42:18.311Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T02:42:48.881Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's inspector-panel feedback into cart/hmsc-workspace-mock/DESIGN_INTAKE.md. Captured the confirmed rule that fields must either actually edit values or read clearly as immutable; editable surfaces must be compact and out of the way; sections must only appear when applicable to the focused face; focus can be tile, piece, multi-piece selection, prop, mission marker, NPC pathing, or future faces. Added deductions for a typed focus model, separate immutable/editable/action visual language, mixed-selection handling, and moving feature-pipeline status out of normal object inspection unless that is the focused thing. No implementation changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T02:42:48.881Z"
+}

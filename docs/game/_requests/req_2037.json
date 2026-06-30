@@ -1,0 +1,30 @@
+{
+  "id": "req_2037",
+  "at": "2026-06-28T21:23:38.690Z",
+  "origin": "session:37f73aee",
+  "text": "thats not true its literally wired up to the compiled route is it not",
+  "status": "review",
+  "sessionId": "37f73aee-425d-488e-8c45-55d4f82a2c00",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T21:24:53.132Z",
+      "actor": "37f7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T00:29:48.316Z",
+      "actor": "37f7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the editor-panel pop-out into a 2nd GPU OS window. Generalized world_window.zig (the proven compiled-world pop-out) from the native 3D world to an arbitrary 2D React subtree: new framework/gpu/panel_window.zig (2nd OS window + sibling wgpu surface on the SAME instance/device, format-agnostic blit, UI input routing); gpu.zig gains a shared drawSegmented2D + renderPanelInto (paints a subtree into an offscreen RT in the main format); engine.zig renders the popped-out subtree after the main frame and routes its press/wheel/hover through the shared JS dispatch (shared editor state, zero IPC); v8_app.zig routes <Window kind=popout> to panel_window (not the SDL3 windows.zig path, which cannot draw GPU effect swatches), keeps it registered so the main paint excludes the subtree, and adds __panel_window_status for re-dock. Cart: a POP OUT/DOCK toggle on the rail + the Window overlay + EditorLayout railWidth. The wgpu-second-instance concern raised in req_2038 does not arise — it is a sibling surface on the existing device. Builds clean (SHIP_RUN_PACKAGE=0 ship hmsc-int). Needs live 2-monitor verification (a popped-out wgpu window cannot be headless-shot).",
+  "shas": [
+    "80491235b"
+  ],
+  "resolvedAt": "2026-06-29T00:29:48.316Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1901",
+  "at": "2026-06-25T20:18:48.309Z",
+  "origin": "session:4f39ae52",
+  "text": "Not bad, some are very off, being the smaller the prop or whatever the worse the image is. besides that though, i like this approach yes. i hate everything else about how this entire panel is working though. the pills for categories. the pills for for pills of categories. but i understand t hat was not your first task. so yeah. uhm. this is better. its acceptable. the rest of everything around it is not",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T20:19:20.037Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T21:17:04.041Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the prop picture-browser thumbnail quality complaint: smaller props rendered worst. Root cause: PropBrowser.solveThumbCamera framed each tile from the prop kind's DECLARED heightMeters/footprint and assumed the model spans 0..h centered at the origin. Any declared-vs-actual mismatch or off-anchor geometry is a fixed error that becomes a large FRACTION of a small prop, so small props floated tiny/off in their tile. Added propVisualBounds(kind) to compile/propRecipes/footprint.ts — the prop's full visual AABB over every recipe part with rotation baked in, reusing the existing partLocalBox + boxSpan helpers — and reframed the thumbnail from its true centre + bounding-sphere radius. Declared dims remain the fallback only for imported/cooked meshes that have no recipe parts to measure. The 'I hate the pills' half of this message became its own task (req_1906, decouple BUILD from PROPS) and is in review separately. Built clean via SHIP_RUN_PACKAGE=0 rjit ship hmsc-int. Needs a live rjit dev look to confirm small props now fill their tiles.",
+  "shas": [
+    "0c1353c8c"
+  ],
+  "resolvedAt": "2026-06-25T21:17:04.041Z"
+}

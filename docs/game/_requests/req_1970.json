@@ -1,0 +1,31 @@
+{
+  "id": "req_1970",
+  "at": "2026-06-26T00:59:58.410Z",
+  "origin": "session:a3e16cb4",
+  "text": "oh. ok i dont really care i just was wondering. ok so this skybox / void, can u make it aware? like. uh how do i say this to make more sense. so, i have this body of water, [Image #2] and it is at an edge of the map. u can see that it instantly turns into the skybox edge, but u could generate a river that keeps going from it. or lets lok over here i have this road that comes to the edge of the map [Image #3] that can connect. rather than just this regurgitation of randomly placed buildings that clearly read as just filler slop",
+  "status": "review",
+  "sessionId": "a3e16cb4-c3df-491f-965f-1cf28de4ce4b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T01:00:24.603Z",
+      "actor": "a3e1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T01:22:29.799Z",
+      "actor": "a3e1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the edge-AWARE void (SKYBOX_PLAYBOOK §1 edge-contiguity seam). The shell was edge-blind — every void chunk emitted the same hash ground+street-cross+buildings regardless of what authored feature it grew from, so a lake or road that hit the map edge stopped dead against random towers ('filler slop'). New game/void/edges.ts reads the authored boundary ONCE into an EdgeProfile: road exits (perimeter-sampled via footingKindAtWorldPosition, which catches painted road/asphalt tiles since planRoads stamps real road tile kinds — outward normal + carriageway width) and water edges (from world.waterBodies overhanging the core, on-edge span). New game/void/voidWater.ts turns water edges into continuation WaterBody rects via the user's 'size decides' rule (SEA_SPAN_METERS): small→a seeded meandering RIVER chain (voidHash, pure/replayable), big→a wide SEA reaching the horizon ring — ordinary parametric bodies so the SAME ~water~ path renders them (real translucent water live + WATER lump compiled, no opaque-box fake). The one shared shell generator (game/void/shell.ts) now takes the profile: road corridors continue straight out (axis-aligned, clean against the grid) and buildings step aside for the seam + water footprints. Wired live (GameWorld3D/VoidShell, edge+void-water memoized on the world) and compiled (pushVoidShell suppression + packageMap WATER lump), both off the same merged world so baked water sits where the shell cleared. Verified: edges.test.ts 4/4 (river/sea split, seeded meander, road seam continuation, water suppression), void.test 10/10 unaffected, compile bundles, and a full bake+shot of the user's real map PASSED — 'built 123 water heightfield(s)' (authored + void rivers/seas) and 20529 edge-aware void boxes, valid PNG, no crash. STILL design-gated (noted in playbook): the PLAY over this geography — coast notoriety/apache gauntlet + achievement, road treadmill/fold. Commits 9dd4569eb (feat) + a8e3bdd20 (playbook).",
+  "shas": [
+    "9dd4569eb",
+    "a8e3bdd20"
+  ],
+  "resolvedAt": "2026-06-26T01:22:29.799Z"
+}

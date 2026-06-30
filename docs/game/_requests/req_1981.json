@@ -1,0 +1,28 @@
+{
+  "id": "req_1981",
+  "at": "2026-06-26T02:16:59.110Z",
+  "origin": "session:4f39ae52",
+  "text": "sorry that mismatch is exactly the shit that makes 0 sense. so lets not be stupid about it. why would the focus show not the item i have in focus",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T02:18:41.087Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T02:25:54.579Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same ask as req_1983 (the focus mismatch) — the user's message was captured under both ids across turns. Resolved together: made the HELD item the top-priority focus so the properties panel always shows the item you have in focus, never falling through to an unrelated tile brush. shownFocus was ordered tiles > place-layer > held > tile-brush, so the held item was third and could be shadowed/leak TILE Asphalt; reordered so armedFocus wins outright, with focusWorld matched. With req_1959 (held props) + req_1962 (held build pieces get a piece focus), holding ANY catalog item now shows that item uniformly. Verified compiling green; left uncommitted in the working tree because index.tsx also holds another session's MINIMAL_REPRO probe (per the user's let-them-do-their-thing). See req_1983 for the canonical entry.",
+  "shas": [],
+  "resolvedAt": "2026-06-26T02:25:54.578Z"
+}

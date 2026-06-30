@@ -1,0 +1,28 @@
+{
+  "id": "req_1833",
+  "at": "2026-06-25T05:14:04.353Z",
+  "origin": "codex:019efd31",
+  "text": "hey i want you to go in on some shaders for the game materials in hmsc-int, lets get variety variety variety. more sidewalk textures, wood, brick, stone, metal, wall papers, gradients, i want quanity quantity quantity. we can always remove the bad ones but we will always wonder where are the good ones if we dont make a catalog of them",
+  "status": "review",
+  "sessionId": "019efd31-8050-79d0-84ae-54d775a7e51d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T05:14:10.508Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T05:21:45.591Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Expanded hmsc-int procedural material shader catalog with five new fill boards K-O: street ground, wood/brick/stone, metal, wallpapers, and gradients. Added 35 material recipes with three takes each, WGSL render implementations and dispatch, category mapping, seed range expansion, and a focused catalog contract test. Verified with the shader catalog test and hmsc-int bundle-only check.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T05:21:45.591Z"
+}

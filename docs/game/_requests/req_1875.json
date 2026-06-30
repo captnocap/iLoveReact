@@ -1,0 +1,30 @@
+{
+  "id": "req_1875",
+  "at": "2026-06-25T17:14:42.021Z",
+  "origin": "session:60071ace",
+  "text": "yeah the footprint should be easy. chunks are 120x120 tiles and tiles are 1m. you can also even do some cool math and show how much of the map space is actually covered in assets vs open space. how long would it take to walk from one end to the other at the player movement speed. idk have fun with it",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T17:15:11.810Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T17:18:53.600Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built reportMapFootprint() in cart/hmsc-int/mapReport.ts, the / dashboard's spatial census and companion to the geometry census. Given the map's painted chunks (CHUNK_TILES=120, 1 tile=1m) and placement+building footprints (both expose footW/footD), it computes the bounding extent (width/depth/diagonal in meters), authored ground area, paintedFraction (density within the bounding box), asset coverage vs open walkable space (clamped to ground area), corner-to-corner walk and run times at the registered player speeds (2.4 / 5.8 m/s), and the closest real-world landmark by area chosen in multiplicative/log terms from a curated tennis-court-to-San-Francisco ladder. Pure and parameterized because map data is map-scoped rather than a global store, so it honors the freeze law and is headless-testable; 6/6 unit tests pass. Committed as fb925c320.",
+  "shas": [
+    "fb925c320"
+  ],
+  "resolvedAt": "2026-06-25T17:18:53.600Z"
+}

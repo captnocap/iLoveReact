@@ -1,0 +1,18 @@
+{
+  "id": "req_2164",
+  "at": "2026-06-30T09:19:50.363Z",
+  "origin": "codex:019f17c8",
+  "text": "hey the tools/rjit dev server, can we get a copy of that same idea but strictly for game dev, like i dont need to be waiting on a build that links upo postgres or etc. and what we will end up needing at some point later is easy to slot in u can make it a gdev command",
+  "status": "doing",
+  "sessionId": "019f17c8-babc-7c82-8f42-f9955c3595a8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T09:19:59.615Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

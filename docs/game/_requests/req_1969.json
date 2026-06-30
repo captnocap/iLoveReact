@@ -1,0 +1,30 @@
+{
+  "id": "req_1969",
+  "at": "2026-06-26T00:54:37.471Z",
+  "origin": "session:67264656",
+  "text": "this is going no where. you keep instrumenting more and more react when the logs the entire time have said its not react its screaming it. its all in the host. or in that flush.",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:56:03.661Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T01:04:01.771Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User pushed back (rightly) that I'd been over-instrumenting React while the dominant per-place cost was host-block (~320ms) + the flush, not the React re-render (~130ms). Acted on the FLUSH: the session snapshot was firing ~265ms after EVERY commit (~50ms main-thread freeze per piece = the PLACEFREEZE). It is only a fast-boot optimization (events are durable in the DB the instant a commit appends), so the scheduler delay went 0 -> 1500ms: a burst of placements now coalesces into ONE flush ~1.5s out instead of one per piece. close() still force-flushes so navigate/close persists the latest state; a crash inside the window just replays the DB tail at boot (no data loss). Kept the original coalesce contract so 8/8 sessions tests pass. Also reframed the host concern: the host frame line reads DOMINANT=other (GC), and that garbage is produced BY the editor re-rendering on each place — so host-block and the React re-render are the same root cause (the re-render allocates, the host GCs it). The render-counter diagnostic already committed (req_1968) will, on the next place, name which panels still re-render so I can memoize exactly those and drop pre AND host-block together. Sha 0fa17007e. Next: read the 're-rendered:' list, kill those panels' re-renders.",
+  "shas": [
+    "0fa17007e"
+  ],
+  "resolvedAt": "2026-06-26T01:04:01.770Z"
+}

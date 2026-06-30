@@ -1,0 +1,28 @@
+{
+  "id": "req_1837",
+  "at": "2026-06-25T05:21:08.494Z",
+  "origin": "codex:019efd31",
+  "text": "Caused by:\n  In wgpuDeviceCreateShaderModule, label = 'effect_gpu_shader'\n    \nShader 'effect_gpu_shader' parsing error: name `patch` is a reserved keyword\n     ┌─ wgsl:2187:7\n     │\n2187 │   let patch = rect_mask(uv, 0.08, 0.46, 0.62, 0.90, 0.010) * step(1.5, variant);\n     │       ^^^^^ definition of `patch`",
+  "status": "review",
+  "sessionId": "019efd31-8050-79d0-84ae-54d775a7e51d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T05:21:18.343Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T05:21:45.541Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the WGSL shader parse failure caused by using reserved identifier patch in the new alley concrete material; renamed it to repair_area. Re-ran the focused shader catalog test and hmsc-int bundle-only check successfully.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T05:21:45.540Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2073",
+  "at": "2026-06-29T18:53:53.233Z",
+  "origin": "session:bd08881c",
+  "text": "we have multi-peice select but we also use to have and need to re-add select all connected pieces inside of the world editor",
+  "status": "review",
+  "sessionId": "bd08881c-7228-4ea2-bf89-72931d1dafbb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T18:53:57.480Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T18:58:22.175Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Re-added 'select all connected pieces' to the world editor loader pane (LoaderIsoView). The deleted IsoAuthor (req_1967) had a smart-select reach that grabbed a click's whole connected structure; in the loader pane that only survived as double-click whole-object select (one structure from a bare click). Added a G keybinding + selectConnectedToSelection() that grows the CURRENT selection — including a multi-picked set of loose pieces from Ctrl-click — out to every transitively-touching piece, unioning GAME_BUILD.placed.connected per seed (the same connectivity walk double-click already uses). No-op when nothing is selected or nothing new would be added. Bound in the existing key bus alongside R/C/Del, matching the loader pane's keyboard-verb pattern. Verified with a clean SHIP_RUN_PACKAGE=0 build of hmsc-int.",
+  "shas": [
+    "b4436f08d"
+  ],
+  "resolvedAt": "2026-06-29T18:58:22.174Z"
+}

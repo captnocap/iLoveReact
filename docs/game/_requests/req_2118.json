@@ -1,0 +1,28 @@
+{
+  "id": "req_2118",
+  "at": "2026-06-30T04:22:31.165Z",
+  "origin": "codex:019f1624",
+  "text": "ok the Eventbus area here at the bottom, this is another thing that perfectly slots into the bottom dock architecture for popover data reviewing without needing to leave the editor or take up un-necessary amounts of space when not in focus.",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:22:42.317Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:25:15.163Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moved the Eventbus review area out of the permanent workspace bottom strip and into the bottom dock architecture. The dock now has an EVENTBUS button that opens a popover with in-memory events, undo/redo state, autosave/invite/session status, authoring timing telemetry, rich-map delta, sparkline, and per-event rows. This keeps event data one click away without taking stage/editor height when not focused.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T04:25:15.163Z"
+}

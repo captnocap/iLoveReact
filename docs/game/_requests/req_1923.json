@@ -1,0 +1,28 @@
+{
+  "id": "req_1923",
+  "at": "2026-06-25T22:37:05.282Z",
+  "origin": "session:5dc68f2d",
+  "text": "haha yeah actually i think having a suite of these is peak. it should be from the most obscure norweigan black metal logo to the dread captcha system to just things like the trolley problem where it doesnt actually matter but makes the player think it does",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:37:24.594Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:25:06.429Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design captured: the gate suite spans three FRICTION AXES — artistic illegibility (decipher), hostile bureaucracy (dread captcha), and psychological theater / fake-choice (the trolley problem where both branches open the lock; optional secret karma-theater logging). This reframes Challenge as a general interaction-gate primitive, not a captcha renderer. Deferred build, recorded in memory.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T23:25:06.429Z"
+}

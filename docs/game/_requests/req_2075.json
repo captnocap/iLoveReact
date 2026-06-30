@@ -1,0 +1,30 @@
+{
+  "id": "req_2075",
+  "at": "2026-06-29T19:41:19.579Z",
+  "origin": "session:2eacb40b",
+  "text": "this is very helpful. now i can explain exactly what i see lool. look at this pathing. wtf is going on here [Image #2][Image #3] [Image #4] w[Image #5]",
+  "status": "review",
+  "sessionId": "2eacb40b-8a1e-4c58-a8d4-b7c3ab9f4aea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T19:43:50.615Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T19:49:59.086Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The path overlay revealed the routes staircasing and tangling into boxy knots — the grid BFS produces jagged cell paths, worst in the flow-neutral junction/crosswalk blocks where many cars' routes wove into overlapping rectangles. Fixed with a string-pull (line-of-sight simplification) over the lane-centered polyline: each run is pulled taut to the longest straight shot that stays CLEAN — on the road network AND, where it crosses a flowed lane, within half a tile of that lane's centerline. That constraint means a straight lane can't be diagonally cut (cars stay centered per req_2071) while flow-neutral junction/crosswalk blocks (no centerline constraint) straighten freely, collapsing the boxy intersection tangle into clean straight/diagonal crossings. 6/6 traffic tests (the centering test now checks for a centered horizontal SEGMENT, since string-pull collapses the straight run to its endpoints); re-baked + self-shot with the P overlay confirms clean straight lines down the lanes. SHA a03c78c70.",
+  "shas": [
+    "a03c78c70"
+  ],
+  "resolvedAt": "2026-06-29T19:49:59.086Z"
+}

@@ -1,0 +1,37 @@
+{
+  "id": "req_2016",
+  "at": "2026-06-28T16:43:16.763Z",
+  "origin": "session:0f02d048",
+  "text": "yeah or i would start with trees. they seem to be the most problematic of the bunch so the hardest hitter would be nice to see up front",
+  "status": "done",
+  "sessionId": "0f02d048-6266-4c5d-affe-6131b0e17f55",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T16:43:50.360Z",
+      "actor": "opus-foliage",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T16:59:33.888Z",
+      "actor": "opus-foliage",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-28T17:02:35.263Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Shrank the palm-frond instance from 80B to 24B (3.33x) — the hardest-hitting foliage. New FrondInstance (pos f32x3, pitch/yaw u16x2, wide/len unorm16x2, rgb unorm8x4) replaces the full 80-byte model matrix; frond_wgsl rebuilds the matrix from TRS (rz dropped, sx==sz folded) and derives the per-frond spaghetti seed from the rebuilt columns so the look is preserved. Fronds also moved to a dedicated GPU buffer (g_frond_static_buf ~24MB + per-frame g_frond_inst_buf) off the shared 1.05M static pool, so a palm-heavy view no longer starves buildings/grass. Isolated to the existing ~frond~ pipeline; buildings/grass/water untouched. Both editor (v8_app) and no-V8 loader compile + render green (63k instances, zero GPU-validation errors). Visual confirmation of trees pending user eyeball via rjit game play. Known follow-up: setupStreaming still counts frond rows against MAX_STATIC_INSTANCES so lod_budget stays 0 on big maps — decoupling that is the next step to fully kill the in-view despawn.",
+  "shas": [
+    "d52881ea2"
+  ],
+  "resolvedAt": "2026-06-28T16:59:33.887Z"
+}

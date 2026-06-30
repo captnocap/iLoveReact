@@ -1,0 +1,28 @@
+{
+  "id": "req_2109",
+  "at": "2026-06-30T03:59:23.961Z",
+  "origin": "session:47bb26c9",
+  "text": "hm. i might have been ambitious about the file drop. idk how well that works. haha. give me a pick file dialog instead",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T03:59:32.900Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:00:43.298Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Superseded immediately by req_2110 — same ask (add a file-pick dialog to the model viewer). The user clarified a native picker already exists in the Studio import path, so this is being delivered under req_2110 by reusing that mechanism rather than building a drag-drop-only flow. No separate code landed under this id; tracking the work on req_2110.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T04:00:43.298Z"
+}

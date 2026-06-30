@@ -1,0 +1,18 @@
+{
+  "id": "req_1972",
+  "at": "2026-06-26T01:14:41.976Z",
+  "origin": "session:67264656",
+  "text": "e\n[diag-roof] UNSKINNED ramp_count=32 gable_count=12 box_count=10084\n[loader] streaming first frame — 26 draws: 6326 detail + 0 lod shell instances (of 3540057 total rows)\n[loader] resident catalog: 37 cooked mesh(es) ready (no rebake to place)\n[warn/render] [decal-raster] image node ('/home/siah/Downloads/high fidelity pastel brick texture(2).png') shipped no asset (empty/unreadable src at bake) — MISSING checkerboard\n[watch] build started (change: \"cart/hmsc-int/compile/worldGeometry.ts\")\n[watch] build finished\n[js.warn] [edit-latency] place   total ~ 559ms = pre  256 [commit 0 + rerender 256 (shell 256 {body 0 + kids 256} + loaderPane 0)] + scans    0 + push    0 + host-block  303  | host DOMINANT=other tick 0.0 paint 15.8 gpu 2.9 | nodes 8097 inst 6305 draws 773 meshes 6305  | re-rendered: Chrome,PropertiesPanel,RightPanel,CatalogRail\n[js.warn] [edit-latency] place   total ~ 478ms = pre  169 [commit 0 + rerender 169 (shell 169 {body 0 + kids 169} + loaderPane 0)] + scans    0 + push    0 + host-block  309  | host DOMINANT=other tick 0.0 paint 30.2 gpu 2.7 | nodes 8097 inst 6306 draws 773 meshes 6306  | re-rendered: Chrome,RightPanel\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=3 delayMs=1334.60 ms=97.66\n[js.warn] [edit-latency] place   total ~ 586ms = pre  267 [commit 0 + rerender 267 (shell 267 {body 0 + kids 267} + loaderPane 0)] + scans    0 + push    0 + host-block  319  | host DOMINANT=other tick 0.0 paint 30.4 gpu 2.8 | nodes 8097 inst 6307 draws 773 meshes 6307  | re-rendered: Chrome,RightPanel\n[js.warn] [edit-latency] place   total ~ 467ms = pre  174 [commit 0 + rerender 174 (shell 174 {body 0 + kids 174} + loaderPane 0)] + scans    0 + push    0 + host-block  293  | host DOMINANT=other tick 0.0 paint 35.7 gpu 2.9 | nodes 8097 inst 6308 draws 773 meshes 6308  | re-rendered: Chrome,RightPanel\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=1297.27 ms=47.74",
+  "status": "doing",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T01:16:28.416Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

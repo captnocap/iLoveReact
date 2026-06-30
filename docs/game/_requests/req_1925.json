@@ -1,0 +1,30 @@
+{
+  "id": "req_1925",
+  "at": "2026-06-25T22:41:16.728Z",
+  "origin": "session:26c62b07",
+  "text": "ok so i want you to drop these pill categories and create icons from svg that bake as sdf for the categories. so its a floor picture that is generic and wireframe like an icon but we know its a floor and we arnt saying the word floor",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:42:05.091Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:55:40.053Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the build menu's floor/wall/ramp/roof/stairs/elevator/pillar/prefabs/water/tower TEXT pills with wireframe ICONS that read as the category without the word. Authored SVG-style path glyphs in runtime/paint/category-icons.ts and baked them into the SDF atlas through the SAME pipeline the Studio paint brushes use (scripts/paint-glyph-source.ts -> rjit bake-icons -> cat.<id> in framework/gpu/icon_atlas.zig + runtime/icons/baked-names.ts), so each tab draws as ONE batched quad rather than a live Graph.Path that re-tessellates every frame. New CategoryIcon component mirrors the kit's BrushIcon (SdfIcon when baked, PathIcon fallback); the category word rides the hover tooltip so the glyphs stay learnable. Verified via rjit ship + shot /editor: all ten glyphs render crisp and the active tab highlights. Ramp reads a touch like a corner at this size — easy tweak if wanted.",
+  "shas": [
+    "e2bf548c7"
+  ],
+  "resolvedAt": "2026-06-25T22:55:40.053Z"
+}

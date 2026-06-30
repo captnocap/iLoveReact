@@ -1,0 +1,35 @@
+{
+  "id": "req_2087",
+  "at": "2026-06-30T00:27:55.564Z",
+  "origin": "session:3dbb283a",
+  "text": "yeah restore them idk what ur waiting on i never said to hold off on it just get it done",
+  "status": "done",
+  "sessionId": "3dbb283a-d0ec-4c16-ae77-0792cd564c91",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T00:28:44.119Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T00:31:41.825Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-30T01:14:39.825Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "User said to proceed with the restore. Rebuilt the recovery from the CURRENT live store (it had 3 newer events, seq 22070-22072, than the earlier backup), re-verified parity against _compact_backup (deep-equality, 59 models @ seq 15613), then installed a clean 92-model snapshot to the live model domain (cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json) after backing up the degraded one. The 4 oversized broken imports (new_mesh_045/046/047/048, 4-34MB each — the failed high-detail imports that black-screened) are excluded from the live store but preserved as standalone files in recovered-models/ (all 96 exported). Verified the installed snapshot: 92 models, globalSeq=22072, events=21298, seam matches the live event log so boot loads it directly (no full replay, no OOM). Editor should now open with the full library.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T00:31:41.824Z"
+}

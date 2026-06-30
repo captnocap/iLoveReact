@@ -1,0 +1,30 @@
+{
+  "id": "req_2143",
+  "at": "2026-06-30T07:40:44.411Z",
+  "origin": "session:a1184b2f",
+  "text": "hey we have some documents and statements around (and memories probably) about dont use subagents and workflows and all that, well its dated. im open to seeing what has changed / if the systems have gotten genuinely better and so go ahead and start by locating all said notation, then remove it, and just write a document that isnt precontext loaded that says where the notes lived if we want to repopulate them",
+  "status": "review",
+  "sessionId": "a1184b2f-c069-43ed-8498-a7655b477140",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T07:40:54.622Z",
+      "actor": "opus-cleanup",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T07:43:36.744Z",
+      "actor": "opus-cleanup",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Located and removed the dated anti-subagent notation. Governing rules pulled: CLAUDE.md's 'Task tool is forbidden' warning, the 'DO NOT USE EXPLORE IN THIS REPOSITORY' HARD RULE, and the 'NO SUBAGENTS, NO -A' HARD RULE; AGENTS.md's 'No subagents' Discipline Rule; and the 'No Explore agent' note in the auto-loaded memory (behavior.md body + frontmatter description, and the MEMORY.md index line). Kept the unrelated HARD RULES (frozen dirs, V8 default, banned shell, self-matching pgrep) and preserved the git add -A discipline that was bundled into the subagent block (it is independently covered in Git Discipline / Discipline Rules). Left dated historical snapshots that merely mention the old rule untouched (docs/handoffs/*, docs/game/_reports/*, and the cart/app/docs supervision-vocabulary product docs). Wrote docs/retired-subagent-restrictions.md — explicitly NOT precontext-loaded — recording every removed note verbatim with its original file+location plus repopulation instructions, so the bans can be restored if subagents/workflows still misbehave against this custom codebase. Memory files live outside the repo and were edited in place (not committed).",
+  "shas": [
+    "3edefbf5e"
+  ],
+  "resolvedAt": "2026-06-30T07:43:36.744Z"
+}

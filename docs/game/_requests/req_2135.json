@@ -1,0 +1,28 @@
+{
+  "id": "req_2135",
+  "at": "2026-06-30T06:06:46.062Z",
+  "origin": "codex:019f1624",
+  "text": "will you bake in the icons you have in this demo, they currently all just resolve empty, there is a script to bake icon shapes in that u can find in the tools",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T06:06:51.931Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T06:09:11.476Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the hmsc-workspace-mock icon wiring by importing the baked-aware Icon component from runtime/icons/Icon instead of the raw primitive Icon host node. Verified the existing bake-icons atlas is current, checked all 57 icon names used by the mock are present in runtime/icons/baked-names.ts, and ran a fast ship build successfully.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T06:09:11.476Z"
+}

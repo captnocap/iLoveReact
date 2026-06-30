@@ -83,9 +83,9 @@ cart/hmsc-int/
     <name>.tsx         a lab: GAME_* imports + an exported scene. Nothing else.
     <name>.notes.md    per-lab notes — read by humans, AI, and the oracle (P6)
 
-  compile/             V15: data/ + game/ → the emitted hmsc game (the bake)
-    verify/            V19: LLM-callable — compile → boot headless → run the
-                       P4 behavior tests → exit with a verdict. Run constantly.
+  compile/             V15: data/ + game/ → the emitted hmsc game-file (the bake)
+    verify/            V19: LLM-callable verify harness — bundle harness →
+                       boot headless → run command scripts/suites → verdict.
 
   data/                what P2 edits, what compile/ consumes. Never logic. (V20)
     streams/           per-concern APPEND-ONLY logs: world/, characters/,
@@ -217,7 +217,7 @@ hmsc ends as compile/'s OUTPUT (V15), not a hand-written cart.
 2. **`compile/` + `compile/verify/` skeleton FIRST-CLASS and EARLY (V19)** —
    even while the compiled game is nearly empty. The green light exists from
    day one and never goes dark; every later step lands under it. LLM-callable:
-   `rjit game compile && rjit game verify`.
+   `rjit game bake && rjit game verify`.
 3. `labs/_scaffold.tsx` + `rjit lab new <name>` + the labs route in shell
 4. `data/` persistence layer (V20) — the workspace pattern extended to
    per-concern append-only streams; editors write to it from their first

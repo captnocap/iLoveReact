@@ -1,0 +1,30 @@
+{
+  "id": "req_1867",
+  "at": "2026-06-25T16:10:11.500Z",
+  "origin": "session:6ff945f5",
+  "text": "why does it compile right when the app starts. it causes the app to start and immediately be frozen",
+  "status": "review",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T16:12:25.233Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T16:12:25.240Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "App auto-compiled right at startup → instantly frozen. The req_1866 mount-guard skipped only the first effect run, but on boot the world DATA loads a beat later (worldRev/placements/previewWorld go empty→populated), re-running the auto-compile effect which read the load as an edit and baked immediately. Replaced the single-run guard with a GRACE WINDOW (AUTO_COMPILE_GRACE_MS=4s) reset on every (re)mount and map switch: auto-compile is suppressed until the settling window passes, so neither boot nor a hot reload auto-bakes — only a genuine edit AFTER the window does. Manual Compile + the persisted toggle (req_1865) unaffected. TSX-only, hot-reloads. Committed a3215783d; completes the auto-compile fix line (req_1865 toggle 0d736c625, req_1866 mount-guard 8e59816ae, this grace window).",
+  "shas": [
+    "a3215783d"
+  ],
+  "resolvedAt": "2026-06-25T16:12:25.240Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1924",
+  "at": "2026-06-25T22:39:02.382Z",
+  "origin": "session:67264656",
+  "text": "ok. is there a way you can instrument the time it takes from me making the keystroke to place the item and it being placed and rendered. this is good but i want it to get as fast as possible so if we can get a timer on it now we have a starting point to beat",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:40:22.246Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:48:57.360Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Instrumented the editor's edit→render loop with a per-verb latency matrix — a baseline to beat. A shared editLatency singleton (cart/hmsc-int/editors/build/editLatency.ts): any edit gesture calls stampEdit(verb) at the keystroke/click, and the loader pane's live-push effect calls takeEditStamp after pushing to the host, logging gesture→push (React reconcile + the push's work — the optimizable part) and gesture→rendered (≈ one requestAnimationFrame later, the felt keystroke→on-screen). Wired ALL verbs the user asked for: place + place·prefab (placeAt), moved/removed/rotated/cloned (the commitMany funnel, verb taken from the event label), and skin/texture (stamped in FacePainter's applyBrush/applyPropTexture since the texture gesture lives outside the loader pane — the module singleton bridges gesture-site to measurement-site, same app instance). Each sample logs '[edit-latency] <verb> gesture→push X ms · gesture→rendered ~Y ms' and the last is stashed on g.__hmscEditLatency for a future HUD. Cart-side TS only — hot-reloads in the running dev host, no rebuild. Honest caveat: gesture→rendered is a one-frame rAF proxy (~±1 frame vs the host's actual present); gesture→push is exact. If we want sub-frame host-timestamped accuracy later it's a small host door. Bundle clean.",
+  "shas": [
+    "ccb82aba4"
+  ],
+  "resolvedAt": "2026-06-25T22:48:57.360Z"
+}

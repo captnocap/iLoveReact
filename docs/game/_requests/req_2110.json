@@ -1,0 +1,30 @@
+{
+  "id": "req_2110",
+  "at": "2026-06-30T03:59:59.518Z",
+  "origin": "session:47bb26c9",
+  "text": "there hsould be one. i know we have it for the existing import model in the actual studio editor",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:00:43.308Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:05:14.714Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a native OS file picker to the model viewer (the drop flow felt unreliable). Reused the exact mechanism the Studio import already had: promoted a shared runtime/hooks/pickFile (zenity --file-selection via execAsync, with shell-quote escaping) and refactored the Studio's cart/hmsc-int pickModelFile to delegate to it — one identical picker behind both, satisfying rule-of-two. cart/modelview.tsx now leads with a 'Choose a model…' button plus a title-bar 'Open…' to swap models; drag-drop stays as a bonus path, and all sources share one applyPath loader. Dropped .gltf from the accepted extensions because the host parser reads the self-contained binary .glb, not JSON-plus-external-bin .gltf. zenity is present on this box; self-shot verified the empty prompt (button) and a loaded model (car.obj, 180 tris, Open button). The picker dialog itself is interactive so it can't be headless-shot, but it is the same proven Studio call.",
+  "shas": [
+    "a7ea6ce6a"
+  ],
+  "resolvedAt": "2026-06-30T04:05:14.714Z"
+}

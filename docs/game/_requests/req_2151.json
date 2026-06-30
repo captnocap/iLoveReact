@@ -1,0 +1,30 @@
+{
+  "id": "req_2151",
+  "at": "2026-06-30T08:12:33.486Z",
+  "origin": "session:e0080e48",
+  "text": "nioce the focus is great i dont see the vertex or edge or face select tho",
+  "status": "review",
+  "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:13:22.334Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T08:37:23.290Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Host-native vertex/edge/face selection landed (slice 1 of the mesh editor). Selection now lives in the host against the resident mesh and the exact render camera (model_paint.project is the precise inverse of cameraRay), eliminating the JS-projector drift that broke the old Studio overlay. New framework/gpu/mesh_edit.zig welds the non-indexed mesh into logical vertices + unique edges + a corner->vertex map (the backbone for the gizmo and the unified layer model), holds per-mode selection sets, and picks face via raycast and vertex/edge via screen-nearest. Face selection is VISIBLE now: it tints selection-orange by riding the existing per-face paint atlas (save base, tint, restore on deselect) with zero new GPU pipeline. Cart gained the Object/Vertex/Edge/Face toolbar (1/2/3 keys, Esc clears), click-to-pick with drag-still-orbits and shift-click-extends, a live count HUD, and auto-wireframe in vertex/edge modes. Doors __mesh_edit_mode/pick/clear/select_face/counts; unit-tested (weld counts, vertex pick, highlight save/restore); built clean; headless RJIT_SELECTFACE proof shows the orange face. KNOWN GAP carried into req_2145 slice 2: vertex/edge selection picks and counts but has no on-mesh dot/line markers yet — those render in the geometry-overlay pass alongside the gizmo.",
+  "shas": [
+    "22f4ae3fc"
+  ],
+  "resolvedAt": "2026-06-30T08:37:23.290Z"
+}

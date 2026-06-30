@@ -1,0 +1,38 @@
+{
+  "id": "req_2056",
+  "at": "2026-06-29T01:41:22.968Z",
+  "origin": "session:2eacb40b",
+  "text": "lets work in npc pathing layer and get some npcs populated walking around the city ive started. im thinking, since we already have road pathing, we can just start there. There are some vehicles already, and we can put them on the roads and watch them drive around then we can do foot paths",
+  "status": "review",
+  "sessionId": "2eacb40b-8a1e-4c58-a8d4-b7c3ab9f4aea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T01:41:28.982Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T01:58:56.028Z",
+      "actor": "2eac",
+      "kind": "note",
+      "text": "Slice 1 (vehicles) built: new game/traffic GAME_TRAFFIC (host-A* + deterministic motion-plan agents, 4/4 P4 tests pass), self-contained TrafficLayer render layer wired into PlayRoute on the live NAVLIVE publish. Bundles clean, boots headless clean. Live 3D needs eyes in 'rjit dev hmsc-int' → Play (headless shot can't render Scene3D). Pedestrians next. sha 406b6be76"
+    },
+    {
+      "at": "2026-06-29T03:57:52.016Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ambient road traffic now drives in the COMPILED NATIVE WORLD (no V8), the surface the user actually checks — re-homed after the initial React PlayRoute attempt landed on a dead route (removed under req_2060). Pipeline: game/traffic GAME_TRAFFIC flow-follows the painted directional lane tiles into looping circuits at BAKE time (pure, no host A* — the headless bake builds the NavGrid via bakeNavGrid); worldTraffic.ts flattens each baked vehicle to a prototype (buildVehicle meshes as 13-float instance rows, geometry params folded into scale) + route + cruise speed + phase and encodes the TRAFFIC lump (id 28, wired into packageMap); constructor.zig decodes it into Scene.traffic; world_loader.zig creates three mutable instance nodes (box/cyl16/sphere) and stepTraffic(dt) samples each route per frame (arc-length speed*t+phase mod loop length), rotating the prototype about the agent heading and lifting onto terrain — the LED-ticker mutable-instance pattern. Deterministic (V5/V21). Verified end to end: rjit game bake + rjit game shot renders 14 vehicles (510 box + 135 cyl rows) driving the lane-marked streets — a black car and an ambulance correctly built/colored/oriented on-road (RJIT_TRAFFIC_SPAWN diagnostic frames them). 12 P4 tests across the three TS suites. NOTE: the editor LOADER PANE needs a 'rjit ship hmsc-int' rebuild to show traffic (framework Zig change; identical code path). Pedestrians/foot paths is the next slice (walker profile + sidewalk tracing + humanoid figures). SHAs: fed708b10 (route gen), 2470d1095 (lump bake), c68252789 (Zig render half); cleanup of the dead React route under req_2060 (c83187a0c).",
+  "shas": [
+    "fed708b10",
+    "2470d1095",
+    "c68252789"
+  ],
+  "resolvedAt": "2026-06-29T03:57:52.016Z"
+}

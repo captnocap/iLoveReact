@@ -1,0 +1,30 @@
+{
+  "id": "req_1968",
+  "at": "2026-06-26T00:45:20.528Z",
+  "origin": "session:67264656",
+  "text": "e\n[diag-roof] UNSKINNED ramp_count=32 gable_count=12 box_count=9643\n[loader] streaming first frame — 26 draws: 4200 detail + 0 lod shell instances (of 3539616 total rows)\n[loader] resident catalog: 37 cooked mesh(es) ready (no rebake to place)\n[warn/render] [decal-raster] image node ('/home/siah/Downloads/high fidelity pastel brick texture(2).png') shipped no asset (empty/unreadable src at bake) — MISSING checkerboard\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=3 delayMs=264.35 ms=100.86\n[js.warn] [edit-latency] place   total ~ 522ms = pre  152 [commit 0 + rerender 152 (shell 152 {body 0 + kids 152} + loaderPane 0)] + scans    0 + push    0 + host-block  370  | host DOMINANT=other tick 0.0 paint 24.0 gpu 2.6 | nodes 1983 inst 3322 draws 758 meshes 3322\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=259.29 ms=47.70\n[js.warn] [edit-latency] place   total ~ 447ms = pre  130 [commit 0 + rerender 130 (shell 130 {body 0 + kids 130} + loaderPane 0)] + scans    0 + push    0 + host-block  317  | host DOMINANT=other tick 0.0 paint 28.4 gpu 2.7 | nodes 1987 inst 3323 draws 758 meshes 3323\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=257.34 ms=47.86\n[js.warn] [edit-latency] place   total ~ 442ms = pre  122 [commit 0 + rerender 122 (shell 122 {body 0 + kids 122} + loaderPane 0)] + scans    0 + push    0 + host-block  320  | host DOMINANT=other tick 0.0 paint 30.5 gpu 2.9 | nodes 1991 inst 3324 draws 758 meshes 3324\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=261.39 ms=47.56\n[js.warn] [edit-latency] place   total ~ 445ms = pre  132 [commit 0 + rerender 132 (shell 132 {body 0 + kids 132} + loaderPane 0)] + scans    0 + push    0 + host-block  313  | host DOMINANT=other tick 0.0 paint 22.6 gpu 2.7 | nodes 1995 inst 3325 draws 758 meshes 3325\n",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:46:36.316Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:51:32.160Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The body/kids split was decisive: shell = body 0 + kids 130, so EditorShell's own render is free and the entire ~130ms is the child panels rendering before the loader pane — but they're STILL re-rendering despite the panel memos + buildingPrefabs/shownFocus stabilizations, so a prop is unstable somewhere (and Chrome + EditorLayout aren't memoized at all). To stop guessing prop-by-prop, added a render-counter: renderTick('Name') at the top of each suspect render (Chrome the shell bar, PropertiesPanel, RightPanel, CatalogRail) into the shared editLatency module, and the edit-latency line now appends 're-rendered: <names>' — the components that actually re-rendered for THAT edit (diffed against the prior snapshot). One place-click now names the exact culprits, so the next cut memoizes/stabilizes only those instead of guessing. Cart-side, hot-reloads. Sha 17e66f8ed. NOTE: this commit adds diagnostic renderTick calls to 4 components + the editLatency module; they're cheap counters to be removed once the perf work lands.",
+  "shas": [
+    "17e66f8ed"
+  ],
+  "resolvedAt": "2026-06-26T00:51:32.160Z"
+}

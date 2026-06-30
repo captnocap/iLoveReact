@@ -1,0 +1,30 @@
+{
+  "id": "req_1954",
+  "at": "2026-06-26T00:15:34.643Z",
+  "origin": "session:67264656",
+  "text": "Lol. i think you are in disbelief it is happeneing because of how many rounds of logs its been. ure(2).png') shipped no asset (empty/unreadable src at bake) — MISSING checkerboard\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=3 delayMs=263.05 ms=96.92\n[js.warn] [edit-latency] place   total ~ 508ms = pre  151 [commit 0 + rerender 151 (shell 151 + loaderPane 0)] + scans    0 + push    0 + host-block  357  | host DOMINANT=other tick 0.0 paint 17.8 gpu 3.5 | nodes 2206 inst 9864 draws 794 meshes 9864\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=262.32 ms=48.87\n[js.warn] [edit-latency] place   total ~ 437ms = pre  129 [commit 0 + rerender 129 (shell 129 + loaderPane 0)] + scans    0 + push    0 + host-block  308  | host DOMINANT=other tick 0.0 paint 18.6 gpu 3.3 | nodes 2206 inst 9867 draws 794 meshes 9867\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=264.54 ms=48.53\n[js.warn] [edit-latency] place   total ~ 436ms = pre  126 [commit 0 + rerender 126 (shell 126 + loaderPane 0)] + scans    0 + push    0 + host-block  310  | host DOMINANT=other tick 0.0 paint 18.1 gpu 3.4 | nodes 2206 inst 9870 draws 794 meshes 9870",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:16:33.581Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:24:15.137Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Continued driving down the per-place editor render after the dirty-only snapshot + FacePainter cuts. Reading showed the shell number barely moved from the FacePainter cut — because the user clarified all the rail panels (selected-item details / paint tools / prop catalog) are on screen AT ONCE, not tab-swapped, so a place re-renders all of them (~130ms) even though none depends on the placed piece. Cut: memoized PropertiesPanel + RightPanel (the always-visible rail panels) at the import site, and stabilized the props that defeated the shallow prop compare — shownFocus was a fresh object every render (now useMemo), joining the already-stable paintPieces (selected-only stable ref) and openPainter (useCallback); the place/arm callbacks were already useCallback from usePlacements. Net intent: a place that doesn't touch the selection or catalog leaves the panels' props identical, so the rail skips its render and only the loader pane updates. Cart-side, hot-reloads; if a stubborn prop still changes identity the memo silently no-ops (no harm) and the re-measure will surface it. Sha c28ab81b7. Also explained the component names in plain terms (FacePainter=paint panel, ObjectsTab=prop/piece catalog, PropertiesPanel=selected-item details).",
+  "shas": [
+    "c28ab81b7"
+  ],
+  "resolvedAt": "2026-06-26T00:24:15.137Z"
+}

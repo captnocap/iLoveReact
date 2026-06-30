@@ -1,0 +1,30 @@
+{
+  "id": "req_2029",
+  "at": "2026-06-28T21:00:49.073Z",
+  "origin": "session:5dc68f2d",
+  "text": "right. thats why the 'which way they face' is solved by further rigging a place that is where the back of the model touches and then again back of the legs. one of these is going to have to show up (almost always the back) and that solves the directional problem",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T22:03:30.162Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T22:03:30.188Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented facing-by-further-rigging: tag the BACK face (and/or back-of-legs) and direction falls out — face away from your back, toward the pillow when laying. Derived from contact faces, never inferred; one directional contact is required so it is always determined. Shipped in deriveSeatFromFaces (31738a0a1), req_2030.",
+  "shas": [
+    "31738a0a1"
+  ],
+  "resolvedAt": "2026-06-28T22:03:30.188Z"
+}

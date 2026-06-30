@@ -1,0 +1,28 @@
+{
+  "id": "req_1916",
+  "at": "2026-06-25T22:21:23.029Z",
+  "origin": "session:26c62b07",
+  "text": "oh actually i just now see them and its not bad. so idk if its worth all the trouble. they honestly look like shit lmao so what difference is it going to make we can see t he shit in 4k ? xD",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:37:48.211Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:37:48.220Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user's verdict on the thumbnail work: after the auto-framing fix (req_1898) hot-reloaded, the framed prop tiles are 'not bad' and good enough — the bake-to-cached-PNG pipeline and the interactive popover are both 'not worth all the trouble' because the limiting factor is the models themselves looking rough, not the thumbnail framing ('what difference is it going to make we can see the shit in 4k'). Phase 2 (offscreen-3D bake) and the popover are shelved; model quality is the real lever for another day. No code — a steering/scope decision.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T22:37:48.220Z"
+}

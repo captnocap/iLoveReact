@@ -1,0 +1,29 @@
+{
+  "id": "req_2031",
+  "at": "2026-06-28T21:05:16.442Z",
+  "origin": "supervisor-relay",
+  "text": "all the building pieces on the ground level do not touch the ground, they float above it a few inches — shown via painting green ground then floors over it, you can still see green at the floor edge",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-28T21:05:45.488Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T21:05:45.497Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Duplicate of req_2024 (same 'floors float above the painted ground' report — req_2026 is the screenshot follow-up, req_2031 the relayed verbatim log). Fixed in 1ba22d852: the flat-plate decomposition in editors/build/pieceShapes.ts now keeps the solid core flush from piece.y up so floors/flat-roofs touch the ground instead of hanging ~12mm over it. See req_2024 for the full write-up and verification.",
+  "shas": [
+    "1ba22d852"
+  ],
+  "resolvedAt": "2026-06-28T21:05:45.496Z"
+}

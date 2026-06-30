@@ -1,0 +1,31 @@
+{
+  "id": "req_1930",
+  "at": "2026-06-25T22:56:26.357Z",
+  "origin": "session:5dc68f2d",
+  "text": "yeah cool so what i would do is this, as it stands right now, we have that interaction layer pretty well fleshed out. but for the time being, lets get the rigging all set up so i can put ass to brass",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:57:09.034Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:25:06.359Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the contact-pin seating rig v1 ('ass to brass'): 5 body-contact anchors in game/figure/rig.ts, a PropSeat.pin schema + propSeatPin resolver in props.ts, and a pure solver seating.ts (seatTransformOnProp) that inverts FigureMeshes' R_y*p+offset transform to land the figure's 'seat' anchor exactly on a prop's pin. Proven by seating.test.ts (32 shape x placement combos within 1e-6) and a shot-verified probe cart (figure seated on a dining chair). Editor/preview-path only, build-beside, no live/bake wiring. Also stubbed world_loader.isExternalCamera to unblock non-compiled-world cart builds (a parallel-session break).",
+  "shas": [
+    "8361a3ad0",
+    "dd6243f05"
+  ],
+  "resolvedAt": "2026-06-25T23:25:06.359Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_1988",
+  "at": "2026-06-26T02:50:47.686Z",
+  "origin": "session:7a3a0337",
+  "text": "yeah clean it up. its completely useless when i have no actual capability to get back to any of those snapshots that continue to add up",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T02:51:59.423Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

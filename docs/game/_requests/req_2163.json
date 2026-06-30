@@ -1,0 +1,18 @@
+{
+  "id": "req_2163",
+  "at": "2026-06-30T09:18:56.294Z",
+  "origin": "session:e0080e48",
+  "text": "so i cant get it to work because the model is always rotating, basically move the rotate to be from middle mouse down only and that should solve it",
+  "status": "doing",
+  "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T09:19:16.521Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2034",
+  "at": "2026-06-28T21:18:33.959Z",
+  "origin": "session:15799c87",
+  "text": "hey so now that i can make walls and floors and stuff, if you look we have had a fuckin horrible history of trying to solve the edge piece thing and i seemed to have solved it pretty easily by mistake, and the answer is just literally in looking at my 'thin_floor' and other pieces that are thin. when its thin it sits perfectly and you dont have to worry about weird shit from my experience so far [Image #20] [Image #21] compare those to this: [Image #22] lol",
+  "status": "review",
+  "sessionId": "15799c87-1d34-4279-9cd7-dee2765a8997",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T21:18:43.691Z",
+      "actor": "session-1579",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T21:48:28.220Z",
+      "actor": "session-1579",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Thinned the floor plate from a fat 0.2m slab to 0.05m (split FLOOR_SIZE out of PLATE_SIZE in game/build/catalog.ts; floor.* point at it, roofs keep PLATE_SIZE since a flat roof underside is a visible ceiling). 0.05m keeps the plate sandwich non-degenerate so per-face floor skins and the 3-box bake survive, while the old curb lip / tall edge face (the 'edge piece' weird shit) all but vanishes. Walls rest on the new top via the existing read-time liftedWallBaseY (no hardcoded 0.2); updated placed.test wall-rest expectations 0.2 to 0.05. Verified: worldParity 16/16, roofs 9/9, worldGeometry floor 3-box+per-face-skin test green.",
+  "shas": [
+    "5448c5592"
+  ],
+  "resolvedAt": "2026-06-28T21:48:28.220Z"
+}

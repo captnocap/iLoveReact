@@ -1,0 +1,28 @@
+{
+  "id": "req_2111",
+  "at": "2026-06-30T04:02:38.441Z",
+  "origin": "codex:019f1624",
+  "text": "Ok so back to this panel i love the direction, i have one problem though i can not scroll the container so need that to see the full functionality here but also, if you ideally could pack it in so that there is no scroll container and it has pages and fixed containers that would be ideal [Image #1]",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:02:45.396Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:09:28.426Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the material content browser mock to use fixed paged result slots instead of relying on a scrollable overflow panel. Material pages now show six compact rows per page, preserve empty slots for stable geometry, keep selected-material controls visible, and document the no-scroll/fixed-page requirement in DESIGN_INTAKE.md.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T04:09:28.426Z"
+}

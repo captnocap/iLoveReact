@@ -1,0 +1,28 @@
+{
+  "id": "req_2112",
+  "at": "2026-06-30T04:05:09.009Z",
+  "origin": "codex:019f1624",
+  "text": "and in this dock at the bottom lets just go ahead and get in there some more helpful things like we can store our in memory edit history here in a popover expand, we can also have things like average time per edit and these sorts of things i always want to monitor since when making a big ass map i need to see when it starts to increase the time of authoring because if it does thats how i know we have the wrong approach for the authoring tooling. im trying to ensure that a placement on an empty map is the same delta as a placement on a fully authored rich map",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:05:21.753Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:09:28.480Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Expanded the bottom dock mock with an authoring telemetry popover. The dock now exposes in-memory edit count, average edit time, p95 edit time, rich-map delta, placement parity status, a compact cost sparkline, and per-event empty-map versus rich-map timings so authoring cost regressions are visible during map work.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T04:09:28.480Z"
+}

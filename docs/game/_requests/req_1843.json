@@ -1,0 +1,30 @@
+{
+  "id": "req_1843",
+  "at": "2026-06-25T05:52:02.892Z",
+  "origin": "session:6ff945f5",
+  "text": "haha actually what il do is treat the claudes closet as the dev room, and it can be one big ass room in the map of actual props, as window shopping. compiling the one is far better than doing all of them that shit was silly. this works great. so the next thing i would say that is on the list is getting textures to update instantly if we can. currently, if i click something, and skin its faces, it doesnt update til compile. but same thing again, we can just reference it, and for pre-painted items from the mesh studio, those already come g2g out of the box",
+  "status": "review",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T05:52:43.796Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T06:10:13.620Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Slice 1 of live editor face-skins: procedural/shader skins on mesh props now show in the loader iso pane WITHOUT a compile. A skin isn't just a reference like geometry was — the loader must materialize it — so the path is: resolve the skin's WGSL recipe in JS (resolveMaterialShader, exported from worldGeometry) → push via the new __compiled_world_set_live_material door → world_loader.ensureLiveMaterials materializes each once (GPU up by render time) into a live-mat:<hash> tile via material_tex.materialize (the same path baked materials take) → the live mesh ref carries a u32 mat_hash (stride 20→24) and appendMeshPropNode wears it via a new tex_key_override (no per-frame UV-flip copy since the live path runs every frame; exact V lands on Compile). Whole-prop (the FacePainter paint-every-slot default). Cooked/mesh-studio props already showed their baked paint. Shipped clean, committed 473bd169a. FOLLOW-UP SLICES (same req, not yet built): flat colors, image decals (need image bytes pushed + rasterized), per-face slots, and parts-props (the box overlay carries no per-row tex key yet). Also recorded: residency now via the user's 'Claude's Closet' room (a normal map compile makes those kinds resident), superseding the rejected mesh-zoo dev bake.",
+  "shas": [
+    "473bd169a"
+  ],
+  "resolvedAt": "2026-06-25T06:10:13.620Z"
+}

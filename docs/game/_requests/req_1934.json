@@ -1,0 +1,30 @@
+{
+  "id": "req_1934",
+  "at": "2026-06-25T23:07:18.477Z",
+  "origin": "session:67264656",
+  "text": "i just see PLACEFREEZE no edit latency log at all atch] build finished\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=12 delayMs=258.70 ms=93.94\n[watch] build started (change: \"cart/hmsc-int/game/kinds/props.ts\")\n[watch] build finished\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=12 delayMs=261.70 ms=91.44\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=12 delayMs=255.78 ms=90.71\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=12 delayMs=256.67 ms=91.08\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=12 delayMs=257.37 ms=93.32",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T23:08:30.951Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:10:20.963Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused why no [edit-latency] line appeared: the dev terminal only surfaces warn+ severities (console.log/warn/error all route through emitJsLog with a severity in v8_bindings_core.zig, and only warn+ reaches the terminal — every line the user DOES see, PLACEFREEZE and the old heartbeat, is console.warn). The edit-latency readout used console.log, so it logged into the void. Switched it to console.warn so it shows up next to the lines the user is already watching: '[js.warn] [edit-latency] place gesture→push X ms · gesture→rendered ~Y ms'. Cart-side TS — hot-reloads, no rebuild. Bundle clean. Note for the optimization phase: the PLACEFREEZE lines the user pasted are real signal — a deferred snapshot flush (editors/sessions.ts) of ~90ms per commit across 12 streams — a concrete latency target once we start driving the numbers down.",
+  "shas": [
+    "9c4f17350"
+  ],
+  "resolvedAt": "2026-06-25T23:10:20.963Z"
+}

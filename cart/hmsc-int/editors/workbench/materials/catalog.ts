@@ -20,6 +20,9 @@ export function assignableMaterialCatalog(): MaterialChoice[] {
     push({ id: spec.id, label: spec.label, group: spec.group, source: 'recipe' });
   }
   for (const t of TEXTURE_REGISTRY) {
+    if (t.source.kind === 'shader' && !shaderSpec(t.id)) {
+      push({ id: t.id, label: t.label, group: t.group ?? 'Shader Presets', source: 'preset' });
+    }
     if (t.source.kind === 'react') push({ id: t.id, label: t.label, group: 'Facades', source: 'react' });
   }
   for (const t of loadCustomTextures()) {

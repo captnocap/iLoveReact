@@ -1,0 +1,30 @@
+{
+  "id": "req_1873",
+  "at": "2026-06-25T17:04:59.823Z",
+  "origin": "session:60071ace",
+  "text": "something like this, if its not clear what would kinda fit where by if you just consider what all entails by using the current editor. [Image #1]",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T17:05:47.543Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T17:12:41.396Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured the user's hand-drawn layout sketch into the playbook as the committed Thread 2 direction: the four quadrants collapse to one big swappable map pane (iso-3D build <-> 2D tile map, the 90% surface), a narrow contextual left rail (selected piece / paint-skins / prop-piece menu, which swap to the tile-paint tools when the 2D map is focused), and a corner picture-in-picture 'switcharoo' toggle that swaps which map is large. Mapped every sketch region to its current component. Committed as 4e6b66700.",
+  "shas": [
+    "4e6b66700"
+  ],
+  "resolvedAt": "2026-06-25T17:12:41.396Z"
+}

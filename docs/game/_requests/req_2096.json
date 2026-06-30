@@ -1,0 +1,28 @@
+{
+  "id": "req_2096",
+  "at": "2026-06-30T02:47:26.435Z",
+  "origin": "codex:019f1624",
+  "text": "1: i would think the best approach is for most things, put in preset values like, lets just think about a variable like speed, i would treat it as a select menu that has a handful of predefined speeds that come from ANOTHER setting elsewhere like game defaults or has a custom override. otherwise the values just feel like magic in here even if every tile said the same numerical value. speed can be expressed in default, fast, slow, etc. these are really just factors of a number at a fixed value. \n2: yes, and overall i think the more horizontal space consumed the better. and really most things can be treated like a table of data / mini spreadsheet component when it comes to immutables\n3: multiple objects should do its best due dilligence to what the selected items are but most times it wont have the ability to combine wrong things anyways. i dont want to be able to place wall pieces at the same time im placing prop pieces in the future editor, so things like trying to couple a prop and a building piece wont be a problem",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T02:47:34.267Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T02:48:30.200Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's follow-up inspector answers in cart/hmsc-workspace-mock/DESIGN_INTAKE.md. Captured the rule that editable values should usually be named presets sourced from game defaults/tunables, with custom overrides only when needed, rather than raw magic numbers in the inspector. Added that immutable data can use wider table/mini-spreadsheet layouts, and multi-selection can assume coherent same-family authoring modes because future placement tools should prevent invalid mixed workflows like wall pieces plus props. Added deductions for default->preset->override modeling, compact select/dropdown edit surfaces, wider immutable readouts, and same-family multi-selection inspectors. No implementation changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T02:48:30.200Z"
+}

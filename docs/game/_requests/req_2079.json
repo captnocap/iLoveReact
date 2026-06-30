@@ -1,0 +1,30 @@
+{
+  "id": "req_2079",
+  "at": "2026-06-29T23:22:27.728Z",
+  "origin": "session:3dbb283a",
+  "text": "raise the roof on it anyways so i dont have to come back. lets get it high so its not a problem",
+  "status": "review",
+  "sessionId": "3dbb283a-d0ec-4c16-ae77-0792cd564c91",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T23:22:38.905Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T23:27:04.341Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Raised the localstore value ceiling so a detailed imported model is never store-bound. Verified the whole value path is heap-backed end to end (v8 binding argToStringAlloc allocates the exact UTF-8 length; the write-queue WriteJob owns a heap []u8 freed by the writer thread; SQLite bindText handles up to ~1GB), so MAX_VALUE was only a sanity guard. Bumped it 4MB->64MB in framework/storage/localstore.zig — a high-poly Studio model (its EditMesh JSON rides in the editor-state value) no longer trips BufferTooSmall, while a genuinely runaway multi-hundred-MB value is still caught. With the store no longer the limiter, lifted MAX_IMPORT_TRIS 25k->150k in importMesh.ts (the cap now reflects editor responsiveness, since every face is a JS object the Studio edits/paints/undoes) and raised the dialog's GRID_MAX 200->512 so the Detail slider can reach the higher fidelity, keeping a snappy ~25k default. 11/11 importMesh unit tests pass; framework + hmsc-int compile clean via SHIP_RUN_PACKAGE=0 ship. IMPORTANT: this is a framework Zig change, so the running dev host must be restarted (rjit dev hmsc-int) to load the new ceiling — the TSX/TS changes hot-reload but the 64MB limit is compiled into the binary.",
+  "shas": [
+    "acdee6fde"
+  ],
+  "resolvedAt": "2026-06-29T23:27:04.341Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_1983",
+  "at": "2026-06-26T02:20:02.178Z",
+  "origin": "session:4f39ae52",
+  "text": "Right. Just let them do their thing. if it is in the way of what u need to do the work around it for now. its just temporary",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T02:25:26.924Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T02:25:26.933Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the held item the TOP-priority focus, so the properties panel always shows the item you have in focus instead of falling through to an unrelated tile brush. The nonsense the user called out: shownFocus resolved as selCells (tiles) > placeFocus (place layer) > armedFocus (held) > tile brush, so the thing you are actively HOLDING was third in line and could be shadowed by a stale tile/place selection or leak the tile brush (TILE Asphalt). Reordered: armedFocus wins outright, then a tile selection, then the place layer, then the tile brush only as the genuine tile-paint default; focusWorld matches so a held prop resolves against its dressed preview. With req_1959 (held props) + req_1962 (held build pieces get a piece focus), holding ANY catalog item now shows that item uniformly. Verified compiling green. NOT committed: index.tsx also holds another session's uncommitted MINIMAL_REPRO=true probe (req_1980) gating the panels off, and I cannot stage only my lines without shipping their temp probe; per the user's 'let them do their thing' I left my change in the working tree to ride into index.tsx's next commit. Pure logic fix, correct regardless of MINIMAL_REPRO.",
+  "shas": [],
+  "resolvedAt": "2026-06-26T02:25:26.933Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_1991",
+  "at": "2026-06-26T03:09:11.008Z",
+  "origin": "session:7a3a0337",
+  "text": "a hotmirror probe. i do not see that in my logs tch[87] key=wmat-45 shape=2 count=3 translucent=false tex_translucent=false\n[diag-roof] matbatch[88] key=wmat-47 shape=7 count=4 translucent=false tex_translucent=false\n[diag-roof] matbatch[89] key=wmat-50 shape=7 count=4 translucent=false tex_translucent=false\n[diag-roof] matbatch[90] key=wmat-51 shape=0 count=3 translucent=false tex_translucent=false\n[diag-roof] matbatch[91] key=wmat-52 shape=7 count=2298 translucent=false tex_translucent=false\n[diag-roof] UNSKINNED ramp_count=32 gable_count=12 box_count=10077\n[loader] streaming first frame — 23 draws: 6263 detail + 0 lod shell instances (of 3538479 total rows)\n[loader] resident catalog: 37 cooked mesh(es) ready (no rebake to place)\n[warn/render] [decal-raster] image node ('/home/siah/Downloads/high fidelity pastel brick texture(2).png') shipped no asset (empty/unreadable src at bake) — MISSING checkerboard\n[js.warn] [store-probe] place total=0.0ms = undoSnap 0.0 + commit 0.0 | append(n=2): seq 0.1 json 0.0 insert 0.1 fold 0.3\n[apptick-split] total=262.8ms | jsTick(+microtasks)=259.5 tickDrain=0.0 drainFlush=1.3 dirty(snap=0.3+rebuild=1.6)\n[js.warn] [edit-latency] place   total ~ 525ms = pre  242 [commit 0 + rerender 242 (shell 242 {body 0 + kids 242} + loaderPane 0)] + scans    0 + push    0 + host-block  283  | host DOMINANT=appTick events 217.6 appTick 262.8 preLayout 0.1 layout 1.2 prePaint 0.4 paint 15.5 gpu 2.9 post 0.0 resid 0.0 | bridge 259.5 | nodes 8040 inst 9696 draws 890 meshes 9696  | re-rendered: Chrome,PropertiesPanel,RightPanel,CatalogRail\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=3 delayMs=1333.03 ms=100.02\n[apptick-split] total=101.2ms | jsTick(+microtasks)=101.0 tickDrain=0.0 drainFlush=0.0 dirty(snap=0.0+rebuild=0.0)\n[js.warn] [store-probe] place total=0.0ms = undoSnap 0.0 + commit 0.0 | append(n=2): seq 0.1 json 0.0 insert 0.1 fold 0.0\n[apptick-split] total=261.3ms | jsTick(+microtasks)=258.1 tickDrain=0.0 drainFlush=1.2 dirty(snap=0.3+rebuild=1.6)\n[js.warn] [edit-latency] place   total ~ 463ms = pre  169 [commit 0 + rerender 169 (shell 169 {body 0 + kids 169} + loaderPane 0)] + scans    0 + push    0 + host-block  294  | host DOMINANT=appTick events 142.2 appTick 261.3 preLayout 0.1 layout 1.3 prePaint 0.3 paint 27.1 gpu 2.9 post 0.0 resid 0.0 | bridge 258.1 | nodes 8040 inst 9699 draws 890 meshes 9699  | re-rendered: Chrome,RightPanel\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=1406.82 ms=47.18\n[apptick-split] total=47.4ms | jsTick(+microtasks)=47.3 tickDrain=0.0 drainFlush=0.0 dirty(snap=0.0+rebuild=0.0)",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T03:12:42.412Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

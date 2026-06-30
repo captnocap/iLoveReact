@@ -1,0 +1,30 @@
+{
+  "id": "req_1948",
+  "at": "2026-06-26T00:02:15.016Z",
+  "origin": "session:a3e16cb4",
+  "text": "check this out. here is the skybox / outskirts of the city we made the other day [Image #1] except its literally rendering over the top of map areas i have claimed in the tile painter. the bounds are wrong it thinks im just a 2x2 chunk and im much more than that so lets fix it",
+  "status": "review",
+  "sessionId": "a3e16cb4-c3df-491f-965f-1cf28de4ce4b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:02:22.486Z",
+      "actor": "a3e1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:13:55.249Z",
+      "actor": "a3e1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the void/skybox shell drawing its procedural city over painted tile-painter chunks. Root cause: a painted chunk is a heightfield landform (chunkFloor.floorToLandform), not a surfaceRegion, but worldCore() only scanned surfaceRegions — so the core rectangle stayed pinned at the initial 2x2 chunk template (~240m) while the painted map extended far past it, and the shell filled every chunk whose centre fell outside that stale core. Now worldCore also expands over world.landforms via each kind's registry footprintRadius (exactly half a chunk for painted heightfields, so the union is the painted area). Editor preview is fixed directly (previewWorld.landforms already holds the painted chunks); the compile bake ships them in the separate floors param, so pushVoidShell and packageMap's voidCore now compute from worldWithFloorLandforms(state, floors). void.test.ts: added a grown-core + shell-skip case (10/10 green).",
+  "shas": [
+    "696ee8ad7"
+  ],
+  "resolvedAt": "2026-06-26T00:13:55.248Z"
+}

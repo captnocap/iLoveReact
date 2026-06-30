@@ -1,0 +1,28 @@
+{
+  "id": "req_2125",
+  "at": "2026-06-30T04:47:48.014Z",
+  "origin": "codex:019f16c9",
+  "text": "yeah the current V* system has some conflicts because its all an ongoing learning experience of what does and doesnt work out well; alright so with that being said can you make a parity and if then you need some mock data to compare just generate a huge world that both can compile data from and compare side by side",
+  "status": "review",
+  "sessionId": "019f16c9-c9f4-7d63-86f1-4a12cf41882c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:47:55.702Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T05:00:19.908Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a repeatable TS/Zig compiler parity harness for the hmsc compiled-route data format. The new rjit game parity command writes one deterministic generated-world source spec, compiles it through the existing TypeScript workspace writer and a new Zig RJMP/gamefile writer/compiler, byte-compares the emitted gamefiles, and reports side-by-side timings. This deliberately targets the platform-format compiler core first: row-RLE, lump container layout, three game streams, sha256 asset manifest, and embedded blobs; live editor store readers and full asset cookers remain the next migration layer.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T05:00:19.907Z"
+}

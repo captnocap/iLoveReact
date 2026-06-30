@@ -1,0 +1,30 @@
+{
+  "id": "req_1940",
+  "at": "2026-06-25T23:41:23.351Z",
+  "origin": "session:67264656",
+  "text": "[warn/render] [decal-raster] image node ('/home/siah/Downloads/high fidelity pastel brick texture(2).png') shipped no asset (empty/unreadable src at bake) — MISSING checkerboard\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=13 delayMs=264.99 ms=121.45\n[js.warn] [edit-latency] place   total ~ 544ms = pre  158 + scans    0 + push    0 + host-block  386  | host DOMINANT=other tick 0.0 paint 21.6 gpu 2.5 | nodes 2105 inst 9526 draws 791 meshes 9526\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=13 delayMs=264.26 ms=111.64\n[js.warn] [edit-latency] place   total ~ 501ms = pre  130 + scans    0 + push    0 + host-block  371  | host DOMINANT=other tick 0.0 paint 14.0 gpu 2.7 | nodes 2105 inst 9529 draws 791 meshes 9529\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=13 delayMs=262.08 ms=126.50\n[js.warn] [edit-latency] place   total ~ 510ms = pre  127 + scans    0 + push    0 + host-block  383  | host DOMINANT=other tick 0.0 paint 13.9 gpu 2.8 | nodes 2105 inst 9532 draws 791 meshes 9532\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=13 delayMs=261.79 ms=125.03\n[js.warn] [edit-latency] place   total ~ 511ms = pre  129 + scans    0 + push    0 + host-block  382  | host DOMINANT=other tick 0.0 paint 13.9 gpu 2.5 | nodes 2105 inst 9535 draws 791 meshes 9535\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=13 delayMs=261.49 ms=117.89\n[js.warn] [edit-latency] place   total ~ 504ms = pre  129 + scans    0 + push    0 + host-block  375  | host DOMINANT=other tick 0.0 paint 13.9 gpu 2.8 | nodes 2101 inst 9538 draws 791 meshes 9538\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=13 delayMs=289.98 ms=122.40\n[js.warn] [edit-latency] place   total ~ 542ms = pre  143 + scans    0 + push    0 + host-block  399  | host DOMINANT=other tick 0.0 paint 13.9 gpu 2.5 | nodes 2101 inst 9541 draws 791 meshes 9541\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=13 delayMs=262.43 ms=109.78\n[js.warn] [edit-latency] place   total ~ 514ms = pre  139 + scans    0 + push    0 + host-block  375  | host DOMINANT=other tick 0.0 paint 21.6 gpu 2.6 | nodes 2101 inst 9544 draws 791 meshes 9544",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T23:42:45.370Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:46:51.343Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The confirming instrument cleared my placementWorld suspect (no 'incl. placementWorld' in the line → it was not recomputing) and pointed at the real recurring cost: the session snapshot flush rewrote ALL 13 streams on every commit (~120ms — the PLACEFREEZE the user kept seeing), even though one commit touches one stream. That deferred flush freezes the UI ~260ms after each edit — the felt jank when placing rapidly. Fix: materializeSnapshots (cart/hmsc-int/data/index.ts) now skips any stream whose event count is unchanged since its last snapshot — the on-disk file stays valid because SNAPBOOT's count-vs-seq boot guard still agrees and the tail is empty, so a skip is correct; worst case if ever wrong is a slower boot via full replay, never lost work (DB events are the source of truth). materializedCount is seeded at boot from what each on-disk snapshot folded, so dirty-only kicks in from the first edit: 13 writes/commit → 1. Proven safe: a new data-store test asserts only the changed stream re-snapshots, an unchanged flush writes nothing, and a SKIPPED stream reopens with correct state (no data lost); 20/20 data tests pass. Cart-side, hot-reloads. Expect PLACEFREEZE to drop from streams=13 ms~120 to streams=1 ms~10, and gesture→rendered to fall accordingly. Sha 2d2910722. Remaining: pre ~130ms (the real piece-visible latency) is the next target if the user wants to push toward gameplay rate.",
+  "shas": [
+    "2d2910722"
+  ],
+  "resolvedAt": "2026-06-25T23:46:51.343Z"
+}

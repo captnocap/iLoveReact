@@ -1,0 +1,30 @@
+{
+  "id": "req_2021",
+  "at": "2026-06-28T17:53:06.758Z",
+  "origin": "session:a3b23d7b",
+  "text": "hey cheeck out the in-app compile pipeline for map/game compile, and lets see if we can speed it up. ideally i think we should be able to if there was some cache that it could just compile ontop of rather than recompiling the entire map again, its not like im changing the entire map",
+  "status": "review",
+  "sessionId": "a3b23d7b-5816-4f29-b64c-3ffdb36ed814",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T17:53:14.425Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T18:00:50.748Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Profiled the in-app map/game Compile pipeline (the Compile button shells out to 'tools/rjit game bake', which bundles+runs bakeGameFile.ts under v8cli). esbuild bundling is negligible (0.04s); the entire ~6.4s was inside createHmscMapfile, and two functions dominated: pushPlacedPieces (~3.45s, render geometry) and buildBakedColliders (~1.8s, physics) — BOTH funnel through liftedWallBaseY, which full-scanned all placed pieces on every call. At ~4.6k pieces it ran ~25k times for ~114M iterations: a classic O(N^2). The repo already has a spatial grid (PLACEPERF-0610 / piecesNear, WeakMap-cached per pieces array) built to kill exactly this; liftedWallBaseY was simply never converted to use it. Routed it through piecesNear (entries carry precomputed bounds, so it also drops the per-candidate pieceBounds). Output is byte-for-byte identical (verified by diffing old-vs-new gamefiles); affected test suites show the same pre-existing pass counts with and without the change. Real CLI bake: 6.4s -> 1.8s (3.5x), benefiting EVERY compile (full /compiled, per-map editor, and autocompile) with zero cache-staleness risk — a cleaner root-cause fix than the requested incremental cache, which is now a much bigger lift for a smaller remaining payoff.",
+  "shas": [
+    "93f78e72f"
+  ],
+  "resolvedAt": "2026-06-28T18:00:50.748Z"
+}

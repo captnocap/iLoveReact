@@ -1,0 +1,37 @@
+{
+  "id": "req_1849",
+  "at": "2026-06-25T07:00:55.693Z",
+  "origin": "session:6ff945f5",
+  "text": "nice yep that worked yet again. nice job. lets close that out same thing for building pieces, and then we can do images for both after that! good shit tho",
+  "status": "done",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T07:02:13.266Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T07:22:51.677Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-25T07:53:00.261Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Building pieces now get the same live procedural face-skins as props. The hard difference: prop meshes are individual nodes (so a re-skin hid the stale baked node), but building-piece boxes are BATCHED instanced draws and can't be hidden per-instance. So instead of hiding, the live skinned face-slab is rendered as a textured cube OUTSET ~8mm to sit just proud of the baked face and cleanly occlude it (no z-fight, no batch surgery). Baseline-free like the prop skin fix, so it covers existing pieces and survives hot reloads. JS buildingSkinBoxes decomposes pieces via pieceVisualShapes; a skinned face-slab carries textureKey 'bldskin:<id>' which resolves to a procedural shader → emit a 32-byte box (transform + matHash) + material. Host door __compiled_world_set_live_skin_boxes; world_loader.appendLiveSkinBoxes renders each as a one-instance textured cube into a pre-sized per-frame buffer outset by SKIN_BOX_OUTSET, reusing the live-material path; applyLiveMeshProps restructured so skin boxes render even with no mesh props in the scene. Shipped clean, committed bac3b1bc4. Slice scope: procedural skins, box faces (skinned ramps deferred). The OUTSET (8mm) is a one-constant tweak if skins look proud of the surface. Flat colors + image decals for both props and pieces are the next follow-up ('images for both').",
+  "shas": [
+    "bac3b1bc4"
+  ],
+  "resolvedAt": "2026-06-25T07:22:51.676Z"
+}

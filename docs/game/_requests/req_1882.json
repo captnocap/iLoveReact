@@ -1,0 +1,30 @@
+{
+  "id": "req_1882",
+  "at": "2026-06-25T18:07:50.399Z",
+  "origin": "session:60071ace",
+  "text": "isnt there like dozens of them? like the shaders ?",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T18:08:44.837Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T18:15:52.945Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added reportMaterialCensus (editors/materials/materialStats.ts) + a MATERIALS panel to the / dashboard, answering the user's point that the texture census (17 raster bitmaps) missed the game's dozens of procedural shader materials. It reads the authored materials stream (Materialized catalog, split shader-based vs decal-based via MaterialRecord.shaderId/decal) and the built-in HMSC_SHADERS recipe count. Pure tally helper unit-tested 2/2; the cart bundles clean. Live shot verification is pending a parallel session's in-flight edits to game/textures/shaders.ts + render3d/fillShader.ts clearing a ship LABEL MISMATCH (has-terminal/doom flags out of sync with cart.json) — that race is unrelated to this code. Committed 058859eaa.",
+  "shas": [
+    "058859eaa"
+  ],
+  "resolvedAt": "2026-06-25T18:15:52.945Z"
+}

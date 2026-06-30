@@ -1,0 +1,28 @@
+{
+  "id": "req_1853",
+  "at": "2026-06-25T07:09:25.513Z",
+  "origin": "codex:019efd31",
+  "text": "amazing, hey so whats the damage to get all of these into a system that is less..... autistic. like all the categories here mean literally nothing and shit is so scattered that it is more a pain than anything else. literally anything is better than this abc family naming",
+  "status": "review",
+  "sessionId": "019efd31-8050-79d0-84ae-54d775a7e51d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T07:09:35.847Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T07:13:31.165Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the visible hmsc-int material catalog taxonomy so shader recipes are grouped by semantic authoring shelves rather than effect-board letters. The catalog now uses shelves such as Pavement & Streets, Wallpaper & Interior Walls, Metal & Industrial, Glass/Light/Gradients, and Codes & Stencils; the shared chooser fallback no longer emits a-family or misc, so buildings, clothing, vehicles, and FacePainter stop leaking ABC family naming when group metadata is missing. Added/updated tests to guard the semantic grouping contract and verified the hmsc-int bundle.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T07:13:31.165Z"
+}

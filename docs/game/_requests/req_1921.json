@@ -1,0 +1,28 @@
+{
+  "id": "req_1921",
+  "at": "2026-06-25T22:29:43.674Z",
+  "origin": "session:5dc68f2d",
+  "text": "actually even better, instead of captchas we do shit like 'what does this say' [Image #1]",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:30:03.087Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:25:06.412Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design captured: the signature gate kind is 'decipher' — render a target word as an illegible black-metal-logo thorn-tangle the player must transcribe, with cruelty = legibility degradation, procedural atop the existing Graph.Polyline/capsules stroke stack so the word itself carries lore. Deferred build, recorded in the prop-capability memory.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T23:25:06.412Z"
+}

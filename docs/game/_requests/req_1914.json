@@ -1,0 +1,28 @@
+{
+  "id": "req_1914",
+  "at": "2026-06-25T22:18:13.455Z",
+  "origin": "session:26c62b07",
+  "text": "they are not bad. i think you could get away with a lot if you introduced a popover that, maybe when i then move the mouse over it could interact with the model in a interactive viewer and that just solves all that problem of how to take a photo of what looks like shit anyways",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:18:32.851Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:37:41.939Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Called off by the user (req_1916). The plan was a hover-dwell popover that opens an interactive orbit/zoom ModelViewer for a prop tile, sidestepping the bake-an-image problem entirely. After seeing the auto-framed thumbnails land (req_1898), the user decided it isn't worth the trouble: the underlying models look rough regardless, so a bigger/interactive view would just show 'the shit in 4k'. No popover built; the framed live thumbnails stand as the answer. The Tooltip dwell pattern (delayMs + onHoverEnter/onHoverExit) is noted if it's ever revived.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T22:37:41.939Z"
+}

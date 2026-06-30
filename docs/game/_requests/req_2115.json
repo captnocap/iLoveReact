@@ -1,0 +1,36 @@
+{
+  "id": "req_2115",
+  "at": "2026-06-30T04:12:07.761Z",
+  "origin": "session:47bb26c9",
+  "text": "nice so now the one other thing i want to ask about since we are here in the zig native tooling land already is i have one hell of a fucking time with painting models even the ones i make because for whatever reason i go to paint on a face here and its painting faces in another place. and then also it can just literally not paint in the place for whatever reason. im wondering if that is something we can also bring a better solution to the table with that wont be a pain in the butt as time goes on. because, ideally, what you made here, becomes the actual studio mesh editor tooling that will start to bring in a lot of capabilities, but for the most part, the one of them over all of them i have the most trouble with is painting for sure",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:12:50.136Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:30:29.899Z",
+      "actor": "claude",
+      "kind": "note",
+      "text": "DIAGNOSED, build deferred behind wireframe (req_2116) by the user's sequencing — they wanted zoom-stable wireframe proven first to build confidence paint will be precise. Root cause of 'paint one face, another changes' = cart/hmsc-int/editors/model/uvDedup.ts deliberately fuses every congruent face onto ONE shared atlas island (storage win, fatal for hand-paint). 'Won't paint' = degenerate/empty UV islands from the per-face unwrap. Durable fix agreed: host-side PROJECTION painting on the resident mesh (raycast cursor -> exact visible triangle -> stamp; per-face paint space, no dedup/overlap), reusing the modelview resident-mesh + host-camera foundation the wireframe just proved. Awaiting user green-light to build."
+    },
+    {
+      "at": "2026-06-30T04:53:59.861Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resolved: the painting pain this request raised is now fixed in code, delivered as the per-face painting build (req_2123, sha ca0607208). Recap of the arc: we diagnosed the root cause here (uvDedup.ts fuses every congruent face onto one shared UV-atlas island, so painting one panel repaints its identical twins; degenerate unwrap islands leave faces unpaintable), the user sequenced wireframe first (req_2116) to prove the host-camera foundation, then greenlit paint. The fix makes face fusion structurally impossible: the resident non-indexed mesh gives every face its own 3 verts, so each face gets its OWN texel in a host WxH paint atlas (framework/gpu/model_paint.zig) and per-face color rides the existing scene3d diffuse path with zero shader change; __model_paint_at raycasts the cursor and fills exactly the face clicked. Proven via the RJIT_PAINT rainbow (all 180 car faces render their own color). Scope per the user: per-face flat color (fill face + paint any face), no brush-type detour; sub-face brush detail is a noted future extension.",
+  "shas": [
+    "ca0607208"
+  ],
+  "resolvedAt": "2026-06-30T04:53:59.861Z"
+}

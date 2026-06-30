@@ -1,0 +1,30 @@
+{
+  "id": "req_2070",
+  "at": "2026-06-29T05:44:27.738Z",
+  "origin": "session:2eacb40b",
+  "text": "ok. so now some of them are just not driving on a road to get to their destination",
+  "status": "review",
+  "sessionId": "2eacb40b-8a1e-4c58-a8d4-b7c3ab9f4aea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T05:45:07.649Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T05:47:04.460Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cars were cutting across terrain to reach goals because the routing passability mask was 'drivable' = any tile with a finite vehicleCost, which includes sidewalk (1.8), grass (1.9), mud (3.2), sand (2.45), median (6.0) and parking (1.4); the shortest-HOP BFS treated those as valid path cells and shortcut across them off-road. Narrowed the mask to the actual ROAD NETWORK: preferredByVehicles surfaces (lanes/road/asphalt/junction) PLUS crosswalk (the one non-preferred tile a car must cross to connect lanes to junctions — excluding it re-seals the network). Terrain is now excluded, so a baked route physically cannot leave the road. Still 14 cars routing across the city; 5/5 traffic tests; re-baked + self-shot confirms cars on-road. SHA 26f3bfe1f.",
+  "shas": [
+    "26f3bfe1f"
+  ],
+  "resolvedAt": "2026-06-29T05:47:04.460Z"
+}

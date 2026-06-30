@@ -1,0 +1,36 @@
+{
+  "id": "req_1872",
+  "at": "2026-06-25T16:48:43.097Z",
+  "origin": "session:60071ace",
+  "text": "hey the '/' route for hmsc-int, i want to change it up. first thing lets write a quick playbook so we can organize these thoughts before we dive in. so, i want t he app to start up and have a window up and running instantly. currently the / route loads an entire games map and the startup time between me pressing enter to start the program in my terminal and the window finally being open and i can do anything is always growing and growing and it just sucks. we end it. the / route becomes a dashboard of sorts, and we want to ideally start pulling in data to be ready to serve, however, i also am thinking that it might be better to treat the data delivery as a sub process and not the same thread so that it can be hot and ready to go like a little ceasers pizza, now im not quite sure if that would actually help but at least first thigns first, the / route needs a change. now, for the content that happen to currently be on the / route. the layout of it is going to do a radical change. because as more and more things have just grown, its a fuckin mess and really i use 1 panel of it >90% or more of t he time so the distribution of space is horrible in the current approach. that is something we need to look at actual possible approaches to consider that dont make it feel like you have to be the autistic guy who wrote the program and knows how it works and no one else can even infer from it.",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T16:48:52.676Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T17:12:41.388Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-25T17:42:37.329Z",
+      "actor": "session-6007",
+      "kind": "note",
+      "text": "Route split landed (54165d5ce): / is now a light DashboardRoute that paints in one frame (geometry + map-footprint reports, deferred/reactive so it never blocks); editor moved to /editor; Chrome brand + Home button → /. Verified rjit shot --route / PASS — boots without the world load/OOM, real data renders (60k tris, 720m map ≈ 0.79x Vatican City). Workspace still warms in background (desirable hot-pizza); deeper scope-to-route is step 3 in the playbook."
+    }
+  ],
+  "resolution": "Wrote DASHBOARD_PLAYBOOK.md organizing the / route rework into three threads before any code, per the user's 'playbook first' ask. Captured the north-star reframe from the user (the enemy is the main-thread FREEZE, not raw startup time — spinner + async load, UI must stay live), the plan for / to become an instant vanity stat dashboard with the heavy editor moved to its own /editor route, and a proposed sequencing that lands the instant-window route split first. Committed as 4e6b66700.",
+  "shas": [
+    "4e6b66700"
+  ],
+  "resolvedAt": "2026-06-25T17:12:41.387Z"
+}

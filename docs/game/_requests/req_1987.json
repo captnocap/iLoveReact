@@ -1,0 +1,18 @@
+{
+  "id": "req_1987",
+  "at": "2026-06-26T02:47:57.656Z",
+  "origin": "session:7a3a0337",
+  "text": "the 'why its built this way' is a bad way to frame it. it isnt built that way. well, ok it is built that way but the logic behind it is a complete misunderstanding of how to retain edit history. why would the edits i made in a session, need recapture EVERYTHING for the sole edit? especially when, i have no actual ability to do the following: make edits -> quit the app -> restart it -> ctrl z; all of that history is inaccessible to me",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T02:48:24.162Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

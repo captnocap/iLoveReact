@@ -1,0 +1,28 @@
+{
+  "id": "req_1905",
+  "at": "2026-06-25T20:34:20.889Z",
+  "origin": "session:5dc68f2d",
+  "text": "ok. so then the other part is that some props are searchable, have inventory, etc. i also need that capability. is it searchable. how many slots can it hold those things. we dont have the inventory to put into them yet but we are right around the corner",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T20:34:37.427Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:25:06.387Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the searchable/inventory capability already exists in full as PropKindDefinition.container (lootCategory/capacity/spawnFillChance/searchSeconds/access), in active use on ~30 props; 'is it searchable' = has a container, 'how many slots' = capacity, plus access (open/locked/keyed). No build needed now — the items system is the forward dependency and lootCategory is its authored hook. Design captured.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T23:25:06.387Z"
+}

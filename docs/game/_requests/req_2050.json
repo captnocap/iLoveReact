@@ -1,0 +1,30 @@
+{
+  "id": "req_2050",
+  "at": "2026-06-29T00:53:43.813Z",
+  "origin": "session:37f73aee",
+  "text": "ok it pops out. its uh well so you cant make it full screen, infact  you cant make it any bigger than it is, it just tears the window",
+  "status": "review",
+  "sessionId": "37f73aee-425d-488e-8c45-55d4f82a2c00",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T00:54:41.551Z",
+      "actor": "37f7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T00:57:38.780Z",
+      "actor": "37f7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the pop-out window not following resize/maximize (it tore and stayed at launch size). Root cause: the WM does not reliably deliver SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED during a live drag, so panel_window only reconfigured its wgpu surface on that event — the swapchain stayed at the old size and the WM stretched/tore the stale frame. Fix: panel_window.syncSize() queries the OS window's real pixel size (SDL_GetWindowSizeInPixels) every frame and reconfigures the surface + dims when it changed; engine.renderPanelWindow calls it before reading size, so the render target, surface, and 2D paint all track the window each frame. The event handler is kept as an immediate backstop. Builds clean (SHIP_RUN_PACKAGE=0 ship hmsc-int); needs the framework rebuild (restart rjit dev) and live verification.",
+  "shas": [
+    "901f8b50a"
+  ],
+  "resolvedAt": "2026-06-29T00:57:38.780Z"
+}

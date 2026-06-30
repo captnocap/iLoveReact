@@ -1,0 +1,28 @@
+{
+  "id": "req_2086",
+  "at": "2026-06-30T00:27:08.342Z",
+  "origin": "codex:019f15ea",
+  "text": "there is a current log that reads like: [js.warn] [route] /editor first render +375ms\n[js.warn] [route] /editor loaded +375ms however, this is only telling half the story. I need you to extend this log and capture a REAL total load time on routes, being how long until i as a user can actually do something. We will keep instrumenting the log until it gets a real time. Currently the editor route takes me more like anywhere from 2-4 seconds on average",
+  "status": "review",
+  "sessionId": "019f15ea-ff55-7f51-bfc2-355000e13326",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T00:27:12.966Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T00:29:38.700Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extended hmsc-int route timing so route loaded no longer returns immediately when requestAnimationFrame is absent, waits for timer-frame calm plus native host-flush drain calm, and reports JS/native flush deltas. Added a lightweight runtime dispatch hook so the route log also prints the first actionable post-navigation input event, giving a direct user-can-interact reality check against the loaded number. Verified by bundling hmsc-int with scripts/cart-bundle.js via tools/v8cli.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T00:29:38.700Z"
+}

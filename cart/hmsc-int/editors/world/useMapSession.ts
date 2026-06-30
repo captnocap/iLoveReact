@@ -462,6 +462,10 @@ export function useMapSession(opts: {
     ws.history.clear();
     refreshMaps();
     log({ cat: 'map', text: `new map ${name}` });
+    // NEWMAP-PROBE (req_2007, TEMP): prove the reset fires on your end — the editor
+    // IS switching to a fresh empty map; only the 3D pane keeps showing the last
+    // compiled hmsc.gamefile (the f76513e8a regression), which is map-independent.
+    console.warn(`[newmap] switched to '${name}' — editor reset (placements/floors/world cleared, build pieces scope to '${name}' → empty). The 3D pane still shows the compiled gamefile until you compile this map.`);
   }, [ws, fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, brush, writeMapFile, refreshMaps, flushCurrent, log, onFloorsRestored]);
 
   const renameMap = useCallback((rawNext: string) => {

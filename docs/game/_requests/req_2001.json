@@ -1,0 +1,18 @@
+{
+  "id": "req_2001",
+  "at": "2026-06-26T04:03:08.148Z",
+  "origin": "session:7a3a0337",
+  "text": "yeah i havent been chasing the problem for over 2M tokens to sell it short get in there and tear it up",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T04:05:13.078Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -46,13 +46,32 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
-      name: 'compile/main.ts + rjit game compile/verify',
+      name: 'compile/verifyHarness.ts + rjit game verify',
       purpose: ['scripting', 'maintenance', 'persistence'],
       kind: 'module',
-      sourceFile: 'cart/hmsc-int/compile/main.ts',
+      sourceFile: 'cart/hmsc-int/compile/verifyHarness.ts',
       description:
-        'The V19 skeleton: `rjit game compile` bundles the headless boot → zig-out/game/hmsc-headless.js; `rjit game verify` compiles fresh, runs the oracle self-check over docs/game/_index (every record file parses and has the fields tools/oracle dereferences, decisions.ts ids match V*/P*/R*, and 14 system smoke queries return matching rulings), runs every game/**/*.test.ts suite, boots the output under v8cli, replays every compile/verify/*.cmds command sequence (game/commands is the language), and exits with one VERDICT GREEN/RED line. The headless state is the captured GameCommandState + boot/tick locals, with a mounted V20 `commands` stream/snapshot adapter under zig-out/game/headless-data for gv_save/gv_load. The full 48-name console vocabulary is mounted (defineGameCommands), so verify scripts speak real commands (commands.cmds: 30 command lines). Grows as captures land.',
+        'The V19 command-script replay harness: `rjit game verify` bundles compile/verifyHarness.ts → zig-out/game/hmsc-verify-harness.js, runs the oracle self-check over docs/game/_index, runs behavior suites, proves the real `rjit game bake` output through the no-V8 loader, then boots the harness under v8cli and replays every compile/verify/*.cmds sequence. The old public `rjit game compile` name is retired; the in-app Compile button maps to the data bake, not this harness. The headless state is the captured GameCommandState + boot/tick locals, with a mounted V20 `commands` stream/snapshot adapter under zig-out/game/headless-data for gv_save/gv_load. The full console vocabulary is mounted (defineGameCommands), so verify scripts speak real commands.',
       status: 'live',
+    },
+    {
+      name: 'rjit game parity (TS/Zig gamefile compiler comparison)',
+      purpose: ['maintenance', 'world_gen'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/compile/parityGameFile.ts',
+      description:
+        '`rjit game parity` writes one deterministic source spec under zig-out/game, compiles that same generated world through the existing TypeScript workspace writer (compile/parityGameFile.ts) and the new Zig writer/compiler (framework/world/gamefile_writer.zig + framework/tools/hmsc_parity_compile.zig), byte-compares the emitted game-files, and reports side-by-side compile times. Scope is intentionally the platform-format compiler core first: RJMP lump layout, row-RLE, three-stream gamefile wrapper, sha256 asset manifest, and embedded blobs. It is the repeatable gate for moving the live Compile button pipeline from TS to Zig without depending on /test or the command-script verify harness.',
+      status: 'live',
+    },
+    {
+      name: 'Compile cache architecture (manifest + compiled chunk history)',
+      purpose: ['maintenance', 'world_gen', 'persistence', 'format'],
+      kind: 'data_model',
+      sourceFile: 'docs/game/COMPILE_CACHE_ARCHITECTURE.md',
+      description:
+        'V31 architecture for the upcoming Compile refactor: every Compile writes an immutable manifest over content-addressed compiled chunk artifacts. Each chunk overview carries the validation hash, dependency/source hashes, edge signatures, summary hash, and local version history pointer; exact hash match reuses the cached artifact, mismatch rebuilds or falls back. Compiled chunk history becomes the practical restore surface for map-direction changes while V20 streams remain source/audit history. Chunks are cache/streaming/compile units inside V30\'s one citywide map, and assembly happens through the manifest/lump index rather than blind byte append.',
+      dependsOn: ['rjit game parity (TS/Zig gamefile compiler comparison)', 'data/index.ts (the V20 store)'],
+      status: 'candidate',
     },
     {
       name: 'labs/ + shell/LabsRoute.tsx + rjit lab new',

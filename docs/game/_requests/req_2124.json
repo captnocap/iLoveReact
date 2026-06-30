@@ -1,0 +1,28 @@
+{
+  "id": "req_2124",
+  "at": "2026-06-30T04:45:26.145Z",
+  "origin": "codex:019f1624",
+  "text": "yeah that is all correct. document that in the design notes",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:45:35.137Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:46:24.783Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Documented the agreed placement-latency/memory/recompute doctrine in cart/hmsc-workspace-mock/DESIGN_INTAKE.md. Added a global design section that defines instant edit behavior, hot compact indices, cold recompute paths, event-shaped undo/redo, remaining O(world) risks, and bottom-dock telemetry expectations.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T04:46:24.783Z"
+}

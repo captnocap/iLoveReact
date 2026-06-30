@@ -1,0 +1,30 @@
+{
+  "id": "req_1917",
+  "at": "2026-06-25T22:22:23.468Z",
+  "origin": "session:26c62b07",
+  "text": "i think the one thing i will say is if we are doing pages though on this display do not give me it inside of a scroll container i dont want to have to scroll down just to see one more row that feels like a ton of work for no reward. show me the whole page all at once",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:22:44.844Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:24:24.667Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the ScrollView around the prop browser's paged grid so the whole page is visible at once (no scrolling for a stray last row). The grid measures its own area via onLayout and perPage is computed from the columns x rows of 92x84+label cells that actually fit, so each page fills the grid exactly and the prev/next pager stays pinned below. overflow:hidden guards the rare full-width 'related' divider row. Hot-reloads in rjit dev; bundle verified.",
+  "shas": [
+    "7c7e02e85"
+  ],
+  "resolvedAt": "2026-06-25T22:24:24.667Z"
+}

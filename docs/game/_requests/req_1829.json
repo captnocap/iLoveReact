@@ -1,0 +1,10 @@
+{
+  "id": "req_1829",
+  "at": "2026-06-25T01:43:54.855Z",
+  "origin": "session:6ff945f5",
+  "text": "and i was thinking, maybe it has to be that at least 1 of said prop has t o be placed already for there to be the instant effect, this kinda makes sense to me atleast, as i see it as, once there is one X somewhere, the next X can just say its a reference of this other existing one, at this position, and show up instantly, while behind the scenes it updates and recompiles it in",
+  "status": "new",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": []
+}

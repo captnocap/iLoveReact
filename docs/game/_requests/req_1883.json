@@ -1,0 +1,30 @@
+{
+  "id": "req_1883",
+  "at": "2026-06-25T18:11:27.805Z",
+  "origin": "session:67264656",
+  "text": "i am not getting t he snapping to shift when i hold a modifier",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T18:11:39.914Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T18:14:41.219Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused why no modifier registered in the loader iso pane: the onKey handler matched e.key==='shift'/'alt'/'control', but the host's SDL_KEY_NAMES table (runtime/hooks/useIFTTT.ts) has NO entry for modifier keys — a modifier-only press decodes to key='sdl:1073742049', so the string comparison never matched and modRef.shift/alt/ctrl stayed false the whole time. That silently killed all three of req_1877's modifiers: SHIFT sub-grid, ALT freeform, and Ctrl-click multi-select. The real modifier state is carried in the decodeKey flags e.shiftKey/altKey/ctrlKey (derived from the SDL mod bitmask), which is exactly what the shared useHeldModifiers hook reads — so I replaced the hand-rolled useRef+key-string parsing with useHeldModifiers (the same hook IsoAuthor uses for its Alt freeform), and removed the now-dead modifier lines + cleanup reset. Cart bundles clean. This makes the req_1877 gestures actually fire; verify live by holding Shift (ghost snaps to 0.5m half-cells), Alt (freeform), Ctrl-click (toggle multi-select), double-click (whole object).",
+  "shas": [
+    "2b3ada941"
+  ],
+  "resolvedAt": "2026-06-25T18:14:41.218Z"
+}

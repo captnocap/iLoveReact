@@ -1,0 +1,28 @@
+{
+  "id": "req_1915",
+  "at": "2026-06-25T22:19:21.424Z",
+  "origin": "session:26c62b07",
+  "text": "but you have to be tasteful. dont show me that shit right as i hover over it. only pop it up after ive levft my mouse there like an undecisive idiot otherwise it will be annoying as shit",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:20:02.565Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:37:41.947Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Called off with req_1914. This was the taste constraint on the popover: never pop on immediate hover, only after the cursor dwells (the Tooltip's delayMs pattern, ~500ms) so sweeping across the grid isn't 'annoying as shit'. Moot now that the popover viewer itself was shelved (req_1916) — the auto-framed static thumbnails are the accepted result and need no hover affordance. Recorded for if the interactive popover is ever picked back up.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T22:37:41.947Z"
+}

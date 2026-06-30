@@ -1,0 +1,28 @@
+{
+  "id": "req_2105",
+  "at": "2026-06-30T03:38:44.476Z",
+  "origin": "codex:019f1624",
+  "text": "since we have about 1000+ more pixels of vertical height i want you to really take advantage of it. Show me the variations side by side rather than just a toggle icon, show me statistics like 'this has been used n times' or what not. show me the capability to favorite it or rename it",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T03:38:56.857Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T03:50:05.144Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Updated the hmsc workspace mock to use the extra vertical height in the material catalog. Materials now render as taller rows with visible side-by-side variants, usage stats, recipe/seed/bank metadata, favorite controls, and a selected-material section with rename, favorite, stats, and larger variant tiles. Verified with bundle and raw ReleaseFast ship.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T03:50:05.143Z"
+}

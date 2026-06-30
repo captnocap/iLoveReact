@@ -1,0 +1,28 @@
+{
+  "id": "req_2093",
+  "at": "2026-06-30T01:44:54.746Z",
+  "origin": "codex:019f1624",
+  "text": "for some reason your file menus are completely decoupled from the action bar [Image #1]",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T01:45:09.233Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T01:46:58.033Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the hmsc-workspace-mock menu/action-bar coupling. Added explicit actionMenu mock state so choosing a top menu drives both the dropdown and action bar. The top menu highlight now follows the active action menu, and ToolOptions renders commands from the same menu-scoped command registry as the dropdown instead of a separate tool-only list. Action bar buttons execute or arm those exact menu commands, so File/Edit/View/etc. no longer show unrelated Build tools. Verified with BUNDLE_FROM_HARNESS=1 tools/v8cli scripts/cart-bundle.js cart/hmsc-workspace-mock/index.tsx --out /tmp/hmsc-workspace-mock.bundle.js and SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-workspace-mock.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T01:46:58.033Z"
+}

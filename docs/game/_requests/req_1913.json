@@ -1,0 +1,30 @@
+{
+  "id": "req_1913",
+  "at": "2026-06-25T22:08:16.802Z",
+  "origin": "session:4f39ae52",
+  "text": "yeah so, for this next step, lets step back and i want you to create a system where they are not in a category at all but rather they hold tags and can hold many tags, we are not going to have the tags listed as pills however, tags can work in tandem when searching, so that when i search up something, it has a tag, we can show relevant items to the item also being searched, or can be searched by tags themselves",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:08:40.606Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:22:52.553Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the prop browser's single-category model with a multi-TAG system + tag-aware search, ranked in the user's tiers. New game/kinds/propTags.ts: each prop holds MANY derived tags — its legacy PropCategory kept as a seed tag, plus camelCase word tokens of the kind id AND human label (roadSignSchool → road/sign/school), plus a compact functional affinity layer that links synonyms a name can't (couch↔sofa↔seating, lamp→lighting, rock→stone, tree→nature). No hand-tagging of ~600 kinds. searchProps ranks FAVORITES → STRING match → TAG match → a heavily-deranked RELEVANCE tail; relevance is GATED to >=2 shared tags so a single generic tag can't surface junk (the user's example: christmas-lights and a lamp share only 'lighting' → NOT shown). Terms work in tandem (more matched words rank higher); typing a tag name surfaces every item carrying it. New game/kinds/propFavorites.ts: durable starred props in the shared 'hmsc' localstore (survive restart), toggled per-tile by a ☆/★ button (sibling Pressables, no nesting); favorites are the top tier and lead even in empty-query browse. PropBrowser.tsx: dropped the category chip row entirely — it is now search-first with one paged stream (matches, a 'related' divider, then the deranked tail), keeping the bounded 12-thumbnail page (perf contract). game/kinds/propTags.test.ts pins tokenizing, many-tags, the derank gate, tandem terms, and the favorites tiers — 11/11 PASS via esbuild+v8cli. Built clean via SHIP_RUN_PACKAGE=0 rjit ship hmsc-int. Note: an unrelated parallel-session LABEL MISMATCH transiently destroyed the binary mid-run; a re-ship built green. Needs a live rjit dev pass to feel the ranking + star toggle. The tag taxonomy (affinity map) is intentionally seedable — easy to grow as the user refines what 'related' should mean per group.",
+  "shas": [
+    "e33d5a0a6"
+  ],
+  "resolvedAt": "2026-06-25T22:22:52.553Z"
+}

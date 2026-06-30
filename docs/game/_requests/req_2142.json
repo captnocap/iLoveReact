@@ -1,0 +1,30 @@
+{
+  "id": "req_2142",
+  "at": "2026-06-30T07:09:24.123Z",
+  "origin": "session:47bb26c9",
+  "text": "oh sorry to interrupt you but also this system should extend to the models i do make by hand in t he studio, maybe not something you need to capture now, maybe it is. just so that everything is uniform",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T07:10:32.247Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T07:18:34.446Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Amendment to req_2141: make the attribution system uniform so it ALSO covers hand-made Studio models, and (the 'extend' signal) build it modular up front instead of god-filing the viewer cart. Done: all attribution logic + UI lives in the shared runtime/attribution/ module (ledger/credits/panel), not in cart/modelview. The ledger is origin-agnostic — keyed by content sha for imports OR model id for Studio models — and ships recordStudioModel() + a 'Self-made' license + an 'Original assets' section in CREDITS.md, so the Studio plugs into the SAME ledger/panel/export with one call. Studio wiring itself (calling recordStudioModel when a hand-made model is created) is the ready follow-on the user said could come later. Delivered together with req_2141 on 760ab3986.",
+  "shas": [
+    "760ab3986"
+  ],
+  "resolvedAt": "2026-06-30T07:18:34.446Z"
+}

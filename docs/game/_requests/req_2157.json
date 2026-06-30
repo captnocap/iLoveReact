@@ -1,0 +1,28 @@
+{
+  "id": "req_2157",
+  "at": "2026-06-30T08:48:18.101Z",
+  "origin": "codex:019f1624",
+  "text": "a neat link actually would be to be able to record some logs and then attach it to ongoing bug reports that are built from the incrementing build versions",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:48:24.600Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T08:49:01.432Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Documented diagnostic log captures as attachable build/bug artifacts. The raw console now needs a capture action that preserves channels, filters, time range, build/request ids, map/context, and a note, then attaches that capture to ongoing bug/build threads tied to incrementing build versions.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T08:49:01.432Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_2000",
+  "at": "2026-06-26T03:40:00.726Z",
+  "origin": "session:7a3a0337",
+  "text": "ok so uh im not really sure what was said there to be honest i tried to follow along. but ok so lets get back to it. the steps 5-11 or whatever they were, is no different than having a filing cabinet of documents. getting 1 new fax in, and then reorganizing the entire cabinent for the one addition when it was already in order to begin with. no one in their right mind does that",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T03:41:44.695Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

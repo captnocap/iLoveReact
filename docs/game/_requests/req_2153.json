@@ -1,0 +1,28 @@
+{
+  "id": "req_2153",
+  "at": "2026-06-30T08:25:53.544Z",
+  "origin": "codex:019f1624",
+  "text": "go through the current hmsc-int and get me a list of all the /routes that exist and i want to start consolidating that on paper so there is no mistake on what ends up in the new editor",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:26:07.037Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T08:28:47.074Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Inventoried current hmsc-int routes from the actual Router/chrome/workbench registries and added a dedicated design note at cart/hmsc-workspace-mock/HMSC_INT_ROUTE_INVENTORY.md. No hmsc-int implementation code changed.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T08:28:47.074Z"
+}

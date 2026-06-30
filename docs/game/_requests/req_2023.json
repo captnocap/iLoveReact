@@ -1,0 +1,28 @@
+{
+  "id": "req_2023",
+  "at": "2026-06-28T18:05:38.015Z",
+  "origin": "session:6f7e560e",
+  "text": "ok this is weird. so yes rebaking the wall also fixes it but look at my editor. this is what i see in the editor right now [Image #18] and then i go into the actual compiled game and [Image #19] its there. so ? why would it not show on the editor got any idea even the doors look like they dont get glass on the editor",
+  "status": "review",
+  "sessionId": "6f7e560e-8b0d-4fd7-83b1-9c466a418f7f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T18:06:29.881Z",
+      "actor": "6f7e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T18:08:30.038Z",
+      "actor": "6f7e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed why cooked-prop glass shows in /compiled but not in the editor's 3D pane. Root cause is NOT a code bug: the editor viewport (LoaderIsoView) is rendered by the native world_loader.zig, but that loader is compiled INTO the editor's V8 app binary (engine.zig @imports world_loader when HAS_COMPILED_WORLD; the loader pane drives it via the in-process __compiled_world_* host fns) — a SEPARATE binary from the no-V8 /compiled loader. Running 'rjit game play/shot' rebuilt the /compiled binary with the req_2020 glass fix, but the editor binary still has the pre-fix loader compiled in. Rebaking only refreshes the gamefile DATA, not the loader CODE inside the editor binary. The tell: editor walls render gray, not blue — a rebuilt loader tints glass faces blue regardless of gamefile age, so gray proves stale loader code. Fix is operational: rebuild/restart the editor binary (Zig/framework changes are not hot-reloaded; rjit dev only hot-reloads TSX/TS). Kill+relaunch rjit dev hmsc-int, or rjit ship hmsc-int. Walls go blue immediately (loader-only fix); doors get glass once the editor re-bakes its per-map gamefile on the next edit (req_2013) now that the door asset is re-cooked. No code change required.",
+  "shas": [],
+  "resolvedAt": "2026-06-28T18:08:30.038Z"
+}

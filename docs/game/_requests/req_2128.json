@@ -1,0 +1,28 @@
+{
+  "id": "req_2128",
+  "at": "2026-06-30T05:02:36.671Z",
+  "origin": "codex:019f16c9",
+  "text": "holy smokes 8.45 what was the wall time on that",
+  "status": "review",
+  "sessionId": "019f16c9-c9f4-7d63-86f1-4a12cf41882c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T05:02:46.690Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T05:02:46.698Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the benchmark wall-time question from the completed parity run: TypeScript wall time was 491.0ms and Zig wall time was 58.0ms on the 2048x2048 generated world, which is about 8.47x faster wall-clock.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T05:02:46.698Z"
+}

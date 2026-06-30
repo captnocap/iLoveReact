@@ -1,0 +1,18 @@
+{
+  "id": "req_1998",
+  "at": "2026-06-26T03:29:28.533Z",
+  "origin": "session:7a3a0337",
+  "text": "sorry im just going to be blunt but \n\n5) why the fuck would we do this\n6) 5 but with an exclaimation point at the end of it \n7) 6 but ten fold\n8) this is just a bad joke to tack onto 7 \n9) red herring, not a problem. dont factor it in as one\n10 and 11) sounds like 5-8 but with a different name badge",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T03:31:03.274Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

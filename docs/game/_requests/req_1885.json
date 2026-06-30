@@ -1,0 +1,30 @@
+{
+  "id": "req_1885",
+  "at": "2026-06-25T18:17:25.571Z",
+  "origin": "session:67264656",
+  "text": "now i know the answer might be to immediately reach for the compile but i would say, there has to be an approach that lets you nullify the data where its previous placement was or atleast patch the value without needing to compile it immediately",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T18:17:49.264Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T19:27:43.289Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented live dirty-rectangle erase so a moved/deleted baked piece's old geometry clears WITHOUT a rebake (the cleanup-speed complaint). The editor pushes the dirty piece's old-footprint AABB; the loader erases the baked geometry inside it: batched box/wall/floor/ramp instance rows collapse (scale->0) and re-upload IN PLACE via a new scene-node version (covers both the monolithic and streaming/per-chunk paths; flora skipped), and baked mesh-prop ('pepes') node ranges hide by position (the MOVE twin of the req_1845 coincident re-skin hide). One rect mechanism, both geometry classes — answering 'why aren't building pieces referenced like props': they ARE instances, just batched for draw-call scale, so they needed a position handle not a different encoding. The live overlay draws the new position; the settle bake still trails behind for /compiled colliders but no longer gates the visual. Erases dedup by signature (a plain placement never re-stages the static world) and clear+re-baseline on reload. Framework: scene3d_instance_version + in-place static re-upload (framework/gpu/3d.zig); new __compiled_world_set_dirty_erase door. Verified: ReleaseFast compiles and the streaming render proof stays GREEN; live move/delete is the user's by-feel check after a dev-host restart (Zig changed).",
+  "shas": [
+    "086ada3da"
+  ],
+  "resolvedAt": "2026-06-25T19:27:43.289Z"
+}

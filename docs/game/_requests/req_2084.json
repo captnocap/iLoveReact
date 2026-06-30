@@ -1,0 +1,28 @@
+{
+  "id": "req_2084",
+  "at": "2026-06-30T00:19:14.951Z",
+  "origin": "session:3dbb283a",
+  "text": "shouldnt we just store every model as a file or something not a sqlite or idk just seems fragile",
+  "status": "review",
+  "sessionId": "3dbb283a-d0ec-4c16-ae77-0792cd564c91",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T00:20:33.516Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T00:31:58.736Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User questioned whether models should be stored as individual files rather than one SQLite event log ('just seems fragile'). Validated the concern with specifics: the fragility that bit them was three concrete things, not 'SQLite bad' — (1) high-detail imports stored entire meshes as single events (already fixed by the req_2078 decimation work), (2) the event log never compacts so it grew to 575MB, (3) boot rebuilds the snapshot by loading the whole log at once and OOMs. SQLite itself is robust and the event log IS the durable source of truth (it survived). Laid out the honest tradeoffs of per-file storage (isolation + inspectable + backup-friendly vs losing cross-session undo and diverging from the shared world/items/characters store). As an immediate safety move, exported all 96 recovered models as individual self-contained files (recovered-models/). Direction agreed with req_2085: move model storage to per-file. Native per-file storage in the Studio is a scoped follow-up (not yet built).",
+  "shas": [],
+  "resolvedAt": "2026-06-30T00:31:58.736Z"
+}

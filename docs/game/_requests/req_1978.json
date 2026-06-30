@@ -1,0 +1,18 @@
+{
+  "id": "req_1978",
+  "at": "2026-06-26T02:10:33.841Z",
+  "origin": "session:7a3a0337",
+  "text": "[loader] streaming first frame — 23 draws: 6254 detail + 0 lod shell instances (of 3538446 total rows)\n[loader] resident catalog: 37 cooked mesh(es) ready (no rebake to place)\n[warn/render] [decal-raster] image node ('/home/siah/Downloads/high fidelity pastel brick texture(2).png') shipped no asset (empty/unreadable src at bake) — MISSING checkerboard\n[js.warn] [edit-latency] place   total ~ 570ms = pre  258 [commit 0 + rerender 258 (shell 258 {body 0 + kids 258} + loaderPane 0)] + scans    0 + push    0 + host-block  312  | host DOMINANT=appTick events 224.6 appTick 262.7 preLayout 0.1 layout 1.3 prePaint 3.7 paint 33.5 gpu 3.0 post 0.0 resid 0.0 | bridge 259.4 | nodes 8032 inst 9654 draws 890 meshes 9654  | re-rendered: Chrome,PropertiesPanel,RightPanel,CatalogRail\n[js.warn] [edit-latency] place   total ~ 483ms = pre  165 [commit 0 + rerender 165 (shell 165 {body 0 + kids 165} + loaderPane 0)] + scans    0 + push    0 + host-block  318  | host DOMINANT=appTick events 137.3 appTick 272.5 preLayout 0.1 layout 1.2 prePaint 3.5 paint 28.6 gpu 2.8 post 0.0 resid 0.0 | bridge 268.9 | nodes 8032 inst 9657 draws 890 meshes 9657  | re-rendered: Chrome,RightPanel\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=3 delayMs=1333.82 ms=98.15\n[js.warn] [edit-latency] place   total ~ 464ms = pre  177 [commit 0 + rerender 177 (shell 177 {body 0 + kids 177} + loaderPane 0)] + scans    0 + push    0 + host-block  287  | host DOMINANT=appTick events 147.8 appTick 262.5 preLayout 0.1 layout 1.3 prePaint 1.1 paint 15.3 gpu 3.0 post 0.0 resid 0.0 | bridge 259.3 | nodes 8032 inst 9660 draws 890 meshes 9660  | re-rendered: Chrome,RightPanel\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=1412.13 ms=47.84\n^C",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T02:11:52.115Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

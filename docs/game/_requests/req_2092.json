@@ -1,0 +1,28 @@
+{
+  "id": "req_2092",
+  "at": "2026-06-30T01:37:51.298Z",
+  "origin": "codex:019f1624",
+  "text": "Go back through it, nothing should be static. if it needs to have mock data to be able to open a menu, mock the data. i need this to behave like it is an actual app where nothing is actually happening underneath, thats how we will approach the entire design. otherwise its too hard to know how any of it will work",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T01:37:57.645Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T01:43:37.081Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Converted cart/hmsc-workspace-mock from a static screenshot-style composition into an interactive mock application backed by local mock state. Menus now open by top-level menu name and render commands from a shared command registry; command rows, tool icons, context menu entries, and pipeline indicators all come from the same mock command data. Library tabs, search, asset selection, document rows, object selection, snap/floor/view controls, context menu toggling, inspector panes, stage actions, minimap selection, history, undo, redo, and compile now update visible mock state without touching hmsc-int or real editor systems. Verified with BUNDLE_FROM_HARNESS=1 tools/v8cli scripts/cart-bundle.js cart/hmsc-workspace-mock/index.tsx --out /tmp/hmsc-workspace-mock.bundle.js and SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-workspace-mock.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T01:43:37.081Z"
+}

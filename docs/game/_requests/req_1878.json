@@ -1,0 +1,30 @@
+{
+  "id": "req_1878",
+  "at": "2026-06-25T17:26:33.710Z",
+  "origin": "session:60071ace",
+  "text": "is /test the only route though that reads it? because i literally do not use test at all and ive continued to say this. the gc makes it  unusable",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T17:30:21.064Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T17:42:22.644Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cut the /test route (the React embodied play view). Recon proved it was the ONLY sibling route reading the live editor world (previewWorld/floors via PlayTestRoute), which was the entire reason the editor workspace had to mount at the Router root and made boot pay the world load regardless of the landing screen. The user doesn't use /test (GC/perf) and every feature already ships to /compiled (the native baked view) anyway, so the React twin was double-work. Unwired the import, the Route, the activeRoute branch, the onTest handler, and the Play nav button across index.tsx + shell/chrome.tsx. Verified PLAYER_CAMERA / CAMERA_OCCLUSION_TUNING live outside editors/play so nothing the compiled game reads is lost; editors/play is now dead (8 files) and flagged for a follow-up delete. Cart bundles clean (exit 0). Committed as 157c8c003.",
+  "shas": [
+    "157c8c003"
+  ],
+  "resolvedAt": "2026-06-25T17:42:22.644Z"
+}

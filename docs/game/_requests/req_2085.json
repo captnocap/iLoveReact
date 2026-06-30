@@ -1,0 +1,28 @@
+{
+  "id": "req_2085",
+  "at": "2026-06-30T00:22:20.895Z",
+  "origin": "session:3dbb283a",
+  "text": "cross session undo doesnt even work for me. again, this is the same problem as the map editor before. there was a fear of me losing cross session history but the thing was i never had it to begin with, not having it in the sense of maybe it exists, but i cant use it. all my ability to go back historically is wiped the moment i leave the page even if it isnt actually wiped. i cant access it",
+  "status": "review",
+  "sessionId": "3dbb283a-d0ec-4c16-ae77-0792cd564c91",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T00:23:31.202Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T00:31:58.745Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User ruled the decisive point: cross-session undo 'doesnt even work for me… all my ability to go back historically is wiped the moment i leave the page even if it isnt actually wiped. i cant access it' — same shape as a prior map-editor episode. This removes the only justification for the complex event-sourced model store: a feature that exists in storage but isn't wired to the UI provides zero user value while imposing the full fragility cost (the 575MB bloat + snapshot corruption that lost all 96 models). Recorded as a durable ruling in memory (feedback_dont_fear_losing_inaccessible_features): count only features the user can actually use; favor simple/isolated/robust (per-file) over event-sourcing complexity that serves an inaccessible feature; within-session in-memory undo is fine to keep. Direction set: rebuild model storage as one-file-per-model. Implementation is the next task.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T00:31:58.745Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2160",
+  "at": "2026-06-30T09:00:30.758Z",
+  "origin": "codex:019f1624",
+  "text": "ok great so in the mockup lets see exactly what we are going to carry forward for a file selection interface that breaks away from the system one, we want to be able to store directory history and be able to even preview a model before importing. you dont need to setup the realtime preview right now but i would setup the interface for it to be ready for it",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T09:00:39.393Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T09:05:46.469Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Updated the hmsc workspace mock's in-app file explorer into an import-ready file selection interface. Added import roots, directory history state, model asset mock data, model-specific preview metadata, native preview socket UI, and staged preview/import actions. Recorded the direction in DESIGN_INTAKE.md. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-workspace-mock.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T09:05:46.469Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2078",
+  "at": "2026-06-29T23:02:39.636Z",
+  "origin": "session:3dbb283a",
+  "text": "hey i tried to import an .obj model and then i tried a .glb model the obj was 9mb the glb was 14mb neither imported infact both caused the app to crash D: [apptick-split] total=91.1ms | jsTick(+microtasks)=90.1 (of which GC=4.2ms x13) tickDrain=0.0 drainFlush=0.8 dirty(snap=0.0+rebuild=0.1)\n[localstore] SET FAILED ns=hmsc key=editor-state:main len=4302835: BufferTooSmall\n[js.warn] [route] → /workbench (clicked)\n[js.warn] [bd-diag] StudioViewport MOUNT epoch=2631\n[js.warn] [route] /workbench first render +196ms\n[js.warn] [route] /workbench loaded +196ms\n[js.warn] [perfLog] churn channel → /tmp/hmsc-int-diagnostics.jsonl (console: log churn off)\n[js.warn] [PLACEFREEZE] session.commit route=/studio channel=model mode=defer appendMs=17.01 markerMs=0.20 snapshotScheduleMs=0.05 totalMs=17.26\n[js.warn] [PLACEFREEZE] session.commit route=/studio channel=model mode=defer appendMs=245.23 markerMs=0.20 snapshotScheduleMs=0.00 totalMs=245.44\n\n<--- Last few GCs --->\n\n[2899191:0x45052000]   269901 ms: Mark-Compact 1356.5 (1419.5) -> 1314.4 (1419.5) MB, pooled: 0.0 MB, 518.08 / 0.00 ms (average mu = 0.251, current mu = 0.192) allocation failure; scavenge might not succeed\n[2899191:0x45052000]   270484 ms: Mark-Compact 1332.3 (1419.5) -> 1316.7 (1405.7) MB, pooled: 13.8 MB, 565.52 / 0.00 ms (average mu = 0.143, current mu = 0.029) allocation failure; scavenge might not succeed\n\n\n\n#\n# Fatal JavaScript out of memory: Ineffective mark-compacts near heap limit\n#\n==== C stack trace ===============================\n\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0xa302853]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0xa301e0b]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x8247d68]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x821d1a6]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x830eab7]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x8312078]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x83216cd]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x8320f8f]\n    /home/siah/creative/reactjit/zig-out/bin/reactjit-dev() [0x829d0b3]\n\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n!!!  CRASH: SIGTRAP (breakpoint / unreachable hit)  !!!\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\ninstruction ptr: 0x8247252\nRebuild with --debug for symbols, then:\n  addr2line -e zig-out/bin/APP 0xADDRESS",
+  "status": "review",
+  "sessionId": "3dbb283a-d0ec-4c16-ae77-0792cd564c91",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T23:02:54.409Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T23:20:59.095Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Model import (.obj/.glb) was OOM-crashing V8: the import pipeline allocated a boxed JS object per byte (base64ToBytes number[]), per vertex/index (readAccessor number[][]), and a string-keyed weld map, so a 9-14MB scan/sculpt (100k-1M+ tris) blew the ~1.4GB heap; the partial EditMesh also overflowed the 4MB localstore value (BufferTooSmall). Rewrote importMesh.ts to parse into a flat typed-array MeshSoup (Uint8Array base64, Float32Array positions, TextDecoder JSON, two-pass objToSoup) that never explodes the heap, added decimateSoup vertex-clustering as a Detail knob plus gridForTargetTris seeding and a soupToEditMesh budget guard (MAX_IMPORT_TRIS=25k) that throws cleanly instead of crashing. The live studiokit ImportModelDialog now parses on Choose and shows a Detail slider with a live 'source N tris -> import M tris' readout, decimating before building the EditMesh and disabling Import when over budget (default ~12k). 11/11 importMesh unit tests pass; full hmsc-int cart bundles clean. Hot-reload picks up the TSX/TS automatically. Decimation is coarse vertex-clustering (cheap, can upgrade to QEM later); raising the 4MB localstore ceiling / storing big models outside editor-state is a possible follow-up.",
+  "shas": [
+    "a43a79411"
+  ],
+  "resolvedAt": "2026-06-29T23:20:59.095Z"
+}

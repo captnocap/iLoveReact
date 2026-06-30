@@ -1,0 +1,30 @@
+{
+  "id": "req_1902",
+  "at": "2026-06-25T20:22:57.307Z",
+  "origin": "session:67264656",
+  "text": "ok nice. now, next one. uh, and this one your first instinct is likely going to be 'thats where the physics rect is' but it isnt, because i can walk under it, but lets look at this example. for a prop that is not at ground level at export time[Image #1] notice the outline of it when ive got it selected is below where it actually is. lets fix thatbehavior",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T20:23:13.178Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T20:28:59.597Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the selection outline drawing below an off-ground prop. A prop exported elevated in Studio (a walk-under shape whose mesh sits above the floor — minY > 0) had its selection box drawn at piece.y..piece.y+height (ground-anchored), one band too low, while the mesh renders in the lifted local coords its collisionBoxes describe (the same band the colliders use — which is why the user can walk under it, confirming it's NOT a physics-rect mismatch). Added pieceVisualBounds in game/build/placed.ts: identical to pieceBounds but, for a prop with an off-ground vertical band (cooked collisionBoxes ?? recipe propVerticalBand), it lifts baseY/topY to piece.y + the real local Y band. Exposed as GAME_BUILD.placed.visualBounds and used by the loader iso pane's selection HUD (selSegs). pieceBounds itself is untouched, so collision/placement/connected/neighbour logic is unchanged — only the highlight box moved to wrap the real mesh. Cart-side TS, hot-reloads (no rebuild). Bundle clean; the 2 failing placed.test cases (req_1713/REQ-0472 wall-join) are pre-existing and unrelated (my diff is purely additive and never touches pieceBounds or wall logic). Verify by selecting the elevated prop — the cyan outline should now wrap the mesh.",
+  "shas": [
+    "72af7193c"
+  ],
+  "resolvedAt": "2026-06-25T20:28:59.597Z"
+}

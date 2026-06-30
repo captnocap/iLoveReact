@@ -1,0 +1,30 @@
+{
+  "id": "req_2049",
+  "at": "2026-06-29T00:48:17.201Z",
+  "origin": "session:81cc249f",
+  "text": "ok so what do i do when something like this happens: these two pieces, do not exist. [Image #4] i deleted them. but they still are there. they are gone when i press compile and go into the game but in the editor they are still just there",
+  "status": "review",
+  "sessionId": "81cc249f-ac65-417c-ab3d-cf88107645a8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T00:48:43.518Z",
+      "actor": "opus-loader-del",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T01:01:13.293Z",
+      "actor": "opus-loader-del",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused and fixed the stranded-pieces bug my req_2048 introduced. The live dirty-erase diffs current pieces against a 'what the baked file holds' baseline (bakedRectRef/IdsRef/SigRef). That baseline was captured at FIRST RENDER from props.pieces — but at boot the world data loads async, so props.pieces is still [] then, making the baseline EMPTY. A later delete diffed against nothing, emitted no erase rect, and the baked geometry stayed (the user's two pieces). The old per-delete settle bake had masked this by reloading+re-baselining; once req_2048 removed it, the baseline stuck at []. Fix A: a baselineReady prop (false through the 4s boot grace window, true once data settles) keeps the baseline tracking the loading piece set then FREEZES it on the settled set, so deletes/moves diff against a real baked footprint and erase live with no recompile. Fix B: with no auto-bake the editor file goes stale within a session, so a map edited then quit without a switch/Compile would boot from a stale file and resurrect deleted pieces; I persisted the dirty-stems set in localstore so the existing boot/switch establish-bake re-syncs a dirty map before its baseline is trusted — a once-on-boot bake only when actually dirty, never per-edit. Also DRYed the duplicated re-baseline into a rebaselineBaked() helper. Verified clean with SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-int. Needs live test: dev host, delete a baked piece, confirm it vanishes instantly with no recompile and stays gone across a restart.",
+  "shas": [
+    "136fc82f3"
+  ],
+  "resolvedAt": "2026-06-29T01:01:13.293Z"
+}

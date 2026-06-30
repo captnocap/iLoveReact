@@ -1,0 +1,30 @@
+{
+  "id": "req_2090",
+  "at": "2026-06-30T01:09:48.063Z",
+  "origin": "session:344a42f1",
+  "text": "yeah so the trailing thing let me show you visually what it looks like for me and what a string actually is inside of it. also, one thing i want to point out, is a long string inside of a input will literally cause other elements to resize, meaning it takes part in layout calculation even if the input field is a fixed size [Image #1]",
+  "status": "review",
+  "sessionId": "344a42f1-04d9-4643-a455-06800f8ed61e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T01:10:18.655Z",
+      "actor": "344a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T01:28:10.261Z",
+      "actor": "344a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed three real defects in single-line TextInput rendering exposed by the user's screenshot (long string bleeding over siblings, no trailing/scroll, looks bad). (1) NO CLIP: paintNodeVisuals paints a node's own content before the overflow scissor that only wraps children, so input text bled outside its box onto siblings — paintTextInput now pushes its own clip scissor for single-line inputs. (2) NO TRAILING: single-line text was drawn with the box width as a WRAP width + max_lines=1, so long strings truncated at the edge and the caret ran off-screen; now drawn no-wrap with a caret-driven horizontal scroll offset (new input.getScrollX/setScrollX backing the existing scroll_x field), and all three click/drag hit-test sites add the same offset so clicks land on the visible glyph. (3) TOO SHORT: a height-less input's actual layout height was font_size (an em), shorter than the line box, so glyphs clipped and sat high — now 1.4×font to match the intrinsic estimate. Also confirmed the 'long string resizes siblings' concern: all four layout sites already guard inputs (width/height/min-content/actual-height check input_id before node.text), and the rewritten demo proves a 320px fixed input + 101-char string leaves its sibling marker put. Verified font parity + clipping + no-resize via self-shot (cart/text_vs_input.tsx, fixed-size side-by-side at sizes 12/16/22/32/48). Trailing caret-scroll needs live focus to see and is left for the user to confirm in rjit dev. Root insight saved to memory: TextInput parks its value in node.text so it reads as a bare text node; branch on input_id first.",
+  "shas": [
+    "6d5c55ae9"
+  ],
+  "resolvedAt": "2026-06-30T01:28:10.261Z"
+}

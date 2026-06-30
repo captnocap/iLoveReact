@@ -1,0 +1,18 @@
+{
+  "id": "req_1980",
+  "at": "2026-06-26T02:15:14.779Z",
+  "origin": "session:7a3a0337",
+  "text": "ok. how about this. disable literally everything except for the panel i need to pick a floor and the map itself. il place the floor. it should clear right up then if its react",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T02:15:25.556Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

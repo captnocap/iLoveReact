@@ -1,0 +1,28 @@
+{
+  "id": "req_2113",
+  "at": "2026-06-30T04:07:23.338Z",
+  "origin": "codex:019f1624",
+  "text": "and this area where i said we want to use predefined values, i want you to make this a dropdown select and not a pill select because if this panel has a ton of data suddenly this becomes a warzone of pill landmines everywhere  [Image #1]",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:07:28.509Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:09:28.653Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed the inspector surface-default preset UI from horizontal pills to a compact dropdown/select mock. The select opens inline, marks the active preset, updates mock state, and DESIGN_INTAKE.md now records that dense property defaults should use dropdowns rather than pill rows.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T04:09:28.653Z"
+}

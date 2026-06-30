@@ -1,0 +1,30 @@
+{
+  "id": "req_2038",
+  "at": "2026-06-28T21:28:22.213Z",
+  "origin": "session:37f73aee",
+  "text": "i think the one thing you might run into which is why it is not a framework based thing is that we will have problems with recreating a wgpu instance, which is in part solved by not using wgpu on the 2nd window but thats not what we want, so thats not a possible option. the other is updating wgpu or to my knowledge patching it for the version we have ourselves",
+  "status": "review",
+  "sessionId": "37f73aee-425d-488e-8c45-55d4f82a2c00",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T00:29:58.512Z",
+      "actor": "37f7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T00:29:58.521Z",
+      "actor": "37f7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same build as req_2035/2037 — the editor-panel pop-out into a 2nd GPU OS window. This req raised the wgpu concern (recreating a wgpu instance / patching wgpu): confirmed a NON-issue. The 2nd window is a sibling SURFACE on the EXISTING g_instance + g_device (gpu.createWindowSurface reuses g_instance; configureExtraSurface reuses g_device/g_adapter) — exactly what the shipping world_window.zig already does. No new instance, no new device, no wgpu update/patch. The only format wrinkle (extra surface may negotiate a different format than the main) is handled by rendering the panel into an offscreen RT in the main format and blitting format-agnostically into the 2nd swapchain. Builds clean; needs live 2-monitor verification.",
+  "shas": [
+    "80491235b"
+  ],
+  "resolvedAt": "2026-06-29T00:29:58.520Z"
+}

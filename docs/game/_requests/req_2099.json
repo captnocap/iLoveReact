@@ -1,0 +1,28 @@
+{
+  "id": "req_2099",
+  "at": "2026-06-30T03:07:30.730Z",
+  "origin": "codex:019f1624",
+  "text": "1: wasted space, mixed concerns, and the overall functionality of the panel\n2: WORKSPACE MEMORY at this current time looks like it is entirely duplicated data in regards to what is being displayed. would you agree this is or isnt the same thing in the panel we just went over previously. \n3: Top level should be none of those 3. Those 3 things should be a factor of what tool i have in use. If its the prop tool, then its a prop menu. if I have a building tool, then its showing me build pieces and preskinning, if im selecting an item already existing on the map, it needs to show all the skinning interfacability\n4: i dont think so no. \n5: yeah so this is how i want this to look like form in my head.\n\nso we start with the top portion being a full list of the assets, paged, no scrolling, with a favorites and recent history always first, followed by most used, then alphabetical. below it, i want all the capabilities that are apart of this [Image #1] already existing where i can change the seed, and get the variant, and i can actually control the materal from here. and then if i want to be able to bring this material into focus so i can really refine it then that would repopulate the interface with the real painting and layers tooling with this already pulled up into focus. i can make any changes, export it back into the materials list as a new name / variant or however i want to. and immediately start using it back on the world where i was just before all from the same route",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T03:07:42.009Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T03:08:18.433Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's left-panel/library feedback in cart/hmsc-workspace-mock/DESIGN_INTAKE.md. Captured that the panel suffers from wasted space, mixed concerns, duplicated Workspace Memory, wrong fixed Build/Props/Skins top tabs, and misplaced Documents. Logged the desired replacement: contextual panel driven by active tool or focused object; paged asset/material list with favorites, recents, most-used, then alphabetical; material capabilities below the list using existing shader/material controls such as seed, variant, recipe, and material bank; a focus-material flow that repopulates the same workspace with painting/layers tooling; export/save back to the material list and immediately return to world use. No implementation changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T03:08:18.433Z"
+}

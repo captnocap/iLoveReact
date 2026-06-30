@@ -1,0 +1,30 @@
+{
+  "id": "req_2137",
+  "at": "2026-06-30T06:09:56.718Z",
+  "origin": "session:47bb26c9",
+  "text": "cool now i would ask since i dont know myself, but if i painted a high quality render does that transfer all the way down? or do i have to repaint in a real setting also, i got this on some model when lowering the quality, which is odd isnt it? not draw. Raise HOST_MESH_STASH in framework/gpu/3d.zig.\n[r3d] host mesh stash FULL (16) — a dropped model was DROPPED and will not draw. Raise HOST_MESH_STASH in framework/gpu/3d.zig.",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T06:11:18.115Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T06:14:14.862Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the 'host mesh stash FULL (16) — DROPPED and will not draw' error that appeared when scrubbing the quality slider. Cause: each quality level stashes its decimated mesh under a new key (path#qN); dragging the slider stashed many levels that were superseded before they ever drew, so internFromStash never freed their slots and after 16 distinct un-drawn keys the stash filled and the model vanished. Fix: the viewer shows ONE host mesh at a time, so stashHostMesh now evicts every other (obsolete) stash entry as it stashes the new current one, bounding the stash to 1 pending mesh — scrubbing can't fill it. Also quantized the quality slider to 20 discrete levels so revisiting a level reuses its already-resident mesh instead of interning an unbounded number of distinct meshes into the retained GPU buffer. Verified: RJIT_QUALITYSTRESS scrubs 30 distinct levels (well past 16) and the model still draws with no stash-full error. Separately answered the user's paint-transfer question (paint currently resets on quality change; carrying it across LODs is a real follow-on = the LoD paint-bake).",
+  "shas": [
+    "08884edd5"
+  ],
+  "resolvedAt": "2026-06-30T06:14:14.862Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_2081",
+  "at": "2026-06-29T23:36:48.951Z",
+  "origin": "session:3dbb283a",
+  "text": "uh ok so after i get a model imported in, this happens. the entire interface just unmounts effectively because im sure the model is too heavy [Image #3] even tho i went pretty low on the quality",
+  "status": "review",
+  "sessionId": "3dbb283a-d0ec-4c16-ae77-0792cd564c91",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T23:37:58.179Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T23:43:09.017Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "An imported model (even at low detail, 24,738 faces) blacked out the entire Studio 3D viewport — grid included — while the left rail kept rendering. Root cause: addPart performs NO scale/position normalization, so an external mesh (which knows nothing of the Studio's 16 u = 1 m convention, sits at whatever world offset it was exported at, and may carry a stray non-finite vertex) lands outside the camera's clamped framing (maxDistance=40, far=200) or, with a NaN vertex, poisons the whole view matrix — both render black. Added normalizeStudioImport() in importMesh.ts: it drops non-finite verts and the faces touching them, centers the model on the XZ origin, seats its base at Y=0, and uniformly scales the longest axis to one tile so it always frames. Wired into every import path (the Detail-slider dialog's doImport plus the glb/objToEditMesh convenience fns), running before unwrap so UV islands build on final geometry. 13/13 importMesh unit tests pass (added center/seat/scale + NaN-drop cases); full hmsc-int cart bundles clean. Pure TSX/TS so it hot-reloads — but a model imported BEFORE this fix is persisted at the bad scale, so the user must delete + re-import to get the corrected placement.",
+  "shas": [
+    "b98c655ad",
+    "b07c1ab6c"
+  ],
+  "resolvedAt": "2026-06-29T23:43:09.017Z"
+}

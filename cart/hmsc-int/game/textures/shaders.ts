@@ -6,15 +6,16 @@
 // pipeline behind the game/textures door — the captured ground floor bakes
 // stored materials from these specs, the editor only adds sliders on top.)
 //
-// A shader here is a RECIPE, not an assignable asset: the texture studio
-// Materializes a tuned recipe into a stored material (./materials.ts), and THAT
-// lands in the texture registry (./registry.tsx) for faces/tiles/parts. Canvas is
-// always exactly 1 tile — wider looks decompose into per-tile materials.
+// A ShaderSpec here is a RECIPE: ShaderLab can still tune it and Materialize a
+// custom frozen look. The registry also derives ShaderTexturePresets from these
+// recipes so authored takes/quality grades are directly assignable without
+// opening the lab. Canvas is always exactly 1 tile — wider looks decompose into
+// per-tile materials.
 //
 // Two shader families:
 //   • ROAD — the game's own layered road-tile shader (asphalt base + marking
 //     overlays), imported from the W-2 render lane's roadTileFill.ts.
-//   • THE FILL BOARDS — the effect_fills evaluation boards (A–J), one mega-WGSL
+//   • THE FILL BOARDS — the effect_fills evaluation boards (A–O), one mega-WGSL
 //     (the W-2 lane's fillShader.ts) whose D[] selects [materialId, variant,
 //     seed, quality, board]. Each board material becomes one spec with its three
 //     authored takes as variants and seed/detail-grade as the tunable base.
@@ -48,7 +49,7 @@ export interface ShaderVariant {
 export interface ShaderSpec {
   id: string;
   label: string;
-  group: string; // catalog rail category by purpose ('Walls & Masonry', 'Wall Props', …)
+  group: string; // visible material-browser shelf by purpose/use, never board family
   blurb: string;
   shader: string; // the real WGSL string — single source, no copies
   base: ShaderParam[]; // shared across every variant
@@ -56,6 +57,15 @@ export interface ShaderSpec {
   // Pack base + overlay values into the exact data[] fs_main expects.
   buildData: (variantValue: number, base: Record<string, number>, overlay: Record<string, number>) => number[];
 }
+
+export type ShaderTexturePreset = {
+  id: string;
+  label: string;
+  group: string;
+  shaderId: string;
+  shader: string;
+  data: number[];
+};
 
 // Default value maps — the slider starting positions for the base or a variant.
 export function paramDefaults(params: ShaderParam[]): Record<string, number> {
@@ -76,7 +86,7 @@ export function defaultShaderData(spec: ShaderSpec): number[] {
 const ROAD: ShaderSpec = {
   id: 'road',
   label: 'Road',
-  group: 'Ground & Roads',
+  group: 'Pavement & Streets',
   blurb: 'One road tile: shared asphalt base + the lane/centerline/bike overlay.',
   shader: ROAD_TILE_SHADER,
   base: [
@@ -153,7 +163,7 @@ const STENCIL_SLIDER_GRID = 8; // the slider form's full-tile grid (all cells se
 const CUTOUT_STENCIL: ShaderSpec = {
   id: 'cutout-stencil',
   label: 'Cutout Stencil',
-  group: 'Stencils',
+  group: 'Codes & Stencils',
   blurb: 'A shape painted in the cutout painter (/cutout), frozen as a stencil: fill color inside the shape, background or transparency outside. Materialize real shapes from /cutout; the sliders here tune a full tile.',
   shader: CUTOUT_STENCIL_SHADER,
   base: [
@@ -213,7 +223,7 @@ export const MISSION_CODE_SHADER = `
 const MISSION_CODE: ShaderSpec = {
   id: 'mission-code',
   label: 'Mission Code',
-  group: 'Stencils',
+  group: 'Codes & Stencils',
   blurb: 'A unique, scannable code minted from a mission — finder patterns + the mission key, CRC-checked and decodable. Generated per mission (not hand-tuned); the sliders here recolor a sample.',
   shader: MISSION_CODE_SHADER,
   base: [
@@ -240,7 +250,7 @@ const MISSION_CODE: ShaderSpec = {
 
 const FILL_GRADES = ['PSX', 'PS2', 'Preview', 'Std', 'Max'] as const;
 const FILL_GRADE_STD = 3;
-const FILL_SEED_MAX = 500; // every board formula lands well under this
+const FILL_SEED_MAX = 2200; // every board formula lands well under this
 
 type FillMaterial = { slug: string; name: string; variants: [string, string, string] };
 type FillBoard = {
@@ -374,70 +384,163 @@ const FILL_BOARDS: FillBoard[] = [
       { slug: 'wall-ac', name: 'AC & Vents', variants: ['Window AC', 'Vent Grille', 'Conduit'] },
     ],
   },
+  {
+    board: 10, letter: 'K', title: 'Street Ground', seedCoef: [61, 41, 463],
+    materials: [
+      { slug: 'sidewalk-grid', name: 'Sidewalk Grid', variants: ['Old Grey', 'Warm Aggregate', 'Blue Dust'] },
+      { slug: 'sidewalk-utility', name: 'Utility Sidewalk', variants: ['Water Covers', 'Telecom Pullbox', 'Gas Plates'] },
+      { slug: 'sidewalk-pavers', name: 'Sidewalk Pavers', variants: ['Red Brick', 'Concrete Blocks', 'Basalt Setts'] },
+      { slug: 'curb-crosswalk', name: 'Curb + Crosswalk', variants: ['Fresh Paint', 'Worn Paint', 'ADA Ramp'] },
+      { slug: 'alley-concrete', name: 'Alley Concrete', variants: ['Oil Spots', 'Trash Stains', 'Patchwork'] },
+      { slug: 'plaza-terrazzo', name: 'Plaza Terrazzo', variants: ['Speckled', 'Brass Inlay', 'Cracked'] },
+      { slug: 'storm-drain', name: 'Storm Drain', variants: ['Curb Grate', 'Round Drain', 'Trench Drain'] },
+    ],
+  },
+  {
+    board: 11, letter: 'L', title: 'Wood Brick Stone', seedCoef: [67, 43, 509],
+    materials: [
+      { slug: 'plywood-sheet', name: 'Plywood Sheet', variants: ['Fresh OSB', 'Boarded Window', 'Painted Scrap'] },
+      { slug: 'clapboard-siding', name: 'Clapboard Siding', variants: ['Whitewash', 'Seafoam', 'Rotten Tan'] },
+      { slug: 'parquet-floor', name: 'Parquet Floor', variants: ['Herringbone', 'Checker', 'Basket Weave'] },
+      { slug: 'brick-herringbone', name: 'Brick Herringbone', variants: ['Red Clay', 'Buff Clay', 'Sooted'] },
+      { slug: 'cinder-block', name: 'Cinder Block', variants: ['Raw Grey', 'Painted Cream', 'Tagged Blue'] },
+      { slug: 'fieldstone', name: 'Fieldstone', variants: ['River Rock', 'Mossy', 'Dry Stack'] },
+      { slug: 'marble-slab', name: 'Marble Slab', variants: ['White Vein', 'Green Vein', 'Black Vein'] },
+    ],
+  },
+  {
+    board: 12, letter: 'M', title: 'Metal Yard', seedCoef: [71, 47, 557],
+    materials: [
+      { slug: 'corrugated-metal', name: 'Corrugated Metal', variants: ['Galvanized', 'Rust Bottom', 'Painted Blue'] },
+      { slug: 'diamond-plate', name: 'Diamond Plate', variants: ['Clean', 'Greasy', 'Worn Edge'] },
+      { slug: 'brushed-steel', name: 'Brushed Steel', variants: ['Horizontal', 'Vertical', 'Circular'] },
+      { slug: 'rusted-panel', name: 'Rusted Panel', variants: ['Orange Bloom', 'Black Rust', 'Peeling Paint'] },
+      { slug: 'chainlink-panel', name: 'Chainlink Panel', variants: ['Fence', 'Razor Top', 'Privacy Slats'] },
+      { slug: 'painted-metal-door', name: 'Painted Metal Door', variants: ['Green Exit', 'Red Service', 'Grey Fire'] },
+      { slug: 'copper-patina', name: 'Copper Patina', variants: ['New Copper', 'Verdigris', 'Rain Streaks'] },
+    ],
+  },
+  {
+    board: 13, letter: 'N', title: 'Wallpapers', seedCoef: [73, 53, 601],
+    materials: [
+      { slug: 'floral-wallpaper', name: 'Floral Wallpaper', variants: ['Rose', 'Avocado', 'Blue China'] },
+      { slug: 'stripe-wallpaper', name: 'Stripe Wallpaper', variants: ['Hotel Red', 'Hospital Mint', 'Navy Gold'] },
+      { slug: 'motel-wallpaper', name: 'Motel Wallpaper', variants: ['Palm', 'Sunburst', 'Cigarette Tan'] },
+      { slug: 'kids-wallpaper', name: 'Kids Wallpaper', variants: ['Stars', 'Clouds', 'Alphabet'] },
+      { slug: 'damask-wallpaper', name: 'Damask Wallpaper', variants: ['Gold', 'Burgundy', 'Smoke Black'] },
+      { slug: 'smoke-stained-wallpaper', name: 'Smoke-Stained Paper', variants: ['Ceiling Fade', 'Water Leak', 'Nicotine'] },
+      { slug: 'office-wallcover', name: 'Office Wallcover', variants: ['Cubicle Grey', 'Beige Weave', 'Conference Blue'] },
+      { slug: 'rose-trellis-wallpaper', name: 'Rose Trellis', variants: ['Dusty Rose', 'Sage Garden', 'Blue Parlor'] },
+      { slug: 'vine-wallpaper', name: 'Vine Wallpaper', variants: ['Ivy Cream', 'Wisteria', 'Black Vine'] },
+      { slug: 'chinoiserie-wallpaper', name: 'Chinoiserie Paper', variants: ['Blue Porcelain', 'Green Birds', 'Ochre Scene'] },
+      { slug: 'art-deco-wallpaper', name: 'Art Deco Paper', variants: ['Gold Fan', 'Teal Fan', 'Noir Fan'] },
+      { slug: 'toile-wallpaper', name: 'Toile Wallpaper', variants: ['French Blue', 'Sepia Farm', 'Red Hunt'] },
+      { slug: 'tropical-wallpaper', name: 'Tropical Wallpaper', variants: ['Palm Green', 'Pink Flamingo', 'Night Jungle'] },
+      { slug: 'kitchen-wallpaper', name: 'Kitchen Wallpaper', variants: ['Lemon Grid', 'Daisy Yellow', 'Cherry Cream'] },
+      { slug: 'nursery-wallpaper', name: 'Nursery Wallpaper', variants: ['Moon Blue', 'Peach Bows', 'Mint Ducks'] },
+      { slug: 'torn-layered-wallpaper', name: 'Torn Layered Paper', variants: ['Old Floral', 'Plaster Reveal', 'Many Layers'] },
+    ],
+  },
+  {
+    board: 14, letter: 'O', title: 'Gradients', seedCoef: [79, 59, 653],
+    materials: [
+      { slug: 'sunset-gradient', name: 'Sunset Gradient', variants: ['Miami Pink', 'Sodium Orange', 'Purple Night'] },
+      { slug: 'vapor-gradient', name: 'Vapor Gradient', variants: ['Cyan Magenta', 'Acid Lime', 'Deep Violet'] },
+      { slug: 'sodium-fog', name: 'Sodium Fog', variants: ['Streetlamp', 'Tunnel', 'Parking Deck'] },
+      { slug: 'fluorescent-panel', name: 'Fluorescent Panel', variants: ['Office White', 'Sick Green', 'Flicker Pink'] },
+      { slug: 'hazard-gradient', name: 'Hazard Gradient', variants: ['Warning Stripe', 'Bio Spill', 'Police Tape'] },
+      { slug: 'wet-neon-fade', name: 'Wet Neon Fade', variants: ['Pink Reflection', 'Blue Reflection', 'Oil Rainbow'] },
+      { slug: 'grime-gradient', name: 'Grime Gradient', variants: ['Top Soot', 'Bottom Mold', 'Corner Dirt'] },
+    ],
+  },
 ];
 
-// ── Editor categories ─────────────────────────────────────────────────────────
-// The catalog rail groups materials by PURPOSE — what a world-builder is actually
-// reaching for (ground, walls, facades, props…) — NOT by the effect_fills demo's
-// authoring batches. The old "A · Environment" / "H · Second Pass" letter boards
-// only ever made sense inside that standalone eval cart; carried into the editor
-// they were noise (a material's batch letter tells a builder nothing about where
-// it goes). `letter`/`board` still drive the stable material id and the demo's
-// swatch layout; the editor's grouping is its own concern, keyed by slug below.
+// ── Editor shelves ───────────────────────────────────────────────────────────
+// The catalog rail groups by authoring intent: where this material belongs or
+// what it is made of. The effect_fills board letters still drive stable ids and
+// WGSL board slots, but they are implementation detail, not UX vocabulary.
 const TEXTURE_CATEGORIES = [
-  'Ground & Roads',
-  'Walls & Masonry',
-  'Building Facades',
-  'Wall Props',
-  'Floors & Interiors',
-  'Surfaces & Glass',
-  'Cloth & Materials',
-  'Objects & Clutter',
-  'Stencils',
+  'Pavement & Streets',
+  'Terrain & Water',
+  'Exterior Walls',
+  'Storefronts & Facades',
+  'Signs & Wall Fixtures',
+  'Wallpaper & Interior Walls',
+  'Floors & Tile',
+  'Glass, Light & Gradients',
+  'Metal & Industrial',
+  'Wood, Fabric & Body',
+  'Props & Clutter',
+  'Codes & Stencils',
 ] as const;
 type TextureCategory = typeof TEXTURE_CATEGORIES[number];
 
 const CATEGORY_BY_SLUG: Record<string, TextureCategory> = {
-  // Ground & Roads — what you walk and drive on.
-  road: 'Ground & Roads', asphalt: 'Ground & Roads', sidewalk: 'Ground & Roads',
-  sand: 'Ground & Roads', dune: 'Ground & Roads', water: 'Ground & Roads',
-  'deep-water': 'Ground & Roads', grass: 'Ground & Roads', turf: 'Ground & Roads',
-  // Walls & Masonry — bare exterior wall surfaces.
-  brick: 'Walls & Masonry', concrete: 'Walls & Masonry', 'stone-wall': 'Walls & Masonry',
-  'stucco-facade': 'Walls & Masonry', 'neon-stucco': 'Walls & Masonry',
-  'mold-wall': 'Walls & Masonry', 'peel-paint': 'Walls & Masonry',
-  'mildew-brick': 'Walls & Masonry', 'rot-siding': 'Walls & Masonry', 'rust-sheet': 'Walls & Masonry',
-  // Building Facades — wall faces with windows/doors/storefronts painted in.
-  'brick-apartment': 'Building Facades', 'brick-fire-escape': 'Building Facades',
-  'brick-shopfront': 'Building Facades', 'brick-entrance': 'Building Facades',
-  'brick-rollshutter': 'Building Facades', 'brick-bodega': 'Building Facades',
-  // Wall Props — street furniture mounted on a wall face.
-  'wall-flag': 'Wall Props', 'wall-plants': 'Wall Props', 'wall-billboard': 'Wall Props',
-  'wall-sign': 'Wall Props', 'wall-ac': 'Wall Props',
-  // Floors & Interiors — indoor floor/ceiling/wall coverings.
-  linoleum: 'Floors & Interiors', 'bath-tile': 'Floors & Interiors', 'pool-tile': 'Floors & Interiors',
-  'peel-wallpaper': 'Floors & Interiors', 'motel-carpet': 'Floors & Interiors',
-  'rotten-rug': 'Floors & Interiors', 'pdx-carpet': 'Floors & Interiors',
-  'booth-vinyl': 'Floors & Interiors', 'drop-ceiling': 'Floors & Interiors',
-  'plank-deck': 'Floors & Interiors', 'moss-carpet': 'Floors & Interiors',
-  // Surfaces & Glass — glossy/reflective/lit surfaces and foliage canopy.
-  'neon-tube': 'Surfaces & Glass', 'sunset-sky': 'Surfaces & Glass', 'wet-asphalt': 'Surfaces & Glass',
-  'car-paint': 'Surfaces & Glass', 'crt-screen': 'Surfaces & Glass', 'palm-canopy': 'Surfaces & Glass',
-  'fogged-mirror': 'Surfaces & Glass', 'salt-flat': 'Surfaces & Glass',
-  'tarnished-silver': 'Surfaces & Glass', 'ice-sheet': 'Surfaces & Glass',
-  'charcoal-bed': 'Surfaces & Glass', 'stained-glass': 'Surfaces & Glass',
-  // Cloth & Materials — prop/wearable substances.
-  'blade-steel': 'Cloth & Materials', gunmetal: 'Cloth & Materials', 'grip-polymer': 'Cloth & Materials',
-  leather: 'Cloth & Materials', denim: 'Cloth & Materials', fabric: 'Cloth & Materials',
-  skin: 'Cloth & Materials', wood: 'Cloth & Materials',
-  // Objects & Clutter — discrete game-objects / set dressing.
-  'cash-stack': 'Objects & Clutter', 'product-baggie': 'Objects & Clutter',
-  'blood-pool': 'Objects & Clutter', evidence: 'Objects & Clutter', refuse: 'Objects & Clutter',
-  corkboard: 'Objects & Clutter', substance: 'Objects & Clutter',
+  // Pavement & Streets — hard outdoor circulation surfaces.
+  road: 'Pavement & Streets', asphalt: 'Pavement & Streets', sidewalk: 'Pavement & Streets',
+  'sidewalk-grid': 'Pavement & Streets', 'sidewalk-utility': 'Pavement & Streets',
+  'sidewalk-pavers': 'Pavement & Streets', 'curb-crosswalk': 'Pavement & Streets',
+  'alley-concrete': 'Pavement & Streets', 'storm-drain': 'Pavement & Streets',
+  'wet-asphalt': 'Pavement & Streets',
+  // Terrain & Water — organic ground, landscape, and outdoor natural surfaces.
+  sand: 'Terrain & Water', dune: 'Terrain & Water', water: 'Terrain & Water',
+  'deep-water': 'Terrain & Water', grass: 'Terrain & Water', turf: 'Terrain & Water',
+  'palm-canopy': 'Terrain & Water', 'salt-flat': 'Terrain & Water', 'ice-sheet': 'Terrain & Water',
+  // Exterior Walls — bare wall/construction skins.
+  brick: 'Exterior Walls', concrete: 'Exterior Walls', 'stone-wall': 'Exterior Walls',
+  'stucco-facade': 'Exterior Walls', 'neon-stucco': 'Exterior Walls',
+  'mold-wall': 'Exterior Walls', 'peel-paint': 'Exterior Walls',
+  'mildew-brick': 'Exterior Walls', 'rot-siding': 'Exterior Walls', 'rust-sheet': 'Exterior Walls',
+  'clapboard-siding': 'Exterior Walls', 'brick-herringbone': 'Exterior Walls',
+  'cinder-block': 'Exterior Walls', fieldstone: 'Exterior Walls', 'marble-slab': 'Exterior Walls',
+  // Storefronts & Facades — wall faces with baked architectural detail.
+  'brick-apartment': 'Storefronts & Facades', 'brick-fire-escape': 'Storefronts & Facades',
+  'brick-shopfront': 'Storefronts & Facades', 'brick-entrance': 'Storefronts & Facades',
+  'brick-rollshutter': 'Storefronts & Facades', 'brick-bodega': 'Storefronts & Facades',
+  // Signs & Wall Fixtures — things mounted onto wall faces.
+  'wall-flag': 'Signs & Wall Fixtures', 'wall-plants': 'Signs & Wall Fixtures',
+  'wall-billboard': 'Signs & Wall Fixtures', 'wall-sign': 'Signs & Wall Fixtures',
+  'wall-ac': 'Signs & Wall Fixtures', 'neon-tube': 'Signs & Wall Fixtures',
+  // Wallpaper & Interior Walls — paper, panel, ceiling, and wallcover.
+  'peel-wallpaper': 'Wallpaper & Interior Walls', 'drop-ceiling': 'Wallpaper & Interior Walls',
+  'floral-wallpaper': 'Wallpaper & Interior Walls', 'stripe-wallpaper': 'Wallpaper & Interior Walls',
+  'motel-wallpaper': 'Wallpaper & Interior Walls', 'kids-wallpaper': 'Wallpaper & Interior Walls',
+  'damask-wallpaper': 'Wallpaper & Interior Walls', 'smoke-stained-wallpaper': 'Wallpaper & Interior Walls',
+  'office-wallcover': 'Wallpaper & Interior Walls', 'rose-trellis-wallpaper': 'Wallpaper & Interior Walls',
+  'vine-wallpaper': 'Wallpaper & Interior Walls', 'chinoiserie-wallpaper': 'Wallpaper & Interior Walls',
+  'art-deco-wallpaper': 'Wallpaper & Interior Walls', 'toile-wallpaper': 'Wallpaper & Interior Walls',
+  'tropical-wallpaper': 'Wallpaper & Interior Walls', 'kitchen-wallpaper': 'Wallpaper & Interior Walls',
+  'nursery-wallpaper': 'Wallpaper & Interior Walls', 'torn-layered-wallpaper': 'Wallpaper & Interior Walls',
+  // Floors & Tile — indoor walkable/flat surfaces.
+  linoleum: 'Floors & Tile', 'bath-tile': 'Floors & Tile', 'pool-tile': 'Floors & Tile',
+  'motel-carpet': 'Floors & Tile', 'rotten-rug': 'Floors & Tile', 'pdx-carpet': 'Floors & Tile',
+  'booth-vinyl': 'Floors & Tile', 'plank-deck': 'Floors & Tile', 'moss-carpet': 'Floors & Tile',
+  'plywood-sheet': 'Floors & Tile', 'parquet-floor': 'Floors & Tile', 'plaza-terrazzo': 'Floors & Tile',
+  // Glass, Light & Gradients — emissive, reflective, screen, and atmospheric looks.
+  'sunset-sky': 'Glass, Light & Gradients', 'car-paint': 'Glass, Light & Gradients',
+  'crt-screen': 'Glass, Light & Gradients', 'fogged-mirror': 'Glass, Light & Gradients',
+  'stained-glass': 'Glass, Light & Gradients', 'sunset-gradient': 'Glass, Light & Gradients',
+  'vapor-gradient': 'Glass, Light & Gradients', 'sodium-fog': 'Glass, Light & Gradients',
+  'fluorescent-panel': 'Glass, Light & Gradients', 'hazard-gradient': 'Glass, Light & Gradients',
+  'wet-neon-fade': 'Glass, Light & Gradients', 'grime-gradient': 'Glass, Light & Gradients',
+  // Metal & Industrial — metal panels, doors, fences, and machine surfaces.
+  'blade-steel': 'Metal & Industrial', gunmetal: 'Metal & Industrial',
+  'grip-polymer': 'Metal & Industrial', 'tarnished-silver': 'Metal & Industrial',
+  'charcoal-bed': 'Metal & Industrial', 'brushed-steel': 'Metal & Industrial',
+  'copper-patina': 'Metal & Industrial', 'corrugated-metal': 'Metal & Industrial',
+  'diamond-plate': 'Metal & Industrial', 'rusted-panel': 'Metal & Industrial',
+  'chainlink-panel': 'Metal & Industrial', 'painted-metal-door': 'Metal & Industrial',
+  // Wood, Fabric & Body — softer substances and character/prop skins.
+  leather: 'Wood, Fabric & Body', denim: 'Wood, Fabric & Body', fabric: 'Wood, Fabric & Body',
+  skin: 'Wood, Fabric & Body', wood: 'Wood, Fabric & Body',
+  // Props & Clutter — discrete set dressing / evidence / mess.
+  'cash-stack': 'Props & Clutter', 'product-baggie': 'Props & Clutter',
+  'blood-pool': 'Props & Clutter', evidence: 'Props & Clutter', refuse: 'Props & Clutter',
+  corkboard: 'Props & Clutter', substance: 'Props & Clutter',
 };
 
 export function textureCategory(slug: string): TextureCategory {
-  return CATEGORY_BY_SLUG[slug] ?? 'Objects & Clutter';
+  return CATEGORY_BY_SLUG[slug] ?? 'Props & Clutter';
 }
 
 function fillSpec(b: FillBoard, materialId: number, m: FillMaterial): ShaderSpec {
@@ -482,8 +585,56 @@ const FILL_SPECS: ShaderSpec[] = FILL_BOARDS.flatMap((b) => b.materials.map((m, 
 
 export const HMSC_SHADERS: ShaderSpec[] = [ROAD, CUTOUT_STENCIL, MISSION_CODE, ...FILL_SPECS];
 
+function slugPart(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'preset';
+}
+
+function frozenData(spec: ShaderSpec, variant: ShaderVariant, basePatch: Record<string, number> = {}): number[] {
+  return spec.buildData(
+    variant.value,
+    { ...paramDefaults(spec.base), ...basePatch },
+    paramDefaults(variant.params),
+  );
+}
+
+function shaderPresetsFor(spec: ShaderSpec): ShaderTexturePreset[] {
+  const hasGrade = spec.base.some((p) => p.key === 'grade');
+  if (hasGrade) {
+    return spec.variants.flatMap((variant) => FILL_GRADES.map((grade, gradeValue) => ({
+      id: `${spec.id}--${variant.id}--${slugPart(grade)}`,
+      label: `${spec.label} · ${variant.label} · ${grade}`,
+      group: spec.group,
+      shaderId: spec.id,
+      shader: spec.shader,
+      data: frozenData(spec, variant, { grade: gradeValue }),
+    })));
+  }
+  if (spec.id === 'road') {
+    return spec.variants.map((variant) => ({
+      id: `${spec.id}--${variant.id}`,
+      label: `${spec.label} · ${variant.label}`,
+      group: spec.group,
+      shaderId: spec.id,
+      shader: spec.shader,
+      data: frozenData(spec, variant),
+    }));
+  }
+  return [];
+}
+
+export const HMSC_SHADER_PRESETS: ShaderTexturePreset[] = HMSC_SHADERS.flatMap(shaderPresetsFor);
+export const HMSC_BROWSE_SHADER_PRESETS: ShaderTexturePreset[] = HMSC_SHADER_PRESETS.filter((preset) => {
+  const spec = shaderSpec(preset.shaderId);
+  if (!spec) return false;
+  return spec.id === 'road' || preset.id.endsWith('--std');
+});
+
 export function shaderSpec(id: string): ShaderSpec | undefined {
   return HMSC_SHADERS.find((s) => s.id === id);
+}
+
+export function shaderTexturePreset(id: string): ShaderTexturePreset | undefined {
+  return HMSC_SHADER_PRESETS.find((p) => p.id === id);
 }
 
 // Group order for catalog rails: the purpose categories in their declared order

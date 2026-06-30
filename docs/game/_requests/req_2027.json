@@ -1,0 +1,30 @@
+{
+  "id": "req_2027",
+  "at": "2026-06-28T20:55:57.399Z",
+  "origin": "session:5dc68f2d",
+  "text": "how do you do it, like, ok so i click a face i assume, then i click ? or do i click rig first, or whats the deal",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T22:03:30.146Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T22:03:30.169Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered 'how do you do it' then BUILT the answer. The only authoring was the centered default (zero clicks); the user rejected auto-locating, so the real authoring became the Studio seat-rig tool (7b5306c5e): in face mode, select a face and tag it by body part. Delivered in the full vertical under req_2030.",
+  "shas": [
+    "7b5306c5e"
+  ],
+  "resolvedAt": "2026-06-28T22:03:30.169Z"
+}

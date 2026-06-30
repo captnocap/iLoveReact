@@ -1,0 +1,31 @@
+{
+  "id": "req_1858",
+  "at": "2026-06-25T08:01:03.474Z",
+  "origin": "session:6ff945f5",
+  "text": "what is enormous? because my map is not enormous. my map is effectively the size of 3 dust2 put side by side",
+  "status": "review",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T08:02:09.113Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T08:28:35.619Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected my mis-diagnosis: the dev-host crash is a V8 heap OOM, and the cause is NOT the map (it's ~3x dust2, moderate, as the user said) — it's the bake enumerating ~850k procedural FLORA rows (234k flowers + 614k palm fronds) into a ~132MB V8 array every compile. Fixed by recipe-izing flowers + palm fronds (see req_1861, SHAs 0c621111f + 018b57b24): they now ship as compact per-cell recipe cells the loader regenerates, dropping the bake instance buffer ~892k→~44k rows. The V8/loader distinction was the key insight (OOM = bake/V8; per-blade expansion = loader/GPU, separate).",
+  "shas": [
+    "0c621111f",
+    "018b57b24"
+  ],
+  "resolvedAt": "2026-06-25T08:28:35.619Z"
+}

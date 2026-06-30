@@ -1,0 +1,28 @@
+{
+  "id": "req_1920",
+  "at": "2026-06-25T22:27:41.843Z",
+  "origin": "session:5dc68f2d",
+  "text": "oh but. we do though, want t o expand the capability of 'searching' for things like hacking, lockpicking. things that bring up some pain in the ass 'are you a human' esque captcha rather than your typical mini game for interactions. its just the worlds most painful letter captcha or some shit",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:28:12.808Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:25:06.403Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design captured: the locked/keyed 'access' enum grows into a shared Challenge interaction-gate primitive (referenced by container.access, doors, vehicles — rule-of-two shared), where you defeat a gate THEN search. Schema-now / UI-later like the items system. Build explicitly deferred by the user in favor of the seating rig first. Recorded in memory.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T23:25:06.403Z"
+}

@@ -5831,10 +5831,10 @@ done
   });
   var GAME_DIR = "cart/hmsc-int/game";
   var SUITE_ROOTS = [GAME_DIR, "cart/hmsc-int/data", "cart/hmsc-int/editors", "cart/hmsc-int/compile", "docs/game/_index"];
-  var COMPILE_ENTRY = "cart/hmsc-int/compile/main.ts";
+  var VERIFY_HARNESS_ENTRY = "cart/hmsc-int/compile/verifyHarness.ts";
   var VERIFY_DIR = "cart/hmsc-int/compile/verify";
   var OUT_DIR = "zig-out/game";
-  var HEADLESS_BUNDLE = `${OUT_DIR}/hmsc-headless.js`;
+  var VERIFY_HARNESS_BUNDLE = `${OUT_DIR}/hmsc-verify-harness.js`;
   var TEST_OUT_DIR = `${OUT_DIR}/tests`;
   var ORACLE_INDEX_DIR = "docs/game/_index";
   var ORACLE_RECORDS_DIR = `${ORACLE_INDEX_DIR}/records`;
@@ -5877,6 +5877,12 @@ done
   var MASSIVE_BAKE_ENTRY = "cart/hmsc-int/compile/bakeMassiveGameFile.ts";
   var MASSIVE_BAKE_BUNDLE = `${OUT_DIR}/hmsc-massive-bake.js`;
   var MASSIVE_GAMEFILE = `${OUT_DIR}/hmsc-massive.gamefile`;
+  var PARITY_ENTRY = "cart/hmsc-int/compile/parityGameFile.ts";
+  var PARITY_TS_BUNDLE = `${OUT_DIR}/hmsc-parity-ts.js`;
+  var PARITY_SOURCE = `${OUT_DIR}/hmsc-parity-source.txt`;
+  var PARITY_TS_GAMEFILE = `${OUT_DIR}/hmsc-parity-ts.gamefile`;
+  var PARITY_ZIG_GAMEFILE = `${OUT_DIR}/hmsc-parity-zig.gamefile`;
+  var PARITY_ZIG_BIN = "zig-out/bin/hmsc_parity_compile";
   var ORACLE_SMOKE_QUERIES = [
     "physics",
     "kinds",
@@ -5895,16 +5901,17 @@ done
   ];
   async function run11(argv) {
     const subcommand = argv[0];
-    if (subcommand === "compile") return compile(__cwd());
+    if (subcommand === "compile") return retiredCompileCommand();
     if (subcommand === "bake") return bake(__cwd(), argv.slice(1));
     if (subcommand === "verify") return verify(__cwd());
+    if (subcommand === "parity") return parity(__cwd(), argv.slice(1));
     if (subcommand === "shot") return shot(__cwd(), argv.slice(1));
     if (subcommand === "play") return play(__cwd(), argv.slice(1));
     if (subcommand === "compact-store") return compactStore(__cwd());
-    err("Usage: rjit game <compile|bake|verify|shot|play|compact-store>");
-    err("  compile  bundle the headless game output");
+    err("Usage: rjit game <bake|verify|parity|shot|play|compact-store>");
     err("  bake     write the authored world to zig-out/game/hmsc.gamefile + contentstore");
-    err("  verify   compile, boot headless, replay verify scripts + behavior suites, exit with a verdict");
+    err("  verify   bake, prove the no-V8 loader, run suites + verify scripts, exit with a verdict");
+    err("  parity   compile one generated world with TS and Zig, byte-compare outputs, report timings");
     err("  shot     build the no-V8 loader, render the baked game-file, capture a PNG (--out path)");
     err("  play     build the no-V8 loader and open a live window (close it or press ESC to exit)");
     err("  compact-store  reclaim the model store: rebuild the snapshot + strip superseded stroke/mesh history (close the editor first)");
@@ -5962,13 +5969,17 @@ done
     if (result.stderr.trim()) err(result.stderr.trim());
     return result.code === 0;
   }
-  function compile(root) {
+  function retiredCompileCommand() {
+    err("[game] `rjit game compile` is retired. The in-app Compile button maps to `rjit game bake`; use `rjit game verify` for the command-script harness.");
+    return 2;
+  }
+  function bundleVerifyHarness(root) {
     fsMkdir(`${root}/${OUT_DIR}`);
-    if (!bundle(root, COMPILE_ENTRY, HEADLESS_BUNDLE)) {
-      err(`[game] compile FAILED: ${COMPILE_ENTRY}`);
+    if (!bundle(root, VERIFY_HARNESS_ENTRY, VERIFY_HARNESS_BUNDLE)) {
+      err(`[game] verify harness FAILED: ${VERIFY_HARNESS_ENTRY}`);
       return 1;
     }
-    out(`[game] compiled ${COMPILE_ENTRY} -> ${HEADLESS_BUNDLE}`);
+    out(`[game] bundled verify harness ${VERIFY_HARNESS_ENTRY} -> ${VERIFY_HARNESS_BUNDLE}`);
     return 0;
   }
   function bake(root, args = []) {
@@ -6328,6 +6339,164 @@ if (failures.length > 0) {
     }
     return installGameFileManifest(root, tapeTransport, MASSIVE_GAMEFILE);
   }
+  function clampInt(v, lo, hi) {
+    if (!Number.isFinite(v)) return lo;
+    return Math.max(lo, Math.min(hi, Math.floor(v)));
+  }
+  function readNumberArg(argv, index, name) {
+    const arg = argv[index] ?? "";
+    if (arg === name && argv[index + 1]) return { value: Number(argv[index + 1]), next: index + 1 };
+    const prefix = `${name}=`;
+    if (arg.startsWith(prefix)) return { value: Number(arg.slice(prefix.length)), next: index };
+    return { value: null, next: index };
+  }
+  function parseParityOptions(argv) {
+    const opts = {
+      width: 1536,
+      height: 1536,
+      seed: 1592594996,
+      assetCount: 8,
+      assetBytes: 4096
+    };
+    for (let i = 0; i < argv.length; i += 1) {
+      let parsed = readNumberArg(argv, i, "--size");
+      if (parsed.value !== null) {
+        opts.width = opts.height = clampInt(parsed.value, 16, 8192);
+        i = parsed.next;
+        continue;
+      }
+      parsed = readNumberArg(argv, i, "--width");
+      if (parsed.value !== null) {
+        opts.width = clampInt(parsed.value, 16, 8192);
+        i = parsed.next;
+        continue;
+      }
+      parsed = readNumberArg(argv, i, "--height");
+      if (parsed.value !== null) {
+        opts.height = clampInt(parsed.value, 16, 8192);
+        i = parsed.next;
+        continue;
+      }
+      parsed = readNumberArg(argv, i, "--seed");
+      if (parsed.value !== null) {
+        opts.seed = clampInt(parsed.value, 0, 4294967295);
+        i = parsed.next;
+        continue;
+      }
+      parsed = readNumberArg(argv, i, "--assets");
+      if (parsed.value !== null) {
+        opts.assetCount = clampInt(parsed.value, 0, 4096);
+        i = parsed.next;
+        continue;
+      }
+      parsed = readNumberArg(argv, i, "--asset-bytes");
+      if (parsed.value !== null) {
+        opts.assetBytes = clampInt(parsed.value, 0, 16 * 1024 * 1024);
+        i = parsed.next;
+        continue;
+      }
+    }
+    return opts;
+  }
+  function paritySourceText(opts) {
+    return [
+      "format=hmsc.parity.v0",
+      `width=${opts.width}`,
+      `height=${opts.height}`,
+      `seed=${opts.seed >>> 0}`,
+      `asset_count=${opts.assetCount}`,
+      `asset_bytes=${opts.assetBytes}`,
+      ""
+    ].join("\n");
+  }
+  function parseCompilerReport(stdout, compiler) {
+    const lines = stdout.trim().split("\n").map((line) => line.trim()).filter(Boolean);
+    const last = lines[lines.length - 1];
+    if (!last) return null;
+    try {
+      const report = JSON.parse(last);
+      return report.compiler === compiler ? report : null;
+    } catch {
+      return null;
+    }
+  }
+  function sha256File(path) {
+    const result = spawnSync("sha256sum", [path]);
+    if (result.code !== 0) return "<sha256sum failed>";
+    return result.stdout.trim().split(/\s+/)[0] ?? "<sha256sum failed>";
+  }
+  function parity(root, argv) {
+    const opts = parseParityOptions(argv);
+    fsMkdir(`${root}/${OUT_DIR}`);
+    fsWrite(`${root}/${PARITY_SOURCE}`, paritySourceText(opts));
+    out(`[game] parity source ${PARITY_SOURCE}: ${opts.width}x${opts.height} (${opts.width * opts.height} cells), assets=${opts.assetCount}x${opts.assetBytes}B`);
+    if (!bundle(root, PARITY_ENTRY, PARITY_TS_BUNDLE)) {
+      err("[game] parity FAILED: TypeScript parity compiler does not bundle");
+      return 1;
+    }
+    const zigBuild = spawnSync("zig", ["build", "hmsc-parity-compiler", "-Doptimize=ReleaseFast"]);
+    if (zigBuild.stdout.trim()) out(zigBuild.stdout.trim());
+    if (zigBuild.stderr.trim()) err(zigBuild.stderr.trim());
+    if (zigBuild.code !== 0) {
+      err("[game] parity FAILED: Zig parity compiler does not build");
+      return 1;
+    }
+    const absSource = `${root}/${PARITY_SOURCE}`;
+    const absTsOut = `${root}/${PARITY_TS_GAMEFILE}`;
+    const absZigOut = `${root}/${PARITY_ZIG_GAMEFILE}`;
+    const tsWall0 = __nowMs();
+    const tsRun = spawnSync(`${root}/tools/v8cli`, [`${root}/${PARITY_TS_BUNDLE}`, "--source", absSource, "--out", absTsOut]);
+    const tsWallMs = __nowMs() - tsWall0;
+    if (tsRun.stderr.trim()) err(tsRun.stderr.trim());
+    if (tsRun.code !== 0) {
+      err("[game] parity FAILED: TypeScript compiler run failed");
+      if (tsRun.stdout.trim()) out(tsRun.stdout.trim());
+      return 1;
+    }
+    const tsReport = parseCompilerReport(tsRun.stdout, "typescript");
+    if (!tsReport) {
+      err("[game] parity FAILED: TypeScript compiler did not print a report");
+      if (tsRun.stdout.trim()) out(tsRun.stdout.trim());
+      return 1;
+    }
+    tsReport.wallMs = tsWallMs;
+    const zigWall0 = __nowMs();
+    const zigRun = spawnSync(`${root}/${PARITY_ZIG_BIN}`, ["--source", absSource, "--out", absZigOut]);
+    const zigWallMs = __nowMs() - zigWall0;
+    if (zigRun.stderr.trim()) err(zigRun.stderr.trim());
+    if (zigRun.code !== 0) {
+      err("[game] parity FAILED: Zig compiler run failed");
+      if (zigRun.stdout.trim()) out(zigRun.stdout.trim());
+      return 1;
+    }
+    const zigReport = parseCompilerReport(zigRun.stdout, "zig");
+    if (!zigReport) {
+      err("[game] parity FAILED: Zig compiler did not print a report");
+      if (zigRun.stdout.trim()) out(zigRun.stdout.trim());
+      return 1;
+    }
+    zigReport.wallMs = zigWallMs;
+    const tsStat = tryFsStat(absTsOut);
+    const zigStat = tryFsStat(absZigOut);
+    if (!tsStat || !zigStat || tsStat.size !== zigStat.size) {
+      err(`[game] parity FAILED: output sizes differ TS=${tsStat?.size ?? 0} Zig=${zigStat?.size ?? 0}`);
+      return 1;
+    }
+    const cmp = spawnSync("cmp", ["-s", absTsOut, absZigOut]);
+    if (cmp.code !== 0) {
+      const detail = spawnSync("cmp", [absTsOut, absZigOut]);
+      if (detail.stdout.trim()) err(detail.stdout.trim());
+      if (detail.stderr.trim()) err(detail.stderr.trim());
+      err("[game] parity FAILED: TS and Zig game-files differ");
+      return 1;
+    }
+    const hash = sha256File(absTsOut);
+    const speedup = zigReport.compileMs > 0 ? tsReport.compileMs / zigReport.compileMs : Infinity;
+    out(`[game] TypeScript parity compile: ${tsReport.compileMs.toFixed(1)}ms inside compiler (${tsReport.wallMs.toFixed(1)}ms wall), ${tsReport.bytes} bytes`);
+    out(`[game] Zig parity compile:        ${zigReport.compileMs.toFixed(1)}ms inside compiler (${zigReport.wallMs.toFixed(1)}ms wall), ${zigReport.bytes} bytes`);
+    out(`[game] parity PASS \u2014 byte-identical game-files (${tsStat.size} bytes, sha256 ${hash}); Zig is ${speedup.toFixed(2)}x by in-compiler time`);
+    return 0;
+  }
   function resolveGameFile(root, choice = {}) {
     if (choice.massive) {
       if (bakeMassiveGameFile(root, choice.blocks)) return MASSIVE_GAMEFILE;
@@ -6426,8 +6595,8 @@ if (failures.length > 0) {
     return run25.code === 0 ? 0 : 1;
   }
   function verify(root) {
-    if (compile(root) !== 0) {
-      err("[game] VERDICT RED \u2014 the game does not compile");
+    if (bundleVerifyHarness(root) !== 0) {
+      err("[game] VERDICT RED \u2014 the verify harness does not bundle");
       return 1;
     }
     const oracleOk = runOracleSelfCheck(root);
@@ -6454,7 +6623,7 @@ if (failures.length > 0) {
     const scripts = fsExists(`${root}/${VERIFY_DIR}`) ? fsList(`${root}/${VERIFY_DIR}`).filter((name) => name.endsWith(".cmds")).sort() : [];
     let scriptsPassed = 0;
     for (const script of scripts) {
-      const result = spawnSync(`${root}/tools/v8cli`, [`${root}/${HEADLESS_BUNDLE}`, `${root}/${VERIFY_DIR}/${script}`]);
+      const result = spawnSync(`${root}/tools/v8cli`, [`${root}/${VERIFY_HARNESS_BUNDLE}`, `${root}/${VERIFY_DIR}/${script}`]);
       if (result.stdout.trim()) out(result.stdout.trim());
       if (result.stderr.trim()) err(result.stderr.trim());
       if (result.code === 0) scriptsPassed += 1;

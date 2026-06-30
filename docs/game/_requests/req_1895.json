@@ -1,0 +1,30 @@
+{
+  "id": "req_1895",
+  "at": "2026-06-25T19:21:23.160Z",
+  "origin": "session:60071ace",
+  "text": "page is good. only if you can still search across all pages and it brings the relevant result into view without needing to go find it in a set of pages",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T19:22:20.314Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T19:29:26.350Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the prop menu's unscannable wall of ~100 text pills with a paged PICTURE browser (new PropBrowser.tsx; CatalogRail's prop tab delegates to it, other tabs keep pills). Shaped around the reconciler's real limits (no list virtualization; a live Scene3D per tile is the heavy path): the visible set is BOUNDED to a page of 12 thumbnails with prev/next so hundreds are never mounted at once; each tile is a one-prop Scene3D wrapped in a StaticSurface keyed by prop kind so its paint collapses to a cached quad and survives paging back; and SEARCH is flat across the ENTIRE catalog (every category) with the hits rendered in place — no page-hunting, the user's explicit requirement. Bundles clean; hot-reloads in dev. This is the de-risk prototype: it answers whether ~12 bounded thumbnails perform (else we go to offline disk-cached bakes) and whether the fixed thumbnail camera frames props recognizably (else per-prop auto-framing). Committed a2b647c52, awaiting the user's dev test.",
+  "shas": [
+    "a2b647c52"
+  ],
+  "resolvedAt": "2026-06-25T19:29:26.350Z"
+}

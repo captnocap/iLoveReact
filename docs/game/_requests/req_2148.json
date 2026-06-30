@@ -1,0 +1,30 @@
+{
+  "id": "req_2148",
+  "at": "2026-06-30T08:00:11.075Z",
+  "origin": "session:e0080e48",
+  "text": "oh, sorry one more thing, but one thing about the current host camera, and i think my gripe here can be folded into the gizmo tooling but so the camera has a fixed point. which is cool but sucks if u start doign large models. i was thinking just like the gizmo tool have some sort of tool that lets me drag around my center focus or recenter it programatically so that i can put my center of focus on like an edge way far off the side and not have to fight trying to edit it with some camera gymnastics (which, yes i have done unfortunately now for a while lmao)",
+  "status": "review",
+  "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:01:00.136Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T08:07:44.151Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Movable camera focus for the host orbit viewer (modelview). The orbit pivot was pinned to the model centre, forcing camera gymnastics to edit far corners of large models. Added a Focus tool (F key / titlebar button) whose left-drag pans the pivot in the screen plane (orbitPan, dist-scaled so the grab tracks the cursor at any zoom), plus double-click-to-recenter which raycasts the point under the cursor and snaps the pivot there (focusAt → new model_paint.pickPoint, front-face preferred, miss keeps focus). Refactored the shared pixel→ray builder (cameraRay) out of pick() so every raycast — face pick, focus point, and future vertex/edge picks — shoots the exact ray the user sees. Doors __model_orbit_pan/__model_focus_at. pickPoint covered by a Zig unit test (hit+miss); built clean; car.obj renders headless with the Focus button present. Live pan/recenter feel verifies in rjit dev.",
+  "shas": [
+    "882df43f7"
+  ],
+  "resolvedAt": "2026-06-30T08:07:44.151Z"
+}

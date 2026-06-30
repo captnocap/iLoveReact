@@ -1,0 +1,30 @@
+{
+  "id": "req_2043",
+  "at": "2026-06-28T22:17:37.990Z",
+  "origin": "session:5dc68f2d",
+  "text": "Lol looks like my ass is falling out of my jeans here but also im sitting through the chair [Image #2]",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T22:19:50.077Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T22:27:14.032Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the crooked sit: deriveSeatFromFaces was reading faces.find(bodyPart) — only the FIRST tagged face of each body part. The user's sculpted backrest is several faces, so one off-center strip's centroid set the facing and skewed the whole pose. Now it aggregates the COMBINED centroid of EVERY face per tag (seat/back/head/legs), so a wide or multi-face backrest yields a centered, un-crooked facing; the seat packing axis also moved from per-edge (which assumed a single quad) to an X/Z bounding box over all seat verts, robust to a many-face curved seat. seating 9/9 and cook 26/26 hold. seating.ts hot-reloads, so the user re-tests by reloading the preview in rjit dev; the live look (crooked gone) is theirs to confirm.",
+  "shas": [
+    "48e4977be"
+  ],
+  "resolvedAt": "2026-06-28T22:27:14.032Z"
+}

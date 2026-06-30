@@ -1,0 +1,33 @@
+{
+  "id": "req_1886",
+  "at": "2026-06-25T18:21:21.239Z",
+  "origin": "session:60071ace",
+  "text": "the ui isnt done so no need to build. lets keep going heres the diagram again. you have this in part correct but huge sore thumb you have not accounted for yet [Image #4]",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T18:22:58.959Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T19:40:36.214Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Editor layout rework toward the user's sketch: replaced the even 2x2 QuadSplit with EditorLayout (left rail + one big swappable map 3D<->2D + a corner PiP switcharoo; both maps stay mounted so swapping never remounts/reloads/resets the camera). The left rail is the three sketch boxes (selected piece / paint-skins / prop-piece). The prop/piece menu moved OFF the map into the rail (armed state hoisted to index.tsx, shared to both map panes). The rail is contextual: in 2D-focus the build tools give way to the tile tools. Remaining and handed off (handoff-20260625-193822): proper prop thumbnails (model->image pipeline), the FacePainter/paint-skins content-first redesign, and the clean/compact PiP. All committed (3bf79084b, 9256ab9c6, 9deaafc1f, a2b647c52); hot-reloads in dev.",
+  "shas": [
+    "3bf79084b",
+    "9256ab9c6",
+    "9deaafc1f",
+    "a2b647c52"
+  ],
+  "resolvedAt": "2026-06-25T19:40:36.213Z"
+}

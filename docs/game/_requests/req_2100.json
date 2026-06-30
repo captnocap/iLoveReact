@@ -1,0 +1,28 @@
+{
+  "id": "req_2100",
+  "at": "2026-06-30T03:16:42.520Z",
+  "origin": "codex:019f1624",
+  "text": "yes they should be visual, always visual all the time with heavy performance considerations. we want it to be the most user friendly it can be while highly performant and capabile of doing real work. some things i want to go over a bit since we started touching on it is i want to start with a core brush set, and then thats it. those brushes exist for anything that ends up using brushes. no having half of them made one way and some of them made another way. I have already kinda in part had this started but we are going to enforce it in full. the same thing goes for sliders, or controls of any sort, buttons, etc. we do NOT do inline styles, we do not create one off button sizes, none of that. everything has a place it comes from and if it doesnt have a place it comes from it gets one. Anything that shows up twice becomes a helper and we do not export a bunch of things from a file. One export per react file. typescript logic files can have many exports that is fine. And absolutely NO god files. The most GOD file in the entire set should read like a bunch of clean react components that pass props down from a central entrypoint. Rather than treat everything as having a undo/redo persistant history, we are going to look at an eventbus instead with only in-memory persistence with auto saving and backup capabilities. We are going to make EVERYTHING go through an eventbus. because the future goal is to be able to integrate 'multiplayer game editing' where a host can invite a friend to join their editor and can work together. This is only possible via an eventbus where all things travel in and out of it",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T03:16:56.291Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T03:17:54.050Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's broad workspace doctrine and visual asset-browser requirements in cart/hmsc-workspace-mock/DESIGN_INTAKE.md. Added global rules for always-visual but performance-conscious asset lists; one shared core brush set for every brush-using surface; shared controls for sliders/buttons/selects/toggles/toolbars; no inline styles; no one-off button/control sizes; duplicate UI becomes helpers; one export per React file; no god files; clean React entrypoints with logic separated. Captured the new eventbus-first direction for all authoring actions and future multiplayer editor collaboration, with in-memory persistence, autosave, and backups instead of feature-local persistent undo/redo history. Noted this must be reconciled with the existing V20 oracle language about total cross-session history before implementation. No implementation changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T03:17:54.050Z"
+}

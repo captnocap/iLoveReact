@@ -1,0 +1,28 @@
+{
+  "id": "req_2097",
+  "at": "2026-06-30T02:52:23.953Z",
+  "origin": "codex:019f1624",
+  "text": "1: tooltips are always great. \n2: in another menu, that can be pulled up inside of this same workspace without skipping a beat. think something like a hotkey for opening a modal overlay that has global values at a instant interface, or 'raycast' controls to type in 'gravity' for example and find right at the top globals for gravity followed by any other pertaining data that resolves around gravity. \n3: they should be dense and searchable and filterable. favorite my favorite properties to see always on top, but professional, i dont want to go scrolling sideways to find data but use horizontal space within constrained space",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T02:52:30.332Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T02:53:13.954Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's next inspector/defaults answers in cart/hmsc-workspace-mock/DESIGN_INTAKE.md. Added that tooltips are preferred for exposing raw numeric/detail values; defaults/tunables should open as an instant hotkey/menu overlay inside the same workspace; that overlay should support ranked search such as 'gravity' showing global gravity first then related data; immutable tables should be dense, searchable, filterable, favorites-aware, and use horizontal space without forcing sideways scrolling. Added deductions for a command-palette-like globals overlay, tooltip numeric provenance, pinned/favorite properties, and table density/filtering strategies. No implementation changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T02:53:13.953Z"
+}

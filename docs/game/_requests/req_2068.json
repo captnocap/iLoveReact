@@ -1,0 +1,30 @@
+{
+  "id": "req_2068",
+  "at": "2026-06-29T04:29:24.656Z",
+  "origin": "session:2eacb40b",
+  "text": "lol all the traffic is doing loops in this one intersection [Image #1]",
+  "status": "review",
+  "sessionId": "2eacb40b-8a1e-4c58-a8d4-b7c3ab9f4aea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T04:30:35.480Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T04:50:37.296Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same issue as req_2069 (the user's screenshot showed all traffic looping one intersection) — resolved by the goal-oriented routing rework in 63902d3f8: cars now route to distant intersections across the city instead of circling the nearest one (the old tracer closed on the smallest cycle). See req_2069 for the full write-up; the load-bearing fix was switching the routing mask from PREFERRED to DRIVABLE so crosswalk tiles at intersections stop sealing lanes off from junctions.",
+  "shas": [
+    "63902d3f8"
+  ],
+  "resolvedAt": "2026-06-29T04:50:37.296Z"
+}

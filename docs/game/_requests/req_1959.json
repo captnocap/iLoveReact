@@ -1,0 +1,30 @@
+{
+  "id": "req_1959",
+  "at": "2026-06-26T00:23:35.194Z",
+  "origin": "session:4f39ae52",
+  "text": "Ok. so now one more time. i have the fire hydrant selected. It says tile asphalt. ? i have not placed the prop either. [Image #6] also, this gutter that has paint obj notes and chat. remove that. all of it is useless trash. i only use the one paint tab",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:24:21.819Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:29:05.607Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two fixes. (1) 'TILE Asphalt' while holding the Fire Hydrant: shownFocus fell back to the current tile BRUSH whenever nothing placed was selected, so the properties panel ignored the held item. Added armedFocus — when an unplaced PROP is held (armed id 'prop.<kind>'), it builds the same one-object preview placeFocus uses, dressed with the staged part textures (armedDraft) so it previews exactly what will drop; shownFocus/focusWorld now prefer it over the tile default. So holding the hydrant shows the hydrant's properties, not asphalt. (Non-prop held build pieces still fall through to the default — noted as a follow-up.) (2) Removed the PAINT/OBJ/NOTE/CHAT nav rail entirely — the user only uses PAINT, so RightPanel is now just the FacePainter full-width (reclaims the 46px the rail ate). The TabId type + the cart's tab state are kept because useMapSession/usePlacements persist + auto-switch a ; ObjectsTab/NotesTab/ChatTab are simply no longer rendered (files left in place, not deleted). Built clean. Committed 533cb82c9. Needs rjit dev eyes (editor self-shot OOMs). Heads-up: removing the OBJ tab also removes the per-kind texture inspector that lived there; if that authoring is still wanted it can resurface in the paint panel.",
+  "shas": [
+    "533cb82c9"
+  ],
+  "resolvedAt": "2026-06-26T00:29:05.607Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2129",
+  "at": "2026-06-30T05:03:20.814Z",
+  "origin": "codex:019f16c9",
+  "text": "ok so what about the larger you go, double the map, then again, and again, whats the results",
+  "status": "review",
+  "sessionId": "019f16c9-c9f4-7d63-86f1-4a12cf41882c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T05:03:31.372Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T05:04:19.364Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ran the larger parity scaling checks the user asked for. 4096x4096 completed byte-identical with TypeScript at 1952ms wall and Zig at 214ms wall. 8192x8192 could not complete on the TypeScript side because V8 hit its heap limit after repeated mark-compacts; the Zig compiler alone completed the same 8192 source in 810.390ms and wrote a 295,830,608-byte gamefile.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T05:04:19.364Z"
+}

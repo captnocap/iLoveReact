@@ -1,0 +1,28 @@
+{
+  "id": "req_1922",
+  "at": "2026-06-25T22:34:13.070Z",
+  "origin": "session:5dc68f2d",
+  "text": "yeah i think both actually a mix of that shit and then genuinely like recreate the captcha system from dread on tor would be peak because that is such a fucked system",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:34:43.869Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:25:06.420Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design captured: the gate is a growable POOL a lock rolls from — decipher plus a recreated Dread/EndGame-style hostile captcha (timed, case-sensitive, no partial credit, resets-and-rerolls on fail, escalating noise/distortion). Build-time note recorded: nail the real reference behavior rather than fabricate Dread internals. Deferred build.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T23:25:06.420Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2155",
+  "at": "2026-06-30T08:34:48.571Z",
+  "origin": "codex:019f1624",
+  "text": "yep and we again, and make note of this and be very clear, everything that is built gets put in with its own timing recordings and debugging first class so we can instrument on things faster and debug faster and not have to come back around, add in debug logs, and have to fuck around with our thumbs up our ass sitting around for rebuilds just for some debugging. debuggin is built in, and it stays. no one off debug tooling",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:34:55.893Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T08:35:28.269Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded first-class instrumentation as a hard design contract. Added a First-Class Instrumentation section to DESIGN_INTAKE.md and added the same requirement to the /editor + /play route target contract: every feature must ship with timing/debug signals from the start, using shared diagnostics rather than temporary one-off debug tooling.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T08:35:28.269Z"
+}

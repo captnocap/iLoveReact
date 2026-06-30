@@ -1,0 +1,30 @@
+{
+  "id": "req_1979",
+  "at": "2026-06-26T02:13:52.644Z",
+  "origin": "codex:019f01b3",
+  "text": "these numbers on the homepage route are full of shit. heres why. watch as i switch through the various maps. [Image #1][Image #2][Image #3][Image #4][Image #5]",
+  "status": "review",
+  "sessionId": "019f01b3-9f47-75e2-992c-e8693116c868",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T02:13:58.789Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T02:16:41.588Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Scoped the / dashboard stats to the selected map. Removed the deferred global asset/texture/material store censuses from DashboardRoute because those library-wide numbers stayed constant while switching maps and read as current-map facts. The route now derives every visible metric from map props: chunks, placed count, unique kinds, painted area, world extent, coverage, open ground, and most-placed labels. Verified hmsc-int bundle plus mapReport and placementStats suites.",
+  "shas": [
+    "4eca6f988"
+  ],
+  "resolvedAt": "2026-06-26T02:16:41.588Z"
+}

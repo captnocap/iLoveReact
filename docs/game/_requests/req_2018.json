@@ -1,0 +1,28 @@
+{
+  "id": "req_2018",
+  "at": "2026-06-28T17:03:44.550Z",
+  "origin": "session:0f02d048",
+  "text": "I see. so every floor is 80kb thats nasty",
+  "status": "review",
+  "sessionId": "0f02d048-6266-4c5d-affe-6131b0e17f55",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T17:19:42.433Z",
+      "actor": "opus-foliage",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T17:19:42.442Z",
+      "actor": "opus-foliage",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarifying Q&A (no code): user asked what counts as a 'building' and reacted to the per-piece 80B cost. Explained the engine has no building concept — 'building' is everything on the standard InstanceData path (box/ramp/cylinder/sphere/prism families + material batches), arbitrary composition. Established that per-piece 80B is fine; aggregate cost is dominated by foliage count, which led directly into the grass/bush/flower slim work (req_2019). The generic shape-row slim (~32B, for floors/buildings) is captured as the next pass in project memory.",
+  "shas": [],
+  "resolvedAt": "2026-06-28T17:19:42.442Z"
+}

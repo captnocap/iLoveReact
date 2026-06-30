@@ -1,0 +1,30 @@
+{
+  "id": "req_2071",
+  "at": "2026-06-29T05:52:53.660Z",
+  "origin": "session:2eacb40b",
+  "text": "ok that is better. now, there is a problem where cars are just driving in the middle of the road / offset in their lane. because lanes are a fixed width of 3 tiles, cars should effectively always path in the center tile down the road",
+  "status": "review",
+  "sessionId": "2eacb40b-8a1e-4c58-a8d4-b7c3ab9f4aea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T05:58:18.810Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T05:58:18.820Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cars drove offset within / down the middle of the road because lanes are 3-tile-wide directional trios but the BFS routed cell-to-cell across the trio's width. Now every route cell is snapped onto its lane CENTERLINE before simplification: scan perpendicular to the cell's flow to find the same-flow trio span, take its midpoint. All three tiles of a trio share the trio's flow, so they snap to one centered line → the car drives dead-center; junctions/crosswalks keep their own center. Replaced integer collapseCollinear with a world-space simplifyPolyline. New P4 test on a 3-wide ring asserts top-band points land on the center tile (z=1.5), never edges. 6/6 traffic tests; re-baked + self-shot. SHA dea0647c7.",
+  "shas": [
+    "dea0647c7"
+  ],
+  "resolvedAt": "2026-06-29T05:58:18.820Z"
+}

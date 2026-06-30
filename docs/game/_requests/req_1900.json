@@ -1,0 +1,30 @@
+{
+  "id": "req_1900",
+  "at": "2026-06-25T20:14:14.164Z",
+  "origin": "session:9a80504f",
+  "text": "the door, so, i made a door, i cant walk thru the wall space when the door is open. idk why. i can walk under props and thru other door spaces not this one",
+  "status": "review",
+  "sessionId": "9a80504f-e7fd-40c1-b6cb-5bd524a8db25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T20:17:15.070Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T20:33:36.340Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused why an OPEN cooked door's doorway stayed solid in /compiled: cooked-prop collision is derived by welding the render mesh into vertex islands, and a door frame's header bridges both jambs at shared corner positions, so the whole frame welds into ONE connected island and falls back to a full-bounds box that seals the opening (open or closed; archways shared this latent bug). The cook already measured the correct gap-leaving frame boxes (descriptor/collision.boxes, leaf excluded) but never shipped them. Fix: ship those authored collider boxes in MESH_PROPS (bumped v6->v7), decode them in constructor.zig (MeshPropMesh.collision_boxes), and have world_loader.meshPropIslands use them verbatim when present — the doorway/arch gap stays walkable, the header bands high (walk under), and the leaf's existing toggleable rect (req_1864) fills the gap only when closed. Imported OBJ/GLB props keep the weld path; older stored assets without boxes fall back to welding. Verified via meshProps v7 round-trip + cookedPiece/worldColliders suites and rjit game bake+shot PASS. The user must RE-COMPILE their world + run the rebuilt v7 loader for the fix to apply.",
+  "shas": [
+    "1fc5045ae"
+  ],
+  "resolvedAt": "2026-06-25T20:33:36.339Z"
+}

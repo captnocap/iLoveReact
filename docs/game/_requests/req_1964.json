@@ -1,0 +1,30 @@
+{
+  "id": "req_1964",
+  "at": "2026-06-26T00:36:11.238Z",
+  "origin": "session:26c62b07",
+  "text": "wat. what is LoaderIsoView and what is IsoAuthor",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:36:40.464Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:37:52.931Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained to the user (non-coder) what LoaderIsoView vs IsoAuthor are: both are the same 3D iso build map to them — LoaderIsoView draws the world with the real game engine (the primary big map, shows placed pieces instantly), IsoAuthor is the older React-drawn twin shown as the corner preview; the editor swaps them. The root smell: each pane keeps its OWN copy of the drag-paint placement gate, so the req_1944 family-aware fix in IsoAuthor never reached the pane the user actually builds in. Fix: pointed LoaderIsoView.paintKindOf at GAME_BUILD.catalog.family too (950d8fa4e), so a cooked floor/wall grid/line drag-paints in the live pane exactly like a built-in; removed the IsoAuthor diagnostic. Flagged the duplicated gate across the two panes as worth unifying later. Hot-reloads in the user's dev.",
+  "shas": [
+    "950d8fa4e"
+  ],
+  "resolvedAt": "2026-06-26T00:37:52.931Z"
+}

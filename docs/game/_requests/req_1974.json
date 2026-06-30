@@ -1,0 +1,30 @@
+{
+  "id": "req_1974",
+  "at": "2026-06-26T01:24:10.238Z",
+  "origin": "session:7a3a0337",
+  "text": "woah lmfao holy shit that is a curve ball lets stop for one moment before we go further and trace back to what you just unveiled. we have not used quickjs for over 3 months now. i have had a handful of times spent where we purge anything t hat is quickjs still lingering. so what did you just find",
+  "status": "review",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T01:29:46.842Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T01:47:02.427Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced the perf log's 'host DOMINANT=other tick 0.0' to its root: engine.zig called js_vm.tick() (commented 'QuickJS tick') and timed tick_us around it, but js_vm is v8_runtime.zig whose tick() is 'pub fn tick() void {}' — a no-op. So tick_us has measured an empty function since the QuickJS eviction; 'tick 0.0' meant the gauge was dead, not that JS didn't run. Explained the find and that the real per-frame JS lives in the bridge accumulator + event dispatch, which had no phase bucket and fell into 'other'.",
+  "shas": [
+    "a5f6d3a6f"
+  ],
+  "resolvedAt": "2026-06-26T01:47:02.427Z"
+}

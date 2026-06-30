@@ -1,0 +1,30 @@
+{
+  "id": "req_1938",
+  "at": "2026-06-25T23:28:03.250Z",
+  "origin": "session:67264656",
+  "text": "[watch] build started (change: \"cart/hmsc-int/editors/build/FacePainter.tsx\")\n[watch] build finished\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=12 delayMs=254.15 ms=88.52\n[js.warn] [edit-latency] place   total ~1277ms = pre  261 + scans    0 + push    0 + host-block 1016\n[js.warn] [PLACEFREEZE] snapshot flush reason=commitMany mode=defer streams=12 delayMs=710.25 ms=96.16\n[js.warn] [edit-latency] painted total ~1016ms = pre    0 + scans    0 + push    0 + host-block 1016\n[js.warn] [edit-latency] place   total ~4037ms = pre 1016 + scans    0 + push    0 + host-block 3021\n[js.warn] [PLACEFREEZE] snapshot flush reason=commitMany mode=defer streams=12 delayMs=2661.11 ms=87.39\n[js.warn] [edit-latency] painted total ~3021ms = pre    0 + scans    0 + push    0 + host-block 3021\n[js.warn] [edit-latency] place   total ~3021ms = pre    0 + scans    0 + push    0 + host-block 3021\n[js.warn] [edit-latency] place   total ~3021ms = pre    0 + scans    0 + push    0 + host-block 3021\n[js.warn] [edit-latency] painted total ~3021ms = pre    0 + scans    0 + push    0 + host-block 3021\n[js.warn] [edit-latency] painted total ~3021ms = pre    0 + scans    0 + push    0 + host-block 3021\n[js.warn] [edit-latency] place   total ~3380ms = pre 3021 + scans    0 + push    0 + host-block  359",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T23:30:03.095Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:32:00.431Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The phase breakdown proved the loader JS is clean (scans=0, push=0) but revealed a compounding multi-second host-block (1016ms→3021ms, growing per edit) — and the requestAnimationFrame 'rendered' proxy batches under that saturation (identical repeated host-block values, pre inheriting the prior line's block), so the absolute host-block is backlog not a clean per-edit cost. To get ground truth on WHAT is blocking the main thread, folded the host's own per-frame telemetry into the edit-latency line: exported readFrameRecord/readCounters from perfWatch and appended 'host DOMINANT=<phase> tick/paint/gpu ms | nodes N inst I draws D meshes M'. Since V8 runs on the host thread, a long JS block surfaces as huge tickUs; a GPU re-upload as gpuUs; CPU raster as paintUs — and if the scene counts CLIMB per edit the compounding is a leak (nodes/instances accumulating) rather than a fixed cost. One place-click now classifies the bottleneck. Cart-side, hot-reloads. Sha caffa8071. Next: read the host line, then go kill the dominant phase (JS path vs GPU upload vs a node/instance leak).",
+  "shas": [
+    "caffa8071"
+  ],
+  "resolvedAt": "2026-06-25T23:32:00.431Z"
+}

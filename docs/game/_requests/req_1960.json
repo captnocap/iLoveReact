@@ -1,0 +1,30 @@
+{
+  "id": "req_1960",
+  "at": "2026-06-26T00:28:57.422Z",
+  "origin": "session:9a80504f",
+  "text": "nice job can we take it up a notch and have the door push back the player when it opens that way its truly a physics object it currently just goes thru me D:",
+  "status": "review",
+  "sessionId": "9a80504f-e7fd-40c1-b6cb-5bd524a8db25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:30:04.178Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:32:03.691Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the swinging cooked door a real physical object that shoves the player. Previously the leaf's collision rect sat at the CLOSED pose and then parked (vanished) past half-open, so the moving panel clipped through the player. Now stepCookedDoors recomputes the rect to TRACK the swinging leaf every frame and keeps it solid the whole time: the rect center pivots about the hinge (engine m4rotateY convention) and its half-extents fold by the leaf's TOTAL angle (instance yaw + swing) from the leaf's stored LOCAL half-extents, so the sweeping door pushes the player out of the way exactly like the elevator car carries a standing player. Fully open the panel lies along the jamb so the doorway stays walkable. Loader-only, builds clean ReleaseFast, rjit game shot PASS. User re-compiles + runs the rebuilt loader to feel it; if it's too shove-y/janky or wedges the player in a tight doorway, the follow-ups are softening the push or a 'blocked -> door waits' fallback.",
+  "shas": [
+    "70ddc73e4"
+  ],
+  "resolvedAt": "2026-06-26T00:32:03.691Z"
+}

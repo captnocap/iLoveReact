@@ -1,0 +1,28 @@
+{
+  "id": "req_2158",
+  "at": "2026-06-30T08:51:13.149Z",
+  "origin": "codex:019f1624",
+  "text": "we should also be able to let me give a bug a specific semantic name so when it occurs again in future sessions i can easily go its the 'jesus water walking' bug again or whatever",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:51:21.305Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T08:51:45.894Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Documented user-authored semantic bug names and aliases for ongoing bug/build threads. Threads keep stable internal ids, but can be found and reattached by memorable names across sessions; renaming must not break existing request/build/log links.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T08:51:45.894Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2104",
+  "at": "2026-06-30T03:30:19.125Z",
+  "origin": "codex:019f1624",
+  "text": "for sake of what we have in the app already will u mock in hundreds of materials so i can see what happens when we have a lot in here",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T03:30:30.484Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T03:33:07.703Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Expanded the hmsc workspace mock material catalog to stress the browser with hundreds of materials. Added a generated 240-entry material bank behind the core named materials, changed the no-scroll page size to 12, made catalog search cover material recipes, added visible range/total page text, and added an empty state for searches with no matches. Verified with cart bundle and raw ReleaseFast ship; generated build artifacts were removed.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T03:33:07.703Z"
+}

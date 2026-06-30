@@ -1,0 +1,32 @@
+{
+  "id": "req_2012",
+  "at": "2026-06-26T21:23:41.355Z",
+  "origin": "session:b8e8fd6a",
+  "text": "what? yeah they were active 2 minutes ago writing u that document because they just burned through another million tokens already after the previous did. do it all",
+  "status": "review",
+  "sessionId": "b8e8fd6a-1e9a-4745-88a9-e72044e72497",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T21:23:45.691Z",
+      "actor": "b8e8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T21:41:13.431Z",
+      "actor": "b8e8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cut the per-edit O(world) work in the hmsc-int editor so a place on a full map approaches the blank-map baseline. Three cuts, all cart/runtime TSX (hot-reloadable, no Zig rebuild): (1) 3022d8bb5 — the per-place snap raycast (raycastPieces) and the anchor scans (nearestPlateLatticeAnchor/nearestWallLineAnchor/topAnchorYAtEdge) were O(world) per click; they now query the cached PLACEPERF-0610 piece grid for grid-local candidates only. This also fixes the dominant appTick cost: the per-frame hover-snap inside the setTimeout __jsTick ran the SAME raycast. (2) 7e0a9027f — EditorLayout keeps both maps mounted; the 2D PaintCanvas re-rendered its O(world) markers on every 3D place (place memo dep buildFootprints) inside the loaderPane window; its place prop is now frozen while it is the unfocused PiP. (3) 9f786671d — the footprint census (mapBuildFootprints, ~30ms/place) is gated to the routes that show it (dashboard or 2D-focused), computed once on mount otherwise; also fixed a latent missing useRef import in useBuildUndo.ts from a prior uncommitted edit. snap.test 35/35, no regressions (2 placed failures pre-exist on HEAD from the parallel buildings work). TEMP probes left in place for the user's live A/B; cleanup commit follows verification.",
+  "shas": [
+    "3022d8bb5",
+    "7e0a9027f",
+    "9f786671d"
+  ],
+  "resolvedAt": "2026-06-26T21:41:13.431Z"
+}

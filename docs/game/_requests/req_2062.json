@@ -1,0 +1,30 @@
+{
+  "id": "req_2062",
+  "at": "2026-06-29T02:56:33.714Z",
+  "origin": "session:ae81d73a",
+  "text": "yeah lets do it! lets be able to make a light first before we do the sun",
+  "status": "review",
+  "sessionId": "ae81d73a-006a-4c08-abbc-df81d4a7c032",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T02:57:28.805Z",
+      "actor": "ae81",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T03:09:30.496Z",
+      "actor": "ae81",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Slice 1 of authoring lights in the Studio mesh editor — 'make a light' before the sun. A light is now an authored part of a model (the user's pyramid): in rig mode a '+ light' button drops a downward white spot above the part, a chip row selects it, and a panel tunes it (spot/bulb toggle, colour swatches, brightness, reach, cone, tip x/y/z, aim x/y/z, casts-shadow). The Studio viewport emits each authored light as a Scene3D.SpotLight/PointLight (the req_2032 primitives) offset by the part's lift, so the model is lit live and a spot's shadow (req_2055) rides along. Data: LightRig type + EditMesh.lights with immutable addLight/updateLight/removeLight/nextLightName helpers and cloneMesh deep-copy; persistence is free because lights ride EditMesh through the partMeshUpdated whole-mesh JSON event into the V20 model store (branch data, undoable). Verified: 4 new editMesh light test suites pass (106/106 total, no regression) and the full hmsc-int cart bundles + ships clean. The Studio editor can't be headlessly screenshotted (known OOM), so live verification is rjit dev hmsc-int. Next slices: a draggable pyramid gizmo in the viewport, then carry lights through the cook into placed props + the /compiled world. Committed 18ee22130.",
+  "shas": [
+    "18ee22130"
+  ],
+  "resolvedAt": "2026-06-29T03:09:30.496Z"
+}

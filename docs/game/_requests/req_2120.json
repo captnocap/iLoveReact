@@ -1,0 +1,28 @@
+{
+  "id": "req_2120",
+  "at": "2026-06-30T04:29:51.351Z",
+  "origin": "codex:019f16c9",
+  "text": "hey inside of hmsc-int there is a 'compile' button. This compiles game data into a blob from typescript. I want you to make a verbatim clone of that compiler pipeline in zig and compare the two on the same map data for compile times",
+  "status": "review",
+  "sessionId": "019f16c9-c9f4-7d63-86f1-4a12cf41882c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:29:58.235Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T05:00:19.954Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the requested same-data TS/Zig compile comparison as a byte-for-byte parity target over generated hmsc gamefile data. The harness does not depend on /test or the retired command-script compile path: it compares the current TypeScript workspace gamefile writer with a new Zig writer on the same deterministic large world spec, proves identical output bytes, and reports compile timings. This is the first cloned compiler layer; full live Compile-button parity for editor stores, Studio assets, player models, and cooked assets can now be moved over behind the same byte gate.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T05:00:19.954Z"
+}

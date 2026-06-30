@@ -1,0 +1,31 @@
+{
+  "id": "req_1866",
+  "at": "2026-06-25T16:04:29.692Z",
+  "origin": "session:6ff945f5",
+  "text": "I do not see it. Where is it? lol this is crazy the app is literally just frozen because its compiled now like 30 times in the last 5 minutes",
+  "status": "review",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T16:07:35.173Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T16:07:35.182Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The req_1865 toggle couldn't help because the app was too frozen to click it. Root cause: the auto-compile effect re-armed a bake on every (re)mount, and a hot reload re-mounts the cart — so an agent's rapid file edits = dozens of hot reloads = dozens of back-to-back 5-6s bakes = frozen editor. Fixed at the source with a mount guard (autoCompileArmedRef): the effect skips its FIRST run after each (re)mount (the hot-reload re-run with unchanged world data) and only arms the bake on SUBSEQUENT runs — a real worldRev/placements/previewWorld edit this session. Hot reloads no longer compile; actual edits still do; manual Compile unaffected. The persisted toggle (req_1865) stays as the explicit off switch (loader pane corner, above LOADER VIEW). TSX-only, hot-reloads. Committed 8e59816ae; pairs with req_1865 (0d736c625). One dev-host restart clears any in-flight storm; the guard prevents recurrence.",
+  "shas": [
+    "8e59816ae",
+    "0d736c625"
+  ],
+  "resolvedAt": "2026-06-25T16:07:35.182Z"
+}

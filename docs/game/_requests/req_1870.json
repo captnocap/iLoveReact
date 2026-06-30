@@ -1,0 +1,30 @@
+{
+  "id": "req_1870",
+  "at": "2026-06-25T16:24:22.775Z",
+  "origin": "session:6ff945f5",
+  "text": "it was the other session. they fixed it. hey so back to the whole, its placed once, reference and it gets instantly placed. seems like that just stopped working all together for somereason. i thought maybe it was the compile storm fucking it up, but no i have a prop that is the pepes and i go to test place it and its taking 5-6s to resolve literally its like the worst GC you ever had on every placement",
+  "status": "review",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T16:27:41.056Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T16:27:41.066Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Instant placement regressed to 5-6s per placement ('worst GC ever'). Cause was mine: live building-piece skins (req_1849) ran buildingSkinBoxes(current) on every props.pieces change — every placement — calling wallJoinSignature (scans neighbours) + pieceVisualShapes for EVERY build piece on the map, ~O(N²). So placing anything, even a pepes prop, re-decomposed every wall and floor, burying the instant resident-mesh path (req_1812). Fix: a cheap O(1) pieceHasMaterialSkin(piece) guard on piece.skin — only a MATERIAL face can produce a 'bldskin:' face-slab, so unskinned/flat-colour pieces (the vast majority) skip the join scan + decomposition; the few actually-skinned pieces still decompose. Placement is instant again. TSX-only, hot-reloads. Committed d76b1df96. (The BadMeshProps crash earlier was another session's, already fixed by them.)",
+  "shas": [
+    "d76b1df96"
+  ],
+  "resolvedAt": "2026-06-25T16:27:41.066Z"
+}

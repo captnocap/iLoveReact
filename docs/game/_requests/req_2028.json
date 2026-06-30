@@ -1,0 +1,30 @@
+{
+  "id": "req_2028",
+  "at": "2026-06-28T20:58:08.387Z",
+  "origin": "session:5dc68f2d",
+  "text": "that approach kinda sucks, if i want to have a booth seat for example i need sitting offsets it should behave in a manner that i rig a face or something. it just trying to find its own location is never going to work",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T22:03:30.154Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T22:03:30.179Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the correction — rig a FACE, not a point, with multiple offsets (a booth). deriveSeatFromFaces (31738a0a1): the seat face's length yields multiple evenly-spaced occupant slots, so 'find its own location' is gone — you pick the polygon, the polygon defines the seat. Part of the full vertical (req_2030).",
+  "shas": [
+    "31738a0a1"
+  ],
+  "resolvedAt": "2026-06-28T22:03:30.179Z"
+}

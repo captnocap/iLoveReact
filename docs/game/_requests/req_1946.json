@@ -1,0 +1,31 @@
+{
+  "id": "req_1946",
+  "at": "2026-06-25T23:58:39.537Z",
+  "origin": "session:4f39ae52",
+  "text": "ok so lets talk about this. first thing and im going to gripe about it because it is such a waste of time is what the hell is this massive dead space. ok the argument may be im on floors. sure [Image #4] lets change it [Image #5] alright honestly looks the same to me. a bunch of empty space at the bottom, and i can see 3 textures which feels like im in poverty",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:00:02.557Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:18:35.767Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Killed the rail dead space and the 'three textures = poverty' starvation. Root cause: the gutter's three panes used percentage flexBasis (13%/45%/flexGrow) which wasn't resolving, so the paint and prop/piece panes sized to their content and left a large void at the bottom of the column, while the fitted grids — measuring that starved area — showed only ~3 tiles. Fix part 1 (index.tsx, landed via a parallel commit ac86eb516): the panes now divide the column by flexGrow WEIGHTS with flexBasis:0 — Properties 2, Paint 5, Catalog 6 — so they fill the whole column with no void and the prop/piece menu gets the most room. Fix part 2 (this commit 15cc2c9aa): PropBrowser's root was height:100%, which inside CatalogRail's column overflowed the BUILD/PROPS toggle instead of filling below it; switched to flexGrow:1 (the correct flex-child fill), so the prop grid measures the real remaining height and pages many tiles. PieceBrowser (BUILD) already used a flexGrow fitted grid, so it fills now that its pane is definite; the FacePainter skin grid likewise gets the taller Paint pane → more skins, not three. Built clean. Needs your rjit dev eyes to confirm the void is gone and both grids show full pages (editor self-shot OOMs). If the skin grid still feels tight, the next lever is trimming FacePainter's fixed chrome (the empty faces row when nothing is selected) to hand the grid more rows.",
+  "shas": [
+    "15cc2c9aa",
+    "ac86eb516"
+  ],
+  "resolvedAt": "2026-06-26T00:18:35.767Z"
+}

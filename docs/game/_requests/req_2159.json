@@ -1,0 +1,30 @@
+{
+  "id": "req_2159",
+  "at": "2026-06-30T08:57:09.621Z",
+  "origin": "session:e0080e48",
+  "text": "Ok. before you get the edge and vertex dots lets address the face capabilites first so we have a strong grounds for the other two. the first thing i want you to focus on is we need the most real time selection we can get. this face selection works but it is clearly delayed. and at an unacceptable rate honetly. slower than paint which should be the opposite",
+  "status": "review",
+  "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:59:29.016Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T09:03:47.267Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Real-time face selection. Selection felt slower than paint because it was structurally slower: the pick fired on mouseUP (deferred to disambiguate click vs orbit-drag) while paint fires on mouseDOWN, so the highlight literally waited for button release. Fixed by picking on mousedown — the press calls the host pick+highlight (a repaint, no setState) so the orange appears the instant you touch the face, exactly like paint; the count-HUD setState moved to mouseup, off the hot path. To keep orbiting from stealing the selection, the active set is snapshotted on press and reverted if the press travels past a few pixels (it's an orbit), via new mesh_edit snapshot/revert + __mesh_edit_snapshot/revert doors. Also, face mode now skips building the welded vertex/edge topology entirely (ensureFaceSel — just a per-face bit array + the raycast), so the first face click no longer pays for a weld it never uses; vertex/edge modes still build it once. Built clean, test-mesh-edit green, headless highlight byte-identical. Interactive feel verifies in rjit dev.",
+  "shas": [
+    "d2e9c2034"
+  ],
+  "resolvedAt": "2026-06-30T09:03:47.267Z"
+}

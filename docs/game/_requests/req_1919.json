@@ -1,0 +1,28 @@
+{
+  "id": "req_1919",
+  "at": "2026-06-25T22:25:43.569Z",
+  "origin": "session:5dc68f2d",
+  "text": "lmao u got me when u said pin ass to seat i forgot what we were even talking about uh yes so searchable is off the whole thing no searching through individual drawers aint no one got any time for that",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:26:11.462Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:25:06.396Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ruling captured and confirmed against the code: searchable is WHOLE-PROP, not per-drawer ('aint no one got time for that') — which is exactly the existing one-container-per-prop schema, so zero code change is needed. Folded into the prop-capability design as a settled decision.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T23:25:06.395Z"
+}

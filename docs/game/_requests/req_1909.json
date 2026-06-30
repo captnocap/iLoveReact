@@ -1,0 +1,28 @@
+{
+  "id": "req_1909",
+  "at": "2026-06-25T21:25:32.032Z",
+  "origin": "session:67264656",
+  "text": "hm so the further and further we get into this the more im not liking how we have approached the whole state of how data makes the items appear. lets step back for a moment and just reevaluate and see if this idea is a better approach. so, when i go into the studio mesh editor. and i make something, im pressing a button in there that says compile -> install  and that then gives me the thought process that this shit is ready to go. yet, i go to place it, and its just like god damnit man im going to die before this ever gets finished at the pace it is not showing up at and its just not acceptable. now, ive been thinking we do not need to change anything about the data. we just need to change how we are treating the output, compiled game and the editing state. one of them needs to behave like the dev server approach we use in reactjit versus a shipped product. one of them is fat and loaded and the other one is only carrying exactly what it is using",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T21:26:23.505Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T21:32:54.629Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Architectural reevaluation of how the editor's world_loader reflects edits (no code — an assessment + agreed direction). Grounded it in GUIDING_LIGHT ('the instant edit->see loop is the whole point — protect it'; bake is the optional cost-the-loop pass) and the RULED V28 two-path model + V30 residency ladder. Diagnosis: the editor mounts a FROZEN baked gamefile (the shipped artifact) whose mesh table is fixed at bake time, so a just-Studio-compiled asset isn't resident and can't be placed without a whole-world re-bake — and the live-overlay/settle-bake/dirty-rect machinery I'd been adding was gymnastics faking liveness on a frozen artifact (the root cause of the slow 'compile->install then it won't show' pain). Corrected my initial misread (the user does NOT want the old JS test route revived). Agreed reframe: the editor world_loader should be the FAT, fully-resident, directly-MUTABLE live world (Sims build-mode response rates) — full content-store catalog resident at boot + the authored map as a live mutable instance set, no compile/debounce in the edit loop; the COMPILED game stays the lean/frozen shipped artifact (optimization passes run only at Compile). Same engine, two modes. Proposed first slice: full catalog residency at boot so a just-compiled asset places instantly with zero bake. Awaiting the user's go/scope decision before the refactor (tracked under req_1910).",
+  "shas": [],
+  "resolvedAt": "2026-06-25T21:32:54.629Z"
+}

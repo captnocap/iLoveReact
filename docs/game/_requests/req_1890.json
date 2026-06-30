@@ -1,0 +1,30 @@
+{
+  "id": "req_1890",
+  "at": "2026-06-25T18:48:45.464Z",
+  "origin": "session:60071ace",
+  "text": "yes keep going. you already said it earlier the tile 2d map has chrome around it that needs to swap into the other locations when its pulled up.",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T18:49:54.823Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T18:53:45.233Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the editor rail contextual to which map is focused, per the sketch caption. When the 3D build map is up the rail shows all three boxes (selected-piece, paint/skins, prop/piece catalog); when the 2D tile map is pulled into focus the build tools hide, the selected-piece inspector grows to fill, and the tile-paint tools take over. Transparent limitation: the tile tools currently ride the 2D map's OWN left rail (visible because that map is the big pane) rather than being re-rendered inside the editor rail boxes — PaintCanvas's tool rail is welded to ~20 internal state vars (brush/zones/roads/flora), a much bigger hoist than the catalog's single 'armed'. The behavior (tools swap with focus) is delivered; exact placement is the open call. Bundles clean; hot-reloads in dev. Committed 9deaafc1f. Awaiting the user's verdict: accept this, or do the full state-hoist.",
+  "shas": [
+    "9deaafc1f"
+  ],
+  "resolvedAt": "2026-06-25T18:53:45.233Z"
+}

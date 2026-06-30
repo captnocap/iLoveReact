@@ -1,0 +1,30 @@
+{
+  "id": "req_1967",
+  "at": "2026-06-26T00:41:44.874Z",
+  "origin": "session:26c62b07",
+  "text": "i already decided. make the change. no one is going to have a broken heart",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:42:07.681Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:50:38.005Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Per the user's 'dont export shit from files if it needs exporting it needs its own component': extracted the shared bits that used to be exported out of the IsoAuthor.tsx grab-bag into their OWN modules — buildArmed.ts (the Armed type + sameArmed helper, shared by the map, the rail, and the properties panel) and CatalogRail.tsx (the rail's catalog menu). index.tsx, LoaderIsoView, and RightPanel now import from those dedicated files; IsoAuthor.tsx was deleted. That grab-bag export pattern is exactly how the second build pane diverged unnoticed, so splitting it prevents recurrence. Also removed the now-obsolete IsoAuthor native-render test and fixed stale comments (controls.ts, index.tsx). Bundle verified. This commit also carried two other sessions' in-flight working-tree edits in index.tsx (armedFocus) and RightPanel (renderTick diag) since I had to edit those files — authorized by the user. SHA f76513e8a.",
+  "shas": [
+    "f76513e8a"
+  ],
+  "resolvedAt": "2026-06-26T00:50:38.005Z"
+}

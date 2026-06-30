@@ -1,0 +1,34 @@
+{
+  "id": "req_2030",
+  "at": "2026-06-28T21:03:09.207Z",
+  "origin": "session:5dc68f2d",
+  "text": "yes the pose comes free from it if you do it correctly which is nice but having even contact points for back of head (for making a bed/laying) that should solve every possible sitting surface i think",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T21:04:57.937Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T22:03:12.896Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the FULL face-rig seating vertical the user green-lit ('go with all of it'). Engine (31738a0a1): deriveSeatFromFaces — tag faces by body part (seat/back/head/legs) and capacity (booth, from seat-face length), facing (away-from-back / toward-pillow / over-leg-edge), and sit-vs-lay (head tagged → lay, packs across width) ALL derive; 9/9 unit + a shot-verified 4-seat booth and 2-sleeper bed. Cook spine (eb096bf3a): StoredModel.seatRig + modelSeatRigSet stream/reducer/selector + studioModel undo/setter/accessor + cookedAsset.seatFromRig → descriptor.seat (mirrors the decals + door-cook patterns); cook 26/26, stream 12/12. Studio tool (7b5306c5e): in FACE mode, selecting face(s) shows a 'seat rig' panel to tag Seat/Back/Head/Legs, written through model.setSeatRig and derived by the cook on Compile; whole cart bundles clean (4.9MB, exit 0). Build-beside, no live wire swapped. The live click→tag→Compile flow needs the user's eyes in rjit dev; in-viewport ghost figures + the multi-pin recline LANDING solve are noted follow-ons.",
+  "shas": [
+    "8361a3ad0",
+    "31738a0a1",
+    "eb096bf3a",
+    "7b5306c5e",
+    "dd6243f05"
+  ],
+  "resolvedAt": "2026-06-28T22:03:12.895Z"
+}

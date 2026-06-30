@@ -1,0 +1,30 @@
+{
+  "id": "req_1874",
+  "at": "2026-06-25T17:07:33.810Z",
+  "origin": "session:60071ace",
+  "text": "ya get a fn that reports that data setup",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T17:07:42.859Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T17:12:41.404Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built reportAssetGeometry() in editors/model/geometryReport.ts — the / dashboard's geometry census. It walks both authored content stores (cooked assets and Studio models) and sums triangles/vertices/edges, returning cooked/studio/total totals plus roster counts and a distinct-mesh count. Cooked MeshBlob is a triangle soup (8 floats/vert, count already stored); Studio EditMesh is verts[] + n-gon faces (fanned to tris, unique edges via the existing meshEdges). Pure in-memory read — no tessellation/GPU/blob-decode — so it honors the freeze law and can run off first paint; headless-safe. Resolved OPEN-1c: no cook-time count field needed. Pure helpers unit-tested 3/3 (cuboid 8/12/12, soup math, empty). Committed as 4378067b3.",
+  "shas": [
+    "4378067b3"
+  ],
+  "resolvedAt": "2026-06-25T17:12:41.404Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2123",
+  "at": "2026-06-30T04:39:31.172Z",
+  "origin": "session:47bb26c9",
+  "text": "oh yeah that is so much better. alright yeah lets do paint and really we dont need to explore so much brush types or any of that but things like fill face and just being able to paint on any face in general is  the main targets here",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:41:26.501Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:53:13.506Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built per-face model painting on the viewer — fill a face, paint any face — the durable replacement for the Studio's broken paint. Root cause we'd diagnosed (req_2115): uvDedup.ts fuses every congruent face onto ONE shared UV-atlas island, so painting one panel repaints its identical twins, and degenerate unwrap islands leave faces unpaintable. This design makes that impossible: the resident mesh is non-indexed (each face owns its 3 verts), so each face gets its OWN texel in a small host-owned WxH paint atlas and its verts map to that texel — per-face color rides the EXISTING scene3d diffuse-texture path with ZERO shader change. New framework/gpu/model_paint.zig holds the active-target state + Moller-Trumbore raycast + atlas build (headless unit tests, test-model-paint). 3d.zig captures the exact render camera each frame and binds the target's paint atlas as its diffuse; the load door calls setPaintTarget (rewriting UVs in place before upload). Doors: __model_paint_at(x,y,r,g,b) raycasts the cursor and fills the hit face (click=one face, drag=stroke), plus __model_paint_face/__model_face_count for index fills. cart/modelview gains Paint mode (P key), a 10-swatch palette, and a white material so paint shows true. Proof: RJIT_PAINT rainbows every face by index and all 180 car faces render their OWN color — the congruent-panel fusion that plagued the Studio is structurally gone; unpainted load stays clean grey; the raycast math is unit-tested and feeds the captured render camera so click-to-paint lands live.",
+  "shas": [
+    "ca0607208"
+  ],
+  "resolvedAt": "2026-06-30T04:53:13.506Z"
+}

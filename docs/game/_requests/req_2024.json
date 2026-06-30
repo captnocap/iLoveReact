@@ -1,0 +1,30 @@
+{
+  "id": "req_2024",
+  "at": "2026-06-28T20:33:36.693Z",
+  "origin": "session:787673f5",
+  "text": "so i realized not tthat long ago that all the building pieces on the ground level, do not touch  the ground lol. they all float above it. you can see this by painting part of the ground tiles one color, and then build floors larger than it, and then get the camera angle just right and you can clearly see under the floors before the ground, meaning they never touch. so everything is floating like a few inches",
+  "status": "review",
+  "sessionId": "787673f5-328a-497f-aadb-debe8e93eb92",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T20:33:46.831Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T21:05:16.449Z",
+      "actor": "opus",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Floors (and flat roofs) floated above the painted ground: the shared flat-plate decomposition in editors/build/pieceShapes.ts inset the solid 'edges' core by faceSlabLift (0.012m) on BOTH top and bottom and placed the bottom face plate at piece.y-lift-slab/2 (below ground), so a level-0 floor's solid mass hung ~12mm over the ground with a thin disconnected bottom plate dangling below — the painted floor showed through the gap at every edge (user proved it by painting grass then placing floors over it). Per user ruling 'sit ON ground, kill the gap', the core is now solid from piece.y up (coreHeight=plateHeight-lift) so its underside is flush on whatever it rests on; only the skinned TOP face floats a hair proud to win the depth test. Floor keeps its 0.2m thickness (still a slab you step onto) but now touches the ground. Verified geometrically (floor at y=0 -> solid [0.0,0.20], bottom at 0) and re-baked main + render PASS. Shared path = editor /test, loader iso pane, and /compiled all fixed. Pre-existing unrelated test failures (flower-grass, two placed.test wall-join cases) fail identically without the change.",
+  "shas": [
+    "1ba22d852"
+  ],
+  "resolvedAt": "2026-06-28T21:05:16.449Z"
+}

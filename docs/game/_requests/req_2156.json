@@ -1,0 +1,28 @@
+{
+  "id": "req_2156",
+  "at": "2026-06-30T08:42:58.692Z",
+  "origin": "codex:019f1624",
+  "text": "yeah no i think i want every sort of logging to be forced to have to feed through some registry that puts every type of debugging log we ever have to instrument in as just a setting menu of toggles and then i get a z-indexed console that just gives me a raw feed i can copy pasta without needing to fuck around and have to say make sure you send that to the stdout or any of that shit",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:43:05.455Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T08:43:29.114Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the diagnostics registry requirement in the design docs. Every debug/logging stream must register centrally with metadata and settings-menu toggles, and feed a z-indexed in-app raw console with copyable output. Stdout/file logs are allowed only as secondary sinks, not the primary debugging path.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T08:43:29.114Z"
+}

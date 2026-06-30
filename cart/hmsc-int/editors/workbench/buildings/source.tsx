@@ -62,6 +62,7 @@ function materialGroup(m: MaterialChoice): string {
 
 function materialBadge(m: MaterialChoice): string {
   if (m.source === 'recipe') return 'recipe';
+  if (m.source === 'preset') return 'preset';
   if (m.source === 'react') return 'react';
   if (m.source === 'stored-decal') return 'saved decal';
   if (m.source === 'stored') return 'saved';

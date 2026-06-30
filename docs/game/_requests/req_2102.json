@@ -1,0 +1,28 @@
+{
+  "id": "req_2102",
+  "at": "2026-06-30T03:21:27.462Z",
+  "origin": "codex:019f1624",
+  "text": "Alright, with what is said right now, lets see some changes land and we can fine tune them, get the in a place they look right, and then nit pick other areas",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T03:21:35.975Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T03:29:06.325Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Landed the next hmsc workspace mock iteration: contextual left catalog with material controls, material-focus workspace surface, inspector read-only versus compact preset editing behavior, and eventbus/autosave framing for the bottom strip. Verified with cart bundle and raw ReleaseFast ship; no native package artifact kept.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T03:29:06.325Z"
+}

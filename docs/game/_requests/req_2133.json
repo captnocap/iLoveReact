@@ -1,0 +1,30 @@
+{
+  "id": "req_2133",
+  "at": "2026-06-30T05:35:46.833Z",
+  "origin": "session:47bb26c9",
+  "text": "really weird it still just feels broken if im being honest with you which is really surprising granted everything else came out the best i think it could have so far. its almost like sometimes i have to just keep painting and i cross a threshold where then it applies or it applies a second or two after i lift, but other times its not applying at all and its still certainly not precise in where im actually painting",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T05:42:51.231Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T05:42:51.239Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Found and fixed the real cause of 'paint applies after a threshold / a second after I lift / sometimes not at all / imprecise' — it was texture upload, not the raycast. The per-face paint atlas was bound through getOrCreateTexBindGroup, whose texFingerprint samples only ~512 spread bytes; a single-face paint changes 4 bytes, so the fingerprint usually stayed unchanged and the cache returned the STALE texture. Paint only appeared after enough strokes flipped a sampled byte (the 'threshold'), and that delayed reveal (cursor since moved) read as imprecision. That cache is for immutable textures, not a per-stroke-mutated buffer. Fix: the paint target gets its OWN persistent GPU texture (3d.zig paintBindGroup) re-uploaded in place only when model_paint.version() (monotonic, bumped on every paint/target/clear) advances — no hashing, no aliasing. Proven headless: RJIT_PAINTONE paints ONE face and it shows immediately (old path dropped it); rainbow still per-face correct. With the prior front-face raycast fix (req_2126), paint now applies instantly to the visible face under the cursor. Needs a rebuild (framework change) to retest.",
+  "shas": [
+    "d46725e59"
+  ],
+  "resolvedAt": "2026-06-30T05:42:51.239Z"
+}

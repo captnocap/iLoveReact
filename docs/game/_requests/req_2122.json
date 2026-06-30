@@ -1,0 +1,28 @@
+{
+  "id": "req_2122",
+  "at": "2026-06-30T04:37:50.094Z",
+  "origin": "codex:019f16c9",
+  "text": "I see. so a few things i will point out and this can shape how you go about it. \n1: i do not use the /test route, the javascript GC makes it unusable. I only ever use the compiled route, therefore the compile button is why this is so relevant to me\n2: you say there is a old compile approach, if that is true, lets remove it now, so that no one mistakenly ends up making changes to it when its old / dormant. if its not dormant. then thats a different story. but as far as i know, i only know the in-app compile button. \n3: now in terms of where the game editor is headed, the 'typescript prop files' will become extinct, the typescript item files, and vehicle files. all of these sorts of things, extinct. There will only be models coming from the studio mesh editor, and then the world terrain like heightfields and buildings, and then player models which is a uv unwrapping approach. all the data, all of that is relevant, but those asset approaches like those of props that are made from typescript files, wont be a thing",
+  "status": "review",
+  "sessionId": "019f16c9-c9f4-7d63-86f1-4a12cf41882c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:38:02.094Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:44:36.046Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Retired the misleading public rjit game compile surface by renaming the old compile/main.ts command-script boot into compile/verifyHarness.ts, making rjit game compile return a retirement error, and updating game verify to bundle the harness privately while the real authored compile remains rjit game bake / the in-app Compile button. Updated DECISIONS, docs index records, hmsc-int docs, structure docs, and regenerated tools/rjit.js so agents see the same contract; V29 now records that TS prop/item/vehicle files are transitional while baked data remains relevant.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T04:44:36.046Z"
+}

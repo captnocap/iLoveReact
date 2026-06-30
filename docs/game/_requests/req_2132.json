@@ -1,0 +1,28 @@
+{
+  "id": "req_2132",
+  "at": "2026-06-30T05:14:47.464Z",
+  "origin": "codex:019f16c9",
+  "text": "yes so exactly how you said lets lay out that architecture into some actual formal document so we can capture this shape for upcoming refactor. so the way i see it is, every compile outputs a manifest, in that manifest, it has the chunk overview, every chunk overview has a hashed string and a local version history. when reconstructing the world, we use the manifest to quickly validate the already existing chunks data with the cached chunk to mend and if the hash is exact it then can glue it together without needing to revalidate the data otherwise a mismatch would bump the version number and give a new string to validate from for future builds. this can let us also instead of storing edit history, store compiled chunk history to be able to restore chunks if we dont like the direction of them without having to go through any insane edit history chain as it currently is laid out to be",
+  "status": "review",
+  "sessionId": "019f16c9-c9f4-7d63-86f1-4a12cf41882c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T05:14:59.839Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T05:19:09.220Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Formalized the future Compile cache architecture as V31: every Compile emits an immutable manifest over content-addressed compiled chunk artifacts; exact chunk hash matches are reused; mismatches rebuild or fall back; local chunk versions track accepted artifact changes; compiled chunk history becomes the practical restore surface while V20 remains source/audit history. Added the architecture document, linked it from hmsc-int docs, and indexed it so oracle queries surface V31 first.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T05:19:09.220Z"
+}

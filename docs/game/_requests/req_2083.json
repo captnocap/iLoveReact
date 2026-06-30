@@ -1,0 +1,35 @@
+{
+  "id": "req_2083",
+  "at": "2026-06-29T23:51:57.838Z",
+  "origin": "session:3dbb283a",
+  "text": "ive done a lot since june 24th but what happened exactly?",
+  "status": "done",
+  "sessionId": "3dbb283a-d0ec-4c16-ae77-0792cd564c91",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T23:52:17.608Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T00:31:41.815Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-30T01:14:39.818Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Explained exactly what happened: nothing was truly lost — the SQLite event log (source of truth) survived with all 144 modelCreated / 48 modelDeleted = 96 live models intact; only the rebuildable snapshot CACHE corrupted. Forensics on the event log (read-only, on the backup): the bloat is dominated by 3307 modelPaintBaked events (351MB — a full PNG per stroke) and 14018 partMeshUpdated (119MB), plus 4 giant import events (16.8/33/11.7/4.5MB). On restart the boot loads the entire 575MB log to rebuild the snapshot and OOMs (same class as req_2078, and the documented req_1556 mode), leaving a degraded snapshot with only the last small model. Recovered the full 96 by streaming-replay through a faithful reducer port, validated by exact deep-equality against the Jun-24 _compact_backup.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T00:31:41.815Z"
+}

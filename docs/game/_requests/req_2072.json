@@ -1,0 +1,30 @@
+{
+  "id": "req_2072",
+  "at": "2026-06-29T15:53:10.592Z",
+  "origin": "session:2eacb40b",
+  "text": "will you add debugging to show toggle on the pathing for cars so i can see the actual path over the road",
+  "status": "review",
+  "sessionId": "2eacb40b-8a1e-4c58-a8d4-b7c3ab9f4aea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T15:54:00.186Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T15:58:23.067Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a debug visualization of the car paths over the road. At load the loader builds a thin cyan ribbon (one box instance per route segment, placed just above the road surface, oriented along each segment) tracing every baked route's lane-centered polyline. The P key edge-toggles it on/off in-game (same prev-key-down edge pattern the E interact uses), and RJIT_TRAFFICPATHS=1 turns it on at boot for headless verification. It is its own static box node toggled by setting instance_count, so it costs nothing when off. Verified with rjit game shot RJIT_TRAFFICPATHS=1: the cyan paths render running down the lane centers and turning through intersections, confirming the routing visually. Framework/Zig change → the editor loader pane needs a rjit ship hmsc-int to pick it up; the compiled game shows it now. SHA 351e79056.",
+  "shas": [
+    "351e79056"
+  ],
+  "resolvedAt": "2026-06-29T15:58:23.067Z"
+}

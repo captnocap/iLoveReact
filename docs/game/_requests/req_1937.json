@@ -1,0 +1,30 @@
+{
+  "id": "req_1937",
+  "at": "2026-06-25T23:24:47.125Z",
+  "origin": "session:4f39ae52",
+  "text": "Alright what did i say the top most of the entire set needed to be, the selection. so is me holding a piece / prop before placement not the same as a selection ?",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T23:25:15.996Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:29:50.168Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "You were right — holding a piece/prop before placement IS a selection, and the top header ignored it. The paint header only read placed-and-selected pieces (selPieces), so while armed-but-not-yet-placed it said 'no selection'. Fixed: plumbed the armed/held item from the cart down through RightPanel into FacePainter (new HeldItem prop) and made the top 'selection' header resolve it — a placed selection still shows name + location (x/y/z, yaw); with nothing placed selected, the HELD item shows instead (its catalog name in cyan + a 'kind · holding — click in the build pane to place' sub-line; tower/water get sensible labels). So the topmost of the set now always reflects the current selection, held or placed. Built clean via SHIP_RUN_PACKAGE=0 rjit ship hmsc-int. Committed 34151dfe7. NEXT STEP if you want it: this only makes the held item the header IDENTITY — it doesn't yet let you skin the held item's faces/parts BEFORE placing (pre-placement skin staging that applies on drop). Say the word and I'll wire the faces + skin grid to operate on the held item too, so a prop can be dressed before it lands. Needs your rjit dev eyes (editor self-shot OOMs).",
+  "shas": [
+    "34151dfe7"
+  ],
+  "resolvedAt": "2026-06-25T23:29:50.167Z"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_1951",
+  "at": "2026-06-26T00:09:33.257Z",
+  "origin": "session:26c62b07",
+  "text": "for context i am testing with the thin_floor asset",
+  "status": "new",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1918",
+  "at": "2026-06-25T22:24:42.735Z",
+  "origin": "session:26c62b07",
+  "text": "and then. lets turn around and do the same thing for build pieces PLEASE so we get away from this dogshit pilled approach we are not red pilled we are not blue pilled we are not pilled lmao",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-25T22:25:31.086Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:37:41.964Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Turned the prop-browser treatment around onto the BUILD section ('get away from this dogshit pilled approach'). The build menu's wall of text pills is now PieceBrowser (new file): framed 3D thumbnails rendered through the same PlacedPieceMeshes path the iso map uses — a catalog piece via placementFor, a prefab stamped+recentred on its envelope, water as its tinted surface slab — each auto-framed from its own bounds. Factored the shared grid/framing vocabulary into railThumbGrid (rule of two): useFittedGrid (measure->page by whole cols x rows that fit, no scroll), RailPager, ThumbTile, solveThumbOrbit; PropBrowser now rides it instead of an inline copy. Caught+fixed a real bug: the page-fit read onLayout rect.w/.h but rects carry width/height, so perPage went NaN and emptied BOTH grids — fixed in railThumbGrid. Verified via rjit ship + shot /editor: the wall tab renders framed wall thumbnails, pager reads 1/5.",
+  "shas": [
+    "ff451c859",
+    "00bc0e6df"
+  ],
+  "resolvedAt": "2026-06-25T22:37:41.964Z"
+}

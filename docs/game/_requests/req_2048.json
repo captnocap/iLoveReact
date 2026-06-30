@@ -1,0 +1,30 @@
+{
+  "id": "req_2048",
+  "at": "2026-06-29T00:37:07.335Z",
+  "origin": "session:81cc249f",
+  "text": "hey so we need to still get a better approach for deleting pieces from the map editor rather than just recompiling at every change, its too much of a delay and its very annoying honestly",
+  "status": "review",
+  "sessionId": "81cc249f-ac65-417c-ab3d-cf88107645a8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T00:37:13.527Z",
+      "actor": "opus-loader-del",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T00:43:41.524Z",
+      "actor": "opus-loader-del",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Deleting/moving a baked piece in the map editor no longer recompiles the map. The cause: LoaderIsoView fired requestSettleBake on any 'gone' baked piece, which ran a 1.2s-debounced 'tools/rjit game bake' (~5s) plus a reload — the felt 'recompiles at every change'. That bake was redundant: the live dirty-erase (req_1891) already collapses baked instance rows and hides baked mesh-prop nodes inside the old footprint with zero bake, the GameState DB already holds the deletion as source of truth, and the live overlay re-derives the erase against the stale baked file every session (reload/restart re-baselines bakedRects then erases again). Durable fold-in still rides the existing dirty-on-buildPieces -> map-switch/revisit rebake, identical to how a placement persists. Removed requestSettleBake entirely (LoaderIsoView prop + index.tsx callback/timer/settleBakeTimer); the gone-piece signal now only gates the erase push. So a delete is now as instant and bake-free as a placement. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-int (bundle + native binary compiled clean).",
+  "shas": [
+    "4307b79bb"
+  ],
+  "resolvedAt": "2026-06-29T00:43:41.524Z"
+}

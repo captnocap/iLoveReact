@@ -1,0 +1,30 @@
+{
+  "id": "req_1993",
+  "at": "2026-06-26T03:13:29.222Z",
+  "origin": "codex:019f01b3",
+  "text": "well no. so ok you are saying they are here on the map though. and im saying regardess of if i placed them or not. there are 0. so whatever that 102 is from is either, true and they do not render in the map. or false and they do not exist at all",
+  "status": "review",
+  "sessionId": "019f01b3-9f47-75e2-992c-e8693116c868",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T03:13:47.355Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T03:25:21.798Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resolved the true-vs-rendering question for generated stop signs. The 102 stopSign props exist in the boot state at concrete coordinates, but before the fix the fresh baked gamefile had zero stop-sign pole/face rows. After wiring packageMap through includeGroundLayers, a fresh bake contains 102 red stop-sign face rows and 102 pole rows, including the Wendy Ave targets at x/z 100.5/45.5, 110.5/36.5, and 110.5/45.5.",
+  "shas": [
+    "27450a23b"
+  ],
+  "resolvedAt": "2026-06-26T03:25:21.798Z"
+}

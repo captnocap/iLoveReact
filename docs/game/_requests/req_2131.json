@@ -1,0 +1,28 @@
+{
+  "id": "req_2131",
+  "at": "2026-06-30T05:08:55.937Z",
+  "origin": "codex:019f16c9",
+  "text": "ok, now to get to the most optimal cache setup, where we can author a fucking massive map, without ever spending more time at compile than what is necessary becasue of our cache state, what does that look like? I know we dont have it right now. But in my head after your last message i have a better shape of one. lets chat about it. im thinking exactly a bit like you said, treat chunks as cache chunks, and compile each chunk as its own valid game chunk, that can be appended t o any other valid game chunk, and as long as nothing in that chunk itself updated, it doesnt need to recompile and we are only ever spending time behind relevant updates and not everything is treated like it is never seen before",
+  "status": "review",
+  "sessionId": "019f16c9-c9f4-7d63-86f1-4a12cf41882c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T05:09:11.176Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T05:09:50.761Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Discussed the optimal future cached compile architecture for massive maps: chunk-addressed compile artifacts, Merkle/source signatures, dirty-chunk invalidation with subsystem halos, content-addressed assets, small manifest updates, atomic cache commits, and loader streaming from a chunk index. Clarified that chunks should be independently valid game chunks but assembled by a manifest/index rather than raw concatenation, and that global systems should be reducers over chunk summaries so compile work remains proportional to relevant edits.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T05:09:50.761Z"
+}

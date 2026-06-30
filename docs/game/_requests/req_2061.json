@@ -1,0 +1,30 @@
+{
+  "id": "req_2061",
+  "at": "2026-06-29T02:46:07.892Z",
+  "origin": "session:d00df27f",
+  "text": "this 'walls hidden' still makes the wall there, look at the outline. [Image #1] i cant select the item inside of here because there was walls in the way",
+  "status": "review",
+  "sessionId": "d00df27f-d7b3-480d-a796-dfc75c67193b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T02:46:53.526Z",
+      "actor": "d00d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T02:53:37.566Z",
+      "actor": "d00d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Hiding a wall's render didn't stop it blocking SELECTION or drawing its outline: the editor build pane picks via a JS raycast over piece DATA (GAME_BUILD.placed.raycast), not the rendered mesh, so a hidden wall still ate the click ('i cant select the item inside') and its blue selection outline still drew. In LoaderIsoView, a piece is now classed as a wall via catalog.family (covers built-in AND cooked walls); while hide-walls is on: select/multi-select/placement-snap raycast a walls-filtered piece set so clicks pass through to the interior item, any selected wall is dropped from the selection, and no wall selection outline is drawn. Pure editor-side TS (no Zig). Verified by clean ship/bundle; live click-through needs the user to test in rjit dev (the editor pane can't be headless-captured).",
+  "shas": [
+    "8d0df70de"
+  ],
+  "resolvedAt": "2026-06-29T02:53:37.566Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1904",
+  "at": "2026-06-25T20:31:38.390Z",
+  "origin": "session:5dc68f2d",
+  "text": "ok so this is likely the not normal way to do anything at all but neither is anything here anyways. but to me. the most useful thing that can be done is to have a player skeleton. have the ass region defined. have the back of head, hands, etc. all contact points that are defined. then on a prop i can say ass goes here or head goes here",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T20:31:57.201Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:25:06.368Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "This contact-point posing idea (define ass/head/hands/feet on the skeleton, then pin them on a prop, pose DERIVED not enumerated) is the design that became the seating rig v1. Skeleton-side contact anchors now exist (seat/heels/head_back/spine_back off real bones); the single primary 'seat' pin is solved and shot-verified (the figure's ass lands on a dining chair, correct sit pose). Multi-pin recline (the other contact anchors are defined but unconsumed) is the deferred strict-addition follow-on.",
+  "shas": [
+    "8361a3ad0"
+  ],
+  "resolvedAt": "2026-06-25T23:25:06.368Z"
+}

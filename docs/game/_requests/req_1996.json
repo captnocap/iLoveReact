@@ -1,0 +1,10 @@
+{
+  "id": "req_1996",
+  "at": "2026-06-26T03:21:24.047Z",
+  "origin": "session:7a3a0337",
+  "text": "ok so hold on let me get this straight. so the problem is a v8 gc. so we moved the entire editor out of a react setup into a host primitive so that it can choke to a v8 gc. ???? does that make sense ? lets just be real here. why do i not have this problem in the /compiled game route? and what amount of javascript is necessary to do what we are doing here",
+  "status": "new",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": []
+}

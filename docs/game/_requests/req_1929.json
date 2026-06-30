@@ -1,0 +1,31 @@
+{
+  "id": "req_1929",
+  "at": "2026-06-25T22:53:01.577Z",
+  "origin": "session:4f39ae52",
+  "text": "Ok. so now here is what needs to happen next. on this entire gutter of controls. from this whole props and piece menu to the textures and skin paint above it and this aawful dead space below it. we are going to change this setup right now [Image #3] \n\nso very simply, i do not care how these are setup currently its bad and we are going to make changes and remove things\n\nfrom top to bottom\n\nThe item i have selected, is the first thing t hat should show up at top. its name. its location data, everything that is relevant. below that, we show the faces that can be skinned on it, that leads into a paged list of skins that behave all the same as the props menu. below that is a pallete of colors that are stored and used and or are added by hex, get rid of this horrible svg blob bs. this tube color input whatever. the neon shits delete it. its all trash. the open image goes from a text string to an image icon and paint a texture goes from text string to a brush icon. the make portable goes away and becomes a background, this is just how we manage the app, it does this shit for us regularly so nothing is lost and noones hearts are broken. below that build and prop peice menus. equally spaced out, no dead space and no flavor text that is un necessary. i know what i am here doing. you dont need to hand hold me about things like 'type a name or a tag' twice, you have it as a placeholder already, dont put it in a string below also, its just extra noise and wasted rendering time",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:53:35.204Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:04:15.417Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Restructured the entire paint gutter top-to-bottom to the spec, removing the cruft called out. FacePainter (the PAINT tab) is now, in order: (1) the SELECTED ITEM first — its name + location (x/y/z, yaw) + kind, or 'N pieces selected'; (2) the FACES/PARTS that can be skinned (click to target one, none = all); (3) a PAGED skin grid that pages exactly like the prop menu — reuses railThumbGrid (fitted, search-narrowed, no family pills); (4) a COLOR palette: stored swatches + recently-used + a #hex add; (5) two ICON doors — open image (Image icon) and paint a texture (Paintbrush icon), replacing the text-string buttons. DELETED for good: the NEON-from-SVG textarea, the tube-colour input, the 'make neon' button, and the 'make portable' button. Portability is now AUTOMATIC — migrateImagesIntoRepo runs on every image upload (idempotent), so uploads travel without a button to remember. Also stripped the redundant 'PAINT — N pieces' header, the nothing-selected paragraph, and the verbose face hints. In PropBrowser, removed the idle hint subtitle (the placeholder already says 'search props or a tag'); the count shows only while searching. Layout: the paint pane was pinned at 54% only because the old texture browser collapsed without it; the skin grid is fitted now, so dropped it to 45% — paint and the prop/piece menu below are ~equal halves (no cramped props / dead space). Committed dcb29393b (FacePainter+PropBrowser), 169673669 (layout). Three clean SHIP_RUN_PACKAGE=0 builds. NOTE for the live look: (a) BUILD/PROPS in the bottom menu remains the toggle from req_1906 — if you want both visible at once equally split rather than toggled, that's a quick follow-up; (b) a PropertiesPanel still sits above the paint pane showing world-focus — say the word and I'll fold its name/location role into this item header so it isn't shown twice. Editor self-shot OOMs, so this needs your rjit dev eyes.",
+  "shas": [
+    "dcb29393b",
+    "169673669"
+  ],
+  "resolvedAt": "2026-06-25T23:04:15.417Z"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_1894",
+  "at": "2026-06-25T19:18:14.904Z",
+  "origin": "session:60071ace",
+  "text": "yeah... ok i like where your head is claude but as much as i love pictures how do you suggest we handle hundreds of them without killing performance  because your right a name means nothing. and virtual scrolling doesnt really do jack shit either, imo the only way to vscroll in this framework i think is you have to deliver content just in time not load any of it ahead of time but we have never successfully even vscrolled icons so pictures of props is not going to be a walk in the park like a browser would be",
+  "status": "new",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": []
+}

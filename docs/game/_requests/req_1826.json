@@ -1,0 +1,10 @@
+{
+  "id": "req_1826",
+  "at": "2026-06-25T01:40:10.995Z",
+  "origin": "session:6ff945f5",
+  "text": "so, the problem im having is, the time between me placing a piece and then it visually showing up, is still just too large. i thought we introduced the streaming approach, but it doesnt seem to be doing any benefit here. i place an item, and then im waiting 5-6s for the world to recompile before i see a change. il die before the map is finished at this rate lol",
+  "status": "new",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": []
+}

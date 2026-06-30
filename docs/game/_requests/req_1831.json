@@ -1,0 +1,33 @@
+{
+  "id": "req_1831",
+  "at": "2026-06-25T05:02:08.325Z",
+  "origin": "session:97075b22",
+  "text": "hey i held off on this but now is a good time to do it, you might want to do a bit of re-evaluation tho of any changes from what you read already to re-establish your plan",
+  "status": "review",
+  "sessionId": "97075b22-60c1-40c5-b513-706d116f008f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T05:05:12.083Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T05:40:41.488Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Folded the materials/decal composer's rich authoring (real-font text, rect with shader+image fills, image, neon) into the mesh Studio painter as a new paint-LAYER KIND. (1) Extracted the composer's node-editing vocabulary into a shared editors/decal/ module (decalEdit pure CRUD, DecalNodeFields controls, DecalStage drag canvas) and refactored the composer to consume it with zero behaviour change (7/7 source.test green, 8/8 new decalEdit parity tests). (2) Persisted decals on the model branch: ModelDecal (a DecalDoc anchored to a face UV at a scale) + decals[] on StoredModel + a modelDecalsSet event (whole-list replace, undoable, inverse) + useStudioModel decals/setDecals; PaintLayerMeta gained kind:'paint'|'decal' (11/11 modelStream green incl. new decal test). (3) Wired the painter: a decal is a layer whose pixels come from a DecalDoc rendered offscreen into a hidden full-atlas StaticSurface at its UV anchor, read back (readSurfacePixels — importing @reactjit/capture auto-flipped -Dhas-capture, confirmed in build flags) into the decal's paint layer, which composites + bakes to the paintRef like any layer (zero extra runtime texture). Add a decal layer, author its doc on a flat stage in the panel (full composer power), click the model to place it on the surface, drag to re-anchor, size buttons scale it; the doc+anchor persist (lossless re-edit). (4) Coalesced drag/slider gestures into one undo entry so the stack doesn't flood. Verified: SHIP_RUN_PACKAGE=0 rjit ship hmsc-int builds clean, the binary boots to READY with the decal module graph evaluated, and all decal-adjacent editor suites pass with no regressions. Live decal-on-mesh authoring to be eyeballed in rjit dev (Paintable content can't be headless-captured).",
+  "shas": [
+    "2d7b5fbcd",
+    "d73097a1d",
+    "e77567c28",
+    "c65b4f537"
+  ],
+  "resolvedAt": "2026-06-25T05:40:41.488Z"
+}

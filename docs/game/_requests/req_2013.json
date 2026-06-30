@@ -1,0 +1,30 @@
+{
+  "id": "req_2013",
+  "at": "2026-06-26T21:44:52.113Z",
+  "origin": "session:b8e8fd6a",
+  "text": "ok that worked. but there is now a new problem to solve. so, i had a map, and it was what revealed this whole problem. to debunk all the myths of a fixed cost, i had to create a new map, and then spam it full of shit placements. ok. now you fixed the problem. cool. so when im returning to my original map now. its infected with the testing maps placements and restarting the entire app doesnt clean it up at all either. the new map system and however it handles switching the active 3d scene is completely broken and needs a real fix",
+  "status": "review",
+  "sessionId": "b8e8fd6a-1e9a-4745-88a9-e72044e72497",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T21:45:42.169Z",
+      "actor": "b8e8",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T22:15:33.473Z",
+      "actor": "b8e8",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the broken map-switch / active-3D-scene system. Root cause (verified against the data, not guessed): the editor loader pane rendered ONE global hmsc.gamefile — shared with /compiled and the standalone game's boot key — re-baked only on edit/New-Map, so opening an existing map or restarting showed whatever map was LAST compiled (the test-spam map bled into the real 'main' map). The per-map STREAM data was always clean (piecesByMap[stem] correctly isolated: main=3006, untitled-12=15715); only the shared baked scene was stale. Per the user's two rulings — 'cached per-map files' + 'isolate the editor' — each map now bakes to its OWN zig-out/game/editor/<stem>.gamefile via a new 'tools/rjit game bake --editor-stem <stem>' flag that reads terrain from a per-map state key (editorMapStateKey, NOT the global boot key) and pieces/floors scoped to that stem. New helpers: gameState.saveGameStateForKey/readStoredGameStateForKey, editorWorld.compileEditorMap. index.tsx points the loader at the per-map file, bakes on first-visit/boot/dirty (instant on revisit when the file exists and the map wasn't edited this session), and keeps compileToGame as the explicit PUBLISH path (Compile button -> boot key + hmsc.gamefile). Rebuilt the committed tools/rjit.js prebuilt CLI bundle to carry the flag. Verified end-to-end: --editor-stem main -> 4130 pieces, untitled-12 -> 15715, each isolated; publish path unchanged; cart bundles clean. Live editor switch/boot behavior is for the user to confirm in the dev host.",
+  "shas": [
+    "268b08302"
+  ],
+  "resolvedAt": "2026-06-26T22:15:33.472Z"
+}

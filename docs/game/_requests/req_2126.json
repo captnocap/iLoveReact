@@ -1,0 +1,30 @@
+{
+  "id": "req_2126",
+  "at": "2026-06-30T04:56:25.206Z",
+  "origin": "session:47bb26c9",
+  "text": "hm. this is doing the same kinda painting problems i have had before [Image #1] and i was hoping that, for example, i turn on wireframe, and see how this is a face, i could click inside of here and it fills [Image #2] oh which if i zoom in, it is doing that! it just, the hit testing on it or something is off.",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:57:24.965Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T05:12:55.307Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the paint hit-testing scatter on real meshes. The render culls back-faces (cull_mode=.back) but the paint raycast did not, so on a thin/curved scanned mesh (the user's humanoid) dragging let the ray pick whichever triangle was geometrically nearest — flipping between the visible near face and the invisible far/inside face — which paints 'through' the surface and reads as scattered/offset. model_paint.pick now prefers the nearest FRONT-facing hit (geometric normal opposing the ray) with a nearest-any fallback so a mis-wound model still paints. Proved the underlying ray math + viewport capture are exactly correct via a new env-gated headless probe (RJIT_PAINTPROBE) that paints known viewport pixels: center pixel hits the center face, off-center pixels hit the correct neighbours (vp 1280x800, center->143, right->145, left->146). The clean convex car never showed the bug (its visible faces were already front-facing), which is why only a real mesh triggered it. Asked the user to retest on their model; if any residual cursor offset remains it would be a live point-vs-pixel viewport mismatch, and RJIT_PAINTPROBE prints the live vp dims to pinpoint it.",
+  "shas": [
+    "b362eca79"
+  ],
+  "resolvedAt": "2026-06-30T05:12:55.307Z"
+}

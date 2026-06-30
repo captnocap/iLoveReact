@@ -322,16 +322,32 @@ NO loop API per R3; the V8 45/min cadence + frame transport), GAME_COMMANDS
 V18 metafile-gate signal. Every family carries a P4 `*.test.ts` beside it
 (bundle with tools/esbuild, run under tools/v8cli).
 
-`cart/hmsc-int/compile/` is the V19 skeleton: `rjit game compile` bundles
-`compile/main.ts` → `zig-out/game/hmsc-headless.js`; `rjit game verify`
-compiles fresh, runs the oracle self-check over `docs/game/_index` (every
-record file parsed and validated against the fields `tools/oracle` actually
-dereferences, `decisions.ts` ids checked, plus 14 system smoke queries), runs
-every `game/**/*.test.ts` suite, then boots the output headless under v8cli and
-replays every `compile/verify/*.cmds` command sequence, exiting with one
-`VERDICT GREEN/RED` line. The milestone-0 world is a state skeleton (boot /
-tick / status / help); it grows as captures land — the green light exists from
-day one and never goes dark.
+`cart/hmsc-int/compile/` owns the compiled-route data bake. The in-app Compile
+button maps to `rjit game bake`, which writes `zig-out/game/hmsc.gamefile` plus
+content-addressed assets for the no-V8 loader. The old public
+`rjit game compile` name is retired so nobody mistakes the command-script
+harness for the real compiler. `rjit game verify` still bundles
+`compile/verifyHarness.ts` → `zig-out/game/hmsc-verify-harness.js`, runs the
+oracle self-check over `docs/game/_index`, runs every behavior suite, proves the
+real baked game-file through the no-V8 loader, then boots the harness under
+v8cli and replays every `compile/verify/*.cmds` command sequence, exiting with
+one `VERDICT GREEN/RED` line.
+
+`rjit game parity` is the TS/Zig compiler comparison harness. It writes one
+deterministic source spec at `zig-out/game/hmsc-parity-source.txt`, compiles that
+same generated world through `compile/parityGameFile.ts` (the current TS
+workspace writer) and `framework/tools/hmsc_parity_compile.zig` (the Zig writer),
+then byte-compares `hmsc-parity-ts.gamefile` and `hmsc-parity-zig.gamefile` and
+prints side-by-side timings. This is a platform-format parity target, not the
+full live-editor bake: it clones the RJMP/gamefile/RLE writer core first so later
+editor-source readers and asset cookers can move over with a byte gate.
+
+V31 adds the target cache architecture for the next Compile refactor:
+`docs/game/COMPILE_CACHE_ARCHITECTURE.md`. Every Compile emits a manifest over
+content-addressed compiled chunk artifacts; exact chunk hash matches are reused,
+mismatches rebuild only the affected chunk/halo, and compiled chunk history
+becomes the restore surface for "take this area back to an older compiled state"
+without replaying the full authoring edit chain.
 
 ## The labs route + scaffold (added 2026-06-05, Milestone-0 step 3)
 

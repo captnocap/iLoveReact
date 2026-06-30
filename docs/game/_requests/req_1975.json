@@ -1,0 +1,30 @@
+{
+  "id": "req_1975",
+  "at": "2026-06-26T01:29:18.565Z",
+  "origin": "session:7a3a0337",
+  "text": "1 clean it up. remove it. get rid of the thing that does nothing. keeping it around longer than this conversation is only hurting us. 2. do not let anything pass as other. if it says other then the log approach is ass and it needs to be logged better. there is is no such thing as other. 3. yes, keep solving the problem",
+  "status": "review",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T01:29:46.832Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T01:47:02.435Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the dead thing end to end: js_vm.tick() call, the tick() no-op fn, telemetry_tick_us, the getTickUs host fn, and tick_us in the V8 frame object / dev_ipc / debug_server / debug_client / sdk perf obj / useTelemetry / cart perfWatch+LoaderIsoView. Replaced tick/layout/paint/gpu/OTHER with an eight-phase contiguous partition (events,appTick,preLayout,layout,prePaint,paint,gpu,post) defined as adjacent-boundary diffs that sum to frame_total exactly — 'other' is now structurally impossible; a non-zero residual is reported as a host-boundary bug. Builds clean (framework + hmsc-int bundle, exit 0). #3 keep-solving continues under req_1973.",
+  "shas": [
+    "a5f6d3a6f"
+  ],
+  "resolvedAt": "2026-06-26T01:47:02.435Z"
+}

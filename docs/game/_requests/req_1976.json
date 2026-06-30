@@ -1,0 +1,30 @@
+{
+  "id": "req_1976",
+  "at": "2026-06-26T01:41:00.999Z",
+  "origin": "session:7a3a0337",
+  "text": "u do not need to go and update all the old carts please do not waste time on that",
+  "status": "review",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T01:47:08.118Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T01:47:08.128Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Complied: did NOT sweep the secondary/old cart telemetry consumers (game/telemetry.ts, telemetry.test.ts, render/DebugHud.tsx). esbuild does no type-checking, so their stale tick_us reads degrade to 0 (exactly what the dead metric always returned) and the bundle builds clean — verified by a full SHIP_RUN_PACKAGE=0 build exiting 0. Scope held to the framework surface + the active edit-latency path.",
+  "shas": [
+    "a5f6d3a6f"
+  ],
+  "resolvedAt": "2026-06-26T01:47:08.128Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2036",
+  "at": "2026-06-28T21:22:43.803Z",
+  "origin": "session:0f02d048",
+  "text": "Nice this is awesome. uh. well, i would say the next best thing is going to be floors and walls without a doubt.",
+  "status": "review",
+  "sessionId": "0f02d048-6266-4c5d-affe-6131b0e17f55",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T21:24:51.160Z",
+      "actor": "opus-foliage",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T21:34:25.570Z",
+      "actor": "opus-foliage",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Slimmed the UNIVERSAL 3D instance row 80B->32B (2.5x) — the standard InstanceData path used by floors/walls/buildings/props/dynamic entities/water/ground (every 3D cart, not just the game). Replaced the baked 4x4 model matrix + f32 rgba with the FACTORS: pos f32x3, euler u16x4 (deg ring — axis-aligned 0/90/180/270 quantize exactly), scale f16x4 (full float range, deliberately NOT a fixed-max unorm so large buildings never clip a low cap), rgba unorm8x4. makeInstance now packs instead of baking+transposing; scene3d_wgsl/water_wgsl/scene3d_ground_prefix each gained a shared rebuild_model() that is the column-major twin of the row-major T.Ry.Rx.Rz.S composition (matrices verified against framework/math/mat4.zig). quantAngleU16 is now shared with the foliage path. Verified beyond the game since it is the universal path: the no-V8 city loader renders pixel-identical (shots/shape_slim_check.png) and a non-game cart (light_demo) renders lit pillars with correct normals (shots/shape_slim_lightdemo.png), confirming the normal transform from the rebuilt matrix. NOTE for reviewer: the editor v8 binary build was blocked by an UNRELATED cart label-manifest mismatch (privacy/httpsrv/voice/audio/midi flags — almost certainly another active session's cart-config edit), not by this rendering change; the no-V8 loader and demo-cart build paths are clean and green. Shipped dc2b02dcc.",
+  "shas": [
+    "dc2b02dcc"
+  ],
+  "resolvedAt": "2026-06-28T21:34:25.570Z"
+}

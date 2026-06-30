@@ -1,0 +1,30 @@
+{
+  "id": "req_1935",
+  "at": "2026-06-25T23:10:31.808Z",
+  "origin": "session:67264656",
+  "text": "2.28\n[js.warn] [edit-latency] place   gesture→push  180.0ms · gesture→rendered ~ 541.0ms\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=12 delayMs=257.97 ms=90.06\n[js.warn] [edit-latency] place   gesture→push  152.0ms · gesture→rendered ~ 503.0ms\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=12 delayMs=269.74 ms=91.55\n[js.warn] [edit-latency] place   gesture→push  161.0ms · gesture→rendered ~ 529.0ms\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=12 delayMs=274.09 ms=95.65\n[js.warn] [edit-latency] place   gesture→push  160.0ms · gesture→rendered ~ 540.0ms\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=12 delayMs=261.35 ms=95.11\n[js.warn] [edit-latency] place   gesture→push  173.0ms · gesture→rendered ~ 533.0ms\n[js.warn] [PLACEFREEZE] snapshot flush reason=commitMany mode=defer streams=12 delayMs=280.76 ms=92.66\n[js.warn] [edit-latency] moved   gesture→push    0.0ms · gesture→rendered ~ 425.0ms\n[js.warn] [PLACEFREEZE] snapshot flush reason=commitMany mode=defer streams=12 delayMs=282.45 ms=98.46\n[js.warn] [edit-latency] moved   gesture→push    0.0ms · gesture→rendered ~ 413.0ms\n[js.warn] [PLACEFREEZE] snapshot flush reason=commitMany mode=defer streams=12 delayMs=276.85 ms=91.34\n[js.warn] [edit-latency] moved   gesture→push    0.0ms · gesture→rendered ~ 422.0ms\n[js.warn] [PLACEFREEZE] snapshot flush reason=commitMany mode=defer streams=12 delayMs=278.51 ms=91.07\n[js.warn] [edit-latency] rotated gesture→push    0.0ms · gesture→rendered ~ 435.0ms",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T23:12:37.214Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:14:17.849Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured the baseline edit-latency matrix from the user's run (place ~540ms total, move/rotate ~420ms; place's gesture→push 160ms vs move's ~0ms) and read it: there are two costs — a ~160ms place-only reconcile, and a ~380-420ms post-push main-thread block that hits EVERY verb (the rAF can't fire until the host frees up; the PLACEFREEZE deferred snapshot of ~90ms/commit across 12 streams is part of it). To attack precisely instead of guessing, shipped a phase breakdown of the timer (cart-side, hot-reloads): each edit now logs total = pre (gesture→effect: onCommit + parent stream apply + reconcile) + scans (the loader's O(N) overlay rebuild: pieceInstanceRows + meshPropLivePush + buildingSkinBoxes) + push (host door calls) + host-block (push→next frame: snapshot/re-render/GPU upload). One place-click now prints exactly where the ~540ms goes, so the next optimization targets the dominant phase. Sha b42e818cd. Next: read the breakdown, then kill the biggest phase end-to-end.",
+  "shas": [
+    "b42e818cd"
+  ],
+  "resolvedAt": "2026-06-25T23:14:17.848Z"
+}

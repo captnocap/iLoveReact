@@ -251,13 +251,13 @@ test('resolution is pure vocabulary: resolveFaceSkin orders piece > type > none'
 
 test('pick folds: materials keep catalog groups, pieces by type with counts, catalog by kind', () => {
   const { store } = fixture();
-  assertEqual(materialFamily('a-concrete'), 'a-family', 'a- prefix groups');
-  assertEqual(materialFamily('office'), 'misc', 'unprefixed pools under misc');
+  assertEqual(materialFamily('a-concrete'), 'Unsorted Materials', 'board-letter ids do not create visible families');
+  assertEqual(materialFamily('office'), 'Unsorted Materials', 'unprefixed ids use the fallback shelf');
   const mats = materialPickOptions(store);
   assertEqual(mats.length, 2, 'one option per registry material');
   assertEqual(mats[0].label, 'Asphalt', 'labels ride along');
   assertEqual(mats[0].group, 'HMSC · Game', 'catalog material groups ride along');
-  assertEqual(mats[1].group, 'misc', 'ids without catalog groups still fall back to family grouping');
+  assertEqual(mats[1].group, 'Unsorted Materials', 'ids without catalog groups use the fallback shelf');
   const pieces = piecePickOptions(store.building(MOTEL)!);
   assertEqual(pieces.filter((p) => p.group === 'walls').length, 4, 'walls · 4 (the grouped counts the user asked for)');
   assertEqual(pieces.filter((p) => p.group === 'floors').length, 1, 'floors · 1');

@@ -1,0 +1,30 @@
+{
+  "id": "req_2059",
+  "at": "2026-06-29T02:36:19.043Z",
+  "origin": "session:dde9e9a9",
+  "text": "there isnt even another side. look [Image #2] [Image #3]",
+  "status": "review",
+  "sessionId": "dde9e9a9-41b8-4a68-b5cd-4808b7b8528e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T02:38:28.754Z",
+      "actor": "opus-signs",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T04:23:11.629Z",
+      "actor": "opus-signs",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Per the user's directive to stop diagnosing and just flip it: the compiled (no-V8) game renders the street-name panel's letters horizontally mirrored on the sign's facing side, persistently across builds, while the editor (which renders street signs via a separate texture-capture panel) reads fine. Fixed by negating the X of the text boxes in streetSignParts (they are laid out centred on x=0 by textLineParts), so the baked stencil reads correctly in the compiled game. Scoped to streetSignParts only — leaves the editor texture path and blockLetters untouched. Rebaked clean (zig-out/game/hmsc.gamefile); user verifies on their next compiled build.",
+  "shas": [
+    "2512e21a2"
+  ],
+  "resolvedAt": "2026-06-29T04:23:11.629Z"
+}

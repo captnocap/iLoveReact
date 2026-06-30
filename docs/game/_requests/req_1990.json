@@ -1,0 +1,30 @@
+{
+  "id": "req_1990",
+  "at": "2026-06-26T03:07:22.428Z",
+  "origin": "codex:019f01b3",
+  "text": "cool. Get me more metrics. Make it fun. Show things like 'the densest region of the map contains..' or 'the tallest building sits...' or 'you average 30 edits per minute when working on...', etc. it doesnt have to be something significant, it just has to have some form of showing progress through arbitrary information that collects",
+  "status": "review",
+  "sessionId": "019f01b3-9f47-75e2-992c-e8693116c868",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T03:07:30.100Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T03:10:39.714Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added more playful / dashboard metrics while keeping the route honest to selected-map/session data. New dashboardMetrics helper reports densest chunk, largest authored footprint, tallest build stack, and recent edit tempo. DashboardRoute now shows MAP GOSSIP and SKYLINE panels; index.tsx passes build peaks derived through GAME_BUILD.placed.bounds plus recent edit events. Added dashboardMetrics tests and verified the hmsc-int bundle plus dashboard metric/map/placement suites.",
+  "shas": [
+    "fcdb1af54"
+  ],
+  "resolvedAt": "2026-06-26T03:10:39.714Z"
+}

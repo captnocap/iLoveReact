@@ -1,0 +1,30 @@
+{
+  "id": "req_1992",
+  "at": "2026-06-26T03:12:05.536Z",
+  "origin": "codex:019f01b3",
+  "text": "cool now here is one thing u can hunt down for me. it keeps showing me that stop sign has 102 placements. yet i literally have 0 stop signs on my map lol. so uh ??? can we figure that one out haha. il show u, no stop signs at all! [Image #1]",
+  "status": "review",
+  "sessionId": "019f01b3-9f47-75e2-992c-e8693116c868",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T03:12:14.903Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T03:25:21.790Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated the Stop Sign x102 count end to end. The count was real in both the selected session and the hmsc boot game-state, but the packaged game geometry was false: createHmscMapfile called buildWorldInstances without includeGroundLayers, so authored world props including generated stop signs were omitted from the INSTANCES lump. Fixed packageMap to include world layers for real packages and added a package-level regression test that decodes the mapfile instance lump and proves a stopSign red octagon face is emitted.",
+  "shas": [
+    "27450a23b"
+  ],
+  "resolvedAt": "2026-06-26T03:25:21.789Z"
+}

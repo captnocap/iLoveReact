@@ -1,0 +1,30 @@
+{
+  "id": "req_2047",
+  "at": "2026-06-29T00:06:26.590Z",
+  "origin": "session:15799c87",
+  "text": "ok. so now when i go to add a wall in the mesh editor it is coming in at 0v 0f [Image #23]",
+  "status": "review",
+  "sessionId": "15799c87-1d34-4279-9cd7-dee2765a8997",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T00:06:41.561Z",
+      "actor": "session-1579",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T00:13:37.029Z",
+      "actor": "session-1579",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Adding a wall in the mesh editor came in empty (0v/0f) because seedFromPiece keeps structural cores and skips render-only face plates (.front/.back/.top/.bottom). A fat wall seeded from its .core, but the new paper-thin wall (req_2044) has NO core — it renders as two .front/.back half-depth boxes that ARE the solid, so isFacePlate skipped both and the seed was empty. Fixed seedableShapes to keep the face halves when the piece has no other structural box (still skipping the proud plates of a fat wall), and added coalesceWallHalves to merge each symmetric front/back pair back into one clean full-depth box (midpoint of centers, summed depth) so the seed is one 8-vert editable solid rather than two glued halves; window walls coalesce per band, fat-wall/floor/ramp seeds are untouched. Updated the seed test's stale [0.05,0.6] thickness range to assert the exact catalog depth. seedFromPiece 10/10; wallSlabs 3/3, worldParity 16/16 unaffected.",
+  "shas": [
+    "64fd4f8a0"
+  ],
+  "resolvedAt": "2026-06-29T00:13:37.029Z"
+}

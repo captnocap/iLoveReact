@@ -1,0 +1,28 @@
+{
+  "id": "req_1850",
+  "at": "2026-06-25T07:02:32.936Z",
+  "origin": "codex:019efd31",
+  "text": "love that N family lets get more of those, the floral is great,",
+  "status": "review",
+  "sessionId": "019efd31-8050-79d0-84ae-54d775a7e51d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T07:02:39.923Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T07:06:33.157Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Expanded Board N wallpapers in the hmsc-int procedural material catalog with nine more recipes: rose trellis, vine, chinoiserie, art deco, toile, tropical, kitchen, nursery, and torn layered paper. Added WGSL implementations, Board N dispatch slots 7-15, category rows, raised the seed slider ceiling for the larger board, and updated the shader catalog contract test. Verified with the focused shader catalog test, hmsc-int bundle-only check, and full Effect WGSL validation through naga.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T07:06:33.157Z"
+}

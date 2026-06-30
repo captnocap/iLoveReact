@@ -1,0 +1,30 @@
+{
+  "id": "req_2020",
+  "at": "2026-06-28T17:12:56.796Z",
+  "origin": "session:6f7e560e",
+  "text": "so i made a door that has a glass window in it, and i have some other walls that have glass windows in them, they all use to load properly, but the doors are rendering as a solid and the walls with the windows are rendering just as hollow. but, glass still works. i know because of this prop i have that is a glass framed image [Image #14] but look, this wall with window looks just hollow of glass [Image #15] and then this door has no glass at all [Image #16] but here it is in the editor [Image #17]",
+  "status": "review",
+  "sessionId": "6f7e560e-8b0d-4fd7-83b1-9c466a418f7f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T17:13:11.205Z",
+      "actor": "6f7e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T17:41:18.709Z",
+      "actor": "6f7e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed and fixed cooked-prop glass in the no-V8 /compiled game (the editor looked fine, masking it). Decoded the actual baked gamefile to ground-truth: window WALLS already ship a translucent glass slot (material ref 19, opacity 0.34) but world_loader fell back to the prop's gray tint #c2c6cf, so 34% gray over bright sky read as a hollow opening — fixed by tinting flat-translucent mesh-prop slots the editor's Glass() blue (new materials.ts GLASS_TINT #a9c8d8, hand-mirrored into world_loader.zig). DOORS shipped ZERO glass refs because a window on the swinging Door Leaf was baked into the opaque leaf (the cook's glass pass only scanned body parts) — fixed by laying the leaf out opaque-frame-then-glass-pane (cookedAsset.flattenModel new leafGlass range), splitting it into opaque+translucent slots in worldGeometry, and binding the whole leaf slot RANGE to the door so stepCookedDoors swings frame and window together (CookedDoor.node_child_first/_count). Walls fix is loader-only (rebuild+rebake). Door fix needs the user to RE-COOK the door model in Studio then re-compile (the split is cook-time). Tests: cookedAsset 23/23 incl. new leaf-glass + glassless-leaf regression; worldGeometry/worldParity green; no-V8 loader builds+renders.",
+  "shas": [
+    "9be609646"
+  ],
+  "resolvedAt": "2026-06-28T17:41:18.709Z"
+}

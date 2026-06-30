@@ -1,0 +1,30 @@
+{
+  "id": "req_1877",
+  "at": "2026-06-25T17:25:30.841Z",
+  "origin": "supervisor-relay",
+  "text": "we will implement shift control for sub grid snapping and alt for freeform, and then multi-peice select + full object select.",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-25T17:25:34.710Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T17:26:19.157Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the loader-iso pane snapping modifiers + selection ergonomics. (1) SHIFT sub-grid: added SnapInput.subgrid + a subgridDivisions P2 tuning row (default 2 = half-cell 0.5m); resolveSnapTarget snaps grid and edge placements to the finer lattice when held, opting out of module/plate/wall anchoring — the snapped sibling of Alt freeform, while default placement stays module-pitch flush (GRIDSNAP-0605). (2) ALT freeform was already wired/ruled (req_0596 'flush against the wall') — left untouched, verified intact by the existing REQ-0596/REQ-0650 suites. (3) Multi-piece select: Ctrl-click now toggles a piece in/out of the running selection (togglePieceAt) instead of replacing. (4) Whole-object select: double-click (350ms) selects the connected object via connected(). Untangled the modifier overload — while armed shift/alt only place (removed shift-click-while-armed select); selection gestures moved off shift/alt. Snap math locked by two new suites (35/35 green); full cart bundles clean. Live by-feel verification (holding the keys in rjit dev) is the user's acceptance step.",
+  "shas": [
+    "e11371b95",
+    "cef3635ab"
+  ],
+  "resolvedAt": "2026-06-25T17:26:19.157Z"
+}

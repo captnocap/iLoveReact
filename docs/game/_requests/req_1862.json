@@ -1,0 +1,28 @@
+{
+  "id": "req_1862",
+  "at": "2026-06-25T08:17:32.173Z",
+  "origin": "codex:019efd31",
+  "text": "and i know if you go into one of the workspace routes, one of them that has shaders, lets you toggle variation / quality levels, can we just bake them all in to the set, rather than needing to go sift through the trenches",
+  "status": "review",
+  "sessionId": "019efd31-8050-79d0-84ae-54d775a7e51d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T08:17:41.969Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T08:21:16.305Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Baked shader variations into the assignable material set instead of leaving them hidden behind ShaderLab controls. The shader catalog now generates stable preset texture ids for every fill-board authored take across all five quality grades, plus road overlay presets; the texture registry and assignable material catalog expose those presets with semantic shelves, while the no-JS compile resolver maps preset ids to their frozen WGSL data so painted faces ship correctly. Tests now cover preset id uniqueness, data packing, material catalog exposure, and compile resolution.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T08:21:16.305Z"
+}

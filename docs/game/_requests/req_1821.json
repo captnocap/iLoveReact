@@ -1,0 +1,10 @@
+{
+  "id": "req_1821",
+  "at": "2026-06-25T01:25:50.442Z",
+  "origin": "session:9be2276f",
+  "text": "yeah so, that fix on mac. i was curiuous about, because so earlier today, we did a fix here on this machine, that did some big numbers for performance, and then went to mac, and immediately the perf was dogshit, and so then claude proposed a fix and it genuinely sounded the same as the one we already did this morning, but i guess it wasnt. so now im curious, from the changes that just came in, why would it be that before those, the mac perf was dogshit but after is now 1:1 with my desktop here (surprisingly) i mean it was pulling 120fps 8.3ms frame time 0.4ms 3d scene walking and ~1gb of ram to run at 30% idle cpu which, honestly i thought it couldnt be that good but it was lol",
+  "status": "new",
+  "sessionId": "9be2276f-3b15-40c9-9cbf-c9c5ce57d365",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_1865",
+  "at": "2026-06-25T15:59:44.309Z",
+  "origin": "session:6ff945f5",
+  "text": "We need to add a toggle for auto-compile because hot-reloads are making it unusable, hot reload comes -> compile -> locked for 5-6s -> by unlock, the next hot reload hits -> repeat til agent is done",
+  "status": "review",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T16:00:32.418Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T16:02:55.820Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an AUTO-COMPILE toggle to the loader pane (pinned above the LOADER VIEW toggle in the corner). Problem: while an agent edits files, each hot reload re-mounts the cart → re-arms the loader pane's debounced auto-compile → the editor locks 5-6s per bake, back-to-back, unusable. Off → the auto-bake never fires; only the manual Compile button bakes, and the live overlay still shows placements/skins instantly so it costs nothing for most edits. The toggle is PERSISTED in localstore (nsGet/nsSet 'editor.autoCompile', same idiom as the loader-view toggle) — a plain useState would reset to ON on every hot reload and defeat the purpose. The auto-compile effect now gates on loaderView && autoCompile (autoCompile added to deps), so toggling off also clears any pending bake via the effect cleanup. Default stays ON. TSX-only, hot-reloads. Committed 0d736c625.",
+  "shas": [
+    "0d736c625"
+  ],
+  "resolvedAt": "2026-06-25T16:02:55.820Z"
+}

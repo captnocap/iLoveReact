@@ -1,0 +1,28 @@
+{
+  "id": "req_2119",
+  "at": "2026-06-30T04:27:34.501Z",
+  "origin": "codex:019f1624",
+  "text": "now i have a question for you that you can help dig into some of the code and give me a solid answer on what you think is a good approach. but ive been watching some videos from andrew kelley about memory management and reducing it, we actually implemented a good reduction in our expanded memory values for things like grass and foliage the other day from 80b to 20b per instance which was a big win, but some of the other things mentioned and this goes right in hand with edit history and undo/redo etc, is while storing things in memory are nice they actually can cost a lot more than just recomputing the thing again depending on what the task is, now im wondering what that looks like for us in terms of getting our time to placement as small as possible. I want to absolutely place a piece and instantly it appears, or i edit it, instant change, delete it, instant. The editor itself should be a game, even if the game loop itself is making a game",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:27:42.137Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:30:20.311Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reviewed hmsc-int persistence, session, live overlay, world stream, and building stream code to answer the memory-vs-recompute placement-latency question. Conclusion: keep compact semantic state and small hot indices in memory, recompute derived/baked/render data off the placement path, and remove remaining O(world) scans/copies from single-edit visual feedback.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T04:30:20.310Z"
+}

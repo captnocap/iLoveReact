@@ -5,15 +5,15 @@
 
 import type { PickOption } from '../../../shell/fields';
 
-export type MaterialSource = 'recipe' | 'react' | 'stored' | 'stored-decal';
+export type MaterialSource = 'recipe' | 'preset' | 'react' | 'stored' | 'stored-decal';
 export type MaterialChoice = { id: string; label: string; group?: string; source?: MaterialSource };
 
-/** Material ids group by their family prefix (`a-`, `b-`, ...). Unprefixed ids
- *  such as facades, road, and stored decals pool under `misc`. */
+/** Last-resort visible grouping when a caller forgot to pass catalog metadata.
+ *  Board-letter prefixes (`a-`, `b-`, ... `o-`) are shader implementation
+ *  detail and must never leak into picker categories. */
 export function materialFamily(id: string): string {
-  const dash = id.indexOf('-');
-  if (dash > 0 && dash <= 2) return `${id.slice(0, dash)}-family`;
-  return 'misc';
+  if (id.startsWith('custom:')) return 'Stored Materials';
+  return 'Unsorted Materials';
 }
 
 export function materialPickOptions(materials: Iterable<MaterialChoice>): PickOption[] {

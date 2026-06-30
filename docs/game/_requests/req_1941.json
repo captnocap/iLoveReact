@@ -1,0 +1,30 @@
+{
+  "id": "req_1941",
+  "at": "2026-06-25T23:44:47.183Z",
+  "origin": "session:26c62b07",
+  "text": "ok. these are alright. next so in the mesh editor, i save something as a wall or a floor, and it doesnt show up in the walls or floors so its lying. fix it. i have walls and floors ive made that should show up in these categories and they are in the props",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T23:45:10.483Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:51:50.258Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cooking a Studio model AS a wall/floor was lying: it showed only under props, never the wall/floor tab. Root cause: the dialog records buildPlacement.pieceKind and the SWAP picker (cookedCatalogPickEntries) honored it, but the build browser tabs read catalogEntriesByKind, which filtered cooked entries by their raw kind — and every cooked asset is kind:'prop' (the shared mesh substrate). Fix: catalogEntriesByKind now routes a cooked entry by its declared FAMILY when that family owns a browser tab (wall/floor/ramp/roof/stairs/elevator/pillar) — so it lists under that tab and drops out of props — falling back to 'prop' for no-tab families (railing/fence/trim) so nothing is ever hidden. Factored the family resolution (cookedEntryFamily) shared with the swap picker; built-in props untouched. Verified with 2 new regression tests in cookedPiece.test.ts (cooked wall→wall tab & not props; cooked floor→floor; railing stays in props): all 11 pass. TSX/TS, hot-reloads in rjit dev — existing cooked walls/floors you saved will now appear in those tabs.",
+  "shas": [
+    "b01f0c3ec"
+  ],
+  "resolvedAt": "2026-06-25T23:51:50.258Z"
+}

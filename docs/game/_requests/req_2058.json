@@ -1,0 +1,30 @@
+{
+  "id": "req_2058",
+  "at": "2026-06-29T02:34:49.388Z",
+  "origin": "session:d00df27f",
+  "text": "ok. so this hides walls, but it only hides walls that have been made by claude, for example, i have made some walls, that have varying sizes of windows in them, and are double story. but they still exist when i do hide walls",
+  "status": "review",
+  "sessionId": "d00df27f-d7b3-480d-a796-dfc75c67193b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T02:35:06.667Z",
+      "actor": "d00d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T02:53:37.556Z",
+      "actor": "d00d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extended hide-walls to custom Studio walls. The first pass only flagged built-in box walls (catalog kind 'wall'); a Studio-modeled wall (double-storey, windowed) is cooked as kind:'prop' on the mesh substrate and ships through MESH_PROPS, so it stayed visible with hide on. Fix: a prop whose buildPlacement.pieceKind==='wall' is flagged on its MESH_PROPS instance (bumped the lump to v8 — a per-instance wall byte after the 20-byte header; worldGeometry encodes it, constructor.zig decodes it, older bakes read wall=false). The loader carries the flag onto baked_mesh_list and hides those mesh-prop node ranges in applyLiveMeshProps when hide-walls is on (same setBakedRangeVisible path the dirty-erase hide uses). Verified: city bake flags 306 cooked walls, native loader decodes v8 and renders GREEN; meshProps v8 byte-layout test + worldGeometry suite green; full ship clean. The user's own screenshot already confirmed the cooked-wall RENDER hides.",
+  "shas": [
+    "8d0df70de"
+  ],
+  "resolvedAt": "2026-06-29T02:53:37.556Z"
+}

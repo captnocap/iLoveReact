@@ -1,0 +1,31 @@
+{
+  "id": "req_1965",
+  "at": "2026-06-26T00:38:31.597Z",
+  "origin": "session:67264656",
+  "text": "loader] streaming first frame — 26 draws: 4200 detail + 0 lod shell instances (of 3539616 total rows)\n[loader] resident catalog: 37 cooked mesh(es) ready (no rebake to place)\n[warn/render] [decal-raster] image node ('/home/siah/Downloads/high fidelity pastel brick texture(2).png') shipped no asset (empty/unreadable src at bake) — MISSING checkerboard\n[js.warn] [PLACEFREEZE] snapshot flush reason=commitMany mode=defer streams=3 delayMs=271.68 ms=93.97\n[js.warn] [edit-latency] painted total ~ 530ms = pre  160 [commit 0 + rerender 160 (shell 160 + loaderPane 0)] + scans    0 + push    0 + host-block  370  | host DOMINANT=other tick 0.0 paint 24.9 gpu 2.8 | nodes 1975 inst 6257 draws 773 meshes 6257\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=268.18 ms=46.48\n[js.warn] [edit-latency] place   total ~ 438ms = pre  118 [commit 0 + rerender 118 (shell 118 + loaderPane 0)] + scans    0 + push    0 + host-block  320  | host DOMINANT=other tick 0.0 paint 24.1 gpu 2.7 | nodes 1979 inst 3965 draws 768 meshes 3965\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=274.35 ms=45.73\n[js.warn] [edit-latency] place   total ~ 464ms = pre  136 [commit 0 + rerender 136 (shell 136 + loaderPane 0)] + scans    0 + push    0 + host-block  328  | host DOMINANT=other tick 0.0 paint 22.7 gpu 2.9 | nodes 1979 inst 3966 draws 768 meshes 3966\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=270.21 ms=45.37\n[js.warn] [edit-latency] place   total ~ 455ms = pre  133 [commit 0 + rerender 133 (shell 133 + loaderPane 0)] + scans    0 + push    0 + host-block  322  | host DOMINANT=other tick 0.0 paint 23.4 gpu 2.6 | nodes 1979 inst 3967 draws 768 meshes 3967\n[js.warn] [PLACEFREEZE] snapshot flush reason=commit mode=defer streams=2 delayMs=268.29 ms=49.84\n[js.warn] [edit-latency] place   total ~ 463ms = pre  135 [commit 0 + rerender 135 (shell 135 + loaderPane 0)] + scans    0 + push    0 + host-block  328  | host DOMINANT=other tick 0.0 paint 23.2 gpu 3.0 | nodes 1979 inst 3968 draws 768 meshes 3968",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:39:28.879Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:42:59.392Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "After memoizing the rail panels the shell number barely moved, so a prop was still defeating the memos. Found and fixed the clearest one: buildingPrefabs was an IIFE producing a NEW array every render, passed to BOTH RightPanel and CatalogRail, so a piece place (which never touches prefabs) re-rendered the whole rail anyway — memoized it on streamState.prefabs/removedPrefabs only (stable on a place). To stop guessing prop-by-prop, also split the  figure in the edit-latency line into {body + kids}: body = EditorShell's own render (its hooks/derives + element creation), kids = the child panels rendered before the loader pane. One place-click now classifies the remaining ~130ms — if kids dominates, a panel is still re-rendering (hunt the unstable prop); if body dominates, it's the parent's own derive work (e.g. a heavy unmemoized computation in EditorShell). Cart-side, hot-reloads. Shas 1ddff8e6f (buildingPrefabs), 2799a7932 (body/kids split). Campaign so far: multi-second backlog -> dirty-only snapshot (streams 13->2) -> pre proven 100% re-render -> panel memos + buildingPrefabs; next reading pinpoints the last chunk.",
+  "shas": [
+    "1ddff8e6f",
+    "2799a7932"
+  ],
+  "resolvedAt": "2026-06-26T00:42:59.392Z"
+}

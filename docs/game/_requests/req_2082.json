@@ -1,0 +1,35 @@
+{
+  "id": "req_2082",
+  "at": "2026-06-29T23:47:26.720Z",
+  "origin": "session:3dbb283a",
+  "text": "hm. it seems that all my models are gone now lol. D: haha [Image #4]",
+  "status": "done",
+  "sessionId": "3dbb283a-d0ec-4c16-ae77-0792cd564c91",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T23:48:37.796Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T00:31:41.807Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-30T01:14:39.809Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Models showed empty in the Studio after the import/restart. Root cause: the model store is an append-only SQLite event log whose fast-boot SNAPSHOT cache got corrupted — high-detail imports wrote entire meshes as single events (one 33MB event) plus 3307 paint-bake events (351MB), bloating the log to 575MB; on dev-host restart the boot rebuilds the snapshot by loading the WHOLE log at once and OOM'd (the known req_1556 failure mode), writing a degraded 1-model snapshot. The event log itself (source of truth) was intact. Recovered all 96 models by streaming the log through a faithful Python port of modelStream.apply (the v8cli SQL binding couldn't return the 544MB result set), PROVEN correct by full byte-for-byte deep-equality against the _compact_backup snapshot at seq 15613 (59 models). Backed everything up first (_MODEL_RECOVERY_BACKUP_20260629/, 631MB), exported all 96 models as individual self-contained files (recovered-models/), and installed a clean 92-model snapshot to the live store (the 4 oversized broken imports new_mesh_045-048 kept as files only). Verified: live snapshot loads 92 models with a matching seam (events=21298).",
+  "shas": [],
+  "resolvedAt": "2026-06-30T00:31:41.806Z"
+}

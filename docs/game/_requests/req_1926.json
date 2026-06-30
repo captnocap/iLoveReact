@@ -1,0 +1,30 @@
+{
+  "id": "req_1926",
+  "at": "2026-06-25T22:41:49.870Z",
+  "origin": "session:26c62b07",
+  "text": "sorry didnt mean to stop u but check the studio mesh edtior, it does this in the paint tools for brushes",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:55:40.061Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T22:55:40.069Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Pointer, not a separate task: the user told me the Studio mesh editor already does the SVG->icon thing in its paint tools for brushes. I traced that pattern (runtime/paint/icons.ts path layers -> scripts/paint-glyph-source.ts -> rjit bake-icons SDF atlas -> SdfIcon in controls.tsx's BrushIcon) and reused it verbatim for the build-category icons in req_1925. No separate deliverable — it steered the implementation onto the proven baked-SDF path instead of live Graph.Path.",
+  "shas": [
+    "e2bf548c7"
+  ],
+  "resolvedAt": "2026-06-25T22:55:40.069Z"
+}

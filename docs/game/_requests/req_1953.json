@@ -1,0 +1,30 @@
+{
+  "id": "req_1953",
+  "at": "2026-06-26T00:14:20.093Z",
+  "origin": "session:9a80504f",
+  "text": "ok so i just tried it. u know how when u have one of those closet doors where u pull it and it folds in the middle and comes to one end, think of that but without the fold and thats how the swing is acting, its not a swing so ok the left edge of the door when closed touches the left door frame, on open the left edge touches the right edge of the door frame while the right edge faces out",
+  "status": "review",
+  "sessionId": "9a80504f-e7fd-40c1-b6cb-5bd524a8db25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:15:16.521Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:20:13.034Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the cooked door sliding-not-swinging bug. The leaf translated across the doorway (left edge ending at the right frame) instead of pivoting because the swing pivot math used the opposite sine-sign to the engine's m4rotateY: the engine rotates x'=x*cos+z*sin, z'=-x*sin+z*cos, but cookedDoorWorldBox + stepCookedDoors used x*cos-z*sin. For the collision rect this was invisible (the leaf is centered near the model origin, so the sign cancels), but the swing offsets the leaf a full half-width about the hinge edge, so the mismatched rotation stops canceling and the panel slides. Aligned the hinge/center derivation and the per-frame node_pos pivot to the engine convention so the hinge edge stays fixed and the free edge swings out 90 degrees. Builds clean, rjit game shot PASS. The user must re-compile + run the rebuilt loader to see it; if it now pivots but hinges on the wrong side or swings the wrong direction, those are one-line tweaks (hinge edge lo[0] vs hi[0]; theta sign).",
+  "shas": [
+    "adc9190b1"
+  ],
+  "resolvedAt": "2026-06-26T00:20:13.034Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2052",
+  "at": "2026-06-29T01:28:32.656Z",
+  "origin": "session:81cc249f",
+  "text": "the curve you see is my own skin on the cover that hangs on the side of the wall",
+  "status": "review",
+  "sessionId": "81cc249f-ac65-417c-ab3d-cf88107645a8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T01:28:58.772Z",
+      "actor": "opus-loader-del",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T01:29:19.927Z",
+      "actor": "opus-loader-del",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarification from the user, not a new defect: the white CURVED shape I flagged as possibly-stale in req_2051 is actually the user's own COVER piece (an awning that hangs on the side of the wall) wearing their skin — a legitimate, correctly-rendered piece, not leftover geometry. This resolves my open question on req_2051: there is NO separate live-skin bug to chase. Verified my req_2051 erase-lift change cannot affect the cover: liftedWallBaseY only lifts WALL_REST_KINDS (wall/fence/railing/pillar/corner/arch, placed.ts:261), so pieceEraseRect is a pure no-op for props/covers — only true wall-family pieces get the lifted erase rect. So the actual stale piece the user hit was a floor-resting WALL, which the req_2051 fix (c5a165498) addresses, and the cover is untouched. No code change for this entry. Pending the user's live retest on a rebuilt dev host to confirm the deleted wall now clears.",
+  "shas": [],
+  "resolvedAt": "2026-06-29T01:29:19.927Z"
+}

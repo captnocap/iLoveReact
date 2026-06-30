@@ -1,0 +1,30 @@
+{
+  "id": "req_1944",
+  "at": "2026-06-25T23:54:41.150Z",
+  "origin": "session:26c62b07",
+  "text": "ok now you need to give those pieces the same placement capabilities. for example a normal floor i can paint it out as a grid for placement. but i cant do that with my custom floor piece. no reason other than poor planning",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T23:55:05.522Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:59:05.460Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Gave cooked wall/floor pieces the same drag-paint placement as the built-ins. A built-in floor fills a dragged rectangle with a grid and a built-in wall paints a line, but a cooked floor/wall could only rotate on drag: the capability gate (paintKindOf in IsoAuthor) read GAME_BUILD.catalog.get(id).kind, which is 'prop' for every cooked mesh substrate, so it returned null. Fix: added catalogPieceFamily(id) to the catalog (the effective build family of any id — a cooked wall/floor resolves to 'wall'/'floor' via its buildPlacement.pieceKind, built-ins are their own kind), exposed it as GAME_BUILD.catalog.family, and paintKindOf now reads the family. So a custom floor grid-fills a drag and a custom wall paints a line, pitched to the cooked piece's measured footprint, identical to the built-ins; single-click grid/edge snap already worked via the entry's snap field. Regression test in cookedPiece.test.ts (catalogPieceFamily: cooked floor→floor, free prop→prop, built-in floor→floor): 12/12 pass. TSX/TS, hot-reloads in rjit dev.",
+  "shas": [
+    "8ac64bf51"
+  ],
+  "resolvedAt": "2026-06-25T23:59:05.460Z"
+}

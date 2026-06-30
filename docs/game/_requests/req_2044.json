@@ -1,0 +1,30 @@
+{
+  "id": "req_2044",
+  "at": "2026-06-28T23:20:30.324Z",
+  "origin": "session:15799c87",
+  "text": "can you give walls the same thickness of the wall piece paper_wall",
+  "status": "review",
+  "sessionId": "15799c87-1d34-4279-9cd7-dee2765a8997",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T23:20:49.059Z",
+      "actor": "session-1579",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T23:34:56.310Z",
+      "actor": "session-1579",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Set the standard wall depth to the user's Studio paper_wall thickness (0.005m) in catalog.ts WALL_SIZE. Walls are centered on their grid line (req_1714/1719), so the thinner slab is symmetric about the line — existing walls thin in place, no data migration. The fat face-slab sandwich can't render a 5mm wall (its 0.02 plates float outside with gaps), so pieceShapes.addWallBox now renders a thin wall as two half-depth boxes meeting at the centerline (front+back), keeping per-side paint; the fat path stays for any thick wall. Made the wall tests thickness-relative (wallSlabs reads .front + catalog depth; placed uses halfDepth; REQ-0109 assertEqual→assertClose since 0.005 isn't dyadic; ramp-trim asserts the sub-threshold overhang; worldGeometry expects 2 boxes). wallSlabs 3/3, worldParity 16/16, roofs 9/9 green.",
+  "shas": [
+    "e52109a94"
+  ],
+  "resolvedAt": "2026-06-28T23:34:56.310Z"
+}

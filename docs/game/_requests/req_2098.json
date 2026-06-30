@@ -1,0 +1,28 @@
+{
+  "id": "req_2098",
+  "at": "2026-06-30T02:58:42.268Z",
+  "origin": "codex:019f1624",
+  "text": "overkill, as long as hovering it shows the actual value and it can be overridden and those defaults can be made custom then thats more than enough",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T02:58:49.179Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T02:59:09.394Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's simplification for preset provenance in cart/hmsc-workspace-mock/DESIGN_INTAKE.md. Main inspector rows should not show overkill source labels like game default/local override by default; as long as hover shows the actual value and the value can be overridden or defaults can be customized through the defaults flow, that is enough. Added deductions to keep preset rows semantic and visually simple, with value/source/customization details reserved for tooltip, detail popover, or the defaults overlay. No implementation changes were made.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T02:59:09.394Z"
+}

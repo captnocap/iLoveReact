@@ -1,0 +1,28 @@
+{
+  "id": "req_2091",
+  "at": "2026-06-30T01:30:41.082Z",
+  "origin": "codex:019f1624",
+  "text": "idea:\nmassive refactor of hmsc-int\n\n\nwhat i want: \na more formal workspace, everything is in one location. Context is just switched between the work. Photoshop level readability and usability\nforward thinking\nno unused space\nfull performance\nrelevant history ( i am tired of selecting some skin, moving to another piece and the interface resetting menus for example)\n\n\n\nevery capability MUST live inside of a dropdown file menu, this is the SSoT for all features to live by name in text not icon\n\na feature addition pipeline: \nfeatures must do the following:\nregister inside of keybindings + have an icon + have a context menu option + native tooling (best performance) + local undo + redo history\n\n\nthings that are highly unacceptable:\nplacement, delete, movement controls being decoupled. example: being able to place a piece at any location but then confined to grid placement when moving the same piece\n\nthings leaking into other things\n\n\n\nmust haves: \ninstant app startup (no delay on the application, data can load after startup, window must be open in under 1 second) \nclean and forward thinking styles approach, must use classifiers\neasy to read jsx\n\n\nwhere to start:\nwe are going to make one, very exact, very precise mock interface. Nothing in it needs to work. All the capability will come from native systems we have made, the major part of this is getting the interface setup for these capabiities\n\ndo NOT refactor any existing code at this point in time, we are currently on the design phase. here are some screenshots.  and you can start by making a brand new demo cart for our interface design [Image #1][Image #2][Image #3][Image #4][Image #5]",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T01:30:50.693Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T01:36:27.851Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a brand-new static demo cart at cart/hmsc-workspace-mock for the next hmsc-int workspace interface design. It defines a classifier/theme-based Photoshop-like editor shell with textual dropdown capability registry as the SSoT, mirrored icon/context surfaces, persistent workspace memory, unified placement/move/delete affordances, inspector, minimap, and local history strip. No existing hmsc-int code was refactored or changed. Verified with BUNDLE_FROM_HARNESS=1 tools/v8cli scripts/cart-bundle.js cart/hmsc-workspace-mock/index.tsx --out /tmp/hmsc-workspace-mock.bundle.js and SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-workspace-mock.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T01:36:27.851Z"
+}

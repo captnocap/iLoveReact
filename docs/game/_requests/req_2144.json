@@ -1,0 +1,28 @@
+{
+  "id": "req_2144",
+  "at": "2026-06-30T07:42:22.149Z",
+  "origin": "session:47bb26c9",
+  "text": "sweet man alright well im going to let you sign off here with a /hand-over so we can get some fresh context to progress us with this. i have some more requests so just make sure to get the next guy filled in correctly on everything made since its all very great work. thanks!",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T07:44:28.130Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T07:44:28.140Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked to sign off with a /hand-over so a fresh session can continue the native model viewer arc with full context. Produced a complete continuation brief at /tmp/handoff-20260630-074250-native-model-viewer-arc-next-requests.md (original_conversation_id 47bb26c9-be86-45cb-8d46-c3abbc60ea02). It captures the full arc built this session — viewer (req_2103), file picker (2110), wireframe (2116), per-face paint + the three distinct paint fixes (2115/2123/2126/2133), quality slider + carry-through-decimation (2134/2137/2139), and the shared attribution system (2141/2142) — with every commit SHA, the architecture, the doors, headless-verify env hooks, gotchas (paint bug trilogy, disk-full incident), user prefs, and the known follow-ons (Studio attribution wiring, LoD bake, sub-face brush, BVH picking). No code change; this is the cross-session continuity artifact. All prior work is committed to main and sitting in review.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T07:44:28.140Z"
+}

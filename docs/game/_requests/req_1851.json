@@ -1,0 +1,30 @@
+{
+  "id": "req_1851",
+  "at": "2026-06-25T07:04:31.768Z",
+  "origin": "session:6ff945f5",
+  "text": "oh hey let me ask u real quick. so, when i apply a texture to a prop here, and its instantly updating, do i need to press compile to finalize it or ? just wondering, cuz a hot update hit from another thread and all the textures i added to some props all wiped but i never hit compile either",
+  "status": "review",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T07:05:26.719Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T07:11:48.421Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered: applying a skin SAVES it immediately (a piecePartTextureSet edit committed to the editor store) — Compile is NOT required to save, only to bake it into the rendered gamefile; the live 3D skin is just a preview of the already-saved edit. The user's skins were never lost (the skin interface still showed them). Fixed the real bug: the live preview vanished from the 3D render after a hot reload (incl. one triggered by another session) because the re-mount re-seeded the 'what's baked' baseline from the current already-skinned pieces, so the re-skin diff saw no change and dropped the skin → fell back to the un-skinned baked render. meshPropLivePush now renders a prop live whenever it WEARS a procedural skin (baseline-free) instead of diffing a mount-seeded baseline, so the preview reconstructs from the saved edit and survives hot reloads; the loader still hides the coincident baked copy. Trade-off noted: procedurally-skinned props render live even post-Compile (no hand-off); a persisted last-compiled baseline is the perf refinement if counts grow. TSX-only, hot-reloads. Committed 1aa5ecbb3.",
+  "shas": [
+    "1aa5ecbb3"
+  ],
+  "resolvedAt": "2026-06-25T07:11:48.420Z"
+}

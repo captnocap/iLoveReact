@@ -8,9 +8,11 @@
 // of calm animation frames means the boot work has drained. That is the number you
 // feel.
 //
-// Same idea for routes (req_1637): clicking a route button → navStart(path); the
+// Same idea for routes (req_1637): clicking a route button -> navStart(path); the
 // shell's route effect calls navReady(path) on first render; a settle watch then
-// reports when that route actually finished loading (not just first-painted).
+// reports when that route actually finished loading (not just first-painted). Route
+// readiness also waits for the host-flush drain to go calm; a calm JS timer alone
+// is not proof that the native tree is usable.
 //
 // Everything is console.warn so it lands in the `rjit dev` terminal next to the
 // [mapgone] trace (severity-0 console.log never reaches the terminal — see memory
@@ -34,6 +36,7 @@ const nowMs: () => number = typeof perfNow === 'function'
 const CALM_MS = 32;
 const QUIET_FRAMES = 6;
 const SETTLE_DEADLINE_MS = 12000;
+const ROUTE_NATIVE_QUIET_FRAMES = 8;
 
 // t0 = when this module first evaluates (imported FIRST in index.tsx).
 const t0 = nowMs();
@@ -67,11 +70,52 @@ export function startupWatchSettle(): void {
 // ── Route navigation timing ──────────────────────────────────────────────────
 let navAt = 0;
 let navTo = '';
+let navSeq = 0;
+
+type RouteCounters = {
+  jsFlushes: number;
+  jsBytes: number;
+  nativeQueued: number;
+  nativeEnqueued: number;
+  nativeDrained: number;
+  nativeDrainBytes: number;
+};
+
+type ActiveRouteProbe = {
+  seq: number;
+  path: string;
+  clickedAt: number;
+  start: RouteCounters;
+  firstInput: boolean;
+};
+
+let activeProbe: ActiveRouteProbe | null = null;
+
+function readRouteCounters(): RouteCounters {
+  const flush = typeof g.__flushReport === 'function' ? (g.__flushReport() ?? {}) : {};
+  const native = typeof g.__tel_host_flush === 'function' ? (g.__tel_host_flush() ?? {}) : {};
+  return {
+    jsFlushes: Number(flush.flushCount) || 0,
+    jsBytes: Number(flush.totalBytes) || 0,
+    nativeQueued: Number(native.queued_batches) || 0,
+    nativeEnqueued: Number(native.total_enqueued_batches) || 0,
+    nativeDrained: Number(native.total_drained_batches) || 0,
+    nativeDrainBytes: Number(native.total_drained_bytes) || 0,
+  };
+}
+
+function routeCounterDelta(from: RouteCounters, to: RouteCounters): string {
+  const kb = (Math.max(0, to.jsBytes - from.jsBytes) / 1024).toFixed(0);
+  const drainKb = (Math.max(0, to.nativeDrainBytes - from.nativeDrainBytes) / 1024).toFixed(0);
+  return `flushes +${Math.max(0, to.jsFlushes - from.jsFlushes)}, js +${kb}KB, native drained +${Math.max(0, to.nativeDrained - from.nativeDrained)} batch/${drainKb}KB`;
+}
 
 /** Call from a route button's onClick, BEFORE nav.push, with the target path. */
 export function navStart(path: string): void {
   navAt = nowMs();
   navTo = path;
+  const seq = ++navSeq;
+  activeProbe = { seq, path, clickedAt: navAt, start: readRouteCounters(), firstInput: false };
   try { console.warn(`[route] → ${path} (clicked)`); } catch {}
 }
 
@@ -82,18 +126,85 @@ export function navStart(path: string): void {
 export function navReady(path: string): void {
   if (!navAt || path !== navTo) return;
   const clickedAt = navAt;
+  const probe = activeProbe && activeProbe.path === path ? activeProbe : null;
   navAt = 0; // consume so re-renders of the same route don't re-log
   try { console.warn(`[route] ${path} first render +${(nowMs() - clickedAt).toFixed(0)}ms`); } catch {}
-  watchSettle((total, timedOut) => {
-    try { console.warn(`[route] ${path} loaded +${total.toFixed(0)}ms${timedOut ? ' (deadline hit, still busy)' : ''}`); } catch {}
-  }, clickedAt);
+  watchRouteSettle((total, timedOut, counters) => {
+    if (probe && activeProbe?.seq !== probe.seq) return;
+    const detail = probe ? ` — ${routeCounterDelta(probe.start, counters)}` : '';
+    try { console.warn(`[route] ${path} loaded +${total.toFixed(0)}ms${timedOut ? ' (deadline hit, still busy)' : ''}${detail}`); } catch {}
+  }, clickedAt, probe?.start ?? readRouteCounters());
+}
+
+// Called by runtime/index.tsx from the real Zig -> JS event path. This does not
+// assert the route is loaded by itself; it proves when a user event actually made
+// it through after navigation, which is the number to compare against "I can do
+// something now."
+g.__routeInputMaybe = (id: number, type: string) => {
+  const probe = activeProbe;
+  if (!probe || probe.firstInput) return;
+  if (!isUserActionEvent(type)) return;
+  probe.firstInput = true;
+  const counters = readRouteCounters();
+  try {
+    console.warn(`[route] ${probe.path} first input +${(nowMs() - probe.clickedAt).toFixed(0)}ms (${type} id=${id}) — ${routeCounterDelta(probe.start, counters)}`);
+  } catch {}
+};
+
+function isUserActionEvent(type: string): boolean {
+  return type !== 'onMouseMove' && type !== 'onPointerMove' && type !== 'onHoverEnter' && type !== 'onHoverExit';
+}
+
+function routeNativeIsQuiet(start: RouteCounters, last: RouteCounters, current: RouteCounters): boolean {
+  // If the host telemetry is absent, all native counters are zero; don't block on
+  // impossible evidence. The timer-settle path still measures JS/main-thread delay.
+  const nativeWired = current.nativeEnqueued > 0 || current.nativeDrained > 0 || current.nativeQueued > 0;
+  if (!nativeWired) return true;
+
+  const routeEnqueued = current.nativeEnqueued > start.nativeEnqueued || current.jsFlushes > start.jsFlushes;
+  if (!routeEnqueued) return false;
+  if (current.nativeQueued > 0) return false;
+  if (current.nativeDrained < current.nativeEnqueued) return false;
+  return current.nativeEnqueued === last.nativeEnqueued && current.nativeDrained === last.nativeDrained && current.jsFlushes === last.jsFlushes;
+}
+
+function watchRouteSettle(
+  onDone: (totalMs: number, timedOut: boolean, counters: RouteCounters) => void,
+  startAt: number,
+  startCounters: RouteCounters,
+): void {
+  const schedule = scheduler();
+  if (!schedule) { onDone(nowMs() - startAt, false, readRouteCounters()); return; }
+  let prev = nowMs();
+  let quiet = 0;
+  let nativeQuiet = 0;
+  let lastCounters = readRouteCounters();
+  const deadline = startAt + SETTLE_DEADLINE_MS;
+  const tick = () => {
+    const t = nowMs();
+    const dt = t - prev;
+    const counters = readRouteCounters();
+    const jsQuiet = dt <= CALM_MS;
+    const nativeQuietNow = routeNativeIsQuiet(startCounters, lastCounters, counters);
+    prev = t;
+    lastCounters = counters;
+    if (t >= deadline) { onDone(t - startAt, true, counters); return; }
+    quiet = jsQuiet ? quiet + 1 : 0;
+    nativeQuiet = nativeQuietNow ? nativeQuiet + 1 : 0;
+    if (quiet >= QUIET_FRAMES && nativeQuiet >= ROUTE_NATIVE_QUIET_FRAMES) {
+      onDone(t - startAt, false, counters);
+      return;
+    }
+    schedule(tick);
+  };
+  schedule(tick);
 }
 
 // Shared frame-settle detector: calls onDone(totalMsSinceStartAt, timedOut) once a
 // run of calm frames is seen (boot/route work drained), or when the deadline passes.
 function watchSettle(onDone: (totalMs: number, timedOut: boolean) => void, startAt: number): void {
-  const raf = g.requestAnimationFrame;
-  if (typeof raf !== 'function') { onDone(nowMs() - startAt, false); return; } // headless: no frames to watch
+  const schedule = scheduler();
+  if (!schedule) { onDone(nowMs() - startAt, false); return; } // headless: no frames or timers to watch
   let prev = nowMs();
   let quiet = 0;
   const deadline = startAt + SETTLE_DEADLINE_MS;
@@ -107,7 +218,15 @@ function watchSettle(onDone: (totalMs: number, timedOut: boolean) => void, start
     } else {
       quiet = 0;
     }
-    raf.call(g, tick);
+    schedule(tick);
   };
-  raf.call(g, tick);
+  schedule(tick);
+}
+
+function scheduler(): ((fn: () => void) => void) | null {
+  const raf = g.requestAnimationFrame;
+  if (typeof raf === 'function') return (fn) => { raf.call(g, fn); };
+  const st = g.setTimeout;
+  if (typeof st === 'function') return (fn) => { st.call(g, fn, 16); };
+  return null;
 }

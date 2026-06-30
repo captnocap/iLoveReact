@@ -1,0 +1,23 @@
+{
+  "id": "req_2076",
+  "at": "2026-06-29T20:03:47.043Z",
+  "origin": "session:2eacb40b",
+  "text": "this is just spaghetti, lets change this up to being hand-authored pathing that can be used",
+  "status": "doing",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-29T20:03:49.300Z",
+      "actor": "session:56b4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T20:33:50.612Z",
+      "actor": "session:56b4",
+      "kind": "note",
+      "text": "Half 1 (data+bake) committed 20db33ef1: TrafficPath world layer + addTrafficPath mutator; gutted the tile-flow generator; routeFromPath/bakeAuthoredTraffic honour the loop-seam contract; trafficRecords reads state.world.trafficPaths. 8/8 tests, clean tsc. Next: the in-editor path tool."
+    }
+  ]
+}

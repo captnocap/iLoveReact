@@ -1,0 +1,28 @@
+{
+  "id": "req_2108",
+  "at": "2026-06-30T03:56:06.960Z",
+  "origin": "codex:019f1624",
+  "text": "here some other things that would be very nice to redo and do in a way that would be nice and useful. we currently have this request system, (its up to 2107) and its currently tucked away in a back alley. I would prefer to treat the new interface with a nice clean thin dock at the bottom that has sections like im showing here [Image #1] [Image #2][Image #3][Image #4] and specifically i want to treat the request system as a self-incrementing build number system where requests and their handled resolution turns into a incremented build number and a tracable log of all build notes as it progresses. I can click on the build number, it opens a dialog that shows the requests and how an agent handled it, but i dont want to keep this system of 'unresolved requests' as i dont have the time to go through every one and approve it / close it out, however it would be nice that when it comes down to bug hunting times, that all of thse get lumped together and easily tracable from end to end throughoyut all of history. so if lets say today something breaks, it gets fixed over several prompts, then a few weeks later, breaks again. that history builds onto the new break so that its always one ongoing bug and that relevant info can be right there to read for agents",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T03:56:40.451Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:09:28.373Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added the bottom dock/build journal direction to the hmsc workspace mock. The dock now owns build identity, validation, coordinates, perf/memory, and clickable build notes; the dialog shows request-derived build notes and ongoing bug/history threads so request handling becomes traceable product history rather than a hidden unresolved inbox.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T04:09:28.373Z"
+}

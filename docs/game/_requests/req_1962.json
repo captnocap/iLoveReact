@@ -1,0 +1,30 @@
+{
+  "id": "req_1962",
+  "at": "2026-06-26T00:34:27.739Z",
+  "origin": "session:4f39ae52",
+  "text": "aok still needs work. i see it now when i select something like thin_floor but Concrete Floor goes to asphalt",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:35:29.174Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:41:43.326Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Held BUILD pieces now show their own identity instead of the tile brush. Root cause of the asymmetry: thin_floor is a COOKED prop (id prop.studio.thin_floor), so it was caught by req_1959's prop-focus path and previewed correctly; a genuine build piece like Concrete Floor (floor.concrete.common) matched neither prop nor tile, so shownFocus fell through to the current tile brush — TILE Asphalt. Build pieces fit none of PropertiesPanel's existing foci (tile/tiles/building/prop), and even PLACED build pieces don't route there (they live in FacePainter via selectedIds). Fix: added a compact 'piece' Focus to PropertiesPanel (new PieceBody — an identity banner: KIND chip + label + theme + W×D×H footprint, read from GAME_BUILD.catalog by id; not the full hero band, since a floor slab has no tile/prop gauges), and extended armedFocus in index.tsx to emit { kind:'piece', id } for any non-prop held piece (props still get the dressed one-object preview). So holding any floor/wall/ramp/stairs now names the piece. Built clean. Committed bebfd0dfd. Scope note: this covers the HELD case (the screenshot); a SELECTED placed build piece still doesn't populate PropertiesPanel (it's edited in the paint panel) — separate pre-existing gap, flag if you want it unified. Needs rjit dev eyes (editor self-shot OOMs).",
+  "shas": [
+    "bebfd0dfd"
+  ],
+  "resolvedAt": "2026-06-26T00:41:43.326Z"
+}

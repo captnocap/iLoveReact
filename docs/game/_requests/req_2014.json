@@ -1,0 +1,10 @@
+{
+  "id": "req_2014",
+  "at": "2026-06-28T16:33:43.614Z",
+  "origin": "session:0f02d048",
+  "text": "hey how many bytes do we end up paying for foliage in the game. trees, grass, bushes. and how much memory can be allocated. i assume its huge, because i still have issues with them despawning from too many in view",
+  "status": "new",
+  "sessionId": "0f02d048-6266-4c5d-affe-6131b0e17f55",
+  "captureMode": "hook",
+  "events": []
+}

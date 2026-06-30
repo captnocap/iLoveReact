@@ -1,0 +1,37 @@
+{
+  "id": "req_2089",
+  "at": "2026-06-30T00:58:44.389Z",
+  "origin": "session:3dbb283a",
+  "text": "it did stop. its stopped again now. you said to restart it. so is why it was just running it",
+  "status": "done",
+  "sessionId": "3dbb283a-d0ec-4c16-ae77-0792cd564c91",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T01:00:12.962Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T01:09:11.909Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-30T01:14:39.835Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "THE root cause of the recovery not sticking: the cart's __fs_read host door capped readFileAlloc at 16MB. The V20 model store reads its snapshot through that door; the recovered 92-model snapshot is 23MB (6.5MB models + 16.9MB baked paint), so the read returned null, the store saw 'no snapshot', full-replayed the 575MB event log, OOM'd, and wrote a degraded 1-model snapshot — which (being <16MB) read back fine, so every dev-host boot re-degraded it (that's why the restore kept vanishing; a running watcher-supervised host also re-materialized over the install). Raised __fs_read and __fs_readfile caps to 256MB (framework/v8_bindings_fs.zig; siblings already used 64MB), committed d55cd5ef1. Proven correct: a 92-model snapshot under the read limit loads 92 on boot via the real data layer (v8cli probe) — the seam/load logic was always right, only the read cap broke it. Installed the full 23MB clean snapshot (92 models WITH paint, globalSeq=22074, events=21300, seam matches live db) while the host was stopped. Framework compiles (SHIP_RUN_PACKAGE=0 ship). Final step is the user launching 'rjit dev hmsc-int' — it will rebuild the host (fingerprint changed) and boot to the full library. All 96 models also preserved as files in recovered-models/ and a full store backup in _MODEL_RECOVERY_BACKUP_20260629/.",
+  "shas": [
+    "d55cd5ef1"
+  ],
+  "resolvedAt": "2026-06-30T01:09:11.909Z"
+}

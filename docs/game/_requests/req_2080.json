@@ -1,0 +1,30 @@
+{
+  "id": "req_2080",
+  "at": "2026-06-29T23:33:02.780Z",
+  "origin": "session:3dbb283a",
+  "text": "so uh lets say i have some crazy 60mb model does that mean i can only load one in at a time or i can load maybe many in at a time it just would not be able to import all at once",
+  "status": "review",
+  "sessionId": "3dbb283a-d0ec-4c16-ae77-0792cd564c91",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T23:33:24.631Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T23:44:25.010Z",
+      "actor": "opus-debug",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User asked whether a ~60MB model means one-at-a-time loading or whether many can coexist (just not imported all at once). Answer: many. Verified the persistence topology — Studio models do NOT use the localstore KV value at all; they persist through the editor workspace store (editors/store.ts → editorChannel → ../data) into a per-domain on-disk SQLite + JSON-snapshot store (cart/hmsc-int/data/domains/model/), bounded by disk, not by the 4MB/64MB localstore MAX_VALUE (that ceiling, raised in req_2079, governs the world editor-state and game-state blobs only). A 60MB source file is also never stored at 60MB: import decimates to the chosen Detail (≤150k tris) and normalizes, so the stored EditMesh is far smaller. Each model is its own record in the model domain's models map, so many models accumulate on disk; the genuine limit is editor responsiveness (every face is a JS object edited/painted/undone), not storage, and only the import ACTION is one-file-at-a-time (the parse+decimate spike is now small and bounded). Also fixed a bug surfaced live during this investigation: GLB import threw 'TextDecoder is not defined' because the rewrite used new TextDecoder(), which exists in the v8cli build host but not the cart runtime — swapped to the shared in-cart bytesText() (sha b07c1ab6c).",
+  "shas": [
+    "b07c1ab6c"
+  ],
+  "resolvedAt": "2026-06-29T23:44:25.010Z"
+}

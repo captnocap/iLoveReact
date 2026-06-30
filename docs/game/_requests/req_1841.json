@@ -1,0 +1,42 @@
+{
+  "id": "req_1841",
+  "at": "2026-06-25T05:39:45.921Z",
+  "origin": "session:6ff945f5",
+  "text": "hell ya that is instant! is there any way to get a better ghost outline now since we have this approach? something better than this haha [Image #1] if u can even see that, its hard lol",
+  "status": "review",
+  "sessionId": "6ff945f5-e52b-4219-9f61-6ca8ec38583b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T05:45:42.900Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T05:45:42.906Z",
+      "actor": "session-6ff9",
+      "kind": "note",
+      "text": "Better placement ghost: render the armed MESH prop as the REAL mesh, translucent (alpha 0.5), tracking the snap target — replaces relying on the faint projected wireframe (which stays for parts props + footprint guide). New host doors __compiled_world_set/clear_live_mesh_ghost + appendMeshPropNode alpha_override; LoaderIsoView pushes meshGhostRef on snap/arm change. Shipping Zig."
+    },
+    {
+      "at": "2026-06-25T05:48:37.399Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-06-25T05:52:43.805Z",
+      "actor": "session-6ff9",
+      "kind": "note",
+      "text": "USER RULING (req_1843): the mesh-zoo dev-room idea is SUPERSEDED — instead, 'Claude's Closet' = one big room of ACTUAL props in the ACTUAL map (window shopping). Compiling the one map makes all those kinds resident → instantly placeable everywhere. No separate dev-gamefile bake ('compiling the one is far better than doing all of them, that shit was silly')."
+    }
+  ],
+  "resolution": "Replaced the loader iso pane's faint projected-wireframe placement ghost with the REAL mesh rendered translucent (alpha 0.5) at the snap target, for mesh props — leveraging the same resident-mesh reference as the instant-placement fix (req_1812). world_loader gains a per-node ghost ref (setLiveMeshGhost/clearLiveMeshGhost doors __compiled_world_set/clear_live_mesh_ghost, one 20-byte keyHash,x,y,z,yaw); applyLiveMeshProps draws it through the shared appendMeshPropNode path with a new alpha_override param (a<1 routes to the transparent pass; all prior call sites pass null). JS meshGhostRef packs the armed prop kind's resident-mesh key + snap transform, LoaderIsoView pushes on each snap/arm change and clears when disarmed or on a non-mesh kind. The wireframe stays as the footprint guide + the ghost for parts props (no mesh). Also quieted the temp [live-push] log to fire only on missing doors. Shipped clean (hmsc-int rebuilt), committed. Alpha is a one-constant tweak (LIVE_MESH_GHOST_ALPHA) if the user wants it stronger/weaker.",
+  "shas": [
+    "0fea05f92"
+  ],
+  "resolvedAt": "2026-06-25T05:48:37.399Z"
+}

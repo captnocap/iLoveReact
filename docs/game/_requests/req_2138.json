@@ -1,0 +1,28 @@
+{
+  "id": "req_2138",
+  "at": "2026-06-30T06:20:14.441Z",
+  "origin": "codex:019f1624",
+  "text": "ok next i want you to create what will be used as an in-app file exploring menu, rather than procing for the systems menu to search for imports etc. i want it to be baked in and have history so that we can reduce the amount of time searching for things and more time working",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T06:20:23.523Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T06:27:02.528Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an in-app project file explorer to the hmsc workspace mock. The File menu now includes project explorer/import-source commands and Open Workspace routes into the same baked-in explorer. The explorer uses mock indexed project data, folder navigation, path/import/tag search, selected-file preview, fixed result rows, and clickable file history. Documented the direction in DESIGN_INTAKE. Also updated v8_bindings_core to match the current dirty DecimatedMesh return shape so the cart can build.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T06:27:02.528Z"
+}

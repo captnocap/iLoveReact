@@ -1,0 +1,29 @@
+{
+  "id": "req_2141",
+  "at": "2026-06-30T07:07:55.579Z",
+  "origin": "session-relay",
+  "text": "when importing a model, can we setup a system to properly store attribution info so that its all correctly accounted for when due.",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-30T07:08:09.707Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T07:18:34.438Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built a shared, modular asset-attribution system that stores 'who made this, what license, where from' for every imported model and accounts for it when due. New __file_sha256 host door content-addresses each asset so attribution follows the bytes (rename/re-download safe). All logic + UI lives in runtime/attribution/ (NOT piled into the cart): ledger.ts (load/save/upsert keyed by sha, auto-detect title/source + scrape sidecar license/readme files, deriveStatus pending-until-author+license), credits.ts (renderCredits → CREDITS.md grouped by license with a pending-warning header so nothing ships unattributed; exportCredits returns the pending count), and a reusable <AttributionPanel> + status badge. The modelview cart records every import into the ledger (keyed by sha), shows a '⚠ needs attribution' badge in the title bar, auto-opens the panel on a pending import, lets you fill author/license (quick-pick chips) and save → accounted, and export credits. Verified headless: ledger written + sha-keyed with auto-detected title/source; panel renders the fields; CREDITS.md groups third-party by license, lists Original/self-made separately, and warns on pending. Committed 760ab3986.",
+  "shas": [
+    "760ab3986"
+  ],
+  "resolvedAt": "2026-06-30T07:18:34.437Z"
+}

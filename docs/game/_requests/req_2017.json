@@ -1,0 +1,28 @@
+{
+  "id": "req_2017",
+  "at": "2026-06-28T17:01:11.726Z",
+  "origin": "session:0f02d048",
+  "text": "That worked beautifully. from 80 to 24? nice, thats a great reduction. they no longer flicker out in view.",
+  "status": "review",
+  "sessionId": "0f02d048-6266-4c5d-affe-6131b0e17f55",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T17:02:41.851Z",
+      "actor": "opus-foliage",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T17:02:41.860Z",
+      "actor": "opus-foliage",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Positive confirmation of req_2016 — user reports palm trees no longer flicker out of view and approves the 80B->24B reduction. No new code; captured the reusable per-family slim-instance technique to project memory (project_slim_instance_foliage.md) as the template for grass/bush/flower next, and noted the open lod_budget decoupling follow-up.",
+  "shas": [],
+  "resolvedAt": "2026-06-28T17:02:41.860Z"
+}

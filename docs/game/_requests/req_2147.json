@@ -1,0 +1,18 @@
+{
+  "id": "req_2147",
+  "at": "2026-06-30T07:57:03.231Z",
+  "origin": "session:e0080e48",
+  "text": "also, this one i think is more key than i often think of it, but the mesh layers and being able to paint on layers that are next to eachother / the same model but not overpainting into it would be so fucking awesome lol AND!!! TO be specific we are going to need both mesh layers and paint layers so that they live in harmony and not in two different worlds.",
+  "status": "doing",
+  "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T07:57:58.829Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

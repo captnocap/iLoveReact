@@ -1,0 +1,31 @@
+{
+  "id": "req_1879",
+  "at": "2026-06-25T17:50:19.219Z",
+  "origin": "session:60071ace",
+  "text": "i love this [Image #2] overtime we just keep adding more different data collection things about the entire game and assets and all of that like you could count the amount of pixels across textures or color variety, most used colors, most placed assets, etc.",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T17:51:24.644Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T18:29:36.188Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Two parts under this thread, both committed and verified. (1) Fixed an iso-pane camera regression the / route split exposed: the loader pane clears its external iso camera on unmount and now re-mounts on /editor, so on a settled remount it fell back to the native player-trailing GAME camera; pushCamera() now reports whether it landed and the rAF loop retries until the iso pose establishes (2f2bd8e70) — verified rjit shot --route /editor renders the iso authoring view, not the game cam. (2) Added two dashboard metrics in the growing portrait-of-your-world family: reportPlacementCensus (most-placed asset labels) and reportTextureCensus (raster texture count + total pixels read from PNG/JPEG headers only via base64ToBytes on a 4KB prefix — atob is absent and full decode would break the freeze law); both deferred/reactive panels (58d54f2f4). Pure cores unit-tested (9/9); rjit shot showed Stop Sign x101 and 17 textures / 17.8M px.",
+  "shas": [
+    "2f2bd8e70",
+    "58d54f2f4"
+  ],
+  "resolvedAt": "2026-06-25T18:29:36.188Z"
+}

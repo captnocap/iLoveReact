@@ -1,0 +1,48 @@
+{
+  "id": "req_2046",
+  "at": "2026-06-29T00:00:59.756Z",
+  "origin": "session:dde9e9a9",
+  "text": "the road / street name signs that are autopopulated are coming in backwards everywhere [Image #1] hwere is an example",
+  "status": "review",
+  "sessionId": "dde9e9a9-41b8-4a68-b5cd-4808b7b8528e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T00:01:06.019Z",
+      "actor": "opus-signs",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T00:23:55.761Z",
+      "actor": "opus-signs",
+      "kind": "note",
+      "text": "Investigated backwards street-sign text. PROVED via real-GPU headless shot (cart/sign_probe.tsx) that the baked street-sign GEOMETRY reads CORRECTLY from its facing (-Z) side: 'WENDY AVE' renders right-reading; only an artificially X-mirrored copy reads backwards. Verified in source that EVERY transform path preserves the full rotation with matching handedness (compile/propRecipes/streetSign.ts -> blockText.textLineParts; bake worldGeometry.propAt/propRotation; live overlay pieceMeshes.pushPropPartRows; no-V8 staging gpu/3d.stageStaticInstanceBytes->makeInstance with ry; shared m4lookAt/m4perspective). No mirror found in any path. Could NOT obtain a no-V8 loader shot to observe the actual compiled render: the framework tree is mid-refactor by another lane (framework/gpu/gpu.zig + engine.zig modified, new panel_window.zig, wgpu.RenderPass removed) and does not compile. Blocked on build restoration to pinpoint + verify a fix."
+    },
+    {
+      "at": "2026-06-29T01:43:54.228Z",
+      "actor": "opus-signs",
+      "kind": "note",
+      "text": "Confirmed (user) the mirror is in the COMPILED game only (no-V8 world_loader), not the editor. Editor renders signs via a texture-capture panel (StreetSign.tsx, 'HMSC AVE'); compiled renders the blockText STENCIL boxes. Ruled out a baked text decal/texture (none exists; signKinds block is temp diag only). Proved with the real baked propAt centers + the loader's translate-to-absolute-pos staging that the stencil word arrangement CANNOT mirror at any yaw — each sign reads correct from its facing side. Tried to observe a real compiled sign frame via the pre-breakage zig-out/bin/world_loader binary on a fresh bake, but the headless loader only renders the fixed spawn camera (no aim/teleport env) and the spawn sits far from any sign; injecting signs via a throwaway session failed because the bake pulls props from the stored boot key, not session placements. Still BLOCKED on a clean build (parallel lane: gpu.zig/engine.zig WIP, wgpu.RenderPass removed). Need either build restored or user help to aim at a sign."
+    },
+    {
+      "at": "2026-06-29T02:56:07.062Z",
+      "actor": "opus-signs",
+      "kind": "note",
+      "text": "ROOT-CAUSE UPDATE: the street-sign RECIPE is correct. Rendered streetSignParts('WENDY AVE') headless on the CURRENT committed framework — reads right-way-round. Crucially the rendered text FLIPPED horizontally between framework rebuilds: an early build (during session d00d's renderer refactor — panel pop-out 901f8b50a, spotlight shadows 4086a8a49, wgpu RenderPass churn) rendered ALL sign text mirrored; the current committed build renders it correct (byte-identical across re-shoots, so deterministic per-binary). So the mirror tracks a FRAMEWORK render-handedness state, not the sign geometry. Could not aim the no-V8 headless loader at a sign to confirm the compiled path directly (fixed spawn camera; bake sources signs from the boot-key SQLite store which is currently open by the live editor — won't touch). Likely the user's compiled binary was built during the flipped window. Recommend recompiling against current code + re-check; if still mirrored it is a persistent no-V8 render flip to chase in the loader."
+    },
+    {
+      "at": "2026-06-29T04:23:11.622Z",
+      "actor": "opus-signs",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Per the user's directive to stop diagnosing and just flip it: the compiled (no-V8) game renders the street-name panel's letters horizontally mirrored on the sign's facing side, persistently across builds, while the editor (which renders street signs via a separate texture-capture panel) reads fine. Fixed by negating the X of the text boxes in streetSignParts (they are laid out centred on x=0 by textLineParts), so the baked stencil reads correctly in the compiled game. Scoped to streetSignParts only — leaves the editor texture path and blockLetters untouched. Rebaked clean (zig-out/game/hmsc.gamefile); user verifies on their next compiled build.",
+  "shas": [
+    "2512e21a2"
+  ],
+  "resolvedAt": "2026-06-29T04:23:11.622Z"
+}

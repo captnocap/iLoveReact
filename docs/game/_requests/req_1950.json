@@ -1,0 +1,28 @@
+{
+  "id": "req_1950",
+  "at": "2026-06-26T00:08:56.104Z",
+  "origin": "session:26c62b07",
+  "text": "ya ok so i restarted the app, it does not work",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:09:10.890Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:20:40.899Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated the 'restarted, still doesn't work' report for the custom-floor drag-paint. Pulled the user's ACTUAL cooked-asset store: studio.thin_floor's descriptor IS correctly tagged buildPlacement:{pieceKind:'floor',snap:'grid'}. Confirmed the stream reducer stores the whole descriptor on load (buildPlacement survives), and reproduced the resolution with that EXACT descriptor through the real catalog code — catalogPieceFamily('prop.studio.thin_floor')='floor', it lands in the floor tab and not props. So the data is correct AND the req_1944 gate code is provably correct on the real data; user is on dev+auto-push so my code is running. The failure is therefore narrow (paint execution for a cooked floor, or a runtime descriptor-load gap) and not visible from reading. Ruled out a stale binary (user confirmed dev). Landed a one-press diagnostic (6705d0759, req_1955) logging the armed piece's entry.kind/family/paintKind to split the diagnosis; awaiting the user's [paintdbg] line + whether thin_floor shows in the Floor vs Props tab.",
+  "shas": [],
+  "resolvedAt": "2026-06-26T00:20:40.899Z"
+}

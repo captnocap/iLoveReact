@@ -1,0 +1,30 @@
+{
+  "id": "req_1888",
+  "at": "2026-06-25T18:37:38.134Z",
+  "origin": "session:60071ace",
+  "text": "not quite. get  the prop panel OFF the map!!",
+  "status": "review",
+  "sessionId": "60071ace-b422-48d8-a844-a6ec2f0f5029",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T18:38:15.972Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T18:47:54.963Z",
+      "actor": "session-6007",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moved the prop/piece menu (CatalogRail) OFF the map and into the editor's left rail, per the user's emphatic ask. The catalog was an overlay bolted to the bottom of the build pane and owned its armed-piece state internally; I hoisted that 'armed' state up to index.tsx and pass it (armed + onArm) to whichever map pane is mounted (LoaderIsoView default / IsoAuthor react-view), so the map renders clean and there is one shared source of truth. CatalogRail re-flows from an absolute bottom strip to a fill-its-container vertical scrolling panel and now renders as the bottom box of the rail (selected-piece / paint-skins / prop-piece). Both panes clear selection on arm via an effect, preserving the old inline onArm behaviour. A mid-refactor gap (I removed it from the map before wiring the rail) briefly made it vanish in the user's dev; that's now closed. Bundles clean; hot-reloads in dev. Committed 9256ab9c6.",
+  "shas": [
+    "9256ab9c6"
+  ],
+  "resolvedAt": "2026-06-25T18:47:54.963Z"
+}

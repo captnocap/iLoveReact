@@ -1,0 +1,31 @@
+{
+  "id": "req_1955",
+  "at": "2026-06-26T00:17:15.749Z",
+  "origin": "session:26c62b07",
+  "text": "there is space and u dont need to ship a binary i use the dev",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:18:00.960Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:37:52.912Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a one-press [paintdbg] diagnostic to IsoAuthor.onDown to split the custom-floor-paint diagnosis. The user saw NO log — which revealed the real cause: I'd been fixing the wrong pane. The editor has two iso build surfaces (IsoAuthor = React-drawn; LoaderIsoView = the live native loader pane), each with its OWN copy of the drag-paint gate. The user builds in LoaderIsoView, so my IsoAuthor-only req_1944 fix never reached them. Diagnostic served its purpose and was removed; real fix landed in req_1964 (950d8fa4e).",
+  "shas": [
+    "6705d0759",
+    "950d8fa4e"
+  ],
+  "resolvedAt": "2026-06-26T00:37:52.912Z"
+}

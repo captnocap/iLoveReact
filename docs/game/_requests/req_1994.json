@@ -1,0 +1,28 @@
+{
+  "id": "req_1994",
+  "at": "2026-06-26T03:16:26.078Z",
+  "origin": "codex:019f01b3",
+  "text": "Ok. so then relative to a road piece, where are they, i will go exactly to a coordinate u tell me to and show u it does not exist",
+  "status": "review",
+  "sessionId": "019f01b3-9f47-75e2-992c-e8693116c868",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T03:16:33.888Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T03:17:30.845Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified the generated stop-sign placement frame from the saved main map and translated it into road-relative, editor graph, and game world coordinates. No code changed; provided a concrete junction target so the user can walk to the claimed generated sign location and confirm whether it renders.",
+  "shas": [],
+  "resolvedAt": "2026-06-26T03:17:30.844Z"
+}

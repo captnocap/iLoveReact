@@ -1,0 +1,28 @@
+{
+  "id": "req_1947",
+  "at": "2026-06-26T00:00:40.544Z",
+  "origin": "session:26c62b07",
+  "text": "its still not doing it. do i need to rebuild or something.",
+  "status": "review",
+  "sessionId": "26c62b07-447f-43dc-ba21-495bf75d6e96",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T00:01:28.171Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:05:13.967Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User reported the req_1944 custom-floor drag-paint still wasn't working and asked if a rebuild is needed. Diagnosis (no new code — the req_1944 fix at 8ac64bf51 is verified correct by the cookedPiece.test.ts family test): these are .ts/.tsx changes that rjit dev hot-reloads, so NO binary rebuild is needed, but the change lives in cart/hmsc-int/game/build/ (a deep module) and with 3 sessions active the running dev host likely hadn't re-bundled it — the stale old paintKindOf reads the raw 'prop' kind and returns null, which is exactly the 'drag just rotates' symptom. Told the user to restart rjit dev (or save index.tsx to force a re-bundle). Gave the decisive diagnostic: if the custom floor now shows under the FLOOR tab it's tagged and will grid-paint after reload; if it's STILL in Props it was cooked without the Floor piece type (older/plain-prop asset) and the family-keyed fix can't retroactively apply — offered to add a 'retag existing asset' action if they have many. Awaiting the user's answer on tab vs props.",
+  "shas": [],
+  "resolvedAt": "2026-06-26T00:05:13.967Z"
+}

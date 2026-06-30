@@ -1,0 +1,30 @@
+{
+  "id": "req_2055",
+  "at": "2026-06-29T01:36:39.804Z",
+  "origin": "session:ae81d73a",
+  "text": "yeah it is good. i think, maybe im wrong but if shadows are apart of lights would make more sense to make that into the light now before we even place them",
+  "status": "review",
+  "sessionId": "ae81d73a-006a-4c08-abbc-df81d4a7c032",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T01:38:00.668Z",
+      "actor": "ae81",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T01:58:36.631Z",
+      "actor": "ae81",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built shadow-casting INTO the light at the source (per the user's point that shadows are part of a light, so the capability should be complete before placement/Studio authoring). A shadow-casting spotlight now renders scene depth from its own point of view into a 2048-square depth map, and the main mesh shader projects each fragment into that light space and PCF-samples it (3x3, textureSampleCompareLevel), darkening only the caster light's contribution where geometry occludes it. Implementation: new shadow_depth_wgsl depth-only pipeline reusing the packed-InstanceData vertex layout; ShadowUniforms + depth texture + comparison sampler added to the shared scene group0 (always bound, gated by has_shadow so no-caster frames — including the whole /compiled game today — are byte-for-byte unaffected); a self-contained depth pass before the color pass that stages opaque caster geometry (single meshes + prop/building instance batches, skipping foliage/ground/dynamic/transparent so grass and glass don't throw solid shadows). scene3d_cast_shadow node field + prop bridge; SpotLight.castsShadow defaults ON. Verified headless on cart/light_demo: a pillar throws a crisp shadow across the lit floor (scratchpad shadow_v2.png). First shadow-casting spot owns the single map today; structured to extend to a depth-array atlas for N casters + point-light cube shadows. Built atop req_2032's placed lights. Committed 4086a8a49.",
+  "shas": [
+    "4086a8a49"
+  ],
+  "resolvedAt": "2026-06-29T01:58:36.630Z"
+}

@@ -253,6 +253,12 @@ if (!(globalThis as any).__zigOS_tick) {
       if (typeof t.fn !== 'function') {
         console.error('[timer] firing non-function callback:', t.id, typeof t.fn, t.fn);
       }
+      // TICKPROBE (req_1977, TEMP): the frame partition fingered `appTick` as the
+      // ~264ms cost; appTick = __jsTick, which fires setTimeout/setInterval AND
+      // React's scheduler flush (it falls back to our setTimeout). Time each
+      // callback and name any that blows past the threshold — this discriminates
+      // "React flush (scheduler.flushWork)" from a specific gameShell/data timer.
+      const _t0 = (globalThis as any).performance?.now?.() ?? now;
       try { t.fn(); } catch (e: any) {
         // Try every reasonable way to get a message out of the thrown value.
         let desc = '(no details)';
@@ -264,6 +270,13 @@ if (!(globalThis as any).__zigOS_tick) {
           else { try { desc = JSON.stringify(e); } catch { desc = String(e); } }
         } catch {}
         console.error(`[timer] error id=${t.id} interval=${t.interval}ms: ${desc}`);
+      }
+      // TICKPROBE (req_1977, TEMP): name any callback that ate the frame.
+      const _dur = ((globalThis as any).performance?.now?.() ?? now) - _t0;
+      if (_dur > 25) {
+        let _src = '(anon)';
+        try { _src = String(t.fn).replace(/\s+/g, ' ').slice(0, 120); } catch {}
+        console.warn(`[tickprobe] callback id=${t.id} interval=${t.interval}ms took ${_dur.toFixed(1)}ms | fn: ${_src}`);
       }
       if (t.interval > 0 && !t.cleared) {
         t.due = now + t.interval;
@@ -425,6 +438,10 @@ function eventAliases(type: string): string[] {
 // Event dispatch entry from Zig — host calls this inside js_on_press eval.
 (globalThis as any).__dispatchEvent = (id: number, type: string) => {
   const host: any = globalThis as any;
+  const routeInput = host.__routeInputMaybe;
+  if (typeof routeInput === 'function') {
+    try { routeInput(id, type); } catch {}
+  }
   const stampDispatch = host.__clickLatencyStampDispatch;
   if (typeof stampDispatch === 'function') {
     try { stampDispatch(); } catch {}
@@ -480,6 +497,10 @@ if (typeof registerDispatch === 'function') {
 
 (globalThis as any).__dispatchInputChange = (id: number, inputSlot?: number) => {
   try {
+    const routeInput = (globalThis as any).__routeInputMaybe;
+    if (typeof routeInput === 'function') {
+      try { routeInput(id, 'onInputChange'); } catch {}
+    }
     const slot = typeof inputSlot === 'number' ? inputSlot : id;
     const text = getInputTextForNode(slot);
     const payload = { targetId: id, text };
@@ -491,6 +512,10 @@ if (typeof registerDispatch === 'function') {
 
 (globalThis as any).__dispatchInputSubmit = (id: number, inputSlot?: number) => {
   try {
+    const routeInput = (globalThis as any).__routeInputMaybe;
+    if (typeof routeInput === 'function') {
+      try { routeInput(id, 'onInputSubmit'); } catch {}
+    }
     const slot = typeof inputSlot === 'number' ? inputSlot : id;
     const text = getInputTextForNode(slot);
     const payload = { targetId: id, text };
@@ -518,6 +543,10 @@ if (typeof registerDispatch === 'function') {
 
 (globalThis as any).__dispatchInputKey = (id: number, keyCode: number, mods: number) => {
   try {
+    const routeInput = (globalThis as any).__routeInputMaybe;
+    if (typeof routeInput === 'function') {
+      try { routeInput(id, 'onInputKey'); } catch {}
+    }
     dispatchAliases(id, ['onKeyDown'], { targetId: id, keyCode, mods });
   } catch (e) {
     // swallow — host prints nothing for eval exceptions except via QJS itself
@@ -526,6 +555,10 @@ if (typeof registerDispatch === 'function') {
 
 (globalThis as any).__dispatchRightClick = (id: number) => {
   try {
+    const routeInput = (globalThis as any).__routeInputMaybe;
+    if (typeof routeInput === 'function') {
+      try { routeInput(id, 'onRightClick'); } catch {}
+    }
     const payload = { targetId: id, ...getPreparedRightClickPayload() };
     dispatchAliases(id, ['onRightClick', 'onContextMenu'], payload);
   } catch (e) {
@@ -535,6 +568,10 @@ if (typeof registerDispatch === 'function') {
 
 (globalThis as any).__dispatchScroll = (id: number) => {
   try {
+    const routeInput = (globalThis as any).__routeInputMaybe;
+    if (typeof routeInput === 'function') {
+      try { routeInput(id, 'onScroll'); } catch {}
+    }
     const payload = { targetId: id, ...getPreparedScrollPayload() };
     dispatchAliases(id, ['onScroll'], payload);
   } catch (e) {
@@ -544,6 +581,10 @@ if (typeof registerDispatch === 'function') {
 
 (globalThis as any).__dispatchCanvasMove = (id: number, gx: number, gy: number) => {
   try {
+    const routeInput = (globalThis as any).__routeInputMaybe;
+    if (typeof routeInput === 'function') {
+      try { routeInput(id, 'onCanvasMove'); } catch {}
+    }
     dispatchAliases(id, ['onMove'], { targetId: id, gx, gy });
   } catch (e) {
     // swallow — host prints nothing for eval exceptions except via QJS itself

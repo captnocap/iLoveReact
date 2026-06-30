@@ -1,0 +1,30 @@
+{
+  "id": "req_2025",
+  "at": "2026-06-28T20:38:50.745Z",
+  "origin": "session:390e9c09",
+  "text": "alright here is a problem, and im not sure why the disconnect because they are both the same world loader afaik. but, ok look here. this is a shot from in the game [Image #1] you can see the cover has a skin on it. alright, back in the editor, it looks like this [Image #2] you can see it has the skin on every face of it. but this isnt even true since we can see here that it isnt [Image #3] so there is a problem with this world editing step that is showing the skin on every face even when its not true",
+  "status": "review",
+  "sessionId": "390e9c09-d922-4fdb-ab83-313859818ab3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T20:38:58.336Z",
+      "actor": "390e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T20:55:15.793Z",
+      "actor": "390e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root cause: the editor loader pane and the compiled game share the same Zig world_loader, but a multi-slot cooked prop reached it through two DIFFERENT data paths. The compiled bake (worldGeometry.slotMaterials) assigns a material PER texture slot, so the game rendered each face correctly. The LIVE editor overlay (meshPropLivePush -> appendLiveMeshRef) took a documented shortcut: wholePropMaterialId grabbed the FIRST applied skin and the loader drew ONE node over the whole mesh with it, smearing that one skin (the floral) onto every face. Fix lands the deferred per-face follow-up: the live mesh-ref wire format is now variable-stride (24-byte header + matCount u32 per-slot material hashes); meshPropLivePush resolves one live skin per cooked-asset texture slot keyed by partTextures[slot.id] (the same key the bake uses), and appendLiveMeshRef mirrors the baked slotted draw (base + one node per slot, each on its own skin or the mesh's baked atlas). Per-slot geom keys are cached once per (meshHash,slot) so the every-frame live draw never allocPrints. Glass/leaf and no-slot/imported props keep their prior behavior; the compiled bake path is untouched. Built clean (rjit ship hmsc-int). Needs the user's visual check in rjit dev — place/re-skin a multi-slot prop and confirm the editor pane now matches /compiled.",
+  "shas": [
+    "2f45fbfd8"
+  ],
+  "resolvedAt": "2026-06-28T20:55:15.792Z"
+}

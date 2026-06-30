@@ -1,0 +1,30 @@
+{
+  "id": "req_1943",
+  "at": "2026-06-25T23:53:06.812Z",
+  "origin": "session:4f39ae52",
+  "text": "lets change that so that i can select something that has no skin that isnt placed, skin it up and then place it out without having to come back around with my thumb in my ass and do double the work",
+  "status": "review",
+  "sessionId": "4f39ae52-6700-44dd-85b7-8841be438ab8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T23:53:24.105Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-26T00:08:54.050Z",
+      "actor": "4f39",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Pre-placement skinning: hold an unplaced prop/piece, skin it, drop it already-dressed. FacePainter gained a HELD MODE — with nothing placed selected but an item armed, it builds a synthetic piece carrying a staged SkinDraft so the faces/parts row + per-face wear render exactly as a placed piece, and skin/color picks route to onArmedDraftChange instead of committing to the (absent) world. The cart (index.tsx) owns the draft: reset when the armed item changes, persisted across repeated placements so you can stamp many dressed copies. One injection seam at the commit boundary (commitPlacement/commitPlacements wrapping commitBuildEvent/s) folds draft.skin/partTextures into every piecePlaced placement, so it works in BOTH the loader pane and the react IsoAuthor without touching either placement site. Plumbed armed+armedDraft+onArmedDraftChange index→RightPanel→FacePainter. Built clean. Committed dc1a546fd. Held-item TEXT staging (signs) is still placed-only, noted as a follow-up. Needs rjit dev verification (editor self-shot OOMs).",
+  "shas": [
+    "dc1a546fd"
+  ],
+  "resolvedAt": "2026-06-26T00:08:54.050Z"
+}

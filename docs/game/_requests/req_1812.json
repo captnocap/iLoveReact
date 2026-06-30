@@ -3,7 +3,7 @@
   "at": "2026-06-24T19:08:42.761Z",
   "origin": "session:edc880d0",
   "text": "right, im well aware of the zig changes and rebuild needed. it notifies me every time in app to rebuild. so im always up todate. i still do not see the item place though. but i know the item placed bercause i can click its invisible box after placing it",
-  "status": "doing",
+  "status": "review",
   "sessionId": "edc880d0-57ef-4fc0-8ae6-7cb21db91bb1",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,31 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-06-25T05:18:09.928Z",
+      "actor": "session-6ff9",
+      "kind": "note",
+      "text": "Layer 1 (b704d3dfc): parts-props render live in the loader overlay via resolvePropParts. Layer 2 (in flight): MESH props (imported/cooked like 'pepes') render live by REFERENCING an already-resident mesh — new host doors __compiled_world_set/clear_live_mesh_props, world_loader applyLiveMeshProps appends a mesh-prop draw per ref each frame (FNV-1a key-hash → loaded mesh, material_ref 0 = no per-frame alloc), JS meshPropLiveRefs packs (hash,x,y,z,yaw). Shipping the Zig now."
+    },
+    {
+      "at": "2026-06-25T05:19:50.013Z",
+      "actor": "session-6ff9",
+      "kind": "note",
+      "text": "USER RULING (req_1836): the parts-props vs mesh-props split is confusing to both of us — soon FOLD the ambiguity, converging on the MESH approach as the canonical one prop representation (user: 'the mesh approach is the better one imo'). Fold = preserve parts-props' behaviors, but every prop becomes addressable as a resident-mesh reference. Deferred follow-up, pairs with the mesh-zoo dev room."
+    },
+    {
+      "at": "2026-06-25T05:40:21.855Z",
+      "actor": "session-6ff9",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Placed mesh props (pepes etc.) now render INSTANTLY in the loader iso pane with no rebake — user confirmed 'that is instant'. Root cause: the live overlay only handled box/parts geometry; mesh props (imported genmesh / Studio-cooked) carry real mesh assets and were skipped, and a pure prop placement bumps mapBuildRev not worldRev so it never baked on its own → forever invisible. Fix renders a just-placed mesh prop by REFERENCING an already-resident mesh (the user's 'once one X exists the next is a reference' model): new host doors __compiled_world_set/clear_live_mesh_props carry (FNV-1a keyHash,x,y,z,yaw) per placement; world_loader.applyLiveMeshProps appends a real mesh-prop draw per ref each frame (hash→loaded mesh via built-once map, material_ref 0 = the mesh's own baked texture, no per-frame alloc), surviving both streaming and monolithic node paths. Parts-props also now render live via resolvePropParts. SHAs b704d3dfc (parts), 89c32b54e (mesh). Follow-ups tracked: mesh-zoo dev room for never-placed kinds + folding the parts/mesh split onto the mesh approach (req_1836).",
+  "shas": [
+    "b704d3dfc",
+    "89c32b54e"
+  ],
+  "resolvedAt": "2026-06-25T05:40:21.855Z"
 }

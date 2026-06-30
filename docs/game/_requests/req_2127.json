@@ -1,0 +1,30 @@
+{
+  "id": "req_2127",
+  "at": "2026-06-30T04:57:52.304Z",
+  "origin": "session:47bb26c9",
+  "text": "oh sorry i should be more clear, close up it doesnt really work either, but close up i could see it was staying within a face,",
+  "status": "review",
+  "sessionId": "47bb26c9-be86-45cb-8d46-c3abbc60ea02",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T05:13:03.672Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T05:13:03.681Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarification of req_2126 (close-up it also mis-paints but stays cleanly WITHIN a face) — addressed by the same fix (sha b362eca79). The clarification was the key insight: per-face fill was always correct (paint stays within one triangle), so the wrong-face selection was the raycast picking a non-visible back-face. pick() now prefers the nearest front-facing (visible) face. Delivered on req_2126.",
+  "shas": [
+    "b362eca79"
+  ],
+  "resolvedAt": "2026-06-30T05:13:03.681Z"
+}

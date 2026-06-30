@@ -1,0 +1,30 @@
+{
+  "id": "req_1898",
+  "at": "2026-06-25T20:01:59.558Z",
+  "origin": "handoff-resume",
+  "text": "start next with a /hand-over and they need to start from stepping aside and creating a proper pipeline for getting a proper image of a model since these are just black boxes with tiny little shits in them i can barely see",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-06-25T20:02:02.101Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T20:06:40.215Z",
+      "actor": "session-resume",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Phase 1 of the model->image work landed and hot-reloads in rjit dev (58da948b9): the prop tiles were unrecognizable because a single FIXED camera framed every prop the same, so most rendered as a tiny speck. solveThumbCamera now auto-frames each prop from its own propKindDefinition bounds (bounding sphere from height+footprint, camera backed off by radius/tan(fov/2)) so the model fills its tile; tiles also went from native cameras (12 fighting for one host orbit controller) to static product-shot cameras and grew 82x66->92x84. This is the direct fix for the 'tiny little shits in black boxes' complaint. Phase 2 (render once -> cached PNG -> cheap Image tiles) is fully designed and documented in DASHBOARD_PLAYBOOK.md (696417c57): the entire downstream half already exists (image.ts encode + the cooked-asset blob cache); the only missing piece is an offscreen-3D->RGBA readback, which needs a new framework host primitive (renderDetached + a copy_src readback driven by a one-shot scene3d_bake_key node flag) and therefore a Zig rebuild. Holding Phase 2 for a go-ahead since it's a framework-level addition + a global rebuild that races with parallel lanes, and Phase 1 may already make a bounded page of 12 page smoothly.",
+  "shas": [
+    "58da948b9",
+    "696417c57"
+  ],
+  "resolvedAt": "2026-06-25T20:06:40.215Z"
+}

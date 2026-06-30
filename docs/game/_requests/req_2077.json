@@ -1,0 +1,30 @@
+{
+  "id": "req_2077",
+  "at": "2026-06-29T20:14:57.485Z",
+  "origin": "session:bd08881c",
+  "text": "cool on the copy, will you make it so i can just copy the skin properties so that i can for example point at a wall piece and then copy it and then be able to paint it and not do the single copy paste",
+  "status": "review",
+  "sessionId": "bd08881c-7228-4ea2-bf89-72931d1dafbb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T20:15:04.727Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T20:27:25.170Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built a 'skin brush' so re-skinning isn't one-piece-at-a-time copy-paste. Flow: select a wall in the loader pane → hit 'copy skin → brush' in the paint panel → the piece's whole look is held → click other pieces in the loader pane to stamp that look onto them; the brush stays armed so you paint a block in a few clicks, Esc or 'stop' ends it. Implemented as a new Armed variant {kind:'skin', look} (PieceLook) that reuses the existing arm/disarm/clear-selection plumbing — the held brush IS the copied look. Added a shared skinBrush.ts kit (pieceLook/lookHasContent/lookLabel/skinStampEvents) and moved propPieceParts there so the copy side (FacePainter) and stamp side (LoaderIsoView) share one source. It's geometry-blind: walls carry a face BuildSkinSet, props carry per-part textures filtered to the target's own parts, and the stamp commits the same pieceSkinSet/piecePartTextureSet events FacePainter already uses. Verified with a clean SHIP_RUN_PACKAGE=0 build of hmsc-int (editor self-shot OOMs per known limit, so verification is build + commit-stream parity).",
+  "shas": [
+    "d31a0d4a8"
+  ],
+  "resolvedAt": "2026-06-29T20:27:25.170Z"
+}

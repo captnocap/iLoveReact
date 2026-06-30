@@ -1,0 +1,28 @@
+{
+  "id": "req_1931",
+  "at": "2026-06-25T22:58:04.879Z",
+  "origin": "session:67264656",
+  "text": "how do i get numbers myself because i want to actually feel it",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T22:58:30.803Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:05:44.428Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Superseded by req_1933. The user clarified they don't care whether the numbers come via console or a HUD — they just couldn't READ them because per-frame probe spam ([hb]/[r3d-census]/[ground-pass]) was flooding the terminal. Fixed by silencing that spam (req_1933, sha f030a19ea) so the existing [edit-latency] console lines are readable, rather than building a separate on-screen HUD. No HUD code shipped; reopen if a live in-pane readout is wanted later.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T23:05:44.428Z"
+}

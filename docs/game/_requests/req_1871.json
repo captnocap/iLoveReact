@@ -1,0 +1,28 @@
+{
+  "id": "req_1871",
+  "at": "2026-06-25T16:33:00.826Z",
+  "origin": "codex:019efd31",
+  "text": "loading a list of 1806 shaders chokes lets be a bit more realistic in the sorting here so i can actually browse them",
+  "status": "review",
+  "sessionId": "019efd31-8050-79d0-84ae-54d775a7e51d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T16:33:12.181Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T16:34:41.221Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reduced the material picker load from the previous all-quality shader preset blast to a browse tier that only registers standard-quality authored takes. All 1,684 generated preset ids still exist and compile can still resolve them by id, but TEXTURE_REGISTRY and assignable material browsing now include only 340 browse presets plus the base recipes, bringing the built-in registry to 462 entries instead of loading the full 1,806-item shader list. Tests now pin that nonstandard qualities stay out of the normal picker while remaining resolvable for compile/back-compat.",
+  "shas": [],
+  "resolvedAt": "2026-06-25T16:34:41.220Z"
+}

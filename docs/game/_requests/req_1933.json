@@ -1,0 +1,30 @@
+{
+  "id": "req_1933",
+  "at": "2026-06-25T22:59:44.273Z",
+  "origin": "session:67264656",
+  "text": "also, please can u silence this shit its just spamming nonsense [ground-pass] seen=0 collected(gcount)=0 drawn=0 pool_cap=128 (dedicated inst buffer — foliage can't starve it)\n[r3d-census] children=8 inst_seen=0 inst_collected=0 mcount=4 tcount=0 geo_cache_len=666 retained=388k/3670k verts\n[ground-pass] seen=0 collected(gcount)=0 drawn=0 pool_cap=128 (dedicated inst buffer — foliage can't starve it)\n[js.warn] [hb] ~51fps  total 20.73ms  DOMINANT=paint  tick 0us layout 710us paint 17.02ms gpu 2.89ms other 110us  | present 46us bridge 14us V8 GC — (×0, never fired)  | rects 568 glyphs 3419 atlas 804 nodes 2173 scene3d{inst 8750 draws 821 meshes 8750 dropped 0 children 8750}\n[r3d-census] children=8 inst_seen=0 inst_collected=0 mcount=4 tcount=0 geo_cache_len=666 retained=388k/3670k verts\n[ground-pass] seen=0 collected(gcount)=0 drawn=0 pool_cap=128 (dedicated inst buffer — foliage can't starve it)\n^[[r3d-census] children=8 inst_seen=0 inst_collected=0 mcount=4 tcount=0 geo_cache_len=666 retained=388k/3670k verts\n[ground-pass] seen=0 collected(gcount)=0 drawn=0 pool_cap=128 (dedicated inst buffer — foliage can't starve it)\n[r3d-census] children=8 inst_seen=0 inst_collected=0 mcount=4 tcount=0 geo_cache_len=666 retained=388k/3670k verts\n[ground-pass] seen=0 collected(gcount)=0 drawn=0 pool_cap=128 (dedicated inst buffer — foliage can't starve it)\n^C",
+  "status": "review",
+  "sessionId": "67264656-2ec6-4893-b2b3-913c769bf035",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T23:00:19.581Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T23:05:44.418Z",
+      "actor": "session:67264656",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Silenced the three per-frame dev-terminal probes that were flooding the console and burying the [edit-latency] readout the user wants to read. (1) The [hb] heartbeat (perfWatch startPerfHeartbeat — a req_1735 TEMP probe started unconditionally from index.tsx) now returns early unless globalThis.__perfHeartbeat is set — opt-in, off by default. (2) The [r3d-census] and [ground-pass] diagnostics in gpu/3d.zig (req_0727) printed every 120 frames unconditionally; both are now gated behind a cached RJIT_R3D_CENSUS env flag (mirrors the existing RJIT_PERFLOG/censusOn pattern). Default is quiet so the per-verb edit-latency lines read clean in the terminal. The heartbeat fix is cart-side and hot-reloads immediately (the worst spammer, gone now); the two census gates compile clean (ReleaseFast) and land on the next dev-host rebuild. Re-enable either probe deliberately when debugging (set the global / the env). req_1931 (an on-screen HUD) is moot — the user said console is fine, they just needed the spam gone.",
+  "shas": [
+    "f030a19ea"
+  ],
+  "resolvedAt": "2026-06-25T23:05:44.417Z"
+}

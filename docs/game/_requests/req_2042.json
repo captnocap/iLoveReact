@@ -1,0 +1,30 @@
+{
+  "id": "req_2042",
+  "at": "2026-06-28T22:08:07.446Z",
+  "origin": "session:5dc68f2d",
+  "text": "ok how about in the studio a preview button that will show the player model on the mesh depending on the rigging",
+  "status": "review",
+  "sessionId": "5dc68f2d-3149-4c05-b33d-c06b196b7eda",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T22:09:12.645Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T22:14:20.341Z",
+      "actor": "5dc6",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the Studio seat-preview the user asked for: a 'preview seats' toggle (appears beside the scale-ghost button once at least one face is rigged) places the player model on the mesh exactly where the seat rig puts it — sit or lay per the tagged head, one occupant per derived pin (a booth shows several side by side, a bed shows figures lying down), facing derived from the back/head faces. It updates live as you tag faces and the button shows the capacity (xN). Implementation reuses the viewport's existing scale-ghost figure infra (FigureMeshes + CharacterCaptures) and the SAME derivation the cook runs — I extracted riggedFacesFor() in cookedAsset.ts so the cook and the preview share one resolver and the preview can never drift from what Compile bakes. Whole hmsc-int cart bundles clean (exit 0); cook 26/26 holds. The live look is the user's to confirm in rjit dev.",
+  "shas": [
+    "ee3fa4e13"
+  ],
+  "resolvedAt": "2026-06-28T22:14:20.341Z"
+}

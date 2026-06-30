@@ -1,0 +1,28 @@
+{
+  "id": "req_2121",
+  "at": "2026-06-30T04:31:59.760Z",
+  "origin": "codex:019f16c9",
+  "text": "oh, so, actually first start by explaining to me exactly how the current approach works, since this will help clarify what is actually relevant and what will be soon phased away",
+  "status": "review",
+  "sessionId": "019f16c9-c9f4-7d63-86f1-4a12cf41882c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T04:32:11.420Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T04:32:47.169Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained the current hmsc-int Compile path without making code changes: distinguished the headless compile harness from the editor game-file bake, traced the button through GameState persistence, TS/V8 bake, RJMP map/gamefile packing, content-addressed assets, and Zig loader construction, then identified which parts are durable versus transitional for the planned Zig compiler work.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T04:32:47.169Z"
+}

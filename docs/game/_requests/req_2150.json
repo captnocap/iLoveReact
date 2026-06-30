@@ -1,0 +1,28 @@
+{
+  "id": "req_2150",
+  "at": "2026-06-30T08:07:49.553Z",
+  "origin": "codex:019f1624",
+  "text": "yes, and so one thing is in the current painting tools, there is a dithering brush, well, we need to treat that brush as something like its own special type of authored layer. and this same thing is going to also apply to shaders in general, as here let me show you what ive been cooking up design wise. [Image #1]",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T08:08:03.510Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T08:09:04.385Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Documented the user's shader palette/dithering-layer direction in cart/hmsc-workspace-mock/DESIGN_INTAKE.md. Captured that the dither brush should author a procedural/effect layer with mask and params, not destructive dithered pixels; generalized the same rule to shader, palette, ramp, pigment, and world-sampled layers; noted implications for current shared paint layers and shader recipe/materialize pipeline.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T08:09:04.385Z"
+}

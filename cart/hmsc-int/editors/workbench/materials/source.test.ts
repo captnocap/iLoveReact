@@ -7,6 +7,7 @@ import { DECAL_DOC_VERSION, emptyDecalDoc } from '../../../game/textures/decal';
 import type { ShaderSpec } from '../../../game/textures/shaders';
 import type { FieldSpec, PanelSpec } from '../../../shell/fields';
 import { materialFamily, materialLabel, materialPickOptions } from './chooser';
+import { assignableMaterialCatalog } from './catalog';
 import { createMaterialStore, type MaterialTwigAdapter, type StoredMaterialSummary } from './store';
 
 const SPEC: ShaderSpec = {
@@ -208,12 +209,23 @@ test('shared chooser contract groups every material consumer the same way', () =
     { id: 'a-concrete', label: 'Concrete' },
     { id: 'brickRed', label: 'Brick Red' },
   ]);
-  assertEqual(materialFamily('a-concrete'), 'a-family', 'a- prefix groups under its family');
-  assertEqual(materialFamily('brickRed'), 'misc', 'unprefixed material ids pool under misc');
-  assertEqual(opts[0].group, 'a-family', 'chooser option carries the family');
-  assertEqual(opts[1].group, 'misc', 'chooser option carries misc');
+  assertEqual(materialFamily('a-concrete'), 'Unsorted Materials', 'board-letter ids do not create visible families');
+  assertEqual(materialFamily('brickRed'), 'Unsorted Materials', 'unprefixed ids use the fallback shelf');
+  assertEqual(materialFamily('custom:old'), 'Stored Materials', 'stored ids have a useful fallback shelf');
+  assertEqual(opts[0].group, 'Unsorted Materials', 'chooser option carries the fallback shelf');
+  assertEqual(opts[1].group, 'Unsorted Materials', 'chooser option carries the fallback shelf');
   assertEqual(materialLabel(opts, 'a-concrete'), 'Concrete', 'shared display label resolves from chooser rows');
   assertEqual(materialLabel(opts, 'missing'), 'missing', 'unknown ids remain readable');
+});
+
+test('assignable material catalog includes the browsable standard shader presets', () => {
+  const rows = assignableMaterialCatalog();
+  const preset = rows.find((r) => r.id === 'n-floral-wallpaper--v2--std');
+  assert(preset !== undefined, 'baked wallpaper preset is assignable');
+  assertEqual(preset!.label, 'Floral Wallpaper · Blue China · Std', 'preset row carries material/take/quality label');
+  assertEqual(preset!.group, 'Wallpaper & Interior Walls', 'preset row carries semantic shelf');
+  assertEqual(preset!.source, 'preset', 'preset row is tagged separately from tunable recipes');
+  assert(!rows.some((r) => r.id === 'n-floral-wallpaper--v2--max'), 'nonstandard quality presets stay out of the normal picker');
 });
 
 finish('workbench/materials');

@@ -1,0 +1,31 @@
+{
+  "id": "req_1834",
+  "at": "2026-06-25T05:17:30.716Z",
+  "origin": "session:9be2276f",
+  "text": "oh hey dude can u look into the water painting tool for me. we made some sick ass water with waves and then put our thumb up our ass and never wired it up properly lmao",
+  "status": "review",
+  "sessionId": "9be2276f-3b15-40c9-9cbf-c9c5ce57d365",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T05:17:43.520Z",
+      "actor": "9be2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T16:52:37.260Z",
+      "actor": "9be2",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rebuilt the water painting tool into a real beach, both phases. Diagnosis: the tool WAS wired (paint→chunk.water→floorsToWaterBodies→WaterBody→~water~ render+compile) but felt dead because painting un-dug ground silently wrote nothing, the foam was keyed to the mesh's rectangular UV edge (chunk border, not the waterline), there was no depth signal so the surface was flat blue, and water meshes used a constant version key that never re-baked on edit. Per the user's ruling (water always rides a negative heightfield; pools are props), I kept that model and added: an end-to-end per-cell DEPTH grid (chunkFloor.floorToWaterBody → WaterBody params → primitives host-heightfield fast path scene3dHfDepths → v8_app decode → layout.Node → gpu/3d.zig hfGen bakes depth into top-surface UV.x, skirt=deep); shaders.zig water_wgsl now colours by real depth (light shallows→deep) and draws a shoreline foam/run-up band hugging the true waterline (depth→0) whose reach is varied along the coast by large-scale noise and washed in/out over time (~1m to ~15m on a gentle slope), with the shallowest film fading into wet sand; the req_1840 edge rule (a shallow cell stays wet only near genuinely deep water ≥0.5m) so the 0-contour reads as clean beach; a content-hashed dyn key so edits re-bake; and a no-op hint ('lower terrain below 0 first') replacing the silent dead stroke. Phase 2 carried it into /compiled (the user's verify path): WATER lump v2 ships the depth grid (worldGeometry.encodeWaterBodies), constructor.zig decodeWater reads it (v1 back-compat), world_loader.zig feeds it to the same hfGen/shader. Verified: ship build clean, rjit game bake PASS (v2 encode), rjit game shot PASS (v2 decode + no-V8 render, 0 V8 symbols). Not yet visually confirmed with an actual painted beach (current map has no water + paintable content can't be headless-captured) — to see it: carve a 0→-8 slope with the terrain tool, paint water over it, recompile. Shas c9749f329 (editor) + 93b239fab (compiled).",
+  "shas": [
+    "c9749f329",
+    "93b239fab"
+  ],
+  "resolvedAt": "2026-06-25T16:52:37.260Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2101",
+  "at": "2026-06-30T03:18:57.494Z",
+  "origin": "codex:019f1624",
+  "text": "Let me give you concrete reason why v20 is wrong. as it stands, v20s approach was implemented, and i never had session rewind capability. infact, i never even had leave the route and come back to undo history, i barely had hotreload history. now, while you may look at see that all the capability to rewind was made, none of it was ever exposed to me properly. so effectively i now see it as the wrong approach since i learned how to work around it anyways",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T03:19:12.193Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T03:19:39.867Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's concrete V20 correction rationale in cart/hmsc-workspace-mock/DESIGN_INTAKE.md. Added that V20's persistent history approach was implemented but never gave the user usable session rewind, reliable route-leave/return undo, or meaningful hot-reload history; internal rewind capability that is not exposed through the product does not count as success. Captured the design conclusion that the new eventbus/autosave/backup approach should prioritize observable recoverable editor behavior over invisible total-history promises, and that any future history/recovery must be a clear user-facing workflow. No implementation changes were made; this should later be reconciled as a formal V20 amendment so oracle output stops privileging the old model.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T03:19:39.866Z"
+}

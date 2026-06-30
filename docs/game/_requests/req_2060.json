@@ -1,0 +1,30 @@
+{
+  "id": "req_2060",
+  "at": "2026-06-29T02:40:14.069Z",
+  "origin": "session:2eacb40b",
+  "text": "we dont have that route anymore. so i cant check that. it should be gone to prevent this exact same thing from occuring.",
+  "status": "review",
+  "sessionId": "2eacb40b-8a1e-4c58-a8d4-b7c3ab9f4aea",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T02:40:45.963Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T03:17:39.314Z",
+      "actor": "2eac",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Deleted the orphaned /test PlayRoute surface that no longer mounts on any route. PlayRoute.tsx + PlayTestRoute.tsx were self-referential dead code (the editor shell moved to the loader pane / compiled native world), and req_2056's traffic had been wired into PlayRoute where it was invisible on the surface the user actually checks. Removed both files plus the React TrafficVehicles layer that targeted them, and trimmed editors/build/viewport.test.ts down to the two guards that still pin the live Embodied substrate (the PlayFold source-shape cases and an already-stale /test-mount assertion went with the files). Cart bundles clean; traffic sim suite stays 4/4. game/traffic (GAME_TRAFFIC) is intentionally kept as the bake-time route source for the native traffic re-home (req_2056).",
+  "shas": [
+    "c83187a0c"
+  ],
+  "resolvedAt": "2026-06-29T03:17:39.314Z"
+}

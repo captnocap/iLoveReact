@@ -1,0 +1,36 @@
+{
+  "id": "req_1864",
+  "at": "2026-06-25T14:00:18.666Z",
+  "origin": "session:9a80504f",
+  "text": "the other day i asked if we could have the building pieces be starters in the mesh editor. we got this. i then asked if i could specificaly get the wall with the door, since i wanted to make some actual doors, not just a black block in the center. so we got the wall with the door. and then so i made a wall with a door on it, yet, there is no compile out that lets you do exactly what im trying to purpose here, being a door on a wall. that being said, lets add it in",
+  "status": "review",
+  "sessionId": "9a80504f-e7fd-40c1-b6cb-5bd524a8db25",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T14:00:30.047Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-25T16:50:52.724Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the 'compile a wall-with-a-door into a real door' feature end to end for the compiled-first flow. (1) The Door Wall / Garage Door mesh-editor seeds now open as two parts, Door Frame + Door Leaf, so the leaf is detailable on its own and identifiable downstream. (2) The Compile Asset dialog gained a 'Door' piece type (+ Walk / Vehicle garage toggle). (3) The cook measures the leaf into descriptor.doorPanel, ships it as a trailing toggleable mesh sub-range, and EXCLUDES it from the static collider so the doorway is walkable when open; the catalog opens a room portal. (4) The bake renders the painted leaf (last MESH_PROPS slot) and carries door meta in MESH_PROPS v6 (MeshPropDoor). (5) The native loader (world_loader.zig) turns that leaf slot into a live two-state door: body islands stop before the leaf, one parked-when-open rect per door, the custom leaf NODE drops on open, and E within reach toggles it — reusing the DOORS-0611 machinery, custom art as the leaf. Verified: seedFromPiece/cookedPiece/cookedAsset/meshProps/worldDoors suites green under v8cli, rjit game bake + shot PASS (clean ReleaseFast build, existing doors intact). DEFERRED: the React /test embodied view's two-state for cooked doors is a separate render-subsystem change (hide the leaf sub-range in <Prop> + closed-state collider); /compiled and the editor loader pane (same loader) already work, which covers the compiled-first loop. Authoring confirmed working by the user in rjit dev.",
+  "shas": [
+    "c7b5fe780",
+    "092692ccc",
+    "171c0bdfb",
+    "b6fececcb",
+    "f654430c0",
+    "8443afb7e",
+    "5474957fc"
+  ],
+  "resolvedAt": "2026-06-25T16:50:52.723Z"
+}

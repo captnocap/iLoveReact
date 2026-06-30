@@ -1,0 +1,18 @@
+{
+  "id": "req_1881",
+  "at": "2026-06-25T18:01:17.208Z",
+  "origin": "session:9be2276f",
+  "text": "lmao ok so uh hm. i must be jesus christ because i can walk on water. haha also the 'waves coming up on shore' are overextending by like hundreds of meters it looks like lol the city is gonna flood",
+  "status": "doing",
+  "sessionId": "9be2276f-3b15-40c9-9cbf-c9c5ce57d365",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-25T18:03:33.180Z",
+      "actor": "9be2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

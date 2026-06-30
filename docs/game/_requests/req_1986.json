@@ -1,0 +1,18 @@
+{
+  "id": "req_1986",
+  "at": "2026-06-26T02:42:19.668Z",
+  "origin": "session:7a3a0337",
+  "text": "so let me get this straight.\n\ni have a map\ni make an edit to it\nthat edit is now my actual authored map\ni go to make a 2nd edit to it \nit snapshots before the 2nd edit \nand then lets the 2nd edit it\n\n\nis this true? and if so, why? why woulod we snapshot a state we literally know what it is right there already",
+  "status": "doing",
+  "sessionId": "7a3a0337-e7d9-4806-a817-5f585d37a379",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-26T02:42:36.477Z",
+      "actor": "7a3a",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

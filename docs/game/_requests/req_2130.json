@@ -1,0 +1,28 @@
+{
+  "id": "req_2130",
+  "at": "2026-06-30T05:05:27.586Z",
+  "origin": "codex:019f16c9",
+  "text": "thats really good news. now, how about what if we were to compile the world from a cached state, as, clearly, when making the game, its not like i am going to be recompiling an entirely new map, its going to be incrementally adding more and more",
+  "status": "review",
+  "sessionId": "019f16c9-c9f4-7d63-86f1-4a12cf41882c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T05:05:40.710Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T05:06:06.155Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained how cached/incremental compile changes the scaling model: the previous TS/Zig parity benchmark was a cold full-world bake, while a cached compile should track dirty chunks/assets and rebuild only changed RLE chunks, geometry chunks, manifests, and content-addressed assets. Also called out the remaining monolithic-file bottleneck: if the final gamefile is always rewritten as one blob, output assembly stays O(total bytes), so the durable direction is chunk/content-addressed map payloads plus a small manifest update.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T05:06:06.155Z"
+}

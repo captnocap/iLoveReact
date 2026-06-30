@@ -1,0 +1,30 @@
+{
+  "id": "req_2041",
+  "at": "2026-06-28T21:34:33.479Z",
+  "origin": "session:15799c87",
+  "text": "ok the new pieces came in, is it possible you can uh... apply it to all existing pieces in the data lol",
+  "status": "review",
+  "sessionId": "15799c87-1d34-4279-9cd7-dee2765a8997",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-28T21:36:22.036Z",
+      "actor": "session-1579",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-28T21:48:28.228Z",
+      "actor": "session-1579",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Existing pieces placed ON the old fat 0.2 floor carried a baked +0.2x(floors-below) Y offset and floated 0.15x above the new thin floor (liftWallsOntoFloors only lifts, never lowers). Wrote cart/hmsc-int/tools/thinFloorMigrate.ts which appends one pieceMoved event per piece through the append-only world stream (fully undoable, no binary surgery) retargeting y_new = floor(y) + 0.05*k where k=floors-below (frac = 0.2*k). Backed up the data dir first, dry-ran, then applied to 603 pieces across 3 maps (main 464, untitled-3 101, untitled-12 38); idempotent re-run finds 0. Editor per-map gamefiles + /compiled boot key re-bake from the fixed snapshot on next Compile.",
+  "shas": [
+    "5448c5592"
+  ],
+  "resolvedAt": "2026-06-28T21:48:28.228Z"
+}

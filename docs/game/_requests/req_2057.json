@@ -1,0 +1,30 @@
+{
+  "id": "req_2057",
+  "at": "2026-06-29T02:19:35.790Z",
+  "origin": "session:753c14b3",
+  "text": "look at this shape [Image #5] ok now if u can see. there is some weird mis-shape but they are identical on each side. but look at the white on the right face vs the left and more importantly look at the shape that is made from faces [Image #6] [Image #7] so same vertex position mirror but the faces one of t hen is like concave and the other isnt or something idk",
+  "status": "review",
+  "sessionId": "753c14b3-6396-4e5b-a2f4-824667910a4b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-29T02:19:46.627Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-29T02:26:12.806Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the mirrored-quad shape mismatch the user reported (left face convex, right face concave, mismatched white/gray shading despite identical mirrored vertices). Root cause: editMeshToGeometry fan-triangulated every face from loop[0], which for a quad always cuts the loop[0]->loop[2] diagonal. A mirror twin's loop is reflected AND reversed, so the same rule cut the OTHER diagonal — a non-planar quad buckled one way on the left and the opposite way on the right. Added quadTriPositions(), which chooses a quad's diagonal purely from geometry and the outward face normal (prefer the diagonal whose two tris both stay convex — the same rule Split Quads uses; tiebreak on the shorter diagonal), both reflection-invariant so a face and its twin pick corresponding diagonals. Wired it into editMeshToGeometry (fixes both the live Studio viewport and the cooked/baked asset, which share that lowering) and refactored splitQuad to reuse the same helper so the split matches what is rendered. Added a regression test proving a quad and its reflected+reversed twin fold along corresponding diagonals; editMesh 102/102, cookedAsset 26/26, meshPaint 15/15 green.",
+  "shas": [
+    "dbd9a768e"
+  ],
+  "resolvedAt": "2026-06-29T02:26:12.806Z"
+}
