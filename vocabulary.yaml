@@ -274,23 +274,6 @@ entries:
   defined_in: runtime/
   added_at: '2026-05-18T16:43:35.606234+00:00'
   added_by: vocabulary_add
-- term: Explore
-  category: convention
-  definition: The built-in Explore/Task/Agent subagent tool. BANNED in this repo.
-  antipatterns:
-  - Do NOT invoke Explore, Agent, or any Task subagent — measured ~57% false-claim
-    rate on this codebase (e.g., claimed frozen tsz/ contained .map() when it did
-    not)
-  - Do NOT delegate 'does this feature exist?' to a subagent — read source directly
-    with Read/Grep/Glob/Bash
-  - When in plan mode, write the plan yourself — do NOT spawn a Plan subagent (loses
-    context, burns tokens)
-  related_terms:
-  - supervisor
-  - worker
-  defined_in: CLAUDE.md
-  added_at: '2026-05-18T16:43:40.187377+00:00'
-  added_by: vocabulary_add
 - term: debug build
   category: phrase
   definition: A non-release build of a cart. Historically invoked as 'scripts/ship
@@ -362,15 +345,12 @@ entries:
 - term: supervisor
   category: noun
   definition: The orchestrating Claude session in a multi-pane kitty layout. Coordinates
-    parallel worker sessions; does not lose context to subagents.
+    parallel worker sessions.
   antipatterns:
-  - Do NOT have a supervisor spawn Task/Agent/Explore subagents — supervisor goes
-    blind and downstream workers can't see results
   - Do NOT loop on git status when the tree is unexpectedly clean — run git log --oneline
     -5 once; another worker committed it
   related_terms:
   - worker
-  - Explore
   defined_in: CLAUDE.md
   added_at: '2026-05-18T16:44:05.193663+00:00'
   added_by: vocabulary_add
@@ -843,7 +823,6 @@ entries:
     — bugs from other workers are still yours to fix
   related_terms:
   - supervisor
-  - Explore
   defined_in: CLAUDE.md
   added_at: '2026-05-18T17:13:00.970217+00:00'
   added_by: vocabulary_add

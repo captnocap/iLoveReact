@@ -89,6 +89,31 @@ The Behavior index entry read:
 
 `no Explore agent` was removed from that one-liner.
 
+### 7. `vocabulary.yaml` — the project vocabulary hook (found 2026-06-30, req_2152)
+
+This one was **missed in the first pass** and kept re-injecting the ban into
+fresh sessions via the `UserPromptSubmit` hook
+`~/.claude/hooks/vocab-prompt-injector.py` (which reads the nearest
+`vocabulary.yaml` live on every prompt — no cache). Three changes:
+
+- **Deleted the entire `Explore` term** — it existed only to ban subagents:
+
+  > - term: Explore
+  >   definition: The built-in Explore/Task/Agent subagent tool. BANNED in this repo.
+  >   antipatterns:
+  >   - Do NOT invoke Explore, Agent, or any Task subagent — measured ~57% false-claim rate on this codebase (e.g., claimed frozen tsz/ contained .map() when it did not)
+  >   - Do NOT delegate 'does this feature exist?' to a subagent — read source directly with Read/Grep/Glob/Bash
+  >   - When in plan mode, write the plan yourself — do NOT spawn a Plan subagent (loses context, burns tokens)
+
+- **`supervisor` term** — dropped `; does not lose context to subagents` from the
+  definition and removed the antipattern *"Do NOT have a supervisor spawn
+  Task/Agent/Explore subagents — supervisor goes blind and downstream workers
+  can't see results."* (Kept the git-status-clean antipattern.)
+- Removed the dangling `Explore` entry from the `related_terms` of `supervisor`
+  and `worker`. The `worker` ownership antipattern (*"Do NOT distance yourself
+  from work by other workers… bugs from other workers are still yours to fix"*)
+  was **kept** — it's about ownership, not subagents.
+
 ---
 
 ## To repopulate
