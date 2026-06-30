@@ -64,9 +64,20 @@ export function dispatch(e: EditorEvent): Seq {
 }
 
 /** Subscribe to confirmed events as they commit. Returns an unsubscribe fn.
- *  Listener receives the confirmed envelope (with its real `seq`). */
+ *  Listener receives the confirmed envelope (with its real `seq`).
+ *
+ *  Transport-agnostic by design: the Zig bus fans out the confirmed envelope as a
+ *  JSON string (via __ffiEmit), while the local fallback fans out a parsed object.
+ *  We normalize string payloads here so subscribers always receive an EditorEvent
+ *  regardless of which path is live. */
 export function onEvent(fn: (e: EditorEvent) => void): () => void {
-  return ffiSubscribe(EDITOR_BUS_CHANNEL, fn as (p: any) => void);
+  return ffiSubscribe(EDITOR_BUS_CHANNEL, (p: any) => {
+    let e = p;
+    if (typeof e === 'string') {
+      try { e = JSON.parse(e); } catch { return; }
+    }
+    fn(e as EditorEvent);
+  });
 }
 
 /** Confirmed events with seq > afterSeq, oldest first — for catch-up / replay. */
