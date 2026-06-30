@@ -8,6 +8,7 @@ export default function ModelPackageBrowser({
   folder,
   search,
   page,
+  activeDocumentId,
   onFolder,
   onPage,
   onAction,
@@ -16,6 +17,7 @@ export default function ModelPackageBrowser({
   folder: ContentFolderId;
   search: string;
   page: number;
+  activeDocumentId: string;
   onFolder: (folder: ContentFolderId) => void;
   onPage: (delta: number) => void;
   onAction: (label: string) => void;
@@ -47,8 +49,10 @@ export default function ModelPackageBrowser({
           <Icon name="SearchX" size={16} color={accentFor('textFaint')} />
           <C.HW_StatusText>no model homes</C.HW_StatusText>
         </C.HW_EmptyState>
-      ) : pageModels.map((model) => (
-        <C.HW_ModelCard key={model.id} onPress={() => onModel(model)}>
+      ) : pageModels.map((model) => {
+        const Card = activeDocumentId === `model:${model.id}` ? C.HW_ModelCardOn : C.HW_ModelCard;
+        return (
+        <Card key={model.id} onPress={() => onModel(model)}>
           <C.HW_ModelThumb style={{ backgroundColor: model.color }} />
           <C.HW_ModelCardMain>
             <C.HW_MaterialTitleRow>
@@ -66,8 +70,9 @@ export default function ModelPackageBrowser({
           <C.HW_IconMiniButton onPress={() => onFolder(model.folderId)}>
             <Icon name="FolderOpen" size={13} color={accentFor('primary')} />
           </C.HW_IconMiniButton>
-        </C.HW_ModelCard>
-      ))}
+        </Card>
+        );
+      })}
       {Array.from({ length: Math.max(0, pageSize - pageModels.length) }, (_, index) => (
         <C.HW_MaterialSlotEmpty key={`model-empty-${safePage}-${index}`}>
           <C.HW_StatusText>empty model slot</C.HW_StatusText>

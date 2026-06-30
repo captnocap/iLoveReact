@@ -3,7 +3,7 @@
 // god-file; only the imports changed (one component per file, shared data/cls).
 // State will migrate onto the real foundation systems (editorbus / hot index /
 // commands / tunables) incrementally; this is the faithful layout first.
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { C } from '../workspace.cls';
 import Chrome from './Chrome';
 import DropdownMenu from './DropdownMenu';
@@ -20,7 +20,7 @@ import FileExplorerDialog from '../dialogs/FileExplorerDialog';
 import RenderProbe from '../../../runtime/render_tracker';
 import type { MockState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelPackage } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
-import { initialState } from '../data/initialState';
+import { loadPersistedState, persistState } from '../data/persistView';
 import { commandById } from '../data/commands';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, SNAP_MODES, FLOORS } from '../data/content';
@@ -30,8 +30,12 @@ import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFil
 import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 
 export default function AppFrame() {
-  const [state, setState] = useState<MockState>(initialState);
+  const [state, setState] = useState<MockState>(loadPersistedState);
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
+
+  // Mirror the active view into hot-state so a dev hot reload rehydrates exactly
+  // what you were looking at instead of snapping back to defaults.
+  useEffect(() => { persistState(state); }, [state]);
 
   const activeCommand = commandById(state.activeCommandId);
   const activeObject = selectedObject(state);
@@ -480,13 +484,14 @@ export default function AppFrame() {
 
   const openModelDocument = (model: ModelPackage) => {
     const doc = modelDocument(model);
+    // Focus moves across the screen into the center/inspector document — the
+    // content browser stays on its list so you can pick the next model without
+    // re-navigating back into the folder. (Do NOT touch contentFolder here.)
     setState((prev) => ({
       ...prev,
       workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
       activeWorkspaceDocumentId: doc.id,
       materialFocused: false,
-      contentFolder: model.folderId,
-      expandedFolders: { ...prev.expandedFolders, [model.folderId]: true },
       contextOpen: false,
       status: `opened model document: ${model.name}`,
     }));

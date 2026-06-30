@@ -90,6 +90,7 @@ export default function LibraryPanel(props: {
           folder={props.contentFolder}
           search={props.state.search}
           page={props.state.assetPage}
+          activeDocumentId={props.state.activeWorkspaceDocumentId}
           onFolder={props.onFolder}
           onPage={props.onPage}
           onAction={props.onMaterialAction}

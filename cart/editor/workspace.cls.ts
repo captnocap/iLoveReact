@@ -113,6 +113,7 @@ classifier({
   HW_PageText: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 700 } },
   HW_ModelBrowser: { type: 'Box', style: { height: 421, flexDirection: 'column', gap: 5, paddingLeft: 10, paddingRight: 10, paddingBottom: 6, overflow: 'hidden' } },
   HW_ModelCard: { type: 'Pressable', style: { height: 68, flexDirection: 'row', alignItems: 'center', gap: 7, padding: 6, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:cardBg' }, hoverStyle: { borderColor: 'theme:textDim' } },
+  HW_ModelCardOn: { type: 'Pressable', style: { height: 68, flexDirection: 'row', alignItems: 'center', gap: 7, padding: 6, borderRadius: 'theme:radiusLg', borderWidth: 2, borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
   HW_ModelThumb: { type: 'Box', style: { width: 44, height: 52, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
   HW_ModelCardMain: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 3 } },
   HW_ModelPath: { type: 'Text', fontSize: 8, color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 800 } },
