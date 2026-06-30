@@ -759,7 +759,7 @@ pub const scene3d_wgsl =
     \\    fog_near: f32,
     \\    fog_far: f32,
     \\    fog_sky: f32,
-    \\    _pad4a: f32,
+    \\    wire: f32,      // 152 — wireframe flag in the shared scene uniform buffer; only scene3d_wgsl reads it (was _pad4a)
     \\    _pad4b: f32,
     \\    sky_horizon: vec3f,
     \\    _pad5: f32,
@@ -826,6 +826,10 @@ pub const scene3d_wgsl =
     \\    @location(3) inst_color: vec4f,
     \\    // Screen-space NDC.y (linear so it matches the screen-space sky gradient).
     \\    @location(4) @interpolate(linear) screen_y: f32,
+    \\    // Barycentric coords of this vertex within its triangle (1,0,0)/(0,1,0)/
+    \\    // (0,0,1), derived from vertex_index%3. Interpolated, it gives each fragment
+    \\    // its distance to the nearest edge — the basis for the wireframe overlay.
+    \\    @location(5) bary: vec3f,
     \\};
     \\
     \\// Rebuild the model matrix from the packed instance (32-byte InstanceData):
@@ -872,7 +876,7 @@ pub const scene3d_wgsl =
     \\
     \\// ── Vertex shader ────────────────────────────────────────────
     \\@vertex
-    \\fn vs_main(in: VertexInput) -> VertexOutput {
+    \\fn vs_main(in: VertexInput, @builtin(vertex_index) vid: u32) -> VertexOutput {
     \\    var out: VertexOutput;
     \\    let model = rebuild_model(in.inst_pos, in.inst_euler, in.inst_scale);
     \\    let world = model * vec4f(in.position, 1.0);
@@ -882,6 +886,11 @@ pub const scene3d_wgsl =
     \\    out.uv = in.uv;
     \\    out.inst_color = in.inst_color;
     \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
+    \\    // Tag this vertex with its corner of the triangle. Meshes are non-indexed
+    \\    // triangle lists (3 verts/tri, in order), so vid%3 IS the corner — no extra
+    \\    // vertex attribute needed. Unused (but cheap) when wireframe is off.
+    \\    let corner = vid % 3u;
+    \\    out.bary = vec3f(f32(corner == 0u), f32(corner == 1u), f32(corner == 2u));
     \\    return out;
     \\}
     \\
@@ -945,6 +954,21 @@ pub const scene3d_wgsl =
     \\    // premultiplied_alpha_blending, so scale rgb by alpha here. Opaque meshes
     \\    // (a == 1) are unchanged; glass (a < 1) composites correctly over the scene.
     \\    let out_a = in.inst_color.a * tex_sample.a;
+    \\    // Wireframe overlay (S.wire == 1): a bright line along every triangle edge,
+    \\    // width CONSTANT in screen pixels via fwidth — so it never thickens or detaches
+    \\    // as you zoom, because it is drawn from THIS triangle's own barycentric and is
+    \\    // pixel-locked to the surface. fwidth is evaluated unconditionally to keep the
+    \\    // derivative in uniform control flow; the branch only uses the result.
+    \\    let bmin = min(in.bary.x, min(in.bary.y, in.bary.z));
+    \\    let bw = fwidth(bmin) * 1.5;
+    \\    if (S.wire > 0.5) {
+    \\        let edge = 1.0 - smoothstep(0.0, max(bw, 1e-5), bmin);
+    \\        let lines = mix(final_rgb, vec3f(0.80, 0.88, 1.0), edge);
+    \\        // Edges stay opaque even over alpha-cut texels, so the wire is unbroken.
+    \\        let wa = max(out_a, edge);
+    \\        if (wa <= 0.01) { discard; }
+    \\        return vec4f(lines * wa, wa);
+    \\    }
     \\    // Alpha-cut fully-transparent texels (req_0915): a decal with a transparent
     \\    // background (a floating neon sign) shows ONLY its lit texels — discarding
     \\    // the empty ones writes no color AND no depth, so the wall behind shows
@@ -1020,7 +1044,7 @@ pub const grass_wgsl =
     \\    fog_near: f32,
     \\    fog_far: f32,
     \\    fog_sky: f32,
-    \\    _pad4a: f32,
+    \\    wire: f32,      // 152 — wireframe flag in the shared scene uniform buffer; only scene3d_wgsl reads it (was _pad4a)
     \\    _pad4b: f32,
     \\    sky_horizon: vec3f,
     \\    _pad5: f32,
@@ -1177,7 +1201,7 @@ pub const water_wgsl =
     \\    fog_near: f32,
     \\    fog_far: f32,
     \\    fog_sky: f32,
-    \\    _pad4a: f32,
+    \\    wire: f32,      // 152 — wireframe flag in the shared scene uniform buffer; only scene3d_wgsl reads it (was _pad4a)
     \\    _pad4b: f32,
     \\    sky_horizon: vec3f,
     \\    _pad5: f32,
@@ -1388,7 +1412,7 @@ pub const frond_wgsl =
     \\    fog_near: f32,
     \\    fog_far: f32,
     \\    fog_sky: f32,
-    \\    _pad4a: f32,
+    \\    wire: f32,      // 152 — wireframe flag in the shared scene uniform buffer; only scene3d_wgsl reads it (was _pad4a)
     \\    _pad4b: f32,
     \\    sky_horizon: vec3f,
     \\    _pad5: f32,
@@ -1553,7 +1577,7 @@ pub const scene3d_ground_prefix =
     \\    fog_near: f32,
     \\    fog_far: f32,
     \\    fog_sky: f32,
-    \\    _pad4a: f32,
+    \\    wire: f32,      // 152 — wireframe flag in the shared scene uniform buffer; only scene3d_wgsl reads it (was _pad4a)
     \\    _pad4b: f32,
     \\    sky_horizon: vec3f,
     \\    _pad5: f32,

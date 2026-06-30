@@ -20,6 +20,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
+import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { callHost } from '@reactjit/runtime/ffi';
 
 const host = globalThis as any;
@@ -49,12 +50,16 @@ const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
 export default function ModelView() {
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [wire, setWire] = useState(false);
 
   // Drag state lives in refs, NOT useState: orbiting must not trigger a React render
   // (the host repaints itself off __model_orbit_drag). A re-render per mouse-move is
   // exactly the choppiness this design exists to avoid.
   const draggingRef = useRef(false);
   const lastRef = useRef<{ x: number; y: number } | null>(null);
+
+  // W toggles wireframe — the standard mesh-editor reflex.
+  useModifiers({ w: () => setWire((v) => !v), W: () => setWire((v) => !v) });
 
   // One load path for every source (picker, drop, CLI): validate the extension, hand
   // the path to the host parser, and surface a clean error if it can't be read.
@@ -95,13 +100,19 @@ export default function ModelView() {
   useEffect(() => {
     const path = callHost<string | null>('__env_get', null, 'RJIT_MODEL');
     if (path) applyPath(path);
+    // RJIT_WIRE=1 boots in wireframe mode — the headless self-shot path for it.
+    if (callHost<string | null>('__env_get', null, 'RJIT_WIRE')) setWire(true);
+    // RJIT_ZOOM=N dollies the camera in N notches at boot — the headless way to prove
+    // the wireframe stays locked to the surface when you get in close.
+    const zoom = Number(callHost<string | null>('__env_get', null, 'RJIT_ZOOM') ?? 0);
+    for (let i = 0; i < zoom; i += 1) orbitZoom(1);
   }, []);
 
   useFileDrop(applyPath);
 
   return (
     <Box style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#0b0d12' }}>
-      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0b0d12" showAxes={false}>
+      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0b0d12" showAxes={false} wireframe={wire}>
         {/* The host owns this camera: position comes from orbit state seeded by the
             load door and driven by the overlay's drag/wheel — never from props here. */}
         <Scene3D.Camera orbit fov={50} />
@@ -155,6 +166,18 @@ export default function ModelView() {
           </Text>
         )}
         <Box style={{ flexGrow: 1 }} />
+        {model && (
+          <Pressable
+            onPress={() => setWire((w) => !w)}
+            tooltip="Toggle wireframe (W)"
+            style={{
+              marginRight: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+              backgroundColor: wire ? '#2a466e' : '#16233aee', borderWidth: 1, borderColor: wire ? '#5a86c0' : '#2c4a6a',
+            }}
+          >
+            <Text style={{ color: wire ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Wireframe</Text>
+          </Pressable>
+        )}
         <Pressable
           onPress={chooseModel}
           style={{

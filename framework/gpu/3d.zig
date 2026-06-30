@@ -50,7 +50,7 @@ const SceneUniforms = extern struct {
     fog_near: f32, // 140
     fog_far: f32, // 144
     fog_sky: f32, // 148  1 = fade toward the screen-space sky gradient, 0 = flat fog_color
-    _pad4a: f32 = 0, // 152
+    wire: f32 = 0, // 152  1 = draw a barycentric wireframe over every mesh (was _pad4a)
     _pad4b: f32 = 0, // 156  (pad up to the 16-aligned 160 the vec3 needs)
     sky_horizon: [3]f32 = .{ 0, 0, 0 }, // 160
     _pad5: f32 = 0, // 172
@@ -2810,6 +2810,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         .fog_near = fog_near,
         .fog_far = fog_far,
         .fog_sky = fog_sky,
+        .wire = if (scene_node.scene3d_wireframe) 1 else 0,
         .sky_horizon = sky_horizon,
         .sky_zenith = .{ sky_zenith[0], sky_zenith[1], sky_zenith[2], 0 },
     };
