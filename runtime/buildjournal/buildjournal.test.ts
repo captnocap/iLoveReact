@@ -176,5 +176,52 @@ test('findThreads reattaches by a remembered old name via alias', () => {
   assert(hits[0]!.stableId === t.stableId, 'old name still finds the thread via its alias');
 });
 
+// ── detach: inverse of attach, keeps back-refs in sync ───────────────────────
+test('detachFromThread removes the request link and the note back-reference', () => {
+  const j = new BuildJournal();
+  const note = j.ingestRequest(req2163)!;
+  const t = j.createThread({ semanticName: 'flaky water' });
+  j.attachToThread(t.stableId, { requestId: 'req_2163' });
+  j.detachFromThread(t.stableId, { requestId: 'req_2163' });
+  assert(!j.thread(t.stableId)!.linkedRequests.includes('req_2163'), 'request unlinked from thread');
+  assert(!note.threadIds.includes(t.stableId), 'note back-reference cleared');
+});
+
+test('detachFromThread is a no-op for an unknown thread or absent link', () => {
+  const j = new BuildJournal();
+  j.ingestRequest(req2163);
+  const t = j.createThread({ semanticName: 'noop' });
+  assert(j.detachFromThread('thread_9999', { requestId: 'req_2163' }) === undefined, 'unknown thread returns undefined');
+  j.detachFromThread(t.stableId, { requestId: 'req_2163' }); // never attached — must not throw
+  assert(j.thread(t.stableId)!.linkedRequests.length === 0, 'still empty after detaching an absent link');
+});
+
+// ── persistence: export/import round-trips threads + rebuilds back-refs ───────
+test('exportThreadState + importThreadState survive a fresh journal and rewire notes', () => {
+  const a = new BuildJournal();
+  a.ingestRequest(req2163);
+  const cap: LogCapture = {
+    id: 'cap_p', name: 'persist me', channels: ['x'],
+    timeRange: { start: 0, end: 1 }, buildId: '1.0.0.2163', mapContext: 'm', note: 'n',
+  };
+  a.registerCapture(cap);
+  const t = a.renameThread(a.createThread({ semanticName: 'old name' }).stableId, 'persisted thread');
+  a.attachToThread(t.stableId, { requestId: 'req_2163' });
+  a.attachToThread(t.stableId, { captureId: 'cap_p' });
+  const state = JSON.parse(JSON.stringify(a.exportThreadState())); // through disk shape
+
+  const b = new BuildJournal();
+  b.ingestRequest(req2163); // notes re-derive from the ledger first
+  b.importThreadState(state);
+
+  const restored = b.thread(t.stableId)!;
+  assert(restored.semanticName === 'persisted thread', 'name restored');
+  assert(restored.aliases.includes('old name'), 'rename alias survived the round-trip');
+  assert(restored.linkedRequests.includes('req_2163'), 'request link restored');
+  assert(restored.attachedCaptures.includes('cap_p'), 'capture link restored');
+  assert(b.noteByRequest('req_2163')!.threadIds.includes(t.stableId), 'note back-ref rebuilt after import');
+  assert(b.createThread({ semanticName: 'next' }).stableId !== t.stableId, 'seq advanced past restored ids');
+});
+
 log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) (globalThis as any).__exit?.(1);

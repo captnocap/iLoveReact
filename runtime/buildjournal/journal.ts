@@ -17,6 +17,16 @@ export interface NewThread {
   searchTokens?: string[];
 }
 
+/** The durable slice of a journal: bug threads + their captures + the id
+ *  counter. Build notes are NOT included — they re-derive from the request
+ *  ledger on every load. This is what a persistence layer reads/writes so
+ *  threads survive across sessions. */
+export interface JournalThreadState {
+  seq: number;
+  threads: BugThread[];
+  captures: LogCapture[];
+}
+
 /** Lowercase, split on non-alphanumerics, drop empties — the one tokenizer used
  *  for both indexing and querying so they always agree. */
 function tokenize(s: string): string[] {
@@ -159,6 +169,59 @@ export class BuildJournal {
     return Array.from(this.threadsById.values());
   }
 
+  // ── durable state: export / hydrate ─────────────────────────────────────────
+
+  /** Snapshot the durable thread + capture state for persistence. Deep-copies so
+   *  callers can serialize without aliasing the live maps. */
+  exportThreadState(): JournalThreadState {
+    return {
+      seq: this.threadSeq,
+      threads: this.threads().map((t) => ({
+        ...t,
+        aliases: [...t.aliases],
+        tags: [...t.tags],
+        searchTokens: [...t.searchTokens],
+        attachedCaptures: [...t.attachedCaptures],
+        linkedRequests: [...t.linkedRequests],
+        linkedBuilds: [...t.linkedBuilds],
+      })),
+      captures: Array.from(this.capturesById.values()).map((c) => ({ ...c })),
+    };
+  }
+
+  /** Hydrate persisted threads + captures. Call AFTER ingesting the ledger so the
+   *  build-note back-references can be rebuilt; links are by stable id, so this
+   *  re-wires note.threadIds / note.captureIds to match the restored threads. */
+  importThreadState(state: JournalThreadState): void {
+    this.threadSeq = Math.max(this.threadSeq, state.seq ?? 0);
+    for (const cap of state.captures ?? []) this.capturesById.set(cap.id, cap);
+    for (const raw of state.threads ?? []) {
+      const thread: BugThread = {
+        stableId: raw.stableId,
+        semanticName: raw.semanticName,
+        aliases: [...(raw.aliases ?? [])],
+        tags: [...(raw.tags ?? [])],
+        searchTokens: [...(raw.searchTokens ?? [])],
+        attachedCaptures: [...(raw.attachedCaptures ?? [])],
+        linkedRequests: [...(raw.linkedRequests ?? [])],
+        linkedBuilds: [...(raw.linkedBuilds ?? [])],
+      };
+      this.threadsById.set(thread.stableId, thread);
+      for (const requestId of thread.linkedRequests) {
+        const note = this.notesByRequest.get(requestId);
+        if (note) {
+          addUnique(note.threadIds, thread.stableId);
+          addUnique(thread.linkedBuilds, note.buildId);
+        }
+      }
+      for (const captureId of thread.attachedCaptures) {
+        const cap = this.capturesById.get(captureId);
+        const note = cap ? this.noteByBuild(cap.buildId) : undefined;
+        if (note) addUnique(note.captureIds, captureId);
+      }
+    }
+  }
+
   // ── attach: wire history onto a thread (bidirectional) ──────────────────────
 
   /** Attach a request, build, and/or capture to a thread's history. Whichever
@@ -187,6 +250,24 @@ export class BuildJournal {
       const cap = this.capturesById.get(link.captureId);
       const note = cap ? this.noteByBuild(cap.buildId) : undefined;
       if (note) addUnique(note.captureIds, link.captureId);
+    }
+    return t;
+  }
+
+  /** Remove a request and/or capture link from a thread, keeping the build-note
+   *  back-reference in sync. The inverse of attachToThread; no-op for links that
+   *  were not present. Returns the thread, or undefined if it doesn't exist. */
+  detachFromThread(stableId: string, link: ThreadLink): BugThread | undefined {
+    const t = this.threadsById.get(stableId);
+    if (!t) return undefined;
+
+    if (link.requestId) {
+      t.linkedRequests = t.linkedRequests.filter((id) => id !== link.requestId);
+      const note = this.notesByRequest.get(link.requestId);
+      if (note) note.threadIds = note.threadIds.filter((id) => id !== stableId);
+    }
+    if (link.captureId) {
+      t.attachedCaptures = t.attachedCaptures.filter((id) => id !== link.captureId);
     }
     return t;
   }

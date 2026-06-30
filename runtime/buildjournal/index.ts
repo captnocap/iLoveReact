@@ -12,4 +12,4 @@ export type {
 export {
   BUILD_BASE, deriveBuildNumber, requestNumber, buildNumberToRequest,
 } from './buildNumber';
-export { BuildJournal, type NewThread } from './journal';
+export { BuildJournal, type NewThread, type JournalThreadState } from './journal';

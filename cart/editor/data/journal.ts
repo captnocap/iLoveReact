@@ -1,29 +1,24 @@
 // editor/data/journal.ts - build-journal snapshot backed by the real request
-// ledger, not seeded editor fixtures.
-import { useEffect, useState } from 'react';
+// ledger, with durable, user-editable bug threads layered on top.
+//
+// Build NOTES re-derive from docs/game/_requests/req_*.json on every load (the
+// ledger is read-only source data). Bug THREADS — the links that turn deliveries
+// into ongoing history — are mutable and persisted via journalStore. The hook
+// returns a snapshot plus the actions the Build Journal dialog drives.
+import { useRef, useState } from 'react';
 import {
   BuildJournal,
-  deriveBuildNumber,
-  requestNumber,
   type BuildNote as JournalNote,
   type BugThread,
+  type LogCapture,
   type RequestEntry,
 } from '../../../runtime/buildjournal';
 import { listDir, readFile } from '../../../runtime/hooks/fs';
-import type { BuildJournalSnapshot, BuildNote, BuildThread } from './types';
+import { CAPTURE_SHELF, loadThreadState, saveThreadState } from './journalStore';
+import type { BuildJournalSnapshot, BuildNote, BuildThread, JournalCapture } from './types';
 
 const REQUEST_LEDGER_DIR = 'docs/game/_requests';
 const RECENT_NOTE_LIMIT = 48;
-
-const EMPTY_SNAPSHOT: BuildJournalSnapshot = {
-  activeBuild: '-',
-  notes: [],
-  threads: [],
-  requestCount: 0,
-  deliveryCount: 0,
-  source: REQUEST_LEDGER_DIR,
-  loadedAt: 'unavailable',
-};
 
 type LedgerEntry = RequestEntry & {
   sessionId?: string;
@@ -31,33 +26,50 @@ type LedgerEntry = RequestEntry & {
   status?: string;
 };
 
-export function loadBuildJournalSnapshot(): BuildJournalSnapshot {
+/** Everything a snapshot is derived from: the live journal (notes + mutable
+ *  threads) plus the ledger context the editor notes need for titles/tags. */
+interface LedgerContext {
+  journal: BuildJournal;
+  entriesById: Map<string, LedgerEntry>;
+  requestCount: number;
+  deliveryCount: number;
+  source: string;
+  loadedAt: string;
+}
+
+/** The mutations the Build Journal dialog can drive. Each one edits the live
+ *  journal, persists the durable thread state, and refreshes the snapshot. */
+export interface JournalActions {
+  createThreadFromRequest(requestId: string, name: string): void;
+  attachRequest(threadId: string, requestId: string): void;
+  detachRequest(threadId: string, requestId: string): void;
+  renameThread(threadId: string, name: string): void;
+  attachCapture(threadId: string, captureId: string): void;
+  detachCapture(threadId: string, captureId: string): void;
+  captureShelf: JournalCapture[];
+}
+
+function loadLedgerContext(): LedgerContext {
   const filenames = listDir(REQUEST_LEDGER_DIR)
     .filter((name) => /^req_\d+\.json$/.test(name))
-    .sort((a, b) => requestNumber(requestIdFromFilename(b)) - requestNumber(requestIdFromFilename(a)));
-
-  if (filenames.length === 0) {
-    return { ...EMPTY_SNAPSHOT, loadedAt: timestampLabel() };
-  }
-
-  const entries = collectDeliveredEntries(filenames);
+    .sort((a, b) => requestNumber(b) - requestNumber(a));
 
   const journal = new BuildJournal();
-  const journalNotes = new Map<string, JournalNote>();
+  const entriesById = new Map<string, LedgerEntry>();
+  const entries = collectDeliveredEntries(filenames);
   for (const entry of entries) {
-    const note = journal.ingestRequest(entry);
-    if (note) journalNotes.set(entry.id, note);
+    entriesById.set(entry.id, entry);
+    journal.ingestRequest(entry);
   }
 
+  // Captures must be registered before hydrating threads so capture→note
+  // mirroring can resolve; then persisted thread links re-wire the back-refs.
+  for (const capture of CAPTURE_SHELF) journal.registerCapture(capture);
+  journal.importThreadState(loadThreadState());
+
   return {
-    activeBuild: entries[0] ? deriveBuildNumber(entries[0].id) : '-',
-    notes: entries
-      .map((entry) => {
-        const note = journalNotes.get(entry.id);
-        return note ? toEditorNote(entry, note) : null;
-      })
-      .filter(Boolean) as BuildNote[],
-    threads: journal.threads().map(toEditorThread),
+    journal,
+    entriesById,
     requestCount: filenames.length,
     deliveryCount: entries.length,
     source: REQUEST_LEDGER_DIR,
@@ -65,14 +77,71 @@ export function loadBuildJournalSnapshot(): BuildJournalSnapshot {
   };
 }
 
-export function useBuildJournalSnapshot(): BuildJournalSnapshot {
-  const [snapshot, setSnapshot] = useState<BuildJournalSnapshot>(loadBuildJournalSnapshot);
+function deriveSnapshot(ctx: LedgerContext): BuildJournalSnapshot {
+  const journal = ctx.journal;
+  return {
+    activeBuild: journal.latestBuildNumber() ?? '-',
+    notes: journal
+      .notes()
+      .map((note) => {
+        const entry = ctx.entriesById.get(note.requestId);
+        return entry ? toEditorNote(entry, note) : null;
+      })
+      .filter(Boolean) as BuildNote[],
+    threads: journal.threads().map((thread) => toEditorThread(thread, journal)),
+    requestCount: ctx.requestCount,
+    deliveryCount: ctx.deliveryCount,
+    source: ctx.source,
+    loadedAt: ctx.loadedAt,
+  };
+}
 
-  useEffect(() => {
-    setSnapshot(loadBuildJournalSnapshot());
-  }, []);
+/** The live build journal: a snapshot of notes + threads, and the actions that
+ *  mutate threads. Mutations persist to disk so threads survive across sessions. */
+export function useBuildJournal(): { snapshot: BuildJournalSnapshot; actions: JournalActions } {
+  const ctxRef = useRef<LedgerContext | null>(null);
+  if (!ctxRef.current) ctxRef.current = loadLedgerContext();
+  const [snapshot, setSnapshot] = useState<BuildJournalSnapshot>(() => deriveSnapshot(ctxRef.current!));
 
-  return snapshot;
+  const commit = () => {
+    const ctx = ctxRef.current!;
+    saveThreadState(ctx.journal.exportThreadState());
+    setSnapshot(deriveSnapshot(ctx));
+  };
+
+  const actions: JournalActions = {
+    createThreadFromRequest(requestId, name) {
+      const journal = ctxRef.current!.journal;
+      const thread = journal.createThread({ semanticName: name.trim() || requestId });
+      if (requestId) journal.attachToThread(thread.stableId, { requestId });
+      commit();
+    },
+    attachRequest(threadId, requestId) {
+      ctxRef.current!.journal.attachToThread(threadId, { requestId });
+      commit();
+    },
+    detachRequest(threadId, requestId) {
+      ctxRef.current!.journal.detachFromThread(threadId, { requestId });
+      commit();
+    },
+    renameThread(threadId, name) {
+      const next = name.trim();
+      if (!next) return;
+      ctxRef.current!.journal.renameThread(threadId, next);
+      commit();
+    },
+    attachCapture(threadId, captureId) {
+      ctxRef.current!.journal.attachToThread(threadId, { captureId });
+      commit();
+    },
+    detachCapture(threadId, captureId) {
+      ctxRef.current!.journal.detachFromThread(threadId, { captureId });
+      commit();
+    },
+    captureShelf: CAPTURE_SHELF.map(toDisplayCapture),
+  };
+
+  return { snapshot, actions };
 }
 
 function readLedgerEntry(filename: string): LedgerEntry | null {
@@ -110,19 +179,33 @@ function toEditorNote(entry: LedgerEntry, note: JournalNote): BuildNote {
     ask: compact(firstUsefulLine(entry.text) || entry.id, 110),
     handled: note.summary,
     trace: traceFor(entry, note),
+    threadIds: [...note.threadIds],
   };
 }
 
-function toEditorThread(thread: BugThread): BuildThread {
+function toEditorThread(thread: BugThread, journal: BuildJournal): BuildThread {
   return {
     id: thread.stableId,
     title: thread.semanticName,
     status: thread.tags[0] ?? 'linked',
-    history: [
-      ...thread.linkedRequests,
-      ...thread.linkedBuilds,
-      ...thread.attachedCaptures,
-    ],
+    aliases: [...thread.aliases],
+    tags: [...thread.tags],
+    deliveries: [...thread.linkedRequests],
+    captures: journal.capturesForThread(thread.stableId).map(toDisplayCapture),
+    history: [...thread.linkedBuilds],
+  };
+}
+
+function toDisplayCapture(capture: LogCapture): JournalCapture {
+  const { start, end } = capture.timeRange;
+  return {
+    id: capture.id,
+    name: capture.name,
+    channels: [...capture.channels],
+    range: start === 0 && end === 0 ? 'pending capture' : `${start}-${end}`,
+    build: capture.buildId,
+    context: capture.mapContext,
+    note: capture.note,
   };
 }
 
@@ -170,8 +253,9 @@ function compact(value: string, max: number): string {
   return oneLine.length > max ? `${oneLine.slice(0, Math.max(0, max - 3)).trim()}...` : oneLine;
 }
 
-function requestIdFromFilename(filename: string): string {
-  return filename.replace(/\.json$/, '');
+function requestNumber(filename: string): number {
+  const match = filename.match(/(\d+)/);
+  return match ? parseInt(match[1]!, 10) : 0;
 }
 
 function timestampLabel(): string {

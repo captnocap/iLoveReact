@@ -25,13 +25,13 @@ import { commandById } from '../data/commands';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
-import { useBuildJournalSnapshot } from '../data/journal';
+import { useBuildJournal } from '../data/journal';
 import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFileById } from '../data/fileExplorer';
 import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 
 export default function AppFrame() {
   const [state, setState] = useState<MockState>(initialState);
-  const journal = useBuildJournalSnapshot();
+  const { snapshot: journal, actions: journalActions } = useBuildJournal();
 
   const activeCommand = commandById(state.activeCommandId);
   const activeObject = selectedObject(state);
@@ -643,7 +643,7 @@ export default function AppFrame() {
       ) : null}
       {state.buildDialogOpen ? (
         <RenderProbe id="Build Journal Dialog">
-          <BuildJournalDialog journal={journal} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: 'build journal closed' }))} />
+          <BuildJournalDialog journal={journal} actions={journalActions} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: 'build journal closed' }))} />
         </RenderProbe>
       ) : null}
       {state.fileExplorerOpen ? (

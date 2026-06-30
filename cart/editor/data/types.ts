@@ -69,12 +69,27 @@ export type BuildNote = {
   ask: string;
   handled: string;
   trace: string[];
+  threadIds: string[];
+};
+
+export type JournalCapture = {
+  id: string;
+  name: string;
+  channels: string[];
+  range: string;
+  build: string;
+  context: string;
+  note: string;
 };
 
 export type BuildThread = {
   id: string;
   title: string;
   status: string;
+  aliases: string[];
+  tags: string[];
+  deliveries: string[];
+  captures: JournalCapture[];
   history: string[];
 };
 
