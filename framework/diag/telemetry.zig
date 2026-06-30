@@ -93,6 +93,7 @@ pub const Snapshot = struct {
     scene3d_meshes_dropped: u32 = 0,
     scene3d_instances: u32 = 0,
     scene3d_draw_calls: u32 = 0,
+    scene3d_triangles: u64 = 0,
     scene3d_draw_us: u64 = 0,
 
     // ── Text/Font ──
@@ -347,6 +348,7 @@ pub fn collect(args: CollectArgs) void {
     snap.scene3d_meshes_dropped = scene3d_stats.meshes_dropped;
     snap.scene3d_instances = scene3d_stats.instances;
     snap.scene3d_draw_calls = scene3d_stats.draw_calls;
+    snap.scene3d_triangles = scene3d_stats.triangles;
     snap.scene3d_draw_us = scene3d_stats.draw_us;
 
     // ── Layout ──

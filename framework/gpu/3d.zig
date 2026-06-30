@@ -1531,9 +1531,17 @@ pub const TelemetryStats = struct {
     /// GPU overdraw. req_1670 discriminator.
     staged_dynamic: u32 = 0,
     draw_calls: u32 = 0,
+    triangles: u64 = 0,
     draw_us: u64 = 0,
 };
 var g_telemetry = TelemetryStats{};
+
+fn recordDraw(vertex_count: u32, instance_count: u32) void {
+    if (instance_count == 0) return;
+    g_telemetry.draw_calls += 1;
+    g_telemetry.instances += instance_count;
+    g_telemetry.triangles += (@as(u64, vertex_count) / 3) * @as(u64, instance_count);
+}
 
 // Opt-in per-frame perf readout (RJIT_PERFLOG=1). cpu_draw_us measures CPU command
 // encoding + instance re-staging only — async GPU shading (overdraw) is NOT in it, so
@@ -4104,8 +4112,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                             pass.setVertexBuffer(1, g_static_inst_buf.?, sd.offset + bu.bytesOfCount(InstanceData, first), bu.bytesOfCount(InstanceData, count));
                         }
                         pass.draw(group_slot.count, count, 0, 0);
-                        g_telemetry.draw_calls += 1;
-                        g_telemetry.instances += count;
+                        recordDraw(group_slot.count, count);
                     }
                     continue;
                 }
@@ -4162,8 +4169,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, bu.bytesOfCount(Vertex, group_slot.count));
             pass.setVertexBuffer(1, g_slim_inst_buf.?, fstart, bu.bytesOfCount(SlimInstance, fcount));
             pass.draw(group_slot.count, fcount, 0, 0);
-            g_telemetry.draw_calls += 1;
-            g_telemetry.instances += fcount;
+            recordDraw(group_slot.count, fcount);
             g_telemetry.staged_dynamic += fcount;
             continue;
         }
@@ -4252,8 +4258,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, geo_bytes);
         pass.setVertexBuffer(1, g_instance_buf.?, inst_start, bu.bytesOfCount(InstanceData, group_count));
         pass.draw(group_slot.count, group_count, 0, 0);
-        g_telemetry.draw_calls += 1;
-        g_telemetry.instances += group_count;
+        recordDraw(group_slot.count, group_count);
         g_telemetry.staged_dynamic += group_count; // re-staged this frame (overflow path)
     }
 
@@ -4310,8 +4315,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                 pass.setVertexBuffer(1, g_ground_inst_buf.?, gi_off, @sizeOf(InstanceData));
                 pass.draw(gslot[gp_i].count, 1, 0, 0);
                 dbg_ground_drawn += 1;
-                g_telemetry.draw_calls += 1;
-                g_telemetry.instances += 1;
+                recordDraw(gslot[gp_i].count, 1);
             }
         }
     }
@@ -4373,8 +4377,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             pass.setVertexBuffer(1, g_instance_buf.?, inst_top, @sizeOf(InstanceData));
             pass.draw(tslot[ti].count, 1, 0, 0);
             inst_top += @sizeOf(InstanceData);
-            g_telemetry.draw_calls += 1;
-            g_telemetry.instances += 1;
+            recordDraw(tslot[ti].count, 1);
         }
     }
 

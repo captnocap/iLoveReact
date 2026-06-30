@@ -6,6 +6,7 @@ const v8rt = @import("v8_runtime.zig");
 // as `qjs_runtime` to keep existing call sites working.
 const frame_telemetry = @import("diag/frame_telemetry.zig");
 const telemetry = @import("diag/telemetry.zig");
+const system_memory = @import("diag/system_memory.zig");
 const reconciler = @import("v8_bindings_reconciler.zig");
 const localstore = @import("storage/localstore.zig");
 const hotstate = @import("state/hotstate.zig");
@@ -264,6 +265,7 @@ fn telGpuCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "scene3d_meshes_dropped", s.scene3d_meshes_dropped);
     setObjectNumber(ctx, obj, "scene3d_instances", s.scene3d_instances);
     setObjectNumber(ctx, obj, "scene3d_draw_calls", s.scene3d_draw_calls);
+    setObjectNumber(ctx, obj, "scene3d_triangles", s.scene3d_triangles);
     setObjectNumber(ctx, obj, "scene3d_draw_us", s.scene3d_draw_us);
     info.getReturnValue().set(obj.toValue());
 }
@@ -303,6 +305,11 @@ fn telSystemCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "display_h", s.display_h);
     setObjectNumber(ctx, obj, "breakpoint", s.breakpoint_tier);
     setObjectNumber(ctx, obj, "secondary_windows", s.secondary_window_count);
+    const mem = system_memory.readSnapshot();
+    setObjectNumber(ctx, obj, "process_rss_bytes", mem.process_rss_bytes);
+    setObjectNumber(ctx, obj, "process_vsize_bytes", mem.process_vsize_bytes);
+    setObjectNumber(ctx, obj, "mem_total_bytes", mem.total_bytes);
+    setObjectNumber(ctx, obj, "mem_available_bytes", mem.available_bytes);
     info.getReturnValue().set(obj.toValue());
 }
 

@@ -960,6 +960,27 @@ pub fn build(b: *std.Build) void {
     const layout_wrap_test_step = b.step("test-layout-wrap", "Run the layout wrap unit tests");
     layout_wrap_test_step.dependOn(&run_layout_wrap_test.step);
 
+    // ── system memory telemetry unit tests ──────────────────────────
+    const system_memory_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/system_memory.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    system_memory_test_mod.addImport("system_memory", b.createModule(.{
+        .root_source_file = b.path("framework/diag/system_memory.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    }));
+    const system_memory_test = b.addTest(.{
+        .name = "system-memory-test",
+        .root_module = system_memory_test_mod,
+    });
+    const run_system_memory_test = b.addRunArtifact(system_memory_test);
+    const system_memory_test_step = b.step("test-system-memory", "Run the system memory telemetry unit tests");
+    system_memory_test_step.dependOn(&run_system_memory_test.step);
+
     // ── mesh import (GLB/OBJ) unit tests — headless, no GPU ────────────────────
     const mesh_import_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/world/mesh_import.zig"),
