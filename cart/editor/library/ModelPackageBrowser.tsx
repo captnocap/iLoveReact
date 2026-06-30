@@ -3,6 +3,7 @@ import { Icon } from '../../../runtime/icons/Icon';
 import type { ContentFolderId, ModelPackage } from '../data/types';
 import { exactModelForFolder, modelPackagesForFolder } from '../data/content';
 import ModelPackageDetail from './ModelPackageDetail';
+import ModelThumbnail from './ModelThumbnail';
 
 export default function ModelPackageBrowser({
   folder,
@@ -53,7 +54,9 @@ export default function ModelPackageBrowser({
         const Card = activeDocumentId === `model:${model.id}` ? C.HW_ModelCardOn : C.HW_ModelCard;
         return (
         <Card key={model.id} onPress={() => onModel(model)}>
-          <C.HW_ModelThumb style={{ backgroundColor: model.color }} />
+          <C.HW_ModelThumb style={{ backgroundColor: model.color }}>
+            <ModelThumbnail model={model} />
+          </C.HW_ModelThumb>
           <C.HW_ModelCardMain>
             <C.HW_MaterialTitleRow>
               <C.HW_MaterialName>{model.name}</C.HW_MaterialName>

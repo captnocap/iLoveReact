@@ -5,12 +5,15 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
+import ModelThumbnail from './ModelThumbnail';
 
 export default function ModelDetailBody({ model, onAction, onOpen }: { model: ModelPackage; onAction: (label: string) => void; onOpen: () => void }) {
   return (
     <>
       <C.HW_ModelTop>
-        <C.HW_ModelThumb style={{ backgroundColor: model.color }} />
+        <C.HW_ModelThumb style={{ backgroundColor: model.color }}>
+          <ModelThumbnail model={model} />
+        </C.HW_ModelThumb>
         <C.HW_ModelCardMain>
           <C.HW_MaterialTitleRow>
             <C.HW_MaterialName>{model.name}</C.HW_MaterialName>
