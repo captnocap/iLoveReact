@@ -235,16 +235,16 @@ fn rayTri(o: [3]f32, d: [3]f32, a: [3]f32, b: [3]f32, c: [3]f32) ?f32 {
     return if (t > 1e-4) t else null;
 }
 
-/// The face under viewport pixel (mx,my), or -1 on a miss. Builds the camera ray to
-/// match the scene3d perspective (vertical fov, +Y up) and returns the nearest hit.
-pub fn pick(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32 {
-    const pos = g_positions orelse return -1;
-    if (vp_w <= 0 or vp_h <= 0) return -1;
+/// The world-space ray (origin = eye, direction) through viewport pixel (mx,my), built to
+/// match the scene3d perspective (vertical fov, +Y up). The one place pixel→ray lives, so
+/// every raycast (face pick, focus point, future vertex/edge picks) shoots the SAME ray
+/// the user sees.
+pub const Ray = struct { o: [3]f32, d: [3]f32 };
+pub fn cameraRay(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) Ray {
     const aspect = vp_w / vp_h;
     const tan_h = @tan(cam.fov_deg * std.math.pi / 180.0 * 0.5);
     const ndc_x = 2.0 * mx / vp_w - 1.0;
     const ndc_y = 1.0 - 2.0 * my / vp_h;
-
     const forward = norm(sub(cam.target, cam.eye));
     const right = norm(cross(forward, .{ 0, 1, 0 }));
     const up = cross(right, forward);
@@ -253,6 +253,15 @@ pub fn pick(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32 {
         ndc_x * tan_h * aspect * right[1] + ndc_y * tan_h * up[1] + forward[1],
         ndc_x * tan_h * aspect * right[2] + ndc_y * tan_h * up[2] + forward[2],
     });
+    return .{ .o = cam.eye, .d = dir };
+}
+
+/// The face under viewport pixel (mx,my), or -1 on a miss. Returns the nearest hit.
+pub fn pick(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32 {
+    const pos = g_positions orelse return -1;
+    if (vp_w <= 0 or vp_h <= 0) return -1;
+    const ray = cameraRay(cam, vp_w, vp_h, mx, my);
+    const dir = ray.d;
 
     // Prefer the nearest FRONT-facing hit — the triangle you can actually see. The
     // render culls back-faces (cull_mode=.back), so without this the ray would happily
@@ -286,6 +295,40 @@ pub fn pick(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32 {
     return if (best_front >= 0) best_front else best_any;
 }
 
+/// The world-space point where the camera ray through (mx,my) first meets the visible
+/// (front-facing) surface, or null on a miss. This is what re-centres the orbit pivot on
+/// the exact spot you click — put the focus on a far corner of a big model and edit it
+/// without camera gymnastics (req_2148). Same front-then-any preference as `pick`.
+pub fn pickPoint(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) ?[3]f32 {
+    const pos = g_positions orelse return null;
+    if (vp_w <= 0 or vp_h <= 0) return null;
+    const ray = cameraRay(cam, vp_w, vp_h, mx, my);
+    var best_front_t: f32 = std.math.floatMax(f32);
+    var best_any_t: f32 = std.math.floatMax(f32);
+    var hit_front = false;
+    var hit_any = false;
+    var f: u32 = 0;
+    while (f < g_facecount) : (f += 1) {
+        const a: [3]f32 = .{ pos[f * 9 + 0], pos[f * 9 + 1], pos[f * 9 + 2] };
+        const b: [3]f32 = .{ pos[f * 9 + 3], pos[f * 9 + 4], pos[f * 9 + 5] };
+        const c: [3]f32 = .{ pos[f * 9 + 6], pos[f * 9 + 7], pos[f * 9 + 8] };
+        if (rayTri(ray.o, ray.d, a, b, c)) |t| {
+            if (t < best_any_t) {
+                best_any_t = t;
+                hit_any = true;
+            }
+            const n = cross(sub(b, a), sub(c, a));
+            if (dot(n, ray.d) < 0.0 and t < best_front_t) {
+                best_front_t = t;
+                hit_front = true;
+            }
+        }
+    }
+    if (!hit_any) return null;
+    const t = if (hit_front) best_front_t else best_any_t;
+    return .{ ray.o[0] + ray.d[0] * t, ray.o[1] + ray.d[1] * t, ray.o[2] + ray.d[2] * t };
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────────
 test "pick hits the face straddling the ray and paints it" {
     // One triangle in the z=0 plane, camera on +Z looking at origin down -Z.
@@ -310,6 +353,25 @@ test "pick hits the face straddling the ray and paints it" {
     const at = atlas().?;
     try std.testing.expectEqual(@as(u8, 10), at.rgba[0]);
     try std.testing.expectEqual(@as(u8, 30), at.rgba[2]);
+}
+
+test "pickPoint returns the world hit on the surface, null on a miss" {
+    // Same single triangle in z=0, camera on +Z looking down -Z at the origin.
+    var verts = [_]f32{
+        -1, -1, 0, 0, 0, 1, 0, 0,
+        1,  -1, 0, 0, 0, 1, 0, 0,
+        0,  1,  0, 0, 0, 1, 0, 0,
+    };
+    setTarget(321, &verts, 3);
+    defer clear();
+    const cam = Camera{ .eye = .{ 0, 0, 5 }, .target = .{ 0, 0, 0 }, .fov_deg = 50 };
+    // Centre pixel hits the triangle at the z=0 plane, on the ray, ≈ the origin.
+    const hit = pickPoint(cam, 800, 600, 400, 300).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 0), hit[0], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), hit[1], 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), hit[2], 1e-4);
+    // A corner pixel misses → null (the cart keeps the current focus).
+    try std.testing.expect(pickPoint(cam, 800, 600, 0, 0) == null);
 }
 
 test "atlas dims cover every face" {

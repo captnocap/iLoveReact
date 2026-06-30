@@ -56,6 +56,11 @@ function loadModelFile(path: string): Loaded | null {
 
 const orbitDrag = (dx: number, dy: number) => host.__model_orbit_drag?.(dx, dy);
 const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
+// Pan the orbit PIVOT in the screen plane (the Focus tool), and recentre it on the
+// point under the cursor (double-click) — so a far corner of a big model becomes the
+// centre of rotation without camera gymnastics. Both feed the host; no React render.
+const orbitPan = (dx: number, dy: number) => host.__model_orbit_pan?.(dx, dy);
+const focusAt = (x: number, y: number): boolean => host.__model_focus_at?.(x, y) === 1;
 // Re-decimate the model to clustering resolution `grid` (8..256, higher = more detail)
 // and return the new {key,count}, or null. The host re-meshes from the retained full-res
 // source — nothing but the key + count crosses the bridge.
@@ -96,6 +101,7 @@ export default function ModelView() {
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(false);
   const [paintMode, setPaintMode] = useState(false);
+  const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
   const [color, setColor] = useState<RGB>(PALETTE[0]);
   const [quality, setQuality] = useState(1); // slider 0..1; 1 = full detail on load
   // Attribution: the shared ledger + the current model's entry + the panel toggle.
@@ -143,11 +149,15 @@ export default function ModelView() {
   const draggingRef = useRef(false);
   const paintingRef = useRef(false);
   const lastRef = useRef<{ x: number; y: number } | null>(null);
+  // Double-click detection lives in JS (the host input layer has no dblclick event):
+  // two quick clicks on the same spot recentre the orbit focus there.
+  const lastClickRef = useRef<{ t: number; x: number; y: number } | null>(null);
 
-  // W = wireframe, P = paint mode — the standard mesh-editor reflexes.
+  // W = wireframe, P = paint mode, F = focus tool — the standard mesh-editor reflexes.
   useModifiers({
     w: () => setWire((v) => !v), W: () => setWire((v) => !v),
     p: () => setPaintMode((v) => !v), P: () => setPaintMode((v) => !v),
+    f: () => setFocusMode((v) => !v), F: () => setFocusMode((v) => !v),
   });
 
   // One load path for every source (picker, drop, CLI): validate the extension, hand
@@ -259,10 +269,21 @@ export default function ModelView() {
             // Click fills one face; holding + dragging paints the faces under the stroke.
             paintingRef.current = true;
             paintAt(x, y, color);
-          } else {
-            draggingRef.current = true;
-            lastRef.current = { x, y };
+            return;
           }
+          // Double-click (same spot, fast) recentres the orbit pivot on the point hit —
+          // the no-gymnastics way to put the focus on a far corner before editing.
+          const now = Date.now();
+          const last = lastClickRef.current;
+          if (last && now - last.t < 320 && Math.abs(x - last.x) < 6 && Math.abs(y - last.y) < 6) {
+            focusAt(x, y);
+            lastClickRef.current = null;
+            draggingRef.current = false;
+            return;
+          }
+          lastClickRef.current = { t: now, x, y };
+          draggingRef.current = true;
+          lastRef.current = { x, y };
         }}
         onMouseMove={(p: any) => {
           const x = p?.x ?? 0;
@@ -272,7 +293,9 @@ export default function ModelView() {
             return;
           }
           if (!draggingRef.current || !lastRef.current) return;
-          orbitDrag(x - lastRef.current.x, y - lastRef.current.y);
+          // Focus tool pans the pivot; otherwise the drag orbits.
+          if (focusMode) orbitPan(x - lastRef.current.x, y - lastRef.current.y);
+          else orbitDrag(x - lastRef.current.x, y - lastRef.current.y);
           lastRef.current = { x, y };
         }}
         onMouseUp={() => {
@@ -304,7 +327,9 @@ export default function ModelView() {
           <Text style={{ color: '#7d899c', fontSize: 12, marginLeft: 12 }}>
             {paintMode
               ? `${(model.count / 3).toLocaleString()} tris · click a face to fill · drag to paint`
-              : `${(model.count / 3).toLocaleString()} tris · drag to orbit · scroll to zoom`}
+              : focusMode
+                ? `${(model.count / 3).toLocaleString()} tris · drag to pan focus · double-click to recenter`
+                : `${(model.count / 3).toLocaleString()} tris · drag to orbit · scroll to zoom · double-click to recenter`}
           </Text>
         )}
         <Box style={{ flexGrow: 1 }} />
@@ -327,6 +352,18 @@ export default function ModelView() {
             }}
           >
             <Text style={{ color: paintMode ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Paint</Text>
+          </Pressable>
+        )}
+        {model && (
+          <Pressable
+            onPress={() => setFocusMode((v) => !v)}
+            tooltip="Focus tool (F) — drag to move the pivot; double-click the model to recenter"
+            style={{
+              marginRight: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+              backgroundColor: focusMode ? '#2a466e' : '#16233aee', borderWidth: 1, borderColor: focusMode ? '#5a86c0' : '#2c4a6a',
+            }}
+          >
+            <Text style={{ color: focusMode ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Focus</Text>
           </Pressable>
         )}
         {model && (

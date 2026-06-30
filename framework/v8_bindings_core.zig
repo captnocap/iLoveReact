@@ -365,6 +365,29 @@ fn hostModelOrbitZoom(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     state.markDirty();
 }
 
+/// __model_orbit_pan(dx, dy) — slide the orbit PIVOT in the screen plane (pixels). Moves
+/// the centre of rotation, not the eye, so you can drop the focus on a far corner of a
+/// large model and edit it without camera gymnastics (req_2148).
+fn hostModelOrbitPan(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const dx: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const dy: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    scene3d.orbitPan(dx, dy);
+    state.markDirty();
+}
+
+/// __model_focus_at(x, y) → bool. Re-centre the orbit on whatever the viewport pixel
+/// (x,y) hits (double-click to recentre). Returns 1 on a hit (and repaints), 0 on a miss
+/// (empty space — focus unchanged). The programmatic counterpart drives the same path.
+fn hostModelFocusAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const ok = scene3d.focusAt(x, y);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __model_paint_at(x, y, r, g, b) → bool. Raycast the viewport pixel (x,y) against the
 /// resident model and paint the face it hits with (r,g,b). One call covers both
 /// gestures: a click fills one face, a drag fires this per move. Returns 1 on a hit
@@ -1184,6 +1207,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_load_file", hostMeshLoadFile);
     v8_runtime.registerHostFn("__model_orbit_drag", hostModelOrbitDrag);
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
+    v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
+    v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
     v8_runtime.registerHostFn("__model_paint_at", hostModelPaintAt);
     v8_runtime.registerHostFn("__model_paint_face", hostModelPaintFace);
     v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);

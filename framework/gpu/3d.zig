@@ -365,6 +365,37 @@ fn orbitCamPos() math.Vec3 {
         .z = g_orbit.target[2] + g_orbit.dist * cp * @cos(g_orbit.yaw),
     };
 }
+/// Pan the orbit PIVOT in the screen plane by a drag delta (pixels). The orbit point was
+/// nailed to the model centre, which fights you the moment a model is large — you'd
+/// orbit a far edge around a centre half a model away. Moving the focus (not the eye)
+/// lets you drop the centre of rotation right where you're working (req_2148). Speed
+/// scales with dist so the grab tracks the cursor at any zoom; drag follows the content.
+pub fn orbitPan(dx: f32, dy: f32) void {
+    const eye = orbitCamPos();
+    const tgt = math.Vec3{ .x = g_orbit.target[0], .y = g_orbit.target[1], .z = g_orbit.target[2] };
+    const fwd = math.v3normalize(math.v3sub(tgt, eye));
+    const right = math.v3normalize(math.v3cross(fwd, math.v3up()));
+    const up = math.v3cross(right, fwd);
+    const k = g_orbit.dist * 0.0018;
+    g_orbit.target[0] += -dx * k * right.x + dy * k * up.x;
+    g_orbit.target[1] += -dx * k * right.y + dy * k * up.y;
+    g_orbit.target[2] += -dx * k * right.z + dy * k * up.z;
+}
+/// Snap the orbit pivot to an explicit world point — keeps yaw/pitch/dist, so only the
+/// centre of attention moves. The programmatic recentre (e.g. focus on a selection).
+pub fn orbitFocus(p: [3]f32) void {
+    g_orbit.target = p;
+}
+/// Re-centre the orbit on whatever the camera ray through (mx,my) hits — double-click a
+/// far corner and it becomes the pivot. Returns false on a miss (empty space) so the cart
+/// keeps the current focus. Uses the exact last-drawn camera, like paintAt.
+pub fn focusAt(mx: f32, my: f32) bool {
+    if (!model_paint.hasTarget()) return false;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const p = model_paint.pickPoint(cam, g_paint_vp_w, g_paint_vp_h, mx, my) orelse return false;
+    g_orbit.target = p;
+    return true;
+}
 
 // The EXACT camera + viewport the last drawScene used, captured so a paint raycast
 // (model_paint) shoots the same ray the user sees. Without this the pick would guess
