@@ -73,6 +73,9 @@ const meshClearSel = () => host.__mesh_edit_clear?.();
 // Snapshot before an instant press-pick; revert if the press turns into an orbit-drag.
 const meshSnapshot = () => host.__mesh_edit_snapshot?.();
 const meshRevert = () => host.__mesh_edit_revert?.();
+// Marquee (Alt+drag) box-select: grab every element inside the screen rect in one sweep.
+const meshBox = (x0: number, y0: number, x1: number, y1: number, additive: boolean): number =>
+  (host.__mesh_edit_box?.(x0, y0, x1, y1, additive ? 1 : 0) as number) ?? -1;
 const readSelInfo = (): SelInfo | null => {
   try {
     const j = host.__mesh_edit_counts?.();
@@ -182,6 +185,9 @@ export default function ModelView() {
   // a moving press orbits (you rotate the view while selecting). Down pos is the pick pos.
   const downRef = useRef<{ x: number; y: number } | null>(null);
   const movedRef = useRef(false);
+  // Alt+drag marquee: start point in a ref (no render), the visible rect in state.
+  const marqueeRef = useRef<{ x0: number; y0: number } | null>(null);
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   // Switch tool: selecting a mesh mode (or going back to view) is the active tool, so it
   // turns off Paint/Focus, and pushes the mode to the host. Mode 0 = plain view/orbit.
@@ -331,6 +337,17 @@ export default function ModelView() {
           // press that becomes an orbit-drag can revert the pick (see onMouseMove). No
           // setState here — the highlight is a host repaint, instant and React-free.
           if (selMode !== 0 && !focusMode) {
+            // Alt+drag = marquee (rubber-band) select. Snapshot so Shift+Alt can sweep-ADD.
+            if (currentModifiers().alt) {
+              meshSnapshot();
+              marqueeRef.current = { x0: x, y0: y };
+              setMarquee({ x, y, w: 0, h: 0 });
+              draggingRef.current = true;
+              return;
+            }
+            // Plain press: pick on PRESS for paint-like immediacy. Snapshot first so a press
+            // that becomes an orbit-drag can revert the pick (see onMouseMove). No setState
+            // here — the highlight is a host repaint, instant and React-free.
             meshSnapshot();
             meshPick(x, y, currentModifiers().shift);
             downRef.current = { x, y };
@@ -360,6 +377,13 @@ export default function ModelView() {
             if (paintingRef.current) paintAt(x, y, color);
             return;
           }
+          // Marquee in progress: select live inside the rect (host, instant) + draw the box.
+          if (marqueeRef.current) {
+            const m = marqueeRef.current;
+            meshBox(m.x0, m.y0, x, y, currentModifiers().shift);
+            setMarquee({ x: Math.min(m.x0, x), y: Math.min(m.y0, y), w: Math.abs(x - m.x0), h: Math.abs(y - m.y0) });
+            return;
+          }
           if (!draggingRef.current || !lastRef.current) return;
           // In select mode a press that travels past a few px is really an orbit: revert the
           // instant press-pick (once) so rotating the view doesn't change the selection.
@@ -375,9 +399,14 @@ export default function ModelView() {
           lastRef.current = { x, y };
         }}
         onMouseUp={() => {
-          // The pick already happened on press; if it stayed a click (no drag), refresh the
-          // count HUD now (one render, off the hot path — the highlight was already instant).
-          if (selMode !== 0 && !focusMode && draggingRef.current && !movedRef.current) {
+          // Marquee end: the live box already set the selection — just clear the rect + HUD.
+          if (marqueeRef.current) {
+            marqueeRef.current = null;
+            setMarquee(null);
+            setSelInfo(readSelInfo() ?? selInfo);
+          } else if (selMode !== 0 && !focusMode && draggingRef.current && !movedRef.current) {
+            // A click (no drag): the press-pick stands; refresh the count HUD (one render,
+            // off the hot path — the highlight was already instant on press).
             setSelInfo(readSelInfo() ?? selInfo);
           }
           draggingRef.current = false;
@@ -386,6 +415,11 @@ export default function ModelView() {
           downRef.current = null;
         }}
         onMouseLeave={() => {
+          if (marqueeRef.current) {
+            marqueeRef.current = null;
+            setMarquee(null);
+            setSelInfo(readSelInfo() ?? selInfo);
+          }
           draggingRef.current = false;
           paintingRef.current = false;
           lastRef.current = null;
@@ -394,6 +428,19 @@ export default function ModelView() {
         onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
       />
+
+      {/* Marquee rectangle — the desktop-style drag-select box (Alt+drag). Drawn over the
+          input layer with pointerEvents off so it never steals the drag; the elements it
+          encloses highlight live underneath as the box sweeps. */}
+      {marquee && (
+        <Box
+          style={{
+            position: 'absolute', left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h,
+            backgroundColor: 'rgba(90,134,192,0.18)', borderWidth: 1, borderColor: '#7fa8e0',
+            pointerEvents: 'none',
+          }}
+        />
+      )}
 
       {/* Title strip — only changes on load, so this render is the one-and-only. */}
       <Row
@@ -413,7 +460,7 @@ export default function ModelView() {
               : focusMode
                 ? `${(model.count / 3).toLocaleString()} tris · drag to pan focus · double-click to recenter`
                 : selMode !== 0
-                  ? `${SEL_MODES[selMode]} · ${selInfo.sel} selected · click to select · shift-click adds · drag to orbit`
+                  ? `${SEL_MODES[selMode]} · ${selInfo.sel} selected · click · shift-click adds · Alt-drag box · drag orbits`
                   : `${(model.count / 3).toLocaleString()} tris · drag to orbit · scroll to zoom · double-click to recenter`}
           </Text>
         )}

@@ -437,6 +437,12 @@ pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
 pub fn meshEditClear() void {
     mesh_edit.clearSelection();
 }
+/// Marquee (rubber-band) select every element inside the screen rect (Alt+drag).
+pub fn meshEditBox(x0: f32, y0: f32, x1: f32, y1: f32, additive: bool) i32 {
+    if (!model_paint.hasTarget()) return -1;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    return mesh_edit.boxSelect(cam, g_paint_vp_w, g_paint_vp_h, x0, y0, x1, y1, additive);
+}
 /// Snapshot the selection before an instant mousedown pick; revert if the press drags.
 pub fn meshEditSnapshot() void {
     mesh_edit.snapshotSelection();

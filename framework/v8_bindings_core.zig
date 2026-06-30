@@ -418,6 +418,20 @@ fn hostMeshEditClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     state.markDirty();
 }
 
+/// __mesh_edit_box(x0, y0, x1, y1, additive) → count. Marquee select every element inside
+/// the screen rect (Alt+drag); additive≠0 unions with the pre-gesture snapshot. Repaints.
+fn hostMeshEditBox(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x0: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y0: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const x1: f32 = @floatCast(argToF64(info, 2) orelse 0);
+    const y1: f32 = @floatCast(argToF64(info, 3) orelse 0);
+    const additive = (argToI32(info, 4) orelse 0) != 0;
+    const n = scene3d.meshEditBox(x0, y0, x1, y1, additive);
+    state.markDirty();
+    setReturnNumber(info, @floatFromInt(n));
+}
+
 /// __mesh_edit_snapshot() — save the selection before an instant mousedown pick.
 fn hostMeshEditSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     _ = info_c;
@@ -1278,6 +1292,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);
     v8_runtime.registerHostFn("__mesh_edit_pick", hostMeshEditPick);
     v8_runtime.registerHostFn("__mesh_edit_clear", hostMeshEditClear);
+    v8_runtime.registerHostFn("__mesh_edit_box", hostMeshEditBox);
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);

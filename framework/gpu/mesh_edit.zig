@@ -328,6 +328,71 @@ pub fn pick(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, add
     return @intCast(selCount());
 }
 
+fn inRect(sp: ?[2]f32, minx: f32, maxx: f32, miny: f32, maxy: f32) bool {
+    const p = sp orelse return false;
+    return p[0] >= minx and p[0] <= maxx and p[1] >= miny and p[1] <= maxy;
+}
+
+/// Marquee (rubber-band) select: select every element whose representative screen point
+/// (vertex / edge-midpoint / face-centroid) falls inside the rect (x0,y0)-(x1,y1). The
+/// desktop-style drag-select — sweep to grab many at once instead of one-by-one. additive
+/// (Shift held with Alt) unions with the pre-gesture snapshot so you can sweep to ADD;
+/// otherwise the rect IS the selection. Recomputed live each drag move. Returns the count.
+pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32, x1: f32, y1: f32, additive: bool) i32 {
+    if (g_mode == .none) return -1;
+    const ready = if (g_mode == .face) ensureFaceSel() else ensureTopology();
+    if (!ready) return -1;
+    const minx = @min(x0, x1);
+    const maxx = @max(x0, x1);
+    const miny = @min(y0, y1);
+    const maxy = @max(y0, y1);
+    const set = activeSet() orelse return -1;
+
+    // Recompute from the base each move: the rect alone, or unioned with the snapshot.
+    @memset(set, false);
+    if (additive) {
+        if (g_snap) |s| {
+            if (s.len == set.len and g_snap_mode == g_mode) @memcpy(set, s);
+        }
+    }
+
+    switch (g_mode) {
+        .face => {
+            const pos = model_paint.positions() orelse return -1;
+            const n: u32 = @intCast(set.len);
+            var f: u32 = 0;
+            while (f < n) : (f += 1) {
+                const b = f * 9;
+                const c: [3]f32 = .{
+                    (pos[b + 0] + pos[b + 3] + pos[b + 6]) / 3.0,
+                    (pos[b + 1] + pos[b + 4] + pos[b + 7]) / 3.0,
+                    (pos[b + 2] + pos[b + 5] + pos[b + 8]) / 3.0,
+                };
+                if (inRect(model_paint.project(cam, vp_w, vp_h, c), minx, maxx, miny, maxy)) set[f] = true;
+            }
+        },
+        .vertex => {
+            var i: u32 = 0;
+            while (i < g_vert_count) : (i += 1) {
+                if (inRect(model_paint.project(cam, vp_w, vp_h, vertPos(i)), minx, maxx, miny, maxy)) set[i] = true;
+            }
+        },
+        .edge => {
+            const edges = g_edges.?;
+            var e: u32 = 0;
+            while (e < g_edge_count) : (e += 1) {
+                const a = vertPos(edges[e * 2 + 0]);
+                const b = vertPos(edges[e * 2 + 1]);
+                const mid: [3]f32 = .{ (a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5 };
+                if (inRect(model_paint.project(cam, vp_w, vp_h, mid), minx, maxx, miny, maxy)) set[e] = true;
+            }
+        },
+        .none => return -1,
+    }
+    if (g_mode == .face) applyFaceHighlight();
+    return @intCast(selCount());
+}
+
 fn pickVertex(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32 {
     var best: i32 = -1;
     var best_d2: f32 = VERT_PX * VERT_PX;
@@ -489,4 +554,32 @@ test "vertex pick selects the nearest welded corner; face highlight saves+restor
     try testing.expectEqual(base0[0], restored[0]);
     try testing.expectEqual(base0[1], restored[1]);
     try testing.expectEqual(base0[2], restored[2]);
+}
+
+test "box select grabs every element inside the rect; additive unions the snapshot" {
+    setupQuad();
+    defer {
+        reset();
+        model_paint.clear();
+    }
+    const cam = model_paint.Camera{ .eye = .{ 0.5, 0.5, 5 }, .target = .{ 0.5, 0.5, 0 }, .fov_deg = 50 };
+    // A rect covering the whole viewport encloses every face/vertex.
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    _ = boxSelect(cam, 800, 600, 0, 0, 800, 600, false);
+    try testing.expectEqual(@as(u32, 4), selCount()); // all 4 welded verts
+
+    setMode(.face);
+    _ = boxSelect(cam, 800, 600, 0, 0, 800, 600, false);
+    try testing.expectEqual(@as(u32, 2), selCount()); // both faces' centroids enclosed
+
+    // A tiny rect at one corner of the screen catches nothing.
+    _ = boxSelect(cam, 800, 600, 0, 0, 2, 2, false);
+    try testing.expectEqual(@as(u32, 0), selCount());
+
+    // Additive box unions with the snapshot: select face 0, snapshot, then box the rest.
+    _ = selectFaceByIndex(0, false);
+    snapshotSelection();
+    _ = boxSelect(cam, 800, 600, 0, 0, 800, 600, true);
+    try testing.expectEqual(@as(u32, 2), selCount());
 }
