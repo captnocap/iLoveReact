@@ -2,7 +2,7 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
 import ModelView from '../../modelview';
-import { cookedMeshBlobData, cookedMeshRefForAsset } from '../data/hmscAssetCatalog';
+import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData } from '../data/hmscAssetCatalog';
 
 export default function ModelDocumentSurface({ model }: { model: ModelPackage | null }) {
   if (!model) {
@@ -28,22 +28,7 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
   if (meshRef) {
     const vertices = cookedMeshBlobData(meshRef);
     if (vertices) {
-      return (
-        <C.HW_ModelDocument>
-          <ModelView
-            key={model.id}
-            initialTitle={model.name}
-            initialMesh={{
-              key: meshRef,
-              name: model.name,
-              vertices,
-              count: Math.floor(vertices.length / 8),
-            }}
-            allowFilePicker={false}
-            trackAttribution={false}
-          />
-        </C.HW_ModelDocument>
-      );
+      return <MeshDocument model={model} meshKey={meshRef} vertices={vertices} />;
     }
     return (
       <C.HW_ModelDocument>
@@ -51,6 +36,21 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
           <Icon name="SearchX" size={18} color={accentFor('textFaint')} />
           <C.HW_StageSocketTitle>MODEL TRIANGLE DATA MISSING</C.HW_StageSocketTitle>
           <C.HW_StatusText>{meshRef}</C.HW_StatusText>
+        </C.HW_ModelDocEmpty>
+      </C.HW_ModelDocument>
+    );
+  }
+
+  const storedModelId = viewerStoredModelId(model);
+  if (storedModelId) {
+    const vertices = storedModelMeshData(storedModelId);
+    if (vertices) return <MeshDocument model={model} meshKey={`studio:${storedModelId}`} vertices={vertices} />;
+    return (
+      <C.HW_ModelDocument>
+        <C.HW_ModelDocEmpty>
+          <Icon name="SearchX" size={18} color={accentFor('textFaint')} />
+          <C.HW_StageSocketTitle>MODEL PART GEOMETRY MISSING</C.HW_StageSocketTitle>
+          <C.HW_StatusText>{storedModelId}</C.HW_StatusText>
         </C.HW_ModelDocEmpty>
       </C.HW_ModelDocument>
     );
@@ -113,6 +113,25 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
   );
 }
 
+function MeshDocument({ model, meshKey, vertices }: { model: ModelPackage; meshKey: string; vertices: Float32Array }) {
+  return (
+    <C.HW_ModelDocument>
+      <ModelView
+        key={model.id}
+        initialTitle={model.name}
+        initialMesh={{
+          key: meshKey,
+          name: model.name,
+          vertices,
+          count: Math.floor(vertices.length / 8),
+        }}
+        allowFilePicker={false}
+        trackAttribution={false}
+      />
+    </C.HW_ModelDocument>
+  );
+}
+
 function viewerMeshRefFor(model: ModelPackage): string | null {
   if (model.viewerMeshRef) return model.viewerMeshRef;
   const assetId = cookedAssetId(model);
@@ -122,6 +141,11 @@ function viewerMeshRefFor(model: ModelPackage): string | null {
 function cookedAssetId(model: ModelPackage): string | null {
   if (model.sourceKind !== 'cooked-asset') return null;
   return model.id.startsWith('cooked:') ? model.id.slice('cooked:'.length) : model.id;
+}
+
+function viewerStoredModelId(model: ModelPackage): string | null {
+  if (model.sourceKind !== 'studio-model') return null;
+  return model.id.startsWith('studio:') ? model.id.slice('studio:'.length) : model.id;
 }
 
 function DocStat({ label, value }: { label: string; value: string }) {

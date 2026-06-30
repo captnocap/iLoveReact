@@ -6,6 +6,7 @@ import {
   shaderSpec,
 } from '../../hmsc-int/game/textures/shaders';
 import { validateDecalDoc } from '../../hmsc-int/game/textures/decal';
+import { editMeshToGeometry, type EditMesh } from '../../hmsc-int/editors/model/editMesh';
 import type { Asset, ContentNode, ModelAtlas, ModelPackage, ModelPaintVariant } from './types';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
@@ -159,6 +160,7 @@ export type HmscEditorCatalog = {
 let cookedTextureBlobs: Record<string, string> = {};
 let cookedMeshBlobs: Record<string, number[]> = {};
 let cookedAssetMeshRefs: Record<string, string> = {};
+let storedModelMeshes: Record<string, Float32Array> = {};
 
 export const HMSC_EDITOR_CATALOG: HmscEditorCatalog = loadHmscEditorCatalog();
 
@@ -177,6 +179,10 @@ export function cookedMeshRefForAsset(assetId: string): string | null {
   return cookedAssetMeshRefs[assetId] ?? null;
 }
 
+export function storedModelMeshData(modelId: string): Float32Array | null {
+  return storedModelMeshes[modelId] ?? null;
+}
+
 function loadHmscEditorCatalog(): HmscEditorCatalog {
   const started = Date.now();
   const errors: string[] = [];
@@ -191,6 +197,7 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
       .filter((asset) => Boolean(asset.id && asset.meshRef))
       .map((asset) => [asset.id, asset.meshRef]),
   );
+  storedModelMeshes = storedModelViewerMeshes(models);
 
   const materialAssets = [
     ...shaderRecipeAssets(),
@@ -238,6 +245,47 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
       errors,
     },
   };
+}
+
+function storedModelViewerMeshes(snapshot: ModelSnapshot | null): Record<string, Float32Array> {
+  const out: Record<string, Float32Array> = {};
+  Object.values(snapshot?.state?.models ?? {}).forEach((model) => {
+    const vertices = storedModelVertices(model);
+    if (vertices.length > 0) out[model.id] = vertices;
+  });
+  return out;
+}
+
+function storedModelVertices(model: StoredModel): Float32Array {
+  const chunks: Float32Array[] = [];
+  let total = 0;
+  orderedParts(model).forEach((part) => {
+    if (part.visible === false || !isEditMesh(part.mesh)) return;
+    const lifted = applyPartLift(editMeshToGeometry(part.mesh).positions, part.lift ?? 0);
+    if (lifted.length === 0) return;
+    chunks.push(lifted);
+    total += lifted.length;
+  });
+  if (chunks.length === 0) return new Float32Array();
+  if (chunks.length === 1) return chunks[0];
+  const out = new Float32Array(total);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  });
+  return out;
+}
+
+function isEditMesh(mesh: StoredPart['mesh']): mesh is EditMesh {
+  return Boolean(mesh && Array.isArray(mesh.verts) && Array.isArray(mesh.faces));
+}
+
+function applyPartLift(vertices: Float32Array, lift: number): Float32Array {
+  if (lift === 0) return vertices;
+  const out = new Float32Array(vertices);
+  for (let index = 1; index < out.length; index += 8) out[index] += lift;
+  return out;
 }
 
 function importedPropViewerSources(data: ImportedPropsData | null): Set<string> {
