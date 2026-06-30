@@ -55,6 +55,39 @@ These rules apply across the whole mock/refactor, not just one panel.
 - Keep JSX easy to read. Components own presentation; logic/data helpers live in
   logic files.
 
+### React Is UI Authoring; Tools Are Host-Owned
+
+- React/TSX is the interface authoring layer. Its job is to render the editor
+  chrome, panels, menus, inspectors, popovers, preview sockets, command surfaces,
+  and temporary mock state needed to design those surfaces.
+- React is not the owner of actual editor capability. Placement, snapping,
+  movement, deletion, model import, model preview, rigging, texture atlas work,
+  painting effects, shader/material evaluation, RLE encode/decode, dithering,
+  pathing, collision, diagnostics, autosave, file IO, multiplayer sync, and
+  compile/export behavior must be host-owned systems or data contracts consumed
+  by host-owned systems.
+- Production flow should read as:
+  `React UI -> command/eventbus event -> host/native tool -> diagnostics/events -> React summary`.
+  React may present and route the command, but the native tool owns execution,
+  validation, timing, persistence, and failure reporting.
+- Mock data is allowed only to make menus, panels, overlays, and state changes
+  inspectable during design. Mock data is not permission to hide a real tool
+  algorithm inside the UI layer.
+- Any capability temporarily implemented in React because the host version does
+  not exist yet must be labeled as a mock, preview shim, or adapter and must name
+  the future host/native owner. Unlabeled React-side tool logic is architecture
+  drift.
+- Host-owned does not mean invisible. Every host tool still needs a first-class
+  UI surface, menu entry, keybinding, icon, context-menu action, diagnostics
+  channel, and eventbus contract. React owns those authoring affordances; the
+  host owns the work.
+- The command registry/file menus are the user-facing source of truth by name.
+  Action bars, icons, context menus, hotkeys, and popovers mirror the same
+  registry entries instead of inventing separate feature paths.
+- Native preview sockets are the expected shape for expensive visual tools. The
+  UI reserves and controls the viewport; the host renders model/material/shader
+  truth into it.
+
 ### Eventbus Direction
 
 - Everything should go through an eventbus. Actions travel into and out of the
@@ -635,6 +668,30 @@ Mock changes:
 - Removed duplicated workspace coordinate/status strip so the bottom dock owns
   that information.
 
+Follow-up delivery-to-thread direction (req_2229):
+
+- The journal's left column is now RECENT DELIVERIES. Every delivery (build
+  note) shows whether it already belongs to a thread or is unthreaded, with a
+  `thread it` / `move thread` action on each card.
+- Choosing the action swaps the right column into an attach panel: a semantic
+  search over thread name/alias/tag/id/delivery tokens, a one-click `open new
+  thread` using the typed name (or the delivery title), and a ranked list of
+  matching threads to attach into.
+- Attaching a delivery moves it into exactly one thread; it is removed from any
+  prior thread so a delivery never double-counts. Detach is available per
+  delivery inside the thread card.
+- Threads carry a stable id, a user-editable semantic display name (inline
+  rename; the previous name is kept as an alias so existing links stay valid),
+  alias chips, tag chips, their attached deliveries (resolved to build/title),
+  the narrative history, and attached diagnostic captures.
+- Diagnostic captures from the raw-console pool can be attached to any thread
+  and render inline with name, channels, time range, build id, map/context, and
+  a copy action, matching the raw-console capture contract.
+- The bottom dock now also reports the live thread count next to build-note and
+  reversible counts.
+- Still a mock: thread/delivery/capture state lives in in-memory MockState; the
+  production owner is the request-ledger/eventbus, not the React layer.
+
 Follow-up dock telemetry direction:
 
 - The dock should also expose in-memory edit history as an expandable popover.
@@ -811,3 +868,248 @@ Implementation implications:
 - Compile can either bake a static effect result into an installable cached
   texture or ship the compact base data plus effect params when the effect is
   meant to remain dynamic/animated.
+
+## 2026-06-30 - Platform Framing: Shitty Games / Nogame Release
+
+What was shared:
+
+- The editor/tooling may be released as a "nogame" engine-first build before
+  the hmsc game content is complete.
+- The analogy is Fortnite Save the World / Battle Royale: the side surface can
+  ship early and become the way people understand the platform while the game
+  continues to develop.
+- The loader is already positioned as game-agnostic. hmsc can become one game
+  package loaded by the platform rather than the platform itself.
+- The public framing should be humble and direct: this is a different kind of
+  game engine, still heavily under development, built through AI-assisted real
+  content authoring, and already useful enough for people to tinker with.
+- Branding direction for the mock: replace the corner "WORLD EDITOR" identity
+  with "Shitty Games."
+
+Confirmed direction:
+
+- "Shitty Games" is the platform/editor brand for the current mock direction.
+- hmsc-int is no longer the user-facing identity. It is an internal/project
+  lineage name that should give way to the engine/tooling brand.
+- The engine/tooling can ship without a bundled finished game as long as it
+  lets people author, load, inspect, and play with data packages.
+- hmsc remains the first game/content package, not the only reason the platform
+  exists.
+- The best pitch is not "Unity competitor." It is closer to a Roblox/GMod-like
+  authoring platform with a data-first loader and native tools, but able to
+  graduate from simple block/Roblox-like assets into high-detail imported
+  models and authored game packages.
+
+Design deductions:
+
+- The editor chrome should foreground the platform brand and make game/project
+  selection feel like loaded content, not the app identity.
+- Routes should continue consolidating toward `/editor` and `/play`; brand and
+  navigation should reinforce that the app is a loader/editor shell.
+- Build notes, request history, debug logs, eventbus records, and package
+  manifests become part of the platform story: people can see how a game was
+  built and updated.
+- The content browser needs to keep separating engine-global resources,
+  package-local game data, model homes, global materials, and shader/effect
+  libraries.
+- RLE remains a core public technical story, but with the caveat already
+  discovered: noisy final pixels such as dithered texture data are the wrong
+  source format. Dither should be stored as compact parameters consumed by an
+  engine function.
+
+Implementation implications:
+
+- Do not rename production directories casually. The user-facing brand can move
+  first in mock/UI surfaces while code paths migrate deliberately.
+- Public packaging should distinguish platform/editor builds from game packages.
+- Dither and shader effects should be represented as data-driven engine
+  capabilities so the same compact game-data story remains true for authored
+  texture effects.
+- When agents add new UI, avoid "hmsc-int" as visible product language unless
+  referring to an existing internal path or migration note.
+
+## 2026-06-30 - Color Studio: Material/Shader-Aware Color Tool
+
+What was shared:
+
+- The provided `Color Pickers.dc.html` handoff is a design reference, not
+  production code to copy.
+- The target is a material/shader-aware Color Studio that replaces a generic
+  color picker with a tool for authoring the named color slots that shaders
+  consume.
+- The highest-value first build is the Material Palette view: select a material,
+  see its preview, change variant/seed/quality, expose baked shader color
+  constants as slots, and fill/reset those slots.
+- The prototype's preview uses CSS approximations. Production previews should
+  render the real WGSL/material output so the user sees ground truth.
+
+Confirmed direction:
+
+- The important destination is not a hue wheel. It is ownership of shader color
+  constants that currently live as baked `vec3f(...)` values.
+- Slots are per material and per variant. Overrides should key by material,
+  variant, and slot index/name.
+- The UI should make the default explicit with a readout like
+  `was baked: vec3f(...)` so the magic-color system is visibly removed.
+- `materialId`, `variant`, `seed`, `quality`, and `board` remain the visible
+  shader descriptor; palette slots are the new missing piece.
+- A low-risk migration path is one material first: default uniforms match the
+  old literals, then the tool writes overrides, then the pattern generalizes.
+
+Design deductions:
+
+- Material cards should be visual, but text names remain first-class so the
+  capability is searchable and visible by name.
+- Variant, seed, and quality controls belong close to the preview because they
+  are part of the shader descriptor, not generic inspector metadata.
+- Slots should behave like owned data records: active slot, default/baked state,
+  override state, reset to baked, and fill from assist/library.
+- Fill assists should derive from the material context, not a global color wheel.
+  "A paint that fits this wood" is the correct mental model.
+- Library pulls should remain local/offline in the hot path. Online discovery is
+  an import into the local library, not a live dependency while picking.
+
+Implementation implications:
+
+- Start in the mock with explicit material data from `fillShader.ts` samples:
+  Rot Siding, Neon Stucco, and Pool Tile.
+- Production should parse or codegen slots from material definitions, or better,
+  refactor material functions to read named palette entries from a parallel
+  palette buffer/uniform contract.
+- The `D[]` descriptor should not become a bag of unexplained numbers. The
+  editor must keep names attached to every parameter and slot.
+- Color edits should travel through the eventbus as semantic events such as
+  `material.slot.fill`, `material.slot.reset`, `material.seed.roll`, and
+  `material.variant.select`.
+- Shader-slot editing and dither/effect layers are the same design family:
+  compact authored data drives engine-owned functions rather than storing noisy
+  final pixels as source truth.
+
+## 2026-06-30 - PRIORITY BACKFILL: concerns dropped by the authoring pass
+
+These three were given to codex in the same 09:33-09:58 window as the Color
+Studio and Platform Framing handoffs (which did get sections), but never made it
+into this doc. Backfilled here verbatim-faithfully and flagged PRIORITY because
+they are unresolved architecture, not nice-to-haves. Source requests cited per
+section. (req_2267)
+
+## PRIORITY - Model Package Layout: a model is a self-contained directory
+
+Source request: `req_2168` (codex, 2026-06-30T09:33Z).
+
+What was shared:
+
+- The full authoring loop for a model is: make/import a model -> rig it -> paint
+  it. The storage model has to serve that whole loop, not just import.
+- Painting must be able to store many versions of a model's textures, for two
+  distinct reasons: visual variations, and decompositions of the model for LoD
+  and for breaking the model apart (e.g. explosions).
+- The on-disk shape the user wants: a `models/` folder where every model has its
+  own directory. Inside that one model directory lives:
+  - the model's own data (mesh/rig);
+  - a texture atlas for the model;
+  - a texture atlas for every decomposition of the model that gets stored;
+  - for each atlas, the paint applied to it, storable arbitrarily many times.
+- Example: a ball can be painted a million different ways and every one of those
+  paintings lives inside that single model's folder.
+- Global textures are explicitly NOT this. Textures that come from shaders or
+  images are less model-specific and are generally applied; they live elsewhere
+  and must not be confused with a model's owned paint.
+- Exception that keeps the home self-contained: if a paint variation uses a
+  shader for part of itself, that shader code reference is stored alongside the
+  same model data. So everything is in one home, and copying the entire folder
+  for a single model carries all of its bases end to end.
+- Sketched structure:
+  ```
+  -models/
+  --props/
+  ---wip/...
+  ---vase/...
+  ---cd_player/...
+  ```
+
+Confirmed direction:
+
+- A model is a self-contained package directory, not a single importable file.
+  The directory is the unit of copy/move/share: copy the folder and you have the
+  mesh, every decomposition, every atlas, every stored paint variation, and any
+  referenced shader code, end to end.
+- Two axes of multiplicity live inside one model directory: variations (many
+  paints over the same atlas) and decompositions (LoD tiers + break-apart pieces
+  like explosion chunks), each decomposition carrying its own atlas.
+- Model-owned paint and globally-applied textures (shader/image sourced) are
+  separate storage classes. Model paint is package-local; global textures are
+  shared and generally applied. A shader merely referenced by a model paint is
+  copied into the model home so the package stays portable.
+- This is the concrete file-structure expression of the "model homes" the
+  Platform Framing and content-browser sections only gestured at, and it is a
+  sibling to the Skeleton Object Model (`docs/game/SKELETON_OBJECT_MODEL.md`),
+  where an object = bones + carried data (meshes/collision/animation/...). Both
+  say the same thing: a thing is a bundle of its assets, not one flat file.
+
+Open questions to resolve before implementation:
+
+- Where do global (shader/image) textures live relative to `models/`, and how is
+  a model-local copy of a referenced shader kept in sync with its global source?
+- Naming/identity of decompositions and paint variations inside a model dir so
+  LoD tiers, explosion chunks, and named paints are addressable and RLE-friendly.
+- Reconcile with the package-local-vs-engine-global split already named in the
+  Platform Framing section so model homes are one consistent story.
+
+## PRIORITY - Overlays Must Block Pointer Events To What Is Behind Them
+
+Source request: `req_2167` (codex, 2026-06-30T09:25Z).
+
+What was shared:
+
+- With a modal/menu open, clicks still reach the elements behind it. The user
+  called this out as a real framework problem to stab as soon as possible, not a
+  per-screen cosmetic issue.
+
+Confirmed direction:
+
+- This is a framework-level pointer-routing concern, not a one-off fix in a
+  single popover. Any open overlay (modal, dropdown, context menu, popover) must
+  block pointer events to everything painted behind it for as long as it is open.
+- It ties directly to the existing overlay rule that overlays paint and hit-test
+  as the root's last child: an open overlay owns input until dismissed.
+- Acceptance: with any overlay open, a click outside the overlay either dismisses
+  the overlay or is swallowed by its scrim. It must never fall through to world
+  geometry, toolbar buttons, or panels underneath.
+
+## PRIORITY - Layout Reachability Validation (host-run, pre-open)
+
+Source requests: `req_2171`, `req_2172` (codex, 2026-06-30T09:56-09:58Z).
+
+What was shared:
+
+- The user wants a validation script that enforces menus and content are always
+  reachable, and that the layout is not doing a jank wrap or missing a scroll
+  container.
+- The mental model of layout here is that everything is predetermined and has a
+  fixed size even at runtime. That is treated as the coherent way to build a UI:
+  a gutter is a known width (e.g. 420px); percentages and flex have precise,
+  resolvable calculations against the other style constraints within the exact
+  same set of nested elements; and even runtime data loads into a fixed-size
+  component.
+- Because of that determinism, layout correctness should be verifiable at the
+  user's breakpoint BEFORE the app is ever opened and looked at.
+- Implementation constraint: validate with the system already in place. No
+  python. Use zig or ts and invoke it the same way the project runs its v8-based
+  CLI functions.
+
+Confirmed direction:
+
+- Layout reachability is a pre-open, host-run gate, not a manual visual check.
+  It should fail the build/check when content can become unreachable: silent
+  wrap, a region that needs a scroll container and lacks one, a fixed gutter that
+  no longer adds up against its siblings, or children dropped past a container
+  cap.
+- The validator runs on the same deterministic layout the engine computes, so a
+  failure is provable from the predetermined sizes without rendering to a screen.
+- Tooling rule: zig or ts only, invoked through the existing v8 CLI path; no
+  python anywhere in this validator.
+- Note: a first cut exists in the tree as `layoutValidateCli.ts` /
+  `bundle-layout-validate.js`; this section is the design contract it must satisfy
+  (reachability + fixed-size invariants + no-python), and it should be reconciled
+  against that script rather than re-invented.
