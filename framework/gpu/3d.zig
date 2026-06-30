@@ -15,6 +15,7 @@ const math = @import("../math/root.zig");
 const layout = @import("../layout.zig");
 const effect_assemble = @import("effect_assemble.zig");
 const static_instance_policy = @import("static_instance_policy.zig");
+const model_paint = @import("model_paint.zig");
 const Node = layout.Node;
 
 // ════════════════════════════════════════════════════════════════════════
@@ -369,6 +370,49 @@ fn orbitCamPos() math.Vec3 {
         .z = g_orbit.target[2] + g_orbit.dist * cp * @cos(g_orbit.yaw),
     };
 }
+
+// The EXACT camera + viewport the last drawScene used, captured so a paint raycast
+// (model_paint) shoots the same ray the user sees. Without this the pick would guess
+// the fov/aspect and miss near the silhouette.
+var g_paint_eye: [3]f32 = .{ 0, 0, 0 };
+var g_paint_target: [3]f32 = .{ 0, 0, 0 };
+var g_paint_fov: f32 = 50;
+var g_paint_vp_w: f32 = 0;
+var g_paint_vp_h: f32 = 0;
+
+/// Adopt a freshly-parsed mesh (interleaved verts, 8 f32/vert) as the paint target.
+/// Rewrites its UVs to the per-face atlas in place, so the SAME verts then uploaded by
+/// stashHostMesh carry the paint mapping. Keyed by the intern key so the draw can find
+/// it. Called by the load door before stashing.
+pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
+    model_paint.setTarget(hashKey(key), verts, count);
+}
+
+/// Paint the face under viewport pixel (mx,my) the given colour, using the last-drawn
+/// camera. Returns true if a face was hit (the caller marks dirty to repaint). One call
+/// handles both gestures: a click fills one face, a drag calls this per move.
+pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) bool {
+    if (!model_paint.hasTarget()) return false;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const face = model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, mx, my);
+    if (face < 0) return false;
+    model_paint.paintFace(@intCast(face), .{ r, g, b, 255 });
+    return true;
+}
+
+/// Paint a face by its index (no raycast) — programmatic fill / the headless paint
+/// proof. Returns false if there's no target or the index is out of range.
+pub fn paintFaceByIndex(face: u32, r: u8, g: u8, b: u8) bool {
+    if (face >= model_paint.faceCount()) return false;
+    model_paint.paintFace(face, .{ r, g, b, 255 });
+    return true;
+}
+
+/// Triangle count of the active paint target (0 if none) — lets a cart iterate faces.
+pub fn paintFaceCount() u32 {
+    return model_paint.faceCount();
+}
+
 var g_dbg_frame: u64 = 0; // req_0727: rate-limit the r3d-census diagnostic print
 
 // ── Dynamic geometry region (variable-size bump) ────────────────────────────
@@ -2602,6 +2646,14 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     const view = math.m4lookAt(cam_pos, cam_look, .{ .x = 0, .y = 1, .z = 0 });
     const vp = math.m4multiply(projection, view);
 
+    // Capture the exact camera this frame so a paint raycast shoots the ray the user
+    // sees (model_paint.pick). Only meaningful when this scene holds the paint target.
+    g_paint_eye = .{ cam_pos.x, cam_pos.y, cam_pos.z };
+    g_paint_target = .{ cam_look.x, cam_look.y, cam_look.z };
+    g_paint_fov = cam_fov;
+    g_paint_vp_w = w;
+    g_paint_vp_h = h;
+
     // With a skybox, distant geometry should melt into the HORIZON colour, not
     // the flat clear colour — that distance fade is most of what sells the sky.
     // A <Scene3D.Fog color=...> overrides it (sentinel {-1,-1,-1} = keep auto).
@@ -2930,6 +2982,15 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         var tex_bg: ?*wgpu.BindGroup = g_default_tex_bind_group;
         if (child.scene3d_tex_rgba) |rgba| {
             if (getOrCreateTexBindGroup(rgba, child.scene3d_tex_w, child.scene3d_tex_h)) |bg| tex_bg = bg;
+        }
+        // Paint target: bind its per-face paint atlas as the diffuse, so each face shows
+        // its painted colour (its verts' UVs were remapped to one atlas texel/face).
+        if (child.scene3d_geom_key) |gk| {
+            if (model_paint.isTarget(hashKey(gk))) {
+                if (model_paint.atlas()) |a| {
+                    if (getOrCreateTexBindGroup(a.rgba, a.w, a.h)) |bg| tex_bg = bg;
+                }
+            }
         }
         if (child.scene3d_tex_key) |tk| {
             if (images.staticSurfaceBindGroup3D(tk)) |bg| tex_bg = bg;

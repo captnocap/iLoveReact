@@ -46,20 +46,38 @@ function loadModelFile(path: string): Loaded | null {
 
 const orbitDrag = (dx: number, dy: number) => host.__model_orbit_drag?.(dx, dy);
 const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
+// Paint the face under viewport pixel (x,y) — the host raycasts the resident mesh and
+// colours exactly the face hit. No verts or UVs cross the bridge.
+const paintAt = (x: number, y: number, rgb: RGB) => host.__model_paint_at?.(x, y, rgb[0], rgb[1], rgb[2]) === 1;
+
+type RGB = [number, number, number];
+// A small fixed palette — this is for colouring faces, not a full art package.
+const PALETTE: RGB[] = [
+  [222, 70, 64], [238, 142, 48], [240, 206, 74], [112, 196, 96],
+  [66, 158, 226], [126, 112, 222], [226, 120, 196], [244, 244, 248],
+  [126, 134, 150], [26, 28, 36],
+];
+const rgbCss = (c: RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
 export default function ModelView() {
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(false);
+  const [paintMode, setPaintMode] = useState(false);
+  const [color, setColor] = useState<RGB>(PALETTE[0]);
 
-  // Drag state lives in refs, NOT useState: orbiting must not trigger a React render
-  // (the host repaints itself off __model_orbit_drag). A re-render per mouse-move is
+  // Drag state lives in refs, NOT useState: orbiting/painting must not trigger a React
+  // render (the host repaints itself off the doors). A re-render per mouse-move is
   // exactly the choppiness this design exists to avoid.
   const draggingRef = useRef(false);
+  const paintingRef = useRef(false);
   const lastRef = useRef<{ x: number; y: number } | null>(null);
 
-  // W toggles wireframe — the standard mesh-editor reflex.
-  useModifiers({ w: () => setWire((v) => !v), W: () => setWire((v) => !v) });
+  // W = wireframe, P = paint mode — the standard mesh-editor reflexes.
+  useModifiers({
+    w: () => setWire((v) => !v), W: () => setWire((v) => !v),
+    p: () => setPaintMode((v) => !v), P: () => setPaintMode((v) => !v),
+  });
 
   // One load path for every source (picker, drop, CLI): validate the extension, hand
   // the path to the host parser, and surface a clean error if it can't be read.
@@ -106,6 +124,17 @@ export default function ModelView() {
     // the wireframe stays locked to the surface when you get in close.
     const zoom = Number(callHost<string | null>('__env_get', null, 'RJIT_ZOOM') ?? 0);
     for (let i = 0; i < zoom; i += 1) orbitZoom(1);
+    // RJIT_PAINT=1 paints every face by index in a rainbow — the headless proof that
+    // painting is per-face and independent (no congruent-face fusion). Each face shows
+    // its OWN colour, which is exactly the bug the old UV-atlas dedup couldn't avoid.
+    if (callHost<string | null>('__env_get', null, 'RJIT_PAINT')) {
+      setPaintMode(true);
+      const n = Number(host.__model_face_count?.() ?? 0);
+      for (let f = 0; f < n; f += 1) {
+        const c = PALETTE[f % PALETTE.length];
+        host.__model_paint_face?.(f, c[0], c[1], c[2]);
+      }
+    }
   }, []);
 
   useFileDrop(applyPath);
@@ -120,29 +149,45 @@ export default function ModelView() {
         <Scene3D.Fog enabled={false} />
         <Scene3D.AmbientLight color="#6b7488" intensity={1.0} />
         <Scene3D.DirectionalLight direction={[-0.5, -0.9, -0.4]} color="#ffffff" intensity={1.7} />
-        {model && <Scene3D.Mesh hostKey={model.key} material="#c2c8d2" />}
+        {/* White material: all colour comes from the host's per-face paint atlas
+            (default grey until painted), so painted colours render true. */}
+        {model && <Scene3D.Mesh hostKey={model.key} material="#ffffff" />}
       </Scene3D>
 
       {/* Invisible full-window input layer: orbits on drag, dollies on wheel. It feeds
           host doors directly and keeps NO React state, so a drag never re-renders. */}
       <Pressable
         onMouseDown={(p: any) => {
-          draggingRef.current = true;
-          lastRef.current = { x: p?.x ?? 0, y: p?.y ?? 0 };
-        }}
-        onMouseMove={(p: any) => {
-          if (!draggingRef.current || !lastRef.current) return;
           const x = p?.x ?? 0;
           const y = p?.y ?? 0;
+          if (paintMode) {
+            // Click fills one face; holding + dragging paints the faces under the stroke.
+            paintingRef.current = true;
+            paintAt(x, y, color);
+          } else {
+            draggingRef.current = true;
+            lastRef.current = { x, y };
+          }
+        }}
+        onMouseMove={(p: any) => {
+          const x = p?.x ?? 0;
+          const y = p?.y ?? 0;
+          if (paintMode) {
+            if (paintingRef.current) paintAt(x, y, color);
+            return;
+          }
+          if (!draggingRef.current || !lastRef.current) return;
           orbitDrag(x - lastRef.current.x, y - lastRef.current.y);
           lastRef.current = { x, y };
         }}
         onMouseUp={() => {
           draggingRef.current = false;
+          paintingRef.current = false;
           lastRef.current = null;
         }}
         onMouseLeave={() => {
           draggingRef.current = false;
+          paintingRef.current = false;
           lastRef.current = null;
         }}
         onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
@@ -162,10 +207,24 @@ export default function ModelView() {
         </Text>
         {model && (
           <Text style={{ color: '#7d899c', fontSize: 12, marginLeft: 12 }}>
-            {`${(model.count / 3).toLocaleString()} tris · drag to orbit · scroll to zoom`}
+            {paintMode
+              ? `${(model.count / 3).toLocaleString()} tris · click a face to fill · drag to paint`
+              : `${(model.count / 3).toLocaleString()} tris · drag to orbit · scroll to zoom`}
           </Text>
         )}
         <Box style={{ flexGrow: 1 }} />
+        {model && (
+          <Pressable
+            onPress={() => setPaintMode((v) => !v)}
+            tooltip="Toggle paint mode (P)"
+            style={{
+              marginRight: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+              backgroundColor: paintMode ? '#2a466e' : '#16233aee', borderWidth: 1, borderColor: paintMode ? '#5a86c0' : '#2c4a6a',
+            }}
+          >
+            <Text style={{ color: paintMode ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Paint</Text>
+          </Pressable>
+        )}
         {model && (
           <Pressable
             onPress={() => setWire((w) => !w)}
@@ -188,6 +247,34 @@ export default function ModelView() {
           <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Open…</Text>
         </Pressable>
       </Row>
+
+      {/* Palette strip — appears under the title bar in paint mode. Click a swatch to
+          set the active colour; it's drawn over the input overlay so clicks land here. */}
+      {model && paintMode && (
+        <Row
+          style={{
+            position: 'absolute', left: 0, top: 34, right: 0, height: 40,
+            alignItems: 'center', paddingLeft: 12, paddingRight: 12,
+            backgroundColor: 'rgba(12,14,20,0.82)', borderBottomWidth: 1, borderColor: '#1d2330',
+          }}
+        >
+          {PALETTE.map((c, i) => {
+            const active = c[0] === color[0] && c[1] === color[1] && c[2] === color[2];
+            return (
+              <Pressable
+                key={i}
+                onPress={() => setColor(c)}
+                style={{
+                  width: 24, height: 24, borderRadius: 5, marginRight: 8,
+                  backgroundColor: rgbCss(c),
+                  borderWidth: active ? 2 : 1,
+                  borderColor: active ? '#ffffff' : '#00000055',
+                }}
+              />
+            );
+          })}
+        </Row>
+      )}
 
       {/* Center prompt until something is loaded. */}
       {!model && (

@@ -244,6 +244,9 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     };
     defer mesh.deinit(std.heap.c_allocator);
 
+    // Adopt this mesh as the paint target FIRST — it rewrites the verts' UVs to the
+    // per-face paint atlas in place, so the stash (next) ships the paint-ready UVs.
+    scene3d.setPaintTarget(path, mesh.verts, mesh.vert_count);
     if (!scene3d.stashHostMesh(path, mesh.verts, mesh.vert_count)) {
         setReturnString(info, "");
         return;
@@ -291,6 +294,41 @@ fn hostModelOrbitZoom(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     const delta: f32 = @floatCast(argToF64(info, 0) orelse 0);
     scene3d.orbitZoom(delta);
     state.markDirty();
+}
+
+/// __model_paint_at(x, y, r, g, b) → bool. Raycast the viewport pixel (x,y) against the
+/// resident model and paint the face it hits with (r,g,b). One call covers both
+/// gestures: a click fills one face, a drag fires this per move. Returns 1 on a hit
+/// (and repaints), 0 on a miss. r/g/b are 0–255.
+fn hostModelPaintAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const r: u8 = @intCast(std.math.clamp(argToI32(info, 2) orelse 0, 0, 255));
+    const g: u8 = @intCast(std.math.clamp(argToI32(info, 3) orelse 0, 0, 255));
+    const b: u8 = @intCast(std.math.clamp(argToI32(info, 4) orelse 0, 0, 255));
+    const hit = scene3d.paintAt(x, y, r, g, b);
+    if (hit) state.markDirty();
+    setReturnNumber(info, if (hit) 1 else 0);
+}
+
+/// __model_paint_face(face, r, g, b) → bool. Fill a face by index (no raycast) —
+/// programmatic colouring + the headless paint proof.
+fn hostModelPaintFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const face: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const r: u8 = @intCast(std.math.clamp(argToI32(info, 1) orelse 0, 0, 255));
+    const g: u8 = @intCast(std.math.clamp(argToI32(info, 2) orelse 0, 0, 255));
+    const b: u8 = @intCast(std.math.clamp(argToI32(info, 3) orelse 0, 0, 255));
+    const ok = scene3d.paintFaceByIndex(face, r, g, b);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __model_face_count() → number of triangles in the active paint target (0 if none).
+fn hostModelFaceCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, @floatFromInt(scene3d.paintFaceCount()));
 }
 
 fn hostReleaseFileBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -970,6 +1008,9 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_load_file", hostMeshLoadFile);
     v8_runtime.registerHostFn("__model_orbit_drag", hostModelOrbitDrag);
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
+    v8_runtime.registerHostFn("__model_paint_at", hostModelPaintAt);
+    v8_runtime.registerHostFn("__model_paint_face", hostModelPaintFace);
+    v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);
     v8_runtime.registerHostFn("__hostReleaseFileBuffer", hostReleaseFileBuffer);
     v8_runtime.registerHostFn("__hostLog", hostLog);
     v8_runtime.registerHostFn("__js_eval", hostJsEval);

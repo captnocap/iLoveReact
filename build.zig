@@ -946,6 +946,21 @@ pub fn build(b: *std.Build) void {
     const mesh_import_test_step = b.step("test-mesh-import", "Run the GLB/OBJ mesh import unit tests");
     mesh_import_test_step.dependOn(&run_mesh_import_test.step);
 
+    // ── model paint (raycast + per-face atlas) unit tests — headless, no GPU ───
+    const model_paint_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/model_paint.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const model_paint_test = b.addTest(.{
+        .name = "model-paint-test",
+        .root_module = model_paint_test_mod,
+    });
+    const run_model_paint_test = b.addRunArtifact(model_paint_test);
+    const model_paint_test_step = b.step("test-model-paint", "Run the model-paint raycast/atlas unit tests");
+    model_paint_test_step.dependOn(&run_model_paint_test.step);
+
     // ── GPU attribution unit tests ──────────────────────────────
     // Exercises native text/capture attribution producers without going
     // through the TS bridge: atlas-miss rollover, text trace summaries,
