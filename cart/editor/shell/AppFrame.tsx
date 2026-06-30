@@ -611,6 +611,7 @@ export default function AppFrame() {
             onCommand={runCommand}
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
+            onModelAction={(label) => setState((prev) => ({ ...prev, status: label }))}
           />
         </RenderProbe>
       </C.HW_Body>

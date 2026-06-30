@@ -1,12 +1,13 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { commandById } from '../data/commands';
-import { FLOORS, PRESETS, RIGHT_PANES, SNAP_MODES } from '../data/content';
+import { FLOORS, PRESETS, RIGHT_PANES, SNAP_MODES, modelPackageById } from '../data/content';
 import { missionCounts, objectMetricRows } from '../data/readouts';
 import type { Asset, MockState, WorldObject } from '../data/types';
 import ReadOnlySection from './ReadOnlySection';
 import PresetSection from './PresetSection';
 import MissionSection from './MissionSection';
+import ModelDetailBody from '../library/ModelDetailBody';
 
 export default function Inspector(props: {
   state: MockState;
@@ -16,7 +17,12 @@ export default function Inspector(props: {
   onCommand: (id: string, source: string) => void;
   onPreset: () => void;
   onPresetOption: (preset: string) => void;
+  onModelAction: (label: string) => void;
 }) {
+  const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
+  const activeModel = activeDocument?.kind === 'model' && activeDocument.sourceId
+    ? modelPackageById(activeDocument.sourceId)
+    : null;
   const activeCommand = commandById(props.state.activeCommandId);
   const counts = missionCounts(props.state);
   const pathRows = props.activeObject.kind === 'TILE'
@@ -48,6 +54,36 @@ export default function Inspector(props: {
       ['soundOcc', '—'],
     ];
   const showMission = props.state.rightPane === 'mission' || activeCommand.menu === 'Story';
+  if (activeModel) {
+    return (
+      <C.HW_RightPanel>
+        <C.HW_Inspector>
+          <C.HW_PanelHead>
+            <C.HW_Kicker>MODEL FOCUS</C.HW_Kicker>
+            <C.HW_Spacer />
+            <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
+          </C.HW_PanelHead>
+          <C.HW_InspectorBody>
+            <ModelDetailBody
+              model={activeModel}
+              onAction={props.onModelAction}
+              onOpen={() => props.onModelAction(`open editor for ${activeModel.name}`)}
+            />
+          </C.HW_InspectorBody>
+        </C.HW_Inspector>
+        <C.HW_RightRail>
+          {RIGHT_PANES.map(([pane, icon]) => {
+            const Btn = props.state.rightPane === pane ? C.HW_RailButtonOn : C.HW_RailButton;
+            return (
+              <Btn key={pane} onPress={() => props.onPane(pane)}>
+                <Icon name={icon} size={14} color={accentFor(props.state.rightPane === pane ? 'primary' : 'textDim')} />
+              </Btn>
+            );
+          })}
+        </C.HW_RightRail>
+      </C.HW_RightPanel>
+    );
+  }
   return (
     <C.HW_RightPanel>
       <C.HW_Inspector>

@@ -291,6 +291,7 @@ classifier({
 
   HW_RightPanel: { type: 'Box', style: { width: 326, height: '100%', flexDirection: 'row', backgroundColor: 'theme:bgAlt', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
   HW_Inspector: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column' } },
+  HW_InspectorBody: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', gap: 5, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8, overflow: 'scroll' } },
   HW_RightRail: { type: 'Box', style: { width: 40, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, backgroundColor: 'theme:surface', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
   HW_ObjectHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_Tag: { type: 'Box', style: { paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:success' } },
