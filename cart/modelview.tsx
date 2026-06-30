@@ -1,7 +1,7 @@
-// modelview — drop a .glb/.obj, view it. Crisp, butter-smooth, native.
+// modelview — pick (or drop) a .glb/.obj, view it. Crisp, butter-smooth, native.
 //
 // The whole point of this cart is what it DOESN'T do: it never ships geometry across
-// the JS bridge and never re-renders to move the camera. A dropped file is parsed
+// the JS bridge and never re-renders to move the camera. The chosen file is parsed
 // ENTIRELY in the host (framework/world/mesh_import.zig via __mesh_load_file), uploaded
 // to the GPU once, and handed back as a short intern key. The <Scene3D.Mesh hostKey>
 // node carries only that key — the host redraws the resident mesh every frame. The
@@ -10,11 +10,16 @@
 // React render. So no matter how heavy the model, orbiting stays smooth — React does
 // exactly one render per file load and nothing per frame.
 //
-// Verify headless: `./tools/rjit shot modelview` renders the empty drop-prompt; drop a
-// real model under `./tools/rjit dev modelview` to see the live view.
+// A file is chosen with the native OS picker (the shared runtime pickFile — the same
+// zenity dialog the Studio import uses), or by dropping it on the window.
+//
+// Verify headless: `./tools/rjit shot modelview` renders the empty prompt; open a real
+// model under `./tools/rjit dev modelview`, or `RJIT_MODEL=path ./tools/rjit shot
+// modelview` to render one headlessly.
 import { useState, useRef, useEffect } from 'react';
 import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
+import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { callHost } from '@reactjit/runtime/ffi';
 
 const host = globalThis as any;
@@ -51,22 +56,14 @@ export default function ModelView() {
   const draggingRef = useRef(false);
   const lastRef = useRef<{ x: number; y: number } | null>(null);
 
-  // Open-from-CLI: `RJIT_MODEL=path/to/file.glb ./zig-out/bin/modelview` loads a model
-  // at boot (no drop needed). Also the headless self-shot path —
-  // `RJIT_MODEL=... ./tools/rjit shot modelview` renders the loaded model.
-  useEffect(() => {
-    const path = callHost<string | null>('__env_get', null, 'RJIT_MODEL');
-    if (path) {
-      const loaded = loadModelFile(path);
-      if (loaded) setModel(loaded);
-      else setError(`Could not load ${path}`);
-    }
-  }, []);
-
-  useFileDrop((path) => {
+  // One load path for every source (picker, drop, CLI): validate the extension, hand
+  // the path to the host parser, and surface a clean error if it can't be read.
+  const applyPath = (path: string) => {
+    // .gltf is intentionally NOT accepted: it's JSON with an external .bin, while the
+    // host parser reads the self-contained binary .glb container.
     const ext = path.toLowerCase();
-    if (!(ext.endsWith('.glb') || ext.endsWith('.gltf') || ext.endsWith('.obj'))) {
-      setError('Unsupported file — drop a .glb, .gltf, or .obj');
+    if (!(ext.endsWith('.glb') || ext.endsWith('.obj'))) {
+      setError('Unsupported file — pick a .glb or .obj');
       return;
     }
     const loaded = loadModelFile(path);
@@ -76,7 +73,31 @@ export default function ModelView() {
     } else {
       setError(`Could not load ${path.split('/').pop()}`);
     }
-  });
+  };
+
+  // Open the native OS file picker (zenity, via the shared runtime pickFile). Async —
+  // the dialog runs in a subprocess and resolves with the chosen path, or null on
+  // cancel. This is the primary way in; drag-drop below is a bonus.
+  const chooseModel = async () => {
+    const path = await pickFile({
+      title: 'Open a 3D model',
+      filters: [
+        { name: '3D models', patterns: ['*.glb', '*.obj'] },
+        { name: 'All files', patterns: ['*'] },
+      ],
+    });
+    if (path) applyPath(path);
+  };
+
+  // Open-from-CLI: `RJIT_MODEL=path/to/file.glb ./zig-out/bin/modelview` loads a model
+  // at boot (no picker needed). Also the headless self-shot path —
+  // `RJIT_MODEL=... ./tools/rjit shot modelview` renders the loaded model.
+  useEffect(() => {
+    const path = callHost<string | null>('__env_get', null, 'RJIT_MODEL');
+    if (path) applyPath(path);
+  }, []);
+
+  useFileDrop(applyPath);
 
   return (
     <Box style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#0b0d12' }}>
@@ -133,13 +154,33 @@ export default function ModelView() {
             {`${(model.count / 3).toLocaleString()} tris · drag to orbit · scroll to zoom`}
           </Text>
         )}
+        <Box style={{ flexGrow: 1 }} />
+        <Pressable
+          onPress={chooseModel}
+          style={{
+            paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+            backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a',
+          }}
+        >
+          <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Open…</Text>
+        </Pressable>
       </Row>
 
       {/* Center prompt until something is loaded. */}
       {!model && (
         <Col style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: '#9aa6ba', fontSize: 22, fontWeight: 600 }}>Drop a model to view</Text>
-          <Text style={{ color: '#5d6878', fontSize: 14, marginTop: 8 }}>.glb · .gltf · .obj — parsed and rendered entirely in the host</Text>
+          <Text style={{ color: '#9aa6ba', fontSize: 22, fontWeight: 600 }}>Open a model to view</Text>
+          <Text style={{ color: '#5d6878', fontSize: 14, marginTop: 8 }}>.glb · .obj — parsed and rendered entirely in the host</Text>
+          <Pressable
+            onPress={chooseModel}
+            style={{
+              marginTop: 22, paddingLeft: 22, paddingRight: 22, paddingTop: 11, paddingBottom: 11, borderRadius: 8,
+              backgroundColor: '#1d3a5fee', borderWidth: 1, borderColor: '#3a5f8a',
+            }}
+          >
+            <Text style={{ color: '#e6f0fb', fontSize: 15, fontWeight: 600 }}>Choose a model…</Text>
+          </Pressable>
+          <Text style={{ color: '#465162', fontSize: 12, marginTop: 14 }}>…or drop a file anywhere</Text>
           {error && <Text style={{ color: '#e2706a', fontSize: 13, marginTop: 16 }}>{error}</Text>}
         </Col>
       )}

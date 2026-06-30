@@ -146,6 +146,8 @@ export type { AudioInputDevice, AudioInputHandle, AudioInputOptions } from './us
 export { useMIDI, subscribeMIDI };
 export type { MIDIHandle, MIDIOptions, MidiEvent, MidiEventType, MidiLearnTarget, MidiMapping, MidiPort } from './useMIDI';
 export { useFileDrop } from './useFileDrop';
+export { pickFile } from './pickFile';
+export type { FileFilter, PickFileOptions } from './pickFile';
 export { useFileWatch, attachWatcher } from './useFileWatch';
 export { useEmbed } from './useEmbed';
 export type { UseEmbedOpts, QueryOpts as EmbedQueryOpts, EmbedHit } from './useEmbed';
