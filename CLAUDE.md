@@ -66,11 +66,13 @@ Do not write `until ! pgrep -f "zig build ..."; do sleep 3; done`-style wait loo
 
 ## What This Is (active shape)
 
-ReactJIT is a React-reconciler-driven UI framework. Apps are written in `.tsx` (standard React), bundled by esbuild.
+ReactJIT lets you drive a Zig systems engine from React. Apps are written in `.tsx` (standard React), bundled by esbuild.
 
 **Cart runtime:** V8 is default. QJS is legacy maintenance-only.
 
 React's reconciler emits CREATE/APPEND/UPDATE mutation commands; the Zig framework's layout, paint, hit-test, text, input, events, effects, and GPU machinery consumes them.
+
+**Where features live — Zig first.** The whole point of this framework is to take advantage of the Zig systems. **React's job is to structure the UI and author/declare data — not to implement intricate features.** When a request comes in, the default home for the capability is a Zig system or primitive in `framework/` (layout, GPU, physics, 3D, input, effects, text, storage, …); the `.tsx`/`runtime/` side wires it up, lays out the chrome, and feeds it data. Reaching for a JS/React implementation **first** — running real logic in the frame loop, re-rolling in hooks what a host system should do — is the anti-pattern, not the shortcut. This matches `GUIDING_LIGHT.md`: the CPU produces artifacts and runs the data; game/feature code does not live in the JS frame loop. Build the feature in Zig; let React declare it.
 
 - **`framework/`** — Zig runtime. Layout, engine, GPU, events, input, state, effects, text, windows.
 - **`runtime/`** — JS entry point, JSX shim, primitives, host globals, hooks.
@@ -101,7 +103,7 @@ There are no debug or raw-ELF flags. `-d` and `--raw` were removed on 2026-05-04
 
 What happens: esbuild bundles TSX → `bundle.js`, Zig compiles the cart host with the bundle embedded via `@embedFile`, Linux packaging bundles all `.so` deps into a self-extracting shell wrapper, macOS produces a `.app` bundle.
 
-**No `.tsz`. No Smith. No d-suite conformance.** When you need a feature — inspector, classifier, theme, custom primitive — port the pattern from `love2d/packages/core/src/` or `love2d/lua/` by hand into `runtime/`, or regenerate it fresh in `.tsx`.
+**No `.tsz`. No Smith. No d-suite conformance.** When a feature needs a real capability — a new primitive, a GPU/physics/3D/text system, hit-testing, anything that runs per-frame or touches the engine — build it as a Zig system in `framework/` (the love2d stack is the reference pattern to port from). UI-level scaffolding — a `.tsx` component, classifier, theme — lives in `runtime/`/`cart/` and just declares and wires the Zig capability. Don't implement the feature itself in JS because the JS path hot-reloads and Zig needs a rebuild; that cost is iteration mechanics, not a reason to put logic in the wrong layer.
 
 ---
 
@@ -114,7 +116,7 @@ What happens: esbuild bundles TSX → `bundle.js`, Zig compiles the cart host wi
 
 The dev host is a single persistent ReleaseFast binary:
 - **Hot reload for React / TSX / TS** — editing files under `cart/` or `runtime/` re-bundles and re-evals in ~300ms. No rebuild needed.
-- **Rebuild required for Zig / framework / build-pipeline changes** — anything under `framework/`, `build.zig`, or `scripts/` needs the binary rebuilt.
+- **Rebuild required for Zig / framework / build-pipeline changes** — anything under `framework/`, `build.zig`, or `scripts/` needs the binary rebuilt. This is an iteration-speed fact, NOT a hint to keep features in JS — most real features belong in `framework/` (see "Where features live — Zig first" above); pay the rebuild.
 - **Tabs in the titlebar** — borderless host, top strip IS window chrome. Click tab to switch. Double-click empty chrome toggles maximize. Drag to move.
 - **Debug builds silently crash on click.** Always use `ReleaseFast` (default in `rjit dev`).
 
