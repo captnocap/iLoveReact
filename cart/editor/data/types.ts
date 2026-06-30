@@ -232,6 +232,7 @@ export type MockState = {
   colorStudioOverrides: Record<string, string>;
   buildDialogOpen: boolean;
   eventbusPopoverOpen: boolean;
+  perfPopoverOpen: boolean;
   fileExplorerOpen: boolean;
   fileExplorerQuery: string;
   fileExplorerFolder: ExplorerFolderId;

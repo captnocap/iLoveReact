@@ -10,10 +10,12 @@ import LeftRail from './LeftRail';
 import BuildDock from './BuildDock';
 import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
+import PerformancePopover from './PerformancePopover';
 import LibraryPanel from '../library/LibraryPanel';
 import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
 import FileExplorerDialog from '../dialogs/FileExplorerDialog';
+import RenderProbe from '../../../runtime/render_tracker';
 import type { MockState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { initialState } from '../data/initialState';
@@ -453,104 +455,130 @@ export default function AppFrame() {
 
   return (
     <C.HW_App>
-      <Chrome
-        state={state}
-        activeCommand={activeCommand}
-        onMenu={(menu) => setState((prev) => ({ ...prev, actionMenu: menu, openMenu: prev.openMenu === menu ? null : menu }))}
-        onCommand={runCommand}
-        onUndo={undoLocal}
-        onRedo={redoLocal}
-      />
-      <C.HW_Body>
-        <LeftRail state={state} onDomain={(activeDomain) => setState((prev) => ({ ...prev, activeDomain, status: `workspace context: ${activeDomain}` }))} />
-        <LibraryPanel
-          state={state}
-          catalogAssets={catalogAssets}
-          assets={filteredAssets}
-          mode={panelMode}
-          activeAsset={activeAsset}
-          activeObject={activeObject}
-          contentFolder={state.contentFolder}
-          expandedFolders={state.expandedFolders}
-          onSearch={(search) => setState((prev) => ({ ...prev, search, assetPage: 0 }))}
-          onAsset={selectAsset}
-          onFolder={selectContentFolder}
-          onToggleFolder={toggleContentFolder}
-          onFavorite={toggleFavorite}
-          onRename={renameAsset}
-          onPage={(delta) => setState((prev) => {
-            const itemCount = isModelFolder(prev.contentFolder)
-              ? modelPackagesForFolder(prev.contentFolder, prev.search).length
-              : filteredAssets.length;
-            const pageSize = isModelFolder(prev.contentFolder) ? 5 : assetPageSizeFor(panelMode);
-            const maxPage = Math.max(0, Math.ceil(itemCount / pageSize) - 1);
-            return { ...prev, assetPage: Math.max(0, Math.min(maxPage, prev.assetPage + delta)) };
-          })}
-          onFocusMaterial={() => setState((prev) => ({ ...prev, materialFocused: true, status: `focused material editor: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
-          onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
-        />
-        <Workspace
+      <RenderProbe id="Chrome">
+        <Chrome
           state={state}
           activeCommand={activeCommand}
-          activeAsset={activeAsset}
+          onMenu={(menu) => setState((prev) => ({ ...prev, actionMenu: menu, openMenu: prev.openMenu === menu ? null : menu }))}
           onCommand={runCommand}
-          onTool={(id) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` }))}
-          onSnap={() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` }))}
-          onFloor={() => runCommand('cycle-floor', 'toolbar')}
-          onViewMode={(viewMode) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` }))}
-          onStage={() => runCommand(state.activeCommandId, 'stage')}
-          onContext={() => setState((prev) => ({ ...prev, contextOpen: !prev.contextOpen, openMenu: null, status: prev.contextOpen ? 'context menu closed' : 'context menu opened' }))}
-          onObject={selectObject}
-          onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
-          onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
-          onSelectColorStudioMaterial={selectColorStudioMaterial}
-          onColorStudioVariant={setColorStudioVariant}
-          onColorStudioSeed={rollColorStudioSeed}
-          onColorStudioQuality={setColorStudioQuality}
-          onColorStudioSlot={activateColorStudioSlot}
-          onColorStudioFill={fillColorStudioSlot}
-          onColorStudioReset={resetColorStudioSlots}
+          onUndo={undoLocal}
+          onRedo={redoLocal}
         />
-        <Inspector
-          state={state}
-          activeObject={activeObject}
-          activeAsset={assetById(activeObject.assetId, state.assetOverrides)}
-          onPane={(rightPane) => setState((prev) => ({ ...prev, rightPane, status: `inspector pane: ${rightPane}` }))}
-        onCommand={runCommand}
-        onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
-        onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
-        />
+      </RenderProbe>
+      <C.HW_Body>
+        <RenderProbe id="Left Rail">
+          <LeftRail state={state} onDomain={(activeDomain) => setState((prev) => ({ ...prev, activeDomain, status: `workspace context: ${activeDomain}` }))} />
+        </RenderProbe>
+        <RenderProbe id="Content Browser">
+          <LibraryPanel
+            state={state}
+            catalogAssets={catalogAssets}
+            assets={filteredAssets}
+            mode={panelMode}
+            activeAsset={activeAsset}
+            activeObject={activeObject}
+            contentFolder={state.contentFolder}
+            expandedFolders={state.expandedFolders}
+            onSearch={(search) => setState((prev) => ({ ...prev, search, assetPage: 0 }))}
+            onAsset={selectAsset}
+            onFolder={selectContentFolder}
+            onToggleFolder={toggleContentFolder}
+            onFavorite={toggleFavorite}
+            onRename={renameAsset}
+            onPage={(delta) => setState((prev) => {
+              const itemCount = isModelFolder(prev.contentFolder)
+                ? modelPackagesForFolder(prev.contentFolder, prev.search).length
+                : filteredAssets.length;
+              const pageSize = isModelFolder(prev.contentFolder) ? 5 : assetPageSizeFor(panelMode);
+              const maxPage = Math.max(0, Math.ceil(itemCount / pageSize) - 1);
+              return { ...prev, assetPage: Math.max(0, Math.min(maxPage, prev.assetPage + delta)) };
+            })}
+            onFocusMaterial={() => setState((prev) => ({ ...prev, materialFocused: true, status: `focused material editor: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+            onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+          />
+        </RenderProbe>
+        <RenderProbe id="Workspace">
+          <Workspace
+            state={state}
+            activeCommand={activeCommand}
+            activeAsset={activeAsset}
+            onCommand={runCommand}
+            onTool={(id) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` }))}
+            onSnap={() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` }))}
+            onFloor={() => runCommand('cycle-floor', 'toolbar')}
+            onViewMode={(viewMode) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` }))}
+            onStage={() => runCommand(state.activeCommandId, 'stage')}
+            onContext={() => setState((prev) => ({ ...prev, contextOpen: !prev.contextOpen, openMenu: null, status: prev.contextOpen ? 'context menu closed' : 'context menu opened' }))}
+            onObject={selectObject}
+            onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+            onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+            onSelectColorStudioMaterial={selectColorStudioMaterial}
+            onColorStudioVariant={setColorStudioVariant}
+            onColorStudioSeed={rollColorStudioSeed}
+            onColorStudioQuality={setColorStudioQuality}
+            onColorStudioSlot={activateColorStudioSlot}
+            onColorStudioFill={fillColorStudioSlot}
+            onColorStudioReset={resetColorStudioSlots}
+          />
+        </RenderProbe>
+        <RenderProbe id="Inspector">
+          <Inspector
+            state={state}
+            activeObject={activeObject}
+            activeAsset={assetById(activeObject.assetId, state.assetOverrides)}
+            onPane={(rightPane) => setState((prev) => ({ ...prev, rightPane, status: `inspector pane: ${rightPane}` }))}
+            onCommand={runCommand}
+            onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
+            onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
+          />
+        </RenderProbe>
       </C.HW_Body>
-      <BuildDock
-        state={state}
-        journal={journal}
-        onBuild={() => setState((prev) => ({ ...prev, buildDialogOpen: true, eventbusPopoverOpen: false, status: `opened build journal ${journal.activeBuild}` }))}
-        onEventbus={() => setState((prev) => ({ ...prev, eventbusPopoverOpen: !prev.eventbusPopoverOpen, status: prev.eventbusPopoverOpen ? 'eventbus review closed' : 'eventbus review opened' }))}
-      />
-      {state.eventbusPopoverOpen ? (
-        <EventBusPopover
+      <RenderProbe id="Bottom Dock">
+        <BuildDock
           state={state}
-          onClose={() => setState((prev) => ({ ...prev, eventbusPopoverOpen: false, status: 'eventbus review closed' }))}
+          journal={journal}
+          onBuild={() => setState((prev) => ({ ...prev, buildDialogOpen: true, eventbusPopoverOpen: false, perfPopoverOpen: false, status: `opened build journal ${journal.activeBuild}` }))}
+          onEventbus={() => setState((prev) => ({ ...prev, eventbusPopoverOpen: !prev.eventbusPopoverOpen, perfPopoverOpen: false, status: prev.eventbusPopoverOpen ? 'eventbus review closed' : 'eventbus review opened' }))}
+          onPerf={() => setState((prev) => ({ ...prev, perfPopoverOpen: !prev.perfPopoverOpen, eventbusPopoverOpen: false, buildDialogOpen: false, status: prev.perfPopoverOpen ? 'performance churn closed' : 'performance churn opened' }))}
         />
+      </RenderProbe>
+      {state.eventbusPopoverOpen ? (
+        <RenderProbe id="Eventbus Popover">
+          <EventBusPopover
+            state={state}
+            onClose={() => setState((prev) => ({ ...prev, eventbusPopoverOpen: false, status: 'eventbus review closed' }))}
+          />
+        </RenderProbe>
+      ) : null}
+      {state.perfPopoverOpen ? (
+        <RenderProbe id="Performance Popover">
+          <PerformancePopover
+            onClose={() => setState((prev) => ({ ...prev, perfPopoverOpen: false, status: 'performance churn closed' }))}
+          />
+        </RenderProbe>
       ) : null}
       {state.buildDialogOpen ? (
-        <BuildJournalDialog journal={journal} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, status: 'build journal closed' }))} />
+        <RenderProbe id="Build Journal Dialog">
+          <BuildJournalDialog journal={journal} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, perfPopoverOpen: false, status: 'build journal closed' }))} />
+        </RenderProbe>
       ) : null}
       {state.fileExplorerOpen ? (
-        <FileExplorerDialog
-          query={state.fileExplorerQuery}
-          selectedFolder={state.fileExplorerFolder}
-          expandedFolders={state.fileExplorerExpanded}
-          selectedFileId={state.fileExplorerSelectedId}
-          history={state.fileExplorerHistory}
-          folderHistory={state.fileExplorerDirectoryHistory}
-          onQuery={(fileExplorerQuery) => setState((prev) => ({ ...prev, fileExplorerQuery, status: `file search: ${fileExplorerQuery || 'all indexed files'}` }))}
-          onFolder={selectExplorerFolder}
-          onToggleFolder={toggleExplorerFolder}
-          onSelectFile={(fileExplorerSelectedId) => setState((prev) => ({ ...prev, fileExplorerSelectedId, status: `selected file ${explorerFileById(fileExplorerSelectedId).path}` }))}
-          onOpenFile={openExplorerFile}
-          onClose={() => setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'file explorer closed' }))}
-        />
+        <RenderProbe id="File Explorer Dialog">
+          <FileExplorerDialog
+            query={state.fileExplorerQuery}
+            selectedFolder={state.fileExplorerFolder}
+            expandedFolders={state.fileExplorerExpanded}
+            selectedFileId={state.fileExplorerSelectedId}
+            history={state.fileExplorerHistory}
+            folderHistory={state.fileExplorerDirectoryHistory}
+            onQuery={(fileExplorerQuery) => setState((prev) => ({ ...prev, fileExplorerQuery, status: `file search: ${fileExplorerQuery || 'all indexed files'}` }))}
+            onFolder={selectExplorerFolder}
+            onToggleFolder={toggleExplorerFolder}
+            onSelectFile={(fileExplorerSelectedId) => setState((prev) => ({ ...prev, fileExplorerSelectedId, status: `selected file ${explorerFileById(fileExplorerSelectedId).path}` }))}
+            onOpenFile={openExplorerFile}
+            onClose={() => setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'file explorer closed' }))}
+          />
+        </RenderProbe>
       ) : null}
     </C.HW_App>
   );

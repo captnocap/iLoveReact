@@ -26,6 +26,7 @@ export function initialState(): MockState {
     colorStudioOverrides: {},
     buildDialogOpen: false,
     eventbusPopoverOpen: false,
+    perfPopoverOpen: false,
     fileExplorerOpen: false,
     fileExplorerQuery: '',
     fileExplorerFolder: 'imports-models',

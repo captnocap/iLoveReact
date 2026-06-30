@@ -58,6 +58,7 @@ export type JsonKind =
   | 'net'         // __tel_net()         network/transport counters
   | 'system'      // __tel_system()      OS-level resource snapshot
   | 'canvas'      // __tel_canvas()      Canvas/Graph render stats
+  | 'hostFlush'   // __tel_host_flush()  React mutation queue/drain stats
   | 'processes'   // getProcessesJson()  system process listing
   | 'threads';    // getThreadsJson()    per-thread CPU listing
 
@@ -115,6 +116,7 @@ const JSON_HOST_FN: Record<JsonKind, string> = {
   net: '__tel_net',
   system: '__tel_system',
   canvas: '__tel_canvas',
+  hostFlush: '__tel_host_flush',
   processes: 'getProcessesJson',
   threads: 'getThreadsJson',
 };

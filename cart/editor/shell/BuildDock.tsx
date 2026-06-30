@@ -6,7 +6,19 @@ import { selectedObject } from '../data/content';
 import { formatBytes, formatCount, formatMeters, selectionPosition, snapReadout, validationReadout } from '../data/readouts';
 import type { BuildJournalSnapshot, MockState } from '../data/types';
 
-export default function BuildDock({ state, journal, onBuild, onEventbus }: { state: MockState; journal: BuildJournalSnapshot; onBuild: () => void; onEventbus: () => void }) {
+export default function BuildDock({
+  state,
+  journal,
+  onBuild,
+  onEventbus,
+  onPerf,
+}: {
+  state: MockState;
+  journal: BuildJournalSnapshot;
+  onBuild: () => void;
+  onEventbus: () => void;
+  onPerf: () => void;
+}) {
   const telemetry = editTelemetry(state.history);
   const activeObject = selectedObject(state);
   const position = selectionPosition(state, activeObject);
@@ -73,18 +85,18 @@ export default function BuildDock({ state, journal, onBuild, onEventbus }: { sta
         <C.HW_DockValue>{telemetry.parity}</C.HW_DockValue>
       </C.HW_DockGroup>
       <C.HW_DockDivider />
-      <C.HW_DockGroup>
+      <C.HW_DockPerfButton onPress={onPerf}>
         <C.HW_DockLabel>FPS:</C.HW_DockLabel>
-        <C.HW_DockCoord>{fps > 0 ? Math.round(fps) : '—'}</C.HW_DockCoord>
+        <C.HW_DockCoord>{fps > 0 ? Math.round(fps) : '-'}</C.HW_DockCoord>
         <C.HW_DockLabel>FRAME</C.HW_DockLabel>
-        <C.HW_DockValue>{frameMs > 0 ? formatMs(frameMs) : '—'}</C.HW_DockValue>
+        <C.HW_DockValue>{frameMs > 0 ? formatMs(frameMs) : '-'}</C.HW_DockValue>
         <C.HW_DockLabel>GPU</C.HW_DockLabel>
-        <C.HW_DockValue>{gpuMs > 0 ? formatMs(gpuMs) : '—'}</C.HW_DockValue>
+        <C.HW_DockValue>{gpuMs > 0 ? formatMs(gpuMs) : '-'}</C.HW_DockValue>
         <C.HW_DockLabel>TRI</C.HW_DockLabel>
         <C.HW_DockValue>{formatCount(triCount)}</C.HW_DockValue>
         <C.HW_DockLabel>DC</C.HW_DockLabel>
         <C.HW_DockValue>{formatCount(drawCalls)}</C.HW_DockValue>
-      </C.HW_DockGroup>
+      </C.HW_DockPerfButton>
       <C.HW_Spacer />
       <C.HW_DockGroup>
         <Icon name="Activity" size={13} color={accentFor('textFaint')} />
