@@ -365,6 +365,31 @@ pub fn pickPoint(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) ?[3]f32 {
     return .{ ray.o[0] + ray.d[0] * t, ray.o[1] + ray.d[1] * t, ray.o[2] + ray.d[2] * t };
 }
 
+/// Is world point `p` hidden behind the surface from the camera? True when a FRONT-facing
+/// triangle sits between the eye and `p` (render culls back faces, so only front faces
+/// visibly occlude). Lets vertex/edge picking ignore elements on the far side of the model
+/// you can't even see. The eps tolerates a vertex's own incident faces (it lies ON them).
+pub fn occluded(cam: Camera, p: [3]f32) bool {
+    const pos = g_positions orelse return false;
+    const ev = sub(p, cam.eye);
+    const pdist = @sqrt(dot(ev, ev));
+    if (pdist < 1e-6) return false;
+    const dir: [3]f32 = .{ ev[0] / pdist, ev[1] / pdist, ev[2] / pdist };
+    const eps = pdist * 0.003 + 1e-4;
+    var f: u32 = 0;
+    while (f < g_facecount) : (f += 1) {
+        const a: [3]f32 = .{ pos[f * 9 + 0], pos[f * 9 + 1], pos[f * 9 + 2] };
+        const b: [3]f32 = .{ pos[f * 9 + 3], pos[f * 9 + 4], pos[f * 9 + 5] };
+        const cc: [3]f32 = .{ pos[f * 9 + 6], pos[f * 9 + 7], pos[f * 9 + 8] };
+        const n = cross(sub(b, a), sub(cc, a));
+        if (dot(n, dir) >= 0.0) continue; // back-facing to the ray → not a visible occluder
+        if (rayTri(cam.eye, dir, a, b, cc)) |t| {
+            if (t < pdist - eps) return true;
+        }
+    }
+    return false;
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────────
 test "pick hits the face straddling the ray and paints it" {
     // One triangle in the z=0 plane, camera on +Z looking at origin down -Z.
@@ -408,6 +433,24 @@ test "pickPoint returns the world hit on the surface, null on a miss" {
     try std.testing.expectApproxEqAbs(@as(f32, 0), hit[2], 1e-4);
     // A corner pixel misses → null (the cart keeps the current focus).
     try std.testing.expect(pickPoint(cam, 800, 600, 0, 0) == null);
+}
+
+test "occluded: a point behind a front face is hidden; on/in front of it is not" {
+    // One triangle in z=0 facing +Z, camera on +Z looking down -Z.
+    var verts = [_]f32{
+        -1, -1, 0, 0, 0, 1, 0, 0,
+        1,  -1, 0, 0, 0, 1, 0, 0,
+        0,  1,  0, 0, 0, 1, 0, 0,
+    };
+    setTarget(322, &verts, 3);
+    defer clear();
+    const cam = Camera{ .eye = .{ 0, 0, 5 }, .target = .{ 0, 0, 0 }, .fov_deg = 50 };
+    // Behind the triangle (z<0), along the ray through its centre → hidden by the front face.
+    try std.testing.expect(occluded(cam, .{ 0, 0, -1 }));
+    // In front of the triangle (closer to the eye) → visible.
+    try std.testing.expect(!occluded(cam, .{ 0, 0, 1 }));
+    // A vertex lying ON the triangle → visible (eps tolerates its own face).
+    try std.testing.expect(!occluded(cam, .{ 0, 1, 0 }));
 }
 
 test "atlas dims cover every face" {

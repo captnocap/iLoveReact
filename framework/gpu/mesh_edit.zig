@@ -427,7 +427,10 @@ fn pickVertex(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i
         const dx = sp[0] - mx;
         const dy = sp[1] - my;
         const d2 = dx * dx + dy * dy;
-        if (d2 < best_d2) {
+        // Only a candidate that beats the best AND is actually visible (not hidden behind the
+        // surface) can win — so you never pick a vertex on the far side you can't see. The
+        // occlusion raycast runs only for the few in-radius candidates, so a click stays cheap.
+        if (d2 < best_d2 and !model_paint.occluded(cam, vertPos(i))) {
             best_d2 = d2;
             best = @intCast(i);
         }
@@ -441,10 +444,16 @@ fn pickEdge(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32
     var best_d2: f32 = EDGE_PX * EDGE_PX;
     var e: u32 = 0;
     while (e < g_edge_count) : (e += 1) {
-        const a = model_paint.project(cam, vp_w, vp_h, vertPos(edges[e * 2 + 0])) orelse continue;
-        const b = model_paint.project(cam, vp_w, vp_h, vertPos(edges[e * 2 + 1])) orelse continue;
+        const va = vertPos(edges[e * 2 + 0]);
+        const vb = vertPos(edges[e * 2 + 1]);
+        const a = model_paint.project(cam, vp_w, vp_h, va) orelse continue;
+        const b = model_paint.project(cam, vp_w, vp_h, vb) orelse continue;
         const d2 = segDist2(mx, my, a[0], a[1], b[0], b[1]);
         if (d2 < best_d2) {
+            // Visible if the midpoint isn't behind the surface (an edge across the silhouette
+            // stays pickable; one wholly on the far side does not).
+            const mid: [3]f32 = .{ (va[0] + vb[0]) * 0.5, (va[1] + vb[1]) * 0.5, (va[2] + vb[2]) * 0.5 };
+            if (model_paint.occluded(cam, mid)) continue;
             best_d2 = d2;
             best = @intCast(e);
         }
