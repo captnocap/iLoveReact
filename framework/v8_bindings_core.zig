@@ -432,6 +432,21 @@ fn hostMeshEditBox(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     setReturnNumber(info, @floatFromInt(n));
 }
 
+/// __mesh_edit_capture(on) — hand the model-editor input loop to the HOST (modelview).
+/// While on, the engine owns orbit (middle-drag), select/marquee (left), zoom (wheel), and
+/// focus (double-click) natively — zero JS per event. The cart sets it on a model load.
+fn hostMeshEditCapture(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    scene3d.setMeshEditCapture((argToI32(info, 0) orelse 0) != 0);
+}
+
+/// __mesh_edit_focus(on) — set the Focus tool (left-drag pans the orbit pivot instead of
+/// selecting). The cart toggles it with the Focus button.
+fn hostMeshEditFocus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    scene3d.setMeshEditFocusTool((argToI32(info, 0) orelse 0) != 0);
+}
+
 /// __mesh_edit_snapshot() — save the selection before an instant mousedown pick.
 fn hostMeshEditSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     _ = info_c;
@@ -1293,6 +1308,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_pick", hostMeshEditPick);
     v8_runtime.registerHostFn("__mesh_edit_clear", hostMeshEditClear);
     v8_runtime.registerHostFn("__mesh_edit_box", hostMeshEditBox);
+    v8_runtime.registerHostFn("__mesh_edit_capture", hostMeshEditCapture);
+    v8_runtime.registerHostFn("__mesh_edit_focus", hostMeshEditFocus);
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);

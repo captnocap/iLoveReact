@@ -373,6 +373,31 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
         return false;
     }
     pub fn update(_: f32) void {}
+    // Native mesh-editor input stubs (only ever called when meshEditCapturing() is true,
+    // which a non-3D build can never set — these just satisfy the compiler).
+    pub fn meshEditCapturing() bool {
+        return false;
+    }
+    pub fn meshEditFocusTool() bool {
+        return false;
+    }
+    pub fn meshEditModeRaw() u8 {
+        return 0;
+    }
+    pub fn orbitDrag(_: f32, _: f32) void {}
+    pub fn orbitPan(_: f32, _: f32) void {}
+    pub fn orbitZoom(_: f32) void {}
+    pub fn focusAt(_: f32, _: f32) bool {
+        return false;
+    }
+    pub fn meshEditPick(_: f32, _: f32, _: bool) i32 {
+        return -1;
+    }
+    pub fn meshEditBox(_: f32, _: f32, _: f32, _: f32, _: bool) i32 {
+        return -1;
+    }
+    pub fn meshEditSnapshot() void {}
+    pub fn meshEditRevert() void {}
 };
 const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("../world_loader.zig") else struct {
     pub fn renderEmbedded(_: std.mem.Allocator, _: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
@@ -734,6 +759,30 @@ var pointer_capture_slot: u32 = 0;
 var pointer_capture_button: u8 = 0;
 var world_loader_mouse_node_id: u32 = 0;
 var world_loader_mouse_aiming: bool = false;
+
+// ── Native mesh-editor input (modelview) — the engine owns the model-editor loop with
+// ZERO JS per event. Gated by r3d.meshEditCapturing() (the cart sets it on a model load),
+// and scoped to the viewport via meHitIsChrome so toolbar buttons/sliders still work.
+// Middle-drag orbits, wheel zooms, double-click recentres focus, and left does the active
+// tool: select/marquee (vertex/edge/face mode) or pan-pivot (Focus tool).
+var me_orbiting: bool = false; // middle button held
+var me_selecting: bool = false; // left held in a select mode (pick on press, marquee on drag)
+var me_panning: bool = false; // left held with the Focus tool
+var me_marquee: bool = false; // the select press travelled → became a marquee
+var me_down_x: f32 = 0;
+var me_down_y: f32 = 0;
+var me_shift: bool = false;
+
+// A hit is "chrome" (handle it normally) if it's an interactive control or
+// pointer blocker. Everything else under the cursor (Scene3D, empty space) is
+// the model viewport, which the native mesh-editor input owns.
+fn meHitIsChrome(hit: ?*Node) bool {
+    const h = hit orelse return false;
+    return h.blocks_pointer_events or h.input_id != null or
+        h.handlers.on_mouse_down != null or h.handlers.js_on_mouse_down != null or h.handlers.lua_on_mouse_down != null or
+        h.handlers.on_press != null or h.handlers.js_on_press != null or h.handlers.lua_on_press != null or
+        h.slider or h.href != null;
+}
 // <Slider> drag (SLIDER-0611) — engine-owned thumb, the scrollbar-drag wire
 // applied to a value control. While slider_drag_slot != 0 every motion
 // updates the pool node's slider_value and repaints with zero JS in the
@@ -4087,6 +4136,42 @@ pub fn run(config_in: AppConfig) !void {
                         const rmy: f32 = event.button.y;
                         if (render_surfaces.handleMouseDown(rmx, rmy, event.button.button)) continue;
                     }
+                    // Native mesh-editor input (modelview): middle starts an orbit; left
+                    // over the viewport does the active tool (select/marquee or pan-pivot)
+                    // or recentres focus on a double-click. No JS in the loop.
+                    if (r3d.meshEditCapturing()) {
+                        const mx: f32 = event.button.x;
+                        const my: f32 = event.button.y;
+                        if (event.button.button == c.SDL_BUTTON_MIDDLE) {
+                            me_orbiting = true;
+                            input.unfocus();
+                            continue;
+                        }
+                        if (event.button.button == c.SDL_BUTTON_LEFT and !meHitIsChrome(layout.hitTest(config.root, mx, my))) {
+                            input.unfocus();
+                            me_down_x = mx;
+                            me_down_y = my;
+                            me_marquee = false;
+                            if (event.button.clicks >= 2) {
+                                _ = r3d.focusAt(mx, my);
+                                state_mod.markDirty();
+                                continue;
+                            }
+                            if (r3d.meshEditFocusTool()) {
+                                me_panning = true;
+                                continue;
+                            }
+                            const m = r3d.meshEditModeRaw();
+                            if (m >= 1 and m <= 3) {
+                                me_selecting = true;
+                                me_shift = (c.SDL_GetModState() & c.SDL_KMOD_SHIFT) != 0;
+                                r3d.meshEditSnapshot();
+                                _ = r3d.meshEditPick(mx, my, me_shift);
+                                state_mod.markDirty();
+                            }
+                            continue;
+                        }
+                    }
                     if (event.button.button == c.SDL_BUTTON_LEFT or event.button.button == c.SDL_BUTTON_RIGHT) {
                         const mx: f32 = event.button.x;
                         const my: f32 = event.button.y;
@@ -4226,6 +4311,8 @@ pub fn run(config_in: AppConfig) !void {
                         // stack for every left click → stderr + /tmp/reactjit-hit.log.
                         hit_trace.trace(config.root, mx, my, hit);
                         const hit_is_interactive = if (hit) |h| (h.input_id != null or h.handlers.on_mouse_down != null or h.handlers.js_on_mouse_down != null or h.handlers.lua_on_mouse_down != null or h.handlers.on_mouse_move != null or h.handlers.js_on_mouse_move != null or h.handlers.lua_on_mouse_move != null or h.handlers.on_mouse_up != null or h.handlers.js_on_mouse_up != null or h.handlers.lua_on_mouse_up != null or h.handlers.on_press != null or h.handlers.js_on_press != null or h.handlers.lua_on_press != null or h.href != null) else false;
+                        const hit_blocks_pointer = if (hit) |h| h.blocks_pointer_events else false;
+                        const canvas_hit = if (!hit_blocks_pointer) events.findCanvasNode(config.root, mx, my) else null;
                         if (hit_is_interactive) {
                             const h = hit.?;
                             if (h.input_id) |id| {
@@ -4328,7 +4415,7 @@ pub fn run(config_in: AppConfig) !void {
                             }
                             // Witness: record the click with semantic target
                             witness.recordClick(h);
-                        } else if (events.findCanvasNode(config.root, mx, my)) |cn| {
+                        } else if (canvas_hit) |cn| {
                             // Canvas click — check for interactive elements inside Canvas.Nodes
                             // Convert screen coords to graph space for canvas-child hit testing
                             const vp_cx = cn.computed.x + cn.computed.w / 2;
@@ -4442,7 +4529,7 @@ pub fn run(config_in: AppConfig) !void {
                                 canvas_drag_last_x = mx;
                                 canvas_drag_last_y = my;
                             }
-                        } else {
+                        } else if (!hit_blocks_pointer) {
                             // Hit-test live Terminal nodes for the click.
                             const HitCtx = struct {
                                 mx: f32,
@@ -4492,6 +4579,29 @@ pub fn run(config_in: AppConfig) !void {
                     const my: f32 = event.motion.y;
                     mouse_state.updateMouse(mx, my);
                     mouse_state.addMouseDelta(event.motion.xrel, event.motion.yrel);
+                    // Native mesh-editor drag (modelview): orbit / pan-pivot / marquee — all
+                    // host-side, repaint only, no JS render per move.
+                    if (r3d.meshEditCapturing()) {
+                        if (me_orbiting) {
+                            r3d.orbitDrag(event.motion.xrel, event.motion.yrel);
+                            state_mod.markDirty();
+                            continue;
+                        }
+                        if (me_panning) {
+                            r3d.orbitPan(event.motion.xrel, event.motion.yrel);
+                            state_mod.markDirty();
+                            continue;
+                        }
+                        if (me_selecting) {
+                            if (!me_marquee and (@abs(mx - me_down_x) > 4 or @abs(my - me_down_y) > 4)) {
+                                me_marquee = true; // the press became a drag → revert the press-pick, switch to marquee
+                                r3d.meshEditRevert();
+                            }
+                            if (me_marquee) _ = r3d.meshEditBox(me_down_x, me_down_y, mx, my, me_shift);
+                            state_mod.markDirty();
+                            continue;
+                        }
+                    }
                     if (world_loader_mouse_node_id != 0) {
                         if (findWorldLoaderNodeById(config.root, world_loader_mouse_node_id) == null) {
                             releaseWorldLoaderPointer();
@@ -4677,6 +4787,29 @@ pub fn run(config_in: AppConfig) !void {
                 c.SDL_EVENT_MOUSE_BUTTON_UP => {
                     mouse_state.updateMouse(event.button.x, event.button.y);
                     mouse_state.updateMouseButton(false, event.button.button == c.SDL_BUTTON_RIGHT);
+                    // Native mesh-editor release: end the orbit/pan, or commit the selection
+                    // (one JS callback to refresh the count HUD — not in the move loop).
+                    if (r3d.meshEditCapturing()) {
+                        if (event.button.button == c.SDL_BUTTON_MIDDLE and me_orbiting) {
+                            me_orbiting = false;
+                            continue;
+                        }
+                        if (event.button.button == c.SDL_BUTTON_LEFT) {
+                            if (me_panning) {
+                                me_panning = false;
+                                continue;
+                            }
+                            if (me_selecting) {
+                                me_selecting = false;
+                                me_marquee = false;
+                                js_vm.callGlobal("__beginJsEvent");
+                                js_vm.callGlobal("__meshEditSelChanged");
+                                js_vm.callGlobal("__endJsEvent");
+                                state_mod.markDirty();
+                                continue;
+                            }
+                        }
+                    }
                     if (event.button.button == c.SDL_BUTTON_RIGHT and world_loader_mouse_node_id != 0 and world_loader_mouse_aiming) {
                         world_loader.setAiming(world_loader_mouse_node_id, false);
                         world_loader_mouse_aiming = false;
@@ -4849,6 +4982,13 @@ pub fn run(config_in: AppConfig) !void {
                     // SDL3: mouse_x/mouse_y are in the wheel event itself
                     const mx: f32 = event.wheel.mouse_x;
                     const my: f32 = event.wheel.mouse_y;
+                    // Native mesh-editor zoom (modelview): wheel over the viewport dollies the
+                    // orbit camera. Over chrome (e.g. a scrollable panel) it falls through.
+                    if (r3d.meshEditCapturing() and !meHitIsChrome(layout.hitTest(config.root, mx, my))) {
+                        r3d.orbitZoom(event.wheel.y);
+                        state_mod.markDirty();
+                        continue;
+                    }
                     witness.recordScroll(mx, my, event.wheel.x, event.wheel.y);
                     const events = @import("events.zig");
                     // Terminal scrollback — mouse wheel scrolls history (check all terminals).

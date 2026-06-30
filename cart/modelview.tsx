@@ -20,7 +20,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Box, Col, Row, Text, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
-import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
+import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { callHost } from '@reactjit/runtime/ffi';
 import {
   loadLedger, putEntry, recordImport, exportCredits, pendingCount,
@@ -54,28 +54,22 @@ function loadModelFile(path: string): Loaded | null {
   }
 }
 
-const orbitDrag = (dx: number, dy: number) => host.__model_orbit_drag?.(dx, dy);
+// Wheel zoom is the one orbit door the cart still calls directly — from the paint-mode
+// Pressable's onScroll (in paint mode that surface owns the wheel; everywhere else the
+// host's native loop handles it). Orbit/pan/select/marquee/focus are ALL native now.
 const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
-// Pan the orbit PIVOT in the screen plane (the Focus tool), and recentre it on the
-// point under the cursor (double-click) — so a far corner of a big model becomes the
-// centre of rotation without camera gymnastics. Both feed the host; no React render.
-const orbitPan = (dx: number, dy: number) => host.__model_orbit_pan?.(dx, dy);
-const focusAt = (x: number, y: number): boolean => host.__model_focus_at?.(x, y) === 1;
 
-// ── Host-native mesh selection (the editor surface) ──────────────────────────────
-// Mode: 0 = view/orbit, 1 = vertex, 2 = edge, 3 = face. Selection state lives in the
-// host (welded topology + sets); the cart only sets the mode and forwards clicks.
+// ── Host-native mesh editor (the editor surface) ─────────────────────────────────
+// Mode: 0 = view, 1 = vertex, 2 = edge, 3 = face. Everything below the toolbar level is
+// the host's: welded topology, selection sets, AND the input loop (engine.zig). The cart
+// only sets mode/tool/capture and reads counts for the HUD — never a per-event handler.
 type SelInfo = { mode: number; verts: number; edges: number; sel: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
-const meshPick = (x: number, y: number, additive: boolean): number =>
-  (host.__mesh_edit_pick?.(x, y, additive ? 1 : 0) as number) ?? -1;
 const meshClearSel = () => host.__mesh_edit_clear?.();
-// Snapshot before an instant press-pick; revert if the press turns into an orbit-drag.
-const meshSnapshot = () => host.__mesh_edit_snapshot?.();
-const meshRevert = () => host.__mesh_edit_revert?.();
-// Marquee (Alt+drag) box-select: grab every element inside the screen rect in one sweep.
-const meshBox = (x0: number, y0: number, x1: number, y1: number, additive: boolean): number =>
-  (host.__mesh_edit_box?.(x0, y0, x1, y1, additive ? 1 : 0) as number) ?? -1;
+// Hand the model-editor input loop to the host (native orbit/select/marquee/zoom/focus,
+// zero JS per event), and toggle the Focus tool (left-drag pans the pivot).
+const meshCapture = (on: boolean) => host.__mesh_edit_capture?.(on ? 1 : 0);
+const meshFocusTool = (on: boolean) => host.__mesh_edit_focus?.(on ? 1 : 0);
 const readSelInfo = (): SelInfo | null => {
   try {
     const j = host.__mesh_edit_counts?.();
@@ -172,22 +166,10 @@ export default function ModelView() {
     }
   };
 
-  // Drag state lives in refs, NOT useState: orbiting/painting must not trigger a React
-  // render (the host repaints itself off the doors). A re-render per mouse-move is
-  // exactly the choppiness this design exists to avoid.
-  const draggingRef = useRef(false);
+  // Only the paint stroke is JS-driven now (and only while in paint mode). Orbit, select,
+  // marquee, focus, and zoom are owned entirely by the host's native input loop — there is
+  // no per-move React state for them, which is the whole point (no JS in the loop).
   const paintingRef = useRef(false);
-  const lastRef = useRef<{ x: number; y: number } | null>(null);
-  // Double-click detection lives in JS (the host input layer has no dblclick event):
-  // two quick clicks on the same spot recentre the orbit focus there.
-  const lastClickRef = useRef<{ t: number; x: number; y: number } | null>(null);
-  // Click-vs-drag for select modes: a press that doesn't move past a few px is a pick;
-  // a moving press orbits (you rotate the view while selecting). Down pos is the pick pos.
-  const downRef = useRef<{ x: number; y: number } | null>(null);
-  const movedRef = useRef(false);
-  // Alt+drag marquee: start point in a ref (no render), the visible rect in state.
-  const marqueeRef = useRef<{ x0: number; y0: number } | null>(null);
-  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   // Switch tool: selecting a mesh mode (or going back to view) is the active tool, so it
   // turns off Paint/Focus, and pushes the mode to the host. Mode 0 = plain view/orbit.
@@ -195,14 +177,16 @@ export default function ModelView() {
     setSelMode(m);
     setPaintMode(false);
     setFocusMode(false);
+    meshFocusTool(false);
     if (m === 1 || m === 2) setWire(true); // show topology where you're clicking verts/edges
     meshSetMode(m);
     setSelInfo(readSelInfo() ?? { mode: m, verts: 0, edges: 0, sel: 0 });
   };
   // Paint and Focus are tools too — turning one on drops the mesh-select mode back to view
-  // so only one tool owns the drag at a time.
-  const togglePaint = () => setPaintMode((v) => { const nv = !v; if (nv) { setFocusMode(false); setSelMode(0); meshSetMode(0); } return nv; });
-  const toggleFocus = () => setFocusMode((v) => { const nv = !v; if (nv) { setPaintMode(false); setSelMode(0); meshSetMode(0); } return nv; });
+  // so only one tool owns the drag at a time. The Focus tool flag also goes to the host
+  // (it owns the left-drag = pan-pivot gesture natively).
+  const togglePaint = () => setPaintMode((v) => { const nv = !v; if (nv) { setFocusMode(false); meshFocusTool(false); setSelMode(0); meshSetMode(0); } return nv; });
+  const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setSelMode(0); meshSetMode(0); } return nv; });
 
   // W = wireframe, P = paint, F = focus, 1/2/3 = vertex/edge/face, Esc = clear/back to view.
   useModifiers({
@@ -253,6 +237,11 @@ export default function ModelView() {
   // at boot (no picker needed). Also the headless self-shot path —
   // `RJIT_MODEL=... ./tools/rjit shot modelview` renders the loaded model.
   useEffect(() => {
+    // Hand the model-editor input loop to the host (native orbit/select/marquee/zoom/focus).
+    meshCapture(true);
+    // The host calls this once per committed selection change (a click or a marquee release,
+    // NOT per drag-move) so the count HUD refreshes without any JS in the interaction loop.
+    (globalThis as any).__meshEditSelChanged = () => setSelInfo(readSelInfo() ?? { mode: 0, verts: 0, edges: 0, sel: 0 });
     const path = callHost<string | null>('__env_get', null, 'RJIT_MODEL');
     if (path) applyPath(path);
     // RJIT_WIRE=1 boots in wireframe mode — the headless self-shot path for it.
@@ -321,124 +310,19 @@ export default function ModelView() {
         {model && <Scene3D.Mesh hostKey={model.key} material="#ffffff" />}
       </Scene3D>
 
-      {/* Invisible full-window input layer: orbits on drag, dollies on wheel. It feeds
-          host doors directly and keeps NO React state, so a drag never re-renders. */}
-      <Pressable
-        onMouseDown={(p: any) => {
-          const x = p?.x ?? 0;
-          const y = p?.y ?? 0;
-          if (paintMode) {
-            // Click fills one face; holding + dragging paints the faces under the stroke.
-            paintingRef.current = true;
-            paintAt(x, y, color);
-            return;
-          }
-          // Mesh select mode: pick on PRESS for paint-like immediacy. Snapshot first so a
-          // press that becomes an orbit-drag can revert the pick (see onMouseMove). No
-          // setState here — the highlight is a host repaint, instant and React-free.
-          if (selMode !== 0 && !focusMode) {
-            // Alt+drag = marquee (rubber-band) select. Snapshot so Shift+Alt can sweep-ADD.
-            if (currentModifiers().alt) {
-              meshSnapshot();
-              marqueeRef.current = { x0: x, y0: y };
-              setMarquee({ x, y, w: 0, h: 0 });
-              draggingRef.current = true;
-              return;
-            }
-            // Plain press: pick on PRESS for paint-like immediacy. Snapshot first so a press
-            // that becomes an orbit-drag can revert the pick (see onMouseMove). No setState
-            // here — the highlight is a host repaint, instant and React-free.
-            meshSnapshot();
-            meshPick(x, y, currentModifiers().shift);
-            downRef.current = { x, y };
-            movedRef.current = false;
-            draggingRef.current = true;
-            lastRef.current = { x, y };
-            return;
-          }
-          // View / Focus: double-click (same spot, fast) recentres the orbit pivot on the
-          // point hit — the no-gymnastics way to put the focus on a far corner.
-          const now = Date.now();
-          const last = lastClickRef.current;
-          if (last && now - last.t < 320 && Math.abs(x - last.x) < 6 && Math.abs(y - last.y) < 6) {
-            focusAt(x, y);
-            lastClickRef.current = null;
-            draggingRef.current = false;
-            return;
-          }
-          lastClickRef.current = { t: now, x, y };
-          draggingRef.current = true;
-          lastRef.current = { x, y };
-        }}
-        onMouseMove={(p: any) => {
-          const x = p?.x ?? 0;
-          const y = p?.y ?? 0;
-          if (paintMode) {
-            if (paintingRef.current) paintAt(x, y, color);
-            return;
-          }
-          // Marquee in progress: select live inside the rect (host, instant) + draw the box.
-          if (marqueeRef.current) {
-            const m = marqueeRef.current;
-            meshBox(m.x0, m.y0, x, y, currentModifiers().shift);
-            setMarquee({ x: Math.min(m.x0, x), y: Math.min(m.y0, y), w: Math.abs(x - m.x0), h: Math.abs(y - m.y0) });
-            return;
-          }
-          if (!draggingRef.current || !lastRef.current) return;
-          // In select mode a press that travels past a few px is really an orbit: revert the
-          // instant press-pick (once) so rotating the view doesn't change the selection.
-          if (selMode !== 0 && !focusMode && downRef.current && !movedRef.current) {
-            if (Math.abs(x - downRef.current.x) > 4 || Math.abs(y - downRef.current.y) > 4) {
-              movedRef.current = true;
-              meshRevert();
-            }
-          }
-          // Focus tool pans the pivot; otherwise the drag orbits (even while selecting).
-          if (focusMode) orbitPan(x - lastRef.current.x, y - lastRef.current.y);
-          else orbitDrag(x - lastRef.current.x, y - lastRef.current.y);
-          lastRef.current = { x, y };
-        }}
-        onMouseUp={() => {
-          // Marquee end: the live box already set the selection — just clear the rect + HUD.
-          if (marqueeRef.current) {
-            marqueeRef.current = null;
-            setMarquee(null);
-            setSelInfo(readSelInfo() ?? selInfo);
-          } else if (selMode !== 0 && !focusMode && draggingRef.current && !movedRef.current) {
-            // A click (no drag): the press-pick stands; refresh the count HUD (one render,
-            // off the hot path — the highlight was already instant on press).
-            setSelInfo(readSelInfo() ?? selInfo);
-          }
-          draggingRef.current = false;
-          paintingRef.current = false;
-          lastRef.current = null;
-          downRef.current = null;
-        }}
-        onMouseLeave={() => {
-          if (marqueeRef.current) {
-            marqueeRef.current = null;
-            setMarquee(null);
-            setSelInfo(readSelInfo() ?? selInfo);
-          }
-          draggingRef.current = false;
-          paintingRef.current = false;
-          lastRef.current = null;
-          downRef.current = null;
-        }}
-        onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
-        style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
-      />
-
-      {/* Marquee rectangle — the desktop-style drag-select box (Alt+drag). Drawn over the
-          input layer with pointerEvents off so it never steals the drag; the elements it
-          encloses highlight live underneath as the box sweeps. */}
-      {marquee && (
-        <Box
-          style={{
-            position: 'absolute', left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h,
-            backgroundColor: 'rgba(90,134,192,0.18)', borderWidth: 1, borderColor: '#7fa8e0',
-            pointerEvents: 'none',
-          }}
+      {/* Paint input surface — mounted ONLY in paint mode. Every other interaction (orbit
+          on middle-drag, vertex/edge/face select + marquee on left, wheel zoom, double-click
+          recenter, Focus-tool pan) is owned by the HOST's native model-editor input loop in
+          engine.zig — zero JS per event, no React render per move. When this Pressable isn't
+          mounted, viewport mouse events reach that native loop directly. */}
+      {model && paintMode && (
+        <Pressable
+          onMouseDown={(p: any) => { paintingRef.current = true; paintAt(p?.x ?? 0, p?.y ?? 0, color); }}
+          onMouseMove={(p: any) => { if (paintingRef.current) paintAt(p?.x ?? 0, p?.y ?? 0, color); }}
+          onMouseUp={() => { paintingRef.current = false; }}
+          onMouseLeave={() => { paintingRef.current = false; }}
+          onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
+          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
         />
       )}
 
@@ -456,12 +340,12 @@ export default function ModelView() {
         {model && (
           <Text style={{ color: '#7d899c', fontSize: 12, marginLeft: 12 }}>
             {paintMode
-              ? `${(model.count / 3).toLocaleString()} tris · click a face to fill · drag to paint`
+              ? `${(model.count / 3).toLocaleString()} tris · click a face to fill · drag to paint · middle-drag orbits`
               : focusMode
                 ? `${(model.count / 3).toLocaleString()} tris · drag to pan focus · double-click to recenter`
                 : selMode !== 0
-                  ? `${SEL_MODES[selMode]} · ${selInfo.sel} selected · click · shift-click adds · Alt-drag box · drag orbits`
-                  : `${(model.count / 3).toLocaleString()} tris · drag to orbit · scroll to zoom · double-click to recenter`}
+                  ? `${SEL_MODES[selMode]} · ${selInfo.sel} selected · click · shift-click adds · drag = box · middle-drag orbits`
+                  : `${(model.count / 3).toLocaleString()} tris · middle-drag orbits · wheel zoom · double-click recenter`}
           </Text>
         )}
         <Box style={{ flexGrow: 1 }} />

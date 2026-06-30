@@ -418,6 +418,30 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
 }
 
 // ── Mesh-element selection (the host-native editor surface) ───────────────────────
+// ── Native mesh-editor input capture (modelview) ─────────────────────────────────
+// When capturing, the ENGINE owns the model-editor input loop (middle-drag orbit, left
+// select/marquee, wheel zoom, double-click focus) with zero JS per event — the cart sets
+// the mode/tool via doors but never touches a mouse event. These flags are the engine's
+// gate + tool read; the gesture state itself lives in the engine event loop.
+var g_me_capture: bool = false;
+var g_me_focus_tool: bool = false;
+pub fn setMeshEditCapture(on: bool) void {
+    g_me_capture = on;
+}
+pub fn meshEditCapturing() bool {
+    return g_me_capture;
+}
+pub fn setMeshEditFocusTool(on: bool) void {
+    g_me_focus_tool = on;
+}
+pub fn meshEditFocusTool() bool {
+    return g_me_focus_tool;
+}
+/// The current selection mode as a raw int (0 none, 1 vertex, 2 edge, 3 face) — the engine
+/// reads it to decide what a left press does (select vs nothing).
+pub fn meshEditModeRaw() u8 {
+    return @intFromEnum(mesh_edit.mode());
+}
 /// Set the selection mode: 0 none, 1 vertex, 2 edge, 3 face. Out-of-range → none.
 pub fn meshEditSetMode(m: u8) void {
     mesh_edit.setMode(switch (m) {
