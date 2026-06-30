@@ -8971,7 +8971,21 @@ __ARCHIVE__
   }
   function binaryCurrent2(binary, cartEntry) {
     if (!fsExists(binary)) return false;
-    return fsStat(binary).mtimeMs > fsStat(cartEntry).mtimeMs;
+    const dirCart = cartEntry.endsWith("/index.tsx");
+    const sourceRoot = dirCart ? dirname7(cartEntry) : cartEntry;
+    return fsStat(binary).mtimeMs >= newestMtime(sourceRoot);
+  }
+  function newestMtime(path) {
+    const st = tryFsStat(path);
+    if (!st) return 0;
+    if (!st.isDir) return st.mtimeMs;
+    let newest = st.mtimeMs;
+    for (const entry of fsList(path)) {
+      if (entry === "." || entry === "..") continue;
+      const m = newestMtime(`${path}/${entry}`);
+      if (m > newest) newest = m;
+    }
+    return newest;
   }
   function pngDims(path) {
     const dump = spawnSync("sh", ["-c", `head -c 24 ${shellQuote3(path)} | od -An -v -tu1`]);

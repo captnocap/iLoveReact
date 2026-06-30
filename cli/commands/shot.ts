@@ -19,7 +19,7 @@
 // The live-app sibling is the in-app console verb `shot [path]`
 // (__capture_frame — same readback, host-fn-driven, no exit).
 
-import { fsExists, fsMkdir, fsStat } from '../host/fs.ts';
+import { fsExists, fsList, fsMkdir, fsStat, tryFsStat } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 import { spawnSync } from '../host/process.ts';
 
@@ -100,7 +100,27 @@ function resolveCartEntry(root: string, name: string): string | null {
 
 function binaryCurrent(binary: string, cartEntry: string): boolean {
   if (!fsExists(binary)) return false;
-  return fsStat(binary).mtimeMs > fsStat(cartEntry).mtimeMs;
+  // A decomposed cart bundles EVERY file under its directory, not just index.tsx.
+  // Comparing the binary only against the entry file silently serves a stale
+  // binary whenever an imported component/data file changed (the entry didn't).
+  // So compare against the NEWEST mtime across the whole cart source.
+  const dirCart = cartEntry.endsWith('/index.tsx');
+  const sourceRoot = dirCart ? dirname(cartEntry) : cartEntry;
+  return fsStat(binary).mtimeMs >= newestMtime(sourceRoot);
+}
+
+// Newest mtime in a file or directory tree (recursive). 0 if missing.
+function newestMtime(path: string): number {
+  const st = tryFsStat(path);
+  if (!st) return 0;
+  if (!st.isDir) return st.mtimeMs;
+  let newest = st.mtimeMs;
+  for (const entry of fsList(path)) {
+    if (entry === '.' || entry === '..') continue;
+    const m = newestMtime(`${path}/${entry}`);
+    if (m > newest) newest = m;
+  }
+  return newest;
 }
 
 /** Parse PNG magic + IHDR width/height — the well-formedness assertion.
