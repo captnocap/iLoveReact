@@ -156,10 +156,11 @@ export type HmscEditorCatalog = {
   diagnostics: CatalogDiagnostics;
 };
 
-export const HMSC_EDITOR_CATALOG: HmscEditorCatalog = loadHmscEditorCatalog();
-
 let cookedTextureBlobs: Record<string, string> = {};
 let cookedMeshBlobs: Record<string, number[]> = {};
+let cookedAssetMeshRefs: Record<string, string> = {};
+
+export const HMSC_EDITOR_CATALOG: HmscEditorCatalog = loadHmscEditorCatalog();
 
 export function textureBlobDataUrl(ref: string): string | null {
   const blob = cookedTextureBlobs[ref];
@@ -172,6 +173,10 @@ export function cookedMeshBlobData(ref: string): Float32Array | null {
   return blob ? new Float32Array(blob) : null;
 }
 
+export function cookedMeshRefForAsset(assetId: string): string | null {
+  return cookedAssetMeshRefs[assetId] ?? null;
+}
+
 function loadHmscEditorCatalog(): HmscEditorCatalog {
   const started = Date.now();
   const errors: string[] = [];
@@ -181,6 +186,11 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
   const importedProps = readJson<ImportedPropsData>(IMPORTED_PROPS_DATA, errors);
   cookedTextureBlobs = cooked?.state?.textureBlobs ?? {};
   cookedMeshBlobs = cooked?.state?.meshBlobs ?? {};
+  cookedAssetMeshRefs = Object.fromEntries(
+    Object.values(cooked?.state?.assets ?? {})
+      .filter((asset) => Boolean(asset.id && asset.meshRef))
+      .map((asset) => [asset.id, asset.meshRef]),
+  );
 
   const materialAssets = [
     ...shaderRecipeAssets(),

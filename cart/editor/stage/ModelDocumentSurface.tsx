@@ -2,7 +2,7 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
 import ModelView from '../../modelview';
-import { cookedMeshBlobData } from '../data/hmscAssetCatalog';
+import { cookedMeshBlobData, cookedMeshRefForAsset } from '../data/hmscAssetCatalog';
 
 export default function ModelDocumentSurface({ model }: { model: ModelPackage | null }) {
   if (!model) {
@@ -24,8 +24,9 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
     );
   }
 
-  if (model.viewerMeshRef) {
-    const vertices = cookedMeshBlobData(model.viewerMeshRef);
+  const meshRef = viewerMeshRefFor(model);
+  if (meshRef) {
+    const vertices = cookedMeshBlobData(meshRef);
     if (vertices) {
       return (
         <C.HW_ModelDocument>
@@ -33,7 +34,7 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
             key={model.id}
             initialTitle={model.name}
             initialMesh={{
-              key: model.viewerMeshRef,
+              key: meshRef,
               name: model.name,
               vertices,
               count: Math.floor(vertices.length / 8),
@@ -44,6 +45,15 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
         </C.HW_ModelDocument>
       );
     }
+    return (
+      <C.HW_ModelDocument>
+        <C.HW_ModelDocEmpty>
+          <Icon name="SearchX" size={18} color={accentFor('textFaint')} />
+          <C.HW_StageSocketTitle>MODEL TRIANGLE DATA MISSING</C.HW_StageSocketTitle>
+          <C.HW_StatusText>{meshRef}</C.HW_StatusText>
+        </C.HW_ModelDocEmpty>
+      </C.HW_ModelDocument>
+    );
   }
 
   return (
@@ -101,6 +111,17 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
       </C.HW_ModelDocShell>
     </C.HW_ModelDocument>
   );
+}
+
+function viewerMeshRefFor(model: ModelPackage): string | null {
+  if (model.viewerMeshRef) return model.viewerMeshRef;
+  const assetId = cookedAssetId(model);
+  return assetId ? cookedMeshRefForAsset(assetId) : null;
+}
+
+function cookedAssetId(model: ModelPackage): string | null {
+  if (model.sourceKind !== 'cooked-asset') return null;
+  return model.id.startsWith('cooked:') ? model.id.slice('cooked:'.length) : model.id;
 }
 
 function DocStat({ label, value }: { label: string; value: string }) {
