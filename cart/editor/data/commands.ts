@@ -5,9 +5,15 @@ import type { Command, Menu, MockState } from './types';
 
 export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Story', 'Window', 'Help'];
 export const MENU_DROPDOWN_WIDTH = 420;
-export const MENU_LEFT_BASE = 154;
-export const MENU_LEFT_STEP = 46;
-export const MENU_STAGE_GUTTER = 12;
+
+// Menu-bar geometry, derived from the Chrome styles (workspace.cls HW_*). The
+// dropdown is mounted at the app root, so these are window-relative pixels: the
+// first menu item begins after the chrome padding + brand block + chrome gap.
+const MENU_BAR_LEFT = 156;     // HW_Chrome paddingLeft(10) + HW_Brand(136) + HW_Chrome gap(10)
+const MENU_ITEM_PAD = 18;      // HW_MenuItem paddingLeft(9) + paddingRight(9)
+const MENU_ITEM_GAP = 2;       // HW_MenuBar gap between items
+const MENU_GLYPH_ADVANCE = 6.4; // ~per-glyph advance of HW_MenuText at fontSize 11
+const MENU_DROPDOWN_GUTTER = 12; // keep the panel off the window edge
 
 export const COMMANDS: Command[] = [
   { id: 'new-map', menu: 'File', name: 'New Map Workspace', icon: 'FilePlus2', key: 'Ctrl+N', context: false, native: true, undoable: false },
@@ -41,11 +47,18 @@ export function commandById(id: string): Command {
   return COMMANDS.find((command) => command.id === id) ?? COMMANDS[0]!;
 }
 
+function menuItemWidth(menu: Menu): number {
+  return MENU_ITEM_PAD + menu.length * MENU_GLYPH_ADVANCE;
+}
+
 export function menuDropdownLeft(menu: Menu | null): number {
-  const viewportWidth = 1536;
-  const stageWidth = viewportWidth - 48 - 350 - 326;
-  const rawLeft = MENU_LEFT_BASE + MENUS.indexOf(menu ?? 'Build') * MENU_LEFT_STEP;
-  return Math.max(MENU_STAGE_GUTTER, Math.min(rawLeft, stageWidth - MENU_DROPDOWN_WIDTH - MENU_STAGE_GUTTER));
+  if (!menu) return MENU_BAR_LEFT;
+  let left = MENU_BAR_LEFT;
+  for (const candidate of MENUS) {
+    if (candidate === menu) break;
+    left += menuItemWidth(candidate) + MENU_ITEM_GAP;
+  }
+  return Math.max(MENU_DROPDOWN_GUTTER, left);
 }
 
 export function activeMenuFor(state: MockState): Menu {

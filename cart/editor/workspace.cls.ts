@@ -371,7 +371,7 @@ classifier({
   HW_FileHistoryCards: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'row', gap: 8, paddingLeft: 12, paddingRight: 12, paddingBottom: 10 } },
   HW_FileHistoryCard: { type: 'Pressable', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 4, padding: 8, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
 
-  HW_MenuDropdown: { type: 'Box', style: { position: 'absolute', left: 236, top: 34, width: 420, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:surface', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', overflow: 'hidden' } },
+  HW_MenuDropdown: { type: 'Box', style: { position: 'absolute', left: 156, top: 37, width: 420, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:surface', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', overflow: 'hidden' } },
   HW_MenuDropHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 7, backgroundColor: 'theme:bgElevated', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_MenuDropRow: { type: 'Pressable', style: { minHeight: 27, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 9, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_MenuDropText: { type: 'Text', fontSize: 11, color: 'theme:text' },

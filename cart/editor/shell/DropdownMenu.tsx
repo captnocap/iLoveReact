@@ -3,15 +3,16 @@ import { C, accentFor } from '../workspace.cls';
 import { COMMANDS, MENU_DROPDOWN_WIDTH, menuDropdownLeft } from '../data/commands';
 import type { MockState } from '../data/types';
 
+// Dropdown for the active top-bar menu. Mounted at the app root (see AppFrame)
+// so it paints over the body and hit-tests correctly; positioned under its
+// menu-bar button via menuDropdownLeft.
+
 export default function DropdownMenu({ state, onCommand }: { state: MockState; onCommand: (id: string, source: string) => void }) {
   const rows = COMMANDS.filter((command) => command.menu === state.openMenu);
   return (
     <C.HW_MenuDropdown style={{ left: menuDropdownLeft(state.openMenu), width: MENU_DROPDOWN_WIDTH }}>
       <C.HW_MenuDropHead>
-        <Icon name="Wrench" size={14} color={accentFor('primary')} />
-        <C.HW_HeadTitle>{state.openMenu} capabilities</C.HW_HeadTitle>
-        <C.HW_Spacer />
-        <C.HW_Kicker>SSOT</C.HW_Kicker>
+        <C.HW_HeadTitle>{state.openMenu}</C.HW_HeadTitle>
       </C.HW_MenuDropHead>
       {rows.map((command) => (
         <C.HW_MenuDropRow key={command.id} onPress={() => onCommand(command.id, 'menu')}>

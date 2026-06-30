@@ -6,6 +6,7 @@
 import { useState, useMemo } from 'react';
 import { C } from '../workspace.cls';
 import Chrome from './Chrome';
+import DropdownMenu from './DropdownMenu';
 import LeftRail from './LeftRail';
 import BuildDock from './BuildDock';
 import EventBusPopover from './EventBusPopover';
@@ -661,6 +662,11 @@ export default function AppFrame() {
             onOpenFile={openExplorerFile}
             onClose={() => setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'file explorer closed' }))}
           />
+        </RenderProbe>
+      ) : null}
+      {state.openMenu ? (
+        <RenderProbe id="Menu Dropdown">
+          <DropdownMenu state={state} onCommand={runCommand} />
         </RenderProbe>
       ) : null}
     </C.HW_App>

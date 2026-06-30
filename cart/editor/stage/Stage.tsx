@@ -2,7 +2,6 @@ import { C } from '../workspace.cls';
 import type { Asset, ColorStudioMaterialKey, MockState } from '../data/types';
 import { modelPackageById } from '../data/content';
 import ContextMenu from '../shell/ContextMenu';
-import DropdownMenu from '../shell/DropdownMenu';
 import MaterialFocusSurface from './MaterialFocusSurface';
 import ModelDocumentSurface from './ModelDocumentSurface';
 import StageTabs from './StageTabs';
@@ -56,7 +55,6 @@ export default function Stage(props: {
           />
         )}
         {activeDocument.kind === 'material' && props.state.contextOpen ? <ContextMenu state={props.state} onCommand={props.onCommand} /> : null}
-        {props.state.openMenu ? <DropdownMenu state={props.state} onCommand={props.onCommand} /> : null}
       </C.HW_StageViewport>
       <StageTabs
         documents={props.state.workspaceDocuments}
