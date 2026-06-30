@@ -917,6 +917,21 @@ pub fn getCursorPos(id: u8) u32 {
     return inputs[id].cursor;
 }
 
+/// Horizontal scroll offset (px) of a single-line input's text viewport —
+/// how far the text is slid left so the caret stays visible as you type past
+/// the right edge. The paint pass owns the value (recomputes it each frame
+/// from the caret position) and click hit-testing reads it back so a click
+/// maps to the same byte the user sees. Multiline inputs leave it 0.
+pub fn getScrollX(id: u8) f32 {
+    if (id >= MAX_INPUTS) return 0;
+    return inputs[id].scroll_x;
+}
+
+pub fn setScrollX(id: u8, v: f32) void {
+    if (id >= MAX_INPUTS) return;
+    inputs[id].scroll_x = if (v > 0) v else 0;
+}
+
 pub fn setCursorPos(id: u8, pos: u32) void {
     if (id >= MAX_INPUTS) return;
     const s = &inputs[id];

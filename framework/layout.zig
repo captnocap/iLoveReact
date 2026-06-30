@@ -2532,7 +2532,12 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
     }
     if (h == null) {
         if (node.input_id != null) {
-            h = @as(f32, @floatFromInt(node.font_size)) + pt + pb;
+            // A height-less input is one line tall. Use the line box
+            // (~1.4×font), not the bare em — font_size alone is shorter than
+            // the glyphs' line height, so the text clips top/bottom and sits
+            // high in the box. Matches estimateIntrinsicHeightUncached above
+            // (estimate and actual layout must agree).
+            h = @as(f32, @floatFromInt(node.font_size)) * 1.4 + pt + pb;
         } else if (node.text != null) {
             const m = measureNodeTextW(node, innerW);
             h = m.height + pt + pb;

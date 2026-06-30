@@ -3201,6 +3201,7 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
     const is_placeholder = typed.len == 0;
     const is_multiline = input.isMultiline(id);
     const max_w = @max(@as(f32, 1), r.w - pl - pr);
+    const cursor_pos = input.getCursorPos(id);
     var text_y = r.y + pt;
     if (!is_multiline) {
         const metrics = measureCallback(
@@ -3219,12 +3220,53 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
         }
     }
     text_y = @floor(text_y);
+
+    // ── Single-line horizontal scroll (the "trailing" behavior) ──────────
+    // A single-line input never wraps; its text slides left so the caret
+    // stays inside the box as you type past the right edge. The paint pass
+    // owns the offset (recomputed every frame from the caret), and the click
+    // hit-test reads it back via input.getScrollX so a click lands on the
+    // glyph the user sees. Multiline inputs keep hscroll = 0 (they wrap).
+    var hscroll: f32 = 0;
+    if (!is_multiline) {
+        var caret_tx: f32 = 0;
+        var text_w: f32 = 0;
+        if (g_text_engine) |te| {
+            if (!is_placeholder) {
+                caret_tx = te.byteToPosLH(typed, @as(usize, cursor_pos), node.font_size, 0, node.line_height).x;
+                text_w = te.byteToPosLH(typed, typed.len, node.font_size, 0, node.line_height).x;
+            }
+        }
+        hscroll = input.getScrollX(id);
+        if (input.isFocused(id)) {
+            // Keep a small margin of context on either side of the caret so
+            // it never sits flush against the clipping edge.
+            const margin: f32 = @min(max_w * 0.5, @as(f32, @floatFromInt(node.font_size)) * 0.4 + 2);
+            if (caret_tx - hscroll > max_w - margin) hscroll = caret_tx - max_w + margin;
+            if (caret_tx - hscroll < margin) hscroll = caret_tx - margin;
+        }
+        // Never scroll past the text's end or into negative space.
+        const max_scroll = @max(@as(f32, 0), text_w - max_w);
+        hscroll = @max(@as(f32, 0), @min(hscroll, max_scroll));
+        input.setScrollX(id, hscroll);
+    }
+
+    // Clip the input's own content to its box. paintNodeVisuals (our caller)
+    // paints node content BEFORE the overflow scissor that wraps children, so
+    // without this an input's text bleeds out over its siblings. Single-line
+    // only — multiline TextArea/TextEditor manage their own viewport (often
+    // inside a parent ScrollView) and must not be re-clipped to one line.
+    const clip_content = !is_multiline;
+    if (clip_content) gpu.pushScissor(r.x + pl, r.y, max_w, r.h);
+    defer if (clip_content) gpu.popScissor();
+
+    const tx0 = r.x + pl - hscroll;
     if (!is_placeholder) {
         const sel = input.getSelection(id);
         if (sel.hi > sel.lo) {
             const scope = selection.applyNodeTextScope(node);
             defer selection.restoreNodeTextScope(scope);
-            gpu.drawSelectionRects(typed, r.x + pl, text_y, node.font_size, max_w, sel.lo, sel.hi);
+            gpu.drawSelectionRects(typed, tx0, text_y, node.font_size, max_w, sel.lo, sel.hi);
         }
     }
     if (!is_placeholder) {
@@ -3248,7 +3290,7 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
             }
             var row_y = text_y + line_h * @as(f32, @floatFromInt(start_row));
             for (rows[start_row..end_row]) |row| {
-                gpu.drawColorTextRow(row.spans, r.x + pl, row_y, node.font_size, g_paint_opacity);
+                gpu.drawColorTextRow(row.spans, tx0, row_y, node.font_size, g_paint_opacity);
                 row_y += line_h;
             }
         } else if (node.input_paint_text) {
@@ -3257,7 +3299,10 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
                 if (t.len > 0) {
                     const tc = node.text_color orelse Color.rgb(220, 220, 220);
                     const max_lines: u16 = if (is_multiline) 0 else 1;
-                    _ = drawNodeTextCommon(node, t, r.x + pl, text_y, max_w, max_lines, tc);
+                    // Single-line: wrap width 0 (no wrap) so the full line is
+                    // laid out and scrolled via tx0, not truncated at max_w.
+                    const wrap_w: f32 = if (is_multiline) max_w else 0;
+                    _ = drawNodeTextCommon(node, t, tx0, text_y, wrap_w, max_lines, tc);
                 }
             }
         }
@@ -3270,12 +3315,12 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
                 else
                     (node.text_color orelse Color.rgb(220, 220, 220));
                 const max_lines: u16 = if (is_multiline) 0 else 1;
-                _ = drawNodeTextCommon(node, t, r.x + pl, text_y, max_w, max_lines, tc);
+                const wrap_w: f32 = if (is_multiline) max_w else 0;
+                _ = drawNodeTextCommon(node, t, tx0, text_y, wrap_w, max_lines, tc);
             }
         }
     }
     if (input.isFocused(id) and g_cursor_visible) {
-        const cursor_pos = input.getCursorPos(id);
         var cursor_x: f32 = 0;
         var cursor_y: f32 = 0;
         if (g_text_engine) |te| {
@@ -3283,7 +3328,7 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
             cursor_x = point.x;
             cursor_y = point.y;
         }
-        const cx = r.x + pl + cursor_x;
+        const cx = tx0 + cursor_x;
         // Match the caret to the line box the text and selection use — same
         // metric as the color-row path above and gpu.drawSelectionRects —
         // instead of a hardcoded 1.3×font_size, which left the caret a
@@ -4196,7 +4241,9 @@ pub fn run(config_in: AppConfig) !void {
                                 var scroll_x: f32 = 0;
                                 var scroll_y: f32 = 0;
                                 _ = scrollOffsetForNode(config.root, h, &scroll_x, &scroll_y);
-                                const local_x = mx + scroll_x - h.computed.x - pl;
+                                // Add the input's own horizontal text-scroll so the click maps to
+                                // the glyph the user sees, not the one that would be there at scroll 0.
+                                const local_x = mx + scroll_x - h.computed.x - pl + input.getScrollX(id);
                                 const local_y = my + scroll_y - h.computed.y - pt;
                                 const cursor_pos = hitTestInputByte(id, local_x, local_y, h.font_size, h.computed.w - pl - pr, h.line_height);
                                 if (clicks == 3) {
@@ -4314,7 +4361,7 @@ pub fn run(config_in: AppConfig) !void {
                                     const pl = h.style.padLeft();
                                     const pt = h.style.padTop();
                                     const pr = h.style.padRight();
-                                    const local_x = gpos[0] - h.computed.x - pl;
+                                    const local_x = gpos[0] - h.computed.x - pl + input.getScrollX(id);
                                     const local_y = gpos[1] - h.computed.y - pt;
                                     const cursor_pos = hitTestInputByte(id, local_x, local_y, h.font_size, h.computed.w - pl - pr, h.line_height);
                                     input.setCursorPos(id, cursor_pos);
@@ -5071,7 +5118,7 @@ pub fn run(config_in: AppConfig) !void {
         // over a 143 KB file saturates the frame with redundant hit-tests.
         if (input_drag_pending) {
             input_drag_pending = false;
-            const local_x = input_drag_pending_x - input_drag_node_x - input_drag_node_pl;
+            const local_x = input_drag_pending_x - input_drag_node_x - input_drag_node_pl + input.getScrollX(input_drag_id);
             const local_y = input_drag_pending_y - input_drag_node_y - input_drag_node_pt;
             const cursor_pos = hitTestInputByte(input_drag_id, local_x, local_y, input_drag_font_size, input_drag_max_width, input_drag_line_height);
             input.updateDragToPos(input_drag_id, cursor_pos);
