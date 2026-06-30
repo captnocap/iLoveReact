@@ -64,9 +64,12 @@ const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
 // the host's: welded topology, selection sets, AND the input loop (engine.zig). The cart
 // only sets mode/tool/capture and reads counts for the HUD — never a per-event handler.
 type SelInfo = { mode: number; verts: number; edges: number; sel: number };
+type TopoResult = { ok: number; key?: string; count?: number };
+type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 const meshClearSel = () => host.__mesh_edit_clear?.();
 const meshGizmoTool = (t: number) => host.__mesh_gizmo_tool?.(t);
+const meshSelectEdge = (idx: number, additive = false) => host.__mesh_edit_select_edge?.(idx, additive ? 1 : 0) === 1;
 // Hand the model-editor input loop to the host (native orbit/select/marquee/zoom/focus,
 // zero JS per event), and toggle the Focus tool (left-drag pans the pivot).
 const meshCapture = (on: boolean) => host.__mesh_edit_capture?.(on ? 1 : 0);
@@ -79,6 +82,24 @@ const readSelInfo = (): SelInfo | null => {
     return null;
   }
 };
+const readTopoResult = (json: any): TopoResult | null => {
+  try {
+    return typeof json === 'string' && json ? (JSON.parse(json) as TopoResult) : null;
+  } catch {
+    return null;
+  }
+};
+const meshExtrudeEdge = (distance: number) => readTopoResult(host.__mesh_topo_extrude_edge?.(distance));
+const meshCreateFace = () => readTopoResult(host.__mesh_topo_create_face?.());
+const readGuard = (): GuardInfo | null => {
+  try {
+    const j = host.__mesh_edit_guard?.();
+    return typeof j === 'string' && j ? (JSON.parse(j) as GuardInfo) : null;
+  } catch {
+    return null;
+  }
+};
+const resolveGuard = (action: number) => host.__mesh_edit_guard_resolve?.(action);
 const SEL_MODES = ['Object', 'Vertex', 'Edge', 'Face'];
 const GIZMO_TOOLS = ['Move', 'Scale', 'Rotate'];
 // Re-decimate the model to clustering resolution `grid` (8..256, higher = more detail)
@@ -125,6 +146,7 @@ export default function ModelView() {
   const [selMode, setSelMode] = useState(0); // 0 view · 1 vertex · 2 edge · 3 face
   const [gizmoTool, setGizmoTool] = useState(0); // 0 move · 1 scale · 2 rotate
   const [selInfo, setSelInfo] = useState<SelInfo>({ mode: 0, verts: 0, edges: 0, sel: 0 });
+  const [guard, setGuard] = useState<GuardInfo | null>(null);
   const [color, setColor] = useState<RGB>(PALETTE[0]);
   const [quality, setQuality] = useState(1); // slider 0..1; 1 = full detail on load
   // Attribution: the shared ledger + the current model's entry + the panel toggle.
@@ -167,6 +189,24 @@ export default function ModelView() {
       setModel((m) => (m ? { ...m, key: r.key, count: r.count } : m));
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 }); // host re-meshed → selection cleared
     }
+  };
+
+  const applyTopo = (r: TopoResult | null, fail: string) => {
+    if (r?.ok && typeof r.key === 'string' && typeof r.count === 'number') {
+      setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
+      setSelMode(2);
+      setWire(true);
+      setSelInfo(readSelInfo() ?? { mode: 2, verts: 0, edges: 0, sel: 0 });
+      setError(null);
+    } else {
+      setError(fail);
+    }
+  };
+
+  const closeGuard = (action: number) => {
+    resolveGuard(action);
+    setGuard(null);
+    setSelInfo(readSelInfo() ?? selInfo);
   };
 
   // Only the paint stroke is JS-driven now (and only while in paint mode). Orbit, select,
@@ -252,6 +292,7 @@ export default function ModelView() {
     // The host calls this once per committed selection change (a click or a marquee release,
     // NOT per drag-move) so the count HUD refreshes without any JS in the interaction loop.
     (globalThis as any).__meshEditSelChanged = () => setSelInfo(readSelInfo() ?? { mode: 0, verts: 0, edges: 0, sel: 0 });
+    (globalThis as any).__meshEditGuardChanged = () => setGuard(readGuard());
     const path = callHost<string | null>('__env_get', null, 'RJIT_MODEL');
     if (path) applyPath(path);
     // RJIT_WIRE=1 boots in wireframe mode — the headless self-shot path for it.
@@ -306,6 +347,28 @@ export default function ModelView() {
       host.__mesh_edit_select_face?.(Number(sf) || 0, 0);
       setSelMode(3);
       setSelInfo(readSelInfo() ?? { mode: 3, verts: 0, edges: 0, sel: 1 });
+    }
+    // RJIT_SELECTEDGE=N or RJIT_SELECTEDGES=A,B selects welded edges by index for
+    // deterministic topology screenshots; RJIT_EDGEOP=extrude|face then runs the op.
+    const edgeText = callHost<string | null>('__env_get', null, 'RJIT_SELECTEDGES')
+      ?? callHost<string | null>('__env_get', null, 'RJIT_SELECTEDGE');
+    if (edgeText != null) {
+      edgeText.split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n)).forEach((idx, i) => {
+        meshSelectEdge(idx, i > 0);
+      });
+      setSelMode(2);
+      setWire(true);
+      setSelInfo(readSelInfo() ?? { mode: 2, verts: 0, edges: 0, sel: 1 });
+    }
+    const edgeOp = callHost<string | null>('__env_get', null, 'RJIT_EDGEOP');
+    if (edgeOp) {
+      const r = edgeOp === 'face' ? meshCreateFace() : meshExtrudeEdge(0);
+      if (r?.ok && r.key && typeof r.count === 'number') {
+        setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
+        setSelMode(2);
+        setWire(true);
+        setSelInfo(readSelInfo() ?? { mode: 2, verts: 0, edges: 0, sel: 0 });
+      }
     }
     // RJIT_NUDGE=x,0.25 (or y/z) translates the active selection headlessly after
     // index-based selection. It proves host-native geometry mutation without a mouse drag.
@@ -511,6 +574,35 @@ export default function ModelView() {
                   </Pressable>
                 );
               })}
+              {selMode === 2 && selInfo.sel > 0 && (
+                <>
+                  <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
+                  {selInfo.sel === 1 && (
+                    <Pressable
+                      onPress={() => applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude')}
+                      tooltip="Extrude selected edge"
+                      style={{
+                        paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                        backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                      }}
+                    >
+                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Extrude</Text>
+                    </Pressable>
+                  )}
+                  {selInfo.sel >= 2 && (
+                    <Pressable
+                      onPress={() => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop')}
+                      tooltip="Create face from selected edges"
+                      style={{
+                        paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                        backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                      }}
+                    >
+                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Create Face</Text>
+                    </Pressable>
+                  )}
+                </>
+              )}
               <Box style={{ flexGrow: 1 }} />
               <Text style={{ color: '#7d899c', fontSize: 12, fontFamily: 'monospace' }}>
                 {`${selInfo.sel} sel · ${selMode === 1 ? `${selInfo.verts} verts` : selMode === 2 ? `${selInfo.edges} edges` : `${(model.count / 3).toLocaleString()} faces`}`}
@@ -526,6 +618,42 @@ export default function ModelView() {
           )}
         </Row>
       )}
+
+      {guard?.pending ? (
+        <Col
+          style={{
+            position: 'absolute', left: 18, bottom: 62, width: 360,
+            paddingLeft: 14, paddingRight: 14, paddingTop: 12, paddingBottom: 12,
+            backgroundColor: 'rgba(17,20,29,0.96)', borderWidth: 1, borderColor: '#805f3c',
+            borderRadius: 8,
+          }}
+        >
+          <Text style={{ color: '#ffe1bf', fontSize: 13, fontWeight: 700 }}>Unsafe face edit</Text>
+          <Text style={{ color: '#b9c4d4', fontSize: 12, marginTop: 6 }}>
+            {`${guard.bad} triangle${guard.bad === 1 ? '' : 's'} collapsed or flipped. Keep the triangulated split, ignore it, or revert.`}
+          </Text>
+          <Row style={{ marginTop: 12, gap: 8 }}>
+            <Pressable
+              onPress={() => closeGuard(0)}
+              style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#244164', borderWidth: 1, borderColor: '#4e75a4' }}
+            >
+              <Text style={{ color: '#e6f1ff', fontSize: 12, fontWeight: 700 }}>Split Quads</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => closeGuard(1)}
+              style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
+            >
+              <Text style={{ color: '#e1e7f1', fontSize: 12, fontWeight: 700 }}>Ignore</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => closeGuard(2)}
+              style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#4a2729', borderWidth: 1, borderColor: '#8d4b50' }}
+            >
+              <Text style={{ color: '#ffe3e4', fontSize: 12, fontWeight: 700 }}>Revert</Text>
+            </Pressable>
+          </Row>
+        </Col>
+      ) : null}
 
       {/* Quality strip — live decimation. Drag to trade detail for triangles; the host
           re-meshes from the retained full-res source. Lower end is "just the shape" for

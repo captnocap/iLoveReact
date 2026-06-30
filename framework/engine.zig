@@ -401,7 +401,11 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn meshGizmoHit(_: f32, _: f32) i32 {
         return -1;
     }
+    pub fn meshGizmoBegin() void {}
     pub fn meshGizmoDrag(_: i32, _: f32, _: f32) bool {
+        return false;
+    }
+    pub fn meshGizmoFinish() bool {
         return false;
     }
     pub fn meshGizmoNudge(_: u8, _: f32) bool {
@@ -4182,6 +4186,7 @@ pub fn run(config_in: AppConfig) !void {
                             if (gh >= 0) {
                                 me_gizmo_dragging = true;
                                 me_gizmo_axis = gh;
+                                r3d.meshGizmoBegin();
                                 state_mod.markDirty();
                                 continue;
                             }
@@ -4834,8 +4839,13 @@ pub fn run(config_in: AppConfig) !void {
                             if (me_gizmo_dragging) {
                                 me_gizmo_dragging = false;
                                 me_gizmo_axis = -1;
+                                const guarded = r3d.meshGizmoFinish();
                                 js_vm.callGlobal("__beginJsEvent");
-                                js_vm.callGlobal("__meshEditSelChanged");
+                                if (guarded) {
+                                    js_vm.callGlobal("__meshEditGuardChanged");
+                                } else {
+                                    js_vm.callGlobal("__meshEditSelChanged");
+                                }
                                 js_vm.callGlobal("__endJsEvent");
                                 state_mod.markDirty();
                                 continue;

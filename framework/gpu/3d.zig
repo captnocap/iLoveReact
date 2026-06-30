@@ -410,12 +410,29 @@ var g_paint_vp_w: f32 = 0;
 var g_paint_vp_h: f32 = 0;
 var g_paint_probed: bool = false; // RJIT_PAINTPROBE one-shot guard
 var g_edit_key_hash: u64 = 0;
+var g_edit_key: ?[]u8 = null;
 var g_edit_verts: ?[]f32 = null; // active displayed mesh, interleaved 8 f32/vert
 var g_edit_count: u32 = 0;
+var g_edit_revision: u32 = 0;
+var g_guard_before: ?[]f32 = null; // pre-gizmo face positions for safety prompt/revert
+var g_guard_pending: bool = false;
+var g_guard_bad_faces: u32 = 0;
+var g_guard_face_count: u32 = 0;
+
+fn clearMeshGuardSnapshot() void {
+    if (g_guard_before) |p| std.heap.c_allocator.free(p);
+    g_guard_before = null;
+    g_guard_pending = false;
+    g_guard_bad_faces = 0;
+    g_guard_face_count = 0;
+}
 
 fn clearActiveEditMesh() void {
+    clearMeshGuardSnapshot();
     if (g_edit_verts) |v| std.heap.c_allocator.free(v);
+    if (g_edit_key) |k| std.heap.c_allocator.free(k);
     g_edit_verts = null;
+    g_edit_key = null;
     g_edit_key_hash = 0;
     g_edit_count = 0;
 }
@@ -530,11 +547,345 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
     if (verts.len >= need) {
         g_edit_verts = std.heap.c_allocator.dupe(f32, verts[0..need]) catch null;
         if (g_edit_verts != null) {
+            g_edit_key = std.heap.c_allocator.dupe(u8, key) catch null;
             g_edit_key_hash = hashKey(key);
             g_edit_count = count;
         }
     }
     mesh_edit.reset(); // topology changed (load or quality re-mesh) → rebuild lazily
+}
+
+pub fn meshEditActiveKey() ?[]const u8 {
+    return g_edit_key;
+}
+pub fn meshEditActiveCount() u32 {
+    return g_edit_count;
+}
+
+fn appendFloats(list: *std.ArrayListUnmanaged(f32), values: []const f32) bool {
+    for (values) |v| list.append(std.heap.c_allocator, v) catch return false;
+    return true;
+}
+
+fn appendVertex(list: *std.ArrayListUnmanaged(f32), p: [3]f32, n: [3]f32) bool {
+    const row = [_]f32{ p[0], p[1], p[2], n[0], n[1], n[2], 0, 0 };
+    return appendFloats(list, row[0..]);
+}
+
+fn appendTri(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: [3]f32) bool {
+    const n = normalOf(a, b, c);
+    return appendVertex(list, a, n) and appendVertex(list, b, n) and appendVertex(list, c, n);
+}
+
+fn triArea2(a: [3]f32, b: [3]f32, c: [3]f32) f32 {
+    const cr = vcross(vsub(b, a), vsub(c, a));
+    return vdot(cr, cr);
+}
+
+fn appendQuadSplit(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: [3]f32, d: [3]f32) bool {
+    const score_ac = @min(triArea2(a, b, c), triArea2(a, c, d));
+    const score_bd = @min(triArea2(a, b, d), triArea2(b, c, d));
+    if (score_bd > score_ac) {
+        return appendTri(list, a, b, d) and appendTri(list, b, c, d);
+    }
+    return appendTri(list, a, b, c) and appendTri(list, a, c, d);
+}
+
+fn collectCurrentFaceColors() ?[]u8 {
+    const fc = model_paint.faceCount();
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, fc) * 4) catch return null;
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        const c = model_paint.faceColor(f) orelse model_paint.DEFAULT_FACE;
+        colors[f * 4 + 0] = c[0];
+        colors[f * 4 + 1] = c[1];
+        colors[f * 4 + 2] = c[2];
+        colors[f * 4 + 3] = c[3];
+    }
+    return colors;
+}
+
+fn applyCarriedFaceColors(old_colors: ?[]const u8, new_fc: u32) void {
+    const colors = std.heap.c_allocator.alloc(u8, @as(usize, new_fc) * 4) catch return;
+    defer std.heap.c_allocator.free(colors);
+    var f: u32 = 0;
+    while (f < new_fc) : (f += 1) {
+        colors[f * 4 + 0] = model_paint.DEFAULT_FACE[0];
+        colors[f * 4 + 1] = model_paint.DEFAULT_FACE[1];
+        colors[f * 4 + 2] = model_paint.DEFAULT_FACE[2];
+        colors[f * 4 + 3] = model_paint.DEFAULT_FACE[3];
+    }
+    if (old_colors) |old| {
+        const carry_faces: u32 = @intCast(@min(old.len / 4, @as(usize, new_fc)));
+        if (carry_faces > 0) @memcpy(colors[0 .. @as(usize, carry_faces) * 4], old[0 .. @as(usize, carry_faces) * 4]);
+    }
+    model_paint.applyColors(colors);
+    if (model_source.colors()) |src_colors| {
+        const n = @min(src_colors.len, colors.len);
+        if (n > 0) @memcpy(src_colors[0..n], colors[0..n]);
+    }
+}
+
+fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
+    const need = @as(usize, count) * 8;
+    if (count < 3 or new_verts.len < need) return false;
+    const old_colors = collectCurrentFaceColors();
+    defer if (old_colors) |c| std.heap.c_allocator.free(c);
+
+    const old_hash = g_edit_key_hash;
+    g_edit_revision +%= 1;
+    const key = std.fmt.allocPrint(std.heap.c_allocator, "modelview-edit-{x}-{d}", .{ old_hash, g_edit_revision }) catch return false;
+    defer std.heap.c_allocator.free(key);
+
+    // setPaintTarget rewrites UVs for the per-face paint atlas; retain/stash the same
+    // mutated vertices so quality changes and first draw see the new topology.
+    setPaintTarget(key, new_verts, count);
+    model_source.retain(key, new_verts[0..need], count);
+    applyCarriedFaceColors(old_colors, count / 3);
+    if (!stashHostMesh(key, new_verts[0..need], count)) return false;
+    return true;
+}
+
+fn edgeSharesVertex(a: mesh_edit.Edge, b: mesh_edit.Edge) bool {
+    return a[0] == b[0] or a[0] == b[1] or a[1] == b[0] or a[1] == b[1];
+}
+
+fn dist2(a: [3]f32, b: [3]f32) f32 {
+    const d = vsub(a, b);
+    return vdot(d, d);
+}
+
+fn appendCurrentDisplayed(list: *std.ArrayListUnmanaged(f32)) bool {
+    const verts = g_edit_verts orelse return false;
+    const need = @as(usize, g_edit_count) * 8;
+    if (need > verts.len) return false;
+    return appendFloats(list, verts[0..need]);
+}
+
+pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
+    if (!model_paint.hasTarget()) return false;
+    const edge_idx = mesh_edit.selectedEdgeIndexPub() orelse return false;
+    const ep = mesh_edit.edgeEndpointsPub(edge_idx);
+    const a = mesh_edit.vertPosPub(ep[0]);
+    const b = mesh_edit.vertPosPub(ep[1]);
+    var n = mesh_edit.edgeAverageNormalPub(edge_idx);
+    if (vdot(n, n) < 0.5) n = .{ 0, 1, 0 };
+    const dist = if (@abs(distance_raw) > 1e-6) distance_raw else @max(0.05, g_orbit.radius * 0.08);
+    const c = vadd(a, vmul(n, dist));
+    const d = vadd(b, vmul(n, dist));
+
+    var verts = std.ArrayListUnmanaged(f32){};
+    if (!appendCurrentDisplayed(&verts)) {
+        verts.deinit(std.heap.c_allocator);
+        return false;
+    }
+    if (!appendQuadSplit(&verts, a, b, d, c)) {
+        verts.deinit(std.heap.c_allocator);
+        return false;
+    }
+    const owned = verts.toOwnedSlice(std.heap.c_allocator) catch {
+        verts.deinit(std.heap.c_allocator);
+        return false;
+    };
+    defer std.heap.c_allocator.free(owned);
+    const ok = replaceActiveEditMesh(owned, g_edit_count + 6);
+    if (ok) mesh_edit.setMode(.edge);
+    return ok;
+}
+
+fn findUniqueIndex(items: []const u32, count: u32, v: u32) ?usize {
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        if (items[i] == v) return i;
+    }
+    return null;
+}
+
+fn edgeConnects(edges: []const mesh_edit.Edge, a: u32, b: u32) bool {
+    for (edges) |e| {
+        if ((e[0] == a and e[1] == b) or (e[0] == b and e[1] == a)) return true;
+    }
+    return false;
+}
+
+fn closedEdgeLoopOrder(edges: []const mesh_edit.Edge, out: *[4]u32) ?u32 {
+    if (edges.len < 3 or edges.len > 4) return null;
+    var unique: [4]u32 = undefined;
+    var degree = [_]u8{0} ** 4;
+    var unique_count: u32 = 0;
+    for (edges) |e| {
+        var k: usize = 0;
+        while (k < 2) : (k += 1) {
+            const v = e[k];
+            const idx = findUniqueIndex(unique[0..], unique_count, v) orelse blk: {
+                if (unique_count >= unique.len) return null;
+                unique[unique_count] = v;
+                unique_count += 1;
+                break :blk @as(usize, @intCast(unique_count - 1));
+            };
+            degree[idx] += 1;
+        }
+    }
+    if (unique_count != edges.len) return null;
+    var i: u32 = 0;
+    while (i < unique_count) : (i += 1) {
+        if (degree[i] != 2) return null;
+    }
+
+    out[0] = edges[0][0];
+    out[1] = edges[0][1];
+    var prev = out[0];
+    var curr = out[1];
+    var n: u32 = 2;
+    while (n < unique_count) : (n += 1) {
+        var next: ?u32 = null;
+        for (edges) |e| {
+            if (e[0] == curr and e[1] != prev) next = e[1];
+            if (e[1] == curr and e[0] != prev) next = e[0];
+        }
+        const v = next orelse return null;
+        if (v == out[0]) return null;
+        out[n] = v;
+        prev = curr;
+        curr = v;
+    }
+    if (!edgeConnects(edges, curr, out[0])) return null;
+    return unique_count;
+}
+
+pub fn meshTopoCreateFaceFromEdges() bool {
+    if (!model_paint.hasTarget()) return false;
+    var selected: [16]mesh_edit.Edge = undefined;
+    const selected_count = mesh_edit.selectedEdgesPub(selected[0..]);
+    if (selected_count < 2 or selected_count > selected.len) return false;
+    const edges = selected[0..@as(usize, @intCast(selected_count))];
+
+    var verts = std.ArrayListUnmanaged(f32){};
+    if (!appendCurrentDisplayed(&verts)) {
+        verts.deinit(std.heap.c_allocator);
+        return false;
+    }
+
+    var ok = false;
+    if (selected_count == 2 and !edgeSharesVertex(edges[0], edges[1])) {
+        const a = mesh_edit.vertPosPub(edges[0][0]);
+        const b = mesh_edit.vertPosPub(edges[0][1]);
+        var c = mesh_edit.vertPosPub(edges[1][0]);
+        var d = mesh_edit.vertPosPub(edges[1][1]);
+        if (dist2(a, d) + dist2(b, c) < dist2(a, c) + dist2(b, d)) {
+            const tmp = c;
+            c = d;
+            d = tmp;
+        }
+        ok = appendQuadSplit(&verts, a, b, d, c);
+    } else {
+        var order: [4]u32 = undefined;
+        if (closedEdgeLoopOrder(edges, &order)) |n| {
+            const p0 = mesh_edit.vertPosPub(order[0]);
+            const p1 = mesh_edit.vertPosPub(order[1]);
+            const p2 = mesh_edit.vertPosPub(order[2]);
+            ok = if (n == 3) appendTri(&verts, p0, p1, p2) else appendQuadSplit(&verts, p0, p1, p2, mesh_edit.vertPosPub(order[3]));
+        }
+    }
+    if (!ok) {
+        verts.deinit(std.heap.c_allocator);
+        return false;
+    }
+    const owned = verts.toOwnedSlice(std.heap.c_allocator) catch {
+        verts.deinit(std.heap.c_allocator);
+        return false;
+    };
+    defer std.heap.c_allocator.free(owned);
+    const added: u32 = @intCast((owned.len / 8) - @as(usize, g_edit_count));
+    const replaced = replaceActiveEditMesh(owned, g_edit_count + added);
+    if (replaced) mesh_edit.setMode(.edge);
+    return replaced;
+}
+
+fn faceCrossFromPositions(pos: []const f32, face: u32) [3]f32 {
+    const b = @as(usize, face) * 9;
+    if (b + 8 >= pos.len) return .{ 0, 0, 0 };
+    const a: [3]f32 = .{ pos[b + 0], pos[b + 1], pos[b + 2] };
+    const p1: [3]f32 = .{ pos[b + 3], pos[b + 4], pos[b + 5] };
+    const p2: [3]f32 = .{ pos[b + 6], pos[b + 7], pos[b + 8] };
+    return vcross(vsub(p1, a), vsub(p2, a));
+}
+
+fn countUnsafeFaceEdits(before: []const f32, after: []const f32, face_count: u32) u32 {
+    var bad: u32 = 0;
+    var f: u32 = 0;
+    while (f < face_count) : (f += 1) {
+        const bc = faceCrossFromPositions(before, f);
+        const ac = faceCrossFromPositions(after, f);
+        const b2 = vdot(bc, bc);
+        const a2 = vdot(ac, ac);
+        if (a2 < @max(@as(f32, 1e-12), b2 * 1e-6)) {
+            bad += 1;
+            continue;
+        }
+        if (b2 > 1e-12 and vdot(vnorm(bc), vnorm(ac)) < -0.05) bad += 1;
+    }
+    return bad;
+}
+
+pub fn meshGizmoBegin() void {
+    clearMeshGuardSnapshot();
+    const pos = model_paint.positions() orelse return;
+    g_guard_before = std.heap.c_allocator.dupe(f32, pos) catch null;
+    g_guard_face_count = model_paint.faceCount();
+}
+
+pub fn meshGizmoFinish() bool {
+    const before = g_guard_before orelse return false;
+    const after = model_paint.positions() orelse {
+        clearMeshGuardSnapshot();
+        return false;
+    };
+    if (after.len != before.len) {
+        clearMeshGuardSnapshot();
+        return false;
+    }
+    const fc: u32 = @intCast(@min(before.len / 9, after.len / 9));
+    const bad = countUnsafeFaceEdits(before, after, fc);
+    if (bad == 0) {
+        clearMeshGuardSnapshot();
+        return false;
+    }
+    g_guard_pending = true;
+    g_guard_bad_faces = bad;
+    g_guard_face_count = fc;
+    return true;
+}
+
+pub fn meshEditGuardInfo() [4]u32 {
+    return .{ if (g_guard_pending) 1 else 0, g_guard_bad_faces, g_guard_face_count, if (g_guard_pending) 1 else 0 };
+}
+
+pub fn meshEditGuardResolve(action: u8) bool {
+    if (!g_guard_pending) return false;
+    var changed = false;
+    if (action == 2) {
+        const before = g_guard_before orelse {
+            clearMeshGuardSnapshot();
+            return false;
+        };
+        const pos = model_paint.positionsMutable() orelse {
+            clearMeshGuardSnapshot();
+            return false;
+        };
+        if (before.len == pos.len) {
+            @memcpy(pos, before);
+            const fc: u32 = @intCast(pos.len / 9);
+            if (fc > 0) {
+                _ = copyPaintPositionsToEditVerts(0, fc - 1);
+                _ = model_source.updateGeometryFromDisplayed(pos, 0, fc - 1);
+                _ = patchActiveEditMesh(0, fc - 1);
+            }
+            changed = true;
+        }
+    }
+    clearMeshGuardSnapshot();
+    return changed;
 }
 
 // ── Mesh-element selection (the host-native editor surface) ───────────────────────
@@ -871,11 +1222,16 @@ pub fn meshEditRevert() void {
 pub fn meshEditSelectFace(idx: u32, additive: bool) bool {
     return mesh_edit.selectFaceByIndex(idx, additive);
 }
+/// Select an edge by welded-edge index (no raycast) — programmatic / headless.
+pub fn meshEditSelectEdge(idx: u32, additive: bool) bool {
+    return mesh_edit.selectEdgeByIndex(idx, additive);
+}
 pub fn meshEditReset() void {
     mesh_edit.reset();
 }
 /// Topology + selection counts for the HUD: {mode, verts, edges, selected-in-mode}.
 pub fn meshEditCounts() [4]u32 {
+    if (mesh_edit.mode() == .vertex or mesh_edit.mode() == .edge) _ = mesh_edit.ensureTopologyPub();
     return .{ @intFromEnum(mesh_edit.mode()), mesh_edit.vertCount(), mesh_edit.edgeCount(), mesh_edit.selCount() };
 }
 

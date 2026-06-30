@@ -1,0 +1,18 @@
+{
+  "id": "req_2199",
+  "at": "2026-06-30T12:08:22.831Z",
+  "origin": "codex:019f184d",
+  "text": "ok next thing to implement is safety guards for concave face edits and ask if the user wants to split quads and all the like as the studio mesh editor has now, as well you can with this implement edge controls like create face from edges, or extrude",
+  "status": "doing",
+  "sessionId": "019f184d-ba5d-7542-84c9-bf3b385705e3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T12:08:39.510Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

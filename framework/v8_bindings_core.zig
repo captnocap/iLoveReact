@@ -411,6 +411,42 @@ fn hostMeshGizmoNudge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+fn setMeshTopoReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
+    if (!ok) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf: [256]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d}}}", .{ key, scene3d.meshEditActiveCount() }) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+
+/// __mesh_topo_extrude_edge(distance) → JSON {"ok","key","count"}. Extrude exactly
+/// one selected welded edge, appending a bridged quad split into triangles.
+fn hostMeshTopoExtrudeEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const distance: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const ok = scene3d.meshTopoExtrudeEdge(distance);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_topo_create_face() → JSON {"ok","key","count"}. Fill a closed 3/4-edge
+/// loop, or bridge two disjoint selected edges as a split quad.
+fn hostMeshTopoCreateFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = scene3d.meshTopoCreateFaceFromEdges();
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_edit_snapshot() — save the selection before an instant mousedown pick.
 fn hostMeshEditSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     _ = info_c;
@@ -433,6 +469,40 @@ fn hostMeshEditSelectFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     const ok = scene3d.meshEditSelectFace(idx, additive);
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __mesh_edit_select_edge(idx, additive) → bool. Programmatic welded-edge select for
+/// topology tools and headless verification.
+fn hostMeshEditSelectEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const idx: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const additive = (argToI32(info, 1) orelse 0) != 0;
+    const ok = scene3d.meshEditSelectEdge(idx, additive);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __mesh_edit_guard() → JSON {"pending","bad","faces","canSplit"}. A pending guard
+/// means a gizmo edit collapsed or flipped triangles and needs user confirmation.
+fn hostMeshEditGuard(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const g = scene3d.meshEditGuardInfo();
+    var buf: [128]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"pending\":{d},\"bad\":{d},\"faces\":{d},\"canSplit\":{d}}}", .{ g[0], g[1], g[2], g[3] }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, json);
+}
+
+/// __mesh_edit_guard_resolve(action) → bool. action: 0 split/keep triangulated,
+/// 1 ignore/accept, 2 revert to the pre-drag snapshot.
+fn hostMeshEditGuardResolve(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const action: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 1, 0, 2));
+    const changed = scene3d.meshEditGuardResolve(action);
+    state.markDirty();
+    setReturnNumber(info, if (changed) 1 else 0);
 }
 
 /// __mesh_edit_counts() → JSON {"mode","verts","edges","sel"} for the HUD.
@@ -1276,9 +1346,14 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_focus", hostMeshEditFocus);
     v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
     v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
+    v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
+    v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);
+    v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
+    v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);
+    v8_runtime.registerHostFn("__mesh_edit_guard_resolve", hostMeshEditGuardResolve);
     v8_runtime.registerHostFn("__mesh_edit_counts", hostMeshEditCounts);
     v8_runtime.registerHostFn("__model_paint_at", hostModelPaintAt);
     v8_runtime.registerHostFn("__model_paint_face", hostModelPaintFace);

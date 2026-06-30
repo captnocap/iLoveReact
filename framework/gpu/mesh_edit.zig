@@ -29,6 +29,7 @@ pub const Mutation = struct {
     first_face: u32 = 0,
     last_face: u32 = 0,
 };
+pub const Edge = [2]u32;
 
 /// Selection orange (matches the Studio's selectFaceColor), blended 0.7 over a face's base.
 const SELECT_RGB: [3]f32 = .{ 255, 138, 61 };
@@ -84,6 +85,66 @@ pub fn edgeEndpointsPub(e: u32) [2]u32 {
 pub fn edgeSelectedPub(e: u32) bool {
     const s = g_sel_edge orelse return false;
     return e < s.len and s[e];
+}
+pub fn selectedEdgeCountPub() u32 {
+    return countTrue(g_sel_edge);
+}
+pub fn selectedEdgesPub(out: []Edge) u32 {
+    if (!ensureTopology()) return 0;
+    const sel = g_sel_edge orelse return 0;
+    const edges = g_edges orelse return 0;
+    var n: u32 = 0;
+    var e: u32 = 0;
+    while (e < sel.len and e < g_edge_count) : (e += 1) {
+        if (!sel[e]) continue;
+        if (n < out.len) out[n] = .{ edges[e * 2], edges[e * 2 + 1] };
+        n += 1;
+    }
+    return n;
+}
+pub fn selectedEdgeIndexPub() ?u32 {
+    if (!ensureTopology()) return null;
+    const sel = g_sel_edge orelse return null;
+    var found: ?u32 = null;
+    var e: u32 = 0;
+    while (e < sel.len) : (e += 1) {
+        if (!sel[e]) continue;
+        if (found != null) return null;
+        found = e;
+    }
+    return found;
+}
+pub fn edgeAverageNormalPub(edge_idx: u32) [3]f32 {
+    if (!ensureTopology()) return .{ 0, 1, 0 };
+    const edges = g_edges orelse return .{ 0, 1, 0 };
+    const corners = g_corner_vert orelse return .{ 0, 1, 0 };
+    const pos = model_paint.positions() orelse return .{ 0, 1, 0 };
+    if (edge_idx >= g_edge_count) return .{ 0, 1, 0 };
+    const a = edges[edge_idx * 2];
+    const b = edges[edge_idx * 2 + 1];
+    var acc: [3]f32 = .{ 0, 0, 0 };
+    var f: u32 = 0;
+    const fc = model_paint.faceCount();
+    while (f < fc) : (f += 1) {
+        var has_a = false;
+        var has_b = false;
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const cv = corners[f * 3 + k];
+            has_a = has_a or cv == a;
+            has_b = has_b or cv == b;
+        }
+        if (!has_a or !has_b) continue;
+        const p0: [3]f32 = .{ pos[f * 9 + 0], pos[f * 9 + 1], pos[f * 9 + 2] };
+        const p1: [3]f32 = .{ pos[f * 9 + 3], pos[f * 9 + 4], pos[f * 9 + 5] };
+        const p2: [3]f32 = .{ pos[f * 9 + 6], pos[f * 9 + 7], pos[f * 9 + 8] };
+        const n = vecNorm(vecCross(vecSub(p1, p0), vecSub(p2, p0)));
+        acc[0] += n[0];
+        acc[1] += n[1];
+        acc[2] += n[2];
+    }
+    const n = vecNorm(acc);
+    return if (vecDot(n, n) > 0.5) n else .{ 0, 1, 0 };
 }
 
 fn activeSet() ?[]bool {
@@ -208,6 +269,19 @@ pub fn selectFaceByIndex(idx: u32, additive: bool) bool {
     }
     sel[idx] = true;
     applyFaceHighlight();
+    return true;
+}
+
+/// Select an edge by welded-edge index (no raycast) — used by toolbar/headless flows that
+/// need a deterministic edge set for topology operations.
+pub fn selectEdgeByIndex(idx: u32, additive: bool) bool {
+    if (!ensureTopology()) return false;
+    g_mode = .edge;
+    const sel = g_sel_edge orelse return false;
+    if (idx >= sel.len) return false;
+    if (!additive) @memset(sel, false);
+    sel[idx] = true;
+    applyFaceHighlight(); // leaving face mode removes any face tint
     return true;
 }
 
@@ -749,6 +823,20 @@ test "weld builds 4 verts and 5 edges from a 2-tri quad" {
     try testing.expectEqual(@as(u32, 4), vertCount());
     try testing.expectEqual(@as(u32, 5), edgeCount()); // 4 sides + 1 shared diagonal
     try testing.expectEqual(@as(u32, 2), faceCount());
+}
+
+test "edge selection by index sets edge mode and supports additive sets" {
+    setupQuad();
+    defer {
+        reset();
+        model_paint.clear();
+    }
+    try testing.expect(selectEdgeByIndex(0, false));
+    try testing.expectEqual(Mode.edge, mode());
+    try testing.expectEqual(@as(u32, 1), selCount());
+    try testing.expectEqual(@as(u32, 1), selectedEdgeCountPub());
+    try testing.expect(selectEdgeByIndex(1, true));
+    try testing.expectEqual(@as(u32, 2), selectedEdgeCountPub());
 }
 
 test "vertex pick selects the nearest welded corner; face highlight saves+restores" {
