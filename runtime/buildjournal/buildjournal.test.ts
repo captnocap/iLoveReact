@@ -223,5 +223,18 @@ test('exportThreadState + importThreadState survive a fresh journal and rewire n
   assert(b.createThread({ semanticName: 'next' }).stableId !== t.stableId, 'seq advanced past restored ids');
 });
 
+test('describeThread sets a description that survives rename and the round-trip', () => {
+  const a = new BuildJournal();
+  const t = a.createThread({ semanticName: 'water bug' });
+  assert(a.thread(t.stableId)!.description === '', 'description starts empty');
+  a.describeThread(t.stableId, 'player clips through shallow water near the docks');
+  a.renameThread(t.stableId, 'dock water clip'); // rename must not disturb the description
+  assert(a.thread(t.stableId)!.description === 'player clips through shallow water near the docks', 'description held through rename');
+
+  const b = new BuildJournal();
+  b.importThreadState(JSON.parse(JSON.stringify(a.exportThreadState())));
+  assert(b.thread(t.stableId)!.description === 'player clips through shallow water near the docks', 'description restored from disk shape');
+});
+
 log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) (globalThis as any).__exit?.(1);

@@ -44,6 +44,7 @@ export interface JournalActions {
   attachRequest(threadId: string, requestId: string): void;
   detachRequest(threadId: string, requestId: string): void;
   renameThread(threadId: string, name: string): void;
+  setDescription(threadId: string, description: string): void;
   attachCapture(threadId: string, captureId: string): void;
   detachCapture(threadId: string, captureId: string): void;
   captureShelf: JournalCapture[];
@@ -130,6 +131,10 @@ export function useBuildJournal(): { snapshot: BuildJournalSnapshot; actions: Jo
       ctxRef.current!.journal.renameThread(threadId, next);
       commit();
     },
+    setDescription(threadId, description) {
+      ctxRef.current!.journal.describeThread(threadId, description.trim());
+      commit();
+    },
     attachCapture(threadId, captureId) {
       ctxRef.current!.journal.attachToThread(threadId, { captureId });
       commit();
@@ -187,6 +192,7 @@ function toEditorThread(thread: BugThread, journal: BuildJournal): BuildThread {
   return {
     id: thread.stableId,
     title: thread.semanticName,
+    description: thread.description,
     status: thread.tags[0] ?? 'linked',
     aliases: [...thread.aliases],
     tags: [...thread.tags],

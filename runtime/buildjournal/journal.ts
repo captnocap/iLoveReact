@@ -12,6 +12,7 @@ import { deriveBuildNumber } from './buildNumber';
 /** Options when minting a new bug thread. Only the name is required. */
 export interface NewThread {
   semanticName: string;
+  description?: string;
   aliases?: string[];
   tags?: string[];
   searchTokens?: string[];
@@ -137,6 +138,7 @@ export class BuildJournal {
     const thread: BugThread = {
       stableId,
       semanticName: spec.semanticName,
+      description: spec.description ?? '',
       aliases: spec.aliases ? [...spec.aliases] : [],
       tags: spec.tags ? [...spec.tags] : [],
       searchTokens: spec.searchTokens ? [...spec.searchTokens] : [],
@@ -156,6 +158,15 @@ export class BuildJournal {
     const old = t.semanticName;
     if (old && old !== newName) addUnique(t.aliases, old);
     t.semanticName = newName;
+    return t;
+  }
+
+  /** Set a thread's longer description (what it is about, in the user's words).
+   *  Pure content edit — touches no links or ids. */
+  describeThread(stableId: string, description: string): BugThread {
+    const t = this.threadsById.get(stableId);
+    if (!t) throw new Error(`buildjournal: no thread '${stableId}' to describe`);
+    t.description = description;
     return t;
   }
 
@@ -199,6 +210,7 @@ export class BuildJournal {
       const thread: BugThread = {
         stableId: raw.stableId,
         semanticName: raw.semanticName,
+        description: raw.description ?? '',
         aliases: [...(raw.aliases ?? [])],
         tags: [...(raw.tags ?? [])],
         searchTokens: [...(raw.searchTokens ?? [])],

@@ -43,6 +43,9 @@ export interface BugThread {
   stableId: string;
   /** User-editable display name, e.g. 'jesus water walking'. */
   semanticName: string;
+  /** User-editable longer description — what this thread is actually about, in
+   *  the user's words. Empty until written; the name stays the short handle. */
+  description: string;
   /** Prior names / alternate phrasings, kept searchable. Renames push the old
    *  name here so a remembered label still finds the thread. */
   aliases: string[];

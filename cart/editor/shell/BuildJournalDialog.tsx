@@ -26,6 +26,8 @@ export default function BuildJournalDialog({ journal, actions, onClose }: { jour
   const [query, setQuery] = useState('');
   const [renameId, setRenameId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [describeId, setDescribeId] = useState<string | null>(null);
+  const [descDraft, setDescDraft] = useState('');
   const [captureFor, setCaptureFor] = useState<string | null>(null);
 
   const threadById = new Map(journal.threads.map((thread) => [thread.id, thread]));
@@ -124,11 +126,16 @@ export default function BuildJournalDialog({ journal, actions, onClose }: { jour
                     thread={thread}
                     renaming={renameId === thread.id}
                     draft={draft}
+                    describing={describeId === thread.id}
+                    descDraft={descDraft}
                     pickingCapture={captureFor === thread.id}
                     captureShelf={actions.captureShelf}
                     onRenameStart={() => { setRenameId(thread.id); setDraft(thread.title); }}
                     onDraft={setDraft}
                     onRenameCommit={() => { actions.renameThread(thread.id, draft); setRenameId(null); }}
+                    onDescribeStart={() => { setDescribeId(thread.id); setDescDraft(thread.description); }}
+                    onDescDraft={setDescDraft}
+                    onDescribeCommit={() => { actions.setDescription(thread.id, descDraft); setDescribeId(null); }}
                     onDetach={(request) => actions.detachRequest(thread.id, request)}
                     onCaptureToggle={() => setCaptureFor(captureFor === thread.id ? null : thread.id)}
                     onCaptureAttach={(captureId) => { actions.attachCapture(thread.id, captureId); setCaptureFor(null); }}
@@ -190,11 +197,16 @@ function ThreadCard(props: {
   thread: BuildThread;
   renaming: boolean;
   draft: string;
+  describing: boolean;
+  descDraft: string;
   pickingCapture: boolean;
   captureShelf: JournalCapture[];
   onRenameStart: () => void;
   onDraft: (text: string) => void;
   onRenameCommit: () => void;
+  onDescribeStart: () => void;
+  onDescDraft: (text: string) => void;
+  onDescribeCommit: () => void;
   onDetach: (request: string) => void;
   onCaptureToggle: () => void;
   onCaptureAttach: (captureId: string) => void;
@@ -220,6 +232,21 @@ function ThreadCard(props: {
         )}
         <C.HW_DockLabel>{thread.status}</C.HW_DockLabel>
       </C.HW_BuildNoteHead>
+      {props.describing ? (
+        <C.HW_JDescEdit>
+          <C.HW_JDescInput placeholder="what is this thread about?" value={props.descDraft} onChange={props.onDescDraft} />
+          <C.HW_JMiniOn onPress={props.onDescribeCommit}><C.HW_JMiniTextOn>save</C.HW_JMiniTextOn></C.HW_JMiniOn>
+        </C.HW_JDescEdit>
+      ) : thread.description ? (
+        <C.HW_JDescRow onPress={props.onDescribeStart}>
+          <C.HW_JDescText>{thread.description}</C.HW_JDescText>
+        </C.HW_JDescRow>
+      ) : (
+        <C.HW_JDescEmpty onPress={props.onDescribeStart}>
+          <Icon name="Pencil" size={10} color={accentFor('textDim')} />
+          <C.HW_JMiniText>add a description</C.HW_JMiniText>
+        </C.HW_JDescEmpty>
+      )}
       <C.HW_JIdRow>
         <C.HW_KeyText>{thread.id}</C.HW_KeyText>
         {thread.aliases.map((alias) => <C.HW_JAlias key={alias}><C.HW_KeyText>aka {alias}</C.HW_KeyText></C.HW_JAlias>)}

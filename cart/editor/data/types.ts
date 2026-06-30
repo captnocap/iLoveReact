@@ -85,6 +85,7 @@ export type JournalCapture = {
 export type BuildThread = {
   id: string;
   title: string;
+  description: string;
   status: string;
   aliases: string[];
   tags: string[];
