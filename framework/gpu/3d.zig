@@ -282,25 +282,20 @@ var g_host_stash: [HOST_MESH_STASH]HostMeshStash = [_]HostMeshStash{.{}} ** HOST
 pub fn stashHostMesh(key: []const u8, verts: []const f32, count: u32) bool {
     if (lookupGeometry(key) != null) return true; // already GPU-resident
     const hash = hashKey(key);
+    // The viewer shows ONE host mesh at a time, so a previously-stashed-but-not-yet-
+    // drawn mesh (a superseded quality level mid-scrub) is obsolete. Evict every OTHER
+    // entry as we stash the new current one — otherwise a fast slider drag fills the
+    // 16-slot stash with meshes that never draw and the model vanishes (req_2137).
     var slot: ?*HostMeshStash = null;
     for (&g_host_stash) |*s| {
         if (s.present and s.hash == hash) {
-            slot = s;
-            break;
+            slot = s; // reuse the same-key entry (re-stash)
+        } else if (s.present) {
+            if (s.verts) |old| std.heap.c_allocator.free(old);
+            s.* = .{};
         }
     }
-    if (slot == null) {
-        for (&g_host_stash) |*s| {
-            if (!s.present) {
-                slot = s;
-                break;
-            }
-        }
-    }
-    const s = slot orelse {
-        std.debug.print("[r3d] host mesh stash FULL ({d}) — a dropped model was DROPPED and will not draw. Raise HOST_MESH_STASH in framework/gpu/3d.zig.\n", .{HOST_MESH_STASH});
-        return false;
-    };
+    const s = slot orelse &g_host_stash[0]; // everything else is now free
     if (s.verts) |old| std.heap.c_allocator.free(old);
     const copy = std.heap.c_allocator.alloc(f32, verts.len) catch return false;
     @memcpy(copy, verts);

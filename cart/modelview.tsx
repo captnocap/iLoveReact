@@ -60,8 +60,14 @@ function setModelQuality(grid: number): { key: string; count: number } | null {
   }
 }
 // Slider position 0..1 → clustering grid. Squared so the low end (coarse "just the
-// shape") gets fine control, which is where the game LoD lives.
-const qualityToGrid = (q: number) => Math.round(8 + q * q * 248);
+// shape") gets fine control, which is where the game LoD lives. Quantized to a fixed
+// set of levels so scrubbing the slider can't intern an unbounded number of distinct
+// meshes into the retained GPU buffer — revisiting a level reuses its resident mesh.
+const QUALITY_STEPS = 20;
+const qualityToGrid = (q: number) => {
+  const snapped = Math.round(q * QUALITY_STEPS) / QUALITY_STEPS;
+  return Math.round(8 + snapped * snapped * 248);
+};
 // Paint the face under viewport pixel (x,y) — the host raycasts the resident mesh and
 // colours exactly the face hit. No verts or UVs cross the bridge.
 const paintAt = (x: number, y: number, rgb: RGB) => host.__model_paint_at?.(x, y, rgb[0], rgb[1], rgb[2]) === 1;
@@ -172,6 +178,13 @@ export default function ModelView() {
     if (q > 0) {
       const r = setModelQuality(q);
       if (r) setModel((m) => (m ? { ...m, key: r.key, count: r.count } : m));
+    }
+    // RJIT_QUALITYSTRESS=1 scrubs 30 distinct quality levels (>16 stash slots) then
+    // settles — proof the stash no longer overflows and the model still draws (req_2137).
+    if (callHost<string | null>('__env_get', null, 'RJIT_QUALITYSTRESS')) {
+      let last: { key: string; count: number } | null = null;
+      for (let g = 10; g < 40; g += 1) last = setModelQuality(g) ?? last;
+      if (last) setModel((m) => (m ? { ...m, key: last!.key, count: last!.count } : m));
     }
   }, []);
 
