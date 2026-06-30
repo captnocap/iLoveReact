@@ -1,0 +1,30 @@
+{
+  "id": "req_2166",
+  "at": "2026-06-30T09:22:34.993Z",
+  "origin": "codex:019f17c8",
+  "text": "i didnt say refactor the dev command, be clear, do not change the dev command. just make a new command called gdev",
+  "status": "review",
+  "sessionId": "019f17c8-babc-7c82-8f42-f9955c3595a8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T09:23:05.394Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T09:31:23.615Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the clarification literally: cli/commands/dev.ts was not changed. Added a new rjit gdev command with separate game dev host wiring, source-driven native flags, separate socket/bundle path, and no embedded Postgres startup.",
+  "shas": [
+    "78fa4d342"
+  ],
+  "resolvedAt": "2026-06-30T09:31:23.615Z"
+}

@@ -3,7 +3,7 @@
   "at": "2026-06-30T09:19:50.363Z",
   "origin": "codex:019f17c8",
   "text": "hey the tools/rjit dev server, can we get a copy of that same idea but strictly for game dev, like i dont need to be waiting on a build that links upo postgres or etc. and what we will end up needing at some point later is easy to slot in u can make it a gdev command",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f17c8-babc-7c82-8f42-f9955c3595a8",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-06-30T09:31:23.596Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Added a standalone rjit gdev command instead of refactoring rjit dev. gdev defaults to hmsc-int, uses source-driven game native flags from the cart metafile, builds a separate reactjit-gdev host/socket/bundle path, and skips the embedded Postgres bootstrap so game iteration does not link/start unrelated dev services.",
+  "shas": [
+    "78fa4d342"
+  ],
+  "resolvedAt": "2026-06-30T09:31:23.596Z"
 }
