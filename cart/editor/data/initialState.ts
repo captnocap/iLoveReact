@@ -9,7 +9,7 @@ export const INITIAL_OBJECTS: WorldObject[] = [
 
 export function initialState(): MockState {
   return {
-    openMenu: 'Build',
+    openMenu: null,
     presetMenuOpen: false,
     actionMenu: 'Build',
     activeDomain: 'world',
@@ -45,7 +45,7 @@ export function initialState(): MockState {
     floorIndex: 1,
     viewMode: '3D',
     rightPane: 'inspector',
-    contextOpen: true,
+    contextOpen: false,
     status: `eventbus idle - ${MODEL_PACKAGE_COUNT} model homes + ${MATERIAL_ASSET_COUNT} materials indexed from ${CATALOG_DIAGNOSTICS.source} in ${CATALOG_DIAGNOSTICS.loadedMs}ms`,
     cursor: { x: 0, y: 0, z: 0 },
     history: [],

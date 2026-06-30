@@ -47,7 +47,7 @@ import {
   type ThemePreset,
 } from './theme_presets';
 import {
-  Box, Text, Image, Pressable, ScrollView, TextInput,
+  Box, Text, Image, Pressable, ScrollView, StaticSurface, TextInput,
   Canvas, Graph, Native,
 } from './primitives';
 import { Icon } from './icons/Icon';
@@ -363,7 +363,7 @@ export function __useClassifierSnapshot(): Store {
 // `size` / `color` / `strokeWidth` as props. It earns a slot here so
 // classifiers can theme `color` via `'theme:NAME'` resolution.
 const PRIMITIVES: Record<string, any> = {
-  Box, Text, Image, Pressable, ScrollView, TextInput,
+  Box, Text, Image, Pressable, ScrollView, StaticSurface, TextInput,
   Canvas, CanvasNode: Canvas.Node, CanvasPath: Canvas.Path, CanvasClamp: Canvas.Clamp,
   Graph, GraphNode: Graph.Node, GraphPath: Graph.Path,
   Native, Icon,
