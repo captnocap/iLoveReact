@@ -159,11 +159,17 @@ export type HmscEditorCatalog = {
 export const HMSC_EDITOR_CATALOG: HmscEditorCatalog = loadHmscEditorCatalog();
 
 let cookedTextureBlobs: Record<string, string> = {};
+let cookedMeshBlobs: Record<string, number[]> = {};
 
 export function textureBlobDataUrl(ref: string): string | null {
   const blob = cookedTextureBlobs[ref];
   if (!blob) return null;
   return blob.startsWith('data:image/') ? blob : `data:image/png;base64,${blob}`;
+}
+
+export function cookedMeshBlobData(ref: string): Float32Array | null {
+  const blob = cookedMeshBlobs[ref];
+  return blob ? new Float32Array(blob) : null;
 }
 
 function loadHmscEditorCatalog(): HmscEditorCatalog {
@@ -174,6 +180,7 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
   const models = readJson<ModelSnapshot>(MODEL_SNAPSHOT, errors);
   const importedProps = readJson<ImportedPropsData>(IMPORTED_PROPS_DATA, errors);
   cookedTextureBlobs = cooked?.state?.textureBlobs ?? {};
+  cookedMeshBlobs = cooked?.state?.meshBlobs ?? {};
 
   const materialAssets = [
     ...shaderRecipeAssets(),
@@ -502,6 +509,7 @@ function cookedModelPackages(snapshot: CookedSnapshot | null): ModelPackage[] {
       stage: 'ready',
       color: cookedColor(asset),
       source: `${COOKED_SNAPSHOT}:${asset.id}`,
+      viewerMeshRef: asset.meshRef,
       rig: `${asset.mounts?.length ?? 0} mounts`,
       data: asset.hash ? `hash ${short(asset.hash)}` : `schema ${asset.schema ?? '-'}`,
       triangles,

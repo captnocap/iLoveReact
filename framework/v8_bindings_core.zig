@@ -291,6 +291,72 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnString(info, buf.items);
 }
 
+/// __mesh_load_vertices(key, float32Verts, vertCount?) → JSON {"key","count","radius"} | "".
+/// Adopt already-cooked scene3d triangle data into the same resident model-viewer path
+/// as OBJ/GLB file imports. Once a model is installed into the editor, its source file
+/// no longer matters; the viewer consumes the engine-owned interleaved vertex factor.
+fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const key = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    defer std.heap.c_allocator.free(key);
+    const bytes = argBytes(info, 1) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    if (key.len == 0 or bytes.len == 0 or bytes.len % @sizeOf(f32) != 0) {
+        setReturnString(info, "");
+        return;
+    }
+    const verts: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, bytes));
+    const requested_count = argToI32(info, 2) orelse @as(i32, @intCast(verts.len / mesh_import.FLOATS_PER_VERTEX));
+    if (requested_count <= 0) {
+        setReturnString(info, "");
+        return;
+    }
+
+    var mesh = mesh_import.fromInterleaved(std.heap.c_allocator, verts, @intCast(requested_count)) catch |e| {
+        std.log.warn("[mesh-load] cooked {s}: {}", .{ key, e });
+        setReturnString(info, "");
+        return;
+    };
+    defer mesh.deinit(std.heap.c_allocator);
+
+    // Keep the original cooked factor for quality/paint projection, then adopt a
+    // paint-ready working copy into the resident host stash.
+    model_source.retain(key, mesh.verts, mesh.vert_count);
+    scene3d.setPaintTarget(key, mesh.verts, mesh.vert_count);
+    if (!scene3d.stashHostMesh(key, mesh.verts, mesh.vert_count)) {
+        setReturnString(info, "");
+        return;
+    }
+    scene3d.orbitFrame(mesh.center, mesh.radius);
+    state.markDirty();
+
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(std.heap.c_allocator);
+    const w = buf.writer(std.heap.c_allocator);
+    w.writeAll("{\"key\":\"") catch {
+        setReturnString(info, "");
+        return;
+    };
+    for (key) |ch| {
+        switch (ch) {
+            '"' => w.writeAll("\\\"") catch return,
+            '\\' => w.writeAll("\\\\") catch return,
+            0...8, 9...10, 11...31 => w.print("\\u{x:0>4}", .{ch}) catch return,
+            else => w.writeByte(ch) catch return,
+        }
+    }
+    w.print("\",\"count\":{d},\"radius\":{d:.6}}}", .{ mesh.vert_count, mesh.radius }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, buf.items);
+}
+
 /// __model_orbit_drag(dx, dy) — orbit the drop-to-view camera by a screen-space drag
 /// delta (pixels). Mutates host orbit state + repaints; never re-renders the cart, so
 /// dragging stays butter-smooth no matter the model size.
@@ -1334,6 +1400,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__hostUploadFloatBuffer", hostUploadFloatBuffer);
     v8_runtime.registerHostFn("__scene3d_patch_dyn", hostScene3DPatchDyn);
     v8_runtime.registerHostFn("__mesh_load_file", hostMeshLoadFile);
+    v8_runtime.registerHostFn("__mesh_load_vertices", hostMeshLoadVertices);
     v8_runtime.registerHostFn("__model_orbit_drag", hostModelOrbitDrag);
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
     v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);

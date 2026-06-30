@@ -171,6 +171,7 @@ export type ModelPackage = {
   color: string;
   source: string;
   viewerPath?: string;
+  viewerMeshRef?: string;
   rig: string;
   data: string;
   triangles: number;

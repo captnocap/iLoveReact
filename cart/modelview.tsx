@@ -30,9 +30,16 @@ import {
 const host = globalThis as any;
 
 type Loaded = { key: string; count: number; radius: number; name: string };
+export type ModelViewInitialMesh = {
+  key: string;
+  name: string;
+  vertices: Float32Array | number[];
+  count?: number;
+};
 export type ModelViewProps = {
   initialPath?: string;
   initialTitle?: string;
+  initialMesh?: ModelViewInitialMesh;
   allowFilePicker?: boolean;
   trackAttribution?: boolean;
 };
@@ -55,6 +62,25 @@ function loadModelFile(path: string): Loaded | null {
     if (!o || typeof o.key !== 'string') return null;
     const name = path.split('/').pop() || path;
     return { key: o.key, count: o.count | 0, radius: o.radius || 1, name };
+  } catch {
+    return null;
+  }
+}
+
+/** Adopt already-cooked triangle data into the same resident host-mesh path as
+ *  file imports. This is for editor-owned assets: after import, the source file is
+ *  no longer the model, the interleaved vertex factor is. */
+function loadModelVertices(mesh: ModelViewInitialMesh): Loaded | null {
+  const fn = host.__mesh_load_vertices;
+  if (typeof fn !== 'function') return null;
+  const verts = mesh.vertices instanceof Float32Array ? mesh.vertices : new Float32Array(mesh.vertices);
+  const count = mesh.count ?? Math.floor(verts.length / 8);
+  const json = fn(mesh.key, verts, count);
+  if (typeof json !== 'string' || json.length === 0) return null;
+  try {
+    const o = JSON.parse(json);
+    if (!o || typeof o.key !== 'string') return null;
+    return { key: o.key, count: o.count | 0, radius: o.radius || 1, name: mesh.name };
   } catch {
     return null;
   }
@@ -143,7 +169,7 @@ const PALETTE: RGB[] = [
 ];
 const rgbCss = (c: RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
-export default function ModelView({ initialPath, initialTitle, allowFilePicker = true, trackAttribution = true }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, allowFilePicker = true, trackAttribution = true }: ModelViewProps = {}) {
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(false);
@@ -276,6 +302,18 @@ export default function ModelView({ initialPath, initialTitle, allowFilePicker =
     }
   };
 
+  const applyMesh = (mesh: ModelViewInitialMesh) => {
+    const loaded = loadModelVertices(mesh);
+    if (loaded) {
+      setModel(loaded);
+      setError(null);
+      setQuality(1);
+      setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 });
+    } else {
+      setError(`Could not load ${mesh.name}`);
+    }
+  };
+
   // Open the native OS file picker (zenity, via the shared runtime pickFile). Async —
   // the dialog runs in a subprocess and resolves with the chosen path, or null on
   // cancel. This is the primary way in; drag-drop below is a bonus.
@@ -300,8 +338,12 @@ export default function ModelView({ initialPath, initialTitle, allowFilePicker =
     // NOT per drag-move) so the count HUD refreshes without any JS in the interaction loop.
     (globalThis as any).__meshEditSelChanged = () => setSelInfo(readSelInfo() ?? { mode: 0, verts: 0, edges: 0, sel: 0 });
     (globalThis as any).__meshEditGuardChanged = () => setGuard(readGuard());
-    const path = initialPath ?? callHost<string | null>('__env_get', null, 'RJIT_MODEL');
-    if (path) applyPath(path);
+    if (initialMesh) {
+      applyMesh(initialMesh);
+    } else {
+      const path = initialPath ?? callHost<string | null>('__env_get', null, 'RJIT_MODEL');
+      if (path) applyPath(path);
+    }
     // RJIT_WIRE=1 boots in wireframe mode — the headless self-shot path for it.
     if (callHost<string | null>('__env_get', null, 'RJIT_WIRE')) setWire(true);
     // RJIT_GIZMO=move|scale|rotate (or 0|1|2) selects the transform sub-tool at boot.
@@ -397,7 +439,9 @@ export default function ModelView({ initialPath, initialTitle, allowFilePicker =
     };
   }, []);
 
-  useFileDrop(applyPath);
+  useFileDrop((path) => {
+    if (allowFilePicker) applyPath(path);
+  });
 
   return (
     <Box style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#0b0d12' }}>
@@ -713,7 +757,7 @@ export default function ModelView({ initialPath, initialTitle, allowFilePicker =
       {!model && (
         <Col style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: '#9aa6ba', fontSize: 22, fontWeight: 600 }}>
-            {error ? 'Model could not load' : initialPath ? `Loading ${initialTitle ?? 'model'}` : 'Open a model to view'}
+            {error ? 'Model could not load' : initialPath || initialMesh ? `Loading ${initialTitle ?? initialMesh?.name ?? 'model'}` : 'Open a model to view'}
           </Text>
           <Text style={{ color: '#5d6878', fontSize: 14, marginTop: 8 }}>.glb · .obj — parsed and rendered entirely in the host</Text>
           {allowFilePicker ? (

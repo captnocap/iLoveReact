@@ -45,6 +45,7 @@ pub const Error = error{
     NotGlb,
     UnsupportedGlbVersion,
     MalformedGlb,
+    MalformedInterleavedMesh,
     BadAccessor,
     UnsupportedPrimitive,
     NoGeometry,
@@ -62,6 +63,59 @@ pub fn loadFile(alloc: std.mem.Allocator, path: []const u8) Error!ParsedMesh {
         return parseGlb(alloc, bytes);
     }
     return parseObj(alloc, bytes);
+}
+
+/// Adopt already-cooked interleaved triangle data into the same ParsedMesh shape as
+/// OBJ/GLB imports. This is the "asset is ours now" path: no source-file semantics,
+/// just validated scene3d vertices and bounds.
+pub fn fromInterleaved(alloc: std.mem.Allocator, verts: []const f32, vert_count: u32) Error!ParsedMesh {
+    if (vert_count == 0 or vert_count % 3 != 0) return Error.NoGeometry;
+    const need = @as(usize, vert_count) * FLOATS_PER_VERTEX;
+    if (need > verts.len) return Error.MalformedInterleavedMesh;
+
+    const owned = try alloc.dupe(f32, verts[0..need]);
+    errdefer alloc.free(owned);
+    const bounds = boundsForInterleaved(owned, vert_count);
+    return .{
+        .verts = owned,
+        .vert_count = vert_count,
+        .center = bounds.center,
+        .radius = bounds.radius,
+    };
+}
+
+const MeshBounds = struct {
+    center: [3]f32,
+    radius: f32,
+};
+
+fn boundsForInterleaved(verts: []const f32, vert_count: u32) MeshBounds {
+    var lo: [3]f32 = .{ verts[0], verts[1], verts[2] };
+    var hi: [3]f32 = lo;
+    var i: usize = 1;
+    while (i < vert_count) : (i += 1) {
+        const base = i * FLOATS_PER_VERTEX;
+        inline for (0..3) |axis| {
+            const value = verts[base + axis];
+            if (value < lo[axis]) lo[axis] = value;
+            if (value > hi[axis]) hi[axis] = value;
+        }
+    }
+    const center: [3]f32 = .{
+        (lo[0] + hi[0]) * 0.5,
+        (lo[1] + hi[1]) * 0.5,
+        (lo[2] + hi[2]) * 0.5,
+    };
+    var radius2: f32 = 0;
+    i = 0;
+    while (i < vert_count) : (i += 1) {
+        const base = i * FLOATS_PER_VERTEX;
+        const dx = verts[base + 0] - center[0];
+        const dy = verts[base + 1] - center[1];
+        const dz = verts[base + 2] - center[2];
+        radius2 = @max(radius2, dx * dx + dy * dy + dz * dz);
+    }
+    return .{ .center = center, .radius = @max(1e-4, @sqrt(radius2)) };
 }
 
 fn hasExtIgnoreCase(path: []const u8, ext: []const u8) bool {
@@ -832,6 +886,28 @@ test "glb: minimal single-triangle file round-trips" {
 test "glb: rejects non-glTF bytes" {
     const alloc = std.testing.allocator;
     try std.testing.expectError(Error.NotGlb, parseGlb(alloc, "not a glb at all!!"));
+}
+
+test "interleaved cooked triangle data adopts as a parsed mesh" {
+    const alloc = std.testing.allocator;
+    const verts = [_]f32{
+        -1, 0, -2, 0, 1, 0, 0, 0,
+        3, 0, -2, 0, 1, 0, 1, 0,
+        -1, 2, 2, 0, 1, 0, 0, 1,
+    };
+    var mesh = try fromInterleaved(alloc, &verts, 3);
+    defer mesh.deinit(alloc);
+    try std.testing.expectEqual(@as(u32, 3), mesh.vert_count);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), mesh.center[0], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), mesh.center[1], 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0), mesh.center[2], 1e-5);
+    try std.testing.expectApproxEqAbs(@sqrt(@as(f32, 9.0)), mesh.radius, 1e-5);
+}
+
+test "interleaved cooked mesh rejects incomplete vertex layout" {
+    const alloc = std.testing.allocator;
+    const verts = [_]f32{ 0, 0, 0, 0, 1, 0, 0 };
+    try std.testing.expectError(Error.MalformedInterleavedMesh, fromInterleaved(alloc, &verts, 3));
 }
 
 /// Assemble a tiny valid GLB v2: one mesh, one triangle, indexed, POSITION only.

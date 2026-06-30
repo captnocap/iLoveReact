@@ -5,6 +5,7 @@ import type { ModelPackage } from '../data/types';
 import { StudioEditor } from '../../hmsc-int/editors/model/studiokit';
 import { studioOpenModel } from '../../hmsc-int/editors/model/studioModel';
 import ModelView from '../../modelview';
+import { cookedMeshBlobData } from '../data/hmscAssetCatalog';
 
 function studioModelId(model: ModelPackage): string | null {
   return model.sourceKind === 'studio-model' && model.id.startsWith('studio:')
@@ -43,6 +44,28 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
         <ModelView key={model.id} initialPath={model.viewerPath} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} />
       </C.HW_ModelDocument>
     );
+  }
+
+  if (model.viewerMeshRef) {
+    const vertices = cookedMeshBlobData(model.viewerMeshRef);
+    if (vertices) {
+      return (
+        <C.HW_ModelDocument>
+          <ModelView
+            key={model.id}
+            initialTitle={model.name}
+            initialMesh={{
+              key: model.viewerMeshRef,
+              name: model.name,
+              vertices,
+              count: Math.floor(vertices.length / 8),
+            }}
+            allowFilePicker={false}
+            trackAttribution={false}
+          />
+        </C.HW_ModelDocument>
+      );
+    }
   }
 
   return (
