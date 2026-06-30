@@ -1,7 +1,7 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { Asset, ContentFolderId, LibraryTab, MockState, WorldObject } from '../data/types';
-import { assetPageSizeFor, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT, variantColor } from '../data/catalog';
+import { assetPageSizeFor, CATALOG_DIAGNOSTICS, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from '../data/catalog';
 import {
   CONTENT_TREE,
   contentFolderLabel,
@@ -59,7 +59,7 @@ export default function LibraryPanel(props: {
         <Icon name="FolderOpen" size={13} color={accentFor('primary')} />
         <C.HW_Kicker>CONTENT BROWSER</C.HW_Kicker>
         <C.HW_Spacer />
-        <C.HW_StatusText>{MODEL_PACKAGE_COUNT} models · {MATERIAL_ASSET_COUNT} materials</C.HW_StatusText>
+        <C.HW_StatusText>M {MODEL_PACKAGE_COUNT} · MAT {MATERIAL_ASSET_COUNT} · C {CATALOG_DIAGNOSTICS.cookedAssets}</C.HW_StatusText>
       </C.HW_PanelHead>
       <C.HW_Search placeholder="search models, paints, materials..." value={props.state.search} onChange={props.onSearch} />
       <ContentTree
@@ -88,7 +88,9 @@ export default function LibraryPanel(props: {
         <ModelPackageBrowser
           folder={props.contentFolder}
           search={props.state.search}
+          page={props.state.assetPage}
           onFolder={props.onFolder}
+          onPage={props.onPage}
           onAction={props.onMaterialAction}
         />
       ) : showMaterialCatalog ? (
@@ -128,7 +130,7 @@ export default function LibraryPanel(props: {
               <Card key={asset.id} onPress={() => props.onAsset(asset)}>
                 <C.HW_AssetSwatch style={{ backgroundColor: asset.color }} />
                 <C.HW_AssetLabel>{asset.name}</C.HW_AssetLabel>
-                <C.HW_AssetMeta>{asset.favorite ? 'favorite' : asset.recent ? 'recent' : 'catalog'}</C.HW_AssetMeta>
+                <C.HW_AssetMeta>{asset.semanticKind ?? asset.sourceKind ?? 'indexed'}</C.HW_AssetMeta>
               </Card>
             );
           })}

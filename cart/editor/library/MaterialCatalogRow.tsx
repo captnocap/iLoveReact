@@ -11,8 +11,8 @@ export default function MaterialCatalogRow(props: {
   onVariant: (label: string) => void;
 }) {
   const Row = props.active ? C.HW_MaterialCardOn : C.HW_MaterialCard;
-  const variants = props.asset.variants ?? ['base', 'aged', 'wet'];
-  const bank = props.asset.favorite ? 'favorite' : props.asset.recent ? 'recent' : 'catalog';
+  const variants = (props.asset.variants?.length ? props.asset.variants : ['source']).slice(0, 3);
+  const bank = props.asset.favorite ? 'favorite' : props.asset.recent ? 'recent' : props.asset.sourceKind ?? 'indexed';
   return (
     <Row onPress={() => props.onAsset(props.asset)}>
       <C.HW_MaterialSwatch style={{ backgroundColor: props.asset.color }} />
@@ -20,7 +20,7 @@ export default function MaterialCatalogRow(props: {
         <C.HW_MaterialTitleRow>
           <C.HW_MaterialName>{props.asset.name}</C.HW_MaterialName>
           <C.HW_Spacer />
-          <C.HW_MaterialStat>{props.asset.tab}</C.HW_MaterialStat>
+          <C.HW_MaterialStat>{props.asset.semanticKind ?? props.asset.tab}</C.HW_MaterialStat>
         </C.HW_MaterialTitleRow>
         <C.HW_MaterialStatsRow>
           <C.HW_MaterialStat>{props.asset.recipe ?? 'catalog asset'}</C.HW_MaterialStat>

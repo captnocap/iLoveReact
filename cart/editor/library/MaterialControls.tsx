@@ -16,7 +16,7 @@ export default function MaterialControls({
   onFavorite: (assetId: string) => void;
   onRename: (assetId: string, name: string) => void;
 }) {
-  const variants = asset.variants ?? ['v0', 'v1', 'v2'];
+  const variants = (asset.variants?.length ? asset.variants : ['source']).slice(0, 3);
   const seed = asset.seed ?? 0;
   const usageCount = 0;
   return (
@@ -49,6 +49,10 @@ export default function MaterialControls({
         <C.HW_ToolLabel>recipe</C.HW_ToolLabel>
         <C.HW_ToolValue>{asset.recipe ?? 'catalog asset'}</C.HW_ToolValue>
       </C.HW_ToolRow>
+      <C.HW_ToolRow>
+        <C.HW_ToolLabel>source</C.HW_ToolLabel>
+        <C.HW_ToolValue>{asset.sourceKind ?? 'indexed'}</C.HW_ToolValue>
+      </C.HW_ToolRow>
       <C.HW_SelectedVariants>
         {variants.map((variant, index) => (
           <C.HW_SelectedVariant key={variant} onPress={() => onAction(`${asset.name} variant ${variant}`)}>
@@ -70,7 +74,7 @@ export default function MaterialControls({
       </C.HW_ToolRow>
       <C.HW_ToolRow>
         <C.HW_ToolLabel>bank</C.HW_ToolLabel>
-        <C.HW_ToolValue>{asset.favorite ? 'pinned' : asset.recent ? 'recent' : 'catalog'}</C.HW_ToolValue>
+        <C.HW_ToolValue>{asset.favorite ? 'pinned' : asset.recent ? 'recent' : asset.semanticKind ?? 'indexed'}</C.HW_ToolValue>
         <C.HW_Spacer />
         <C.HW_ToolHint>no route change</C.HW_ToolHint>
       </C.HW_ToolRow>

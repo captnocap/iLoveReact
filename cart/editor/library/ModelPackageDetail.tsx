@@ -16,9 +16,9 @@ export default function ModelPackageDetail({ model, onAction }: { model: ModelPa
             </C.HW_MaterialTitleRow>
             <C.HW_ModelPath>{model.path}</C.HW_ModelPath>
             <C.HW_ModelMetaRow>
-              <C.HW_MaterialStat>tris —</C.HW_MaterialStat>
-              <C.HW_MaterialStat>LoD —</C.HW_MaterialStat>
-              <C.HW_MaterialStat>uses 0</C.HW_MaterialStat>
+              <C.HW_MaterialStat>{model.triangles > 0 ? `${formatCount(model.triangles)} tris` : 'tris —'}</C.HW_MaterialStat>
+              <C.HW_MaterialStat>{model.semanticKind ?? model.kind}</C.HW_MaterialStat>
+              <C.HW_MaterialStat>{model.sourceKind ?? 'indexed'}</C.HW_MaterialStat>
             </C.HW_ModelMetaRow>
           </C.HW_ModelCardMain>
         </C.HW_ModelTop>
@@ -52,11 +52,11 @@ export default function ModelPackageDetail({ model, onAction }: { model: ModelPa
                 <C.HW_MaterialTitleRow>
                   <C.HW_ToolValue>{atlas.label}</C.HW_ToolValue>
                   <C.HW_Spacer />
-                  <C.HW_MaterialStat>resolution —</C.HW_MaterialStat>
+                  <C.HW_MaterialStat>{atlas.resolution}</C.HW_MaterialStat>
                 </C.HW_MaterialTitleRow>
                 <C.HW_ModelMetaRow>
                   <C.HW_MaterialStat>{atlas.scope}</C.HW_MaterialStat>
-                  <C.HW_MaterialStat>paints —</C.HW_MaterialStat>
+                  <C.HW_MaterialStat>{atlas.paints} paints</C.HW_MaterialStat>
                 </C.HW_ModelMetaRow>
               </C.HW_ModelCardMain>
             </C.HW_ModelAtlasCard>
@@ -100,4 +100,10 @@ export default function ModelPackageDetail({ model, onAction }: { model: ModelPa
       </C.HW_ModelHomePanel>
     </C.HW_ModelBrowser>
   );
+}
+
+function formatCount(value: number): string {
+  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}m`;
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
+  return String(value);
 }

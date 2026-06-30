@@ -1,7 +1,6 @@
-// editor/data/content.ts — content tree, navigation enums, and folder helpers.
-//
-// Cloned from the hmsc-workspace-mock god-file. Pure data + pure helpers.
+// editor/data/content.ts - content tree, navigation enums, and folder helpers.
 import { MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
+import { HMSC_EDITOR_CATALOG } from './hmscAssetCatalog';
 import { commandById } from './commands';
 import { INITIAL_OBJECTS } from './initialState';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, MockState, ModelPackage, WorldObject } from './types';
@@ -21,71 +20,7 @@ export const RIGHT_PANES = [
   ['mission', 'Flag'],
   ['routes', 'Route'],
 ];
-export const CONTENT_TREE: ContentNode[] = [
-  {
-    id: 'game',
-    label: '/Game',
-    children: [
-      { id: 'audio', label: 'Audio' },
-      { id: 'characters', label: 'Characters' },
-      { id: 'locations', label: 'Locations' },
-      {
-        id: 'models',
-        label: 'Models',
-        icon: 'Box',
-        children: [
-          {
-            id: 'models-props',
-            label: 'props',
-            children: [
-              { id: 'models-props-wip', label: 'wip' },
-              { id: 'model-vase', label: 'vase' },
-              { id: 'model-cd-player', label: 'cd_player' },
-              { id: 'model-ball', label: 'ball' },
-            ],
-          },
-        ],
-      },
-      {
-        id: 'missions',
-        label: 'Missions',
-        children: [
-          {
-            id: 'bankheist',
-            label: 'BankHeist',
-            children: [
-              { id: 'mission-assets', label: 'Assets' },
-              { id: 'scripts', label: 'Scripts' },
-              { id: 'ui', label: 'UI' },
-            ],
-          },
-        ],
-      },
-      {
-        id: 'materials',
-        label: 'Global Materials',
-        children: [
-          { id: 'materials-core', label: 'Defaults' },
-          { id: 'materials-generated', label: 'Procedural' },
-          { id: 'materials-favorites', label: 'Favorites' },
-          { id: 'materials-recent', label: 'Recent' },
-        ],
-      },
-      {
-        id: 'architecture',
-        label: 'Architecture',
-        children: [
-          { id: 'build-pieces', label: 'Build Pieces' },
-          { id: 'prefabs', label: 'Prefabs' },
-        ],
-      },
-      { id: 'vehicles', label: 'Vehicles' },
-      { id: 'weapons', label: 'Weapons' },
-      { id: 'props', label: 'Props' },
-      { id: 'fx', label: 'FX' },
-    ],
-  },
-];
+export const CONTENT_TREE: ContentNode[] = HMSC_EDITOR_CATALOG.contentTree;
 export const SNAP_MODES = ['surface + edge', 'grid', 'free', 'vertex'];
 export const FLOORS = ['Floor 2', 'Floor 1', 'Basement'];
 export const PRESETS = ['default', 'slow', 'fast', 'custom'];
@@ -99,7 +34,9 @@ export function tabForContentFolder(folder: ContentFolderId): LibraryTab | null 
 }
 
 export function folderForAsset(asset: Asset): ContentFolderId {
-  if (asset.tab === 'Skins') return asset.id.startsWith('mock-mat-') ? 'materials-generated' : 'materials-core';
+  if (asset.tab === 'Skins') {
+    return asset.sourceKind === 'shader-preset' ? 'materials-generated' : 'materials-core';
+  }
   if (asset.tab === 'Build') return 'build-pieces';
   return 'props';
 }
@@ -113,7 +50,10 @@ export function contentFolderLabel(folder: ContentFolderId): string {
     }
     return null;
   };
-  return findNode(CONTENT_TREE)?.label ?? folder;
+  const node = findNode(CONTENT_TREE);
+  if (node) return node.label;
+  const model = exactModelForFolder(folder);
+  return model?.name ?? folder;
 }
 
 export function isMaterialFolder(folder: ContentFolderId): boolean {
@@ -122,9 +62,10 @@ export function isMaterialFolder(folder: ContentFolderId): boolean {
 
 export function isModelFolder(folder: ContentFolderId): boolean {
   return folder === 'models' ||
+    folder === 'models-build' ||
     folder === 'models-props' ||
     folder === 'models-props-wip' ||
-    MODEL_PACKAGES.some((model) => model.folderId === folder);
+    String(folder).startsWith('model-');
 }
 
 export function modelPackagesForFolder(folder: ContentFolderId, search: string): ModelPackage[] {
@@ -132,8 +73,9 @@ export function modelPackagesForFolder(folder: ContentFolderId, search: string):
   return MODEL_PACKAGES
     .filter((model) => {
       if (folder === 'models') return true;
+      if (folder === 'models-build') return model.kind === 'build';
       if (folder === 'models-props') return model.kind === 'prop';
-      if (folder === 'models-props-wip') return model.stage === 'wip';
+      if (folder === 'models-props-wip') return model.sourceKind === 'studio-model' || model.stage === 'wip';
       return model.folderId === folder;
     })
     .filter((model) => {
@@ -141,6 +83,8 @@ export function modelPackagesForFolder(folder: ContentFolderId, search: string):
       const haystack = [
         model.name,
         model.path,
+        model.kind,
+        model.semanticKind ?? '',
         model.source,
         model.rig,
         model.data,
@@ -160,8 +104,8 @@ export function assetMatchesContentFolder(asset: Asset, folder: ContentFolderId)
   if (isModelFolder(folder)) return false;
   if (folder === 'game') return true;
   if (folder === 'materials') return asset.tab === 'Skins';
-  if (folder === 'materials-core') return asset.tab === 'Skins' && !asset.id.startsWith('mock-mat-');
-  if (folder === 'materials-generated') return asset.tab === 'Skins' && asset.id.startsWith('mock-mat-');
+  if (folder === 'materials-core') return asset.tab === 'Skins' && asset.sourceKind !== 'shader-preset';
+  if (folder === 'materials-generated') return asset.tab === 'Skins' && asset.sourceKind === 'shader-preset';
   if (folder === 'materials-favorites') return asset.tab === 'Skins' && Boolean(asset.favorite);
   if (folder === 'materials-recent') return asset.tab === 'Skins' && Boolean(asset.recent);
   if (folder === 'props') return asset.tab === 'Props';

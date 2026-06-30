@@ -19,7 +19,7 @@ import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplore
 import { initialState } from '../data/initialState';
 import { commandById } from '../data/commands';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, SNAP_MODES, FLOORS } from '../data/content';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
 import { useBuildJournalSnapshot } from '../data/journal';
 import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFileById } from '../data/fileExplorer';
@@ -39,7 +39,18 @@ export default function AppFrame() {
     const needle = state.search.trim().toLowerCase();
     return catalogAssets
       .filter((asset) => assetMatchesContentFolder(asset, state.contentFolder))
-      .filter((asset) => !needle || asset.name.toLowerCase().includes(needle) || (asset.recipe ?? '').toLowerCase().includes(needle))
+      .filter((asset) => {
+        if (!needle) return true;
+        const haystack = [
+          asset.name,
+          asset.recipe ?? '',
+          asset.sourceKind ?? '',
+          asset.sourceId ?? '',
+          asset.semanticKind ?? '',
+          ...(asset.stats ?? []),
+        ].join(' ').toLowerCase();
+        return haystack.includes(needle);
+      })
       .sort(rankAssets);
   }, [catalogAssets, panelMode, state.contentFolder, state.search]);
 
@@ -468,7 +479,11 @@ export default function AppFrame() {
           onFavorite={toggleFavorite}
           onRename={renameAsset}
           onPage={(delta) => setState((prev) => {
-            const maxPage = Math.max(0, Math.ceil(filteredAssets.length / assetPageSizeFor(panelMode)) - 1);
+            const itemCount = isModelFolder(prev.contentFolder)
+              ? modelPackagesForFolder(prev.contentFolder, prev.search).length
+              : filteredAssets.length;
+            const pageSize = isModelFolder(prev.contentFolder) ? 5 : assetPageSizeFor(panelMode);
+            const maxPage = Math.max(0, Math.ceil(itemCount / pageSize) - 1);
             return { ...prev, assetPage: Math.max(0, Math.min(maxPage, prev.assetPage + delta)) };
           })}
           onFocusMaterial={() => setState((prev) => ({ ...prev, materialFocused: true, status: `focused material editor: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}

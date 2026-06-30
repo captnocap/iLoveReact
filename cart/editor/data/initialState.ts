@@ -1,15 +1,10 @@
-// editor/data/initialState.ts — seed world objects, seed history, initial state.
-//
-// Cloned from the hmsc-workspace-mock god-file. Pure data + the state factory.
-import { MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from './catalog';
+// editor/data/initialState.ts - seed world objects, seed history, initial state.
+import { CATALOG_DIAGNOSTICS, DEFAULT_ASSET_ID, DEFAULT_CONTENT_FOLDER, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from './catalog';
 import { INITIAL_EXPLORER_DIRECTORY_HISTORY, INITIAL_EXPLORER_HISTORY } from './fileExplorer';
 import type { MockState, WorldObject } from './types';
 
 export const INITIAL_OBJECTS: WorldObject[] = [
-  { id: 'obj-tile', kind: 'TILE', name: 'Grass', assetId: 'grass', left: 248, top: 116, width: 78, height: 70, metrics: [] },
-  { id: 'obj-wall-a', kind: 'PIECE', name: 'Wall Kit A', assetId: 'wall-kit', left: 214, top: 58, width: 64, height: 88, metrics: [] },
-  { id: 'obj-door', kind: 'CUTOUT', name: 'Door Cutout', assetId: 'door-cut', left: 330, top: 202, width: 96, height: 44, metrics: [] },
-  { id: 'obj-shop', kind: 'PREFAB', name: 'Shop Front', assetId: 'shop-front', left: 376, top: 162, width: 70, height: 86, metrics: [] },
+  { id: 'obj-tile', kind: 'TILE', name: 'Selected material', assetId: DEFAULT_ASSET_ID, left: 248, top: 116, width: 78, height: 70, metrics: [] },
 ];
 
 export function initialState(): MockState {
@@ -20,7 +15,7 @@ export function initialState(): MockState {
     activeDomain: 'world',
     activeTab: 'Skins',
     activeCommandId: 'move-selection',
-    activeAssetId: 'grass',
+    activeAssetId: DEFAULT_ASSET_ID,
     assetPage: 0,
     materialFocused: false,
     colorStudioMaterial: 'rot',
@@ -39,8 +34,8 @@ export function initialState(): MockState {
     fileExplorerHistory: INITIAL_EXPLORER_HISTORY,
     fileExplorerDirectoryHistory: INITIAL_EXPLORER_DIRECTORY_HISTORY,
     selectedObjectId: 'obj-tile',
-    contentFolder: 'model-vase',
-    expandedFolders: { game: true, models: true, 'models-props': true, missions: true, bankheist: true, materials: true, architecture: true },
+    contentFolder: DEFAULT_CONTENT_FOLDER,
+    expandedFolders: { game: true, models: true, 'models-build': true, 'models-props': true, missions: true, bankheist: true, materials: true, architecture: true },
     search: '',
     surfacePreset: 'default',
     snapIndex: 0,
@@ -50,7 +45,7 @@ export function initialState(): MockState {
     viewMode: '3D',
     rightPane: 'inspector',
     contextOpen: true,
-    status: `eventbus idle - ${MODEL_PACKAGE_COUNT} model homes + ${MATERIAL_ASSET_COUNT} global materials indexed`,
+    status: `eventbus idle - ${MODEL_PACKAGE_COUNT} model homes + ${MATERIAL_ASSET_COUNT} materials indexed from ${CATALOG_DIAGNOSTICS.source} in ${CATALOG_DIAGNOSTICS.loadedMs}ms`,
     cursor: { x: 0, y: 0, z: 0 },
     history: [],
     redo: [],

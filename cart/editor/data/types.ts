@@ -22,11 +22,10 @@ export type ContentFolderId =
   | 'scripts'
   | 'ui'
   | 'models'
+  | 'models-build'
   | 'models-props'
   | 'models-props-wip'
-  | 'model-vase'
-  | 'model-cd-player'
-  | 'model-ball'
+  | `model-${string}`
   | 'materials'
   | 'materials-core'
   | 'materials-generated'
@@ -92,6 +91,11 @@ export type Asset = {
   recipe?: string;
   seed?: number;
   variants?: string[];
+  sourceKind?: 'shader-recipe' | 'shader-preset' | 'stored-material' | 'texture-file' | 'cooked-asset';
+  sourceId?: string;
+  sourcePath?: string;
+  semanticKind?: string;
+  stats?: string[];
 };
 
 export type AssetOverride = {
@@ -130,7 +134,7 @@ export type ModelPackage = {
   folderId: ContentFolderId;
   name: string;
   path: string;
-  kind: 'prop' | 'character' | 'vehicle';
+  kind: 'build' | 'prop' | 'character' | 'vehicle';
   stage: 'wip' | 'ready' | 'locked';
   color: string;
   source: string;
@@ -141,6 +145,8 @@ export type ModelPackage = {
   decompositions: string[];
   atlases: ModelAtlas[];
   paints: ModelPaintVariant[];
+  sourceKind?: 'cooked-asset' | 'studio-model';
+  semanticKind?: string;
 };
 
 export type Rgb = [number, number, number];
