@@ -12,6 +12,8 @@ export default function Workspace(props: {
   onSnap: () => void;
   onFloor: () => void;
   onViewMode: (mode: ViewMode) => void;
+  onWorkspaceDocument: (id: string) => void;
+  onCloseWorkspaceDocument: (id: string) => void;
   onStage: () => void;
   onContext: () => void;
   onObject: (id: string) => void;

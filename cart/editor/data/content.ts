@@ -96,6 +96,10 @@ export function modelPackagesForFolder(folder: ContentFolderId, search: string):
     });
 }
 
+export function modelPackageById(id: string): ModelPackage | null {
+  return MODEL_PACKAGES.find((model) => model.id === id) ?? null;
+}
+
 export function exactModelForFolder(folder: ContentFolderId): ModelPackage | null {
   return MODEL_PACKAGES.find((model) => model.folderId === folder) ?? null;
 }

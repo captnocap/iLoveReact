@@ -1,5 +1,6 @@
 // editor/data/initialState.ts - seed world objects, seed history, initial state.
 import { CATALOG_DIAGNOSTICS, DEFAULT_ASSET_ID, DEFAULT_CONTENT_FOLDER, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from './catalog';
+import { WORLD_DOCUMENT, WORLD_DOCUMENT_ID } from './documents';
 import { INITIAL_EXPLORER_DIRECTORY_HISTORY, INITIAL_EXPLORER_HISTORY } from './fileExplorer';
 import type { MockState, WorldObject } from './types';
 
@@ -44,6 +45,8 @@ export function initialState(): MockState {
     snapAngleDegrees: 0,
     floorIndex: 1,
     viewMode: '3D',
+    workspaceDocuments: [WORLD_DOCUMENT],
+    activeWorkspaceDocumentId: WORLD_DOCUMENT_ID,
     rightPane: 'inspector',
     contextOpen: false,
     status: `eventbus idle - ${MODEL_PACKAGE_COUNT} model homes + ${MATERIAL_ASSET_COUNT} materials indexed from ${CATALOG_DIAGNOSTICS.source} in ${CATALOG_DIAGNOSTICS.loadedMs}ms`,

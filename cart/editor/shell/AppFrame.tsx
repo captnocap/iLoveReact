@@ -16,7 +16,7 @@ import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
 import FileExplorerDialog from '../dialogs/FileExplorerDialog';
 import RenderProbe from '../../../runtime/render_tracker';
-import type { MockState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey } from '../data/types';
+import type { MockState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelPackage } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { initialState } from '../data/initialState';
 import { commandById } from '../data/commands';
@@ -25,6 +25,7 @@ import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentF
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
 import { useBuildJournalSnapshot } from '../data/journal';
 import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFileById } from '../data/fileExplorer';
+import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 
 export default function AppFrame() {
   const [state, setState] = useState<MockState>(initialState);
@@ -147,7 +148,15 @@ export default function AppFrame() {
           objects: prev.objects.map((item) => item.id === object.id ? { ...item, assetId: asset.id, name: item.kind === 'TILE' ? asset.name : item.name } : item),
         };
       } else if (command.id === 'open-color-studio') {
-        next = { ...next, materialFocused: true, contextOpen: false, openMenu: null };
+        const doc = materialDocument(asset);
+        next = {
+          ...next,
+          materialFocused: true,
+          workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
+          activeWorkspaceDocumentId: doc.id,
+          contextOpen: false,
+          openMenu: null,
+        };
       } else if (command.id === 'sample-material') {
         next = { ...next, activeAssetId: object.assetId, activeTab: assetById(object.assetId, prev.assetOverrides).tab };
       } else if (command.id === 'duplicate-selection') {
@@ -453,6 +462,68 @@ export default function AppFrame() {
     });
   };
 
+  const focusMaterialDocument = () => {
+    setState((prev) => {
+      const asset = assetById(prev.activeAssetId, prev.assetOverrides);
+      const doc = materialDocument(asset);
+      return {
+        ...prev,
+        materialFocused: true,
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
+        activeWorkspaceDocumentId: doc.id,
+        status: `opened material document: ${asset.name}`,
+      };
+    });
+  };
+
+  const openModelDocument = (model: ModelPackage) => {
+    const doc = modelDocument(model);
+    setState((prev) => ({
+      ...prev,
+      workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
+      activeWorkspaceDocumentId: doc.id,
+      materialFocused: false,
+      contentFolder: model.folderId,
+      expandedFolders: { ...prev.expandedFolders, [model.folderId]: true },
+      contextOpen: false,
+      status: `opened model document: ${model.name}`,
+    }));
+  };
+
+  const selectWorkspaceDocument = (activeWorkspaceDocumentId: string) => {
+    setState((prev) => {
+      const doc = prev.workspaceDocuments.find((item) => item.id === activeWorkspaceDocumentId);
+      if (!doc) return prev;
+      return {
+        ...prev,
+        activeWorkspaceDocumentId,
+        materialFocused: doc.kind === 'material',
+        activeAssetId: doc.kind === 'material' && doc.sourceId ? doc.sourceId : prev.activeAssetId,
+        contextOpen: false,
+        status: `workspace document: ${doc.title}`,
+      };
+    });
+  };
+
+  const closeWorkspaceDocument = (documentId: string) => {
+    if (documentId === WORLD_DOCUMENT_ID) return;
+    setState((prev) => {
+      const remaining = prev.workspaceDocuments.filter((doc) => doc.id !== documentId);
+      const nextActive = prev.activeWorkspaceDocumentId === documentId
+        ? WORLD_DOCUMENT_ID
+        : prev.activeWorkspaceDocumentId;
+      const activeDoc = remaining.find((doc) => doc.id === nextActive);
+      return {
+        ...prev,
+        workspaceDocuments: remaining,
+        activeWorkspaceDocumentId: activeDoc?.id ?? WORLD_DOCUMENT_ID,
+        materialFocused: activeDoc?.kind === 'material',
+        contextOpen: false,
+        status: 'workspace document closed',
+      };
+    });
+  };
+
   return (
     <C.HW_App>
       <RenderProbe id="Chrome">
@@ -493,8 +564,9 @@ export default function AppFrame() {
               const maxPage = Math.max(0, Math.ceil(itemCount / pageSize) - 1);
               return { ...prev, assetPage: Math.max(0, Math.min(maxPage, prev.assetPage + delta)) };
             })}
-            onFocusMaterial={() => setState((prev) => ({ ...prev, materialFocused: true, status: `focused material editor: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+            onFocusMaterial={focusMaterialDocument}
             onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+            onModel={openModelDocument}
           />
         </RenderProbe>
         <RenderProbe id="Workspace">
@@ -507,10 +579,12 @@ export default function AppFrame() {
             onSnap={() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` }))}
             onFloor={() => runCommand('cycle-floor', 'toolbar')}
             onViewMode={(viewMode) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` }))}
+            onWorkspaceDocument={selectWorkspaceDocument}
+            onCloseWorkspaceDocument={closeWorkspaceDocument}
             onStage={() => runCommand(state.activeCommandId, 'stage')}
             onContext={() => setState((prev) => ({ ...prev, contextOpen: !prev.contextOpen, openMenu: null, status: prev.contextOpen ? 'context menu closed' : 'context menu opened' }))}
             onObject={selectObject}
-            onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+            onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
             onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
             onSelectColorStudioMaterial={selectColorStudioMaterial}
             onColorStudioVariant={setColorStudioVariant}

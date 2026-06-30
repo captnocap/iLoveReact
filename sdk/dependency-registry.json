@@ -898,6 +898,10 @@
         {
           "kind": "metafileInput",
           "input": "cart/hmsc-int/CompiledWorld.tsx"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "cart/hmsc-int/LoaderIsoView.tsx"
         }
       ],
       "buildOptions": [

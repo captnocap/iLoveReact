@@ -2,7 +2,7 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
 
-export default function ModelPackageDetail({ model, onAction }: { model: ModelPackage; onAction: (label: string) => void }) {
+export default function ModelPackageDetail({ model, onAction, onOpen }: { model: ModelPackage; onAction: (label: string) => void; onOpen: () => void }) {
   return (
     <C.HW_ModelBrowser>
       <C.HW_ModelHomePanel>
@@ -94,6 +94,7 @@ export default function ModelPackageDetail({ model, onAction }: { model: ModelPa
         </C.HW_ModelSection>
 
         <C.HW_ButtonRow>
+          <C.HW_SmallButton onPress={onOpen}><C.HW_FormValue>open editor</C.HW_FormValue></C.HW_SmallButton>
           <C.HW_SmallButton onPress={() => onAction(`open painter for ${model.name}`)}><C.HW_FormValue>paint model</C.HW_FormValue></C.HW_SmallButton>
           <C.HW_SmallButton onPress={() => onAction(`save new variant for ${model.name}`)}><C.HW_FormValue>save variant</C.HW_FormValue></C.HW_SmallButton>
         </C.HW_ButtonRow>

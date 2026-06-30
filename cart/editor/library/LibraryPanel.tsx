@@ -1,6 +1,6 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
-import type { Asset, ContentFolderId, LibraryTab, MockState, WorldObject } from '../data/types';
+import type { Asset, ContentFolderId, LibraryTab, MockState, ModelPackage, WorldObject } from '../data/types';
 import { assetPageSizeFor, CATALOG_DIAGNOSTICS, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from '../data/catalog';
 import {
   CONTENT_TREE,
@@ -35,6 +35,7 @@ export default function LibraryPanel(props: {
   onPage: (delta: number) => void;
   onFocusMaterial: () => void;
   onMaterialAction: (label: string) => void;
+  onModel: (model: ModelPackage) => void;
 }) {
   const pageSize = assetPageSizeFor(props.mode);
   const maxPage = Math.max(0, Math.ceil(props.assets.length / pageSize) - 1);
@@ -92,6 +93,7 @@ export default function LibraryPanel(props: {
           onFolder={props.onFolder}
           onPage={props.onPage}
           onAction={props.onMaterialAction}
+          onModel={props.onModel}
         />
       ) : showMaterialCatalog ? (
         <C.HW_MaterialGrid>

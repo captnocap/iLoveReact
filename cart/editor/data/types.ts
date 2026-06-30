@@ -12,6 +12,14 @@ import type { DecalDoc } from '../../hmsc-int/game/textures/decal';
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Window' | 'Help';
 export type LibraryTab = 'Build' | 'Props' | 'Skins';
 export type ViewMode = '3D' | '2D';
+export type WorkspaceDocumentKind = 'world' | 'model' | 'material';
+export type WorkspaceDocument = {
+  id: string;
+  kind: WorkspaceDocumentKind;
+  title: string;
+  subtitle?: string;
+  sourceId?: string;
+};
 export type ContentFolderId =
   | 'game'
   | 'audio'
@@ -250,6 +258,8 @@ export type MockState = {
   snapAngleDegrees: number;
   floorIndex: number;
   viewMode: ViewMode;
+  workspaceDocuments: WorkspaceDocument[];
+  activeWorkspaceDocumentId: string;
   rightPane: string;
   contextOpen: boolean;
   status: string;

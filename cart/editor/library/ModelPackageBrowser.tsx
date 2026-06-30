@@ -1,6 +1,6 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
-import type { ContentFolderId } from '../data/types';
+import type { ContentFolderId, ModelPackage } from '../data/types';
 import { exactModelForFolder, modelPackagesForFolder } from '../data/content';
 import ModelPackageDetail from './ModelPackageDetail';
 
@@ -11,6 +11,7 @@ export default function ModelPackageBrowser({
   onFolder,
   onPage,
   onAction,
+  onModel,
 }: {
   folder: ContentFolderId;
   search: string;
@@ -18,6 +19,7 @@ export default function ModelPackageBrowser({
   onFolder: (folder: ContentFolderId) => void;
   onPage: (delta: number) => void;
   onAction: (label: string) => void;
+  onModel: (model: ModelPackage) => void;
 }) {
   const exactModel = exactModelForFolder(folder);
   const models = modelPackagesForFolder(folder, search);
@@ -28,7 +30,7 @@ export default function ModelPackageBrowser({
   const firstModel = models.length === 0 ? 0 : safePage * pageSize + 1;
   const lastModel = Math.min(models.length, firstModel + pageModels.length - 1);
   if (exactModel) {
-    return <ModelPackageDetail model={exactModel} onAction={onAction} />;
+    return <ModelPackageDetail model={exactModel} onAction={onAction} onOpen={() => onModel(exactModel)} />;
   }
   return (
     <C.HW_ModelBrowser>
@@ -46,7 +48,7 @@ export default function ModelPackageBrowser({
           <C.HW_StatusText>no model homes</C.HW_StatusText>
         </C.HW_EmptyState>
       ) : pageModels.map((model) => (
-        <C.HW_ModelCard key={model.id} onPress={() => onFolder(model.folderId)}>
+        <C.HW_ModelCard key={model.id} onPress={() => onModel(model)}>
           <C.HW_ModelThumb style={{ backgroundColor: model.color }} />
           <C.HW_ModelCardMain>
             <C.HW_MaterialTitleRow>
@@ -61,7 +63,7 @@ export default function ModelPackageBrowser({
               <C.HW_MaterialStat>{model.decompositions.length} decomps</C.HW_MaterialStat>
             </C.HW_ModelMetaRow>
           </C.HW_ModelCardMain>
-          <C.HW_IconMiniButton onPress={() => onAction(`open model home ${model.name}`)}>
+          <C.HW_IconMiniButton onPress={() => onFolder(model.folderId)}>
             <Icon name="FolderOpen" size={13} color={accentFor('primary')} />
           </C.HW_IconMiniButton>
         </C.HW_ModelCard>
