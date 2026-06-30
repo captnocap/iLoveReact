@@ -20,6 +20,7 @@ const fswatch = @import("fs/fswatch.zig");
 const latches = @import("state/latches.zig");
 const animations = @import("gpu/animations.zig");
 const scene3d = @import("gpu/3d.zig");
+const mesh_import = @import("world/mesh_import.zig");
 const system_signals = @import("ifttt/system_signals.zig");
 const selection_watch = @import("ifttt/selection_watch.zig");
 const event_bus = @import("diag/event_bus.zig");
@@ -215,6 +216,81 @@ fn hostScene3DPatchDyn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     const verts: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, bytes));
     const ok = scene3d.patchDynSlotById(id, verts, count);
     setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __mesh_load_file(path) → JSON {"key","count","radius"} | "" on failure.
+/// The drop-to-view door: parse a GLB/OBJ ENTIRELY in the host (no geometry crosses
+/// the bridge), park its verts in the scene3d host stash under `key`, and seed the
+/// orbit camera to frame it. The cart renders a <Scene3D.Mesh scene3dGeomKey={key}>
+/// with NO verts — the first draw interns the stash and every later frame redraws it
+/// natively. `key` is the file path (re-dropping the same file reuses the resident
+/// mesh). Returns "" on any parse/stash failure (the cart leaves the view empty).
+fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const path = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    defer std.heap.c_allocator.free(path);
+    if (path.len == 0) {
+        setReturnString(info, "");
+        return;
+    }
+
+    var mesh = mesh_import.loadFile(std.heap.c_allocator, path) catch |e| {
+        std.log.warn("[mesh-load] {s}: {}", .{ path, e });
+        setReturnString(info, "");
+        return;
+    };
+    defer mesh.deinit(std.heap.c_allocator);
+
+    if (!scene3d.stashHostMesh(path, mesh.verts, mesh.vert_count)) {
+        setReturnString(info, "");
+        return;
+    }
+    scene3d.orbitFrame(mesh.center, mesh.radius);
+    state.markDirty();
+
+    // Build {"key":"<escaped path>","count":N,"radius":R} for the cart to mount.
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(std.heap.c_allocator);
+    const w = buf.writer(std.heap.c_allocator);
+    w.writeAll("{\"key\":\"") catch {
+        setReturnString(info, "");
+        return;
+    };
+    for (path) |ch| {
+        switch (ch) {
+            '"' => w.writeAll("\\\"") catch return,
+            '\\' => w.writeAll("\\\\") catch return,
+            0...8, 9...10, 11...31 => w.print("\\u{x:0>4}", .{ch}) catch return,
+            else => w.writeByte(ch) catch return,
+        }
+    }
+    w.print("\",\"count\":{d},\"radius\":{d:.6}}}", .{ mesh.vert_count, mesh.radius }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, buf.items);
+}
+
+/// __model_orbit_drag(dx, dy) — orbit the drop-to-view camera by a screen-space drag
+/// delta (pixels). Mutates host orbit state + repaints; never re-renders the cart, so
+/// dragging stays butter-smooth no matter the model size.
+fn hostModelOrbitDrag(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const dx: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const dy: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    scene3d.orbitDrag(dx, dy);
+    state.markDirty();
+}
+
+/// __model_orbit_zoom(delta) — dolly the drop-to-view camera (wheel delta; sign only).
+fn hostModelOrbitZoom(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const delta: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    scene3d.orbitZoom(delta);
+    state.markDirty();
 }
 
 fn hostReleaseFileBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -891,6 +967,9 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__hostLoadFileToBuffer", hostLoadFileToBuffer);
     v8_runtime.registerHostFn("__hostUploadFloatBuffer", hostUploadFloatBuffer);
     v8_runtime.registerHostFn("__scene3d_patch_dyn", hostScene3DPatchDyn);
+    v8_runtime.registerHostFn("__mesh_load_file", hostMeshLoadFile);
+    v8_runtime.registerHostFn("__model_orbit_drag", hostModelOrbitDrag);
+    v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
     v8_runtime.registerHostFn("__hostReleaseFileBuffer", hostReleaseFileBuffer);
     v8_runtime.registerHostFn("__hostLog", hostLog);
     v8_runtime.registerHostFn("__js_eval", hostJsEval);

@@ -1934,6 +1934,11 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonBool(v)) |b| node.scene3d_mesh = b;
         } else if (std.mem.eql(u8, k, "scene3dCamera")) {
             if (jsonBool(v)) |b| node.scene3d_camera = b;
+        } else if (std.mem.eql(u8, k, "scene3dCameraOrbit")) {
+            // Drop-to-view orbit camera: the host owns the view (gpu/3d.zig orbit
+            // state). Distinct from scene3dCameraNative, which binds the game FPS
+            // camera (game_camera.zig).
+            if (jsonBool(v)) |b| node.scene3d_camera_orbit = b;
         } else if (std.mem.eql(u8, k, "scene3dCameraNative")) {
             if (jsonBool(v)) |b| {
                 if (b) {

@@ -451,6 +451,7 @@ pub const Node = struct {
     scene3d: bool = false, // true = contains 3D.* children
     scene3d_mesh: bool = false, // true = 3D.Mesh
     scene3d_camera: bool = false, // true = 3D.Camera
+    scene3d_camera_orbit: bool = false, // true = host-driven orbit camera (drop-to-view); ignores pos/look props
     scene3d_light: bool = false, // true = 3D.Light
     scene3d_group: bool = false, // true = 3D.Group
     scene3d_light_type: ?[]const u8 = null, // "ambient", "directional", "point"

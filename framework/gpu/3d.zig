@@ -257,6 +257,118 @@ const GeoEntry = struct {
 var g_geo_cache: [GEO_CACHE_SIZE]GeoEntry = [_]GeoEntry{.{}} ** GEO_CACHE_SIZE;
 var g_geo_cache_len: usize = 0;
 var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persists across frames
+
+// ── Host-loaded mesh stash (drop-to-view, framework/world/mesh_import.zig) ───────
+// A GLB/OBJ dropped on a viewer is parsed ENTIRELY in the host and never crosses the
+// JS bridge as geometry — only a short intern key does (see __mesh_load_file). The
+// parse door owns no GPU queue, so it parks the verts here, keyed by the same FNV hash
+// the geo cache uses; the first draw that resolves the key interns them into
+// g_retained_vbuf (internFromStash) and frees the host copy. A viewer holds a handful
+// of models, so a small fixed table; overflow is loud and simply doesn't draw.
+const HOST_MESH_STASH = 16;
+const HostMeshStash = struct {
+    hash: u64 = 0,
+    verts: ?[]f32 = null, // c_allocator-owned until interned, then freed
+    count: u32 = 0,
+    present: bool = false,
+};
+var g_host_stash: [HOST_MESH_STASH]HostMeshStash = [_]HostMeshStash{.{}} ** HOST_MESH_STASH;
+
+/// Park a host-parsed mesh under `key` for lazy interning on first draw. `verts` is
+/// COPIED into a host-owned buffer (the caller's parse result is freed right after).
+/// Returns false (loud) only when the stash is full. A re-drop of the same key
+/// overwrites; an already-resident key is a no-op success.
+pub fn stashHostMesh(key: []const u8, verts: []const f32, count: u32) bool {
+    if (lookupGeometry(key) != null) return true; // already GPU-resident
+    const hash = hashKey(key);
+    var slot: ?*HostMeshStash = null;
+    for (&g_host_stash) |*s| {
+        if (s.present and s.hash == hash) {
+            slot = s;
+            break;
+        }
+    }
+    if (slot == null) {
+        for (&g_host_stash) |*s| {
+            if (!s.present) {
+                slot = s;
+                break;
+            }
+        }
+    }
+    const s = slot orelse {
+        std.debug.print("[r3d] host mesh stash FULL ({d}) — a dropped model was DROPPED and will not draw. Raise HOST_MESH_STASH in framework/gpu/3d.zig.\n", .{HOST_MESH_STASH});
+        return false;
+    };
+    if (s.verts) |old| std.heap.c_allocator.free(old);
+    const copy = std.heap.c_allocator.alloc(f32, verts.len) catch return false;
+    @memcpy(copy, verts);
+    s.* = .{ .hash = hash, .verts = copy, .count = count, .present = true };
+    return true;
+}
+
+/// Resolve a stashed host mesh into the retained GPU buffer (once), freeing the host
+/// copy on success. Returns null if no stash entry matches or interning failed.
+fn internFromStash(queue: *wgpu.Queue, key: []const u8) ?GeoSlice {
+    const hash = hashKey(key);
+    for (&g_host_stash) |*s| {
+        if (s.present and s.hash == hash) {
+            const verts = s.verts orelse return null;
+            const slot = internGeometry(queue, key, verts, s.count) orelse return null;
+            std.heap.c_allocator.free(verts);
+            s.* = .{};
+            return slot;
+        }
+    }
+    return null;
+}
+
+// ── Native orbit camera (drop-to-view) ──────────────────────────────────────────
+// A <Scene3D.Camera nativeCamera> hands camera control to the HOST: the cart never
+// re-renders to MOVE the camera — drag orbits, wheel dollies, and the host redraws on
+// markDirty. That sidesteps the per-frame React-rerender churn that made the loader
+// pane choppy (see the loader_pane_camera memory). The door layer feeds raw input
+// deltas in (orbitDrag/orbitZoom); orbitFrame seeds it on model load so an
+// arbitrary-scale import always lands framed in view.
+const Orbit = struct {
+    yaw: f32 = 0.7, // radians around +Y
+    pitch: f32 = 0.45, // radians above the XZ plane
+    dist: f32 = 6,
+    target: [3]f32 = .{ 0, 0, 0 },
+    radius: f32 = 1,
+    framed: bool = false,
+};
+var g_orbit: Orbit = .{};
+
+/// Seed the orbit to frame a model of bounding `radius` about `target`. Called by the
+/// load door the moment a model finishes parsing.
+pub fn orbitFrame(target: [3]f32, radius: f32) void {
+    g_orbit.target = target;
+    g_orbit.radius = @max(1e-3, radius);
+    g_orbit.dist = g_orbit.radius * 2.6;
+    g_orbit.framed = true;
+}
+/// Orbit by a screen-space drag delta (pixels). Pitch clamps shy of the poles.
+pub fn orbitDrag(dx: f32, dy: f32) void {
+    g_orbit.yaw -= dx * 0.01;
+    g_orbit.pitch += dy * 0.01;
+    const lim: f32 = 1.5;
+    g_orbit.pitch = @max(-lim, @min(lim, g_orbit.pitch));
+}
+/// Dolly in/out by a wheel delta (sign only matters). Clamped to a sane band of the
+/// model radius so you can't fly through it or lose it.
+pub fn orbitZoom(delta: f32) void {
+    const factor: f32 = if (delta > 0) 0.88 else 1.0 / 0.88;
+    g_orbit.dist = @max(g_orbit.radius * 0.15, @min(g_orbit.radius * 40.0, g_orbit.dist * factor));
+}
+fn orbitCamPos() math.Vec3 {
+    const cp = @cos(g_orbit.pitch);
+    return .{
+        .x = g_orbit.target[0] + g_orbit.dist * cp * @sin(g_orbit.yaw),
+        .y = g_orbit.target[1] + g_orbit.dist * @sin(g_orbit.pitch),
+        .z = g_orbit.target[2] + g_orbit.dist * cp * @cos(g_orbit.yaw),
+    };
+}
 var g_dbg_frame: u64 = 0; // req_0727: rate-limit the r3d-census diagnostic print
 
 // ── Dynamic geometry region (variable-size bump) ────────────────────────────
@@ -1260,6 +1372,13 @@ pub fn resetForReload() void {
     g_dyn_bump_verts = 0;
     g_dyn_warned = false;
     for (&g_dyn_slots) |*s| s.* = .{};
+    // The geo cache (above) was cleared, so any stashed-but-not-yet-interned host
+    // mesh would re-intern fine — but free the host copies so a reload doesn't leak
+    // them, and so a re-drop re-parses cleanly.
+    for (&g_host_stash) |*s| {
+        if (s.verts) |old| std.heap.c_allocator.free(old);
+        s.* = .{};
+    }
     // The texture hash memo keys on buffer POINTERS; a reload frees + recycles
     // those addresses, so a stale (ptr,len) could collide with a new buffer. Clear
     // it (the fingerprint guards the rare same-address+len case, but a clean memo
@@ -2349,11 +2468,23 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         if (child.scene3d_skybox) sky_node = child;
         if (child.scene3d_fog) fog_node = child;
         if (child.scene3d_camera) {
-            cam_pos = .{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
-            cam_look = .{ .x = child.scene3d_look_x, .y = child.scene3d_look_y, .z = child.scene3d_look_z };
-            cam_fov = child.scene3d_fov;
-            cam_far = child.scene3d_far;
-            cam_near = child.scene3d_near;
+            if (child.scene3d_camera_orbit) {
+                // Host-driven orbit: position derives from the orbit state, not from
+                // React props, so moving the camera never re-renders the cart.
+                cam_pos = orbitCamPos();
+                cam_look = .{ .x = g_orbit.target[0], .y = g_orbit.target[1], .z = g_orbit.target[2] };
+                cam_fov = if (child.scene3d_fov > 0) child.scene3d_fov else 50;
+                // Auto near/far bracketing the orbit so an arbitrary-scale model never
+                // clips, unless the cart pins them explicitly.
+                cam_far = if (child.scene3d_far > 0) child.scene3d_far else (g_orbit.dist + g_orbit.radius * 4.0);
+                cam_near = if (child.scene3d_near > 0) child.scene3d_near else @max(0.01, g_orbit.radius * 0.01);
+            } else {
+                cam_pos = .{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
+                cam_look = .{ .x = child.scene3d_look_x, .y = child.scene3d_look_y, .z = child.scene3d_look_z };
+                cam_fov = child.scene3d_fov;
+                cam_far = child.scene3d_far;
+                cam_near = child.scene3d_near;
+            }
         }
         if (child.scene3d_light) {
             if (child.scene3d_light_type) |lt| {
@@ -2767,6 +2898,11 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             if (maybe_slot == null) continue;
         } else {
             maybe_slot = lookupGeometry(key);
+            if (maybe_slot == null) {
+                // Host-loaded model (drop-to-view): the parse door stashed verts under
+                // this key; intern them now that we hold the GPU queue. No JS verts.
+                maybe_slot = internFromStash(queue, key);
+            }
             if (maybe_slot == null) {
                 // First mesh per key in this scene must carry verts (the dedup path
                 // only ships verts on the first per key; later ones cache-hit).

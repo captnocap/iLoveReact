@@ -454,7 +454,7 @@ const Scene3DBase: any = ({ ...rest }: any) =>
 // overrides, so cresting a hill shows a hazed horizon instead of the whole map.
 Scene3DBase.Camera = {
   $$typeof: Symbol.for('react.forward_ref'),
-  render({ position, target, fov, far, near, nativeCamera, scene3dCameraNative, ...rest }: any, ref: any) {
+  render({ position, target, fov, far, near, nativeCamera, scene3dCameraNative, orbit, ...rest }: any, ref: any) {
     const [px, py, pz] = _vec3(position, 3, 2, 4);
     const [lx, ly, lz] = _vec3(target, 0, 0, 0);
     return h('View', {
@@ -462,6 +462,11 @@ Scene3DBase.Camera = {
       ref,
       scene3dCamera: true,
       scene3dCameraNative: !!(nativeCamera ?? scene3dCameraNative),
+      // `orbit` hands the view to the host's drop-to-view orbit camera (gpu/3d.zig):
+      // position/look come from host orbit state seeded by __mesh_load_file and driven
+      // by __model_orbit_drag/zoom, so moving the camera never re-renders the cart.
+      // Distinct from nativeCamera, which binds the game FPS camera.
+      scene3dCameraOrbit: !!orbit,
       scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
       scene3dLookX: lx, scene3dLookY: ly, scene3dLookZ: lz,
       scene3dFov: fov ?? 60,
@@ -592,8 +597,28 @@ export function patchDynSlot(slotId: string, verts: number[] | Float32Array, cou
 Scene3DBase.Mesh = ({
   geometry, params, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,
   texture, textureKey, dynamicKey, heights, hfCols, hfRows, waveAmplitude, waveLength, waveSpeed,
-  waveDirection, waveDirX, waveDirZ, wavePhase, groundFormula, groundData, ...rest
+  waveDirection, waveDirX, waveDirZ, wavePhase, groundFormula, groundData, hostKey, ...rest
 }: any) => {
+  // ── host-resident geometry reference (drop-to-view) ──────────────────
+  // `hostKey` names a mesh the HOST already holds — parsed from a dropped GLB/OBJ by
+  // __mesh_load_file and stashed in gpu/3d.zig under that key. No verts cross the
+  // bridge: the node carries only the key, and the host's geo-cache resolves it on the
+  // first draw and redraws it natively every frame. This is the leanest mesh path —
+  // one string, zero geometry. Pair with <Scene3D.Camera orbit /> for the full viewer.
+  if (typeof hostKey === 'string' && hostKey.length > 0) {
+    const [hr, hg, hb] = _hexToRgb(typeof material === 'string' ? material : (material?.color ?? color), [0.8, 0.8, 0.82]);
+    const [hpx, hpy, hpz] = _vec3(position, 0, 0, 0);
+    const [hsx, hsy, hsz] = _scaleVec3(scale);
+    return h('View', {
+      ...rest,
+      scene3dMesh: true,
+      scene3dGeomKey: hostKey,
+      scene3dColorR: hr, scene3dColorG: hg, scene3dColorB: hb,
+      scene3dPosX: hpx, scene3dPosY: hpy, scene3dPosZ: hpz,
+      scene3dScaleX: hsx, scene3dScaleY: hsy, scene3dScaleZ: hsz,
+    });
+  }
+
   // Data-shape ground: a WGSL surface formula + its per-cell ref stream make the
   // mesh synthesise its look per fragment (no baked texture). Only the host-side
   // heightfield path consumes them; a normal textured mesh ignores both.

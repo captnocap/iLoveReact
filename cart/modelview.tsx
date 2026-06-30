@@ -1,0 +1,148 @@
+// modelview — drop a .glb/.obj, view it. Crisp, butter-smooth, native.
+//
+// The whole point of this cart is what it DOESN'T do: it never ships geometry across
+// the JS bridge and never re-renders to move the camera. A dropped file is parsed
+// ENTIRELY in the host (framework/world/mesh_import.zig via __mesh_load_file), uploaded
+// to the GPU once, and handed back as a short intern key. The <Scene3D.Mesh hostKey>
+// node carries only that key — the host redraws the resident mesh every frame. The
+// camera is the host's orbit camera (<Scene3D.Camera orbit>): drag and wheel feed raw
+// deltas straight to gpu/3d.zig (__model_orbit_drag/zoom), which repaints WITHOUT a
+// React render. So no matter how heavy the model, orbiting stays smooth — React does
+// exactly one render per file load and nothing per frame.
+//
+// Verify headless: `./tools/rjit shot modelview` renders the empty drop-prompt; drop a
+// real model under `./tools/rjit dev modelview` to see the live view.
+import { useState, useRef, useEffect } from 'react';
+import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
+import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
+import { callHost } from '@reactjit/runtime/ffi';
+
+const host = globalThis as any;
+
+type Loaded = { key: string; count: number; radius: number; name: string };
+
+/** Parse a dropped file in the host and get back its intern key + stats. Returns null
+ *  if the door is missing (non-V8 host) or the file failed to parse. */
+function loadModelFile(path: string): Loaded | null {
+  const fn = host.__mesh_load_file;
+  if (typeof fn !== 'function') return null;
+  const json = fn(path);
+  if (typeof json !== 'string' || json.length === 0) return null;
+  try {
+    const o = JSON.parse(json);
+    if (!o || typeof o.key !== 'string') return null;
+    const name = path.split('/').pop() || path;
+    return { key: o.key, count: o.count | 0, radius: o.radius || 1, name };
+  } catch {
+    return null;
+  }
+}
+
+const orbitDrag = (dx: number, dy: number) => host.__model_orbit_drag?.(dx, dy);
+const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
+
+export default function ModelView() {
+  const [model, setModel] = useState<Loaded | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Drag state lives in refs, NOT useState: orbiting must not trigger a React render
+  // (the host repaints itself off __model_orbit_drag). A re-render per mouse-move is
+  // exactly the choppiness this design exists to avoid.
+  const draggingRef = useRef(false);
+  const lastRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Open-from-CLI: `RJIT_MODEL=path/to/file.glb ./zig-out/bin/modelview` loads a model
+  // at boot (no drop needed). Also the headless self-shot path —
+  // `RJIT_MODEL=... ./tools/rjit shot modelview` renders the loaded model.
+  useEffect(() => {
+    const path = callHost<string | null>('__env_get', null, 'RJIT_MODEL');
+    if (path) {
+      const loaded = loadModelFile(path);
+      if (loaded) setModel(loaded);
+      else setError(`Could not load ${path}`);
+    }
+  }, []);
+
+  useFileDrop((path) => {
+    const ext = path.toLowerCase();
+    if (!(ext.endsWith('.glb') || ext.endsWith('.gltf') || ext.endsWith('.obj'))) {
+      setError('Unsupported file — drop a .glb, .gltf, or .obj');
+      return;
+    }
+    const loaded = loadModelFile(path);
+    if (loaded) {
+      setModel(loaded);
+      setError(null);
+    } else {
+      setError(`Could not load ${path.split('/').pop()}`);
+    }
+  });
+
+  return (
+    <Box style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#0b0d12' }}>
+      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0b0d12" showAxes={false}>
+        {/* The host owns this camera: position comes from orbit state seeded by the
+            load door and driven by the overlay's drag/wheel — never from props here. */}
+        <Scene3D.Camera orbit fov={50} />
+        {/* A clean object-viewer wants no distance fade. */}
+        <Scene3D.Fog enabled={false} />
+        <Scene3D.AmbientLight color="#6b7488" intensity={1.0} />
+        <Scene3D.DirectionalLight direction={[-0.5, -0.9, -0.4]} color="#ffffff" intensity={1.7} />
+        {model && <Scene3D.Mesh hostKey={model.key} material="#c2c8d2" />}
+      </Scene3D>
+
+      {/* Invisible full-window input layer: orbits on drag, dollies on wheel. It feeds
+          host doors directly and keeps NO React state, so a drag never re-renders. */}
+      <Pressable
+        onMouseDown={(p: any) => {
+          draggingRef.current = true;
+          lastRef.current = { x: p?.x ?? 0, y: p?.y ?? 0 };
+        }}
+        onMouseMove={(p: any) => {
+          if (!draggingRef.current || !lastRef.current) return;
+          const x = p?.x ?? 0;
+          const y = p?.y ?? 0;
+          orbitDrag(x - lastRef.current.x, y - lastRef.current.y);
+          lastRef.current = { x, y };
+        }}
+        onMouseUp={() => {
+          draggingRef.current = false;
+          lastRef.current = null;
+        }}
+        onMouseLeave={() => {
+          draggingRef.current = false;
+          lastRef.current = null;
+        }}
+        onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
+        style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
+      />
+
+      {/* Title strip — only changes on load, so this render is the one-and-only. */}
+      <Row
+        style={{
+          position: 'absolute', left: 0, top: 0, right: 0, height: 34,
+          alignItems: 'center', paddingLeft: 14, paddingRight: 14,
+          backgroundColor: 'rgba(12,14,20,0.72)', borderBottomWidth: 1, borderColor: '#1d2330',
+        }}
+      >
+        <Text style={{ color: '#e8edf6', fontSize: 13, fontWeight: 600 }}>
+          {model ? model.name : 'Model Viewer'}
+        </Text>
+        {model && (
+          <Text style={{ color: '#7d899c', fontSize: 12, marginLeft: 12 }}>
+            {`${(model.count / 3).toLocaleString()} tris · drag to orbit · scroll to zoom`}
+          </Text>
+        )}
+      </Row>
+
+      {/* Center prompt until something is loaded. */}
+      {!model && (
+        <Col style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: '#9aa6ba', fontSize: 22, fontWeight: 600 }}>Drop a model to view</Text>
+          <Text style={{ color: '#5d6878', fontSize: 14, marginTop: 8 }}>.glb · .gltf · .obj — parsed and rendered entirely in the host</Text>
+          {error && <Text style={{ color: '#e2706a', fontSize: 13, marginTop: 16 }}>{error}</Text>}
+        </Col>
+      )}
+    </Box>
+  );
+}
