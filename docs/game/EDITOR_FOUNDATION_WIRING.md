@@ -48,13 +48,49 @@ in the test file header.
 
 ## E — Hot authoring-state index (`framework/editor/`)
 
-☐ *pending worker report* — will include the `editor_bus.append()` → `hot_index.observe(seq,
-confirmed)` hook line + build.zig module/test wiring.
+☐ **`framework/events/editor_bus.zig::append()`** — one line right after the existing
+broadcast near the end:
+```zig
+        if (g_broadcaster) |bc| bc(confirmed);
+        @import("../editor/hot_index.zig").instance().observe(seq, confirmed); // ← ADD
+        return seq;
+```
+(`confirmed` stays valid; `observe` re-parses independently, never frees it. A
+function-pointer alternative is documented in `hot_index.zig` if editor_bus prefers no
+`editor/` import.)
+
+☐ **`framework/v8_ingredients.zig`** (always-on block, after the `editor_bus` entry):
+```zig
+const v8_bindings_hot_index = @import("editor/v8_bindings_hot_index.zig");
+.{ .name = "hot_index", .required = true, .grep_prefix = "", .reg_fn = "registerHotIndex", .mod = v8_bindings_hot_index },
+```
+☐ **`build.zig`** — no production change (reached transitively). For the test: mirror the
+`world_gamefile_writer_test` block, providing `world_compile_cache` + `world_chunk_dirty`
+modules to both the index and test modules, then a `test-hot-index` step. Full block in the
+`// INTEGRATION:` header of `v8_bindings_hot_index.zig` + the test file.
 
 ## H slice 1 — Skeleton schema + bones_loader validator (`framework/skeleton/`)
 
-☐ *pending worker report* — will include the mesh_import.zig fold point (slice 2) + build.zig
-module/test wiring.
+☐ **`build.zig`** — no production change (root reaches the modules transitively). For the test
+(mirrors the mesh-import pattern ~build.zig:964; `bones_loader.zig` pulls in `skeleton.zig` via a
+sibling import, so one module):
+```zig
+const bones_loader_test_mod = b.createModule(.{
+    .root_source_file = b.path("framework/testing/unit/bones_loader.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+});
+bones_loader_test_mod.addImport("bones_loader", b.createModule(.{
+    .root_source_file = b.path("framework/skeleton/bones_loader.zig"),
+    .target = target, .optimize = optimize, .link_libc = true,
+}));
+const bones_loader_test = b.addTest(.{ .name = "bones-loader-test", .root_module = bones_loader_test_mod });
+b.step("test-bones-loader", "Run the skeleton validator unit tests")
+    .dependOn(&b.addRunArtifact(bones_loader_test).step);
+```
+- **Slice-2 fold (NOT this pass):** `mesh_import.zig`'s `parseGlb`/`visitNode`/`nodeMatrix`
+  (~lines 381-423) already walk the glTF node TRS hierarchy — a GLB *is* a bone formation. The
+  slice-2 adapter maps each glTF node → a `Bone` and its mesh → `Meshes.per_bone{bone_id,
+  geometry_key}`, then hands the `Skeleton` to `validate`. No change to `mesh_import.zig` itself.
 
 ## After wiring
 
