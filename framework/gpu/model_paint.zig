@@ -28,6 +28,14 @@ var g_atlas_h: u32 = 0;
 var g_colors: ?[]u8 = null; // facecount*4 rgba — the per-face paint
 var g_rgba: ?[]u8 = null; // atlas_w*atlas_h*4 — the diffuse texture, rebuilt on dirty
 var g_dirty: bool = true;
+// Bumped on every change (paint / new target / clear). The GPU side compares this to
+// know when to re-upload the paint texture — content-hashing the atlas would alias on
+// single-face changes (only a sparse fingerprint is sampled), which made paint appear
+// only after a "threshold" of strokes. A monotonic version never aliases.
+var g_version: u64 = 0;
+pub fn version() u64 {
+    return g_version;
+}
 
 /// Unpainted faces read as this neutral light grey, so a freshly-loaded model looks
 /// the same as the plain shaded viewer until you paint it.
@@ -114,6 +122,7 @@ pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
         verts[vi * 8 + 7] = uv[1];
     }
     g_dirty = true;
+    g_version +%= 1;
 }
 
 pub fn clear() void {
@@ -128,6 +137,7 @@ pub fn clear() void {
     g_atlas_h = 0;
     g_key_hash = 0;
     g_dirty = true;
+    g_version +%= 1;
 }
 
 /// Paint one face. `face` out of range is ignored (a raycast miss passes -1 up the
@@ -140,6 +150,7 @@ pub fn paintFace(face: u32, rgba: [4]u8) void {
     cols[face * 4 + 2] = rgba[2];
     cols[face * 4 + 3] = rgba[3];
     g_dirty = true;
+    g_version +%= 1;
 }
 
 pub const Atlas = struct { rgba: []const u8, w: u32, h: u32 };

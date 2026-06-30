@@ -135,6 +135,12 @@ export default function ModelView() {
         host.__model_paint_face?.(f, c[0], c[1], c[2]);
       }
     }
+    // RJIT_PAINTONE=1 paints exactly ONE face bright red — the proof that a single-face
+    // change shows immediately (the content-hash texture cache used to drop it).
+    if (callHost<string | null>('__env_get', null, 'RJIT_PAINTONE')) {
+      setPaintMode(true);
+      host.__model_paint_face?.(40, 230, 40, 40);
+    }
   }, []);
 
   useFileDrop(applyPath);

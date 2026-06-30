@@ -1726,6 +1726,95 @@ fn getOrCreateTexBindGroup(rgba: []const u8, w: u32, h: u32) ?*wgpu.BindGroup {
     return bg;
 }
 
+// ── Paint target's own texture (in-place updated) ───────────────────────────────
+// The paint atlas is MUTATED every stroke, so it must NOT ride the content-hash cache
+// above: texFingerprint samples only ~512 spread bytes, so a single-face change usually
+// leaves the hash unchanged and the STALE texture is returned — the paint only appears
+// after enough strokes flip a sampled byte (the "threshold"/delayed-apply bug). Instead
+// one persistent texture, re-uploaded in place only when model_paint.version() advances.
+var g_paint_tex: ?*wgpu.Texture = null;
+var g_paint_view: ?*wgpu.TextureView = null;
+var g_paint_bg: ?*wgpu.BindGroup = null;
+var g_paint_tex_w: u32 = 0;
+var g_paint_tex_h: u32 = 0;
+var g_paint_uploaded_ver: u64 = std.math.maxInt(u64);
+
+fn paintBindGroup() ?*wgpu.BindGroup {
+    const a = model_paint.atlas() orelse return null;
+    const device = core.getDevice() orelse return null;
+    const queue = core.getQueue() orelse return null;
+    if (g_paint_tex == null or g_paint_tex_w != a.w or g_paint_tex_h != a.h) {
+        if (g_paint_bg) |bg| bg.release();
+        if (g_paint_view) |v| v.release();
+        if (g_paint_tex) |t| t.destroy();
+        g_paint_bg = null;
+        g_paint_view = null;
+        g_paint_tex = null;
+        const tex = device.createTexture(&.{
+            .label = wgpu.StringView.fromSlice("r3d_paint"),
+            .size = .{ .width = a.w, .height = a.h, .depth_or_array_layers = 1 },
+            .mip_level_count = 1,
+            .sample_count = 1,
+            .dimension = .@"2d",
+            .format = .rgba8_unorm,
+            .usage = wgpu.TextureUsages.texture_binding | wgpu.TextureUsages.copy_dst,
+        }) orelse return null;
+        const view = tex.createView(&.{
+            .format = .rgba8_unorm,
+            .dimension = .@"2d",
+            .base_mip_level = 0,
+            .mip_level_count = 1,
+            .base_array_layer = 0,
+            .array_layer_count = 1,
+            .aspect = .all,
+        }) orelse {
+            tex.destroy();
+            return null;
+        };
+        const sampler = g_diffuse_sampler orelse {
+            view.release();
+            tex.destroy();
+            return null;
+        };
+        const layout_ = g_tex_bind_group_layout orelse {
+            view.release();
+            tex.destroy();
+            return null;
+        };
+        const entries = [_]wgpu.BindGroupEntry{
+            .{ .binding = 0, .texture_view = view },
+            .{ .binding = 1, .sampler = sampler },
+        };
+        const bg = device.createBindGroup(&.{
+            .layout = layout_,
+            .entry_count = entries.len,
+            .entries = &entries,
+        }) orelse {
+            view.release();
+            tex.destroy();
+            return null;
+        };
+        g_paint_tex = tex;
+        g_paint_view = view;
+        g_paint_bg = bg;
+        g_paint_tex_w = a.w;
+        g_paint_tex_h = a.h;
+        g_paint_uploaded_ver = std.math.maxInt(u64); // force the first upload below
+    }
+    const ver = model_paint.version();
+    if (ver != g_paint_uploaded_ver) {
+        queue.writeTexture(
+            &.{ .texture = g_paint_tex.?, .mip_level = 0, .origin = .{}, .aspect = .all },
+            @ptrCast(a.rgba.ptr),
+            a.rgba.len,
+            &.{ .offset = 0, .bytes_per_row = a.w * 4, .rows_per_image = a.h },
+            &.{ .width = a.w, .height = a.h, .depth_or_array_layers = 1 },
+        );
+        g_paint_uploaded_ver = ver;
+    }
+    return g_paint_bg;
+}
+
 fn hashKey(key: []const u8) u64 {
     var h: u64 = 0xcbf29ce484222325;
     for (key) |byte| {
@@ -3004,13 +3093,13 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
         if (child.scene3d_tex_rgba) |rgba| {
             if (getOrCreateTexBindGroup(rgba, child.scene3d_tex_w, child.scene3d_tex_h)) |bg| tex_bg = bg;
         }
-        // Paint target: bind its per-face paint atlas as the diffuse, so each face shows
-        // its painted colour (its verts' UVs were remapped to one atlas texel/face).
+        // Paint target: bind its OWN in-place-updated paint texture as the diffuse, so
+        // each face shows its painted colour (its verts' UVs map to one atlas texel/
+        // face). Uses paintBindGroup, NOT the content-hash cache (which aliases on
+        // single-face changes — the delayed/threshold paint bug).
         if (child.scene3d_geom_key) |gk| {
             if (model_paint.isTarget(hashKey(gk))) {
-                if (model_paint.atlas()) |a| {
-                    if (getOrCreateTexBindGroup(a.rgba, a.w, a.h)) |bg| tex_bg = bg;
-                }
+                if (paintBindGroup()) |bg| tex_bg = bg;
             }
         }
         if (child.scene3d_tex_key) |tk| {
