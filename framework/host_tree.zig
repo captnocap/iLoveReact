@@ -411,6 +411,15 @@ pub fn inheritTypography(parent_id: u32, child_id: u32) void {
     const parent = g_node_by_id.get(parent_id) orelse return;
     const child = g_node_by_id.get(child_id) orelse return;
     if (child.text == null) return;
+    // A TextInput/TextArea/TextEditor parks its controlled `value` in
+    // node.text, so it reads as a bare text instance here — but it is NOT
+    // one. It owns its own typography from its own props (fontSize, family,
+    // weight), exactly like a real <input> carries the UA font rather than
+    // inheriting the surrounding box's. Without this bail, APPEND (and every
+    // parent UPDATE, which re-runs this for all children) stomps the input's
+    // explicit font_size back to the parent's default — so a
+    // `<TextInput style={{ fontSize: 32 }}>` silently painted at 16.
+    if (child.input_id != null) return;
     child.font_size = parent.font_size;
     child.font_family_id = parent.font_family_id;
     child.font_weight = parent.font_weight;
