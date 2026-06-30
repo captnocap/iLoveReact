@@ -207,6 +207,12 @@ pub fn positions() ?[]const f32 {
     return g_positions;
 }
 
+/// Mutable CPU triangle positions for host-native mesh editing. This is the same array
+/// raycast/project read, so a moved vertex is immediately pickable at its new location.
+pub fn positionsMutable() ?[]f32 {
+    return g_positions;
+}
+
 /// Project a world point to viewport pixel (x,y), or null if behind the camera. The exact
 /// inverse of cameraRay (same fov/aspect/basis), so a vertex projects to the pixel its
 /// raycast would shoot back through — screen-nearest vertex/edge picking with zero drift.

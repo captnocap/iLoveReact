@@ -16,6 +16,7 @@ const layout = @import("../layout.zig");
 const effect_assemble = @import("effect_assemble.zig");
 const static_instance_policy = @import("static_instance_policy.zig");
 const model_paint = @import("model_paint.zig");
+const model_source = @import("model_source.zig");
 const mesh_edit = @import("mesh_edit.zig");
 const capsules = @import("capsules.zig");
 const Node = layout.Node;
@@ -408,13 +409,131 @@ var g_paint_fov: f32 = 50;
 var g_paint_vp_w: f32 = 0;
 var g_paint_vp_h: f32 = 0;
 var g_paint_probed: bool = false; // RJIT_PAINTPROBE one-shot guard
+var g_edit_key_hash: u64 = 0;
+var g_edit_verts: ?[]f32 = null; // active displayed mesh, interleaved 8 f32/vert
+var g_edit_count: u32 = 0;
+
+fn clearActiveEditMesh() void {
+    if (g_edit_verts) |v| std.heap.c_allocator.free(v);
+    g_edit_verts = null;
+    g_edit_key_hash = 0;
+    g_edit_count = 0;
+}
+
+fn normalOf(a: [3]f32, b: [3]f32, c: [3]f32) [3]f32 {
+    const ux = b[0] - a[0];
+    const uy = b[1] - a[1];
+    const uz = b[2] - a[2];
+    const vx = c[0] - a[0];
+    const vy = c[1] - a[1];
+    const vz = c[2] - a[2];
+    var n = [3]f32{ uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx };
+    const l = @sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    if (l > 1e-8) {
+        n[0] /= l;
+        n[1] /= l;
+        n[2] /= l;
+    } else {
+        n = .{ 0, 1, 0 };
+    }
+    return n;
+}
+
+fn copyPaintPositionsToEditVerts(first_face: u32, last_face: u32) bool {
+    const verts = g_edit_verts orelse return false;
+    const pos = model_paint.positions() orelse return false;
+    if (g_edit_count == 0 or first_face > last_face) return false;
+    const face_count = @min(g_edit_count / 3, @as(u32, @intCast(pos.len / 9)));
+    if (first_face >= face_count) return false;
+    const hi = @min(last_face, face_count - 1);
+    var f = first_face;
+    while (f <= hi) : (f += 1) {
+        const pb = @as(usize, f) * 9;
+        const a = [3]f32{ pos[pb + 0], pos[pb + 1], pos[pb + 2] };
+        const b = [3]f32{ pos[pb + 3], pos[pb + 4], pos[pb + 5] };
+        const c = [3]f32{ pos[pb + 6], pos[pb + 7], pos[pb + 8] };
+        const n = normalOf(a, b, c);
+        var k: usize = 0;
+        while (k < 3) : (k += 1) {
+            const vi = @as(usize, f) * 3 + k;
+            const dst = vi * 8;
+            const src = pb + k * 3;
+            if (dst + 7 >= verts.len) continue;
+            verts[dst + 0] = pos[src + 0];
+            verts[dst + 1] = pos[src + 1];
+            verts[dst + 2] = pos[src + 2];
+            verts[dst + 3] = n[0];
+            verts[dst + 4] = n[1];
+            verts[dst + 5] = n[2];
+        }
+    }
+    return true;
+}
+
+fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
+    const verts = g_edit_verts orelse return false;
+    if (g_edit_key_hash == 0 or g_edit_count == 0 or first_face > last_face) return false;
+    const first_vert = first_face * 3;
+    const face_count = g_edit_count / 3;
+    if (first_face >= face_count) return false;
+    const hi = @min(last_face, face_count - 1);
+    const vert_count = (hi - first_face + 1) * 3;
+    const start_f32 = @as(usize, first_vert) * 8;
+    const len_f32 = @as(usize, vert_count) * 8;
+    if (start_f32 + len_f32 > verts.len) return false;
+
+    var patched = false;
+    for (&g_host_stash) |*s| {
+        if (!s.present or s.hash != g_edit_key_hash) continue;
+        if (s.verts) |stash_verts| {
+            if (start_f32 + len_f32 <= stash_verts.len) {
+                @memcpy(stash_verts[start_f32 .. start_f32 + len_f32], verts[start_f32 .. start_f32 + len_f32]);
+                patched = true;
+            }
+        }
+    }
+    const queue = core.getQueue();
+    const buf = g_retained_vbuf;
+    if (queue != null and buf != null) {
+        for (g_geo_cache[0..g_geo_cache_len]) |*e| {
+            if (!e.present or e.hash != g_edit_key_hash) continue;
+            if (first_vert + vert_count > e.count) continue;
+            queue.?.writeBuffer(
+                buf.?,
+                e.offset_bytes + @as(u64, first_vert) * @sizeOf(Vertex),
+                @ptrCast(verts[start_f32..].ptr),
+                bu.bytesOfCount(Vertex, vert_count),
+            );
+            patched = true;
+        }
+    }
+    return patched;
+}
+
+fn applyMeshMutation(m: mesh_edit.Mutation) bool {
+    if (!m.changed) return false;
+    if (!copyPaintPositionsToEditVerts(m.first_face, m.last_face)) return false;
+    if (model_paint.positions()) |pos| {
+        _ = model_source.updateGeometryFromDisplayed(pos, m.first_face, m.last_face);
+    }
+    return patchActiveEditMesh(m.first_face, m.last_face);
+}
 
 /// Adopt a freshly-parsed mesh (interleaved verts, 8 f32/vert) as the paint target.
 /// Rewrites its UVs to the per-face atlas in place, so the SAME verts then uploaded by
 /// stashHostMesh carry the paint mapping. Keyed by the intern key so the draw can find
 /// it. Called by the load door before stashing.
 pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
+    clearActiveEditMesh();
     model_paint.setTarget(hashKey(key), verts, count);
+    const need = @as(usize, count) * 8;
+    if (verts.len >= need) {
+        g_edit_verts = std.heap.c_allocator.dupe(f32, verts[0..need]) catch null;
+        if (g_edit_verts != null) {
+            g_edit_key_hash = hashKey(key);
+            g_edit_count = count;
+        }
+    }
     mesh_edit.reset(); // topology changed (load or quality re-mesh) → rebuild lazily
 }
 
@@ -426,6 +545,8 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
 // gate + tool read; the gesture state itself lives in the engine event loop.
 var g_me_capture: bool = false;
 var g_me_focus_tool: bool = false;
+const GizmoTool = enum(u8) { move = 0, scale = 1, rotate = 2 };
+var g_gizmo_tool: GizmoTool = .move;
 pub fn setMeshEditCapture(on: bool) void {
     g_me_capture = on;
 }
@@ -437,6 +558,16 @@ pub fn setMeshEditFocusTool(on: bool) void {
 }
 pub fn meshEditFocusTool() bool {
     return g_me_focus_tool;
+}
+pub fn setMeshGizmoTool(t: u8) void {
+    g_gizmo_tool = switch (t) {
+        1 => .scale,
+        2 => .rotate,
+        else => .move,
+    };
+}
+pub fn meshGizmoToolRaw() u8 {
+    return @intFromEnum(g_gizmo_tool);
 }
 /// The current selection mode as a raw int (0 none, 1 vertex, 2 edge, 3 face) — the engine
 /// reads it to decide what a left press does (select vs nothing).
@@ -480,6 +611,11 @@ const OV_ORANGE = [3]f32{ 1.0, 0.52, 0.16 }; // selected
 const OV_VERT = [3]f32{ 0.95, 0.97, 1.0 }; // unselected vertex fill
 const OV_HALO = [4]f32{ 0.02, 0.03, 0.07, 0.95 }; // dark outline behind every marker
 const OV_MARQUEE = [4]f32{ 0.62, 0.78, 1.0, 0.98 };
+const GIZMO_X = [3]f32{ 1.0, 0.18, 0.16 };
+const GIZMO_Y = [3]f32{ 0.28, 0.9, 0.28 };
+const GIZMO_Z = [3]f32{ 0.3, 0.55, 1.0 };
+const GIZMO_AXIS_PX: f32 = 86;
+const GIZMO_HIT_PX: f32 = 13;
 const OV_MAX_VERT_DOTS: u32 = 80000; // beyond this draw only selected dots (wireframe still
 // shows topology) — a generous fps guard, not a data cap.
 
@@ -492,6 +628,180 @@ fn overlayDot(px: f32, py: f32, r: f32, g: f32, b: f32, size: f32) void {
 fn overlayLine(ax: f32, ay: f32, bx: f32, by: f32, r: f32, g: f32, b: f32, w: f32) void {
     capsules.drawCapsule(ax, ay, bx, by, OV_HALO[0], OV_HALO[1], OV_HALO[2], OV_HALO[3], w + 2.5);
     capsules.drawCapsule(ax, ay, bx, by, r, g, b, 1.0, w);
+}
+
+fn axisVec(axis: i32) [3]f32 {
+    return switch (axis) {
+        0 => .{ 1, 0, 0 },
+        1 => .{ 0, 1, 0 },
+        else => .{ 0, 0, 1 },
+    };
+}
+fn axisColor(axis: i32) [3]f32 {
+    return switch (axis) {
+        0 => GIZMO_X,
+        1 => GIZMO_Y,
+        else => GIZMO_Z,
+    };
+}
+fn vadd(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ a[0] + b[0], a[1] + b[1], a[2] + b[2] };
+}
+fn vsub(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ a[0] - b[0], a[1] - b[1], a[2] - b[2] };
+}
+fn vmul(a: [3]f32, s: f32) [3]f32 {
+    return .{ a[0] * s, a[1] * s, a[2] * s };
+}
+fn vdot(a: [3]f32, b: [3]f32) f32 {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+fn vcross(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
+}
+fn vnorm(a: [3]f32) [3]f32 {
+    const l = @sqrt(vdot(a, a));
+    if (l < 1e-8) return .{ 0, 0, 0 };
+    return .{ a[0] / l, a[1] / l, a[2] / l };
+}
+fn worldUnitsPerPixel(cam: model_paint.Camera, p: [3]f32) f32 {
+    const fwd = vnorm(vsub(cam.target, cam.eye));
+    const rel = vsub(p, cam.eye);
+    const z = @max(0.001, vdot(rel, fwd));
+    const span = 2.0 * z * @tan(cam.fov_deg * std.math.pi / 180.0 * 0.5);
+    return if (g_paint_vp_h > 1) span / g_paint_vp_h else 0.01;
+}
+fn axisEndpoint(cam: model_paint.Camera, pivot: [3]f32, axis: i32) ?[2][2]f32 {
+    const p0 = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return null;
+    const len = worldUnitsPerPixel(cam, pivot) * GIZMO_AXIS_PX;
+    const p1w = vadd(pivot, vmul(axisVec(axis), len));
+    const p1 = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, p1w) orelse return null;
+    return .{ p0, p1 };
+}
+fn screenAxisDir(cam: model_paint.Camera, pivot: [3]f32, axis: i32) [2]f32 {
+    const ep = axisEndpoint(cam, pivot, axis) orelse return .{ 1, 0 };
+    const dx = ep[1][0] - ep[0][0];
+    const dy = ep[1][1] - ep[0][1];
+    const l = @sqrt(dx * dx + dy * dy);
+    if (l < 4) return .{ 1, 0 };
+    return .{ dx / l, dy / l };
+}
+fn segDist2(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) f32 {
+    const vx = bx - ax;
+    const vy = by - ay;
+    const wx = px - ax;
+    const wy = py - ay;
+    const len2 = vx * vx + vy * vy;
+    const t = if (len2 > 1e-6) std.math.clamp((wx * vx + wy * vy) / len2, 0.0, 1.0) else 0.0;
+    const cx = ax + t * vx;
+    const cy = ay + t * vy;
+    const dx = px - cx;
+    const dy = py - cy;
+    return dx * dx + dy * dy;
+}
+fn ringBasis(axis: [3]f32) [2][3]f32 {
+    const ref: [3]f32 = if (@abs(axis[1]) < 0.85) .{ 0, 1, 0 } else .{ 1, 0, 0 };
+    const u = vnorm(vcross(axis, ref));
+    return .{ u, vnorm(vcross(axis, u)) };
+}
+fn drawGizmoRing(cam: model_paint.Camera, pivot: [3]f32, axis: i32, ox: f32, oy: f32) void {
+    const col = axisColor(axis);
+    const av = axisVec(axis);
+    const basis = ringBasis(av);
+    const r = worldUnitsPerPixel(cam, pivot) * GIZMO_AXIS_PX * 0.82;
+    const steps: u32 = 48;
+    var prev: ?[2]f32 = null;
+    var i: u32 = 0;
+    while (i <= steps) : (i += 1) {
+        const t = (@as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(steps))) * std.math.pi * 2.0;
+        const p = vadd(pivot, vadd(vmul(basis[0], @cos(t) * r), vmul(basis[1], @sin(t) * r)));
+        const sp = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, p) orelse {
+            prev = null;
+            continue;
+        };
+        if (prev) |q| overlayLine(q[0] + ox, q[1] + oy, sp[0] + ox, sp[1] + oy, col[0], col[1], col[2], 3.0);
+        prev = sp;
+    }
+}
+fn ringHitDist2(cam: model_paint.Camera, pivot: [3]f32, axis: i32, mx: f32, my: f32) f32 {
+    const av = axisVec(axis);
+    const basis = ringBasis(av);
+    const r = worldUnitsPerPixel(cam, pivot) * GIZMO_AXIS_PX * 0.82;
+    const steps: u32 = 48;
+    var prev: ?[2]f32 = null;
+    var best: f32 = 1.0e12;
+    var i: u32 = 0;
+    while (i <= steps) : (i += 1) {
+        const t = (@as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(steps))) * std.math.pi * 2.0;
+        const p = vadd(pivot, vadd(vmul(basis[0], @cos(t) * r), vmul(basis[1], @sin(t) * r)));
+        const sp = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, p) orelse {
+            prev = null;
+            continue;
+        };
+        if (prev) |q| best = @min(best, segDist2(mx, my, q[0], q[1], sp[0], sp[1]));
+        prev = sp;
+    }
+    return best;
+}
+
+fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    if (meshEditModeRaw() == 0) return;
+    const pivot = mesh_edit.selectionPivot() orelse return;
+    const pc = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return;
+    overlayDot(pc[0] + ox, pc[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 10);
+    var axis: i32 = 0;
+    while (axis < 3) : (axis += 1) {
+        if (g_gizmo_tool == .rotate) {
+            drawGizmoRing(cam, pivot, axis, ox, oy);
+        } else if (axisEndpoint(cam, pivot, axis)) |ep| {
+            const c = axisColor(axis);
+            overlayLine(ep[0][0] + ox, ep[0][1] + oy, ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], 5.0);
+            overlayDot(ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], if (g_gizmo_tool == .scale) 14 else 11);
+        }
+    }
+}
+
+pub fn meshGizmoHit(mx: f32, my: f32) i32 {
+    if (!g_me_capture or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return -1;
+    const pivot = mesh_edit.selectionPivot() orelse return -1;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    var best_axis: i32 = -1;
+    var best_d2: f32 = GIZMO_HIT_PX * GIZMO_HIT_PX;
+    var axis: i32 = 0;
+    while (axis < 3) : (axis += 1) {
+        const d2 = if (g_gizmo_tool == .rotate) blk: {
+            break :blk ringHitDist2(cam, pivot, axis, mx, my);
+        } else blk: {
+            const ep = axisEndpoint(cam, pivot, axis) orelse break :blk 1.0e12;
+            break :blk segDist2(mx, my, ep[0][0], ep[0][1], ep[1][0], ep[1][1]);
+        };
+        if (d2 < best_d2) {
+            best_d2 = d2;
+            best_axis = axis;
+        }
+    }
+    return best_axis;
+}
+
+pub fn meshGizmoDrag(axis: i32, dx: f32, dy: f32) bool {
+    if (axis < 0 or axis > 2 or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
+    const pivot = mesh_edit.selectionPivot() orelse return false;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const dir = screenAxisDir(cam, pivot, axis);
+    const px = dx * dir[0] + dy * dir[1];
+    const av = axisVec(axis);
+    const m = switch (g_gizmo_tool) {
+        .move => mesh_edit.translateSelection(vmul(av, px * worldUnitsPerPixel(cam, pivot))),
+        .scale => mesh_edit.scaleSelectionAxis(av, pivot, 1.0 + px * 0.012),
+        .rotate => mesh_edit.rotateSelectionAxis(av, pivot, px * 0.018),
+    };
+    return applyMeshMutation(m);
+}
+
+pub fn meshGizmoNudge(axis: u8, amount: f32) bool {
+    if (axis > 2 or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
+    const m = mesh_edit.translateSelection(vmul(axisVec(axis), amount));
+    return applyMeshMutation(m);
 }
 
 /// Draw the editor overlay (vertex dots / edge highlights / marquee box) as screen-space
@@ -542,6 +852,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
             overlayLine(a[0] + ox, a[1] + oy, b[0] + ox, b[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 4.0);
         }
     }
+    drawGizmoOverlay(cam, ox, oy);
 }
 /// Marquee (rubber-band) select every element inside the screen rect (Alt+drag).
 pub fn meshEditBox(x0: f32, y0: f32, x1: f32, y1: f32, additive: bool) i32 {
@@ -1595,6 +1906,7 @@ pub fn frameCleanup() void {
 pub fn resetForReload() void {
     g_geo_cache_len = 0;
     g_retained_top = 0;
+    clearActiveEditMesh();
     for (&g_geo_cache) |*e| e.* = .{};
     g_static_inst_cache_len = 0;
     g_static_inst_top = 0;
@@ -2645,10 +2957,16 @@ fn stageStaticSlimBytes(queue: *wgpu.Queue, idata: []const f32, stride: u32, n: 
         while (k < chunk) : (k += 1) {
             const src = @as(usize, done + k) * stride;
             g_slim_inst_scratch[k] = makeSlimInstance(
-                idata[src + 0], idata[src + 1], idata[src + 2], // pos
-                idata[src + 3], idata[src + 4], // pitch, yaw (rz at +5 dropped)
-                idata[src + 6], idata[src + 7], // wide, len (sz at +8 == wide, dropped)
-                idata[src + 9], idata[src + 10], idata[src + 11], // root rgb
+                idata[src + 0],
+                idata[src + 1],
+                idata[src + 2], // pos
+                idata[src + 3],
+                idata[src + 4], // pitch, yaw (rz at +5 dropped)
+                idata[src + 6],
+                idata[src + 7], // wide, len (sz at +8 == wide, dropped)
+                idata[src + 9],
+                idata[src + 10],
+                idata[src + 11], // root rgb
             );
         }
         bu.writeTypedBuffer(queue, g_slim_static_buf.?, dst_offset + @as(u64, done) * @sizeOf(SlimInstance), SlimInstance, g_slim_inst_scratch[0..chunk]);
@@ -3064,12 +3382,19 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                         const cb: usize = if (stride >= 12) 9 else 6;
                         const idx: usize = @intCast(sh_top / @sizeOf(InstanceData));
                         sh_scratch[idx] = makeInstance(
-                            idata[base + 0], idata[base + 1], idata[base + 2],
+                            idata[base + 0],
+                            idata[base + 1],
+                            idata[base + 2],
                             if (stride >= 12) idata[base + 3] else 0,
                             if (stride >= 12) idata[base + 4] else 0,
                             if (stride >= 12) idata[base + 5] else 0,
-                            idata[base + sb + 0], idata[base + sb + 1], idata[base + sb + 2],
-                            idata[base + cb + 0], idata[base + cb + 1], idata[base + cb + 2], 1.0,
+                            idata[base + sb + 0],
+                            idata[base + sb + 1],
+                            idata[base + sb + 2],
+                            idata[base + cb + 0],
+                            idata[base + cb + 1],
+                            idata[base + cb + 2],
+                            1.0,
                         );
                         sh_top += @sizeOf(InstanceData);
                         grp_cnt += 1;
@@ -3078,10 +3403,19 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
             } else if (sh_top + @sizeOf(InstanceData) <= sh_cap) {
                 const idx: usize = @intCast(sh_top / @sizeOf(InstanceData));
                 sh_scratch[idx] = makeInstance(
-                    c.scene3d_pos_x, c.scene3d_pos_y, c.scene3d_pos_z,
-                    c.scene3d_rot_x, c.scene3d_rot_y, c.scene3d_rot_z,
-                    c.scene3d_scale_x, c.scene3d_scale_y, c.scene3d_scale_z,
-                    c.scene3d_color_r, c.scene3d_color_g, c.scene3d_color_b, 1.0,
+                    c.scene3d_pos_x,
+                    c.scene3d_pos_y,
+                    c.scene3d_pos_z,
+                    c.scene3d_rot_x,
+                    c.scene3d_rot_y,
+                    c.scene3d_rot_z,
+                    c.scene3d_scale_x,
+                    c.scene3d_scale_y,
+                    c.scene3d_scale_z,
+                    c.scene3d_color_r,
+                    c.scene3d_color_g,
+                    c.scene3d_color_b,
+                    1.0,
                 );
                 sh_top += @sizeOf(InstanceData);
                 grp_cnt += 1;
@@ -3447,10 +3781,16 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
                             const base = @as(usize, ifirst + ii) * stride;
                             const fi: usize = @intCast(slim_inst_top / @sizeOf(SlimInstance));
                             slim_inst_scratch[fi] = makeSlimInstance(
-                                idata[base + 0], idata[base + 1], idata[base + 2],
-                                idata[base + 3], idata[base + 4],
-                                idata[base + 6], idata[base + 7],
-                                idata[base + 9], idata[base + 10], idata[base + 11],
+                                idata[base + 0],
+                                idata[base + 1],
+                                idata[base + 2],
+                                idata[base + 3],
+                                idata[base + 4],
+                                idata[base + 6],
+                                idata[base + 7],
+                                idata[base + 9],
+                                idata[base + 10],
+                                idata[base + 11],
                             );
                             slim_inst_top += @sizeOf(SlimInstance);
                             fcount += 1;

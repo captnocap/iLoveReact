@@ -21,6 +21,7 @@ const latches = @import("state/latches.zig");
 const animations = @import("gpu/animations.zig");
 const scene3d = @import("gpu/3d.zig");
 const mesh_import = @import("world/mesh_import.zig");
+const model_source = @import("gpu/model_source.zig");
 
 // Retained FULL-RES source mesh + its path, so the live quality slider can re-decimate
 // from the original at any level (model_set_quality) without re-reading the file.
@@ -30,62 +31,6 @@ const mesh_import = @import("world/mesh_import.zig");
 // writes back through g_face_to_source (displayed face → source face) into here, and a
 // quality change re-derives the displayed colours from here. So paint survives every
 // quality change and every LoD is just a projection of this one paint.
-var g_source_verts: ?[]f32 = null;
-var g_source_count: u32 = 0;
-var g_source_path: ?[]u8 = null;
-var g_source_colors: ?[]u8 = null; // g_source_count*4 rgba — the authoritative paint
-var g_face_to_source: ?[]u32 = null; // current displayed face → source face (identity at full-res)
-
-fn retainSource(path: []const u8, verts: []const f32, count: u32) void {
-    if (g_source_verts) |v| std.heap.c_allocator.free(v);
-    if (g_source_path) |p| std.heap.c_allocator.free(p);
-    if (g_source_colors) |sc| std.heap.c_allocator.free(sc);
-    if (g_face_to_source) |m| std.heap.c_allocator.free(m);
-    g_source_verts = std.heap.c_allocator.dupe(f32, verts) catch null;
-    g_source_path = std.heap.c_allocator.dupe(u8, path) catch null;
-    g_source_count = if (g_source_verts != null) count else 0;
-
-    // Fresh paint = all default grey; the displayed mesh starts as the source itself,
-    // so the face→source map is the identity.
-    const fc = count / 3;
-    g_source_colors = std.heap.c_allocator.alloc(u8, @as(usize, fc) * 4) catch null;
-    if (g_source_colors) |cols| {
-        var i: usize = 0;
-        while (i < fc) : (i += 1) {
-            cols[i * 4 + 0] = scene3d.DEFAULT_FACE[0];
-            cols[i * 4 + 1] = scene3d.DEFAULT_FACE[1];
-            cols[i * 4 + 2] = scene3d.DEFAULT_FACE[2];
-            cols[i * 4 + 3] = scene3d.DEFAULT_FACE[3];
-        }
-    }
-    g_face_to_source = std.heap.c_allocator.alloc(u32, fc) catch null;
-    if (g_face_to_source) |m| {
-        var i: u32 = 0;
-        while (i < fc) : (i += 1) m[i] = i;
-    }
-}
-
-/// Replace the current displayed→source face map (taking ownership of a copy of `m`).
-fn setFaceMap(m: []const u32) void {
-    if (g_face_to_source) |old| std.heap.c_allocator.free(old);
-    g_face_to_source = std.heap.c_allocator.dupe(u32, m) catch null;
-}
-
-/// Write a painted DISPLAYED face's colour back to the authoritative source paint
-/// (displayed face → source face via the current map), so it survives quality changes.
-fn writeSourceColor(displayed_face: i32, r: u8, g: u8, b: u8) void {
-    if (displayed_face < 0) return;
-    const map = g_face_to_source orelse return;
-    const cols = g_source_colors orelse return;
-    const df: usize = @intCast(displayed_face);
-    if (df >= map.len) return;
-    const sf = map[df];
-    if (@as(usize, sf) * 4 + 3 >= cols.len) return;
-    cols[sf * 4 + 0] = r;
-    cols[sf * 4 + 1] = g;
-    cols[sf * 4 + 2] = b;
-    cols[sf * 4 + 3] = 255;
-}
 const system_signals = @import("ifttt/system_signals.zig");
 const selection_watch = @import("ifttt/selection_watch.zig");
 const event_bus = @import("diag/event_bus.zig");
@@ -311,7 +256,7 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 
     // Keep the pristine full-res mesh for the quality slider (before setPaintTarget
     // rewrites UVs — positions are untouched, but copy now to be unambiguous).
-    retainSource(path, mesh.verts, mesh.vert_count);
+    model_source.retain(path, mesh.verts, mesh.vert_count);
 
     // Adopt this mesh as the paint target FIRST — it rewrites the verts' UVs to the
     // per-face paint atlas in place, so the stash (next) ships the paint-ready UVs.
@@ -447,6 +392,25 @@ fn hostMeshEditFocus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     scene3d.setMeshEditFocusTool((argToI32(info, 0) orelse 0) != 0);
 }
 
+/// __mesh_gizmo_tool(t) — set transform sub-tool: 0 move, 1 scale, 2 rotate.
+fn hostMeshGizmoTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const t: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 2));
+    scene3d.setMeshGizmoTool(t);
+    state.markDirty();
+}
+
+/// __mesh_gizmo_nudge(axis, amount) → bool. Headless/test hook: translate the active
+/// selection along X/Y/Z without needing a mouse drag or captured camera.
+fn hostMeshGizmoNudge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const axis: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 2));
+    const amount: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const ok = scene3d.meshGizmoNudge(axis, amount);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __mesh_edit_snapshot() — save the selection before an instant mousedown pick.
 fn hostMeshEditSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     _ = info_c;
@@ -496,7 +460,7 @@ fn hostModelPaintAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     const b: u8 = @intCast(std.math.clamp(argToI32(info, 4) orelse 0, 0, 255));
     const face = scene3d.paintAt(x, y, r, g, b);
     if (face >= 0) {
-        writeSourceColor(face, r, g, b); // keep the source paint authoritative
+        model_source.writeColor(face, r, g, b); // keep the source paint authoritative
         state.markDirty();
     }
     setReturnNumber(info, if (face >= 0) 1 else 0);
@@ -512,7 +476,7 @@ fn hostModelPaintFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     const b: u8 = @intCast(std.math.clamp(argToI32(info, 3) orelse 0, 0, 255));
     const ok = scene3d.paintFaceByIndex(face, r, g, b);
     if (ok) {
-        writeSourceColor(@intCast(face), r, g, b); // source-authoritative, like paint_at
+        model_source.writeColor(@intCast(face), r, g, b); // source-authoritative, like paint_at
         state.markDirty();
     }
     setReturnNumber(info, if (ok) 1 else 0);
@@ -558,13 +522,13 @@ fn hostFileSha256(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const grid: u32 = @intCast(std.math.clamp(argToI32(info, 0) orelse 64, 2, 1024));
-    const src = g_source_verts orelse {
+    const src = model_source.verts() orelse {
         setReturnString(info, "");
         return;
     };
-    const base = g_source_path orelse "model";
+    const base = model_source.path() orelse "model";
 
-    var dec = mesh_import.decimateExpanded(std.heap.c_allocator, src, g_source_count, grid) catch {
+    var dec = mesh_import.decimateExpanded(std.heap.c_allocator, src, model_source.count(), grid) catch {
         setReturnString(info, "");
         return;
     };
@@ -585,7 +549,7 @@ fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 
     // Carry the authoritative source paint down onto this level: each new face takes the
     // colour of the source face it came from. So lowering quality keeps your paint.
-    if (g_source_colors) |src_cols| {
+    if (model_source.colors()) |src_cols| {
         const nfaces = dec.face_to_source.len;
         if (std.heap.c_allocator.alloc(u8, nfaces * 4)) |carried| {
             defer std.heap.c_allocator.free(carried);
@@ -600,7 +564,7 @@ fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
             scene3d.applyPaintColors(carried);
         } else |_| {}
     }
-    setFaceMap(dec.face_to_source);
+    model_source.setFaceMap(dec.face_to_source);
     state.markDirty();
 
     var buf: std.ArrayList(u8) = .{};
@@ -1310,6 +1274,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_box", hostMeshEditBox);
     v8_runtime.registerHostFn("__mesh_edit_capture", hostMeshEditCapture);
     v8_runtime.registerHostFn("__mesh_edit_focus", hostMeshEditFocus);
+    v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
+    v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);

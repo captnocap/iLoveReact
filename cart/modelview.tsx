@@ -66,6 +66,7 @@ const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
 type SelInfo = { mode: number; verts: number; edges: number; sel: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 const meshClearSel = () => host.__mesh_edit_clear?.();
+const meshGizmoTool = (t: number) => host.__mesh_gizmo_tool?.(t);
 // Hand the model-editor input loop to the host (native orbit/select/marquee/zoom/focus,
 // zero JS per event), and toggle the Focus tool (left-drag pans the pivot).
 const meshCapture = (on: boolean) => host.__mesh_edit_capture?.(on ? 1 : 0);
@@ -79,6 +80,7 @@ const readSelInfo = (): SelInfo | null => {
   }
 };
 const SEL_MODES = ['Object', 'Vertex', 'Edge', 'Face'];
+const GIZMO_TOOLS = ['Move', 'Scale', 'Rotate'];
 // Re-decimate the model to clustering resolution `grid` (8..256, higher = more detail)
 // and return the new {key,count}, or null. The host re-meshes from the retained full-res
 // source — nothing but the key + count crosses the bridge.
@@ -121,6 +123,7 @@ export default function ModelView() {
   const [paintMode, setPaintMode] = useState(false);
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
   const [selMode, setSelMode] = useState(0); // 0 view · 1 vertex · 2 edge · 3 face
+  const [gizmoTool, setGizmoTool] = useState(0); // 0 move · 1 scale · 2 rotate
   const [selInfo, setSelInfo] = useState<SelInfo>({ mode: 0, verts: 0, edges: 0, sel: 0 });
   const [color, setColor] = useState<RGB>(PALETTE[0]);
   const [quality, setQuality] = useState(1); // slider 0..1; 1 = full detail on load
@@ -182,6 +185,10 @@ export default function ModelView() {
     meshSetMode(m);
     setSelInfo(readSelInfo() ?? { mode: m, verts: 0, edges: 0, sel: 0 });
   };
+  const chooseGizmoTool = (t: number) => {
+    setGizmoTool(t);
+    meshGizmoTool(t);
+  };
   // Paint and Focus are tools too — turning one on drops the mesh-select mode back to view
   // so only one tool owns the drag at a time. The Focus tool flag also goes to the host
   // (it owns the left-drag = pan-pivot gesture natively).
@@ -193,6 +200,9 @@ export default function ModelView() {
     w: () => setWire((v) => !v), W: () => setWire((v) => !v),
     p: togglePaint, P: togglePaint,
     f: toggleFocus, F: toggleFocus,
+    g: () => chooseGizmoTool(0), G: () => chooseGizmoTool(0),
+    s: () => chooseGizmoTool(1), S: () => chooseGizmoTool(1),
+    r: () => chooseGizmoTool(2), R: () => chooseGizmoTool(2),
     '1': () => chooseSelMode(1), '2': () => chooseSelMode(2), '3': () => chooseSelMode(3),
     Escape: () => { if (selMode !== 0) { meshClearSel(); setSelInfo(readSelInfo() ?? selInfo); } },
   });
@@ -246,6 +256,12 @@ export default function ModelView() {
     if (path) applyPath(path);
     // RJIT_WIRE=1 boots in wireframe mode — the headless self-shot path for it.
     if (callHost<string | null>('__env_get', null, 'RJIT_WIRE')) setWire(true);
+    // RJIT_GIZMO=move|scale|rotate (or 0|1|2) selects the transform sub-tool at boot.
+    const gt = callHost<string | null>('__env_get', null, 'RJIT_GIZMO');
+    if (gt) {
+      const t = gt === 'scale' ? 1 : gt === 'rotate' ? 2 : Number(gt) || 0;
+      chooseGizmoTool(Math.max(0, Math.min(2, t)));
+    }
     // RJIT_ZOOM=N dollies the camera in N notches at boot — the headless way to prove
     // the wireframe stays locked to the surface when you get in close.
     const zoom = Number(callHost<string | null>('__env_get', null, 'RJIT_ZOOM') ?? 0);
@@ -289,6 +305,15 @@ export default function ModelView() {
     if (sf != null) {
       host.__mesh_edit_select_face?.(Number(sf) || 0, 0);
       setSelMode(3);
+      setSelInfo(readSelInfo() ?? { mode: 3, verts: 0, edges: 0, sel: 1 });
+    }
+    // RJIT_NUDGE=x,0.25 (or y/z) translates the active selection headlessly after
+    // index-based selection. It proves host-native geometry mutation without a mouse drag.
+    const nudge = callHost<string | null>('__env_get', null, 'RJIT_NUDGE');
+    if (nudge) {
+      const [axisName, amountText] = nudge.split(',');
+      const axis = axisName === 'y' ? 1 : axisName === 'z' ? 2 : 0;
+      host.__mesh_gizmo_nudge?.(axis, Number(amountText) || 0);
       setSelInfo(readSelInfo() ?? { mode: 3, verts: 0, edges: 0, sel: 1 });
     }
     // RJIT_MESHMODE=1|2|3 enters vertex/edge/face mode at boot — the headless proof that
@@ -348,7 +373,7 @@ export default function ModelView() {
               : focusMode
                 ? `${(model.count / 3).toLocaleString()} tris · drag to pan focus · double-click to recenter`
                 : selMode !== 0
-                  ? `${SEL_MODES[selMode]} · ${selInfo.sel} selected · click · shift-click adds · drag = box · middle-drag orbits`
+                  ? `${SEL_MODES[selMode]} · ${GIZMO_TOOLS[gizmoTool]} gizmo · ${selInfo.sel} selected · click · shift-click adds · drag = box · middle-drag orbits`
                   : `${(model.count / 3).toLocaleString()} tris · middle-drag orbits · wheel zoom · double-click recenter`}
           </Text>
         )}
@@ -467,6 +492,25 @@ export default function ModelView() {
           })}
           {selMode !== 0 && (
             <>
+              <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
+              {GIZMO_TOOLS.map((label, t) => {
+                const active = gizmoTool === t;
+                const key = t === 0 ? 'G' : t === 1 ? 'S' : 'R';
+                return (
+                  <Pressable
+                    key={label}
+                    onPress={() => chooseGizmoTool(t)}
+                    tooltip={`${label} gizmo (${key})`}
+                    style={{
+                      paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                      backgroundColor: active ? '#42305f' : '#16233aee',
+                      borderWidth: 1, borderColor: active ? '#8a6ac0' : '#2c4a6a',
+                    }}
+                  >
+                    <Text style={{ color: active ? '#f0eaff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>{label}</Text>
+                  </Pressable>
+                );
+              })}
               <Box style={{ flexGrow: 1 }} />
               <Text style={{ color: '#7d899c', fontSize: 12, fontFamily: 'monospace' }}>
                 {`${selInfo.sel} sel · ${selMode === 1 ? `${selInfo.verts} verts` : selMode === 2 ? `${selInfo.edges} edges` : `${(model.count / 3).toLocaleString()} faces`}`}

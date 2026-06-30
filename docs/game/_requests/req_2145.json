@@ -13,6 +13,12 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-06-30T11:33:42.639Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Continuing the modelview mesh-editor arc from /tmp/handoff-20260630-113036-modelview-gizmo-reshape-mesh-by-pulling-bending.md; focusing on the remaining host-native transform gizmo slice: handles, hit-test, selection mutation, geometry re-upload, and verification."
     }
   ]
 }

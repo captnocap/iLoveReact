@@ -24,6 +24,11 @@ const model_paint = @import("model_paint.zig");
 const alloc = std.heap.c_allocator;
 
 pub const Mode = enum(u8) { none = 0, vertex = 1, edge = 2, face = 3 };
+pub const Mutation = struct {
+    changed: bool = false,
+    first_face: u32 = 0,
+    last_face: u32 = 0,
+};
 
 /// Selection orange (matches the Studio's selectFaceColor), blended 0.7 over a face's base.
 const SELECT_RGB: [3]f32 = .{ 255, 138, 61 };
@@ -43,6 +48,7 @@ var g_vert_count: u32 = 0;
 var g_corner_vert: ?[]u32 = null; // facecount*3 → logical vertex index
 var g_edges: ?[]u32 = null; // edgecount*2 → logical vertex indices (a<b)
 var g_edge_count: u32 = 0;
+var g_affect_vert: ?[]bool = null; // scratch: logical verts affected by the active selection
 
 // ── Selection sets (one per element kind; modes keep their own) ──────────────────────
 var g_sel_vert: ?[]bool = null;
@@ -135,6 +141,7 @@ pub fn reset() void {
     if (g_verts) |v| alloc.free(v);
     if (g_corner_vert) |c| alloc.free(c);
     if (g_edges) |e| alloc.free(e);
+    if (g_affect_vert) |s| alloc.free(s);
     if (g_sel_vert) |s| alloc.free(s);
     if (g_sel_edge) |s| alloc.free(s);
     if (g_sel_face) |s| alloc.free(s);
@@ -143,6 +150,7 @@ pub fn reset() void {
     g_verts = null;
     g_corner_vert = null;
     g_edges = null;
+    g_affect_vert = null;
     g_sel_vert = null;
     g_sel_edge = null;
     g_sel_face = null;
@@ -237,6 +245,13 @@ fn ensureTopology() bool {
     const fc = model_paint.faceCount();
     if (fc == 0) return false;
     if (g_built_for == fc and g_verts != null) return true;
+
+    var old_face_sel: ?[]bool = null;
+    if (g_sel_face) |s| {
+        if (s.len == fc) old_face_sel = alloc.dupe(bool, s) catch null;
+    }
+    defer if (old_face_sel) |s| alloc.free(s);
+
     reset();
 
     const pos = model_paint.positions() orelse return false;
@@ -289,9 +304,15 @@ fn ensureTopology() bool {
     g_sel_vert = alloc.alloc(bool, g_vert_count) catch return false;
     g_sel_edge = alloc.alloc(bool, g_edge_count) catch return false;
     g_sel_face = alloc.alloc(bool, fc) catch return false;
+    g_affect_vert = alloc.alloc(bool, g_vert_count) catch return false;
     @memset(g_sel_vert.?, false);
     @memset(g_sel_edge.?, false);
     @memset(g_sel_face.?, false);
+    @memset(g_affect_vert.?, false);
+    if (old_face_sel) |old| {
+        if (old.len == g_sel_face.?.len) @memcpy(g_sel_face.?, old);
+    }
+    if (g_mode == .face) applyFaceHighlight();
     return true;
 }
 
@@ -309,6 +330,175 @@ fn addEdge(emap: *std.AutoHashMapUnmanaged(u64, void), edges: *std.ArrayListUnma
 fn vertPos(i: u32) [3]f32 {
     const v = g_verts.?;
     return .{ v[i * 3 + 0], v[i * 3 + 1], v[i * 3 + 2] };
+}
+
+fn vecAdd(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ a[0] + b[0], a[1] + b[1], a[2] + b[2] };
+}
+fn vecSub(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ a[0] - b[0], a[1] - b[1], a[2] - b[2] };
+}
+fn vecMul(a: [3]f32, s: f32) [3]f32 {
+    return .{ a[0] * s, a[1] * s, a[2] * s };
+}
+fn vecDot(a: [3]f32, b: [3]f32) f32 {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+fn vecCross(a: [3]f32, b: [3]f32) [3]f32 {
+    return .{ a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
+}
+fn vecNorm(a: [3]f32) [3]f32 {
+    const l = @sqrt(vecDot(a, a));
+    if (l < 1e-8) return .{ 0, 0, 0 };
+    return .{ a[0] / l, a[1] / l, a[2] / l };
+}
+
+fn markAffected(mask: []bool, idx: u32, count: *u32) void {
+    if (idx >= mask.len or mask[idx]) return;
+    mask[idx] = true;
+    count.* += 1;
+}
+
+fn fillAffectedVerts() ?[]bool {
+    if (!ensureTopology()) return null;
+    const mask = g_affect_vert orelse return null;
+    @memset(mask, false);
+    var count: u32 = 0;
+    switch (g_mode) {
+        .vertex => {
+            const sel = g_sel_vert orelse return null;
+            var i: u32 = 0;
+            while (i < sel.len) : (i += 1) {
+                if (sel[i]) markAffected(mask, i, &count);
+            }
+        },
+        .edge => {
+            const sel = g_sel_edge orelse return null;
+            const edges = g_edges orelse return null;
+            var e: u32 = 0;
+            while (e < sel.len and e < g_edge_count) : (e += 1) {
+                if (!sel[e]) continue;
+                markAffected(mask, edges[e * 2 + 0], &count);
+                markAffected(mask, edges[e * 2 + 1], &count);
+            }
+        },
+        .face => {
+            const sel = g_sel_face orelse return null;
+            const corners = g_corner_vert orelse return null;
+            var f: u32 = 0;
+            while (f < sel.len) : (f += 1) {
+                if (!sel[f]) continue;
+                markAffected(mask, corners[f * 3 + 0], &count);
+                markAffected(mask, corners[f * 3 + 1], &count);
+                markAffected(mask, corners[f * 3 + 2], &count);
+            }
+        },
+        .none => return null,
+    }
+    return if (count > 0) mask else null;
+}
+
+/// Centroid of the logical vertices affected by the active selection. Used by the
+/// native transform gizmo as its stable pivot.
+pub fn selectionPivot() ?[3]f32 {
+    const mask = fillAffectedVerts() orelse return null;
+    var sum: [3]f32 = .{ 0, 0, 0 };
+    var count: u32 = 0;
+    var i: u32 = 0;
+    while (i < g_vert_count) : (i += 1) {
+        if (!mask[i]) continue;
+        const p = vertPos(i);
+        sum[0] += p[0];
+        sum[1] += p[1];
+        sum[2] += p[2];
+        count += 1;
+    }
+    if (count == 0) return null;
+    const inv = 1.0 / @as(f32, @floatFromInt(count));
+    return .{ sum[0] * inv, sum[1] * inv, sum[2] * inv };
+}
+
+const TransformKind = enum { translate, scale_axis, rotate_axis };
+
+fn transformPoint(kind: TransformKind, p: [3]f32, delta: [3]f32, axis: [3]f32, pivot: [3]f32, scalar: f32) [3]f32 {
+    return switch (kind) {
+        .translate => vecAdd(p, delta),
+        .scale_axis => blk: {
+            const rel = vecSub(p, pivot);
+            const along = vecDot(rel, axis);
+            break :blk vecAdd(p, vecMul(axis, along * (scalar - 1.0)));
+        },
+        .rotate_axis => blk: {
+            const rel = vecSub(p, pivot);
+            const c = @cos(scalar);
+            const s = @sin(scalar);
+            const term1 = vecMul(rel, c);
+            const term2 = vecMul(vecCross(axis, rel), s);
+            const term3 = vecMul(axis, vecDot(axis, rel) * (1.0 - c));
+            break :blk vecAdd(pivot, vecAdd(vecAdd(term1, term2), term3));
+        },
+    };
+}
+
+fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [3]f32, scalar: f32) Mutation {
+    const mask = fillAffectedVerts() orelse return .{};
+    const axis = vecNorm(axis_raw);
+    if ((kind == .scale_axis or kind == .rotate_axis) and vecDot(axis, axis) < 0.5) return .{};
+    const verts = g_verts orelse return .{};
+    const corners = g_corner_vert orelse return .{};
+    const pos = model_paint.positionsMutable() orelse return .{};
+
+    var i: u32 = 0;
+    while (i < g_vert_count) : (i += 1) {
+        if (!mask[i]) continue;
+        const p = vertPos(i);
+        const np = transformPoint(kind, p, delta, axis, pivot, scalar);
+        verts[i * 3 + 0] = np[0];
+        verts[i * 3 + 1] = np[1];
+        verts[i * 3 + 2] = np[2];
+    }
+
+    const fc = model_paint.faceCount();
+    var out = Mutation{ .first_face = fc, .last_face = 0 };
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        var touched = false;
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const lv = corners[f * 3 + k];
+            if (lv >= mask.len or !mask[lv]) continue;
+            const dst = f * 9 + k * 3;
+            const src = lv * 3;
+            if (@as(usize, dst) + 2 >= pos.len) continue;
+            pos[dst + 0] = verts[src + 0];
+            pos[dst + 1] = verts[src + 1];
+            pos[dst + 2] = verts[src + 2];
+            touched = true;
+        }
+        if (touched) {
+            if (f < out.first_face) out.first_face = f;
+            if (f > out.last_face) out.last_face = f;
+            out.changed = true;
+        }
+    }
+    if (!out.changed) return .{};
+    return out;
+}
+
+pub fn translateSelection(delta: [3]f32) Mutation {
+    if (@abs(delta[0]) + @abs(delta[1]) + @abs(delta[2]) < 1e-8) return .{};
+    return applyTransform(.translate, delta, .{ 1, 0, 0 }, .{ 0, 0, 0 }, 0);
+}
+
+pub fn scaleSelectionAxis(axis: [3]f32, pivot: [3]f32, factor_raw: f32) Mutation {
+    const factor = std.math.clamp(factor_raw, 0.02, 50.0);
+    if (@abs(factor - 1.0) < 1e-5) return .{};
+    return applyTransform(.scale_axis, .{ 0, 0, 0 }, axis, pivot, factor);
+}
+
+pub fn rotateSelectionAxis(axis: [3]f32, pivot: [3]f32, radians: f32) Mutation {
+    if (@abs(radians) < 1e-6) return .{};
+    return applyTransform(.rotate_axis, .{ 0, 0, 0 }, axis, pivot, radians);
 }
 
 // ── Picking ─────────────────────────────────────────────────────────────────────
@@ -616,4 +806,53 @@ test "box select grabs every element inside the rect; additive unions the snapsh
     snapshotSelection();
     _ = boxSelect(cam, 800, 600, 0, 0, 800, 600, true);
     try testing.expectEqual(@as(u32, 2), selCount());
+}
+
+test "face selection transform moves welded shared corners" {
+    setupQuad();
+    defer {
+        reset();
+        model_paint.clear();
+    }
+    try testing.expect(selectFaceByIndex(0, false));
+    const pivot = selectionPivot().?;
+    try testing.expectApproxEqAbs(@as(f32, 2.0 / 3.0), pivot[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 1.0 / 3.0), pivot[1], 0.0001);
+
+    const m = translateSelection(.{ 0, 0, 2 });
+    try testing.expect(m.changed);
+    try testing.expectEqual(@as(u32, 0), m.first_face);
+    try testing.expectEqual(@as(u32, 1), m.last_face);
+
+    const pos = model_paint.positions().?;
+    // Face 0's three logical vertices moved.
+    try testing.expectApproxEqAbs(@as(f32, 2), pos[2], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 2), pos[5], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 2), pos[8], 0.0001);
+    // Face 1 shares (0,0) and (1,1), so those corners move too; its unique (0,1) stays.
+    try testing.expectApproxEqAbs(@as(f32, 2), pos[11], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 2), pos[14], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0), pos[17], 0.0001);
+}
+
+test "axis scale and rotate operate around the selection pivot" {
+    setupQuad();
+    defer {
+        reset();
+        model_paint.clear();
+    }
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    g_sel_vert.?[0] = true; // (0,0,0)
+    g_sel_vert.?[1] = true; // (1,0,0)
+
+    const pivot = selectionPivot().?;
+    try testing.expectApproxEqAbs(@as(f32, 0.5), pivot[0], 0.0001);
+    _ = scaleSelectionAxis(.{ 1, 0, 0 }, pivot, 2.0);
+    try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(0)[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 1.5), vertPos(1)[0], 0.0001);
+
+    _ = rotateSelectionAxis(.{ 0, 0, 1 }, pivot, std.math.pi);
+    try testing.expectApproxEqAbs(@as(f32, 1.5), vertPos(0)[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(1)[0], 0.0001);
 }

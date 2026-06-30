@@ -398,6 +398,16 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     }
     pub fn meshEditSnapshot() void {}
     pub fn meshEditRevert() void {}
+    pub fn meshGizmoHit(_: f32, _: f32) i32 {
+        return -1;
+    }
+    pub fn meshGizmoDrag(_: i32, _: f32, _: f32) bool {
+        return false;
+    }
+    pub fn meshGizmoNudge(_: u8, _: f32) bool {
+        return false;
+    }
+    pub fn setMeshGizmoTool(_: u8) void {}
     pub fn drawEditorOverlay(_: f32, _: f32) void {}
     pub fn meshSetMarquee(_: f32, _: f32, _: f32, _: f32) void {}
     pub fn meshClearMarquee() void {}
@@ -771,6 +781,8 @@ var world_loader_mouse_aiming: bool = false;
 var me_orbiting: bool = false; // middle button held
 var me_selecting: bool = false; // left held in a select mode (pick on press, marquee on drag)
 var me_panning: bool = false; // left held with the Focus tool
+var me_gizmo_dragging: bool = false; // left held on a transform gizmo handle
+var me_gizmo_axis: i32 = -1;
 var me_marquee: bool = false; // the select press travelled → became a marquee
 var me_down_x: f32 = 0;
 var me_down_y: f32 = 0;
@@ -4166,6 +4178,13 @@ pub fn run(config_in: AppConfig) !void {
                                 me_panning = true;
                                 continue;
                             }
+                            const gh = r3d.meshGizmoHit(mx, my);
+                            if (gh >= 0) {
+                                me_gizmo_dragging = true;
+                                me_gizmo_axis = gh;
+                                state_mod.markDirty();
+                                continue;
+                            }
                             const m = r3d.meshEditModeRaw();
                             if (m >= 1 and m <= 3) {
                                 me_selecting = true;
@@ -4597,6 +4616,11 @@ pub fn run(config_in: AppConfig) !void {
                             state_mod.markDirty();
                             continue;
                         }
+                        if (me_gizmo_dragging) {
+                            _ = r3d.meshGizmoDrag(me_gizmo_axis, event.motion.xrel, event.motion.yrel);
+                            state_mod.markDirty();
+                            continue;
+                        }
                         if (me_selecting) {
                             if (!me_marquee and (@abs(mx - me_down_x) > 4 or @abs(my - me_down_y) > 4)) {
                                 me_marquee = true; // the press became a drag → revert the press-pick, switch to marquee
@@ -4805,6 +4829,15 @@ pub fn run(config_in: AppConfig) !void {
                         if (event.button.button == c.SDL_BUTTON_LEFT) {
                             if (me_panning) {
                                 me_panning = false;
+                                continue;
+                            }
+                            if (me_gizmo_dragging) {
+                                me_gizmo_dragging = false;
+                                me_gizmo_axis = -1;
+                                js_vm.callGlobal("__beginJsEvent");
+                                js_vm.callGlobal("__meshEditSelChanged");
+                                js_vm.callGlobal("__endJsEvent");
+                                state_mod.markDirty();
                                 continue;
                             }
                             if (me_selecting) {
