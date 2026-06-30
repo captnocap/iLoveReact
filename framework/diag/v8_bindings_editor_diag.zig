@@ -149,3 +149,10 @@ pub fn register() void {
     v8_runtime.registerHostFn("__diag_recent", hostDiagRecent);
     v8_runtime.registerHostFn("__diag_channels_state", hostDiagChannelsState);
 }
+
+/// INGREDIENTS-catalog entry point (matches the reg_fn(anytype) convention used
+/// by v8_ingredients.zig). Diagnostics are always-on observability, like the
+/// eventbus — so this rides the always-on (required=true) block.
+pub fn registerEditorDiag(_: anytype) void {
+    register();
+}

@@ -96,6 +96,7 @@ const v8_bindings_core = if (has_gpu_flag) @import("v8_bindings_core.zig") else 
     pub fn registerCore(_: anytype) void {}
 };
 const v8_bindings_eventbus = @import("v8_bindings_eventbus.zig");
+const v8_bindings_editor_diag = @import("diag/v8_bindings_editor_diag.zig");
 const v8_bindings_ifttt = @import("v8_bindings_ifttt.zig");
 const v8_bindings_env = @import("v8_bindings_env.zig");
 const v8_bindings_window = if (has_gpu_flag) @import("v8_bindings_window.zig") else struct {
@@ -308,6 +309,10 @@ pub const INGREDIENTS = [_]Ingredient{
     // gets free crash/overflow/perf diagnostics with no opt-in. Cost is
     // five host fns and a circular ring; nothing the cart has to import.
     .{ .name = "eventbus", .required = true, .grep_prefix = "", .reg_fn = "registerEventBus", .mod = v8_bindings_eventbus },
+    // editor diagnostics registry — always-on observability (same rationale as the
+    // eventbus above): registers __diag_emit/set_enabled/set_sample/recent/channels_state
+    // and the in-app raw-console feed sink. The editor's first-class instrumentation.
+    .{ .name = "editor_diag", .required = true, .grep_prefix = "", .reg_fn = "registerEditorDiag", .mod = v8_bindings_editor_diag },
     // useIFTTT registry + timer wheel — always-on. runtime/index.tsx
     // unconditionally requires useIFTTT.ts (it's the system-signal
     // sink), so every cart pulls the wire/timer host fns. Source-gating
