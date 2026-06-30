@@ -1202,6 +1202,118 @@ pub fn build(b: *std.Build) void {
     const world_gamefile_writer_test_step = b.step("test-world-gamefile-writer", "Run the platform game-file writer tests");
     world_gamefile_writer_test_step.dependOn(&run_world_gamefile_writer_test.step);
 
+    // ── Editor foundation unit tests (req_2174/req_2190) ─────────────────
+    // The dormant editor-foundation modules verified in isolation. Each builds its
+    // own module graph; none are wired into a cart by these steps.
+    const world_compile_cache_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/world/compile_cache.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const world_chunk_dirty_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/world/chunk_dirty.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    world_chunk_dirty_mod_t.addImport("world_compile_cache", world_compile_cache_mod_t);
+
+    // diagnostics registry (workstream B)
+    const diag_registry_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/diag/diag_registry.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const diag_registry_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/diag_registry.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    diag_registry_test_mod.addImport("diag_registry", diag_registry_mod_t);
+    const diag_registry_test = b.addTest(.{ .name = "diag-registry-test", .root_module = diag_registry_test_mod });
+    b.step("test-diag-registry", "Run the diagnostics registry unit tests")
+        .dependOn(&b.addRunArtifact(diag_registry_test).step);
+
+    // authoring eventbus spine (workstream A)
+    const editor_sqlite_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/storage/sqlite.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const editor_bus_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/events/editor_bus.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    editor_bus_mod_t.addImport("sqlite", editor_sqlite_mod_t);
+    const editor_bus_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/editor_bus.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    editor_bus_test_mod.addImport("editor_bus", editor_bus_mod_t);
+    const editor_bus_test = b.addTest(.{ .name = "editor-bus-test", .root_module = editor_bus_test_mod });
+    b.step("test-editor-bus", "Run the authoring eventbus unit tests")
+        .dependOn(&b.addRunArtifact(editor_bus_test).step);
+
+    // chunk compile cache scaffolding (workstream D)
+    const compile_cache_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/compile_cache.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    compile_cache_test_mod.addImport("world_compile_cache", world_compile_cache_mod_t);
+    compile_cache_test_mod.addImport("world_chunk_dirty", world_chunk_dirty_mod_t);
+    const compile_cache_test = b.addTest(.{ .name = "compile-cache-test", .root_module = compile_cache_test_mod });
+    b.step("test-world-compile-cache", "Run the chunk compile-cache scaffolding tests")
+        .dependOn(&b.addRunArtifact(compile_cache_test).step);
+
+    // hot authoring-state index (workstream E)
+    const hot_index_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/editor/hot_index.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    hot_index_mod_t.addImport("world_chunk_dirty", world_chunk_dirty_mod_t);
+    hot_index_mod_t.addImport("world_compile_cache", world_compile_cache_mod_t);
+    const hot_index_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/hot_index.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    hot_index_test_mod.addImport("hot_index", hot_index_mod_t);
+    hot_index_test_mod.addImport("world_chunk_dirty", world_chunk_dirty_mod_t);
+    const hot_index_test = b.addTest(.{ .name = "hot-index-test", .root_module = hot_index_test_mod });
+    b.step("test-hot-index", "Run the hot authoring-state index tests")
+        .dependOn(&b.addRunArtifact(hot_index_test).step);
+
+    // skeleton bones_loader validator (workstream H slice 1)
+    const bones_loader_mod_t = b.createModule(.{
+        .root_source_file = b.path("framework/skeleton/bones_loader.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const bones_loader_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/bones_loader.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    bones_loader_test_mod.addImport("bones_loader", bones_loader_mod_t);
+    const bones_loader_test = b.addTest(.{ .name = "bones-loader-test", .root_module = bones_loader_test_mod });
+    b.step("test-bones-loader", "Run the skeleton validator unit tests")
+        .dependOn(&b.addRunArtifact(bones_loader_test).step);
+
     // ── Key-packing behavior tests (GAME_INPUT hazard close, P4) ──────
     // Exercises framework/key_pack.zig — the one (mod << 32 | sym) key
     // packing engine.zig produces and ifttt.zig + useIFTTT.ts decode.

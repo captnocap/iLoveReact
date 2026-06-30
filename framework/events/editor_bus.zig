@@ -32,7 +32,10 @@
 //! Single-writer discipline: the main (V8) thread owns this. No locks.
 
 const std = @import("std");
-const sqlite = @import("../storage/sqlite.zig");
+// sqlite is a NAMED module dependency (not a relative import) so editor_bus can be
+// built as an isolated module for unit tests. The host/test build provides it from
+// framework/storage/sqlite.zig (see build.zig + EDITOR_FOUNDATION_WIRING.md).
+const sqlite = @import("sqlite");
 
 const alloc = std.heap.c_allocator;
 
