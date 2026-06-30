@@ -171,6 +171,24 @@ pub fn paintFace(face: u32, rgba: [4]u8) void {
     markRows(ty, ty);
 }
 
+/// Bulk-set every face's colour from a per-face RGBA array (length ≥ facecount*4) —
+/// how a quality change carries the source paint down onto the new (decimated) mesh.
+pub fn applyColors(colors: []const u8) void {
+    const buf = g_rgba orelse return;
+    if (colors.len < @as(usize, g_facecount) * 4) return;
+    var f: u32 = 0;
+    while (f < g_facecount) : (f += 1) {
+        const tx = f % g_atlas_w;
+        const ty = f / g_atlas_w;
+        const dst = (@as(usize, ty) * g_atlas_w + tx) * 4;
+        buf[dst + 0] = colors[f * 4 + 0];
+        buf[dst + 1] = colors[f * 4 + 1];
+        buf[dst + 2] = colors[f * 4 + 2];
+        buf[dst + 3] = colors[f * 4 + 3];
+    }
+    if (g_atlas_h > 0) markRows(0, g_atlas_h - 1);
+}
+
 pub const Atlas = struct { rgba: []const u8, w: u32, h: u32 };
 
 /// The live diffuse-texture bytes for the active target, or null if none. Always

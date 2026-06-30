@@ -618,7 +618,21 @@ fn emitObjFace(alloc: std.mem.Allocator, b: *Builder, line: []const u8, pos: []c
 // what makes painting/raycasting on a huge model cheap: you edit the reduced mesh).
 // The Zig sibling of importMesh.ts decimateSoup, but it works directly on the expanded
 // (non-indexed) Vertex stream this module produces and re-emits the same stream.
-pub fn decimateExpanded(alloc: std.mem.Allocator, verts: []const f32, vert_count: u32, grid: u32) Error!ParsedMesh {
+//
+// It also returns `face_to_source`: for each surviving decimated face, the ORIGINAL
+// source-face index it was emitted from. That's the thread paint rides down a level —
+// a displayed face inherits (and writes back) the colour of its source face, so paint
+// is resolution-independent and every LoD derives from one authoritative paint.
+pub const DecimatedMesh = struct {
+    mesh: ParsedMesh,
+    face_to_source: []u32, // length = mesh.vert_count / 3
+    pub fn deinit(self: *const DecimatedMesh, alloc: std.mem.Allocator) void {
+        self.mesh.deinit(alloc);
+        alloc.free(self.face_to_source);
+    }
+};
+
+pub fn decimateExpanded(alloc: std.mem.Allocator, verts: []const f32, vert_count: u32, grid: u32) Error!DecimatedMesh {
     const fc = vert_count / 3;
     if (fc == 0) return Error.NoGeometry;
     const R: u32 = @min(1024, @max(2, grid));
@@ -687,9 +701,12 @@ pub fn decimateExpanded(alloc: std.mem.Allocator, verts: []const f32, vert_count
         centroids[ci] = .{ @floatCast(s[0] * inv_c), @floatCast(s[1] * inv_c), @floatCast(s[2] * inv_c) };
     }
 
-    // Re-emit surviving (non-collapsed) triangles, recomputing face normals.
+    // Re-emit surviving (non-collapsed) triangles, recomputing face normals, and record
+    // the source face each one came from (emit order == map order).
     var b = Builder{};
     errdefer b.out.deinit(alloc);
+    var map = std.ArrayList(u32){};
+    errdefer map.deinit(alloc);
     var f: u32 = 0;
     while (f < fc) : (f += 1) {
         const a = remap[f * 3 + 0];
@@ -700,8 +717,10 @@ pub fn decimateExpanded(alloc: std.mem.Allocator, verts: []const f32, vert_count
         const n: [3][3]f32 = .{ .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 } };
         const uv: [3][2]f32 = .{ .{ 0, 0 }, .{ 0, 0 }, .{ 0, 0 } };
         try b.triangle(alloc, p, n, uv, true);
+        try map.append(alloc, f);
     }
-    return b.finish(alloc);
+    const mesh = try b.finish(alloc);
+    return .{ .mesh = mesh, .face_to_source = try map.toOwnedSlice(alloc) };
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -772,14 +791,17 @@ test "decimate: a fine grid of triangles collapses at low resolution" {
     try std.testing.expectEqual(@as(u32, 162 * 3), full.vert_count);
 
     // Decimate to a coarse 3×3 lattice — far fewer triangles, still valid geometry.
-    var low = try decimateExpanded(alloc, full.verts, full.vert_count, 3);
+    const low = try decimateExpanded(alloc, full.verts, full.vert_count, 3);
     defer low.deinit(alloc);
-    try std.testing.expect(low.vert_count > 0);
-    try std.testing.expect(low.vert_count < full.vert_count);
+    try std.testing.expect(low.mesh.vert_count > 0);
+    try std.testing.expect(low.mesh.vert_count < full.vert_count);
+    // One source-face index per surviving decimated face, all in range.
+    try std.testing.expectEqual(low.mesh.vert_count / 3, @as(u32, @intCast(low.face_to_source.len)));
+    for (low.face_to_source) |sf| try std.testing.expect(sf < 162);
     // A fine lattice keeps (nearly) everything.
-    var high = try decimateExpanded(alloc, full.verts, full.vert_count, 1024);
+    const high = try decimateExpanded(alloc, full.verts, full.vert_count, 1024);
     defer high.deinit(alloc);
-    try std.testing.expect(high.vert_count >= low.vert_count);
+    try std.testing.expect(high.mesh.vert_count >= low.mesh.vert_count);
 }
 
 test "obj: negative (relative) indices resolve against verts-so-far" {

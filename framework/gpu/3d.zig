@@ -385,16 +385,26 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
 }
 
 /// Paint the face under viewport pixel (mx,my) the given colour, using the last-drawn
-/// camera. Returns true if a face was hit (the caller marks dirty to repaint). One call
-/// handles both gestures: a click fills one face, a drag calls this per move.
-pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) bool {
-    if (!model_paint.hasTarget()) return false;
+/// camera. Returns the DISPLAYED face index painted, or -1 on a miss. The caller maps
+/// that face back to the source paint (so it survives quality changes) and marks dirty.
+pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
+    if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const face = model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, mx, my);
-    if (face < 0) return false;
+    if (face < 0) return -1;
     model_paint.paintFace(@intCast(face), .{ r, g, b, 255 });
-    return true;
+    return face;
 }
+
+/// Carry a per-face colour set onto the active paint target (length ≥ facecount*4) —
+/// used when a quality change derives the new mesh's colours from the source paint.
+pub fn applyPaintColors(colors: []const u8) void {
+    model_paint.applyColors(colors);
+}
+
+/// The default unpainted face colour (matches the displayed atlas), so the source-side
+/// authoritative paint starts identical to what's shown.
+pub const DEFAULT_FACE = model_paint.DEFAULT_FACE;
 
 /// Paint a face by its index (no raycast) — programmatic fill / the headless paint
 /// proof. Returns false if there's no target or the index is out of range.
