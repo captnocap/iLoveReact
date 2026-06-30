@@ -234,21 +234,36 @@ pub fn pick(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32 {
         ndc_x * tan_h * aspect * right[2] + ndc_y * tan_h * up[2] + forward[2],
     });
 
-    var best_t: f32 = std.math.floatMax(f32);
-    var best: i32 = -1;
+    // Prefer the nearest FRONT-facing hit — the triangle you can actually see. The
+    // render culls back-faces (cull_mode=.back), so without this the ray would happily
+    // pick the invisible near side of a closed surface or a back-face on a fold, and
+    // paint a face the user can't see (the "it paints the wrong place" scatter on a
+    // real scanned mesh). A fallback to the nearest ANY hit means a model whose winding
+    // disagrees with the render still paints something rather than nothing.
+    var best_front_t: f32 = std.math.floatMax(f32);
+    var best_front: i32 = -1;
+    var best_any_t: f32 = std.math.floatMax(f32);
+    var best_any: i32 = -1;
     var f: u32 = 0;
     while (f < g_facecount) : (f += 1) {
         const a: [3]f32 = .{ pos[f * 9 + 0], pos[f * 9 + 1], pos[f * 9 + 2] };
         const b: [3]f32 = .{ pos[f * 9 + 3], pos[f * 9 + 4], pos[f * 9 + 5] };
         const c: [3]f32 = .{ pos[f * 9 + 6], pos[f * 9 + 7], pos[f * 9 + 8] };
         if (rayTri(cam.eye, dir, a, b, c)) |t| {
-            if (t < best_t) {
-                best_t = t;
-                best = @intCast(f);
+            if (t < best_any_t) {
+                best_any_t = t;
+                best_any = @intCast(f);
+            }
+            // Geometric normal (same winding as the triangle). Front-facing toward the
+            // camera ⇒ it opposes the ray direction.
+            const n = cross(sub(b, a), sub(c, a));
+            if (dot(n, dir) < 0.0 and t < best_front_t) {
+                best_front_t = t;
+                best_front = @intCast(f);
             }
         }
     }
-    return best;
+    return if (best_front >= 0) best_front else best_any;
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────────

@@ -379,6 +379,7 @@ var g_paint_target: [3]f32 = .{ 0, 0, 0 };
 var g_paint_fov: f32 = 50;
 var g_paint_vp_w: f32 = 0;
 var g_paint_vp_h: f32 = 0;
+var g_paint_probed: bool = false; // RJIT_PAINTPROBE one-shot guard
 
 /// Adopt a freshly-parsed mesh (interleaved verts, 8 f32/vert) as the paint target.
 /// Rewrites its UVs to the per-face atlas in place, so the SAME verts then uploaded by
@@ -2653,6 +2654,26 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     g_paint_fov = cam_fov;
     g_paint_vp_w = w;
     g_paint_vp_h = h;
+
+    // One-shot raycast probe (RJIT_PAINTPROBE): paint four KNOWN viewport pixels with
+    // four known colours, so a headless shot shows exactly where each ray lands vs the
+    // pixel it came from — ground truth for the hit-test, independent of live mouse
+    // delivery. Red=centre, green=right, blue=top, yellow=left.
+    if (model_paint.hasTarget() and !g_paint_probed and std.posix.getenv("RJIT_PAINTPROBE") != null) {
+        g_paint_probed = true;
+        const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+        // Small offsets that STAY on the model, so right/up/aspect terms are exercised
+        // (the dead-centre pixel cancels them and can't catch a horizontal/vertical bug).
+        const probes = [_][2]f32{ .{ 0.5, 0.5 }, .{ 0.60, 0.5 }, .{ 0.40, 0.5 }, .{ 0.5, 0.62 } };
+        const cols = [_][4]u8{ .{ 255, 40, 40, 255 }, .{ 40, 255, 40, 255 }, .{ 255, 220, 40, 255 }, .{ 60, 120, 255, 255 } };
+        for (probes, cols) |pr, col| {
+            const px = w * pr[0];
+            const py = h * pr[1];
+            const fc = model_paint.pick(cam, w, h, px, py);
+            std.debug.print("[paintprobe] vp={d:.0}x{d:.0} fov={d:.0} eye=({d:.2},{d:.2},{d:.2}) target=({d:.2},{d:.2},{d:.2}) px=({d:.0},{d:.0}) -> face {d}\n", .{ w, h, g_paint_fov, g_paint_eye[0], g_paint_eye[1], g_paint_eye[2], g_paint_target[0], g_paint_target[1], g_paint_target[2], px, py, fc });
+            if (fc >= 0) model_paint.paintFace(@intCast(fc), col);
+        }
+    }
 
     // With a skybox, distant geometry should melt into the HORIZON colour, not
     // the flat clear colour — that distance fade is most of what sells the sky.
