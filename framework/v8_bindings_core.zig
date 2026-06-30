@@ -406,6 +406,32 @@ fn hostModelFaceCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnNumber(info, @floatFromInt(scene3d.paintFaceCount()));
 }
 
+/// __file_sha256(path) → 64-char lowercase hex of the file's bytes, or "" on read
+/// failure. Content-addresses an imported asset so its attribution follows the BYTES,
+/// not the filename — a renamed or re-downloaded copy resolves to the same entry.
+fn hostFileSha256(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const path = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    defer std.heap.c_allocator.free(path);
+    const data = std.fs.cwd().readFileAlloc(std.heap.c_allocator, path, 512 * 1024 * 1024) catch {
+        setReturnString(info, "");
+        return;
+    };
+    defer std.heap.c_allocator.free(data);
+    var digest: [32]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(data, &digest, .{});
+    var hex: [64]u8 = undefined;
+    const charset = "0123456789abcdef";
+    for (digest, 0..) |byte, i| {
+        hex[i * 2] = charset[byte >> 4];
+        hex[i * 2 + 1] = charset[byte & 0xf];
+    }
+    setReturnString(info, &hex);
+}
+
 /// __model_set_quality(grid) → JSON {"key","count"} | "". Re-decimate the retained
 /// full-res source mesh to clustering resolution `grid` (2..1024; higher = more
 /// detail), swap it in as the resident + paint target under a quality-specific key, and
@@ -1162,6 +1188,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_paint_face", hostModelPaintFace);
     v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);
     v8_runtime.registerHostFn("__model_set_quality", hostModelSetQuality);
+    v8_runtime.registerHostFn("__file_sha256", hostFileSha256);
     v8_runtime.registerHostFn("__hostReleaseFileBuffer", hostReleaseFileBuffer);
     v8_runtime.registerHostFn("__hostLog", hostLog);
     v8_runtime.registerHostFn("__js_eval", hostJsEval);

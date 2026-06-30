@@ -22,10 +22,20 @@ import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { callHost } from '@reactjit/runtime/ffi';
+import {
+  loadLedger, putEntry, recordImport, exportCredits, pendingCount,
+  AttributionPanel, AttributionStatusBadge, type Attribution, type Ledger,
+} from '@reactjit/runtime/attribution';
 
 const host = globalThis as any;
 
 type Loaded = { key: string; count: number; radius: number; name: string };
+
+/** sha256 of the file bytes (host door) — keys attribution to the content. */
+const fileSha = (path: string): string => {
+  const s = host.__file_sha256?.(path);
+  return typeof s === 'string' ? s : '';
+};
 
 /** Parse a dropped file in the host and get back its intern key + stats. Returns null
  *  if the door is missing (non-V8 host) or the file failed to parse. */
@@ -88,6 +98,36 @@ export default function ModelView() {
   const [paintMode, setPaintMode] = useState(false);
   const [color, setColor] = useState<RGB>(PALETTE[0]);
   const [quality, setQuality] = useState(1); // slider 0..1; 1 = full detail on load
+  // Attribution: the shared ledger + the current model's entry + the panel toggle.
+  const [ledger, setLedger] = useState<Ledger>(() => loadLedger());
+  const [attribution, setAttribution] = useState<Attribution | null>(null);
+  const [attrOpen, setAttrOpen] = useState(false);
+
+  // Record (or fetch) the attribution for a just-loaded file, keyed by its content sha.
+  const recordAttribution = (path: string) => {
+    const sha = fileSha(path);
+    if (!sha) { setAttribution(null); return; }
+    const next = { ...ledger };
+    const entry = recordImport(sha, path, next);
+    setLedger(next);
+    setAttribution(entry);
+    if (entry.status === 'pending') setAttrOpen(true); // surface the obligation immediately
+  };
+
+  const saveAttribution = (patch: Pick<Attribution, 'title' | 'author' | 'source' | 'license'>) => {
+    if (!attribution) return;
+    const next = { ...ledger };
+    const saved = putEntry(next, { ...attribution, ...patch });
+    setLedger(next);
+    setAttribution(saved);
+  };
+
+  const doExportCredits = () => {
+    const r = exportCredits(ledger);
+    setError(r.ok
+      ? (r.pending > 0 ? `Credits exported — ⚠ ${r.pending} asset(s) still need attribution` : 'Credits exported ✓')
+      : 'Could not write credits file');
+  };
 
   // Apply a new quality (slider 0..1): re-decimate in the host and swap the resident
   // mesh. Repainting resets (the topology changed) — quality is a pre-paint step.
@@ -125,6 +165,7 @@ export default function ModelView() {
       setModel(loaded);
       setError(null);
       setQuality(1); // a fresh model loads full-res
+      recordAttribution(path); // account for where this asset came from
     } else {
       setError(`Could not load ${path.split('/').pop()}`);
     }
@@ -173,6 +214,9 @@ export default function ModelView() {
       setPaintMode(true);
       host.__model_paint_face?.(40, 230, 40, 40);
     }
+    // RJIT_ATTRIB_EXPORT=1 writes CREDITS.md from the current ledger at boot — the
+    // headless proof the credits export works (and reports pending obligations).
+    if (callHost<string | null>('__env_get', null, 'RJIT_ATTRIB_EXPORT')) doExportCredits();
     // RJIT_QUALITY=grid re-decimates at boot — the headless proof the quality knob works.
     const q = Number(callHost<string | null>('__env_get', null, 'RJIT_QUALITY') ?? 0);
     if (q > 0) {
@@ -264,6 +308,15 @@ export default function ModelView() {
           </Text>
         )}
         <Box style={{ flexGrow: 1 }} />
+        {model && attribution && (
+          <Pressable
+            onPress={() => setAttrOpen((v) => !v)}
+            tooltip="Attribution & credits"
+            style={{ marginRight: 8, flexDirection: 'row', alignItems: 'center' }}
+          >
+            <AttributionStatusBadge status={attribution.status} />
+          </Pressable>
+        )}
         {model && (
           <Pressable
             onPress={() => setPaintMode((v) => !v)}
@@ -353,6 +406,18 @@ export default function ModelView() {
             {`${(model.count / 3).toLocaleString()} tris`}
           </Text>
         </Row>
+      )}
+
+      {/* Attribution panel — the shared editor (same one the Studio will use). Keyed by
+          the entry id so switching models re-seeds the fields. */}
+      {attrOpen && attribution && (
+        <AttributionPanel
+          key={attribution.id}
+          entry={attribution}
+          onSave={saveAttribution}
+          onExport={doExportCredits}
+          onClose={() => setAttrOpen(false)}
+        />
       )}
 
       {/* Center prompt until something is loaded. */}
