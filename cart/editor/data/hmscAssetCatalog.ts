@@ -8,6 +8,7 @@ import {
 import { validateDecalDoc } from '../../hmsc-int/game/textures/decal';
 import { editMeshToGeometry, type EditMesh } from '../../hmsc-int/editors/model/editMesh';
 import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, ModelPaintVariant } from './types';
+import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
 const COOKED_SNAPSHOT = 'cart/hmsc-int/data/domains/cooked-asset/snapshots/cooked-asset.snapshot.json';
@@ -624,10 +625,34 @@ function storedModelPackages(snapshot: ModelSnapshot | null): ModelPackage[] {
   });
 }
 
-// The Models subtree mirrors the on-disk Model Package layout
-// (models/<category>/<model>/, see cart/editor/data/modelPackage.ts): one node
-// per category directory that actually has models, so the browse tree inherits
-// the same directory structure the packages do instead of source-kind buckets.
+// The Models subtree IS the on-disk Model Package layout, dug into like a file
+// explorer (models/<category>/<model>/<subdir>/, see modelPackage.ts): category
+// dirs -> per-model homes -> the mesh/atlases/paints/shaders subdirs. Every
+// level is a real, expandable tree node so the browser mirrors the packages
+// end to end instead of stopping at source-kind buckets.
+
+// A model's package subdirectories as leaf nodes. Ids extend the model's folder
+// id (model-<id>/<sub>), which still satisfies the `model-${string}` union.
+function modelSubdirNodes(model: ModelPackage): ContentNode[] {
+  return MODEL_PACKAGE_SUBDIRS.map((sub) => ({
+    id: `${model.folderId}/${sub}` as ContentFolderId,
+    label: sub,
+    icon: 'Folder',
+  }));
+}
+
+// One home per model under its category, each expandable into its subdirs.
+function modelHomeNodes(models: ModelPackage[]): ContentNode[] {
+  return [...models]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((model) => ({
+      id: model.folderId,
+      label: model.name,
+      icon: 'Box',
+      children: modelSubdirNodes(model),
+    }));
+}
+
 function modelCategoryNodes(models: ModelPackage[]): ContentNode[] {
   const categories: Array<[ModelPackage['kind'], ContentFolderId, string]> = [
     ['prop', 'models-props', 'Props'],
@@ -637,7 +662,11 @@ function modelCategoryNodes(models: ModelPackage[]): ContentNode[] {
   ];
   return categories
     .filter(([kind]) => models.some((model) => model.kind === kind))
-    .map(([, id, label]) => ({ id, label }));
+    .map(([kind, id, label]) => ({
+      id,
+      label,
+      children: modelHomeNodes(models.filter((model) => model.kind === kind)),
+    }));
 }
 
 function contentTree(models: ModelPackage[]): ContentNode[] {
