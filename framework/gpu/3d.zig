@@ -3738,15 +3738,36 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
     const view = math.m4lookAt(cam_pos, cam_look, .{ .x = 0, .y = 1, .z = 0 });
     const vp = math.m4multiply(projection, view);
 
+    // Only the scene that actually holds the mesh-edit / paint target may publish the
+    // viewport globals below. These are single process-wide vars read by the mesh-edit
+    // overlay projection (drawEditorOverlay) and by paint/pick raycasts; in a multi-Scene3D
+    // layout — the editor's content browser mounts a <Scene3D> per model thumbnail — the
+    // LAST scene drawn would otherwise clobber them with its own (thumbnail-sized) viewport,
+    // so the overlay projected the model through the wrong rect: handles collapsed into the
+    // pane corner and face picks missed. This implements the gate the comment below has
+    // always named. (Thumbnails render generated geometry, never the target key, so they
+    // never match.)
+    var scene_holds_target = false;
+    for (scene_node.children) |*child| {
+        const gk = child.scene3d_geom_key orelse continue;
+        const key_hash = hashKey(gk);
+        if (model_paint.isTarget(key_hash) or (g_edit_key_hash != 0 and key_hash == g_edit_key_hash)) {
+            scene_holds_target = true;
+            break;
+        }
+    }
+
     // Capture the exact camera this frame so a paint raycast shoots the ray the user
     // sees (model_paint.pick). Only meaningful when this scene holds the paint target.
-    g_paint_eye = .{ cam_pos.x, cam_pos.y, cam_pos.z };
-    g_paint_target = .{ cam_look.x, cam_look.y, cam_look.z };
-    g_paint_fov = cam_fov;
-    g_paint_vp_w = w;
-    g_paint_vp_h = h;
-    g_paint_vp_x = vp_x;
-    g_paint_vp_y = vp_y;
+    if (scene_holds_target) {
+        g_paint_eye = .{ cam_pos.x, cam_pos.y, cam_pos.z };
+        g_paint_target = .{ cam_look.x, cam_look.y, cam_look.z };
+        g_paint_fov = cam_fov;
+        g_paint_vp_w = w;
+        g_paint_vp_h = h;
+        g_paint_vp_x = vp_x;
+        g_paint_vp_y = vp_y;
+    }
 
     // One-shot raycast probe (RJIT_PAINTPROBE): paint four KNOWN viewport pixels with
     // four known colours, so a headless shot shows exactly where each ray lands vs the
