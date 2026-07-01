@@ -2,11 +2,11 @@
 // corrected way (req_1288): the catalog material (game/textures) sampled in CONTINUOUS
 // surface space at a WORLD scale (worldPerTile metres/tile), masked to the slot's
 // painted cells. Reuses the exact catalog material functions (FILL_FUNCS from
-// render3d/fillShader) with a world-scale + mask entry point — no per-cell repeat
+// render3d/shaders) with a world-scale + mask entry point — no per-cell repeat
 // (paint_texture_demo proved the shape), no stretching, one copy of the materials.
 
 import { Effect } from '@reactjit/primitives';
-import { FILL_FUNCS } from '../../render3d/fillShader';
+import { FILL_FUNCS } from '../../render3d/shaders/index';
 import { paramDefaults, shaderSpec } from '../../game/textures/shaders';
 import type { SlotDef } from './modelStream';
 import type { CellGrid } from './meshPaint';
