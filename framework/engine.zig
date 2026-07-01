@@ -782,6 +782,11 @@ var pointer_capture_slot: u32 = 0;
 var pointer_capture_button: u8 = 0;
 var world_loader_mouse_node_id: u32 = 0;
 var world_loader_mouse_aiming: bool = false;
+// MAPPAINT req_2473: the loader node whose armed paint tool owns the left-drag.
+// While set, motion events route straight into the host map painter
+// (world_loader.paintPointer) — zero JS per dab, the modelview input pattern
+// applied to the world viewport.
+var world_loader_paint_node_id: u32 = 0;
 
 // ── Native mesh-editor input (modelview) — the engine owns the model-editor loop with
 // ZERO JS per event. Gated by r3d.meshEditCapturing() (the cart sets it on a model load),
@@ -4220,6 +4225,15 @@ pub fn run(config_in: AppConfig) !void {
                         const mx: f32 = event.button.x;
                         const my: f32 = event.button.y;
                         if (hitTestWorldLoader(config.root, mx, my)) |loader_node| {
+                            // MAPPAINT req_2473: an armed paint tool claims the LEFT
+                            // button before the external-camera fall-through — the
+                            // stroke runs host-side, zero JS per event.
+                            if (event.button.button == c.SDL_BUTTON_LEFT and world_loader.paintArmed(loader_node.id)) {
+                                world_loader_paint_node_id = loader_node.id;
+                                world_loader.paintPointer(loader_node.id, .down, mx, my);
+                                state_mod.markDirty();
+                                continue;
+                            }
                             // LOADERVIEW req_1776: an editor-driven loader (external camera)
                             // is a passive viewport — DON'T capture the pointer for in-world
                             // look; fall through so the event reaches the editor's JS overlay
@@ -4654,6 +4668,21 @@ pub fn run(config_in: AppConfig) !void {
                             continue;
                         }
                     }
+                    if (world_loader_paint_node_id != 0) {
+                        // MAPPAINT req_2473: an active paint drag — stroke host-side.
+                        if (findWorldLoaderNodeById(config.root, world_loader_paint_node_id) == null) {
+                            world_loader.paintPointer(world_loader_paint_node_id, .up, mx, my);
+                            world_loader_paint_node_id = 0;
+                        } else {
+                            world_loader.paintPointer(world_loader_paint_node_id, .move, mx, my);
+                            state_mod.markDirty();
+                            continue;
+                        }
+                    } else if (world_loader.anyPaintArmed()) {
+                        // hover: the loader polls the mouse per frame for the brush
+                        // beam — just keep frames coming while the cursor moves.
+                        state_mod.markDirty();
+                    }
                     if (world_loader_mouse_node_id != 0) {
                         if (findWorldLoaderNodeById(config.root, world_loader_mouse_node_id) == null) {
                             releaseWorldLoaderPointer();
@@ -4876,6 +4905,13 @@ pub fn run(config_in: AppConfig) !void {
                                 continue;
                             }
                         }
+                    }
+                    if (event.button.button == c.SDL_BUTTON_LEFT and world_loader_paint_node_id != 0) {
+                        // MAPPAINT req_2473: release ends the stroke (ramp/slope stamp here).
+                        world_loader.paintPointer(world_loader_paint_node_id, .up, event.button.x, event.button.y);
+                        world_loader_paint_node_id = 0;
+                        state_mod.markDirty();
+                        continue;
                     }
                     if (event.button.button == c.SDL_BUTTON_RIGHT and world_loader_mouse_node_id != 0 and world_loader_mouse_aiming) {
                         world_loader.setAiming(world_loader_mouse_node_id, false);
@@ -5208,6 +5244,10 @@ pub fn run(config_in: AppConfig) !void {
                 },
                 c.SDL_EVENT_WINDOW_FOCUS_LOST => {
                     releaseWorldLoaderPointer();
+                    if (world_loader_paint_node_id != 0) {
+                        world_loader.paintPointer(world_loader_paint_node_id, .up, 0, 0);
+                        world_loader_paint_node_id = 0;
+                    }
                     system_signals.notifyFocus(false);
                 },
                 else => {},

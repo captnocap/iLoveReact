@@ -150,6 +150,11 @@ export function LoaderIsoView(props: {
   // WALLHIDE req_2053: when true, the native loader hides every wall piece (baked + live)
   // so you can see and edit a building's interior. The editor (index.tsx) owns + persists it.
   hideWalls?: boolean;
+  // MAPPAINT req_2473: when true, the LEFT button over this viewport routes into the
+  // host map painter (framework/game/map) — terrain strokes, the brush beam, the live
+  // terrain mirror and its colliders all run host-side, zero JS per event. The editor
+  // arms the TOOL itself through the __map_* doors (runtime/game/map.ts).
+  paintMode?: boolean;
 }) {
   // req_1945: stamp when THIS pane starts rendering. The edit-latency line then splits the
   // `pre` re-render into [before-loader] (the shell + earlier panels) vs [loader-onward] (this
@@ -835,6 +840,16 @@ export function LoaderIsoView(props: {
     if (!nodeId || typeof g.__compiled_world_set_hide_walls !== 'function') return;
     g.__compiled_world_set_hide_walls(nodeId, hideWalls ? 1 : 0);
   }, [hideWalls, props.reloadToken]);
+
+  // MAPPAINT req_2473: arm/disarm in-viewport map painting on the native loader.
+  // Node-keyed like the walls door; disarms on unmount so a stale arm can't
+  // capture clicks after the pane goes away.
+  useEffect(() => {
+    const nodeId = Number(loaderRef.current?.id ?? 0);
+    if (!nodeId || typeof g.__compiled_world_set_paint_mode !== 'function') return;
+    g.__compiled_world_set_paint_mode(nodeId, props.paintMode ? 1 : 0);
+    return () => { g.__compiled_world_set_paint_mode(nodeId, 0); };
+  }, [props.paintMode, props.reloadToken]);
 
   // LIVEHOST req_1798: push the just-placed-but-unbaked pieces to the native loader as a
   // LIVE box overlay, so a placement/move shows as a real solid mesh the instant you

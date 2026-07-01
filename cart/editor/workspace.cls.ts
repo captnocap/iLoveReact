@@ -195,7 +195,10 @@ classifier({
   HW_Stage: { type: 'Pressable', style: { flexGrow: 1, minHeight: 0, position: 'relative', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
   HW_StagePanel: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
   HW_StageViewport: { type: 'Box', style: { flexGrow: 1, minHeight: 0, position: 'relative', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
-  HW_WorldEditorSurface: { type: 'Box', style: { width: '100%', height: '100%', minHeight: 0, backgroundColor: '#0d141f', overflow: 'hidden' } },
+  HW_WorldEditorSurface: { type: 'Box', style: { width: '100%', height: '100%', minHeight: 0, position: 'relative', backgroundColor: '#0d141f', overflow: 'hidden' } },
+  // MAPPAINT req_2473: the Map Paint bar floats INSIDE the world viewport (the
+  // paint-bar convention, req_2469) — rendered after the loader so it wins hits.
+  HW_MapPaintDock: { type: 'Box', style: { position: 'absolute', left: 10, top: 10, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, maxWidth: 760, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:surface', borderWidth: 'theme:borderThin', borderColor: 'theme:border', opacity: 0.96 } },
   HW_StageTabStrip: { type: 'Box', style: { height: 31, flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 8, paddingRight: 8, backgroundColor: 'theme:surface', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', overflow: 'hidden' } },
   HW_StageWorldTab: { type: 'Pressable', style: { width: 32, height: 25, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft', backgroundColor: 'theme:controlBg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover', borderColor: 'theme:textDim' } },
   HW_StageWorldTabOn: { type: 'Pressable', style: { width: 32, height: 25, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },

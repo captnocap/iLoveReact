@@ -38,6 +38,11 @@ const foliage = @import("framework/world/foliage.zig");
 const instance_collider_policy = @import("framework/world/instance_collider_policy.zig");
 const streaming = @import("framework/world/streaming.zig");
 const game_physics = @import("framework/game/physics.zig");
+// MAPPAINT req_2473: the host-owned map painter. The loader renders its live
+// chunks (sculpted terrain mirror), routes armed pointer input into its stroke
+// engine, and refreshes its heightfield colliders — all in-process, no bridge.
+const map_paint = @import("framework/game/map/engine.zig");
+const map_chunks = @import("framework/game/map/chunks.zig");
 
 // Resolution of each materialized shader's 1-tile texture (the shader's canvas
 // is exactly one 1m tile; the face sampler REPEATS it across the surface).
@@ -58,6 +63,16 @@ const TRAFFIC_PROTO_STRIDE: usize = 13;
 const SHAPE_BOX: f32 = 0;
 const SHAPE_RAMP: f32 = 1;
 const SHAPE_CYLINDER8: f32 = 2;
+
+// MAPPAINT req_2473: live-painted terrain mirror. One render node + one
+// collider slot per painted chunk; the collider ids claim the TOP of the
+// game_physics heightfield table so baked scene fields (counting up from 0)
+// never collide with them.
+const MAX_PAINT_SLOTS: usize = 64;
+const PAINT_COLLIDER_BASE: usize = game_physics.MAX_HEIGHTFIELDS - MAX_PAINT_SLOTS;
+/// The THPS-style brush beam: a translucent column over the brush footprint.
+const PAINT_BEAM_HEIGHT_METERS: f32 = 42;
+const PAINT_BEAM_ALPHA: f32 = 0.32;
 const SHAPE_CYLINDER16: f32 = 3;
 const SHAPE_SPHERE: f32 = 4;
 const SHAPE_GABLE: f32 = 5; // req_0930: the triangular gable-end wall prism
@@ -3091,6 +3106,28 @@ pub const Runtime = struct {
     stream_logged: bool = false,
     stream_drop_warned: bool = false,
     last_aspect: f32 = @as(f32, WIN_W) / @as(f32, WIN_H),
+    // MAPPAINT req_2473: the live-painted terrain mirror. paint_kids_first is a
+    // MAX_PAINT_SLOTS run of reserved nodes in the stable prefix (one per painted
+    // chunk); each used slot owns a 121×121 downsampled floor buffer + a versioned
+    // "~hf~paint-…" geom key, re-baked only when the chunk's height channel is
+    // dirty (the once-per-frame coalescing the JS painter did with usePaintedField,
+    // now host-side). paint_beam_kid is the translucent brush-beam column. The
+    // last_* rect is the pane placement renderEmbedded saw — the screen→ray
+    // mapping paintPointer needs.
+    paint_kids_first: ?usize = null,
+    paint_beam_kid: ?usize = null,
+    paint_slot_used: [MAX_PAINT_SLOTS]bool = @splat(false),
+    paint_slot_chunk: [MAX_PAINT_SLOTS][2]i32 = @splat(.{ 0, 0 }),
+    paint_slot_ver: [MAX_PAINT_SLOTS]u32 = @splat(0),
+    paint_slot_key: [MAX_PAINT_SLOTS]?[]u8 = @splat(null),
+    paint_slot_floor: [MAX_PAINT_SLOTS]?[]f32 = @splat(null),
+    paint_drop_warned: bool = false,
+    paint_hover: ?[3]f32 = null,
+    paint_stroking: bool = false,
+    paint_last_x: f32 = 0,
+    paint_last_y: f32 = 0,
+    paint_last_w: f32 = 0,
+    paint_last_h: f32 = 0,
 
     pub fn create(allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !*Runtime {
         const self = try allocator.create(Runtime);
@@ -3217,6 +3254,12 @@ pub const Runtime = struct {
         if (self.mesh_prop_islands.len > 0) self.allocator.free(self.mesh_prop_islands);
         for (self.player_geom_keys.items) |key| self.allocator.free(key);
         self.player_geom_keys.deinit(self.allocator);
+        for (self.paint_slot_key) |maybe_key| {
+            if (maybe_key) |key| self.allocator.free(key);
+        }
+        for (self.paint_slot_floor) |maybe_floor| {
+            if (maybe_floor) |floor| self.allocator.free(floor);
+        }
         {
             var it = self.live_slot_keys.valueIterator();
             while (it.next()) |key| self.allocator.free(key.*);
@@ -4568,6 +4611,24 @@ pub const Runtime = struct {
             .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
             .scene3d_instance_static = false,
         });
+        // MAPPAINT req_2473: the brush beam + the live-painted terrain mirror.
+        // The beam is a single translucent box column (instance_count 0 + alpha
+        // < 1 routes it through the transparent pass); the paint slots are inert
+        // until applyPaintLayer assigns a painted chunk to one. All in the stable
+        // prefix so streaming's tail rebuild never clobbers them.
+        self.paint_beam_kid = self.kid_list.items.len;
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = false,
+            .scene3d_geom_key = "box",
+            .scene3d_vertices = self.cube[0..],
+            .scene3d_vert_count = 36,
+            .scene3d_color_a = PAINT_BEAM_ALPHA,
+        });
+        self.paint_kids_first = self.kid_list.items.len;
+        var paint_slot: usize = 0;
+        while (paint_slot < MAX_PAINT_SLOTS) : (paint_slot += 1) {
+            try self.kid_list.append(self.allocator, .{ .scene3d_mesh = false });
+        }
         // The world batches are STATIC (built once at construct, never mutated) —
         // flag them so the host uploads each ONCE and redraws from the retained
         // instance buffer with no per-frame restage/upload. This is what makes a
@@ -6480,6 +6541,268 @@ fn applyPendingLive(runtime: *Runtime) void {
     }
 }
 
+// ── MAPPAINT req_2473: the live map-paint layer ───────────────────────────────
+// The map painter's authoring buffers (framework/game/map) are host globals; the
+// loader is their VIEW: each painted chunk claims a reserved paint node whose
+// heights point at an owned 121×121 downsample of the chunk's 241×241 brush
+// field, re-baked + collider-refreshed only when the chunk's height channel is
+// dirty. Pointer input routes here from engine.zig when a paint tool is armed
+// (setPaintMode) — screen → ext-camera ray → terrain hit → stroke engine, with
+// zero JS per event. The brush beam (THPS park-editor style) is a translucent
+// column the hover point drags around.
+
+const PendingPaint = struct {
+    node_id: u32 = 0,
+    enabled: bool = false,
+};
+var g_pending_paint: [MAX_EMBEDDED_LOADERS]PendingPaint = [_]PendingPaint{.{}} ** MAX_EMBEDDED_LOADERS;
+var g_any_paint_armed: bool = false;
+
+/// Arm/disarm in-viewport map painting for a loader node (the editor's door).
+pub fn setPaintMode(node_id: u32, enabled: bool) void {
+    if (node_id == 0) return;
+    var slot: ?*PendingPaint = null;
+    for (&g_pending_paint) |*p| {
+        if (p.node_id == node_id) {
+            slot = p;
+            break;
+        }
+        if (slot == null and p.node_id == 0) slot = p;
+    }
+    if (slot) |p| {
+        p.node_id = node_id;
+        p.enabled = enabled;
+    }
+    g_any_paint_armed = false;
+    for (&g_pending_paint) |*p| {
+        if (p.node_id != 0 and p.enabled) g_any_paint_armed = true;
+    }
+}
+
+pub fn paintArmed(node_id: u32) bool {
+    for (&g_pending_paint) |*p| {
+        if (p.node_id == node_id) return p.enabled;
+    }
+    return false;
+}
+
+/// Cheap pre-check for engine.zig's per-motion routing: any armed viewport at all?
+pub fn anyPaintArmed() bool {
+    return g_any_paint_armed;
+}
+
+pub const PaintPhase = enum { down, move, up };
+
+/// Route a pointer event into the map painter (engine.zig calls this while a
+/// paint drag owns the pointer). Screen coords are window-absolute; the pane
+/// rect renderEmbedded stored maps them into the viewport.
+pub fn paintPointer(node_id: u32, phase: PaintPhase, mx: f32, my: f32) void {
+    const entry = findMounted(node_id) orelse return;
+    const runtime = entry.runtime orelse return;
+    if (phase == .up) {
+        if (runtime.paint_stroking) {
+            runtime.paint_stroking = false;
+            _ = map_paint.strokeEnd();
+        }
+        return;
+    }
+    const hit = paintGroundHitAt(runtime, mx, my) orelse return;
+    runtime.paint_hover = hit;
+    switch (phase) {
+        .down => {
+            runtime.paint_stroking = true;
+            map_paint.strokeBegin(hit[0], hit[2]);
+        },
+        .move => {
+            if (runtime.paint_stroking) map_paint.strokeMove(hit[0], hit[2]);
+        },
+        .up => unreachable,
+    }
+}
+
+/// Screen (window-absolute) → world ray through the external iso camera →
+/// painted-terrain hit. The ray basis mirrors gpu/3d.zig drawScene's
+/// m4perspective(fov_y, aspect) + lookAt(up = +Y) exactly, so the brush lands
+/// under the cursor by construction.
+fn paintGroundHitAt(runtime: *Runtime, mx: f32, my: f32) ?[3]f32 {
+    if (runtime.paint_last_w <= 1 or runtime.paint_last_h <= 1) return null;
+    const cam = &runtime.camera;
+    if (!cam.external) return null; // painting is an editor-viewport affair
+    const nx = ((mx - runtime.paint_last_x) / runtime.paint_last_w) * 2 - 1;
+    const ny = 1 - ((my - runtime.paint_last_y) / runtime.paint_last_h) * 2;
+    if (nx < -1.05 or nx > 1.05 or ny < -1.05 or ny > 1.05) return null;
+
+    var fx = cam.ext_look.x - cam.ext_pos.x;
+    var fy = cam.ext_look.y - cam.ext_pos.y;
+    var fz = cam.ext_look.z - cam.ext_pos.z;
+    const flen = @sqrt(fx * fx + fy * fy + fz * fz);
+    if (flen < 0.0001) return null;
+    fx /= flen;
+    fy /= flen;
+    fz /= flen;
+    // right = normalize(forward × up), up basis = right × forward
+    var rx = -fz;
+    var rz = fx;
+    const rlen = @sqrt(rx * rx + rz * rz);
+    if (rlen < 0.0001) return null; // straight-down camera: degenerate basis
+    rx /= rlen;
+    rz /= rlen;
+    // up basis = right(rx,0,rz) × forward(fx,fy,fz)
+    const up_x = -rz * fy;
+    const up_y = rz * fx - rx * fz;
+    const up_z = rx * fy;
+    const tan_half = @tan(cam.ext_fov * std.math.pi / 360.0);
+    const aspect = runtime.paint_last_w / runtime.paint_last_h;
+    var dx = fx + rx * (nx * tan_half * aspect) + up_x * (ny * tan_half);
+    var dy = fy + up_y * (ny * tan_half);
+    var dz = fz + rz * (nx * tan_half * aspect) + up_z * (ny * tan_half);
+    const dlen = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (dlen < 0.0001) return null;
+    dx /= dlen;
+    dy /= dlen;
+    dz /= dlen;
+    return map_paint.groundHit(cam.ext_pos.x, cam.ext_pos.y, cam.ext_pos.z, dx, dy, dz, 2000);
+}
+
+/// Per-frame paint pass (renderEmbedded): mirror every painted chunk into its
+/// reserved node + collider (dirty-coalesced), poll the hover beam, and dress
+/// the beam node. Runs unconditionally — with no painted chunks and paint
+/// disarmed it is a cheap slot scan.
+fn applyPaintLayer(runtime: *Runtime) void {
+    const first = runtime.paint_kids_first orelse return;
+
+    // hover poll: the beam follows the mouse whenever the tool is armed, not
+    // just during a drag — no per-motion tree walk needed for hover.
+    const armed = paintArmed(runtime.node_id);
+    if (armed and !runtime.paint_stroking) {
+        var mx: f32 = 0;
+        var my: f32 = 0;
+        _ = c.SDL_GetMouseState(&mx, &my);
+        if (mx >= runtime.paint_last_x and mx <= runtime.paint_last_x + runtime.paint_last_w and
+            my >= runtime.paint_last_y and my <= runtime.paint_last_y + runtime.paint_last_h)
+        {
+            runtime.paint_hover = paintGroundHitAt(runtime, mx, my);
+        } else {
+            runtime.paint_hover = null;
+        }
+    } else if (!armed) {
+        runtime.paint_hover = null;
+    }
+
+    // painted-chunk mirror: assign slots, re-bake dirty heights, refresh colliders
+    for (map_chunks.slots()) |maybe| {
+        const chunk = maybe orelse continue;
+        var slot: ?usize = null;
+        var free_slot: ?usize = null;
+        for (0..MAX_PAINT_SLOTS) |i| {
+            if (runtime.paint_slot_used[i]) {
+                if (runtime.paint_slot_chunk[i][0] == chunk.cx and runtime.paint_slot_chunk[i][1] == chunk.cz) {
+                    slot = i;
+                    break;
+                }
+            } else if (free_slot == null) {
+                free_slot = i;
+            }
+        }
+        const fresh = slot == null;
+        if (fresh) {
+            slot = free_slot orelse {
+                if (!runtime.paint_drop_warned) {
+                    runtime.paint_drop_warned = true;
+                    log.print("[paint] LIVE MIRROR FULL: >{d} painted chunks — chunk ({d},{d}) not mirrored\n", .{ MAX_PAINT_SLOTS, chunk.cx, chunk.cz });
+                }
+                continue;
+            };
+        }
+        const i = slot.?;
+        if (!fresh and !chunk.dirty.height) continue;
+
+        const floor = runtime.paint_slot_floor[i] orelse blk: {
+            const buf = runtime.allocator.alloc(f32, map_paint.FLOOR_CELLS) catch continue;
+            runtime.paint_slot_floor[i] = buf;
+            break :blk buf;
+        };
+        map_paint.downsampleFloorHeights(&chunk.height, floor);
+        chunk.dirty.height = false;
+        runtime.paint_slot_ver[i] += 1;
+        if (runtime.paint_slot_key[i]) |old| runtime.allocator.free(old);
+        const key = std.fmt.allocPrint(runtime.allocator, "~hf~paint-{d}-{d}~{d}", .{ chunk.cx, chunk.cz, runtime.paint_slot_ver[i] }) catch continue;
+        runtime.paint_slot_key[i] = key;
+        runtime.paint_slot_used[i] = true;
+        runtime.paint_slot_chunk[i] = .{ chunk.cx, chunk.cz };
+
+        var max_abs: f32 = 0;
+        for (floor) |v| max_abs = @max(max_abs, @abs(v));
+        const half_span = map_chunks.CHUNK_METERS / 2;
+        const node = &runtime.kid_list.items[first + i];
+        node.* = .{
+            .scene3d_mesh = true,
+            .scene3d_geom_key = key,
+            .scene3d_heights = floor,
+            .scene3d_hf_cols = @intCast(map_paint.FLOOR_RES),
+            .scene3d_hf_rows = @intCast(map_paint.FLOOR_RES),
+            .scene3d_hf_width = map_chunks.CHUNK_METERS,
+            .scene3d_hf_depth = map_chunks.CHUNK_METERS,
+            .scene3d_hf_base = 0,
+            .scene3d_bounds_radius = @sqrt(half_span * half_span * 2 + max_abs * max_abs),
+            .scene3d_pos_x = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS,
+            .scene3d_pos_y = 0,
+            .scene3d_pos_z = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS,
+            // editor terrain tint until the ground-texture channel lands (phase 3)
+            .scene3d_color_r = 0.42,
+            .scene3d_color_g = 0.52,
+            .scene3d_color_b = 0.34,
+        };
+
+        // collider mirror: same grid the render bakes — see-it == walk-it
+        _ = game_physics.registerHeightfield(.{
+            .id = PAINT_COLLIDER_BASE + i,
+            .origin_x = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS - half_span,
+            .origin_z = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS - half_span,
+            .cell = map_chunks.CHUNK_METERS / @as(f32, @floatFromInt(map_paint.FLOOR_RES - 1)),
+            .cols = map_paint.FLOOR_RES,
+            .rows = map_paint.FLOOR_RES,
+            .base_y = 0,
+            .walk_cos = 0.6,
+        }, std.mem.sliceAsBytes(floor));
+    }
+
+    // the brush beam: a translucent column over the footprint at the hover point
+    if (runtime.paint_beam_kid) |beam_kid| {
+        const node = &runtime.kid_list.items[beam_kid];
+        if (armed and runtime.paint_hover != null) {
+            const hover = runtime.paint_hover.?;
+            const tool = map_paint.tool();
+            const radius = @max(0.5, tool.radius_m);
+            node.scene3d_mesh = true;
+            node.scene3d_pos_x = hover[0];
+            node.scene3d_pos_y = hover[1] + PAINT_BEAM_HEIGHT_METERS / 2;
+            node.scene3d_pos_z = hover[2];
+            node.scene3d_scale_x = radius * 2;
+            node.scene3d_scale_y = PAINT_BEAM_HEIGHT_METERS;
+            node.scene3d_scale_z = radius * 2;
+            // diamond footprint reads as a 45° square; circle/square share the box
+            node.scene3d_rot_y = if (tool.shape == .diamond) std.math.pi / 4.0 else 0;
+            if (tool.mode == .erase) {
+                node.scene3d_color_r = 0.95;
+                node.scene3d_color_g = 0.25;
+                node.scene3d_color_b = 0.2;
+            } else if (tool.channel == .water) {
+                node.scene3d_color_r = 0.25;
+                node.scene3d_color_g = 0.55;
+                node.scene3d_color_b = 0.95;
+            } else {
+                node.scene3d_color_r = 1.0;
+                node.scene3d_color_g = 0.72;
+                node.scene3d_color_b = 0.25;
+            }
+            node.scene3d_color_a = PAINT_BEAM_ALPHA;
+        } else {
+            node.scene3d_mesh = false;
+        }
+    }
+}
+
 fn findMounted(node_id: u32) ?*MountedLoader {
     for (&g_mounted_loaders) |*entry| {
         const runtime = entry.runtime orelse continue;
@@ -6543,6 +6866,13 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
         }
     }
     applyPendingLive(runtime); // LIVEHOST req_1798: just-placed pieces, drawn without a rebake
+    // MAPPAINT req_2473: the pane rect feeds the screen→ray mapping; the paint
+    // layer mirrors painted chunks + colliders and dresses the brush beam.
+    runtime.paint_last_x = x;
+    runtime.paint_last_y = y;
+    runtime.paint_last_w = w;
+    runtime.paint_last_h = h;
+    applyPaintLayer(runtime);
     runtime.stepNow();
     runtime.ensureMaterials();
     const ok = scene3d.render(&runtime.root, x, y, w, h, opacity);

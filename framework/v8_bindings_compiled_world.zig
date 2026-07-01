@@ -282,6 +282,22 @@ fn hostSetHideWalls(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnString(info, "ok");
 }
 
+// __compiled_world_set_paint_mode(nodeId, on) arms/disarms in-viewport map painting
+// (MAPPAINT req_2473): while on, the left button over this loader routes into the
+// host map painter (framework/game/map) — strokes, brush beam, live terrain mirror
+// and colliders all run host-side with zero JS per event. The tool itself is armed
+// through the __map_* doors (v8_bindings_game_map.zig).
+fn hostSetPaintMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const on = (argToF64(info, 1) orelse 0) != 0;
+    world_loader.setPaintMode(node_id, on);
+    setReturnString(info, "ok");
+}
+
 // __compiled_world_set_resident_meshes(nodeId, Uint8Array meshPropsLump) installs the editor's
 // full cooked-asset catalog (FULLRES req_1909/1911/1912) so every compiled asset is resident and
 // placeable with no rebake. `bytes` is a MESH_PROPS lump (meshes only); empty clears residency.
@@ -367,6 +383,7 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_set_live_skin_boxes", hostSetLiveSkinBoxes);
     v8_runtime.registerHostFn("__compiled_world_set_dirty_erase", hostSetDirtyErase);
     v8_runtime.registerHostFn("__compiled_world_set_hide_walls", hostSetHideWalls);
+    v8_runtime.registerHostFn("__compiled_world_set_paint_mode", hostSetPaintMode);
     v8_runtime.registerHostFn("__compiled_world_set_resident_meshes", hostSetResidentMeshes);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);

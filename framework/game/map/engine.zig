@@ -559,6 +559,114 @@ fn paintGlobalCell(gtx: i32, gtz: i32, erase: bool) void {
     }
 }
 
+// ── terrain queries (the loader's picking + beam ground) ─────────────────────
+
+/// Bilinear painted-terrain height at a world-meter point. 0 where no chunk
+/// (unpainted ground is the y=0 plane). Border samples are duplicated across
+/// neighbouring chunks with identical values, so either side answers alike.
+pub fn heightAt(x: f32, z: f32) f32 {
+    const half = chunks.CHUNK_METERS / 2;
+    const sxf = (x + half) / DOT_M;
+    const szf = (z + half) / DOT_M;
+    const sx0: i32 = @intFromFloat(@floor(sxf));
+    const sz0: i32 = @intFromFloat(@floor(szf));
+    const fx = sxf - @floor(sxf);
+    const fz = szf - @floor(szf);
+    const h00 = sampleAtGlobal(sx0, sz0);
+    const h10 = sampleAtGlobal(sx0 + 1, sz0);
+    const h01 = sampleAtGlobal(sx0, sz0 + 1);
+    const h11 = sampleAtGlobal(sx0 + 1, sz0 + 1);
+    const top = h00 + (h10 - h00) * fx;
+    const bot = h01 + (h11 - h01) * fx;
+    return top + (bot - top) * fz;
+}
+
+fn sampleAtGlobal(gsx: i32, gsz: i32) f32 {
+    const per: i32 = chunks.CHUNK_TILES * chunks.DOTS_PER_TILE; // 240 samples per chunk span
+    const cx = @divFloor(gsx, per);
+    const cz = @divFloor(gsz, per);
+    const ch = chunks.chunkAt(cx, cz) orelse return 0;
+    const lx: usize = @intCast(gsx - cx * per);
+    const lz: usize = @intCast(gsz - cz * per);
+    return ch.height[lz * chunks.SAMPLE_COLS + lx];
+}
+
+/// March a camera ray against the painted terrain (plane y=0 where unpainted).
+/// Returns the world hit point, or null when the ray never comes down within
+/// max_dist. Coarse 0.5 m steps + 8 bisection refinements — editor picking, not
+/// physics.
+pub fn groundHit(ox: f32, oy: f32, oz: f32, dx: f32, dy: f32, dz: f32, max_dist: f32) ?[3]f32 {
+    const STEP: f32 = 0.5;
+    var t_prev: f32 = 0;
+    var above_prev = oy - heightAt(ox, oz);
+    if (above_prev <= 0) return .{ ox, oy, oz }; // camera already at/below ground
+    var t: f32 = STEP;
+    while (t <= max_dist) : (t += STEP) {
+        const px = ox + dx * t;
+        const py = oy + dy * t;
+        const pz = oz + dz * t;
+        const above = py - heightAt(px, pz);
+        if (above <= 0) {
+            // bisect [t_prev, t] to the crossing
+            var lo = t_prev;
+            var hi = t;
+            var i: u8 = 0;
+            while (i < 8) : (i += 1) {
+                const mid = (lo + hi) / 2;
+                const my = oy + dy * mid - heightAt(ox + dx * mid, oz + dz * mid);
+                if (my > 0) lo = mid else hi = mid;
+            }
+            const th = (lo + hi) / 2;
+            return .{ ox + dx * th, oy + dy * th, oz + dz * th };
+        }
+        t_prev = t;
+        above_prev = above;
+    }
+    return null;
+}
+
+// ── the loader's floor mirror ─────────────────────────────────────────────────
+
+/// Vertices per side of a chunk's render/collider mirror: one per tile + 1.
+/// The brush field samples finer (2/tile) than the mirror needs; 121×121 also
+/// fits the collider budget (game_physics HF_MAX_SAMPLES) and the dyn-vert
+/// scratch, which the full 241×241 grid would overflow. Port of
+/// cart/hmsc-int/chunkFloor.ts CHUNK_FLOOR_HF_RES + downsampleChunkFloorHeights.
+pub const FLOOR_RES: usize = @as(usize, @intCast(chunks.CHUNK_TILES)) + 1; // 121
+pub const FLOOR_CELLS: usize = FLOOR_RES * FLOOR_RES;
+
+/// Downsample a chunk's 241×241 sample grid into a 121×121 mirror, taking the
+/// ABS-MAX over each cell's window so thin ridges/pits survive the resample
+/// (chunkFloor.ts:52). dst.len must be FLOOR_CELLS.
+pub fn downsampleFloorHeights(src: *const [chunks.SAMPLE_CELLS]f32, dst: []f32) void {
+    const cols = chunks.SAMPLE_COLS;
+    const res = FLOOR_RES;
+    const s = @as(f32, @floatFromInt(cols - 1)) / @as(f32, @floatFromInt(res - 1));
+    const h: i32 = @max(1, @as(i32, @intFromFloat(@ceil(s / 2))));
+    var j: usize = 0;
+    while (j < res) : (j += 1) {
+        const cyi: i32 = @intFromFloat(@round(@as(f32, @floatFromInt(j)) * s));
+        var i: usize = 0;
+        while (i < res) : (i += 1) {
+            const cxi: i32 = @intFromFloat(@round(@as(f32, @floatFromInt(i)) * s));
+            var best: f32 = 0;
+            var dy: i32 = -h;
+            while (dy <= h) : (dy += 1) {
+                const yy = cyi + dy;
+                if (yy < 0 or yy >= cols) continue;
+                var dx: i32 = -h;
+                while (dx <= h) : (dx += 1) {
+                    const xx = cxi + dx;
+                    if (xx < 0 or xx >= cols) continue;
+                    const v = src[@as(usize, @intCast(yy)) * cols + @as(usize, @intCast(xx))];
+                    if (@abs(v) > @abs(best)) best = v;
+                }
+            }
+            dst[j * res + i] = best;
+        }
+    }
+}
+
 // ── dirty bookkeeping ─────────────────────────────────────────────────────────
 
 pub fn dirtyChunkCount() u32 {
@@ -578,6 +686,50 @@ pub fn clearDirty() void {
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
+
+test "heightAt bilinear-samples painted terrain, 0 off-chunk" {
+    reset();
+    defer reset();
+    _ = chunks.growChunk(0, 0).?;
+    setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 4, .center_z = 6, .profile = .flat });
+    strokeBegin(0, 0);
+    _ = strokeEnd();
+    try std.testing.expectApproxEqAbs(@as(f32, 6), heightAt(0, 0), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), heightAt(50, 50), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), heightAt(500, 0), 0.0001); // no chunk there
+}
+
+test "groundHit lands a top-down ray on the sculpted cap" {
+    reset();
+    defer reset();
+    _ = chunks.growChunk(0, 0).?;
+    setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 4, .center_z = 6, .profile = .flat });
+    strokeBegin(10, 10);
+    _ = strokeEnd();
+
+    // iso-style ray from above, angled onto the hill at (10,10)
+    const hit = groundHit(10, 50, 40, 0, -0.8, -0.6, 200).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 10), hit[0], 0.6);
+    try std.testing.expectApproxEqAbs(@as(f32, 6), hit[1], 0.6);
+    // a ray that never comes down misses
+    try std.testing.expect(groundHit(0, 10, 0, 0, 1, 0, 100) == null);
+    // flat unpainted ground still hits the y=0 plane
+    const flat = groundHit(40, 20, 40, 0, -1, 0, 100).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 0), flat[1], 0.1);
+}
+
+test "downsampleFloorHeights keeps ridge peaks through the resample" {
+    reset();
+    defer reset();
+    const ch = chunks.growChunk(0, 0).?;
+    // a one-sample spike that naive stride-sampling at odd offsets would drop
+    ch.height[100 * chunks.SAMPLE_COLS + 101] = 9;
+    var floor: [FLOOR_CELLS]f32 = undefined;
+    downsampleFloorHeights(&ch.height, floor[0..]);
+    var peak: f32 = 0;
+    for (floor) |v| peak = @max(peak, v);
+    try std.testing.expectApproxEqAbs(@as(f32, 9), peak, 0.0001);
+}
 
 test "height stroke stamps seam-free across the shared border" {
     reset();
