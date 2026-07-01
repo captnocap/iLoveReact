@@ -1,0 +1,90 @@
+// editor/data/modelPackageStore.ts — filesystem IO for Model Packages.
+//
+// Materializes a ModelPackage into its own on-disk directory and reads packages
+// back (req_2168: a model is a self-contained, copyable directory). This is the
+// IO half; modelPackage.ts owns the format/paths and stays pure. Runs in the
+// editor host, which exposes the fs hooks (runtime/hooks/fs) — there is no path
+// confinement, so every path here comes from modelPackage.ts, never ad hoc.
+//
+// This slice materializes the MANIFEST + directory skeleton. Copying the mesh /
+// atlas / paint / shader BYTES into the subdirs (so a copied folder is truly
+// self-contained) is the next slice; the subdirs are created now so the shape
+// is visible and the writers have a home.
+import { exists, listDir, mkdir, readFile, writeFile } from '../../../runtime/hooks/fs';
+import {
+  MODELS_HOME,
+  MODEL_PACKAGE_SUBDIRS,
+  categoryDir,
+  manifestPath,
+  packageDir,
+  packageToManifest,
+  parseManifest,
+  manifestToPackage,
+  serializeManifest,
+} from './modelPackage';
+import type { ModelPackage } from './types';
+
+export type MaterializeResult = { ok: boolean; id: string; dir: string; error?: string };
+export type MaterializeSummary = { total: number; wrote: number; failed: MaterializeResult[] };
+
+// Write one model's package directory: the category + model dirs, the four blob
+// subdirs, and manifest.json. Idempotent — mkdir/writeFile overwrite in place.
+export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
+  const dir = packageDir(pkg.kind, pkg.id);
+  if (!mkdir(dir)) return { ok: false, id: pkg.id, dir, error: 'mkdir package dir failed' };
+  for (const sub of MODEL_PACKAGE_SUBDIRS) {
+    if (!mkdir(`${dir}/${sub}`)) return { ok: false, id: pkg.id, dir, error: `mkdir ${sub} failed` };
+  }
+  const wrote = writeFile(manifestPath(pkg.kind, pkg.id), serializeManifest(packageToManifest(pkg)));
+  if (!wrote) return { ok: false, id: pkg.id, dir, error: 'write manifest failed' };
+  return { ok: true, id: pkg.id, dir };
+}
+
+// Materialize a whole catalog. Used to seed the package home from the current
+// (still snapshot-derived) model list so the on-disk directories become real.
+export function materializeCatalog(pkgs: ModelPackage[]): MaterializeSummary {
+  const failed: MaterializeResult[] = [];
+  let wrote = 0;
+  for (const pkg of pkgs) {
+    const result = materializeModelPackage(pkg);
+    if (result.ok) wrote += 1;
+    else failed.push(result);
+  }
+  return { total: pkgs.length, wrote, failed };
+}
+
+// True once at least one materialized package exists on disk. Lets callers
+// prefer real packages and fall back to the snapshot catalog while empty.
+export function hasMaterializedPackages(): boolean {
+  if (!exists(MODELS_HOME)) return false;
+  return listDir(MODELS_HOME).some((category) => {
+    const categoryPath = `${MODELS_HOME}/${category}`;
+    return exists(categoryPath) && listDir(categoryPath).length > 0;
+  });
+}
+
+// Read every materialized package back into ModelPackage[]. Skips any directory
+// without a readable manifest instead of throwing, so one bad package can't
+// blank the roster (a lesson already paid for in paint-blob storage).
+export function loadMaterializedPackages(): ModelPackage[] {
+  if (!exists(MODELS_HOME)) return [];
+  const out: ModelPackage[] = [];
+  for (const category of listDir(MODELS_HOME)) {
+    const categoryPath = `${MODELS_HOME}/${category}`;
+    if (!exists(categoryPath)) continue;
+    for (const slug of listDir(categoryPath)) {
+      const file = `${categoryPath}/${slug}/manifest.json`;
+      const text = readFile(file);
+      if (!text) continue;
+      try {
+        out.push(manifestToPackage(parseManifest(text)));
+      } catch {
+        // Not a valid manifest — skip this directory, keep the roster intact.
+      }
+    }
+  }
+  return out;
+}
+
+// Re-exported so callers get the category mapping without reaching past the store.
+export { categoryDir };
