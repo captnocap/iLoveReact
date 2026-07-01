@@ -7,7 +7,7 @@ import {
 } from '../../hmsc-int/game/textures/shaders';
 import { validateDecalDoc } from '../../hmsc-int/game/textures/decal';
 import { editMeshToGeometry, type EditMesh } from '../../hmsc-int/editors/model/editMesh';
-import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, ModelPaintVariant } from './types';
+import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage } from './types';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
@@ -579,7 +579,9 @@ function cookedModelPackages(snapshot: CookedSnapshot | null): ModelPackage[] {
         asset.texRef ? `texture:${short(asset.texRef)}` : 'texture:-',
       ],
       atlases: cookedAtlases(asset, triangles, textureBytes),
-      paints: cookedPaints(asset),
+      // Paint variants are saved paintings, held live in the editor store (paintVariants.ts),
+      // not derived from the snapshot — the package carries none.
+      paints: [],
       sourceKind: 'cooked-asset',
       semanticKind: semantic,
     }];
@@ -622,7 +624,9 @@ function storedModelPackages(snapshot: ModelSnapshot | null): ModelPackage[] {
         `palette:${paletteSlots.length}`,
       ],
       atlases: storedModelAtlases(model, color),
-      paints: storedModelPaints(model),
+      // Paint variants live in the editor store (paintVariants.ts), read live per model — the
+      // snapshot package carries none (the old palette-slot fabrication is gone).
+      paints: [],
       sourceKind: 'studio-model',
       semanticKind: semantic,
     }];
@@ -752,18 +756,6 @@ function cookedAtlases(asset: CookedAsset, triangles: number, textureBytes: numb
   return rows;
 }
 
-function cookedPaints(asset: CookedAsset): ModelPaintVariant[] {
-  return (asset.slots ?? []).map((slot, index) => ({
-    id: `${asset.id}:slot:${slot.id ?? index}`,
-    name: slot.label ?? slot.id ?? `slot ${index + 1}`,
-    atlas: 'cooked slots',
-    used: 0,
-    shaderRefs: slot.defaultMaterial ? [slot.defaultMaterial] : [],
-    imageRefs: asset.texRef ? [short(asset.texRef)] : [],
-    color: slot.defaultMaterial && /^#[0-9a-f]{6}$/i.test(slot.defaultMaterial) ? slot.defaultMaterial : cookedColor(asset),
-  }));
-}
-
 function storedModelAtlases(model: StoredModel, color: string): ModelAtlas[] {
   const parts = orderedParts(model);
   const rows: ModelAtlas[] = [{
@@ -771,7 +763,7 @@ function storedModelAtlases(model: StoredModel, color: string): ModelAtlas[] {
     label: 'parts',
     scope: 'saved Studio geometry',
     resolution: `${parts.length} parts`,
-    paints: model.palette?.slots?.length ?? 0,
+    paints: 0,
     color,
   }];
   if (model.paintRef) {
@@ -780,24 +772,11 @@ function storedModelAtlases(model: StoredModel, color: string): ModelAtlas[] {
       label: `paint/${short(model.paintRef)}`,
       scope: 'content-addressed paint texture',
       resolution: 'stored blob ref',
-      paints: model.palette?.slots?.length ?? 0,
+      paints: 0,
       color,
     });
   }
   return rows;
-}
-
-function storedModelPaints(model: StoredModel): ModelPaintVariant[] {
-  const paintRef = model.paintRef ? [short(model.paintRef)] : [];
-  return (model.palette?.slots ?? []).map((slot, index) => ({
-    id: `${model.id}:palette:${slot.id ?? index}`,
-    name: slot.name ?? `slot ${slot.id ?? index + 1}`,
-    atlas: `palette v${model.palette?.variant ?? 0}`,
-    used: 0,
-    shaderRefs: slot.material?.slug ? [slot.material.slug] : [],
-    imageRefs: paintRef,
-    color: slot.pseudo ?? slot.colors?.[0] ?? colorFor(`${model.id}:${index}`),
-  }));
 }
 
 function orderedParts(model: StoredModel): StoredPart[] {

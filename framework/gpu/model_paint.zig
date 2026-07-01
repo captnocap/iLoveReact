@@ -228,6 +228,19 @@ pub fn applyColors(colors: []const u8) void {
     }
 }
 
+/// Overwrite the WHOLE atlas with saved bytes — how a saved paint variant is loaded back onto
+/// the model. The caller restores the matching detail first (setDetail), so the buffer is
+/// already sized to the saved painting and the per-vertex UVs line up. Marks every row dirty so
+/// the texture re-uploads. Returns false on a size mismatch (wrong detail / no target).
+pub fn setAtlas(rgba: []const u8) bool {
+    const buf = g_rgba orelse return false;
+    if (rgba.len != buf.len) return false;
+    @memcpy(buf, rgba);
+    g_has_dirty = false;
+    markRows(0, g_atlas_h - 1);
+    return true;
+}
+
 /// A face's representative colour — the texel at its triangle centroid. Lets callers read
 /// a face's base tone (quality carry-over, the headless proof). Selection uses the whole-
 /// patch save/restore below so it never flattens sub-face paint.

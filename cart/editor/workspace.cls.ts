@@ -12,7 +12,9 @@ const MONO = 'monospace';
 
 classifier({
   HW_App: { type: 'Box', style: { width: '100%', height: '100%', flexDirection: 'column', position: 'relative', backgroundColor: 'theme:bg', overflow: 'hidden' } },
-  HW_Chrome: { type: 'Box', style: { height: 37, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
+  // paddingRight reserves room for the floating RouteToggle (Editor/Play), which is
+  // position:absolute at right:10 over the top strip — keeps Compile from being smothered.
+  HW_Chrome: { type: 'Box', style: { height: 37, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 150, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_Brand: { type: 'Box', style: { width: 136, height: '100%', flexDirection: 'row', alignItems: 'center', gap: 7, borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:borderSoft' } },
   HW_BrandText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 2 } },
   HW_MenuBar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 2, height: '100%' } },
@@ -131,8 +133,6 @@ classifier({
   HW_ModelSectionHead: { type: 'Box', style: { height: 17, flexDirection: 'row', alignItems: 'center', gap: 6 } },
   HW_ModelDataRow: { type: 'Pressable', style: { height: 19, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_ModelAtlasCard: { type: 'Pressable', style: { height: 34, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
-  HW_ModelPaintGrid: { type: 'Box', style: { height: 50, flexDirection: 'row', gap: 6 } },
-  HW_ModelPaintCard: { type: 'Pressable', style: { flexGrow: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 2, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_MaterialGrid: { type: 'Box', style: { height: 284, flexShrink: 0, flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start', justifyContent: 'space-between', gap: 4, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, overflow: 'hidden' } },
   HW_MaterialTile: { type: 'Pressable', style: { width: 68, height: 68, position: 'relative', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:cardBg', overflow: 'hidden' }, hoverStyle: { borderColor: 'theme:textDim' } },
   HW_MaterialTileOn: { type: 'Pressable', style: { width: 68, height: 68, position: 'relative', borderRadius: 'theme:radiusMd', borderWidth: 2, borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg', overflow: 'hidden' } },

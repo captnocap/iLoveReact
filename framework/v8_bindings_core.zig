@@ -669,6 +669,60 @@ fn hostModelSetPaintDetail(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setReturnNumber(info, @floatFromInt(applied));
 }
 
+/// __model_atlas_read() → JSON {"w":W,"h":H,"detail":D,"data":"<base64 rgba>"} for the current
+/// painting, or "" if there's no paint target. The editor persists this as a paint variant.
+fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    const pa = scene3d.paintAtlas() orelse {
+        setReturnString(info, "");
+        return;
+    };
+    const enc = std.base64.standard.Encoder;
+    const b64 = alloc.alloc(u8, enc.calcSize(pa.rgba.len)) catch {
+        setReturnString(info, "");
+        return;
+    };
+    defer alloc.free(b64);
+    _ = enc.encode(b64, pa.rgba);
+    const json = std.fmt.allocPrint(alloc, "{{\"w\":{d},\"h\":{d},\"detail\":{d},\"data\":\"{s}\"}}", .{ pa.w, pa.h, pa.detail, b64 }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    defer alloc.free(json);
+    setReturnString(info, json);
+}
+
+/// __model_atlas_apply(detail, base64) → 1 on success, 0 on failure. Restore a saved painting:
+/// the host re-tessellates to `detail` then blits the decoded atlas back over the texture.
+fn hostModelAtlasApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    const detail = argToI32(info, 0) orelse 1;
+    const b64 = argToStringAlloc(info, 1) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer alloc.free(b64);
+    const dec = std.base64.standard.Decoder;
+    const n = dec.calcSizeForSlice(b64) catch {
+        setReturnNumber(info, 0);
+        return;
+    };
+    const raw = alloc.alloc(u8, n) catch {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer alloc.free(raw);
+    dec.decode(raw, b64) catch {
+        setReturnNumber(info, 0);
+        return;
+    };
+    const ok = scene3d.applyPaintAtlas(detail, raw);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __file_sha256(path) → 64-char lowercase hex of the file's bytes, or "" on read
 /// failure. Content-addresses an imported asset so its attribution follows the BYTES,
 /// not the filename — a renamed or re-downloaded copy resolves to the same entry.
@@ -1473,6 +1527,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_paint_stroke_begin", hostModelPaintStrokeBegin);
     v8_runtime.registerHostFn("__model_paint_stamp", hostModelPaintStamp);
     v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
+    v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
+    v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
     v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);
     v8_runtime.registerHostFn("__model_set_quality", hostModelSetQuality);
     v8_runtime.registerHostFn("__file_sha256", hostFileSha256);

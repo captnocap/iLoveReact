@@ -7,6 +7,7 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
 import ModelThumbnail from './ModelThumbnail';
+import ModelPaintVariants from './ModelPaintVariants';
 
 export default function ModelDetailBody({ model }: { model: ModelPackage }) {
   return (
@@ -63,28 +64,16 @@ export default function ModelDetailBody({ model }: { model: ModelPackage }) {
               </C.HW_MaterialTitleRow>
               <C.HW_ModelMetaRow>
                 <C.HW_MaterialStat>{atlas.scope}</C.HW_MaterialStat>
-                <C.HW_MaterialStat>{atlas.paints} paints</C.HW_MaterialStat>
               </C.HW_ModelMetaRow>
             </C.HW_ModelCardMain>
           </C.HW_ModelAtlasCard>
         ))}
       </C.HW_ModelSection>
 
-      <C.HW_ModelSection>
-        <C.HW_ModelSectionHead>
-          <Icon name="Brush" size={12} color={accentFor('primary')} />
-          <C.HW_GroupText>PAINT VARIANTS</C.HW_GroupText>
-        </C.HW_ModelSectionHead>
-        <C.HW_ModelPaintGrid>
-          {model.paints.map((paint) => (
-            <C.HW_ModelPaintCard key={paint.id}>
-              <C.HW_SelectedVariantSwatch style={{ backgroundColor: paint.color }} />
-              <C.HW_ToolValue>{paint.name}</C.HW_ToolValue>
-              <C.HW_ToolHint>{paint.atlas}</C.HW_ToolHint>
-            </C.HW_ModelPaintCard>
-          ))}
-        </C.HW_ModelPaintGrid>
-      </C.HW_ModelSection>
+      {/* Real paint variants — whole saved paintings of the model, read live from the editor
+          store (honest-empty until one is saved). Replaces the old palette-slot swatches that
+          were fabricated here and mislabeled as variants. */}
+      <ModelPaintVariants modelId={model.id} />
 
     </>
   );

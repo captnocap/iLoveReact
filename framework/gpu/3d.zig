@@ -1367,6 +1367,23 @@ pub fn setPaintDetail(px: i32) i32 {
     return @intCast(model_paint.detail());
 }
 
+// ── Paint variants (save / load a whole painting) ───────────────────────────────────
+// A saved variant is the model's entire paint atlas at a moment in time (DESIGN_INTAKE: a
+// model painted a million ways, each stored in its folder). Read gives the raw atlas + its
+// detail so the editor can persist it; apply restores the detail (so the layout/UVs match)
+// then blits the saved bytes back over the texture.
+pub const PaintAtlas = struct { rgba: []const u8, w: u32, h: u32, detail: u32 };
+pub fn paintAtlas() ?PaintAtlas {
+    const a = model_paint.atlas() orelse return null;
+    return .{ .rgba = a.rgba, .w = a.w, .h = a.h, .detail = model_paint.detail() };
+}
+/// Load a saved painting: restore its detail (rewrites UVs + re-uploads the mesh) then blit the
+/// saved atlas over the texture. Returns false if the bytes don't match the restored dimensions.
+pub fn applyPaintAtlas(detail_px: i32, rgba: []const u8) bool {
+    _ = setPaintDetail(detail_px);
+    return model_paint.setAtlas(rgba);
+}
+
 var g_dbg_frame: u64 = 0; // req_0727: rate-limit the r3d-census diagnostic print
 
 // ── Dynamic geometry region (variable-size bump) ────────────────────────────
