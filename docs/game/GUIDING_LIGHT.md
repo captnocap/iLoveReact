@@ -64,6 +64,27 @@ What won't separate is your honest, irreducible cost. Pay that and nothing more.
   (games × all platforms). A handful of composable systems spans an exponential
   behavior space the data navigates. Build the engine once; ship infinite content.
 
+### React's Boundary
+
+React is UI authoring. It is how the editor presents panels, menus, inspectors,
+command palettes, preview sockets, and temporary design mocks. It is not where
+the actual game/editor tools live.
+
+The actual tooling is host-owned: placement and snapping, movement/delete
+semantics, model import and preview, painting/effect execution, shader/material
+evaluation, RLE and dithering transforms, pathing, collision, diagnostics,
+autosave, file IO, multiplayer sync, compile, and export. React sends named
+commands and displays the resulting state; the host owns execution, validation,
+timing, persistence, and failure reporting.
+
+If a tool appears in React before the host implementation exists, it is a mock,
+preview shim, or adapter with a named native owner. It is not the final
+architecture. The final contract is always:
+
+```
+React UI -> command/event data -> host/native tool -> data/events/diagnostics
+```
+
 ---
 
 ## The Discipline (the gate — this is what holds it all up)
