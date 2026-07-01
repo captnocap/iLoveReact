@@ -7,7 +7,7 @@ import {
 } from '../textures/shaders';
 import { validateDecalDoc } from '../textures/decal';
 import { cuboid, cylinder, cone, pyramid, plane, sphere, icosphere, editMeshToGeometry, type EditMesh } from '../model/editMesh';
-import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, PrimitiveKind } from './types';
+import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, ModelPart, PrimitiveKind } from './types';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
@@ -211,6 +211,43 @@ export function primitiveMeshData(kind: PrimitiveKind): { positions: Float32Arra
   const groups: number[] = [];
   const geo = editMeshToGeometry(primitiveEditMesh(kind), undefined, groups);
   return { positions: new Float32Array(geo.positions), faceGroups: new Uint32Array(groups) };
+}
+
+// Build one primitive's authored EditMesh (the outliner's per-part geometry). Public so the
+// AppFrame add-part handler can seed a fresh part without importing the generators directly.
+export function primitivePartMesh(kind: PrimitiveKind): EditMesh {
+  return primitiveEditMesh(kind);
+}
+
+export type PartGroupRange = { id: string; lo: number; hi: number };
+
+// Compose a multi-part model into ONE host mesh (positions + per-triangle face groups),
+// mirroring storedModelVertices: each visible part contributes its triangles and owns a
+// contiguous group range [lo, hi) so the outliner can select the whole part by range. Same
+// path a Studio model takes, so parts read as clean grouped sub-meshes in the host editor.
+export function composeModelParts(parts: ModelPart[]): { positions: Float32Array; faceGroups: Uint32Array; ranges: PartGroupRange[] } {
+  const chunks: Float32Array[] = [];
+  const groupChunks: number[][] = [];
+  const ranges: PartGroupRange[] = [];
+  let groupBase = 0;
+  for (const part of parts) {
+    if (!part.visible) continue;
+    const localGroups: number[] = [];
+    const positions = new Float32Array(editMeshToGeometry(part.mesh, undefined, localGroups).positions);
+    if (positions.length === 0) continue;
+    const faceCount = part.mesh.faces.length;
+    chunks.push(positions);
+    groupChunks.push(localGroups.map((fi) => groupBase + fi));
+    ranges.push({ id: part.id, lo: groupBase, hi: groupBase + faceCount });
+    groupBase += faceCount;
+  }
+  const positions = new Float32Array(chunks.reduce((sum, c) => sum + c.length, 0));
+  let offset = 0;
+  chunks.forEach((c) => { positions.set(c, offset); offset += c.length; });
+  const faceGroups = new Uint32Array(groupChunks.reduce((sum, c) => sum + c.length, 0));
+  let groupOffset = 0;
+  groupChunks.forEach((c) => { faceGroups.set(c, groupOffset); groupOffset += c.length; });
+  return { positions, faceGroups, ranges };
 }
 
 function loadHmscEditorCatalog(): HmscEditorCatalog {

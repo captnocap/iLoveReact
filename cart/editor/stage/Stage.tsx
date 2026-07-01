@@ -5,7 +5,7 @@ import type { OklchColor } from '../../../runtime/paint/colors';
 import { modelPackageById } from '../data/content';
 import ContextMenu from '../shell/ContextMenu';
 import MaterialFocusSurface from './MaterialFocusSurface';
-import ModelDocumentSurface from './ModelDocumentSurface';
+import ModelDocumentSurface, { type OutlinerHandlers } from './ModelDocumentSurface';
 import StageTabs from './StageTabs';
 import WorldEditorSurface from './WorldEditorSurface';
 
@@ -18,6 +18,7 @@ export default function Stage(props: {
   onModelToolApi: (api: ModelToolApi) => void;
   onModelToolState: (state: ModelToolSnapshot) => void;
   modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
+  outlinerHandlers: OutlinerHandlers;
   onStage: () => void;
   onContext: () => void;
   onObject: (id: string) => void;
@@ -44,6 +45,12 @@ export default function Stage(props: {
   const activeModel = activeDocument.kind === 'model' && activeDocument.sourceId
     ? modelPackageById(activeDocument.sourceId)
     : null;
+  // The outliner drives multi-part models: present only when this model carries parts state
+  // (primitive-authored). Combines the live parts with the stable handlers from AppFrame.
+  const activeParts = activeModel ? props.state.modelParts[activeModel.id] : undefined;
+  const outliner = activeModel && activeParts
+    ? { parts: activeParts, activePartId: props.state.modelActivePartId, ...props.outlinerHandlers }
+    : null;
   return (
     <C.HW_StagePanel>
       <C.HW_StageViewport>
@@ -56,6 +63,7 @@ export default function Stage(props: {
             triggerProps={props.modelContextTrigger}
             onToolApi={props.onModelToolApi}
             onToolState={props.onModelToolState}
+            outliner={outliner}
           />
         ) : (
           <MaterialFocusSurface

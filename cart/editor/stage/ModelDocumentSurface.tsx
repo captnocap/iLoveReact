@@ -1,8 +1,30 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
-import type { ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
+import type { ModelPackage, ModelPart, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
 import ModelView from './ModelView';
-import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData, primitiveMeshData } from '../data/hmscAssetCatalog';
+import ModelOutliner from './ModelOutliner';
+import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData, primitiveMeshData, composeModelParts } from '../data/hmscAssetCatalog';
+
+// The composed geometry changes (add/delete/hide/reorder a part) → the host mesh must
+// reload. Renaming doesn't touch geometry, so it isn't in the signature (the outliner row
+// updates without a viewer reload).
+function partsSignature(parts: ModelPart[]): string {
+  return parts.map((p) => `${p.id}:${p.visible ? 1 : 0}:${p.mesh.faces.length}`).join(',');
+}
+
+// The outliner's part handlers, threaded from AppFrame (which owns state). Split from the
+// live parts/active so Workspace + Stage can carry the stable handlers and Stage supplies
+// the per-model parts from state.
+export type OutlinerHandlers = {
+  onSelectPart: (id: string) => void;
+  onToggleVisiblePart: (id: string) => void;
+  onDeletePart: (id: string) => void;
+  onAddPart: (kind: PrimitiveKind) => void;
+};
+export type OutlinerApi = OutlinerHandlers & {
+  parts: ModelPart[];
+  activePartId: string | null;
+};
 
 // The live viewer source for a model document: a file path, resident mesh data,
 // or a "data missing" placeholder. Resolved once so the render branches stay flat.
@@ -14,7 +36,7 @@ type ViewerSource =
   | { kind: 'missing'; title: string; label: string }
   | null;
 
-export default function ModelDocumentSurface({ model, triggerProps, onToolApi, onToolState }: {
+export default function ModelDocumentSurface({ model, triggerProps, onToolApi, onToolState, outliner }: {
   model: ModelPackage | null;
   // Right-click trigger from the app-root context menu (useContextMenu lives in
   // AppFrame so the menu lands at the cursor — see ModelContextMenu). Spread onto
@@ -22,6 +44,9 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
   triggerProps: { onRightClick: (e: { x: number; y: number }) => void };
   onToolApi: (api: ModelToolApi) => void;
   onToolState: (state: ModelToolSnapshot) => void;
+  // Present only for multi-part (primitive-authored) models — drives the outliner and the
+  // composed host mesh. Absent for imported single meshes (their outliner is a follow-up).
+  outliner: OutlinerApi | null;
 }) {
   // The model surface stays bland — its tools live in the editor toolbar and in
   // the app-root context menu (opened by right-click here), both mirroring the one
@@ -38,6 +63,45 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
     );
   }
 
+  // Multi-part model: compose the parts into one host mesh and reload when its geometry
+  // signature changes. The outliner overlays the viewport. An imported/single model has no
+  // outliner and resolves the old way.
+  const composed = outliner ? composeModelParts(outliner.parts) : null;
+  const outlinerPanel = outliner ? (
+    <ModelOutliner
+      parts={outliner.parts}
+      activeId={outliner.activePartId}
+      onSelect={outliner.onSelectPart}
+      onToggleVisible={outliner.onToggleVisiblePart}
+      onDelete={outliner.onDeletePart}
+      onAdd={outliner.onAddPart}
+    />
+  ) : null;
+
+  if (composed) {
+    // Every part hidden/deleted → nothing to draw, but keep the outliner so you can add or
+    // un-hide. A non-empty compose mounts the viewer keyed on the geometry signature.
+    const modelView = composed.positions.length > 0 ? (
+      <ModelView
+        key={`${model.id}:${partsSignature(outliner!.parts)}`}
+        initialTitle={model.name}
+        initialMesh={{ key: `${model.id}:${partsSignature(outliner!.parts)}`, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups }}
+        allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState}
+      />
+    ) : (
+      <C.HW_ModelDocEmpty>
+        <Icon name="Boxes" size={18} color={accentFor('textFaint')} />
+        <C.HW_StageSocketTitle>NO VISIBLE PARTS</C.HW_StageSocketTitle>
+      </C.HW_ModelDocEmpty>
+    );
+    return (
+      <C.HW_ModelDocument {...triggerProps}>
+        {modelView}
+        {outlinerPanel}
+      </C.HW_ModelDocument>
+    );
+  }
+
   const viewer = resolveViewer(model);
 
   if (viewer && (viewer.kind === 'path' || viewer.kind === 'mesh')) {
@@ -47,6 +111,7 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
     return (
       <C.HW_ModelDocument {...triggerProps}>
         {modelView}
+        {outlinerPanel}
       </C.HW_ModelDocument>
     );
   }

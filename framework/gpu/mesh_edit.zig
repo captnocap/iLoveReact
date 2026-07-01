@@ -285,6 +285,27 @@ pub fn selectFaceByIndex(idx: u32, additive: bool) bool {
     return true;
 }
 
+/// Select (face mode) every displayed face whose authored group id is in [lo, hi). The
+/// outliner grabs a whole PART this way — each part occupies a contiguous group range in the
+/// composed mesh. Returns the selected face count, or -1 if there's no mesh.
+pub fn selectFacesByGroupRange(lo: u32, hi: u32, additive: bool) i32 {
+    if (!ensureFaceSel()) return -1;
+    g_mode = .face;
+    const sel = g_sel_face orelse return -1;
+    if (!additive) {
+        @memset(sel, false);
+        restoreAllFaces();
+    }
+    var f: u32 = 0;
+    const fc: u32 = @intCast(sel.len);
+    while (f < fc) : (f += 1) {
+        const grp = model_source.faceGroupOf(f);
+        if (grp != model_source.NO_FACE_GROUP and grp >= lo and grp < hi) sel[f] = true;
+    }
+    applyFaceHighlight();
+    return @intCast(selCount());
+}
+
 /// Select an edge by welded-edge index (no raycast) — used by toolbar/headless flows that
 /// need a deterministic edge set for topology operations.
 pub fn selectEdgeByIndex(idx: u32, additive: bool) bool {

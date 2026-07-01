@@ -20,10 +20,11 @@ import FileExplorerDialog from '../dialogs/FileExplorerDialog';
 import ModelContextMenu from '../stage/ModelContextMenu';
 import RenderProbe from '../../../runtime/render_tracker';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
-import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelOverride, ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
+import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { loadPersistedState, persistState } from '../data/persistView';
-import { commandById, isMeshToolCommand } from '../data/commands';
+import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
+import { primitivePartMesh, composeModelParts } from '../data/hmscAssetCatalog';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
@@ -127,12 +128,34 @@ export default function AppFrame() {
       return;
     }
     if (command.id.startsWith('new-mesh-')) {
-      // Fresh primitive → its own model document with the host-native mesh editor live. A
-      // per-kind sequence keeps every "New Mesh → X" a distinct pristine document.
-      const kind = command.id.slice('new-mesh-'.length);
-      const seq = state.workspaceDocuments.filter((doc) => doc.id.startsWith(`model:primitive:${kind}:`)).length + 1;
-      openModelDocument(primitiveModelPackage(`primitive:${kind}:${seq}`));
-      setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `new ${kind} mesh (${command.name} ${seq})` }));
+      const kind = command.id.slice('new-mesh-'.length) as PrimitiveKind;
+      // A model is already in view → the primitive becomes a new PART on it (the outliner
+      // way — 100 balls + 50 cylinders on one model). Otherwise spawn a fresh model document
+      // seeded with this one part.
+      if (activePartsModelId(state)) {
+        addPart(kind);
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File' }));
+        return;
+      }
+      const docSeq = state.workspaceDocuments.filter((doc) => doc.id.startsWith('model:primitive:')).length + 1;
+      const mid = `primitive:${kind}:${docSeq}`;
+      const doc = modelDocument(primitiveModelPackage(mid));
+      setState((prev) => {
+        const part = makePart(kind, [], prev.seq);
+        return {
+          ...prev,
+          seq: prev.seq + 1,
+          workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
+          activeWorkspaceDocumentId: doc.id,
+          modelParts: { ...prev.modelParts, [mid]: [part] },
+          modelActivePartId: part.id,
+          materialFocused: false,
+          contextOpen: false,
+          openMenu: null,
+          actionMenu: 'File',
+          status: `new ${kind} mesh (${command.name})`,
+        };
+      });
       return;
     }
     if (command.id === 'open-map' || command.id === 'open-file-explorer' || command.id === 'find-import-source') {
@@ -573,6 +596,47 @@ export default function AppFrame() {
     });
   };
 
+  // ── Model outliner (multi-part authoring) ───────────────────────────────────
+  // A model in view is a list of PARTS (each its own mesh). These handlers own the parts
+  // state; the surface composes them into the host mesh and reloads on change.
+  const PART_TINTS = ['#c9b48f', '#8fb6c9', '#c98f9b', '#9cc98f', '#b49bc9', '#c9c08f', '#8fc9bb'];
+  const activePartsModelId = (s: EditorState): string | null => {
+    const doc = s.workspaceDocuments.find((d) => d.id === s.activeWorkspaceDocumentId);
+    return doc?.kind === 'model' && doc.sourceId && s.modelParts[doc.sourceId] ? doc.sourceId : null;
+  };
+  const makePart = (kind: PrimitiveKind, existing: ModelPart[], seq: number): ModelPart => {
+    const meta = PRIMITIVE_MESHES.find((p) => p.kind === kind)!;
+    const n = existing.filter((p) => p.kind === kind).length + 1;
+    return { id: `part:${kind}:${seq}`, name: `${meta.name} ${n}`, kind, mesh: primitivePartMesh(kind), visible: true, color: PART_TINTS[existing.length % PART_TINTS.length]! };
+  };
+  const addPart = (kind: PrimitiveKind) => setState((prev) => {
+    const mid = activePartsModelId(prev);
+    if (!mid) return prev;
+    const parts = prev.modelParts[mid] ?? [];
+    const part = makePart(kind, parts, prev.seq);
+    return { ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [mid]: [...parts, part] }, modelActivePartId: part.id, status: `added ${part.name}` };
+  });
+  const selectPart = (id: string) => {
+    // Highlight the whole part in the host by its face-group range (needs the rebuilt door).
+    const mid = activePartsModelId(state);
+    if (mid) {
+      const range = composeModelParts(state.modelParts[mid] ?? []).ranges.find((r) => r.id === id);
+      if (range) (globalThis as any).__mesh_edit_select_group_range?.(range.lo, range.hi, 0);
+    }
+    setState((prev) => ({ ...prev, modelActivePartId: id }));
+  };
+  const toggleVisiblePart = (id: string) => setState((prev) => {
+    const mid = activePartsModelId(prev);
+    if (!mid) return prev;
+    return { ...prev, modelParts: { ...prev.modelParts, [mid]: (prev.modelParts[mid] ?? []).map((p) => (p.id === id ? { ...p, visible: !p.visible } : p)) } };
+  });
+  const deletePart = (id: string) => setState((prev) => {
+    const mid = activePartsModelId(prev);
+    if (!mid) return prev;
+    const parts = (prev.modelParts[mid] ?? []).filter((p) => p.id !== id);
+    return { ...prev, modelParts: { ...prev.modelParts, [mid]: parts }, modelActivePartId: prev.modelActivePartId === id ? (parts[0]?.id ?? null) : prev.modelActivePartId };
+  });
+
   const openModelDocument = (model: ModelPackage) => {
     const doc = modelDocument(model);
     // Focus moves across the screen into the center/inspector document — the
@@ -725,6 +789,7 @@ export default function AppFrame() {
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
             onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => ({ ...prev, modelTool }))}
             modelContextTrigger={modelMenu.triggerProps}
+            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart }}
             onTool={(id) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` }))}
             onSnap={() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` }))}
             onFloor={() => runCommand('cycle-floor', 'toolbar')}
@@ -847,6 +912,7 @@ export default function AppFrame() {
             modelTool={state.modelTool}
             onCommand={runCommand}
             onQuality={(quality: number) => modelToolApiRef.current?.setQuality(quality)}
+            onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)}
             onClose={modelMenu.close}
           />
         </modelMenu.ContextMenu>

@@ -1359,6 +1359,10 @@ pub fn meshEditRevert() void {
 pub fn meshEditSelectFace(idx: u32, additive: bool) bool {
     return mesh_edit.selectFaceByIndex(idx, additive);
 }
+/// Select every face in the authored group range [lo, hi) — the outliner grabs a whole part.
+pub fn meshEditSelectGroupRange(lo: u32, hi: u32, additive: bool) i32 {
+    return mesh_edit.selectFacesByGroupRange(lo, hi, additive);
+}
 /// Select an edge by welded-edge index (no raycast) — programmatic / headless.
 pub fn meshEditSelectEdge(idx: u32, additive: bool) bool {
     return mesh_edit.selectEdgeByIndex(idx, additive);

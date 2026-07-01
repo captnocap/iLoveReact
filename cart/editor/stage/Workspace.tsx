@@ -1,5 +1,6 @@
 import { C } from '../workspace.cls';
 import type { Asset, ColorStudioMaterialKey, Command, EditorState, ModelToolApi, ModelToolSnapshot, ViewMode } from '../data/types';
+import type { OutlinerHandlers } from './ModelDocumentSurface';
 import type { ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import ToolOptions from './ToolOptions';
@@ -13,6 +14,7 @@ export default function Workspace(props: {
   onModelToolApi: (api: ModelToolApi) => void;
   onModelToolState: (state: ModelToolSnapshot) => void;
   modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
+  outlinerHandlers: OutlinerHandlers;
   onTool: (id: string) => void;
   onSnap: () => void;
   onFloor: () => void;

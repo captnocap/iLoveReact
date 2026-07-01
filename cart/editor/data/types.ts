@@ -11,11 +11,24 @@ import type { DecalDoc } from '../textures/decal';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import type { Brush, BrushTool, Palette } from '../../../runtime/paint/model';
 import type { ColorLens } from './colorSpine';
+import type { EditMesh } from '../model/editMesh';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Window' | 'Help';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
 // (cuboid/cylinder/…); see PRIMITIVE_MESHES (commands.ts) + primitiveMeshData (catalog).
 export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere';
+// One sub-mesh of a multi-part model — the outliner concept ported from the Studio
+// (StudioPart). A model is a list of parts, each its own EditMesh; they compose into ONE
+// host mesh (composeModelParts) where each part owns a contiguous face-group range so the
+// outliner can select/highlight a whole part. Mirrors the Studio's parts + outliner.
+export type ModelPart = {
+  id: string;
+  name: string;
+  kind: PrimitiveKind;
+  mesh: EditMesh;
+  visible: boolean;
+  color: string;
+};
 export type LibraryTab = 'Build' | 'Props' | 'Skins';
 export type ViewMode = '3D' | '2D';
 export type WorkspaceDocumentKind = 'world' | 'model' | 'material';
@@ -78,7 +91,8 @@ export type Command = {
 // Mirror of the model viewer's live tool state (host-native mesh editor), held
 // in editor state so the toolbar + context menu can highlight the active tool.
 // Shapes match modelview's exported ModelToolSnapshot / ModelToolApi (structural).
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette };
+export type LightId = 'flat' | 'key' | 'fill' | 'rim';
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean };
 export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
@@ -94,6 +108,7 @@ export type ModelToolApi = {
   cycleDetail: () => void;
   setBrush: (b: Brush) => void;
   setPalette: (p: Palette) => void;
+  toggleLight: (which: LightId) => void;
 };
 
 export type BuildNote = {
@@ -373,4 +388,9 @@ export type EditorState = {
   modelOverrides: Record<string, ModelOverride>;
   modelDupes: ModelPackage[];
   modelRenamingId: string | null;
+  // Multi-part model authoring (the outliner). Parts per model id; the active part is the
+  // one the outliner highlights + the gizmo drives. Only primitive-authored models carry
+  // parts; imported single meshes have none (their outliner is a follow-up).
+  modelParts: Record<string, ModelPart[]>;
+  modelActivePartId: string | null;
 };
