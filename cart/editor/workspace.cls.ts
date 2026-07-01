@@ -161,6 +161,8 @@ classifier({
   HW_ToolPanel: { type: 'Box', style: { borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', paddingTop: 6, paddingBottom: 6 } },
   HW_RenameRow: { type: 'Box', style: { height: 27, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 12, paddingRight: 12, marginBottom: 5 } },
   HW_RenameInput: { type: 'TextInput', style: { flexGrow: 1, minWidth: 0, height: 24, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:text', fontSize: 11, fontFamily: MONO, fontWeight: 800 } },
+  // Inline model-rename bar (content browser): shown while a model is being renamed.
+  HW_RenameBar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4 } },
   HW_StatGrid: { type: 'Box', style: { flexDirection: 'row', gap: 7, paddingLeft: 12, paddingRight: 12, marginBottom: 5 } },
   HW_StatCell: { type: 'Box', style: { flexGrow: 1, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' } },
   HW_StatValue: { type: 'Text', fontSize: 13, color: 'theme:valNum', style: { fontFamily: MONO, fontWeight: 900 } },

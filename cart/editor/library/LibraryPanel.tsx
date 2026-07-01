@@ -1,9 +1,10 @@
+import { useState } from 'react';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
-import type { Asset, ContentFolderId, LibraryTab, EditorState, ModelPackage, WorldObject } from '../data/types';
+import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
+import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelPackage, WorldObject } from '../data/types';
 import { assetPageSizeFor, CATALOG_DIAGNOSTICS, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from '../data/catalog';
 import {
-  CONTENT_TREE,
   contentFolderLabel,
   countAssetsForFolder,
   isMaterialFolder,
@@ -12,6 +13,7 @@ import {
 } from '../data/content';
 import ContentTree from './ContentTree';
 import ModelPackageBrowser from './ModelPackageBrowser';
+import ModelActionMenu from './ModelActionMenu';
 import MaterialCatalogRow from './MaterialCatalogRow';
 import FolderSummary from './FolderSummary';
 import MaterialControls from './MaterialControls';
@@ -36,7 +38,21 @@ export default function LibraryPanel(props: {
   onFocusMaterial: () => void;
   onMaterialAction: (label: string) => void;
   onModel: (model: ModelPackage) => void;
+  contentTree: ContentNode[];
+  models: ModelPackage[];
+  modelRenamingId: string | null;
+  onModelStartRename: (id: string) => void;
+  onModelRename: (id: string, name: string) => void;
+  onModelFinishRename: () => void;
+  onModelFavorite: (id: string) => void;
+  onModelDuplicate: (model: ModelPackage) => void;
+  onModelDelete: (id: string) => void;
 }) {
+  const modelMenu = useContextMenu();
+  const [menuModel, setMenuModel] = useState<ModelPackage | null>(null);
+  const renamingModel = props.modelRenamingId
+    ? props.models.find((model) => model.id === props.modelRenamingId) ?? null
+    : null;
   const pageSize = assetPageSizeFor(props.mode);
   const maxPage = Math.max(0, Math.ceil(props.assets.length / pageSize) - 1);
   const page = Math.min(props.state.assetPage, maxPage);
@@ -53,18 +69,25 @@ export default function LibraryPanel(props: {
   const showModelPackages = isModelFolder(props.contentFolder);
   const showMaterialCatalog = isMaterialFolder(props.contentFolder);
   const canBrowseAssets = showMaterialCatalog || Boolean(folderTab);
-  const selectedFolderCount = countAssetsForFolder(props.catalogAssets, props.contentFolder);
+  const selectedFolderCount = countAssetsForFolder(props.catalogAssets, props.contentFolder, props.models);
   return (
     <C.HW_SidePanel>
       <C.HW_PanelHead>
         <Icon name="FolderOpen" size={13} color={accentFor('primary')} />
         <C.HW_Kicker>CONTENT BROWSER</C.HW_Kicker>
         <C.HW_Spacer />
-        <C.HW_StatusText>M {MODEL_PACKAGE_COUNT} · MAT {MATERIAL_ASSET_COUNT} · C {CATALOG_DIAGNOSTICS.cookedAssets}</C.HW_StatusText>
+        <C.HW_StatusText>M {props.models.length} · MAT {MATERIAL_ASSET_COUNT} · C {CATALOG_DIAGNOSTICS.cookedAssets}</C.HW_StatusText>
       </C.HW_PanelHead>
       <C.HW_Search placeholder="search models, paints, materials..." value={props.state.search} onChange={props.onSearch} />
+      {renamingModel ? (
+        <C.HW_RenameBar>
+          <Icon name="Pencil" size={12} color={accentFor('primary')} />
+          <C.HW_RenameInput value={renamingModel.name} onChange={(name: string) => props.onModelRename(renamingModel.id, name)} />
+          <C.HW_IconMiniButton onPress={props.onModelFinishRename}><Icon name="Check" size={13} color={accentFor('primary')} /></C.HW_IconMiniButton>
+        </C.HW_RenameBar>
+      ) : null}
       <ContentTree
-        nodes={CONTENT_TREE}
+        nodes={props.contentTree}
         assets={props.catalogAssets}
         selected={props.contentFolder}
         expanded={props.expandedFolders}
@@ -91,8 +114,10 @@ export default function LibraryPanel(props: {
           search={props.state.search}
           page={props.state.assetPage}
           activeDocumentId={props.state.activeWorkspaceDocumentId}
+          models={props.models}
           onPage={props.onPage}
           onModel={props.onModel}
+          onModelRightClick={(model, event) => { setMenuModel(model); modelMenu.triggerProps.onRightClick(event); }}
         />
       ) : showMaterialCatalog ? (
         <C.HW_MaterialGrid>
@@ -148,6 +173,18 @@ export default function LibraryPanel(props: {
       ) : folderTab ? (
         <ContextToolControls mode={props.mode} activeObject={props.activeObject} onAction={props.onMaterialAction} />
       ) : null}
+      <modelMenu.ContextMenu>
+        {menuModel ? (
+          <ModelActionMenu
+            model={menuModel}
+            onRename={props.onModelStartRename}
+            onFavorite={props.onModelFavorite}
+            onDuplicate={props.onModelDuplicate}
+            onDelete={props.onModelDelete}
+            onClose={modelMenu.close}
+          />
+        ) : null}
+      </modelMenu.ContextMenu>
     </C.HW_SidePanel>
   );
 }

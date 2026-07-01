@@ -20,12 +20,12 @@ import FileExplorerDialog from '../dialogs/FileExplorerDialog';
 import ModelContextMenu from '../stage/ModelContextMenu';
 import RenderProbe from '../../../runtime/render_tracker';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
-import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
+import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelOverride, ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { commandById, isMeshToolCommand } from '../data/commands';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
 import { oklchName, type ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
@@ -608,6 +608,49 @@ export default function AppFrame() {
     });
   };
 
+  // Live model list + tree. Right-click actions (rename/favorite/duplicate/
+  // delete) are UI overrides applied on read, so the gallery, the tree, and the
+  // counts all read one resolved list and stay consistent.
+  const visibleModels = useMemo(
+    () => visibleModelPackages(state.modelOverrides, state.modelDupes),
+    [state.modelOverrides, state.modelDupes],
+  );
+  const contentTreeNodes = useMemo(() => liveContentTree(visibleModels), [visibleModels]);
+
+  const favoriteModel = (id: string) =>
+    setState((prev) => {
+      const next = !(prev.modelOverrides[id]?.favorite ?? false);
+      return {
+        ...prev,
+        modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], favorite: next } },
+        status: next ? 'favorited model' : 'unfavorited model',
+      };
+    });
+
+  const deleteModel = (id: string) =>
+    setState((prev) => ({
+      ...prev,
+      modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], hidden: true } },
+      status: 'deleted model (hidden from browser)',
+    }));
+
+  const startRenameModel = (id: string) => setState((prev) => ({ ...prev, modelRenamingId: id, status: 'renaming model' }));
+  const renameModel = (id: string, name: string) =>
+    setState((prev) => ({ ...prev, modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], name } } }));
+  const finishRenameModel = () => setState((prev) => ({ ...prev, modelRenamingId: null, status: 'renamed model' }));
+
+  const duplicateModel = (model: ModelPackage) =>
+    setState((prev) => {
+      const dupe: ModelPackage = {
+        ...model,
+        id: `${model.id}::dup-${prev.seq}`,
+        folderId: `model-dup-${prev.seq}` as ContentFolderId,
+        name: `${model.name} copy`,
+        favorite: false,
+      };
+      return { ...prev, modelDupes: [...prev.modelDupes, dupe], seq: prev.seq + 1, status: `duplicated ${model.name}` };
+    });
+
   return (
     <C.HW_App>
       <RenderProbe id="Chrome">
@@ -642,7 +685,7 @@ export default function AppFrame() {
             onRename={renameAsset}
             onPage={(delta) => setState((prev) => {
               const itemCount = isModelFolder(prev.contentFolder)
-                ? modelPackagesForFolder(prev.contentFolder, prev.search).length
+                ? modelPackagesForFolder(prev.contentFolder, prev.search, visibleModelPackages(prev.modelOverrides, prev.modelDupes)).length
                 : filteredAssets.length;
               const pageSize = isModelFolder(prev.contentFolder) ? MODEL_GALLERY_PAGE_SIZE : assetPageSizeFor(panelMode);
               const maxPage = Math.max(0, Math.ceil(itemCount / pageSize) - 1);
@@ -651,6 +694,15 @@ export default function AppFrame() {
             onFocusMaterial={focusMaterialDocument}
             onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
             onModel={openModelDocument}
+            contentTree={contentTreeNodes}
+            models={visibleModels}
+            modelRenamingId={state.modelRenamingId}
+            onModelStartRename={startRenameModel}
+            onModelRename={renameModel}
+            onModelFinishRename={finishRenameModel}
+            onModelFavorite={favoriteModel}
+            onModelDuplicate={duplicateModel}
+            onModelDelete={deleteModel}
           />
         </RenderProbe>
         <RenderProbe id="Workspace">

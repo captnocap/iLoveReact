@@ -657,7 +657,7 @@ function modelHomeNodes(models: ModelPackage[]): ContentNode[] {
     }));
 }
 
-function modelCategoryNodes(models: ModelPackage[]): ContentNode[] {
+export function modelCategoryNodes(models: ModelPackage[]): ContentNode[] {
   const categories: Array<[ModelPackage['kind'], ContentFolderId, string]> = [
     ['prop', 'models-props', 'Props'],
     ['build', 'models-build', 'Build'],
