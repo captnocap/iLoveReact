@@ -874,6 +874,21 @@
       ],
       "note": "The iso world editor's placement brain — raycast/placementFor/validatePlacement/piece queries — ported verbatim from cart/hmsc-int/game/build/*.ts into host-owned framework/game/build.zig (req_2349), registered by framework/v8_bindings_game_build.zig as __game_build_*. Fires when a cart bundles the runtime/game/build.ts door. This is what lets the editor stop cross-importing the whole game cart (req_2178) to place a floor: it calls the host fns instead."
     },
+    "game-map": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/game/map.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-game-map"
+      ],
+      "v8Bindings": [
+        "game_map"
+      ],
+      "note": "The map painter's authoring engine (framework/game/map/: chunk grid + brush stamps + stroke engine), ported from the cart/hmsc-int 2D tile map painter (req_2473), registered by framework/v8_bindings_game_map.zig as __map_*. Fires when a cart bundles the runtime/game/map.ts door. Painting terrain height, ground tiles, water, flora, and zones runs host-side — React only arms the tool."
+    },
     "game-pathing": {
       "triggers": [
         {

@@ -1,0 +1,287 @@
+//! Game map-paint host bindings — thin V8 registrar over framework/game/map/
+//! (chunks/stamps/engine). The 2D tile map painter's authoring engine, ported
+//! from cart/hmsc-int (USER ASK req_2473); this file only parses V8 args and
+//! marshals packed f32 buffers. All stroke/stamp/chunk logic is module-owned.
+//!
+//! The stroke doors exist for the React chrome and for tests; the per-dab hot
+//! path is meant to route NATIVELY (loader input → engine.strokeMove in-process,
+//! zero JS per event). UI-rate doors:
+//!
+//!   __map_reset()                              — drop the whole painting
+//!   __map_grow_chunk(cx, cz) -> 0|1
+//!   __map_chunk_count() -> f64
+//!   __map_open_neighbors(cx, cz) -> Float32 ArrayBuffer [count, x0,z0, …]
+//!   __map_set_tool(f32[17])                    — arm channel/tool/brush params
+//!   __map_stroke_begin(x, z) / __map_stroke_move(x, z)
+//!   __map_stroke_end() -> Float32 ArrayBuffer [samples, stamps, touched, waterDry]
+//!   __map_stats() -> Float32 ArrayBuffer [chunkCount, dirtyChunks]
+//!   __map_read_height(cx, cz) / __map_read_water(cx, cz)
+//!       -> Float32 ArrayBuffer of SAMPLE_CELLS (a copy; verification/readback)
+//!   __map_read_cells(cx, cz, channel) -> Float32 ArrayBuffer of TILE_CELLS
+//!       channel: 0 tiles · 1 zones · 2 flora grass · 3 flora tree · 4 flora bush
+//!
+//! __map_set_tool packing (f32[17]):
+//!   [0] channel  [1] mode  [2] terrainTool  [3] shape  [4] profile
+//!   [5] radiusM  [6] centerZ
+//!   [7] rampMin  [8] rampMax  [9] rampWide  [10] rampLong  [11] rampAngleDeg
+//!   [12] smoothStrength  [13] kindIdx  [14] floraKindIdx  [15] floraLane
+//!   [16] zoneIdx
+//!
+//! Gated ingredient (V18): registered only when the metafile gate flips
+//! -Dhas-game-map (see sdk/dependency-registry.json `game-map` and
+//! v8_ingredients.zig). A cart that never paints a map pays zero bytes.
+
+const std = @import("std");
+const v8 = @import("v8");
+const v8_runtime = @import("v8_runtime.zig");
+const chunks = @import("game/map/chunks.zig");
+const engine = @import("game/map/engine.zig");
+const stamps = @import("game/map/stamps.zig");
+
+// ── V8 arg / return helpers (same shapes as v8_bindings_game_build.zig) ───────
+
+fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
+    if (idx >= info.length()) return null;
+    const ctx = info.getIsolate().getCurrentContext();
+    return info.getArg(idx).toF64(ctx) catch null;
+}
+
+fn argBytes(info: v8.FunctionCallbackInfo, idx: u32) ?[]const u8 {
+    if (idx >= info.length()) return null;
+    const value = info.getArg(idx);
+    if (!value.isArrayBufferView()) return null;
+    const view: v8.ArrayBufferView = .{ .handle = @ptrCast(value.handle) };
+    const byte_len = view.getByteLength();
+    if (byte_len == 0) return &[_]u8{};
+    const byte_off = view.getByteOffset();
+    const ab = view.getBuffer();
+    var shared = ab.getBackingStore();
+    defer v8.BackingStore.sharedPtrReset(&shared);
+    const bs = v8.BackingStore.sharedPtrGet(&shared);
+    const base = bs.getData() orelse return null;
+    const base_bytes: [*]const u8 = @ptrCast(base);
+    return base_bytes[byte_off .. byte_off + byte_len];
+}
+
+fn setReturnNull(info: v8.FunctionCallbackInfo) void {
+    info.getReturnValue().set(info.getIsolate().initNull());
+}
+
+fn setReturnF64(info: v8.FunctionCallbackInfo, value: f64) void {
+    info.getReturnValue().set(v8.Number.init(info.getIsolate(), value));
+}
+
+fn noopBackingStoreDeleter(_: ?*anyopaque, _: usize, _: ?*anyopaque) callconv(.c) void {}
+
+fn setReturnF32Buffer(info: v8.FunctionCallbackInfo, floats: []f32) void {
+    const iso = info.getIsolate();
+    const bytes = std.mem.sliceAsBytes(floats);
+    const bs_raw = v8.c.v8__ArrayBuffer__NewBackingStore2(
+        @ptrCast(bytes.ptr),
+        bytes.len,
+        noopBackingStoreDeleter,
+        null,
+    ) orelse {
+        setReturnNull(info);
+        return;
+    };
+    var shared = v8.c.v8__BackingStore__TO_SHARED_PTR(bs_raw);
+    defer v8.BackingStore.sharedPtrReset(&shared);
+    const ab = v8.ArrayBuffer.initWithBackingStore(iso, &shared);
+    info.getReturnValue().set(ab);
+}
+
+fn argChunkCoords(info: v8.FunctionCallbackInfo) ?[2]i32 {
+    const cx = argToF64(info, 0) orelse return null;
+    const cz = argToF64(info, 1) orelse return null;
+    if (!std.math.isFinite(cx) or !std.math.isFinite(cz)) return null;
+    return .{ @intFromFloat(cx), @intFromFloat(cz) };
+}
+
+// ── world / chunk doors ───────────────────────────────────────────────────────
+
+fn hostReset(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    _ = info_c;
+    engine.reset();
+}
+
+fn hostGrowChunk(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const at = argChunkCoords(info) orelse {
+        setReturnF64(info, 0);
+        return;
+    };
+    setReturnF64(info, if (chunks.growChunk(at[0], at[1]) != null) 1 else 0);
+}
+
+fn hostChunkCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnF64(info, @floatFromInt(chunks.chunkCount()));
+}
+
+var neighbors_out: [9]f32 = undefined;
+
+fn hostOpenNeighbors(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const at = argChunkCoords(info) orelse {
+        setReturnNull(info);
+        return;
+    };
+    var open: [4][2]i32 = undefined;
+    const n = chunks.openNeighbors(at[0], at[1], &open);
+    neighbors_out[0] = @floatFromInt(n);
+    for (open[0..n], 0..) |slot, i| {
+        neighbors_out[1 + i * 2] = @floatFromInt(slot[0]);
+        neighbors_out[2 + i * 2] = @floatFromInt(slot[1]);
+    }
+    setReturnF32Buffer(info, neighbors_out[0 .. 1 + n * 2]);
+}
+
+// ── tool + stroke doors ───────────────────────────────────────────────────────
+
+const TOOL_FLOATS: usize = 17;
+
+fn enumFromF32(comptime E: type, raw: f32) E {
+    const count = @typeInfo(E).@"enum".fields.len;
+    var v: usize = 0;
+    if (raw > 0) {
+        const cast: usize = @intFromFloat(raw);
+        v = if (cast >= count) count - 1 else cast;
+    }
+    return @enumFromInt(v);
+}
+
+fn hostSetTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse return;
+    if (bytes.len < TOOL_FLOATS * @sizeOf(f32)) return;
+    const in_ptr: [*]const f32 = @ptrCast(@alignCast(bytes.ptr));
+    const p = in_ptr[0..TOOL_FLOATS];
+    engine.setTool(.{
+        .channel = enumFromF32(engine.Channel, p[0]),
+        .mode = enumFromF32(engine.Mode, p[1]),
+        .terrain_tool = enumFromF32(engine.TerrainTool, p[2]),
+        .shape = enumFromF32(stamps.BrushShape, p[3]),
+        .profile = enumFromF32(stamps.BrushProfile, p[4]),
+        .radius_m = p[5],
+        .center_z = p[6],
+        .ramp_min = p[7],
+        .ramp_max = p[8],
+        .ramp_wide = p[9],
+        .ramp_long = p[10],
+        .ramp_angle_deg = p[11],
+        .smooth_strength = p[12],
+        .kind_idx = @intFromFloat(@max(-1, p[13])),
+        .flora_kind_idx = @intFromFloat(@max(-1, p[14])),
+        .flora_lane = @intFromFloat(@max(0, @min(2, p[15]))),
+        .zone_idx = @intFromFloat(@max(-1, p[16])),
+    });
+}
+
+fn argWorldPoint(info: v8.FunctionCallbackInfo) ?[2]f32 {
+    const x = argToF64(info, 0) orelse return null;
+    const z = argToF64(info, 1) orelse return null;
+    if (!std.math.isFinite(x) or !std.math.isFinite(z)) return null;
+    return .{ @floatCast(x), @floatCast(z) };
+}
+
+fn hostStrokeBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const at = argWorldPoint(info) orelse return;
+    engine.strokeBegin(at[0], at[1]);
+}
+
+fn hostStrokeMove(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const at = argWorldPoint(info) orelse return;
+    engine.strokeMove(at[0], at[1]);
+}
+
+var stroke_out: [4]f32 = undefined;
+
+fn hostStrokeEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const stats = engine.strokeEnd();
+    stroke_out[0] = @floatFromInt(stats.samples);
+    stroke_out[1] = @floatFromInt(stats.stamps);
+    stroke_out[2] = @floatFromInt(stats.touched);
+    stroke_out[3] = if (stats.water_dry) 1 else 0;
+    setReturnF32Buffer(info, stroke_out[0..]);
+}
+
+var stats_out: [2]f32 = undefined;
+
+fn hostStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    stats_out[0] = @floatFromInt(chunks.chunkCount());
+    stats_out[1] = @floatFromInt(engine.dirtyChunkCount());
+    setReturnF32Buffer(info, stats_out[0..]);
+}
+
+// ── readback doors (verification / chrome, UI-rate only) ──────────────────────
+
+var sample_scratch: [chunks.SAMPLE_CELLS]f32 = undefined;
+var cell_scratch: [chunks.TILE_CELLS]f32 = undefined;
+
+fn hostReadHeight(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    readSampleField(info_c, .height);
+}
+
+fn hostReadWater(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    readSampleField(info_c, .water);
+}
+
+fn readSampleField(info_c: ?*const v8.c.FunctionCallbackInfo, which: enum { height, water }) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const at = argChunkCoords(info) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const chunk = chunks.chunkAt(at[0], at[1]) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const src = switch (which) {
+        .height => chunk.height[0..],
+        .water => chunk.water[0..],
+    };
+    @memcpy(sample_scratch[0..], src);
+    setReturnF32Buffer(info, sample_scratch[0..]);
+}
+
+fn hostReadCells(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const at = argChunkCoords(info) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const chunk = chunks.chunkAt(at[0], at[1]) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const channel = argToF64(info, 2) orelse 0;
+    const src: []const i16 = switch (@as(u8, if (channel > 0 and channel < 5) @intFromFloat(channel) else 0)) {
+        1 => chunk.zones[0..],
+        2 => chunk.flora[0][0..],
+        3 => chunk.flora[1][0..],
+        4 => chunk.flora[2][0..],
+        else => chunk.tiles[0..],
+    };
+    for (src, 0..) |v, i| cell_scratch[i] = @floatFromInt(v);
+    setReturnF32Buffer(info, cell_scratch[0..]);
+}
+
+pub fn registerGameMap(_: anytype) void {
+    v8_runtime.registerHostFn("__map_reset", hostReset);
+    v8_runtime.registerHostFn("__map_grow_chunk", hostGrowChunk);
+    v8_runtime.registerHostFn("__map_chunk_count", hostChunkCount);
+    v8_runtime.registerHostFn("__map_open_neighbors", hostOpenNeighbors);
+    v8_runtime.registerHostFn("__map_set_tool", hostSetTool);
+    v8_runtime.registerHostFn("__map_stroke_begin", hostStrokeBegin);
+    v8_runtime.registerHostFn("__map_stroke_move", hostStrokeMove);
+    v8_runtime.registerHostFn("__map_stroke_end", hostStrokeEnd);
+    v8_runtime.registerHostFn("__map_stats", hostStats);
+    v8_runtime.registerHostFn("__map_read_height", hostReadHeight);
+    v8_runtime.registerHostFn("__map_read_water", hostReadWater);
+    v8_runtime.registerHostFn("__map_read_cells", hostReadCells);
+}

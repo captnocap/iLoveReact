@@ -180,6 +180,20 @@ pub fn build(b: *std.Build) void {
     // dlopens libluajit-5.1 directly, so it doesn't need this import.
     if (has_audio) root_mod.addImport("zluajit", zluajit_dep.module("zluajit"));
 
+    // sqlite — the authoring eventbus spine (framework/events/editor_bus.zig)
+    // imports "sqlite" as a NAMED module so it can be built in isolation for its
+    // unit test (see editor_bus_mod_t below). The host build reaches editor_bus.zig
+    // via relative import (v8_ingredients → v8_bindings_editor_bus → editor_bus),
+    // so it compiles into root_mod — which means the "sqlite" name must be
+    // registered here too, or the graph fails with "no module named 'sqlite'
+    // available within module 'root'". sqlite.zig dlopens libsqlite3 (no link dep).
+    const editor_sqlite_root_mod = b.createModule(.{
+        .root_source_file = b.path("framework/storage/sqlite.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    root_mod.addImport("sqlite", editor_sqlite_root_mod);
+
     // ── pg.zig (Postgres client) ────────────────────────────────
     // Used by framework/pg.zig (and via that, framework/embed.zig). Always
     // imported so the comptime-stub paths in v8_app.zig still resolve when
@@ -612,6 +626,8 @@ pub fn build(b: *std.Build) void {
     const has_game_physics = b.option(bool, "has-game-physics", "Register __hmsc_*/__game_physics_* bindings (framework/game: the game's host-side physics + movement)") orelse false;
     const has_game_pathing = b.option(bool, "has-game-pathing", "Register __path_*/__game_pathing_* bindings (framework/game: grid A* + lane discipline + motion plans)") orelse false;
     const has_game_camera = b.option(bool, "has-game-camera", "Register __game_camera_* bindings (framework/game: native per-frame camera controller)") orelse false;
+    const has_game_build = b.option(bool, "has-game-build", "Register __game_build_* bindings (framework/game: host-owned build placement — raycast/validate/catalog)") orelse false;
+    const has_game_map = b.option(bool, "has-game-map", "Register __map_* bindings (framework/game/map: the map painter's chunk grid + brush stamps + stroke engine)") orelse false;
     const has_compiled_world = b.option(bool, "has-compiled-world", "Register WorldLoader host primitive + __compiled_world_* status bindings") orelse false;
     const has_capture = b.option(bool, "has-capture", "Register __capture_frame binding (SELFSHOT-0606: the app screenshots its OWN rendered frame; desktop capture of the user's system is banned)") orelse false;
     // has_imageops hoisted earlier (next to its stb link block).
@@ -634,6 +650,8 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_game_physics", has_game_physics);
     options.addOption(bool, "has_game_pathing", has_game_pathing);
     options.addOption(bool, "has_game_camera", has_game_camera);
+    options.addOption(bool, "has_game_build", has_game_build);
+    options.addOption(bool, "has_game_map", has_game_map);
     options.addOption(bool, "has_compiled_world", has_compiled_world);
     options.addOption(bool, "has_capture", has_capture);
     options.addOption(bool, "has_imageops", has_imageops);
@@ -669,6 +687,8 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/game_physics.flag", if (has_game_physics) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/game_pathing.flag", if (has_game_pathing) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/game_camera.flag", if (has_game_camera) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/game_build.flag", if (has_game_build) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/game_map.flag", if (has_game_map) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/compiled_world.flag", if (has_compiled_world) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/capture.flag", if (has_capture) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/imageops.flag", if (has_imageops) "1\n" else "0\n");
@@ -1116,6 +1136,26 @@ pub fn build(b: *std.Build) void {
     const run_game_pathing_test = b.addRunArtifact(game_pathing_test);
     const game_pathing_test_step = b.step("test-game-pathing", "Run the game pathing behavior tests");
     game_pathing_test_step.dependOn(&run_game_pathing_test.step);
+
+    // ── Map painter engine tests (req_2473) ────────────────────────
+    // Exercises framework/game/map/ (chunks + stamps + engine, tests inline
+    // in the modules): seam-free cross-chunk strokes, brush/ramp/slope/smooth
+    // stamps, water basins, cell channels, per-stroke dedup. Pure-math module —
+    // no SDL/V8 link; the cart binary gets it only through the gated
+    // v8_bindings_game_map.zig ingredient.
+    const game_map_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/game/map/engine.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const game_map_test = b.addTest(.{
+        .name = "game-map-test",
+        .root_module = game_map_test_mod,
+    });
+    const run_game_map_test = b.addRunArtifact(game_map_test);
+    const game_map_test_step = b.step("test-game-map", "Run the map painter engine tests");
+    game_map_test_step.dependOn(&run_game_map_test.step);
 
     // ── Game camera behavior tests (V23, P4) ───────────────────────
     // Exercises framework/game/camera.zig: Orbit/Aim fidelity against

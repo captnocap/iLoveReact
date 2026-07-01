@@ -256,6 +256,13 @@ const v8_bindings_game_physics = if (enabledFor("game_physics")) @import("v8_bin
 const v8_bindings_game_build = if (enabledFor("game_build")) @import("v8_bindings_game_build.zig") else struct {
     pub fn registerGameBuild(_: anytype) void {}
 };
+// The map painter's authoring engine (framework/game/map/, req_2473): the 2D
+// tile map painter's chunk grid + brush stamps + stroke engine, ported from
+// cart/hmsc-int so painting terrain/tiles/water/flora/zones runs host-side.
+// __map_* host fns. Gated INGREDIENT — when off, the module is never parsed.
+const v8_bindings_game_map = if (enabledFor("game_map")) @import("v8_bindings_game_map.zig") else struct {
+    pub fn registerGameMap(_: anytype) void {}
+};
 // The game's pathing (framework/game/pathing.zig, V5/V18): grid A* + lane
 // discipline + deterministic motion plans, __path_*/__game_pathing_* host
 // fns. Gated INGREDIENT — when off, the module is never even parsed.
@@ -379,6 +386,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "physics_lab", .required = false, .grep_prefix = "__physics_lab_", .reg_fn = "registerPhysicsLab", .mod = v8_bindings_physics_lab },
     .{ .name = "game_physics", .required = false, .grep_prefix = "__hmsc_", .reg_fn = "registerGamePhysics", .mod = v8_bindings_game_physics },
     .{ .name = "game_build", .required = false, .grep_prefix = "__game_build_", .reg_fn = "registerGameBuild", .mod = v8_bindings_game_build },
+    .{ .name = "game_map", .required = false, .grep_prefix = "__map_", .reg_fn = "registerGameMap", .mod = v8_bindings_game_map },
     .{ .name = "game_pathing", .required = false, .grep_prefix = "__path_", .reg_fn = "registerGamePathing", .mod = v8_bindings_game_pathing },
     .{ .name = "game_camera", .required = false, .grep_prefix = "__game_camera_", .reg_fn = "registerGameCamera", .mod = v8_bindings_game_camera },
     .{ .name = "compiled_world", .required = false, .grep_prefix = "__compiled_world_", .reg_fn = "registerCompiledWorld", .mod = v8_bindings_compiled_world },
