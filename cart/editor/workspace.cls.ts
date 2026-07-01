@@ -88,7 +88,7 @@ classifier({
   HW_Kicker: { type: 'Text', fontSize: 9, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 1.5 } },
   HW_HeadTitle: { type: 'Text', fontSize: 12, color: 'theme:text', style: { fontWeight: 800 } },
   HW_Search: { type: 'TextInput', style: { height: 25, marginLeft: 10, marginRight: 10, marginTop: 7, marginBottom: 5, paddingLeft: 9, paddingRight: 8, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:textSecondary', fontSize: 11 } },
-  HW_ContentTree: { type: 'Box', style: { flexShrink: 1, minHeight: 0, flexDirection: 'column', paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 3, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border', overflow: 'scroll' } },
+  HW_ContentTree: { type: 'Box', style: { flexGrow: 1, flexShrink: 1, minHeight: 0, flexDirection: 'column', paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 3, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border', overflow: 'scroll' } },
   HW_TreeRow: { type: 'Pressable', style: { height: 15, flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 2, paddingRight: 6, borderRadius: 'theme:radiusMd' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_TreeRowOn: { type: 'Pressable', style: { height: 15, flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 2, paddingRight: 6, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
   HW_TreeIndent: { type: 'Box', style: { width: 10, height: 1, backgroundColor: 'transparent' } },
