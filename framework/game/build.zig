@@ -123,7 +123,7 @@ pub const BUILD_FACE_SLOTS = [_]BuildFaceSlot{ .front, .back, .sides };
 pub const BuildTheme = enum { common, downtown, motel, trap_lot, suburb, industrial };
 
 /// catalog.ts BuildMaterial.
-pub const BuildMaterial = enum { concrete, brick, stucco, wood, metal, glass };
+pub const BuildMaterial = enum { concrete, brick, stucco, wood, metal, glass, chainlink };
 
 /// catalog.ts BuildPieceSize — the piece's plan/height extent in meters.
 pub const BuildPieceSize = struct {
@@ -283,11 +283,240 @@ pub fn placedPieceAcceptsEdits(kind: BuildPieceKind) bool {
     return kindAcceptsWallEdits(kind);
 }
 
+// ── the catalog ──────────────────────────────────────────────────────────────
+// Verbatim from game/build/catalog.ts BUILD_CATALOG — the 36 static structural
+// rows. Shared size/tag consts mirror the TS; per-row overrides (the `{...BASE,
+// field: x}` spreads) become block expressions that copy the base and set the
+// same fields. The runtime PROP_CATALOG / COOKED_CATALOG entries derive from the
+// prop/cooked pipelines (propKindDefinition + propModelFootprintMeters) — that
+// coded-model derivation is out of scope; catalogEntry falls through to a runtime
+// registry the cooked module registers.
+
+const WALL_SIZE = BuildPieceSize{ .widthMeters = 3, .heightMeters = 3, .depthMeters = 0.005 };
+const PLATE_SIZE = BuildPieceSize{ .widthMeters = 3, .heightMeters = 0.2, .depthMeters = 3 };
+const FLOOR_SIZE = BuildPieceSize{ .widthMeters = 3, .heightMeters = 0.05, .depthMeters = 3 };
+const VERTICAL_LINK_SIZE = BuildPieceSize{ .widthMeters = 3, .heightMeters = 3, .depthMeters = 3 };
+
+const SOLID_WALL_TAGS = BuildGameplayTags{ .collision = true, .blocksSight = true, .blocksSound = true, .cover = .full, .durability = null, .climbable = false, .vaultable = false, .portal = false };
+const SOLID_PLATE_TAGS = BuildGameplayTags{ .collision = true, .blocksSight = false, .blocksSound = true, .cover = .none, .durability = null, .climbable = false, .vaultable = false, .portal = false };
+
+pub const BUILD_CATALOG = [_]BuildPieceDef{
+    // ── walls (the edit-bearing family) ────────────────────────────────────────
+    .{ .id = "wall.concrete.common", .kind = .wall, .label = "Concrete Wall", .theme = .common, .material = .concrete, .size = WALL_SIZE, .snap = .edge, .tags = SOLID_WALL_TAGS },
+    .{ .id = "wall.brick.downtown", .kind = .wall, .label = "Brick Wall", .theme = .downtown, .material = .brick, .size = WALL_SIZE, .snap = .edge, .tags = SOLID_WALL_TAGS },
+    .{ .id = "wall.stucco.suburb", .kind = .wall, .label = "Stucco Wall", .theme = .suburb, .material = .stucco, .size = WALL_SIZE, .snap = .edge, .tags = blk: {
+        var t = SOLID_WALL_TAGS;
+        t.durability = 240;
+        break :blk t;
+    } },
+    .{ .id = "wall.stucco.motel", .kind = .wall, .label = "Motel Wall", .theme = .motel, .material = .stucco, .size = WALL_SIZE, .snap = .edge, .tags = blk: {
+        var t = SOLID_WALL_TAGS;
+        t.durability = 240;
+        break :blk t;
+    } },
+    .{ .id = "wall.metal.industrial", .kind = .wall, .label = "Sheet-Metal Wall", .theme = .industrial, .material = .metal, .size = WALL_SIZE, .snap = .edge, .tags = blk: {
+        var t = SOLID_WALL_TAGS;
+        t.blocksSound = false;
+        break :blk t;
+    } },
+    .{ .id = "wall.plywood.trap_lot", .kind = .wall, .label = "Plywood Wall", .theme = .trap_lot, .material = .wood, .size = WALL_SIZE, .snap = .edge, .tags = blk: {
+        var t = SOLID_WALL_TAGS;
+        t.blocksSound = false;
+        t.durability = 120;
+        break :blk t;
+    } },
+    .{ .id = "wall.storefront.downtown", .kind = .wall, .label = "Storefront Glass", .theme = .downtown, .material = .glass, .size = WALL_SIZE, .snap = .edge, .tags = .{ .collision = true, .blocksSight = false, .blocksSound = true, .cover = .none, .durability = 60, .climbable = false, .vaultable = false, .portal = false } },
+
+    // ── wall TYPES that are a cutout (REQ-0647) ────────────────────────────────
+    .{ .id = "wall.concrete.doorway", .kind = .wall, .label = "Doorway Wall", .theme = .common, .material = .concrete, .size = WALL_SIZE, .snap = .edge, .defaultEdit = .door, .tags = SOLID_WALL_TAGS },
+    .{ .id = "wall.concrete.openDoorway", .kind = .wall, .label = "Open Doorway Wall", .theme = .common, .material = .concrete, .size = WALL_SIZE, .snap = .edge, .defaultEdit = .arch, .tags = SOLID_WALL_TAGS },
+    .{ .id = "wall.metal.garageDoor", .kind = .wall, .label = "Garage Door Wall", .theme = .industrial, .material = .metal, .size = WALL_SIZE, .snap = .edge, .defaultEdit = .garageDoor, .tags = blk: {
+        var t = SOLID_WALL_TAGS;
+        t.blocksSound = false;
+        break :blk t;
+    } },
+    .{ .id = "wall.stucco.window", .kind = .wall, .label = "Window Wall", .theme = .suburb, .material = .stucco, .size = WALL_SIZE, .snap = .edge, .defaultEdit = .window, .tags = blk: {
+        var t = SOLID_WALL_TAGS;
+        t.durability = 240;
+        break :blk t;
+    } },
+    .{ .id = "wall.stucco.doubleWindow", .kind = .wall, .label = "Double Window Wall", .theme = .suburb, .material = .stucco, .size = WALL_SIZE, .snap = .edge, .defaultEdit = .doubleWindow, .tags = blk: {
+        var t = SOLID_WALL_TAGS;
+        t.durability = 240;
+        break :blk t;
+    } },
+    .{ .id = "wall.plywood.brokenWindow", .kind = .wall, .label = "Broken Window Wall", .theme = .trap_lot, .material = .wood, .size = WALL_SIZE, .snap = .edge, .defaultEdit = .brokenWindow, .tags = blk: {
+        var t = SOLID_WALL_TAGS;
+        t.blocksSound = false;
+        t.durability = 120;
+        break :blk t;
+    } },
+
+    // ── floors / roofs ─────────────────────────────────────────────────────────
+    .{ .id = "floor.concrete.common", .kind = .floor, .label = "Concrete Floor", .theme = .common, .material = .concrete, .size = FLOOR_SIZE, .snap = .grid, .tags = SOLID_PLATE_TAGS },
+    .{ .id = "floor.wood.suburb", .kind = .floor, .label = "Wood Floor", .theme = .suburb, .material = .wood, .size = FLOOR_SIZE, .snap = .grid, .tags = blk: {
+        var t = SOLID_PLATE_TAGS;
+        t.durability = 180;
+        break :blk t;
+    } },
+    .{ .id = "roof.flat.common", .kind = .roof, .label = "Flat Roof", .theme = .common, .material = .concrete, .size = PLATE_SIZE, .snap = .grid, .roofShape = .flat, .tags = blk: {
+        var t = SOLID_PLATE_TAGS;
+        t.cover = .low;
+        break :blk t;
+    } },
+    .{ .id = "roof.gable.suburb", .kind = .roof, .label = "Gable Roof", .theme = .suburb, .material = .wood, .size = PLATE_SIZE, .snap = .grid, .roofShape = .gable, .roofPitch = ROOF_PITCH.semiSlant, .tags = ROOF_CLIMB_TAGS },
+    .{ .id = "roof.gableSteep.suburb", .kind = .roof, .label = "Gable Roof (Steep)", .theme = .suburb, .material = .wood, .size = PLATE_SIZE, .snap = .grid, .roofShape = .gable, .roofPitch = ROOF_PITCH.fullSlant, .tags = ROOF_CLIMB_TAGS },
+    .{ .id = "roof.shed.common", .kind = .roof, .label = "Shed Roof", .theme = .common, .material = .metal, .size = PLATE_SIZE, .snap = .grid, .roofShape = .shed, .roofPitch = ROOF_PITCH.semiSlant, .tags = ROOF_CLIMB_TAGS },
+    .{ .id = "roof.shedSteep.common", .kind = .roof, .label = "Shed Roof (Steep)", .theme = .common, .material = .metal, .size = PLATE_SIZE, .snap = .grid, .roofShape = .shed, .roofPitch = ROOF_PITCH.fullSlant, .tags = ROOF_CLIMB_TAGS },
+    .{ .id = "roof.shingle.suburb", .kind = .roof, .label = "Shingle Roof", .theme = .suburb, .material = .wood, .size = PLATE_SIZE, .snap = .grid, .roofShape = .gable, .roofPitch = ROOF_PITCH.semiSlant, .tags = ROOF_CLIMB_TAGS },
+
+    // ── vertical links ─────────────────────────────────────────────────────────
+    .{ .id = "ramp.concrete.common", .kind = .ramp, .label = "Concrete Ramp", .theme = .common, .material = .concrete, .size = VERTICAL_LINK_SIZE, .snap = .grid, .tags = blk: {
+        var t = SOLID_PLATE_TAGS;
+        t.cover = .high;
+        t.blocksSight = true;
+        t.blocksSound = false;
+        break :blk t;
+    } },
+    .{ .id = "stairs.wood.common", .kind = .stairs, .label = "Wood Stairs", .theme = .common, .material = .wood, .size = VERTICAL_LINK_SIZE, .snap = .grid, .tags = blk: {
+        var t = SOLID_PLATE_TAGS;
+        t.cover = .low;
+        t.durability = 150;
+        t.blocksSound = false;
+        break :blk t;
+    } },
+    .{ .id = "stairs.concrete.common", .kind = .stairs, .label = "Concrete Stairs", .theme = .common, .material = .concrete, .size = VERTICAL_LINK_SIZE, .snap = .grid, .tags = blk: {
+        var t = SOLID_PLATE_TAGS;
+        t.cover = .low;
+        t.blocksSound = false;
+        break :blk t;
+    } },
+    .{ .id = "stairs.metal.industrial", .kind = .stairs, .label = "Metal Utility Stairs", .theme = .industrial, .material = .metal, .size = VERTICAL_LINK_SIZE, .snap = .grid, .tags = blk: {
+        var t = SOLID_PLATE_TAGS;
+        t.cover = .low;
+        t.durability = 180;
+        t.blocksSound = false;
+        break :blk t;
+    } },
+    .{ .id = "stairs.wood.narrow", .kind = .stairs, .label = "Narrow Wood Stairs", .theme = .common, .material = .wood, .size = .{ .widthMeters = 1.2, .heightMeters = 3, .depthMeters = 3 }, .snap = .grid, .tags = blk: {
+        var t = SOLID_PLATE_TAGS;
+        t.cover = .low;
+        t.durability = 120;
+        t.blocksSound = false;
+        break :blk t;
+    } },
+    .{ .id = "elevator.metal.common", .kind = .elevator, .label = "Elevator", .theme = .common, .material = .metal, .size = VERTICAL_LINK_SIZE, .snap = .grid, .tags = blk: {
+        var t = SOLID_PLATE_TAGS;
+        t.cover = .high;
+        t.durability = 200;
+        t.blocksSound = false;
+        break :blk t;
+    } },
+
+    // ── columns / corners / arches ─────────────────────────────────────────────
+    .{ .id = "pillar.concrete.common", .kind = .pillar, .label = "Concrete Pillar", .theme = .common, .material = .concrete, .size = .{ .widthMeters = 0.6, .heightMeters = 3, .depthMeters = 0.6 }, .snap = .grid, .tags = blk: {
+        var t = SOLID_WALL_TAGS;
+        t.cover = .full;
+        t.blocksSound = false;
+        break :blk t;
+    } },
+    .{ .id = "corner.concrete.common", .kind = .corner, .label = "Concrete Corner", .theme = .common, .material = .concrete, .size = .{ .widthMeters = 3, .heightMeters = 3, .depthMeters = 3 }, .snap = .edge, .tags = SOLID_WALL_TAGS },
+    .{ .id = "arch.concrete.downtown", .kind = .arch, .label = "Concrete Arch", .theme = .downtown, .material = .concrete, .size = WALL_SIZE, .snap = .edge, .tags = blk: {
+        var t = SOLID_WALL_TAGS;
+        t.blocksSight = false;
+        t.blocksSound = false;
+        t.portal = true;
+        break :blk t;
+    } },
+
+    // ── boundary lines ─────────────────────────────────────────────────────────
+    .{ .id = "fence.chainlink.trap_lot", .kind = .fence, .label = "Chainlink Fence", .theme = .trap_lot, .material = .chainlink, .size = .{ .widthMeters = 3, .heightMeters = 2, .depthMeters = 0.05 }, .snap = .edge, .tags = .{ .collision = true, .blocksSight = false, .blocksSound = false, .cover = .none, .durability = 80, .climbable = true, .vaultable = false, .portal = false } },
+    .{ .id = "fence.wood.suburb", .kind = .fence, .label = "Wood Fence", .theme = .suburb, .material = .wood, .size = .{ .widthMeters = 3, .heightMeters = 1.8, .depthMeters = 0.08 }, .snap = .edge, .tags = .{ .collision = true, .blocksSight = true, .blocksSound = false, .cover = .high, .durability = 90, .climbable = true, .vaultable = false, .portal = false } },
+    .{ .id = "railing.metal.motel", .kind = .railing, .label = "Walkway Railing", .theme = .motel, .material = .metal, .size = .{ .widthMeters = 3, .heightMeters = 1, .depthMeters = 0.08 }, .snap = .edge, .tags = .{ .collision = true, .blocksSight = false, .blocksSound = false, .cover = .low, .durability = 110, .climbable = false, .vaultable = true, .portal = false } },
+
+    // ── signal-only pieces ─────────────────────────────────────────────────────
+    .{ .id = "trim.cornice.downtown", .kind = .trim, .label = "Cornice Trim", .theme = .downtown, .material = .concrete, .size = .{ .widthMeters = 3, .heightMeters = 0.3, .depthMeters = 0.3 }, .snap = .surface, .tags = .{ .collision = false, .blocksSight = false, .blocksSound = false, .cover = .none, .durability = null, .climbable = false, .vaultable = false, .portal = false } },
+    .{ .id = "sign.shop.downtown", .kind = .sign, .label = "Shop Sign", .theme = .downtown, .material = .metal, .size = .{ .widthMeters = 2.4, .heightMeters = 0.8, .depthMeters = 0.2 }, .snap = .surface, .tags = .{ .collision = false, .blocksSight = false, .blocksSound = false, .cover = .none, .durability = 40, .climbable = false, .vaultable = false, .portal = false } },
+    .{ .id = "sign.pole.common", .kind = .sign, .label = "Pole Sign", .theme = .common, .material = .metal, .size = .{ .widthMeters = 0.24, .heightMeters = 3.3, .depthMeters = 0.24 }, .snap = .free, .tags = .{ .collision = true, .blocksSight = false, .blocksSound = false, .cover = .none, .durability = 70, .climbable = false, .vaultable = false, .portal = false } },
+};
+
+// Shared roof tag row: SOLID_PLATE_TAGS + { cover: 'low', durability: 180, climbable: true }.
+const ROOF_CLIMB_TAGS = blk: {
+    var t = SOLID_PLATE_TAGS;
+    t.cover = .low;
+    t.durability = 180;
+    t.climbable = true;
+    break :blk t;
+};
+
+/// Runtime prop/cooked catalog registry (the TS COOKED_CATALOG + PROP_CATALOG).
+/// The cooked/prop module registers a lookup once ported; null until then, so
+/// catalogEntry resolves the static rows immediately and cooked ids when wired.
+const CookedLookup = *const fn (id: []const u8) ?BuildPieceDef;
+var cooked_lookup: ?CookedLookup = null;
+pub fn registerCookedCatalog(lookup: CookedLookup) void {
+    cooked_lookup = lookup;
+}
+fn cookedCatalogEntry(id: []const u8) ?BuildPieceDef {
+    if (cooked_lookup) |f| return f(id);
+    return null;
+}
+
+/// The static BUILD_CATALOG row for an id, or null (catalog.ts BUILD_CATALOG[id]).
+pub fn builtinCatalogEntry(id: []const u8) ?BuildPieceDef {
+    for (BUILD_CATALOG) |entry| {
+        if (std.mem.eql(u8, entry.id, id)) return entry;
+    }
+    return null;
+}
+
+/// catalog.ts catalogEntry — BUILD_CATALOG then COOKED_CATALOG. null = unknown id
+/// (the TS throws `unknown piece id`; callers treat null as that error).
+pub fn catalogEntry(id: []const u8) ?BuildPieceDef {
+    if (builtinCatalogEntry(id)) |e| return e;
+    return cookedCatalogEntry(id);
+}
+
+/// catalog.ts isCatalogId.
+pub fn isCatalogId(id: []const u8) bool {
+    return catalogEntry(id) != null;
+}
+
+/// placed.ts placedPieceDef — the catalog row for a placed piece (null = unknown id).
+pub fn placedPieceDef(piece: PlacedBuildPiece) ?BuildPieceDef {
+    return catalogEntry(piece.pieceId);
+}
+
 test "PLACED_TUNING values match the TS source verbatim" {
     try std.testing.expectEqual(@as(f32, 1.2), PLACED_TUNING.walkOpeningWidthMeters);
     try std.testing.expectEqual(@as(f32, 2.6), PLACED_TUNING.vehicleOpeningWidthMeters);
     try std.testing.expectEqual(@as(i32, 10), PLACED_TUNING.stairVisualSteps);
     try std.testing.expectEqual(@as(f32, 1e-6), PLACED_TUNING.wallJoinToleranceMeters);
+}
+
+test "BUILD_CATALOG rows + catalogEntry match the TS source verbatim" {
+    try std.testing.expectEqual(@as(usize, 36), BUILD_CATALOG.len);
+    // floor row: kind + FLOOR_SIZE
+    const floor = catalogEntry("floor.concrete.common").?;
+    try std.testing.expectEqual(BuildPieceKind.floor, floor.kind);
+    try std.testing.expectEqual(@as(f32, 0.05), floor.size.heightMeters);
+    // wall cutout carries its defaultEdit
+    try std.testing.expectEqual(WallEdit.door, catalogEntry("wall.concrete.doorway").?.defaultEdit.?);
+    // durability override
+    try std.testing.expectEqual(@as(i32, 240), catalogEntry("wall.stucco.suburb").?.tags.durability.?);
+    // chainlink material + see-through fence tags
+    const fence = catalogEntry("fence.chainlink.trap_lot").?;
+    try std.testing.expectEqual(BuildMaterial.chainlink, fence.material);
+    try std.testing.expect(!fence.tags.blocksSight);
+    try std.testing.expect(fence.tags.climbable);
+    // roof: shared climb tags + pitch
+    const gable = catalogEntry("roof.gable.suburb").?;
+    try std.testing.expectEqual(RoofShape.gable, gable.roofShape.?);
+    try std.testing.expectEqual(@as(f32, 0.5), gable.roofPitch.?);
+    try std.testing.expect(gable.tags.climbable);
+    // unknown id ⇒ null (the TS throw)
+    try std.testing.expect(!isCatalogId("wall.nope"));
+    try std.testing.expect(catalogEntry("wall.nope") == null);
 }
 
 test "applyWallEdit / effectiveTags match the TS overrides verbatim" {
