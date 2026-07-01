@@ -10,10 +10,7 @@ export default function Chrome(props: {
   activeCommand: Command;
   onMenu: (menu: Menu) => void;
   onCommand: (id: string, source: string) => void;
-  onUndo: () => void;
-  onRedo: () => void;
 }) {
-  const undoCount = props.state.history.filter((event) => event.undoable).length;
   const activeMenu = activeMenuFor(props.state);
   const { data: frame } = useTelemetry<{ app_tick_us?: number }>({ kind: 'frame', pollMs: 500 });
   const shellMs = frame?.app_tick_us ? frame.app_tick_us / 1000 : 0;
@@ -35,12 +32,6 @@ export default function Chrome(props: {
         })}
       </C.HW_MenuBar>
       <C.HW_Spacer />
-      <C.HW_Pill onPress={props.onUndo} tooltip="Undo">
-        <Icon name="Undo2" size={13} color={accentFor(undoCount > 0 ? 'textSecondary' : 'textFaint')} />
-      </C.HW_Pill>
-      <C.HW_Pill onPress={props.onRedo} tooltip="Redo">
-        <Icon name="Redo2" size={13} color={accentFor(props.state.redo.length > 0 ? 'textSecondary' : 'textFaint')} />
-      </C.HW_Pill>
       <C.HW_Compile onPress={() => props.onCommand('compile-rle', 'chrome')}>
         <Icon name="Download" size={13} color={accentFor('primary')} />
         <C.HW_PillTextOn>Compile</C.HW_PillTextOn>

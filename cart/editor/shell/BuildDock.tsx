@@ -11,6 +11,8 @@ export default function BuildDock({
   journal,
   onBuild,
   onEventbus,
+  onUndo,
+  onRedo,
   onPerf,
   onMemory,
 }: {
@@ -18,10 +20,13 @@ export default function BuildDock({
   journal: BuildJournalSnapshot;
   onBuild: () => void;
   onEventbus: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
   onPerf: () => void;
   onMemory: () => void;
 }) {
   const telemetry = editTelemetry(state.history);
+  const undoCount = state.history.filter((event) => event.undoable).length;
   const activeObject = selectedObject(state);
   const position = selectionPosition(state, activeObject);
   const snap = snapReadout(state);
@@ -72,6 +77,14 @@ export default function BuildDock({
         <Icon name="Workflow" size={12} color={accentFor(state.eventbusPopoverOpen ? 'primary' : 'textSecondary')} />
         <C.HW_DockLabel>BUS</C.HW_DockLabel>
         <C.HW_DockValue>{state.history.length}</C.HW_DockValue>
+      </C.HW_DockBuild>
+      <C.HW_DockBuild onPress={onUndo} tooltip="Undo">
+        <Icon name="Undo2" size={12} color={accentFor(undoCount > 0 ? 'textSecondary' : 'textFaint')} />
+        <C.HW_DockLabel>UNDO</C.HW_DockLabel>
+      </C.HW_DockBuild>
+      <C.HW_DockBuild onPress={onRedo} tooltip="Redo">
+        <Icon name="Redo2" size={12} color={accentFor(state.redo.length > 0 ? 'textSecondary' : 'textFaint')} />
+        <C.HW_DockLabel>REDO</C.HW_DockLabel>
       </C.HW_DockBuild>
       <C.HW_DockGroup>
         <C.HW_DockLabel>AVG</C.HW_DockLabel>
