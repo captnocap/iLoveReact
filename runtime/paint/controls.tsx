@@ -8,8 +8,8 @@
 // use it. `log` maps the slider track logarithmically (size wants fine control
 // at the low end) while the readout always shows the real value.
 
-import { useEffect, useState } from 'react';
-import { Box, Row, Text, Pressable, TextInput, Slider, Graph, SdfIcon } from '../primitives';
+import { useEffect, useRef, useState } from 'react';
+import { Box, Row, Text, Pressable, TextInput, Graph, SdfIcon } from '../primitives';
 import { BAKED_ICON_NAMES } from '../icons/baked-names';
 import { type PaintTheme, DARK_THEME } from './theme';
 import { sizeTrackToPx, sizePxToTrack } from './stroke';
@@ -55,18 +55,43 @@ export function BrushScalar(props: BrushScalarProps) {
     else setDraft(fmt(props.value, precision));
   };
 
+  // Drag via a Pressable + measured track — the SAME general-hit-test path BrushKit's colour
+  // wheel uses, which works anywhere. The host <Slider>'s dedicated hit-walker went dead deep
+  // inside the editor's scrolled inspector panel (the thumb gave no read at all); a Pressable
+  // does not (req_2322/2330). onLayout gives the track's screen rect so a pointer x maps to a
+  // 0..1 fraction; down + move + up/leave live on the SAME node so the drag captures.
+  const rectRef = useRef<{ x: number; width: number }>({ x: 0, width: 0 });
+  const draggingRef = useRef(false);
+  const [trackW, setTrackW] = useState(0);
+  const clamp01 = (n: number) => Math.max(0, Math.min(1, Number.isFinite(n) ? n : 0));
+  const commitFromPointer = (p: any) => {
+    const r = rectRef.current;
+    if (r.width <= 0) return;
+    props.onChange(fromTrack(clamp01((Number(p?.x) - r.x) / r.width)));
+  };
+  const frac = clamp01(toTrack(props.value));
+  const THUMB = 12;
+
   return (
     <Row style={{ alignItems: 'center', gap: 8, width: props.width ?? '100%' }}>
       <Text style={{ color: T.dim, fontSize: 10, fontWeight: '800', width: 54 }}>{props.label}</Text>
       <Box style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, height: 18, justifyContent: 'center' }}>
-        <Slider
-          value={toTrack(props.value)}
-          min={0}
-          max={1}
-          step={0}
-          onChange={(t: number) => props.onChange(fromTrack(t))}
-          style={{ height: 6, backgroundColor: T.control, color: T.accent }}
-        />
+        <Pressable
+          onMouseDown={(p: any) => { draggingRef.current = true; commitFromPointer(p); }}
+          onMouseMove={(p: any) => { if (draggingRef.current) commitFromPointer(p); }}
+          onMouseUp={() => { draggingRef.current = false; }}
+          onMouseLeave={() => { draggingRef.current = false; }}
+        >
+          <Box
+            onLayout={(r: any) => { rectRef.current = { x: r.x, width: r.width }; setTrackW(r.width); }}
+            style={{ height: 18, justifyContent: 'center', position: 'relative' }}
+          >
+            <Box style={{ height: 6, borderRadius: 3, backgroundColor: T.control, overflow: 'hidden', position: 'relative' }}>
+              <Box style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: Math.round(frac * trackW), backgroundColor: T.accent }} />
+            </Box>
+            <Box style={{ position: 'absolute', top: 3, left: Math.round(frac * Math.max(0, trackW - THUMB)), width: THUMB, height: THUMB, borderRadius: THUMB / 2, backgroundColor: T.accent, borderWidth: 2, borderColor: T.page }} />
+          </Box>
+        </Pressable>
       </Box>
       <Box style={{ width: 52 }}>
         <TextInput
