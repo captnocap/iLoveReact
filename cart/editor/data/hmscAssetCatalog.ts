@@ -232,15 +232,50 @@ function buildStoredModelParts(snapshot: ModelSnapshot | null): Record<string, M
 // generator + editMeshToGeometry path a Studio part takes — one authored-face id per
 // triangle — so it opens in the host editor as clean grouped faces (real quad/n-gon edges,
 // no triangulation diagonals). Unit-ish defaults; the user edits from there.
-function primitiveEditMesh(kind: PrimitiveKind): EditMesh {
+// ── Primitive parameters (the "add a mesh at a chosen size" dialog) ──────────────────
+// Adding a primitive prompts UPFRONT for its dimensions + resolution, like the old studio
+// mesh editor — so you get a properly-sized thing to paint on instead of a fixed unit cube.
+// One flat param bag drives every kind; PRIMITIVE_FIELDS says which knobs each kind exposes
+// (self-describing label/range), and primitiveEditMesh maps them onto the generators.
+export type PrimitiveParams = { size: number; height: number; resolution: number };
+export type PrimitiveField = { key: keyof PrimitiveParams; label: string; min: number; max: number; step: number; default: number };
+
+const F = {
+  size: { key: 'size', label: 'Size', min: 0.1, max: 50, step: 0.1, default: 1 } as PrimitiveField,
+  diameter: { key: 'size', label: 'Diameter', min: 0.1, max: 50, step: 0.1, default: 1 } as PrimitiveField,
+  height: { key: 'height', label: 'Height', min: 0.1, max: 50, step: 0.1, default: 1 } as PrimitiveField,
+  segments: { key: 'resolution', label: 'Segments', min: 3, max: 96, step: 1, default: 24 } as PrimitiveField,
+  subdiv: { key: 'resolution', label: 'Subdivisions', min: 0, max: 5, step: 1, default: 2 } as PrimitiveField,
+};
+
+export const PRIMITIVE_FIELDS: Record<PrimitiveKind, PrimitiveField[]> = {
+  cube: [F.size, F.height],
+  cylinder: [F.diameter, F.height, F.segments],
+  cone: [F.diameter, F.height, F.segments],
+  pyramid: [F.size, F.height],
+  plane: [F.size],
+  sphere: [F.diameter, F.segments],
+  icosphere: [F.diameter, F.subdiv],
+};
+
+/** The starting params for a kind's dialog — each exposed field seeded from its default. */
+export function defaultPrimitiveParams(kind: PrimitiveKind): PrimitiveParams {
+  const p: PrimitiveParams = { size: 1, height: 1, resolution: 24 };
+  for (const f of PRIMITIVE_FIELDS[kind]) p[f.key] = f.default;
+  return p;
+}
+
+function primitiveEditMesh(kind: PrimitiveKind, p: PrimitiveParams = defaultPrimitiveParams(kind)): EditMesh {
+  const s = p.size, h = p.height, r = p.size / 2;
+  const seg = Math.max(3, Math.round(p.resolution)); // round kinds want ≥3 segments
   switch (kind) {
-    case 'cube': return cuboid(1, 1, 1);
-    case 'cylinder': return cylinder(0.5, 1, 24);
-    case 'cone': return cone(0.5, 1, 24);
-    case 'pyramid': return pyramid(1, 1, 1);
-    case 'plane': return plane(1, 1);
-    case 'sphere': return sphere(0.5, 24);
-    case 'icosphere': return icosphere(0.5, 2);
+    case 'cube': return cuboid(s, h, s);
+    case 'cylinder': return cylinder(r, h, seg);
+    case 'cone': return cone(r, h, seg);
+    case 'pyramid': return pyramid(s, h, s);
+    case 'plane': return plane(s, s);
+    case 'sphere': return sphere(r, seg);
+    case 'icosphere': return icosphere(r, Math.max(0, Math.round(p.resolution))); // resolution = subdivisions here
   }
 }
 export function primitiveMeshData(kind: PrimitiveKind): { positions: Float32Array; faceGroups: Uint32Array } {
@@ -249,10 +284,11 @@ export function primitiveMeshData(kind: PrimitiveKind): { positions: Float32Arra
   return { positions: new Float32Array(geo.positions), faceGroups: new Uint32Array(groups) };
 }
 
-// Build one primitive's authored EditMesh (the outliner's per-part geometry). Public so the
-// AppFrame add-part handler can seed a fresh part without importing the generators directly.
-export function primitivePartMesh(kind: PrimitiveKind): EditMesh {
-  return primitiveEditMesh(kind);
+// Build one primitive's authored EditMesh (the outliner's per-part geometry) at the given
+// params. Public so the AppFrame add-part handler can seed a part without importing the
+// generators directly. Omitting params yields the kind's defaults (a unit primitive).
+export function primitivePartMesh(kind: PrimitiveKind, params?: PrimitiveParams): EditMesh {
+  return primitiveEditMesh(kind, params ?? defaultPrimitiveParams(kind));
 }
 
 export type PartGroupRange = { id: string; lo: number; hi: number };

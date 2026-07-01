@@ -11,6 +11,7 @@ import LeftRail from './LeftRail';
 import BuildDock from './BuildDock';
 import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
+import NewMeshDialog from './NewMeshDialog';
 import PerformancePopover from './PerformancePopover';
 import MemoryPopover from './MemoryPopover';
 import LibraryPanel from '../library/LibraryPanel';
@@ -27,7 +28,7 @@ import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplore
 import { loadPersistedState, persistState } from '../data/persistView';
 import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
-import { primitivePartMesh, composeModelParts, storedModelParts } from '../data/hmscAssetCatalog';
+import { primitivePartMesh, composeModelParts, storedModelParts, type PrimitiveParams } from '../data/hmscAssetCatalog';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
@@ -168,34 +169,11 @@ export default function AppFrame() {
       return;
     }
     if (command.id.startsWith('new-mesh-')) {
+      // Don't drop a fixed unit primitive — prompt for its size + resolution FIRST (the old
+      // studio mesh editor's add dialog). createPrimitive builds it at the chosen params when
+      // the dialog confirms; the part-vs-new-model branch is decided there.
       const kind = command.id.slice('new-mesh-'.length) as PrimitiveKind;
-      // A model is already in view → the primitive becomes a new PART on it (the outliner
-      // way — 100 balls + 50 cylinders on one model). Otherwise spawn a fresh model document
-      // seeded with this one part.
-      if (activePartsModelId(state)) {
-        addPart(kind);
-        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File' }));
-        return;
-      }
-      const docSeq = state.workspaceDocuments.filter((doc) => doc.id.startsWith('model:primitive:')).length + 1;
-      const mid = `primitive:${kind}:${docSeq}`;
-      const doc = modelDocument(primitiveModelPackage(mid));
-      setState((prev) => {
-        const part = makePart(kind, [], prev.seq);
-        return {
-          ...prev,
-          seq: prev.seq + 1,
-          workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
-          activeWorkspaceDocumentId: doc.id,
-          modelParts: { ...prev.modelParts, [mid]: [part] },
-          modelActivePartId: part.id,
-          materialFocused: false,
-          contextOpen: false,
-          openMenu: null,
-          actionMenu: 'File',
-          status: `new ${kind} mesh (${command.name})`,
-        };
-      });
+      setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', newMeshPrompt: kind }));
       return;
     }
     if (command.id === 'open-map' || command.id === 'open-file-explorer' || command.id === 'find-import-source') {
@@ -644,17 +622,37 @@ export default function AppFrame() {
     const doc = s.workspaceDocuments.find((d) => d.id === s.activeWorkspaceDocumentId);
     return doc?.kind === 'model' && doc.sourceId && s.modelParts[doc.sourceId] ? doc.sourceId : null;
   };
-  const makePart = (kind: PrimitiveKind, existing: ModelPart[], seq: number): ModelPart => {
+  const makePart = (kind: PrimitiveKind, existing: ModelPart[], seq: number, params?: PrimitiveParams): ModelPart => {
     const meta = PRIMITIVE_MESHES.find((p) => p.kind === kind)!;
     const n = existing.filter((p) => p.kind === kind).length + 1;
-    return { id: `part:${kind}:${seq}`, name: `${meta.name} ${n}`, kind, mesh: primitivePartMesh(kind), visible: true, color: PART_TINTS[existing.length % PART_TINTS.length]! };
+    return { id: `part:${kind}:${seq}`, name: `${meta.name} ${n}`, kind, mesh: primitivePartMesh(kind, params), visible: true, color: PART_TINTS[existing.length % PART_TINTS.length]! };
   };
-  const addPart = (kind: PrimitiveKind) => setState((prev) => {
-    const mid = activePartsModelId(prev);
-    if (!mid) return prev;
-    const parts = prev.modelParts[mid] ?? [];
-    const part = makePart(kind, parts, prev.seq);
-    return { ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [mid]: [...parts, part] }, modelActivePartId: part.id, status: `added ${part.name}` };
+  // Adding a mesh (menu or outliner) opens the size/resolution dialog instead of dropping a
+  // fixed unit primitive — you author the dimensions upfront, like the old studio mesh editor.
+  const addPart = (kind: PrimitiveKind) => setState((prev) => ({ ...prev, newMeshPrompt: kind }));
+  // The dialog confirmed: build the primitive at the chosen params — a new PART on the model in
+  // view, or a fresh model document seeded with it. Same part-vs-new-model split as before, now
+  // decided here so both entry points (File → New Mesh and the outliner +) share it.
+  const createPrimitive = (kind: PrimitiveKind, params: PrimitiveParams) => setState((prev) => {
+    const activeModel = activePartsModelId(prev);
+    if (activeModel) {
+      const parts = prev.modelParts[activeModel] ?? [];
+      const part = makePart(kind, parts, prev.seq, params);
+      return { ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...parts, part] }, modelActivePartId: part.id, newMeshPrompt: null, status: `added ${part.name}` };
+    }
+    const docSeq = prev.workspaceDocuments.filter((doc) => doc.id.startsWith('model:primitive:')).length + 1;
+    const mid = `primitive:${kind}:${docSeq}`;
+    const doc = modelDocument(primitiveModelPackage(mid));
+    const part = makePart(kind, [], prev.seq, params);
+    return {
+      ...prev, seq: prev.seq + 1,
+      workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
+      activeWorkspaceDocumentId: doc.id,
+      modelParts: { ...prev.modelParts, [mid]: [part] },
+      modelActivePartId: part.id,
+      materialFocused: false, contextOpen: false, newMeshPrompt: null,
+      status: `new ${kind} mesh`,
+    };
   });
   const selectPart = (id: string) => {
     // Focus a part = SCOPE editing to it: only its verts/edges/faces show + select, and the
@@ -949,6 +947,13 @@ export default function AppFrame() {
         <RenderProbe id="Build Journal Dialog">
           <BuildJournalDialog journal={journal} actions={journalActions} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: 'build journal closed' }))} />
         </RenderProbe>
+      ) : null}
+      {state.newMeshPrompt ? (
+        <NewMeshDialog
+          kind={state.newMeshPrompt}
+          onCancel={() => setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'add mesh cancelled' }))}
+          onAdd={(params) => createPrimitive(state.newMeshPrompt!, params)}
+        />
       ) : null}
       {state.fileExplorerOpen ? (
         <RenderProbe id="File Explorer Dialog">

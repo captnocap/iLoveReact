@@ -336,6 +336,7 @@ export type HistoryEvent = {
 // mock; it drives the real editor now, so the name reflects that.)
 export type EditorState = {
   openMenu: Menu | null;
+  newMeshPrompt?: PrimitiveKind | null; // when set, the "add a mesh at a chosen size" dialog is open for this kind
   presetMenuOpen: boolean;
   actionMenu: Menu;
   activeDomain: string;
