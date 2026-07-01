@@ -1089,6 +1089,10 @@ const GIZMO_AXIS_PX: f32 = 86;
 const GIZMO_HIT_PX: f32 = 13;
 const OV_MAX_VERT_DOTS: u32 = 80000; // beyond this draw only selected dots (wireframe still
 // shows topology) — a generous fps guard, not a data cap.
+const OV_EDGE = [3]f32{ 0.62, 0.70, 0.85 }; // unselected boundary edge (real model edges)
+// Above this boundary-edge count, skip the overlay edge lines (a huge triangle soup with no
+// grouping would flood the pass) — the GPU wireframe toggle still shows topology.
+const OV_MAX_EDGE_LINES: u32 = 40000;
 
 /// A haloed dot: a dark disc, then the bright fill on top — visible on any background.
 fn overlayDot(px: f32, py: f32, r: f32, g: f32, b: f32, size: f32) void {
@@ -1298,8 +1302,30 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     if (!model_paint.hasTarget()) return;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const mode = meshEditModeRaw();
+    // Vertex + edge modes draw the model's BOUNDARY edges as real lines (Blender/Blockbench
+    // style) — the triangulation diagonals stay hidden because they aren't boundary edges.
+    // This is the topology view; the GPU barycentric wireframe (full tris) is a separate
+    // toggle. Skipped for a huge ungrouped soup (cap) where the GPU wire is the better tool.
+    if ((mode == 1 or mode == 2) and mesh_edit.ensureTopologyPub()) {
+        if (mesh_edit.boundaryEdgeCount() <= OV_MAX_EDGE_LINES) {
+            const n = mesh_edit.edgeCount();
+            var e: u32 = 0;
+            while (e < n) : (e += 1) {
+                if (!mesh_edit.edgeIsBoundaryPub(e)) continue;
+                // In edge mode a selected boundary edge draws bold-orange over the dim base.
+                const sel = mode == 2 and mesh_edit.edgeSelectedPub(e);
+                const ep = mesh_edit.edgeEndpointsPub(e);
+                const a = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(ep[0])) orelse continue;
+                const b = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(ep[1])) orelse continue;
+                if (sel) {
+                    overlayLine(a[0] + ox, a[1] + oy, b[0] + ox, b[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 4.0);
+                } else {
+                    overlayLine(a[0] + ox, a[1] + oy, b[0] + ox, b[1] + oy, OV_EDGE[0], OV_EDGE[1], OV_EDGE[2], 1.6);
+                }
+            }
+        }
+    }
     if (mode == 1) { // vertex: every vert as a haloed dot, selected ones orange + bigger
-        if (!mesh_edit.ensureTopologyPub()) return;
         const n = mesh_edit.vertCount();
         const draw_all = n <= OV_MAX_VERT_DOTS;
         var i: u32 = 0;
@@ -1312,17 +1338,6 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
             } else {
                 overlayDot(sp[0] + ox, sp[1] + oy, OV_VERT[0], OV_VERT[1], OV_VERT[2], 8);
             }
-        }
-    } else if (mode == 2) { // edge: selected edges as bold orange lines (wireframe shows the rest)
-        if (!mesh_edit.ensureTopologyPub()) return;
-        const n = mesh_edit.edgeCount();
-        var e: u32 = 0;
-        while (e < n) : (e += 1) {
-            if (!mesh_edit.edgeSelectedPub(e)) continue;
-            const ep = mesh_edit.edgeEndpointsPub(e);
-            const a = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(ep[0])) orelse continue;
-            const b = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(ep[1])) orelse continue;
-            overlayLine(a[0] + ox, a[1] + oy, b[0] + ox, b[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 4.0);
         }
     }
     drawGizmoOverlay(cam, ox, oy);

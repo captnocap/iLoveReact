@@ -347,7 +347,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     setPaintMode(false);
     setFocusMode(false);
     meshFocusTool(false);
-    if (m === 1 || m === 2) setWire(true); // show topology where you're clicking verts/edges
+    // Topology is shown by the host's boundary-edge overlay (real model edges, no
+    // triangulation diagonals) — NOT the GPU triangle wireframe, which would draw every
+    // quad's diagonal. Wireframe (W) stays an independent "show all triangles" toggle.
     meshSetMode(m);
     setSelInfo(readSelInfo() ?? { mode: m, verts: 0, edges: 0, sel: 0 });
   };

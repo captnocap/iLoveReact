@@ -50,6 +50,13 @@ var g_vert_count: u32 = 0;
 var g_corner_vert: ?[]u32 = null; // facecount*3 → logical vertex index
 var g_edges: ?[]u32 = null; // edgecount*2 → logical vertex indices (a<b)
 var g_edge_count: u32 = 0;
+// Per welded edge: is it a BOUNDARY edge (a real model edge) vs an INTERNAL one (a
+// triangulation diagonal)? An edge is internal when both faces touching it belong to the
+// SAME authored face-group (the two halves of one quad share their diagonal). Boundary when
+// the incident faces span >1 group, when it's a naked/non-manifold edge, or when the mesh
+// carries no grouping at all (a plain triangle soup — every edge is real). Selection and the
+// edit overlay use ONLY boundary edges, so a cube reads as 12 edges, not 18. (req_2367)
+var g_edge_boundary: ?[]bool = null;
 var g_affect_vert: ?[]bool = null; // scratch: logical verts affected by the active selection
 
 // ── Selection sets (one per element kind; modes keep their own) ──────────────────────
@@ -206,6 +213,7 @@ pub fn reset() void {
     if (g_verts) |v| alloc.free(v);
     if (g_corner_vert) |c| alloc.free(c);
     if (g_edges) |e| alloc.free(e);
+    if (g_edge_boundary) |b| alloc.free(b);
     if (g_affect_vert) |s| alloc.free(s);
     if (g_sel_vert) |s| alloc.free(s);
     if (g_sel_edge) |s| alloc.free(s);
@@ -215,6 +223,7 @@ pub fn reset() void {
     g_verts = null;
     g_corner_vert = null;
     g_edges = null;
+    g_edge_boundary = null;
     g_affect_vert = null;
     g_sel_vert = null;
     g_sel_edge = null;
@@ -361,8 +370,10 @@ fn ensureTopology() bool {
         }
     }
 
-    // Unique undirected edges from the three corners of every face.
-    var emap = std.AutoHashMapUnmanaged(u64, void){};
+    // Unique undirected edges from the three corners of every face. emap maps an edge
+    // key → its index in `edges`, so the boundary pass below can find an edge from a
+    // face's corner pair.
+    var emap = std.AutoHashMapUnmanaged(u64, u32){};
     defer emap.deinit(alloc);
     var edges = std.ArrayListUnmanaged(u32){};
     f = 0;
@@ -382,6 +393,50 @@ fn ensureTopology() bool {
     g_edge_count = @intCast(g_edges.?.len / 2);
     g_built_for = fc;
 
+    // Classify each edge as boundary vs internal (a triangulation diagonal). An internal
+    // edge is shared by exactly two faces of the SAME authored group; everything else is a
+    // real edge. No grouping → every edge is real (a plain triangle mesh has no diagonals to
+    // hide). This is what makes a cube read as 12 edges instead of 18.
+    g_edge_boundary = alloc.alloc(bool, g_edge_count) catch return false;
+    const boundary = g_edge_boundary.?;
+    const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+    if (!has_groups) {
+        @memset(boundary, true);
+    } else {
+        @memset(boundary, false);
+        const first_group = alloc.alloc(u32, g_edge_count) catch return false;
+        defer alloc.free(first_group);
+        const seen = alloc.alloc(bool, g_edge_count) catch return false;
+        defer alloc.free(seen);
+        const incidence = alloc.alloc(u16, g_edge_count) catch return false;
+        defer alloc.free(incidence);
+        @memset(seen, false);
+        @memset(incidence, 0);
+        f = 0;
+        while (f < fc) : (f += 1) {
+            const g = model_source.faceGroupOf(f);
+            var k: u32 = 0;
+            while (k < 3) : (k += 1) {
+                const va = corner_vert[f * 3 + k];
+                const vb = corner_vert[f * 3 + (k + 1) % 3];
+                if (va == vb) continue;
+                const idx = emap.get(edgeKey(va, vb)) orelse continue;
+                if (incidence[idx] < std.math.maxInt(u16)) incidence[idx] += 1;
+                if (!seen[idx]) {
+                    seen[idx] = true;
+                    first_group[idx] = g;
+                } else if (first_group[idx] != g) {
+                    boundary[idx] = true;
+                }
+            }
+        }
+        // A naked / non-manifold edge (not shared by exactly two faces) is always real.
+        var e: u32 = 0;
+        while (e < g_edge_count) : (e += 1) {
+            if (incidence[e] != 2) boundary[e] = true;
+        }
+    }
+
     g_sel_vert = alloc.alloc(bool, g_vert_count) catch return false;
     g_sel_edge = alloc.alloc(bool, g_edge_count) catch return false;
     g_sel_face = alloc.alloc(bool, fc) catch return false;
@@ -397,15 +452,38 @@ fn ensureTopology() bool {
     return true;
 }
 
-fn addEdge(emap: *std.AutoHashMapUnmanaged(u64, void), edges: *std.ArrayListUnmanaged(u32), a0: u32, b0: u32) void {
+fn edgeKey(a0: u32, b0: u32) u64 {
+    const a = @min(a0, b0);
+    const b = @max(a0, b0);
+    return (@as(u64, a) << 32) | @as(u64, b);
+}
+
+fn addEdge(emap: *std.AutoHashMapUnmanaged(u64, u32), edges: *std.ArrayListUnmanaged(u32), a0: u32, b0: u32) void {
     const a = @min(a0, b0);
     const b = @max(a0, b0);
     if (a == b) return;
-    const key = (@as(u64, a) << 32) | @as(u64, b);
-    const gop = emap.getOrPut(alloc, key) catch return;
+    const gop = emap.getOrPut(alloc, edgeKey(a, b)) catch return;
     if (gop.found_existing) return;
+    gop.value_ptr.* = @intCast(edges.items.len / 2);
     edges.append(alloc, a) catch return;
     edges.append(alloc, b) catch return;
+}
+
+/// Is welded edge `e` a boundary edge (a real model edge, not a triangulation diagonal)?
+/// True when no topology/grouping is loaded, so callers default to showing every edge.
+pub fn edgeIsBoundaryPub(e: u32) bool {
+    const b = g_edge_boundary orelse return true;
+    return e >= b.len or b[e];
+}
+
+/// Count of boundary edges (the ones selection + the overlay actually use).
+pub fn boundaryEdgeCount() u32 {
+    const b = g_edge_boundary orelse return g_edge_count;
+    var n: u32 = 0;
+    for (b) |v| {
+        if (v) n += 1;
+    }
+    return n;
 }
 
 fn vertPos(i: u32) [3]f32 {
@@ -702,6 +780,7 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
             const edges = g_edges.?;
             var e: u32 = 0;
             while (e < g_edge_count) : (e += 1) {
+                if (!edgeIsBoundaryPub(e)) continue; // diagonals aren't real edges
                 const a = vertPos(edges[e * 2 + 0]);
                 const b = vertPos(edges[e * 2 + 1]);
                 const mid: [3]f32 = .{ (a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5 };
@@ -740,6 +819,7 @@ fn pickEdge(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32
     var best_d2: f32 = EDGE_PX * EDGE_PX;
     var e: u32 = 0;
     while (e < g_edge_count) : (e += 1) {
+        if (!edgeIsBoundaryPub(e)) continue; // diagonals aren't real edges — not pickable
         const va = vertPos(edges[e * 2 + 0]);
         const vb = vertPos(edges[e * 2 + 1]);
         const a = model_paint.project(cam, vp_w, vp_h, va) orelse continue;
@@ -1034,9 +1114,10 @@ test "planeCutSoup leaves a non-crossing triangle whole" {
     try testing.expectEqual(@as(u32, 9), r.groups.?[0]);
 }
 
-test "symmetric cube welds to 8 verts + 18 edges (weld key must be exact, not a lossy hash)" {
-    // The 8 corners of a unit cube (±0.5). The old x*C1 ^ y*C2 ^ z*C3 pack collapsed these
-    // symmetric sign-flips to 2 keys → welded 8 corners into 2 verts (the "1 edge" cube bug).
+// A unit-cube triangle soup (6 quads → 12 tris → 36 interleaved verts), the exact shape
+// primitiveMeshData feeds the host. Each quad is fan-split (shared diagonal), matching how a
+// Studio cube triangulates.
+fn buildCubeSoup(soup: *[12 * 3 * 8]f32) void {
     const c = [8][3]f32{
         .{ -0.5, -0.5, -0.5 }, .{ 0.5, -0.5, -0.5 }, .{ 0.5, -0.5, 0.5 }, .{ -0.5, -0.5, 0.5 },
         .{ -0.5, 0.5, -0.5 },  .{ 0.5, 0.5, -0.5 },  .{ 0.5, 0.5, 0.5 },  .{ -0.5, 0.5, 0.5 },
@@ -1044,7 +1125,6 @@ test "symmetric cube welds to 8 verts + 18 edges (weld key must be exact, not a 
     const quads = [6][4]u32{
         .{ 4, 7, 6, 5 }, .{ 0, 1, 2, 3 }, .{ 0, 4, 5, 1 }, .{ 3, 2, 6, 7 }, .{ 0, 3, 7, 4 }, .{ 1, 5, 6, 2 },
     };
-    var soup: [12 * 3 * 8]f32 = undefined;
     var w: usize = 0;
     for (quads) |q| {
         const tri = [6]u32{ q[0], q[1], q[2], q[0], q[2], q[3] };
@@ -1061,6 +1141,13 @@ test "symmetric cube welds to 8 verts + 18 edges (weld key must be exact, not a 
             w += 8;
         }
     }
+}
+
+test "symmetric cube welds to 8 verts + 18 edges (weld key must be exact, not a lossy hash)" {
+    // The old x*C1 ^ y*C2 ^ z*C3 pack collapsed the cube's symmetric ±0.5 corners to 2 keys
+    // → welded 8 corners into 2 verts (the "1 edge" cube bug).
+    var soup: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&soup);
     model_paint.setTarget(778, soup[0..], 36);
     defer {
         reset();
@@ -1069,6 +1156,23 @@ test "symmetric cube welds to 8 verts + 18 edges (weld key must be exact, not a 
     try testing.expect(ensureTopology());
     try testing.expectEqual(@as(u32, 8), vertCount());
     try testing.expectEqual(@as(u32, 18), edgeCount()); // 12 cube edges + 6 quad diagonals
+}
+
+test "grouped cube exposes 12 boundary edges — the 6 quad diagonals are hidden" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&soup);
+    // One authored-face id per SOURCE triangle: the two tris of each quad share a group.
+    const groups = [12]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    model_source.setFaceGroups(groups[0..]);
+    model_paint.setTarget(779, soup[0..], 36);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+    }
+    try testing.expect(ensureTopology());
+    try testing.expectEqual(@as(u32, 18), edgeCount()); // topology still has all 18 welded edges
+    try testing.expectEqual(@as(u32, 12), boundaryEdgeCount()); // but only 12 are REAL edges
 }
 
 test "weld builds 4 verts and 5 edges from a 2-tri quad" {
