@@ -36,8 +36,7 @@ import {
   type LogCapture,
 } from './captures';
 
-const { useState, useMemo, useSyncExternalStore, useCallback } = React;
-
+import { useState, useMemo, useSyncExternalStore, useCallback } from 'react';
 /** The console is mounted by the editor shell and shown on a hotkey/dock entry. */
 export interface DiagConsoleProps {
   /** When false, renders nothing (keeps the subscription cheap when closed). */

@@ -117,6 +117,18 @@ var g_text_bind_group: ?*wgpu.BindGroup = null;
 var g_text_bind_group_layout: ?*wgpu.BindGroupLayout = null;
 var g_atlas_texture: ?*wgpu.Texture = null;
 var g_atlas_view: ?*wgpu.TextureView = null;
+
+/// Glyph atlas texture bytes (ATLAS_SIZE² × RGBA8), resident once created.
+/// Shell-side (UI text); device-local (VRAM). Fixed once allocated.
+pub fn atlasTextureBytes() u64 {
+    return if (g_atlas_texture != null) @as(u64, ATLAS_SIZE) * ATLAS_SIZE * 4 else 0;
+}
+
+/// Glyph instance buffer capacity bytes — the per-glyph GPU instance array,
+/// allocated once on first text draw. Shell-side; device-local (VRAM).
+pub fn glyphBufferBytes() u64 {
+    return if (g_text_buffer != null) @as(u64, MAX_GLYPHS) * @sizeOf(GlyphInstance) else 0;
+}
 var g_atlas_sampler: ?*wgpu.Sampler = null;
 
 // CPU-side glyph batch

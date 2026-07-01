@@ -137,6 +137,18 @@ const Paintable = struct {
 
 // ─── Module state ────────────────────────────────────────────────────────
 var g_entries: [MAX_PAINTABLES]Paintable = [_]Paintable{.{}} ** MAX_PAINTABLES;
+
+/// Resident paintable texture bytes — Σ width×height×bpp over active entries.
+/// Editor paint surfaces (Studio pixel painter, decal composer); device-local
+/// (VRAM). Transient CPU upload buffers are freed per drain and not counted.
+pub fn residentTextureBytes() u64 {
+    var total: u64 = 0;
+    for (&g_entries) |*e| {
+        if (!e.active) continue;
+        total += @as(u64, e.width) * e.height * bpp(e);
+    }
+    return total;
+}
 /// Monotonic generation counter — bumps every time a paintable's
 /// underlying wgpu texture is destroyed (releaseEntry). Consumers like
 /// effects.zig cache the value at bind-group-build time and rebuild when

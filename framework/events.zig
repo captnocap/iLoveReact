@@ -97,7 +97,8 @@ pub const EventHandler = struct {
 // ── Hit Testing ──────────────────────────────────────────────────────────
 
 /// Walk the tree back-to-front (children rendered later are "on top").
-/// Returns the deepest node containing (mx, my) that has at least one handler.
+/// Returns the deepest node containing (mx, my) that has at least one handler
+/// or explicitly blocks pointer events.
 /// Skips display:none nodes entirely.
 pub fn hitTest(node: *Node, mx: f32, my: f32) ?*Node {
     if (node.style.display == .none) return null;
@@ -150,8 +151,8 @@ pub fn hitTest(node: *Node, mx: f32, my: f32) ?*Node {
         if (hitTest(&node.children[i], child_mx, child_my)) |hit| return hit;
     }
 
-    // Check self — if this node has handlers, href, TextInput, or Canvas
-    if (hasHandlers(&node.handlers) or node.href != null or node.input_id != null or node.canvas_type != null) {
+    // Check self — handlers/href/input/canvas dispatch, blocks_pointer_events consumes.
+    if (node.blocks_pointer_events or hasHandlers(&node.handlers) or node.href != null or node.input_id != null or node.canvas_type != null) {
         if (mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
             return node;
         }
@@ -191,8 +192,8 @@ fn hasHandlers(h: *const EventHandler) bool {
 // ── Hover Hit Test (any node, not just ones with handlers) ──────────────
 
 /// Walk the tree back-to-front.
-/// Returns the deepest node containing (mx, my) that has handlers OR hoverable flag.
-/// Used for hover effects — opt-in via handlers or hoverable = true.
+/// Returns the deepest node containing (mx, my) that has handlers, hoverable flag,
+/// or pointer blocking. Used for hover effects and for clearing hover under overlays.
 pub fn hitTestHoverable(node: *Node, mx: f32, my: f32) ?*Node {
     if (node.style.display == .none) return null;
 
@@ -245,7 +246,7 @@ pub fn hitTestHoverable(node: *Node, mx: f32, my: f32) ?*Node {
         if (hitTestHoverable(&node.children[i], child_mx, child_my)) |hit| return hit;
     }
 
-    if (hasHandlers(&node.handlers) or node.hoverable or node.href != null or node.input_id != null or node.canvas_type != null) {
+    if (node.blocks_pointer_events or hasHandlers(&node.handlers) or node.hoverable or node.href != null or node.input_id != null or node.canvas_type != null) {
         if (r.w > 0 and r.h > 0 and mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
             return node;
         }
@@ -408,7 +409,7 @@ pub fn hitTestRightClick(node: *Node, mx: f32, my: f32) ?*Node {
                 if (hitTestRightClick(child, child_mx, child_my)) |hit| return hit;
             }
         }
-        if (node.handlers.on_right_click != null or node.context_menu_items != null) return node;
+        if (node.blocks_pointer_events or node.handlers.on_right_click != null or node.context_menu_items != null) return node;
         return null;
     }
 
@@ -418,7 +419,7 @@ pub fn hitTestRightClick(node: *Node, mx: f32, my: f32) ?*Node {
         if (hitTestRightClick(&node.children[i], child_mx, child_my)) |hit| return hit;
     }
 
-    if (node.handlers.on_right_click != null or node.context_menu_items != null) {
+    if (node.blocks_pointer_events or node.handlers.on_right_click != null or node.context_menu_items != null) {
         if (mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
             return node;
         }
@@ -466,7 +467,7 @@ pub fn hitTestScroll(node: *Node, mx: f32, my: f32) ?*Node {
                 if (hitTestScroll(child, child_mx, child_my)) |hit| return hit;
             }
         }
-        if (node.handlers.js_on_scroll != null or node.handlers.on_scroll != null) return node;
+        if (node.blocks_pointer_events or node.handlers.js_on_scroll != null or node.handlers.on_scroll != null) return node;
         return null;
     }
 
@@ -476,7 +477,7 @@ pub fn hitTestScroll(node: *Node, mx: f32, my: f32) ?*Node {
         if (hitTestScroll(&node.children[i], child_mx, child_my)) |hit| return hit;
     }
 
-    if (node.handlers.js_on_scroll != null or node.handlers.on_scroll != null) {
+    if (node.blocks_pointer_events or node.handlers.js_on_scroll != null or node.handlers.on_scroll != null) {
         if (mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
             return node;
         }

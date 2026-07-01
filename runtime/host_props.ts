@@ -23,6 +23,8 @@ export type HostNodeProps = Partial<{
   tooltip: string;
   /** Marks this node as participating in hover hit-testing without a Pressable. */
   hoverable: boolean;
+  /** Consume pointer hit-testing without installing a no-op handler. Use for modal scrims and overlay blockers. */
+  blocksPointerEvents: boolean;
   /** Hyperlink — currently surfaces in `node.href`; opens via the host. */
   href: string;
 

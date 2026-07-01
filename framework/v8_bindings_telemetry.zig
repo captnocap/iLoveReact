@@ -7,6 +7,7 @@ const v8rt = @import("v8_runtime.zig");
 const frame_telemetry = @import("diag/frame_telemetry.zig");
 const telemetry = @import("diag/telemetry.zig");
 const system_memory = @import("diag/system_memory.zig");
+const mem_breakdown = @import("diag/mem_breakdown.zig");
 const reconciler = @import("v8_bindings_reconciler.zig");
 const localstore = @import("storage/localstore.zig");
 const hotstate = @import("state/hotstate.zig");
@@ -321,6 +322,20 @@ fn telSystemCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "process_threads", mem.process_threads);
     setObjectNumber(ctx, obj, "mem_total_bytes", mem.total_bytes);
     setObjectNumber(ctx, obj, "mem_available_bytes", mem.available_bytes);
+    // Per-subsystem attribution (mem_breakdown.zig). GPU fields are device-local
+    // (VRAM); js_*/host_* fields are process RSS. The cart keeps the two pools
+    // separate — see cart/editor/shell/memoryDiagnostics.ts.
+    const mb = mem_breakdown.read();
+    setObjectNumber(ctx, obj, "gpu_geom_intern_bytes", mb.geom_intern_bytes);
+    setObjectNumber(ctx, obj, "gpu_glyph_atlas_bytes", mb.glyph_atlas_bytes);
+    setObjectNumber(ctx, obj, "gpu_glyph_buffer_bytes", mb.glyph_buffer_bytes);
+    setObjectNumber(ctx, obj, "gpu_ui_rect_bytes", mb.ui_rect_bytes);
+    setObjectNumber(ctx, obj, "gpu_paint_texture_bytes", mb.paint_texture_bytes);
+    setObjectNumber(ctx, obj, "js_heap_used_bytes", mb.js_heap_used_bytes);
+    setObjectNumber(ctx, obj, "js_heap_total_bytes", mb.js_heap_total_bytes);
+    setObjectNumber(ctx, obj, "js_external_bytes", mb.js_external_bytes);
+    setObjectNumber(ctx, obj, "js_malloced_bytes", mb.js_malloced_bytes);
+    setObjectNumber(ctx, obj, "host_mesh_stash_bytes", mb.host_mesh_stash_bytes);
     info.getReturnValue().set(obj.toValue());
 }
 

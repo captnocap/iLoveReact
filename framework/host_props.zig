@@ -1021,7 +1021,7 @@ pub fn applyStyle(
 ///              colorRows, contentHandle, source, render*, staticSurface*,
 ///              canvas_*, graph_*, effect_*, physics_*, shell, session,
 ///              terminalFontSize, paintText, contextMenuItems, inlineGlyphs,
-///              hoverable, tooltip, href, debugName, testID, devtoolsViz,
+///              hoverable, blocksPointerEvents, tooltip, href, debugName, testID, devtoolsViz,
 ///              + every `on*` handler name.
 pub fn applyTopLevelProp(
     node: *Node,
@@ -1077,6 +1077,10 @@ pub fn applyTopLevelProp(
     }
     if (eq(u8, key, "noWrap")) {
         if (jsonBool(val)) |b| node.no_wrap = b;
+        return true;
+    }
+    if (eq(u8, key, "blocksPointerEvents")) {
+        if (jsonBool(val)) |b| node.blocks_pointer_events = b;
         return true;
     }
     return false;

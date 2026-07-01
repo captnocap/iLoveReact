@@ -54,7 +54,7 @@ fn out(comptime fmt: []const u8, args: anytype) void {
     if (log_file) |f| _ = f.write(s) catch {};
 }
 
-/// Mirrors layout.zig's private hasHandlers + the href/input/canvas extras —
+/// Mirrors layout.zig's private hasHandlers + the href/input/canvas/blocker extras —
 /// the set of nodes layout.hitTest can return.
 fn interactive(n: *const Node) bool {
     const h = n.handlers;
@@ -67,7 +67,8 @@ fn interactive(n: *const Node) bool {
         h.js_on_hover_exit != null or h.lua_on_hover_exit != null or
         h.on_key != null or h.on_change_text != null or h.on_scroll != null or
         h.on_right_click != null or
-        n.href != null or n.input_id != null or n.canvas_type != null;
+        n.href != null or n.input_id != null or n.canvas_type != null or
+        n.blocks_pointer_events;
 }
 
 /// Mirrors engine.zig's hit_is_interactive — the winner only dispatches a
@@ -104,6 +105,7 @@ fn handlerTags(n: *const Node, buf: []u8) []const u8 {
     if (n.href != null) app(buf, &len, "href,");
     if (n.input_id != null) app(buf, &len, "input,");
     if (n.canvas_type != null) app(buf, &len, "canvas,");
+    if (n.blocks_pointer_events) app(buf, &len, "block,");
     if (len > 0) len -= 1; // drop trailing comma
     return buf[0..len];
 }

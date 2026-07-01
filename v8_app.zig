@@ -1488,6 +1488,8 @@ fn removePropKeys(node: *Node, keys_v: std.json.Value) void {
             node.tooltip = null;
         } else if (std.mem.eql(u8, k, "hoverable")) {
             node.hoverable = false;
+        } else if (std.mem.eql(u8, k, "blocksPointerEvents")) {
+            node.blocks_pointer_events = false;
         } else if (std.mem.eql(u8, k, "debugName")) {
             node.debug_name = null;
         } else if (std.mem.eql(u8, k, "testID")) {
@@ -1875,6 +1877,8 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (dupJsonText(v)) |s| node.tooltip = s;
         } else if (std.mem.eql(u8, k, "hoverable")) {
             if (jsonBool(v)) |b| node.hoverable = b;
+        } else if (std.mem.eql(u8, k, "blocksPointerEvents")) {
+            if (jsonBool(v)) |b| node.blocks_pointer_events = b;
         } else if (std.mem.eql(u8, k, "debugName")) {
             if (dupJsonText(v)) |s| node.debug_name = s;
         } else if (std.mem.eql(u8, k, "testID")) {

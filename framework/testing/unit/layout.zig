@@ -37,6 +37,27 @@ fn mockMeasure(
     };
 }
 
+test "pointer-blocking overlay consumes hit before interactive sibling behind it" {
+    const behind = layout.Node{
+        .computed = .{ .x = 10, .y = 10, .w = 80, .h = 80 },
+        .handlers = .{ .on_press = noopPress },
+    };
+    const scrim = layout.Node{
+        .computed = .{ .x = 0, .y = 0, .w = 120, .h = 120 },
+        .blocks_pointer_events = true,
+    };
+    var children = [_]layout.Node{ behind, scrim };
+    var root = layout.Node{
+        .computed = .{ .x = 0, .y = 0, .w = 120, .h = 120 },
+        .children = &children,
+    };
+
+    const hit = layout.hitTest(&root, 20, 20) orelse return error.ExpectedHit;
+    try testing.expectEqual(&root.children[1], hit);
+}
+
+fn noopPress() void {}
+
 test "small centered text in a fixed-width box does not expand parent row height" {
     layout.setMeasureFn(mockMeasure);
     defer layout.setMeasureFn(null);

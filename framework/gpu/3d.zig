@@ -262,6 +262,14 @@ var g_geo_cache: [GEO_CACHE_SIZE]GeoEntry = [_]GeoEntry{.{}} ** GEO_CACHE_SIZE;
 var g_geo_cache_len: usize = 0;
 var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persists across frames
 
+/// Retained (interned) geometry bytes currently resident in the GPU vertex
+/// buffer — the bump cursor itself. Device-local (VRAM). Dominated by world/map
+/// geometry (chunk meshes, props, buildings) because the intern never evicts, so
+/// this is the headline "World" number in the memory breakdown telemetry.
+pub fn retainedGeometryBytes() u64 {
+    return g_retained_top;
+}
+
 // ── Host-loaded mesh stash (drop-to-view, framework/world/mesh_import.zig) ───────
 // A GLB/OBJ dropped on a viewer is parsed ENTIRELY in the host and never crosses the
 // JS bridge as geometry — only a short intern key does (see __mesh_load_file). The
@@ -277,6 +285,18 @@ const HostMeshStash = struct {
     present: bool = false,
 };
 var g_host_stash: [HOST_MESH_STASH]HostMeshStash = [_]HostMeshStash{.{}} ** HOST_MESH_STASH;
+
+/// Host-side bytes parked in the mesh stash (c_allocator-owned vertex copies
+/// awaiting their first-draw intern). Counts toward process RSS, not VRAM.
+pub fn hostStashBytes() u64 {
+    var total: u64 = 0;
+    for (g_host_stash) |s| {
+        if (s.present) {
+            if (s.verts) |v| total += @as(u64, @intCast(v.len)) * @sizeOf(f32);
+        }
+    }
+    return total;
+}
 
 /// Park a host-parsed mesh under `key` for lazy interning on first draw. `verts` is
 /// COPIED into a host-owned buffer (the caller's parse result is freed right after).
@@ -395,7 +415,7 @@ pub fn orbitFocus(p: [3]f32) void {
 pub fn focusAt(mx: f32, my: f32) bool {
     if (!model_paint.hasTarget()) return false;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
-    const p = model_paint.pickPoint(cam, g_paint_vp_w, g_paint_vp_h, mx, my) orelse return false;
+    const p = model_paint.pickPoint(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)) orelse return false;
     g_orbit.target = p;
     return true;
 }
@@ -408,6 +428,20 @@ var g_paint_target: [3]f32 = .{ 0, 0, 0 };
 var g_paint_fov: f32 = 50;
 var g_paint_vp_w: f32 = 0;
 var g_paint_vp_h: f32 = 0;
+// Screen-space origin (window px) of the Scene3D node's composite rect — the SAME
+// (r.x, r.y) drawEditorOverlay adds when projecting overlay markers. Captured so the
+// input pickers can convert window coords → viewport-local. Standalone the scene fills
+// the window so this is (0,0) and the conversion is a no-op; embedded in the editor the
+// node is offset by the rails/chrome, and without subtracting it every pick / marquee /
+// gizmo-hit / paint raycast lands off by that offset (req_2248).
+var g_paint_vp_x: f32 = 0;
+var g_paint_vp_y: f32 = 0;
+inline fn vpLocalX(mx: f32) f32 {
+    return mx - g_paint_vp_x;
+}
+inline fn vpLocalY(my: f32) f32 {
+    return my - g_paint_vp_y;
+}
 var g_paint_probed: bool = false; // RJIT_PAINTPROBE one-shot guard
 var g_edit_key_hash: u64 = 0;
 var g_edit_key: ?[]u8 = null;
@@ -939,7 +973,7 @@ pub fn meshEditSetMode(m: u8) void {
 pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
     if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
-    return mesh_edit.pick(cam, g_paint_vp_w, g_paint_vp_h, mx, my, additive);
+    return mesh_edit.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my), additive);
 }
 pub fn meshEditClear() void {
     mesh_edit.clearSelection();
@@ -1116,15 +1150,17 @@ pub fn meshGizmoHit(mx: f32, my: f32) i32 {
     if (!g_me_capture or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return -1;
     const pivot = mesh_edit.selectionPivot() orelse return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const lmx = vpLocalX(mx);
+    const lmy = vpLocalY(my);
     var best_axis: i32 = -1;
     var best_d2: f32 = GIZMO_HIT_PX * GIZMO_HIT_PX;
     var axis: i32 = 0;
     while (axis < 3) : (axis += 1) {
         const d2 = if (g_gizmo_tool == .rotate) blk: {
-            break :blk ringHitDist2(cam, pivot, axis, mx, my);
+            break :blk ringHitDist2(cam, pivot, axis, lmx, lmy);
         } else blk: {
             const ep = axisEndpoint(cam, pivot, axis) orelse break :blk 1.0e12;
-            break :blk segDist2(mx, my, ep[0][0], ep[0][1], ep[1][0], ep[1][1]);
+            break :blk segDist2(lmx, lmy, ep[0][0], ep[0][1], ep[1][0], ep[1][1]);
         };
         if (d2 < best_d2) {
             best_d2 = d2;
@@ -1209,7 +1245,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
 pub fn meshEditBox(x0: f32, y0: f32, x1: f32, y1: f32, additive: bool) i32 {
     if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
-    return mesh_edit.boxSelect(cam, g_paint_vp_w, g_paint_vp_h, x0, y0, x1, y1, additive);
+    return mesh_edit.boxSelect(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(x0), vpLocalY(y0), vpLocalX(x1), vpLocalY(y1), additive);
 }
 /// Snapshot the selection before an instant mousedown pick; revert if the press drags.
 pub fn meshEditSnapshot() void {
@@ -1241,7 +1277,7 @@ pub fn meshEditCounts() [4]u32 {
 pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
     if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
-    const face = model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, mx, my);
+    const face = model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my));
     if (face < 0) return -1;
     model_paint.paintFace(@intCast(face), .{ r, g, b, 255 });
     return face;
@@ -1515,7 +1551,7 @@ var g_rt_alloc_warned: bool = false;
 // Scenes recorded by render() during the paint walk, drawn later by
 // flushPending() (after StaticSurface captures). One pending entry per
 // acquired RT slot, so it shares the pool's cap.
-const Pending = struct { node: *Node, slot: *Rt, w: f32, h: f32 };
+const Pending = struct { node: *Node, slot: *Rt, x: f32, y: f32, w: f32, h: f32 };
 var g_pending: [MAX_RT_POOL]Pending = undefined;
 var g_pending_count: usize = 0;
 
@@ -3062,7 +3098,7 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
     // screen) then reads THIS frame's captured content instead of last
     // frame's — fixing the one-frame-stale / first-frame-blank monitor.
     if (g_pending_count < g_pending.len) {
-        g_pending[g_pending_count] = .{ .node = node, .slot = slot, .w = w, .h = h };
+        g_pending[g_pending_count] = .{ .node = node, .slot = slot, .x = x, .y = y, .w = w, .h = h };
         g_pending_count += 1;
     }
 
@@ -3087,7 +3123,7 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
 pub fn flushPending() void {
     g_telemetry = .{ .scene_count = @intCast(g_pending_count) };
     const started = std.time.microTimestamp();
-    for (g_pending[0..g_pending_count]) |p| drawScene(p.node, p.slot, p.w, p.h);
+    for (g_pending[0..g_pending_count]) |p| drawScene(p.node, p.slot, p.x, p.y, p.w, p.h);
     const ended = std.time.microTimestamp();
     g_telemetry.draw_us = @intCast(@max(0, ended - started));
     if (perfLogOn()) {
@@ -3128,7 +3164,8 @@ pub fn renderDetached(target: *DetachedTarget, node: *Node, w: f32, h: f32) ?*wg
     const iw: u32 = @intFromFloat(@max(1, w));
     const ih: u32 = @intFromFloat(@max(1, h));
     const slot = ensureRt(&target.slot, iw, ih) orelse return null;
-    drawScene(node, slot, w, h);
+    // Detached targets are their own window/surface — the scene fills it, origin (0,0).
+    drawScene(node, slot, 0, 0, w, h);
     return slot.color_view;
 }
 
@@ -3446,7 +3483,7 @@ fn ensureGroundPipeline(formula: []const u8) void {
     if (g_ground_pipeline != null) g_ground_formula_hash = h;
 }
 
-fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
+fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32) void {
     const queue = core.getQueue() orelse return;
     const device = core.getDevice() orelse return;
 
@@ -3630,6 +3667,8 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     g_paint_fov = cam_fov;
     g_paint_vp_w = w;
     g_paint_vp_h = h;
+    g_paint_vp_x = vp_x;
+    g_paint_vp_y = vp_y;
 
     // One-shot raycast probe (RJIT_PAINTPROBE): paint four KNOWN viewport pixels with
     // four known colours, so a headless shot shows exactly where each ray lands vs the

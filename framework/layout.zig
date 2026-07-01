@@ -435,6 +435,9 @@ pub const Node = struct {
     tooltip: ?[]const u8 = null,
     href: ?[]const u8 = null,
     hoverable: bool = false,
+    /// Visual-only surfaces can opt into pointer hit-testing so modal scrims
+    /// and overlays consume clicks without installing no-op JS handlers.
+    blocks_pointer_events: bool = false,
     handlers: EventHandler = .{},
     scroll_x: f32 = 0,
     scroll_y: f32 = 0,
@@ -934,7 +937,7 @@ pub fn hitTest(node: *Node, mx: f32, my: f32) ?*Node {
             return hit;
         }
     }
-    if (hasHandlers(node.handlers) or node.href != null or node.input_id != null or node.canvas_type != null) {
+    if (node.blocks_pointer_events or hasHandlers(node.handlers) or node.href != null or node.input_id != null or node.canvas_type != null) {
         if (mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
             return node;
         }

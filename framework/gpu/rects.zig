@@ -72,6 +72,12 @@ var g_last_rect_count: usize = 0;
 
 var g_rect_pipeline: ?*wgpu.RenderPipeline = null;
 var g_rect_buffer: ?*wgpu.Buffer = null;
+
+/// UI rect instance buffer capacity bytes — the one-quad instanced-rect GPU
+/// buffer, allocated on first draw. Shell/UI chrome; device-local (VRAM).
+pub fn instanceBufferBytes() u64 {
+    return if (g_rect_buffer != null) @as(u64, MAX_RECTS) * @sizeOf(RectInstance) else 0;
+}
 var g_bind_group: ?*wgpu.BindGroup = null;
 var g_bind_group_layout: ?*wgpu.BindGroupLayout = null;
 

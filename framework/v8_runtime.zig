@@ -40,6 +40,39 @@ pub fn gcLastType() i32 {
     return @intCast(rjit_v8_gc_last_type());
 }
 
+// ── V8 heap statistics (memory breakdown telemetry) ─────────────────────────
+pub const JsHeap = struct {
+    /// Live (used) bytes in the managed JS object heap.
+    used: u64 = 0,
+    /// Committed bytes of the managed JS heap — closer to what RSS reflects.
+    total: u64 = 0,
+    /// ArrayBuffer + registered-external bytes held outside the JS heap.
+    external: u64 = 0,
+    /// V8's own C++ malloc (zone/parser/compiler memory).
+    malloced: u64 = 0,
+    /// Peak of `malloced` since isolate start.
+    peak_malloced: u64 = 0,
+    /// V8's self-imposed heap ceiling.
+    limit: u64 = 0,
+};
+
+/// V8 isolate heap statistics, or null before the VM is up. All fields are
+/// host/RSS memory (the managed heap is anonymous mmap in this process), NOT
+/// VRAM — so the breakdown groups these under "JS Runtime" and they DO count
+/// against the OS-reported process RSS.
+pub fn jsHeap() ?JsHeap {
+    const iso = g_isolate orelse return null;
+    const s = iso.getHeapStatistics();
+    return .{
+        .used = @intCast(s.used_heap_size),
+        .total = @intCast(s.total_heap_size),
+        .external = @intCast(s.external_memory),
+        .malloced = @intCast(s.malloced_memory),
+        .peak_malloced = @intCast(s.peak_malloced_memory),
+        .limit = @intCast(s.heap_size_limit),
+    };
+}
+
 // ── Bridge (Zig→JS) wall-time accumulator ───────────────────────────────────
 // Every host-initiated cross into JS funnels through callGlobalWithArgs (app
 // tick __jsTick, event dispatch, etc). We time the call + microtask drain and
