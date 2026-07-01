@@ -24,10 +24,14 @@ export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' |
 export type ModelPart = {
   id: string;
   name: string;
-  kind: PrimitiveKind;
+  // The primitive it was spawned from (naming/icons); absent for a Studio-authored part,
+  // which is an arbitrary mesh, not a primitive.
+  kind?: PrimitiveKind;
   mesh: EditMesh;
   visible: boolean;
   color: string;
+  // Vertical offset applied on compose (Studio parts carry one); 0/absent for primitives.
+  lift?: number;
 };
 export type LibraryTab = 'Build' | 'Props' | 'Skins';
 export type ViewMode = '3D' | '2D';

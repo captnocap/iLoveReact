@@ -26,7 +26,7 @@ import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ColorSt
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
-import { primitivePartMesh, composeModelParts } from '../data/hmscAssetCatalog';
+import { primitivePartMesh, composeModelParts, storedModelParts } from '../data/hmscAssetCatalog';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
@@ -651,6 +651,7 @@ export default function AppFrame() {
     // Focus moves across the screen into the center/inspector document — the
     // content browser stays on its list so you can pick the next model without
     // re-navigating back into the folder. (Do NOT touch contentFolder here.)
+    // Parts are seeded by the effect below (covers both click-open and reload-of-open).
     setState((prev) => ({
       ...prev,
       workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
@@ -660,6 +661,19 @@ export default function AppFrame() {
       status: `opened model document: ${model.name}`,
     }));
   };
+
+  // Seed the outliner from a Studio model's stored parts the first time it's the active doc
+  // (covers a fresh click AND a hot reload of an already-open model). A model the user has
+  // already edited this session keeps its parts. Primitive models seed themselves on create.
+  useEffect(() => {
+    const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+    const mid = doc?.kind === 'model' ? doc.sourceId : undefined;
+    if (!mid || state.modelParts[mid]) return;
+    const bareId = mid.startsWith('studio:') ? mid.slice('studio:'.length) : mid;
+    const seeded = storedModelParts(bareId);
+    if (!seeded) return;
+    setState((prev) => (prev.modelParts[mid] ? prev : { ...prev, modelParts: { ...prev.modelParts, [mid]: seeded }, modelActivePartId: seeded[0]?.id ?? prev.modelActivePartId }));
+  }, [state.activeWorkspaceDocumentId]);
 
   const selectWorkspaceDocument = (activeWorkspaceDocumentId: string) => {
     setState((prev) => {

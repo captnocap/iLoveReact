@@ -166,6 +166,10 @@ let storedModelMeshes: Record<string, Float32Array> = {};
 // vertex buffer), so the host mesh editor can regroup the fan-triangulated soup
 // back into the original authored faces. See storedModelVertices / editMeshToGeometry.
 let storedModelFaceGroups: Record<string, Uint32Array> = {};
+// Per studio model (bare id): its authored parts as ModelPart[] — the SAME parts list the
+// outliner drives, so a Studio model opens with its real parts (not the empty primitive
+// list). Built once at load; seeded into editor state when the model is opened.
+let storedModelPartsById: Record<string, ModelPart[]> = {};
 
 export const HMSC_EDITOR_CATALOG: HmscEditorCatalog = loadHmscEditorCatalog();
 
@@ -190,6 +194,38 @@ export function storedModelMeshData(modelId: string): Float32Array | null {
 
 export function storedModelFaceGroupData(modelId: string): Uint32Array | null {
   return storedModelFaceGroups[modelId] ?? null;
+}
+
+// A studio model's authored parts as ModelPart[] (bare id, e.g. the 'studio:' prefix
+// stripped). Null when the model has no stored parts. Used to seed the outliner so a Studio
+// model shows its real parts instead of an empty list.
+export function storedModelParts(modelId: string): ModelPart[] | null {
+  return storedModelPartsById[modelId] ?? null;
+}
+
+// Map a stored studio part (loose snapshot shape) to a ModelPart. Null for a part with no
+// valid EditMesh (an empty/placeholder part) so it never enters the outliner or compose.
+function storedPartToModelPart(part: StoredPart, i: number): ModelPart | null {
+  if (!isEditMesh(part.mesh)) return null;
+  return {
+    id: part.id ?? `spart:${i}`,
+    name: part.name ?? `Part ${i + 1}`,
+    mesh: part.mesh,
+    visible: part.visible !== false,
+    color: part.color ?? '#8fb6c9',
+    lift: part.lift ?? 0,
+  };
+}
+
+function buildStoredModelParts(snapshot: ModelSnapshot | null): Record<string, ModelPart[]> {
+  const out: Record<string, ModelPart[]> = {};
+  Object.values(snapshot?.state?.models ?? {}).forEach((model) => {
+    const parts = orderedParts(model)
+      .map((part, i) => storedPartToModelPart(part, i))
+      .filter((p): p is ModelPart => p !== null);
+    if (parts.length > 0) out[model.id] = parts;
+  });
+  return out;
 }
 
 // A fresh primitive's geometry (File → New Mesh → …). Built through the SAME editMesh
@@ -233,7 +269,7 @@ export function composeModelParts(parts: ModelPart[]): { positions: Float32Array
   for (const part of parts) {
     if (!part.visible) continue;
     const localGroups: number[] = [];
-    const positions = new Float32Array(editMeshToGeometry(part.mesh, undefined, localGroups).positions);
+    const positions = applyPartLift(new Float32Array(editMeshToGeometry(part.mesh, undefined, localGroups).positions), part.lift ?? 0);
     if (positions.length === 0) continue;
     const faceCount = part.mesh.faces.length;
     chunks.push(positions);
@@ -267,6 +303,7 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
   const storedViewer = storedModelViewerMeshes(models);
   storedModelMeshes = storedViewer.meshes;
   storedModelFaceGroups = storedViewer.faceGroups;
+  storedModelPartsById = buildStoredModelParts(models);
 
   const materialAssets = [
     ...shaderRecipeAssets(),
