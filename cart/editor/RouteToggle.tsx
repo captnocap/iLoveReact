@@ -1,6 +1,8 @@
-// RouteToggle — the platform-level Editor/Play route switch. Floats top-right over
-// the active route. (The deeper Compile→Play flow lands later; this is the explicit
-// nav affordance so the two routes are reachable now.)
+// RouteToggle — the platform-level Editor/Play route switch. Lives INLINE in the
+// top chrome row (see Chrome.tsx), a real member of the bar sharing its centerline
+// — not a floating overlay. Because the chrome (AppFrame shell) is mounted on both
+// routes, this stays reachable on /play too. (The deeper Compile→Play flow lands
+// later; this is the explicit nav affordance so the two routes are reachable now.)
 import { useNavigate, useRoute } from '../../runtime/router';
 import { C } from './editor.cls';
 

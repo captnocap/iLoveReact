@@ -1,6 +1,7 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { activeMenuFor, MENUS } from '../data/commands';
+import RouteToggle from '../RouteToggle';
 import type { Command, Menu, EditorState } from '../data/types';
 
 export default function Chrome(props: {
@@ -32,6 +33,7 @@ export default function Chrome(props: {
         <Icon name="Download" size={13} color={accentFor('primary')} />
         <C.HW_PillTextOn>Compile</C.HW_PillTextOn>
       </C.HW_Compile>
+      <RouteToggle />
     </C.HW_Chrome>
   );
 }

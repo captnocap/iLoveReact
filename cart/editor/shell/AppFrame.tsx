@@ -19,6 +19,8 @@ import Inspector from '../inspector/Inspector';
 import FileExplorerDialog from '../dialogs/FileExplorerDialog';
 import ModelContextMenu from '../stage/ModelContextMenu';
 import RenderProbe from '../../../runtime/render_tracker';
+import PlayRoute from '../PlayRoute';
+import { useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
@@ -35,6 +37,13 @@ import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFil
 import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 
 export default function AppFrame() {
+  // The shell for BOTH routes. AppFrame stays mounted across the Editor/Play
+  // switch (it's rendered directly under <Router>, not swapped by a <Route>), so
+  // the top chrome — and its Editor/Play toggle — persists on /play and the
+  // authoring state survives a round trip. The body is what swaps: editor panels
+  // on /editor, the host-native WorldLoader on /play.
+  const { path } = useRoute();
+  const playing = path === '/play';
   const [state, setState] = useState<EditorState>(loadPersistedState);
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
 
@@ -739,6 +748,12 @@ export default function AppFrame() {
           onCommand={runCommand}
         />
       </RenderProbe>
+      {playing ? (
+        <C.HW_PlayBody>
+          <PlayRoute />
+        </C.HW_PlayBody>
+      ) : (
+      <>
       <C.HW_Body>
         <RenderProbe id="Left Rail">
           <LeftRail state={state} onDomain={(activeDomain) => setState((prev) => ({ ...prev, activeDomain, status: `workspace context: ${activeDomain}` }))} />
@@ -918,6 +933,8 @@ export default function AppFrame() {
           />
         </modelMenu.ContextMenu>
       ) : null}
+      </>
+      )}
     </C.HW_App>
   );
 }

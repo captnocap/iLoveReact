@@ -14,7 +14,7 @@ classifier({
   HW_App: { type: 'Box', style: { width: '100%', height: '100%', flexDirection: 'column', position: 'relative', backgroundColor: 'theme:bg', overflow: 'hidden' } },
   // paddingRight reserves room for the floating RouteToggle (Editor/Play), which is
   // position:absolute at right:10 over the top strip — keeps Compile from being smothered.
-  HW_Chrome: { type: 'Box', style: { height: 37, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 150, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
+  HW_Chrome: { type: 'Box', style: { height: 37, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_Brand: { type: 'Box', style: { width: 136, height: '100%', flexDirection: 'row', alignItems: 'center', gap: 7, borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:borderSoft' } },
   HW_BrandText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 2 } },
   HW_MenuBar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 2, height: '100%' } },
@@ -82,6 +82,8 @@ classifier({
   HW_ThreadCard: { type: 'Box', style: { minHeight: 108, gap: 6, padding: 9, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
 
   HW_Body: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'row' } },
+  // /play body — fills the space under the persistent chrome, hosts the WorldLoader.
+  HW_PlayBody: { type: 'Box', style: { flexGrow: 1, minHeight: 0, position: 'relative' } },
   HW_LeftRail: { type: 'Box', style: { width: 48, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, paddingBottom: 8, backgroundColor: 'theme:surface', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
   HW_RailButton: { type: 'Pressable', style: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusLg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_RailButtonOn: { type: 'Pressable', style: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },

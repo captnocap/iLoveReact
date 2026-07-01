@@ -28,9 +28,11 @@ classifier({
   ED_TabText: { type: 'Text', fontSize: 11, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 700 } },
   ED_TabTextOn: { type: 'Text', fontSize: 11, color: 'theme:segActiveText', style: { fontFamily: MONO, fontWeight: 800 } },
 
-  // Route toggle — floats top-right over the workspace; the platform-level
-  // Editor/Play switch (distinct from the workspace's own chrome).
-  ED_RouteToggle: { type: 'Box', style: { position: 'absolute', top: 6, right: 10, zIndex: 9000, flexDirection: 'row', alignItems: 'center', gap: 6, padding: 3, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:bgAlt', borderWidth: 'theme:borderThin', borderColor: 'theme:border' } },
+  // Route toggle — the platform-level Editor/Play switch. Lives INLINE in the top
+  // chrome row (see Chrome.tsx) as a real member, so it shares the bar's centerline
+  // instead of floating on its own axis. Shipped on both routes: the persistent
+  // chrome (AppFrame shell) is always mounted, so /play keeps its way home.
+  ED_RouteToggle: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 3, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:bgAlt', borderWidth: 'theme:borderThin', borderColor: 'theme:border' } },
 
   // Stage (route body)
   ED_Stage: { type: 'Box', style: { flexGrow: 1, minWidth: 0, position: 'relative', backgroundColor: 'theme:stageBg' } },
