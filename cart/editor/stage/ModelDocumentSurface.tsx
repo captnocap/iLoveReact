@@ -1,7 +1,7 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
-import ModelView from '../../modelview';
+import ModelView from './ModelView';
 import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData } from '../data/hmscAssetCatalog';
 
 // The live viewer source for a model document: a file path, resident mesh data,
