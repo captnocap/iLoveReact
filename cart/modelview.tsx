@@ -437,25 +437,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
       else setLitRim((v) => !v);
     },
   };
-  useEffect(() => {
-    onToolApi?.({
-      selMode: (m) => toolApiRef.current?.selMode(m),
-      gizmo: (t) => toolApiRef.current?.gizmo(t),
-      paint: () => toolApiRef.current?.paint(),
-      focus: () => toolApiRef.current?.focus(),
-      wire: () => toolApiRef.current?.wire(),
-      extrudeEdge: () => toolApiRef.current?.extrudeEdge(),
-      createFace: () => toolApiRef.current?.createFace(),
-      loopCut: () => toolApiRef.current?.loopCut(),
-      setQuality: (q) => toolApiRef.current?.setQuality(q),
-      brushTool: (t) => toolApiRef.current?.brushTool(t),
-      cycleSafety: () => toolApiRef.current?.cycleSafety(),
-      cycleDetail: () => toolApiRef.current?.cycleDetail(),
-      setBrush: (b) => toolApiRef.current?.setBrush(b),
-      setPalette: (p) => toolApiRef.current?.setPalette(p),
-      toggleLight: (which) => toolApiRef.current?.toggleLight(which),
-    });
-  }, []);
+  // Hand the LIVE api object (toolApiRef.current) straight to the editor, re-registering every
+  // render. The old approach registered a one-shot DELEGATING WRAPPER that hand-listed every
+  // method — a duplicate list that silently drifted: a method present on toolApiRef.current but
+  // missing from the wrapper (e.g. toggleLight) made the editor call "X is not a function" even
+  // on a fresh build. Registering the real object can't drift — it always carries the full,
+  // current method set. onModelToolApi just stores a ref, so this is a cheap assignment, no
+  // re-render.
+  useEffect(() => { onToolApi?.(toolApiRef.current!); });
   useEffect(() => {
     onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim });
   }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim]);
