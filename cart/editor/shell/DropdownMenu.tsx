@@ -10,8 +10,11 @@ import type { Command, EditorState } from '../data/types';
 // expandable parent flyout (File → New Mesh → Cube); everything else is top-level.
 
 function MenuRow({ command, indent, onCommand }: { command: Command; indent?: boolean; onCommand: (id: string, source: string) => void }) {
+  // NOTE: never pass style={undefined} — the classifier merge (mergeUserProps) treats a
+  // present `style` key as an override, so undefined WIPES the class default (flexDirection
+  // row → the row collapses to a column). Only include the prop when we actually indent.
   return (
-    <C.HW_MenuDropRow onPress={() => onCommand(command.id, 'menu')} style={indent ? { paddingLeft: 30 } : undefined}>
+    <C.HW_MenuDropRow onPress={() => onCommand(command.id, 'menu')} {...(indent ? { style: { paddingLeft: 30 } } : {})}>
       <Icon name={command.icon} size={13} color={accentFor(command.native ? 'primary' : 'textDim')} />
       <C.HW_MenuDropText>{command.name}</C.HW_MenuDropText>
       <C.HW_Spacer />
