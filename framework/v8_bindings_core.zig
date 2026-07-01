@@ -554,6 +554,56 @@ fn hostMeshDeleteSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_append_group(f32Verts, count, u32Groups) → JSON {"ok","key","count","lo","hi"}.
+/// Append a new part's triangles to the LIVE edit mesh (preserving prior edits) with a fresh
+/// authored-group range. Only the new part's geometry crosses the bridge.
+fn hostMeshAppendGroup(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const vbytes = argBytes(info, 0) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    const count = argToI32(info, 1) orelse 0;
+    const gbytes = argBytes(info, 2) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    if (count <= 0 or vbytes.len % @sizeOf(f32) != 0 or gbytes.len % @sizeOf(u32) != 0) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    const verts: []const f32 = @alignCast(std.mem.bytesAsSlice(f32, vbytes));
+    const groups: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, gbytes));
+    const r = scene3d.meshAppendGroup(verts, @intCast(count), groups);
+    if (!r.ok) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    state.markDirty();
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf: [320]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"lo\":{d},\"hi\":{d}}}", .{ key, r.count, r.lo, r.hi }) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+
+/// __mesh_set_group_hidden(lo, hi, hidden) → JSON {"ok","key","count"}. Hide/show the part in
+/// the group range, moving its triangles to/from a host stash (non-destructive of edits).
+fn hostMeshSetGroupHidden(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
+    const hidden = (argToI32(info, 2) orelse 0) != 0;
+    const ok = scene3d.meshSetGroupHidden(lo, hi, hidden);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_group_face_count(lo, hi) → surviving faces in the group range. The outliner asks
 /// this after a delete to drop parts whose geometry is entirely gone.
 fn hostMeshGroupFaceCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -561,6 +611,28 @@ fn hostMeshGroupFaceCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     const lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
     const hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
     setReturnNumber(info, @floatFromInt(scene3d.meshGroupFaceCount(lo, hi)));
+}
+
+/// __mesh_surviving_groups(lo, hi) → "g0,g1,…" of the authored groups in the range that still
+/// have a face after a delete. The outliner prunes each part's stored faces to these.
+fn hostMeshSurvivingGroups(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
+    var ids: [4096]u32 = undefined;
+    const n = scene3d.meshSurvivingGroups(lo, hi, ids[0..]);
+    var buf: [40960]u8 = undefined;
+    var pos: usize = 0;
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        if (i > 0 and pos < buf.len) {
+            buf[pos] = ',';
+            pos += 1;
+        }
+        const s = std.fmt.bufPrint(buf[pos..], "{d}", .{ids[i]}) catch break;
+        pos += s.len;
+    }
+    setReturnString(info, buf[0..pos]);
 }
 
 /// __mesh_edit_snapshot() — save the selection before an instant mousedown pick.
@@ -1717,6 +1789,9 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
     v8_runtime.registerHostFn("__mesh_delete_selection", hostMeshDeleteSelection);
     v8_runtime.registerHostFn("__mesh_group_face_count", hostMeshGroupFaceCount);
+    v8_runtime.registerHostFn("__mesh_append_group", hostMeshAppendGroup);
+    v8_runtime.registerHostFn("__mesh_set_group_hidden", hostMeshSetGroupHidden);
+    v8_runtime.registerHostFn("__mesh_surviving_groups", hostMeshSurvivingGroups);
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);

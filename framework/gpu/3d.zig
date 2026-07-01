@@ -970,6 +970,202 @@ pub fn meshDeleteSelection() bool {
     return ok;
 }
 
+// Snapshot the current mesh's per-face authored groups (before a replace resets them).
+fn captureFaceGroups() ?[]u32 {
+    const fc = g_edit_count / 3;
+    const out = std.heap.c_allocator.alloc(u32, fc) catch return null;
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) out[f] = model_source.faceGroupOf(f);
+    return out;
+}
+
+fn maxGroupId(groups: []const u32) i64 {
+    var mx: i64 = -1;
+    for (groups) |g| {
+        if (g != model_source.NO_FACE_GROUP and @as(i64, g) > mx) mx = g;
+    }
+    return mx;
+}
+
+pub const AppendResult = struct { ok: bool, lo: u32, hi: u32, count: u32 };
+
+/// Append a fresh part's triangles to the LIVE edit mesh (which already carries the user's
+/// deletes/edits), giving them a new authored-group range above every existing group. This is
+/// how "add a part" preserves prior edits — it grows the host mesh instead of recomposing from
+/// JS. `new_verts` is interleaved 8 f32/vert; `new_groups` is one authored id per new triangle
+/// (part-local, 0-based). Returns the new group range [lo, hi).
+pub fn meshAppendGroup(new_verts: []const f32, new_count: u32, new_groups: []const u32) AppendResult {
+    const fail = AppendResult{ .ok = false, .lo = 0, .hi = 0, .count = 0 };
+    if (!model_paint.hasTarget()) return fail;
+    const cur_verts = g_edit_verts orelse return fail;
+    const cur_count = g_edit_count;
+    const need = @as(usize, new_count) * 8;
+    if (new_count < 3 or new_verts.len < need) return fail;
+
+    const cur_groups = captureFaceGroups() orelse return fail;
+    defer std.heap.c_allocator.free(cur_groups);
+    const offset: u32 = @intCast(maxGroupId(cur_groups) + 1);
+
+    const cur_faces = cur_count / 3;
+    const new_faces = new_count / 3;
+    var new_group_span: u32 = 0;
+    {
+        var i: u32 = 0;
+        while (i < new_faces) : (i += 1) {
+            const g = if (i < new_groups.len) new_groups[i] else 0;
+            if (g + 1 > new_group_span) new_group_span = g + 1;
+        }
+    }
+
+    var out = std.ArrayListUnmanaged(f32){};
+    if (!appendFloats(&out, cur_verts[0 .. @as(usize, cur_count) * 8]) or !appendFloats(&out, new_verts[0..need])) {
+        out.deinit(std.heap.c_allocator);
+        return fail;
+    }
+    var groups = std.ArrayListUnmanaged(u32){};
+    defer groups.deinit(std.heap.c_allocator);
+    {
+        var f: u32 = 0;
+        while (f < cur_faces) : (f += 1) groups.append(std.heap.c_allocator, cur_groups[f]) catch {};
+        var i: u32 = 0;
+        while (i < new_faces) : (i += 1) groups.append(std.heap.c_allocator, (if (i < new_groups.len) new_groups[i] else 0) + offset) catch {};
+    }
+    const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
+        out.deinit(std.heap.c_allocator);
+        return fail;
+    };
+    defer std.heap.c_allocator.free(owned);
+
+    const ok = replaceActiveEditMesh(owned, cur_count + new_count);
+    if (ok) model_source.setFaceGroups(groups.items);
+    return .{ .ok = ok, .lo = offset, .hi = offset + new_group_span, .count = cur_count + new_count };
+}
+
+// Host-side stash of a hidden part: its exact triangles (interleaved verts) + authored groups,
+// so hide is non-destructive and unhide restores the edited geometry (no JS round-trip).
+const HiddenGroup = struct { lo: u32, hi: u32, verts: []f32, groups: []u32 };
+var g_hidden_groups: std.ArrayListUnmanaged(HiddenGroup) = .{};
+
+/// Hide or show the part occupying authored-group range [lo, hi). Hiding moves its triangles
+/// out of the live mesh into a host stash (geometry never crosses the bridge); showing
+/// re-appends them with their original groups. Returns whether the mesh changed.
+pub fn meshSetGroupHidden(lo: u32, hi: u32, hidden: bool) bool {
+    if (!model_paint.hasTarget()) return false;
+    if (hidden) return hideGroup(lo, hi) else return showGroup(lo, hi);
+}
+
+fn hideGroup(lo: u32, hi: u32) bool {
+    const cur_verts = g_edit_verts orelse return false;
+    const cur_count = g_edit_count;
+    const cur_faces = cur_count / 3;
+    const cur_groups = captureFaceGroups() orelse return false;
+    defer std.heap.c_allocator.free(cur_groups);
+
+    var keep = std.ArrayListUnmanaged(f32){};
+    var keep_g = std.ArrayListUnmanaged(u32){};
+    defer keep_g.deinit(std.heap.c_allocator);
+    var hid = std.ArrayListUnmanaged(f32){};
+    var hid_g = std.ArrayListUnmanaged(u32){};
+    var any = false;
+    var f: u32 = 0;
+    while (f < cur_faces) : (f += 1) {
+        const g = cur_groups[f];
+        const base = @as(usize, f) * 24;
+        if (base + 24 > cur_verts.len) break;
+        if (g != model_source.NO_FACE_GROUP and g >= lo and g < hi) {
+            any = true;
+            _ = appendFloats(&hid, cur_verts[base .. base + 24]);
+            hid_g.append(std.heap.c_allocator, g) catch {};
+        } else {
+            _ = appendFloats(&keep, cur_verts[base .. base + 24]);
+            keep_g.append(std.heap.c_allocator, g) catch {};
+        }
+    }
+    if (!any or keep.items.len < 24 * 3) {
+        keep.deinit(std.heap.c_allocator);
+        hid.deinit(std.heap.c_allocator);
+        hid_g.deinit(std.heap.c_allocator);
+        return false;
+    }
+    const hid_verts = hid.toOwnedSlice(std.heap.c_allocator) catch return false;
+    const hid_groups = hid_g.toOwnedSlice(std.heap.c_allocator) catch return false;
+    g_hidden_groups.append(std.heap.c_allocator, .{ .lo = lo, .hi = hi, .verts = hid_verts, .groups = hid_groups }) catch {};
+
+    const owned = keep.toOwnedSlice(std.heap.c_allocator) catch return false;
+    defer std.heap.c_allocator.free(owned);
+    const kept: u32 = @intCast(owned.len / 8);
+    const ok = replaceActiveEditMesh(owned, kept);
+    if (ok) model_source.setFaceGroups(keep_g.items);
+    return ok;
+}
+
+fn showGroup(lo: u32, hi: u32) bool {
+    var idx: ?usize = null;
+    for (g_hidden_groups.items, 0..) |h, i| {
+        if (h.lo == lo and h.hi == hi) {
+            idx = i;
+            break;
+        }
+    }
+    const i = idx orelse return false;
+    const entry = g_hidden_groups.items[i];
+    defer {
+        std.heap.c_allocator.free(entry.verts);
+        std.heap.c_allocator.free(entry.groups);
+        _ = g_hidden_groups.orderedRemove(i);
+    }
+
+    const cur_verts = g_edit_verts orelse return false;
+    const cur_count = g_edit_count;
+    const cur_groups = captureFaceGroups() orelse return false;
+    defer std.heap.c_allocator.free(cur_groups);
+
+    var out = std.ArrayListUnmanaged(f32){};
+    if (!appendFloats(&out, cur_verts[0 .. @as(usize, cur_count) * 8]) or !appendFloats(&out, entry.verts)) {
+        out.deinit(std.heap.c_allocator);
+        return false;
+    }
+    var groups = std.ArrayListUnmanaged(u32){};
+    defer groups.deinit(std.heap.c_allocator);
+    for (cur_groups) |g| groups.append(std.heap.c_allocator, g) catch {};
+    for (entry.groups) |g| groups.append(std.heap.c_allocator, g) catch {};
+
+    const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
+        out.deinit(std.heap.c_allocator);
+        return false;
+    };
+    defer std.heap.c_allocator.free(owned);
+    const ok = replaceActiveEditMesh(owned, cur_count + @as(u32, @intCast(entry.verts.len / 8)));
+    if (ok) model_source.setFaceGroups(groups.items);
+    return ok;
+}
+
+/// Distinct authored group ids in [lo, hi) that still have at least one surviving face after a
+/// delete. The outliner uses this to prune each part's STORED faces down to what remains — only
+/// the small id list crosses the bridge, never geometry — so a later recompose keeps the delete.
+pub fn meshSurvivingGroups(lo: u32, hi: u32, out: []u32) u32 {
+    if (hi <= lo) return 0;
+    const span = hi - lo;
+    const seen = std.heap.c_allocator.alloc(bool, span) catch return 0;
+    defer std.heap.c_allocator.free(seen);
+    @memset(seen, false);
+    const fc = model_paint.faceCount();
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        const g = model_source.faceGroupOf(f);
+        if (g != model_source.NO_FACE_GROUP and g >= lo and g < hi) seen[g - lo] = true;
+    }
+    var n: u32 = 0;
+    var i: u32 = 0;
+    while (i < span) : (i += 1) {
+        if (seen[i] and n < out.len) {
+            out[n] = lo + i;
+            n += 1;
+        }
+    }
+    return n;
+}
+
 fn faceCrossFromPositions(pos: []const f32, face: u32) [3]f32 {
     const b = @as(usize, face) * 9;
     if (b + 8 >= pos.len) return .{ 0, 0, 0 };

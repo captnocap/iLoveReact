@@ -303,7 +303,7 @@ export function composeModelParts(parts: ModelPart[]): { positions: Float32Array
   const ranges: PartGroupRange[] = [];
   let groupBase = 0;
   for (const part of parts) {
-    if (!part.visible) continue;
+    if (!part.visible || !part.mesh) continue;
     const localGroups: number[] = [];
     const positions = applyPartLift(new Float32Array(editMeshToGeometry(part.mesh, undefined, localGroups).positions), part.lift ?? 0);
     if (positions.length === 0) continue;

@@ -692,38 +692,51 @@ export default function AppFrame() {
     const parts = (prev.modelParts[mid] ?? []).filter((p) => p.id !== id);
     return { ...prev, modelParts: { ...prev.modelParts, [mid]: parts }, modelActivePartId: prev.modelActivePartId === id ? (parts[0]?.id ?? null) : prev.modelActivePartId };
   });
-  // After a mesh edit (delete), drop any part whose geometry is entirely gone: ask the host
-  // how many faces survive in each part's group range and remove the empties from the
-  // outliner. Visible parts only (a hidden part isn't in the host mesh — it's hidden, not
-  // deleted). Runs off the triangle-count drop below.
-  const reconcileEmptyParts = () => {
+  // After a mesh edit (delete), WRITE THE DELETION BACK into each part's stored EditMesh so it
+  // survives a later recompose (add/hide) instead of springing back. The host keeps the
+  // geometry — only the small list of surviving group ids crosses the bridge — and we prune
+  // each part's faces to those survivors, dropping parts left with nothing. Visible parts only
+  // (a hidden part isn't in the host mesh — it's hidden, not deleted). Runs off the tri drop.
+  const reconcileParts = () => {
     const mid = activePartsModelId(state);
     if (!mid) return;
     const parts = state.modelParts[mid] ?? [];
     if (parts.length === 0) return;
     const hostFns = globalThis as any;
-    const empty = new Set<string>();
-    for (const r of composeModelParts(parts).ranges) {
-      if ((hostFns.__mesh_group_face_count?.(r.lo, r.hi) ?? -1) === 0) empty.add(r.id);
-    }
-    if (empty.size === 0) return;
+    const rangeById = new Map(composeModelParts(parts).ranges.map((r) => [r.id, r]));
+    let changed = false;
+    const pruned = parts.map((part) => {
+      const r = rangeById.get(part.id);
+      if (!r || !part.mesh) return part; // hidden / not in the composed host mesh
+      const s = hostFns.__mesh_surviving_groups?.(r.lo, r.hi);
+      if (typeof s !== 'string') return part;
+      const surviving = s ? s.split(',').map(Number) : [];
+      if (surviving.length >= part.mesh.faces.length) return part; // nothing deleted from this part
+      changed = true;
+      const keep = new Set(surviving.map((g) => g - r.lo));
+      return { ...part, mesh: { ...part.mesh, faces: part.mesh.faces.filter((_, i) => keep.has(i)) } };
+    });
+    const list = pruned.filter((p) => !p.mesh || p.mesh.faces.length > 0);
+    if (!changed && list.length === parts.length) return;
     setState((prev) => {
-      const list = (prev.modelParts[mid] ?? []).filter((p) => !empty.has(p.id));
+      const alive = new Set(list.map((p) => p.id));
       return {
         ...prev,
         modelParts: { ...prev.modelParts, [mid]: list },
-        modelActivePartId: prev.modelActivePartId && empty.has(prev.modelActivePartId) ? (list[0]?.id ?? null) : prev.modelActivePartId,
-        status: `removed ${empty.size} emptied part${empty.size === 1 ? '' : 's'}`,
+        modelActivePartId: prev.modelActivePartId && alive.has(prev.modelActivePartId) ? prev.modelActivePartId : (list[0]?.id ?? null),
+        status: list.length < parts.length ? `removed ${parts.length - list.length} emptied part(s)` : 'synced deletion to parts',
       };
     });
   };
-  // The model's live triangle count is mirrored up via onToolState. A DROP means faces were
-  // removed (a delete) — reconcile emptied parts. Decimation/hide also drop tris but never
-  // zero a part, so those are harmless no-ops.
+  // The model's live triangle count is mirrored up via onToolState. A DROP at FULL quality
+  // means faces were deleted (loop cut only grows; gizmo moves don't change the count) — write
+  // it back to the parts. The full-quality gate matters: decimation drops the DISPLAYED count
+  // without touching the source faces, so reconciling then would falsely prune un-displayed
+  // faces. Below full quality we skip it (edit at full res to persist deletes).
   const prevTrisRef = useRef(0);
   useEffect(() => {
     const tris = state.modelTool.tris;
-    if (tris < prevTrisRef.current) reconcileEmptyParts();
+    if (tris < prevTrisRef.current && state.modelTool.quality >= 0.999) reconcileParts();
     prevTrisRef.current = tris;
   }, [state.modelTool.tris]);
 

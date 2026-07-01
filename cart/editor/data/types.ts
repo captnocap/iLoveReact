@@ -27,11 +27,19 @@ export type ModelPart = {
   // The primitive it was spawned from (naming/icons); absent for a Studio-authored part,
   // which is an arbitrary mesh, not a primitive.
   kind?: PrimitiveKind;
-  mesh: EditMesh;
+  // Seed geometry for the INITIAL compose (studio/primitive parts loaded at open). A part
+  // ADDED after load lives only in the host mesh (appended), so it has no mesh here — its
+  // geometry is identified by its authored-group range [lo, hi) instead. The host mesh is the
+  // source of truth once editing starts; parts are metadata + a group range.
+  mesh?: EditMesh;
   visible: boolean;
   color: string;
   // Vertical offset applied on compose (Studio parts carry one); 0/absent for primitives.
   lift?: number;
+  // The part's authored-group range in the composed host mesh — set after the initial compose
+  // and by an append. Drives scope/select/hide/delete for the part (host-authoritative).
+  lo?: number;
+  hi?: number;
 };
 export type LibraryTab = 'Build' | 'Props' | 'Skins';
 export type ViewMode = '3D' | '2D';
