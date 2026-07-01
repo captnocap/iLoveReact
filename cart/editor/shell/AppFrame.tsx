@@ -803,7 +803,6 @@ export default function AppFrame() {
             onCommand={runCommand}
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
             onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => ({ ...prev, modelTool }))}
-            onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)}
             modelContextTrigger={modelMenu.triggerProps}
             outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart }}
             onTool={(id) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` }))}
@@ -916,7 +915,7 @@ export default function AppFrame() {
       ) : null}
       {state.openMenu ? (
         <RenderProbe id="Menu Dropdown">
-          <DropdownMenu state={state} onCommand={runCommand} />
+          <DropdownMenu state={state} onCommand={runCommand} onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)} />
         </RenderProbe>
       ) : null}
       {/* Model context menu — rendered LAST at the root so it lands at the cursor

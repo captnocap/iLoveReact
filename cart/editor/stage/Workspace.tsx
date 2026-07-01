@@ -1,5 +1,5 @@
 import { C } from '../workspace.cls';
-import type { Asset, ColorStudioMaterialKey, Command, EditorState, LightId, ModelToolApi, ModelToolSnapshot, ViewMode } from '../data/types';
+import type { Asset, ColorStudioMaterialKey, Command, EditorState, ModelToolApi, ModelToolSnapshot, ViewMode } from '../data/types';
 import type { OutlinerHandlers } from './ModelDocumentSurface';
 import type { ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
@@ -13,7 +13,6 @@ export default function Workspace(props: {
   onCommand: (id: string, source: string) => void;
   onModelToolApi: (api: ModelToolApi) => void;
   onModelToolState: (state: ModelToolSnapshot) => void;
-  onToggleLight: (which: LightId) => void;
   modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
   outlinerHandlers: OutlinerHandlers;
   onTool: (id: string) => void;

@@ -4,19 +4,19 @@
 // useContextMenu so it lands at the cursor: the menu positions relative to its
 // parent, and only the root sits at window origin (the stage is offset by the
 // rail + content browser). The toolbar mirrors the quick subset of this.
+import { useState } from 'react';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import { Slider } from '../../../runtime/primitives';
 import { meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
 import type { LightId, ModelToolSnapshot } from '../data/types';
 
-// The viewer light-rig switches, in menu order. Flat is the even paint-true master; Key/Fill/Rim
-// only apply when Flat is off. `field` reads the on-state off the tool snapshot.
-const LIGHT_ROWS: { id: LightId; label: string; field: 'litFlat' | 'litKey' | 'litFill' | 'litRim' }[] = [
+// The viewer light-rig switches. Flat is the even paint-true master; Key/Fill only apply when
+// Flat is off. `field` reads the on-state off the tool snapshot.
+const LIGHT_ROWS: { id: LightId; label: string; field: 'litFlat' | 'litKey' | 'litFill' }[] = [
   { id: 'flat', label: 'Flat (even, paint-true)', field: 'litFlat' },
   { id: 'key', label: 'Key light', field: 'litKey' },
-  { id: 'fill', label: 'Fill light', field: 'litFill' },
-  { id: 'rim', label: 'Rim light', field: 'litRim' },
+  { id: 'fill', label: 'Fill (lift shadows)', field: 'litFill' },
 ];
 
 export default function ModelContextMenu({ modelTool, onCommand, onQuality, onToggleLight, onClose }: {
@@ -26,6 +26,9 @@ export default function ModelContextMenu({ modelTool, onCommand, onQuality, onTo
   onToggleLight: (which: LightId) => void;
   onClose: () => void;
 }) {
+  // Lighting is a nested, collapsible flyout so a right-click stays compact — it's "in there
+  // somewhere" without making the menu a wall. Expanding keeps the menu open.
+  const [lightsOpen, setLightsOpen] = useState(false);
   return (
     <C.HW_StageContextMenu>
       {meshToolCommands().map((command) => {
@@ -47,20 +50,26 @@ export default function ModelContextMenu({ modelTool, onCommand, onQuality, onTo
           <C.HW_KeyText>{command.key}</C.HW_KeyText>
         </C.HW_ContextRow>
       ))}
-      {/* Lighting — the viewer's light switches, with a real home here (the toolbar mirrors
-          them for quick access). Toggling keeps the menu open so you can flip several. */}
-      {LIGHT_ROWS.map((row) => {
+      {/* Lighting — a nested flyout. Collapsed by default (the menu stays compact); expand to
+          flip the switches. Also lives in the View menu bar. Toggling keeps this menu open. */}
+      <C.HW_ContextRow onPress={() => setLightsOpen((v) => !v)}>
+        <Icon name="Sun" size={12} color={accentFor('primary')} />
+        <C.HW_ContextText>Lighting</C.HW_ContextText>
+        <C.HW_Spacer />
+        <Icon name={lightsOpen ? 'ChevronDown' : 'ChevronRight'} size={12} color={accentFor('textDim')} />
+      </C.HW_ContextRow>
+      {lightsOpen ? LIGHT_ROWS.map((row) => {
         const disabled = row.id !== 'flat' && modelTool.litFlat;
         const on = modelTool[row.field] && !disabled;
         return (
-          <C.HW_ContextRow key={row.id} onPress={() => { if (!disabled) onToggleLight(row.id); }}>
+          <C.HW_ContextRow key={row.id} onPress={() => { if (!disabled) onToggleLight(row.id); }} style={{ paddingLeft: 26 }}>
             <Icon name={on ? 'Lightbulb' : 'LightbulbOff'} size={12} color={accentFor(on ? 'primary' : 'textDim')} />
             <C.HW_ContextText>{row.label}</C.HW_ContextText>
             <C.HW_Spacer />
             <C.HW_KeyText>{disabled ? '—' : on ? 'on' : 'off'}</C.HW_KeyText>
           </C.HW_ContextRow>
         );
-      })}
+      }) : null}
       {/* Quality lives here — tucked away, only present when the menu is called.
           Dragging stays inside the menu, so it doesn't dismiss. */}
       <C.HW_StageMenuQuality>
