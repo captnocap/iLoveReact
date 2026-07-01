@@ -1064,6 +1064,11 @@ pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
 pub fn meshEditClear() void {
     mesh_edit.clearSelection();
 }
+/// Mesh-editor Ctrl+A — select every element of the current mode within the focused part
+/// (or the whole model). Returns the selected count, -1 if no mesh.
+pub fn meshEditSelectAll() i32 {
+    return mesh_edit.selectAll();
+}
 // Marquee rectangle (window px), set by the native input loop during a left drag-select.
 var g_mq_active: bool = false;
 var g_mq: [4]f32 = .{ 0, 0, 0, 0 };

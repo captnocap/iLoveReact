@@ -396,6 +396,9 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn meshEditBox(_: f32, _: f32, _: f32, _: f32, _: bool) i32 {
         return -1;
     }
+    pub fn meshEditSelectAll() i32 {
+        return -1;
+    }
     pub fn meshEditSnapshot() void {}
     pub fn meshEditRevert() void {}
     pub fn meshGizmoHit(_: f32, _: f32) i32 {
@@ -5020,6 +5023,21 @@ pub fn run(config_in: AppConfig) !void {
                     if (render_surfaces.handleKeyDown(sym)) continue;
                     {
                         const ctrl = (mod & c.SDL_KMOD_CTRL) != 0;
+                        // Mesh editor Ctrl+A → select all elements (scoped to the focused
+                        // part), NOT the app-wide text select-all. Only when no text field is
+                        // focused and the model editor is capturing in a select mode. Clearing
+                        // the tree selection here (same dispatch) stops the app-wide highlight
+                        // from ever rendering. (USER req_2421)
+                        if (ctrl and sym == 'a' and input.getFocusedId() == null and r3d.meshEditCapturing()) {
+                            // In a select mode this selects every scoped element; in view mode
+                            // it's a no-op — but either way we swallow Ctrl+A so it never
+                            // lights up the whole app's text.
+                            _ = r3d.meshEditSelectAll();
+                            selection.clear();
+                            js_vm.callGlobal("__meshEditSelChanged");
+                            state_mod.markDirty();
+                            continue;
+                        }
                         const input_consumed = if (input.getFocusedId() != null)
                             (handleInputVerticalKey(config.root, sym, mod) or
                                 if (ctrl) input.handleCtrlKey(sym, mod) else input.handleKey(sym, mod))

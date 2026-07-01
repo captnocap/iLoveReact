@@ -390,6 +390,38 @@ pub fn selectFacesByGroupRange(lo: u32, hi: u32, additive: bool) i32 {
     return @intCast(selCount());
 }
 
+/// Ctrl+A for the mesh editor: select every element of the current mode that's in the active
+/// edit scope (whole model when no part is focused). Returns the selected count, -1 if no mesh
+/// or no mode. Edges select only boundary edges (diagonals aren't real edges).
+pub fn selectAll() i32 {
+    if (g_mode == .none) return -1;
+    const ready = if (g_mode == .face) ensureFaceSel() else ensureTopology();
+    if (!ready) return -1;
+    switch (g_mode) {
+        .vertex => {
+            const sel = g_sel_vert orelse return -1;
+            const n: u32 = @intCast(sel.len);
+            var i: u32 = 0;
+            while (i < n) : (i += 1) sel[i] = vertInScopePub(i);
+        },
+        .edge => {
+            const sel = g_sel_edge orelse return -1;
+            const n: u32 = @intCast(sel.len);
+            var e: u32 = 0;
+            while (e < n) : (e += 1) sel[e] = edgeIsBoundaryPub(e) and edgeInScopePub(e);
+        },
+        .face => {
+            const sel = g_sel_face orelse return -1;
+            const n: u32 = @intCast(sel.len);
+            var f: u32 = 0;
+            while (f < n) : (f += 1) sel[f] = faceInScopePub(f);
+            applyFaceHighlight();
+        },
+        .none => return -1,
+    }
+    return @intCast(selCount());
+}
+
 /// Select an edge by welded-edge index (no raycast) — used by toolbar/headless flows that
 /// need a deterministic edge set for topology operations.
 pub fn selectEdgeByIndex(idx: u32, additive: bool) bool {
