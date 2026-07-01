@@ -49,18 +49,21 @@ export default function EventBusPopover({ state, onClose }: { state: EditorState
           ))}
         </C.HW_Sparkline>
       </C.HW_DockTrace>
+      {/* Honest status: the edit log is an in-memory, session-local list — there
+          is no autosave or multiplayer yet. Persistence + fan-out arrive when the
+          eventbus host (DESIGN_INTAKE "Eventbus Direction") owns this stream. */}
       <C.HW_EventSummary>
-        <C.HW_DockGroup>
-          <Icon name="CircleCheck" size={12} color={accentFor('success')} />
-          <C.HW_DockValue>autosave ready</C.HW_DockValue>
-        </C.HW_DockGroup>
         <C.HW_DockGroup>
           <Icon name="Radio" size={12} color={accentFor('primary')} />
           <C.HW_DockValue>session local</C.HW_DockValue>
         </C.HW_DockGroup>
         <C.HW_DockGroup>
-          <Icon name="Users" size={12} color={accentFor('textDim')} />
-          <C.HW_DockValue>invite idle</C.HW_DockValue>
+          <Icon name="Cpu" size={12} color={accentFor('textDim')} />
+          <C.HW_DockValue>in-memory only</C.HW_DockValue>
+        </C.HW_DockGroup>
+        <C.HW_DockGroup>
+          <Icon name="Workflow" size={12} color={accentFor('textDim')} />
+          <C.HW_DockValue>eventbus host: not wired</C.HW_DockValue>
         </C.HW_DockGroup>
         <C.HW_Spacer />
         <C.HW_StatusText>review surface only - editor canvas keeps its height</C.HW_StatusText>
