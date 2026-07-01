@@ -31,6 +31,7 @@ import { createElement, useCallback, useEffect, useMemo, useRef, useState } from
 import { Box, Graph, Pressable, Text } from '@reactjit/primitives';
 import { useRerender } from '@reactjit/runtime/hooks';
 import { busOn } from '@reactjit/hooks/useIFTTT';
+import { pickBuildPieceHost } from '@reactjit/runtime/game/build';
 import { IsoStage, METERS_PER_LEVEL } from './isoStage';
 import { editorTypingFocused } from './editors/controls';
 import { GAME_BUILD, buildingPieceInstanceId, partitionBuildingSelection } from './game';
@@ -440,9 +441,18 @@ export function LoaderIsoView(props: {
   // ── select: raycast the standing pieces. `whole` (double-click) selects the
   // connected object; otherwise the single hit piece. Empty space clears.
   const selectPieceAt = useCallback((sx: number, sy: number, whole: boolean) => {
-    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), pickPieces(), ISO_SNAP_TUNING.reachMeters);
-    if (!hit) { setSelectedIds(new Set()); return; }
-    setSelectedIds(whole ? GAME_BUILD.placed.connected(hit.piece.id, piecesRef.current) : new Set([hit.piece.id]));
+    const ray = stage.pieceRay(sx, sy, rectRef.current);
+    const pieces = pickPieces();
+    // Host-owned raycast (framework/game/build.zig, ported verbatim per req_2349)
+    // when the -Dhas-game-build binding is live; otherwise the original TS path.
+    // pickBuildPieceHost returns the hit piece, null (miss), or undefined (host
+    // not live → fall back). This is the visible proof the ported picking works.
+    const hostPick = pickBuildPieceHost(ray, pieces, ISO_SNAP_TUNING.reachMeters);
+    const hitPiece = hostPick !== undefined
+      ? hostPick
+      : (GAME_BUILD.placed.raycast(ray, pieces, ISO_SNAP_TUNING.reachMeters)?.piece ?? null);
+    if (!hitPiece) { setSelectedIds(new Set()); return; }
+    setSelectedIds(whole ? GAME_BUILD.placed.connected(hitPiece.id, piecesRef.current) : new Set([hitPiece.id]));
   }, [stage, pickPieces]);
 
   // ── multi-select (Ctrl-click): toggle the hit piece in/out of the running

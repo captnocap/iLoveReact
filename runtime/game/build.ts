@@ -12,7 +12,39 @@
 // Pieces cross as CATALOG INDICES (0..catalog length), never strings — the editor
 // mirrors the small id/label list (static data it may clone) and passes indices;
 // all placement math stays host-owned.
-import { callHost } from '../ffi';
+import { callHost, hasHost } from '../ffi';
+
+// The static BUILD_CATALOG ids, IN THE SAME ORDER as framework/game/build.zig
+// BUILD_CATALOG (the index the host fns key on). MUST stay in lockstep with that
+// array — a drift mis-picks pieces. The editor may clone this small id list
+// (static data); all placement math stays host-owned.
+export const BUILD_CATALOG_IDS: readonly string[] = [
+  'wall.concrete.common', 'wall.brick.downtown', 'wall.stucco.suburb', 'wall.stucco.motel',
+  'wall.metal.industrial', 'wall.plywood.trap_lot', 'wall.storefront.downtown',
+  'wall.concrete.doorway', 'wall.concrete.openDoorway', 'wall.metal.garageDoor',
+  'wall.stucco.window', 'wall.stucco.doubleWindow', 'wall.plywood.brokenWindow',
+  'floor.concrete.common', 'floor.wood.suburb',
+  'roof.flat.common', 'roof.gable.suburb', 'roof.gableSteep.suburb', 'roof.shed.common',
+  'roof.shedSteep.common', 'roof.shingle.suburb',
+  'ramp.concrete.common', 'stairs.wood.common', 'stairs.concrete.common',
+  'stairs.metal.industrial', 'stairs.wood.narrow', 'elevator.metal.common',
+  'pillar.concrete.common', 'corner.concrete.common', 'arch.concrete.downtown',
+  'fence.chainlink.trap_lot', 'fence.wood.suburb', 'railing.metal.motel',
+  'trim.cornice.downtown', 'sign.shop.downtown', 'sign.pole.common',
+];
+
+const CATALOG_INDEX: ReadonlyMap<string, number> = new Map(BUILD_CATALOG_IDS.map((id, i) => [id, i]));
+
+/** Catalog index for a piece id, or -1 (props/cooked ids aren't in the static catalog). */
+export function buildCatalogIndex(pieceId: string): number {
+  return CATALOG_INDEX.get(pieceId) ?? -1;
+}
+
+/** Whether the host build binding is live (i.e. the framework was built with
+ *  -Dhas-game-build). When false, callers should keep their TS path. */
+export function buildHostLive(): boolean {
+  return hasHost('__game_build_raycast');
+}
 
 export type Vec3 = { x: number; y: number; z: number };
 export type BuildPieceLite = { catalogIndex: number; x: number; y: number; z: number; yawDegrees: number };
@@ -50,6 +82,30 @@ export function raycastBuild(ray: BuildRay, pieces: readonly BuildPieceLite[], m
     point: { x: out[4]!, y: out[5]!, z: out[6]! },
     normal: { x: out[7]!, y: out[8]!, z: out[9]! },
   };
+}
+
+/** Host-raycast a placed-piece list and return the HIT PIECE (from `pieces`), or
+ *  `null` for a genuine miss, or `undefined` when the host binding isn't live
+ *  (the framework hasn't been built with -Dhas-game-build) — callers should keep
+ *  their existing path in that case. Non-catalog pieces (props/cooked ids) are
+ *  skipped for the host path since the static catalog index doesn't cover them. */
+export function pickBuildPieceHost<T extends { pieceId: string; x: number; y: number; z: number; yawDegrees: number }>(
+  ray: BuildRay,
+  pieces: readonly T[],
+  maxDistance: number,
+): T | null | undefined {
+  if (!buildHostLive()) return undefined;
+  const lite: BuildPieceLite[] = [];
+  const orig: number[] = [];
+  for (let i = 0; i < pieces.length; i += 1) {
+    const ci = buildCatalogIndex(pieces[i]!.pieceId);
+    if (ci < 0) continue; // props/cooked: not in the static catalog
+    lite.push({ catalogIndex: ci, x: pieces[i]!.x, y: pieces[i]!.y, z: pieces[i]!.z, yawDegrees: pieces[i]!.yawDegrees });
+    orig.push(i);
+  }
+  const hit = raycastBuild(ray, lite, maxDistance);
+  if (!hit) return null;
+  return pieces[orig[hit.pieceIndex]!] ?? null;
 }
 
 /** Validate a placement (host validatePlacement). editIndex < 0 ⇒ no edit. */
