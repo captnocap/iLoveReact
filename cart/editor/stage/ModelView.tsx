@@ -681,7 +681,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
         {model && (
           <Text style={{ color: '#7d899c', fontSize: 12, marginLeft: 12 }}>
             {selMode !== 0
-              ? `${SEL_MODES[selMode]} · ${GIZMO_TOOLS[gizmoTool]} gizmo · ${selInfo.sel} selected`
+              ? `${selInfo.sel} selected`
               : `${(model.count / 3).toLocaleString()} tris`}
           </Text>
         )}
