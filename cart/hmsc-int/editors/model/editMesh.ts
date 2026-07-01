@@ -575,7 +575,12 @@ function quadTriPositions(m: EditMesh, face: EditMeshFace): [[number, number, nu
  *  around it within SMOOTH_CREASE_DEG of this face, so curved low-poly surfaces
  *  lose their per-facet lighting seams but hard edges stay hard. Per-corner UVs
  *  ride through when the face carries stored `uv`; faces without UVs pin (0.5,0.5). */
-export function editMeshToGeometry(m: EditMesh, includeFace?: (f: EditMeshFace) => boolean): GeometryData {
+// faceGroupsOut, when passed, is filled with one entry PER EMITTED TRIANGLE (in the
+// exact order g.tri is called): the index of the original authored face the triangle
+// came from. An n-gon fan-triangulates into many triangles that all share one id, so a
+// consumer can regroup the triangle soup back into the real faces (the new editor's
+// host mesh editor uses this to select/outline whole n-gons instead of fan slivers).
+export function editMeshToGeometry(m: EditMesh, includeFace?: (f: EditMeshFace) => boolean, faceGroupsOut?: number[]): GeometryData {
   const g = mesh();
   const flat: V2 = [0.5, 0.5];
   // per-face normals + which faces touch each vertex (for the smoothing groups).
@@ -614,6 +619,7 @@ export function editMeshToGeometry(m: EditMesh, includeFace?: (f: EditMeshFace) 
       const [pb, nb, ub] = corner(l1);
       const [pc, nc, uc] = corner(l2);
       g.tri(pa, na, ua, pb, nb, ub, pc, nc, uc);
+      faceGroupsOut?.push(fi);
     }
   }
   return g.build();

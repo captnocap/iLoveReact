@@ -2,13 +2,15 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
 import ModelView from '../../modelview';
-import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData } from '../data/hmscAssetCatalog';
+import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData } from '../data/hmscAssetCatalog';
 
 // The live viewer source for a model document: a file path, resident mesh data,
 // or a "data missing" placeholder. Resolved once so the render branches stay flat.
+// faceGroups (studio models only): one id per triangle so the host regroups the
+// fan-triangulated soup back into the original authored faces.
 type ViewerSource =
   | { kind: 'path'; path: string }
-  | { kind: 'mesh'; key: string; vertices: Float32Array }
+  | { kind: 'mesh'; key: string; vertices: Float32Array; faceGroups?: Uint32Array }
   | { kind: 'missing'; title: string; label: string }
   | null;
 
@@ -41,7 +43,7 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
   if (viewer && (viewer.kind === 'path' || viewer.kind === 'mesh')) {
     const modelView = viewer.kind === 'path'
       ? <ModelView key={model.id} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} />
-      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8) }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} />;
+      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8), faceGroups: viewer.faceGroups }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} />;
     return (
       <C.HW_ModelDocument {...triggerProps}>
         {modelView}
@@ -135,7 +137,7 @@ function resolveViewer(model: ModelPackage): ViewerSource {
   if (storedModelId) {
     const vertices = storedModelMeshData(storedModelId);
     return vertices
-      ? { kind: 'mesh', key: `studio:${storedModelId}`, vertices }
+      ? { kind: 'mesh', key: `studio:${storedModelId}`, vertices, faceGroups: storedModelFaceGroupData(storedModelId) ?? undefined }
       : { kind: 'missing', title: 'MODEL PART GEOMETRY MISSING', label: storedModelId };
   }
 

@@ -20,6 +20,7 @@
 
 const std = @import("std");
 const model_paint = @import("model_paint.zig");
+const model_source = @import("model_source.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -270,7 +271,7 @@ pub fn selectFaceByIndex(idx: u32, additive: bool) bool {
         @memset(sel, false);
         restoreAllFaces();
     }
-    sel[idx] = true;
+    setFaceGroup(sel, idx, true);
     applyFaceHighlight();
     return true;
 }
@@ -607,17 +608,42 @@ pub fn pick(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, add
         if (!additive) clearSelection();
     } else {
         const idx: u32 = @intCast(hit);
-        if (additive) {
+        if (g_mode == .face) {
+            // Studio faces arrive fan-triangulated, so a face pick grabs the whole
+            // authored n-gon (every triangle sharing its group), not one sliver.
+            if (additive) {
+                const want = if (idx < set.len) !set[idx] else true;
+                setFaceGroup(set, idx, want);
+            } else {
+                @memset(set, false);
+                restoreAllFaces();
+                setFaceGroup(set, idx, true);
+            }
+        } else if (additive) {
             if (idx < set.len) set[idx] = !set[idx];
         } else {
             // Replace: clear the active set, select just this one.
             @memset(set, false);
-            if (g_mode == .face) restoreAllFaces();
             if (idx < set.len) set[idx] = true;
         }
     }
     if (g_mode == .face) applyFaceHighlight();
     return @intCast(selCount());
+}
+
+/// Set every displayed face sharing `idx`'s authored-face group (model_source), so one
+/// pick selects a whole fan-triangulated n-gon. No grouping loaded → just the one face.
+fn setFaceGroup(set: []bool, idx: u32, value: bool) void {
+    const group = model_source.faceGroupOf(idx);
+    if (group == model_source.NO_FACE_GROUP) {
+        if (idx < set.len) set[idx] = value;
+        return;
+    }
+    var f: u32 = 0;
+    const fc: u32 = @intCast(set.len);
+    while (f < fc) : (f += 1) {
+        if (model_source.faceGroupOf(f) == group) set[f] = value;
+    }
 }
 
 fn inRect(sp: ?[2]f32, minx: f32, maxx: f32, miny: f32, maxy: f32) bool {

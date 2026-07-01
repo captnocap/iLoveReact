@@ -14,6 +14,10 @@ var g_source_count: u32 = 0;
 var g_source_path: ?[]u8 = null;
 var g_source_colors: ?[]u8 = null; // source facecount*4 rgba
 var g_face_to_source: ?[]u32 = null; // current displayed face -> source face
+// One id per SOURCE face: source faces sharing an id came from the same authored
+// n-gon (studio EditMesh, via editMeshToGeometry). Absent for plain triangle imports.
+var g_source_face_group: ?[]u32 = null;
+pub const NO_FACE_GROUP: u32 = std.math.maxInt(u32);
 
 pub fn retain(model_path: []const u8, mesh_verts: []const f32, source_count: u32) void {
     clear();
@@ -44,10 +48,12 @@ pub fn clear() void {
     if (g_source_path) |p| alloc.free(p);
     if (g_source_colors) |c| alloc.free(c);
     if (g_face_to_source) |m| alloc.free(m);
+    if (g_source_face_group) |m| alloc.free(m);
     g_source_verts = null;
     g_source_path = null;
     g_source_colors = null;
     g_face_to_source = null;
+    g_source_face_group = null;
     g_source_count = 0;
 }
 
@@ -71,6 +77,26 @@ pub fn colors() ?[]u8 {
 pub fn setFaceMap(m: []const u32) void {
     if (g_face_to_source) |old| alloc.free(old);
     g_face_to_source = alloc.dupe(u32, m) catch null;
+}
+
+/// Adopt the authored-face grouping (one id per SOURCE face). Set after a load, once,
+/// for studio models; cleared by the next retain(). File imports never set it.
+pub fn setFaceGroups(m: []const u32) void {
+    if (g_source_face_group) |old| alloc.free(old);
+    g_source_face_group = alloc.dupe(u32, m) catch null;
+}
+
+/// The authored-face group a DISPLAYED face belongs to — composes displayed->source
+/// (decimation) with source->group. NO_FACE_GROUP when no grouping is loaded.
+pub fn faceGroupOf(displayed_face: u32) u32 {
+    const groups = g_source_face_group orelse return NO_FACE_GROUP;
+    var sf = displayed_face;
+    if (g_face_to_source) |map| {
+        if (displayed_face >= map.len) return NO_FACE_GROUP;
+        sf = map[displayed_face];
+    }
+    if (sf >= groups.len) return NO_FACE_GROUP;
+    return groups[sf];
 }
 
 /// Write a painted DISPLAYED face's colour back to the authoritative source paint.

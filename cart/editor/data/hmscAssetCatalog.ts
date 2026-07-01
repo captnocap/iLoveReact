@@ -162,6 +162,10 @@ let cookedTextureBlobs: Record<string, string> = {};
 let cookedMeshBlobs: Record<string, number[]> = {};
 let cookedAssetMeshRefs: Record<string, string> = {};
 let storedModelMeshes: Record<string, Float32Array> = {};
+// Per studio model: one face-group id per rendered triangle (same order as the
+// vertex buffer), so the host mesh editor can regroup the fan-triangulated soup
+// back into the original authored faces. See storedModelVertices / editMeshToGeometry.
+let storedModelFaceGroups: Record<string, Uint32Array> = {};
 
 export const HMSC_EDITOR_CATALOG: HmscEditorCatalog = loadHmscEditorCatalog();
 
@@ -184,6 +188,10 @@ export function storedModelMeshData(modelId: string): Float32Array | null {
   return storedModelMeshes[modelId] ?? null;
 }
 
+export function storedModelFaceGroupData(modelId: string): Uint32Array | null {
+  return storedModelFaceGroups[modelId] ?? null;
+}
+
 function loadHmscEditorCatalog(): HmscEditorCatalog {
   const started = Date.now();
   const errors: string[] = [];
@@ -198,7 +206,9 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
       .filter((asset) => Boolean(asset.id && asset.meshRef))
       .map((asset) => [asset.id, asset.meshRef]),
   );
-  storedModelMeshes = storedModelViewerMeshes(models);
+  const storedViewer = storedModelViewerMeshes(models);
+  storedModelMeshes = storedViewer.meshes;
+  storedModelFaceGroups = storedViewer.faceGroups;
 
   const materialAssets = [
     ...shaderRecipeAssets(),
@@ -248,34 +258,50 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
   };
 }
 
-function storedModelViewerMeshes(snapshot: ModelSnapshot | null): Record<string, Float32Array> {
-  const out: Record<string, Float32Array> = {};
+function storedModelViewerMeshes(snapshot: ModelSnapshot | null): {
+  meshes: Record<string, Float32Array>;
+  faceGroups: Record<string, Uint32Array>;
+} {
+  const meshes: Record<string, Float32Array> = {};
+  const faceGroups: Record<string, Uint32Array> = {};
   Object.values(snapshot?.state?.models ?? {}).forEach((model) => {
-    const vertices = storedModelVertices(model);
-    if (vertices.length > 0) out[model.id] = vertices;
+    const built = storedModelVertices(model);
+    if (built.positions.length > 0) {
+      meshes[model.id] = built.positions;
+      faceGroups[model.id] = built.faceGroups;
+    }
   });
-  return out;
+  return { meshes, faceGroups };
 }
 
-function storedModelVertices(model: StoredModel): Float32Array {
+// Merge every visible part's triangulated geometry into one interleaved vertex
+// buffer, and build a parallel per-triangle face-group array (one id per triangle,
+// same order). Each part's face ids are offset so faces from different parts never
+// collide — a group id uniquely names one authored face across the whole model.
+function storedModelVertices(model: StoredModel): { positions: Float32Array; faceGroups: Uint32Array } {
   const chunks: Float32Array[] = [];
+  const groupChunks: number[][] = [];
   let total = 0;
+  let groupTotal = 0;
+  let groupBase = 0;
   orderedParts(model).forEach((part) => {
     if (part.visible === false || !isEditMesh(part.mesh)) return;
-    const lifted = applyPartLift(editMeshToGeometry(part.mesh).positions, part.lift ?? 0);
+    const localGroups: number[] = [];
+    const lifted = applyPartLift(editMeshToGeometry(part.mesh, undefined, localGroups).positions, part.lift ?? 0);
     if (lifted.length === 0) return;
     chunks.push(lifted);
     total += lifted.length;
+    groupChunks.push(localGroups.map((fi) => groupBase + fi));
+    groupTotal += localGroups.length;
+    groupBase += part.mesh.faces.length;
   });
-  if (chunks.length === 0) return new Float32Array();
-  if (chunks.length === 1) return chunks[0];
-  const out = new Float32Array(total);
+  const positions = new Float32Array(total);
   let offset = 0;
-  chunks.forEach((chunk) => {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  });
-  return out;
+  chunks.forEach((chunk) => { positions.set(chunk, offset); offset += chunk.length; });
+  const faceGroups = new Uint32Array(groupTotal);
+  let groupOffset = 0;
+  groupChunks.forEach((chunk) => { faceGroups.set(chunk, groupOffset); groupOffset += chunk.length; });
+  return { positions, faceGroups };
 }
 
 function isEditMesh(mesh: StoredPart['mesh']): mesh is EditMesh {

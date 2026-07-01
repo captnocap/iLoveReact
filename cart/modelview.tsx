@@ -44,6 +44,10 @@ export type ModelViewInitialMesh = {
   name: string;
   vertices: Float32Array | number[];
   count?: number;
+  // One face-group id per triangle (same order as vertices): triangles that share
+  // an id came from the same authored n-gon face, so the host mesh editor selects /
+  // outlines whole faces instead of fan slivers. Absent for plain triangle imports.
+  faceGroups?: Uint32Array | number[];
 };
 // The live tool state, mirrored out so an embedding shell (the editor) can drive
 // the SAME host-native tools from its own toolbar / context menu instead of the
@@ -127,6 +131,12 @@ function loadModelVertices(mesh: ModelViewInitialMesh): Loaded | null {
   try {
     const o = JSON.parse(json);
     if (!o || typeof o.key !== 'string') return null;
+    // Hand the host the authored-face grouping (studio models) so face select /
+    // outline works on real n-gons, not the fan triangles. Absent = plain soup.
+    const groups = mesh.faceGroups instanceof Uint32Array
+      ? mesh.faceGroups
+      : mesh.faceGroups ? new Uint32Array(mesh.faceGroups) : null;
+    if (groups && groups.length > 0) host.__mesh_set_face_groups?.(groups);
     return { key: o.key, count: o.count | 0, radius: o.radius || 1, name: mesh.name };
   } catch {
     return null;

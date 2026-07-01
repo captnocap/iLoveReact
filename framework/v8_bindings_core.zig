@@ -399,6 +399,25 @@ fn hostModelFocusAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __mesh_set_face_groups(u32Groups) → 1|0. Adopt one authored-face id per SOURCE
+/// triangle so the mesh editor selects/outlines whole n-gons instead of the fan
+/// slivers a studio EditMesh triangulates into. Called once right after
+/// __mesh_load_vertices; cleared by the next load. File imports never call it.
+fn hostMeshSetFaceGroups(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    if (bytes.len == 0 or bytes.len % @sizeOf(u32) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const groups: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    model_source.setFaceGroups(groups);
+    setReturnNumber(info, 1);
+}
+
 /// __mesh_edit_mode(m) — set the selection mode: 0 none, 1 vertex, 2 edge, 3 face. The
 /// host-native counterpart to the Studio's JS mode toolbar; selection lives in the host.
 fn hostMeshEditMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1500,6 +1519,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__scene3d_patch_dyn", hostScene3DPatchDyn);
     v8_runtime.registerHostFn("__mesh_load_file", hostMeshLoadFile);
     v8_runtime.registerHostFn("__mesh_load_vertices", hostMeshLoadVertices);
+    v8_runtime.registerHostFn("__mesh_set_face_groups", hostMeshSetFaceGroups);
     v8_runtime.registerHostFn("__model_orbit_drag", hostModelOrbitDrag);
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
     v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
