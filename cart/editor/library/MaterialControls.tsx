@@ -6,13 +6,11 @@ import { variantColor } from '../data/catalog';
 export default function MaterialControls({
   asset,
   onFocus,
-  onAction,
   onFavorite,
   onRename,
 }: {
   asset: Asset;
   onFocus: () => void;
-  onAction: (label: string) => void;
   onFavorite: (assetId: string) => void;
   onRename: (assetId: string, name: string) => void;
 }) {
@@ -48,7 +46,7 @@ export default function MaterialControls({
       </C.HW_ToolRow>
       <C.HW_SelectedVariants>
         {variants.map((variant, index) => (
-          <C.HW_SelectedVariant key={variant} onPress={() => onAction(`${asset.name} variant ${variant}`)}>
+          <C.HW_SelectedVariant key={variant}>
             <C.HW_SelectedVariantSwatch style={{ backgroundColor: variantColor(asset, index) }} />
             <C.HW_ToolValue numberOfLines={1} noWrap>{variant}</C.HW_ToolValue>
             <C.HW_ToolHint>{index === 0 ? 'default' : index === 1 ? 'alt' : 'override'}</C.HW_ToolHint>
@@ -63,12 +61,9 @@ export default function MaterialControls({
       <C.HW_ToolRow>
         <C.HW_ToolLabel>bank</C.HW_ToolLabel>
         <C.HW_ToolValue numberOfLines={1} noWrap>{asset.favorite ? 'pinned' : asset.recent ? 'recent' : asset.semanticKind ?? 'indexed'}</C.HW_ToolValue>
-        <C.HW_Spacer />
-        <C.HW_ToolHint>no route change</C.HW_ToolHint>
       </C.HW_ToolRow>
       <C.HW_ButtonRow>
         <C.HW_SmallButton onPress={onFocus}><C.HW_FormValue>focus material</C.HW_FormValue></C.HW_SmallButton>
-        <C.HW_SmallButton onPress={() => onAction('export variant')}><C.HW_FormValue>save variant</C.HW_FormValue></C.HW_SmallButton>
       </C.HW_ButtonRow>
     </C.HW_ToolPanel>
   );

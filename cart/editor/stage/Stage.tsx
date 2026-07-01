@@ -22,7 +22,6 @@ export default function Stage(props: {
   onContext: () => void;
   onObject: (id: string) => void;
   onExitMaterialFocus: () => void;
-  onMaterialAction: (label: string) => void;
   onSelectColorStudioMaterial: (material: ColorStudioMaterialKey) => void;
   onColorStudioVariant: (variant: number) => void;
   onColorStudioSeed: () => void;
@@ -63,7 +62,6 @@ export default function Stage(props: {
             state={props.state}
             activeAsset={props.activeAsset}
             onExit={props.onExitMaterialFocus}
-            onAction={props.onMaterialAction}
             onSelectMaterial={props.onSelectColorStudioMaterial}
             onVariant={props.onColorStudioVariant}
             onSeed={props.onColorStudioSeed}

@@ -17,7 +17,6 @@ export default function Inspector(props: {
   onCommand: (id: string, source: string) => void;
   onPreset: () => void;
   onPresetOption: (preset: string) => void;
-  onModelAction: (label: string) => void;
 }) {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
   const activeModel = activeDocument?.kind === 'model' && activeDocument.sourceId
@@ -64,11 +63,7 @@ export default function Inspector(props: {
             <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
           </C.HW_PanelHead>
           <C.HW_InspectorBody>
-            <ModelDetailBody
-              model={activeModel}
-              onAction={props.onModelAction}
-              onOpen={() => props.onModelAction(`open editor for ${activeModel.name}`)}
-            />
+            <ModelDetailBody model={activeModel} />
           </C.HW_InspectorBody>
         </C.HW_Inspector>
         <C.HW_RightRail>

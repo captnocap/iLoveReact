@@ -1,13 +1,14 @@
 // editor/library/ModelDetailBody.tsx — the focused-model detail content
-// (header, folder contract, atlas sets, paint variants, captured references,
-// actions). Shared so the SAME detail renders both in the content browser
-// (ModelPackageDetail) and in the right inspector when a model is in focus.
+// (header, folder contract, atlas sets, paint variants). Pure real-data display
+// from the model package; renders in the right inspector when a model is in
+// focus. (The old "captured references" section and open/paint/save action row
+// were god-file-clone cruft that was never asked for — removed.)
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
 import ModelThumbnail from './ModelThumbnail';
 
-export default function ModelDetailBody({ model, onAction, onOpen }: { model: ModelPackage; onAction: (label: string) => void; onOpen: () => void }) {
+export default function ModelDetailBody({ model }: { model: ModelPackage }) {
   return (
     <>
       <C.HW_ModelTop>
@@ -39,7 +40,7 @@ export default function ModelDetailBody({ model, onAction, onOpen }: { model: Mo
           ['rig data', model.rig],
           ['manifest', model.data],
         ].map(([label, value]) => (
-          <C.HW_ModelDataRow key={label} onPress={() => onAction(`${model.name} ${label}`)}>
+          <C.HW_ModelDataRow key={label}>
             <C.HW_ToolLabel>{label}</C.HW_ToolLabel>
             <C.HW_ToolValue>{value}</C.HW_ToolValue>
           </C.HW_ModelDataRow>
@@ -52,7 +53,7 @@ export default function ModelDetailBody({ model, onAction, onOpen }: { model: Mo
           <C.HW_GroupText>ATLAS SETS</C.HW_GroupText>
         </C.HW_ModelSectionHead>
         {model.atlases.map((atlas) => (
-          <C.HW_ModelAtlasCard key={atlas.id} onPress={() => onAction(`${model.name} ${atlas.label}`)}>
+          <C.HW_ModelAtlasCard key={atlas.id}>
             <C.HW_VariantSwatch style={{ backgroundColor: atlas.color }} />
             <C.HW_ModelCardMain>
               <C.HW_MaterialTitleRow>
@@ -76,7 +77,7 @@ export default function ModelDetailBody({ model, onAction, onOpen }: { model: Mo
         </C.HW_ModelSectionHead>
         <C.HW_ModelPaintGrid>
           {model.paints.map((paint) => (
-            <C.HW_ModelPaintCard key={paint.id} onPress={() => onAction(`${model.name} paint ${paint.name}`)}>
+            <C.HW_ModelPaintCard key={paint.id}>
               <C.HW_SelectedVariantSwatch style={{ backgroundColor: paint.color }} />
               <C.HW_ToolValue>{paint.name}</C.HW_ToolValue>
               <C.HW_ToolHint>{paint.atlas}</C.HW_ToolHint>
@@ -85,25 +86,6 @@ export default function ModelDetailBody({ model, onAction, onOpen }: { model: Mo
         </C.HW_ModelPaintGrid>
       </C.HW_ModelSection>
 
-      <C.HW_ModelSection>
-        <C.HW_ModelSectionHead>
-          <Icon name="Workflow" size={12} color={accentFor('primary')} />
-          <C.HW_GroupText>CAPTURED REFERENCES</C.HW_GroupText>
-        </C.HW_ModelSectionHead>
-        <C.HW_ChipRow>
-          {Array.from(new Set(model.paints.flatMap((paint) => [...paint.shaderRefs, ...paint.imageRefs]))).map((ref) => (
-            <C.HW_TraceChip key={ref} onPress={() => onAction(`${model.name} reference ${ref}`)}>
-              <C.HW_MaterialStat>{ref}</C.HW_MaterialStat>
-            </C.HW_TraceChip>
-          ))}
-        </C.HW_ChipRow>
-      </C.HW_ModelSection>
-
-      <C.HW_ButtonRow>
-        <C.HW_SmallButton onPress={onOpen}><C.HW_FormValue>open editor</C.HW_FormValue></C.HW_SmallButton>
-        <C.HW_SmallButton onPress={() => onAction(`open painter for ${model.name}`)}><C.HW_FormValue>paint model</C.HW_FormValue></C.HW_SmallButton>
-        <C.HW_SmallButton onPress={() => onAction(`save new variant for ${model.name}`)}><C.HW_FormValue>save variant</C.HW_FormValue></C.HW_SmallButton>
-      </C.HW_ButtonRow>
     </>
   );
 }

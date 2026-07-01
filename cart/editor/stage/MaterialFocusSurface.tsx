@@ -30,7 +30,6 @@ export default function MaterialFocusSurface(props: {
   state: EditorState;
   activeAsset: Asset;
   onExit: () => void;
-  onAction: (label: string) => void;
   onSelectMaterial: (material: ColorStudioMaterialKey) => void;
   onVariant: (variant: number) => void;
   onSeed: () => void;
@@ -77,9 +76,6 @@ export default function MaterialFocusSurface(props: {
           </>
         ) : null}
         <C.HW_Spacer />
-        {props.state.colorStudioView === 'materialPalette' ? (
-          <C.HW_Pill onPress={() => props.onAction(`save ${material.name} palette variant`)}><C.HW_PillText>save variant</C.HW_PillText></C.HW_Pill>
-        ) : null}
         <C.HW_Pill onPress={props.onExit}><C.HW_PillText>return to world</C.HW_PillText></C.HW_Pill>
       </C.HW_FocusHeader>
       <C.HW_ColorStudioShell>

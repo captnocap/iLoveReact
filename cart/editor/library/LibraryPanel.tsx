@@ -36,7 +36,6 @@ export default function LibraryPanel(props: {
   onRename: (assetId: string, name: string) => void;
   onPage: (delta: number) => void;
   onFocusMaterial: () => void;
-  onMaterialAction: (label: string) => void;
   onModel: (model: ModelPackage) => void;
   contentTree: ContentNode[];
   models: ModelPackage[];
@@ -140,7 +139,6 @@ export default function LibraryPanel(props: {
               active={props.state.activeAssetId === asset.id}
               onAsset={props.onAsset}
               onFavorite={props.onFavorite}
-              onVariant={props.onMaterialAction}
             />
           )).concat(
             Array.from({ length: emptySlots }, (_, index) => (
@@ -173,12 +171,11 @@ export default function LibraryPanel(props: {
         <MaterialControls
           asset={props.activeAsset}
           onFocus={props.onFocusMaterial}
-          onAction={props.onMaterialAction}
           onFavorite={props.onFavorite}
           onRename={props.onRename}
         />
       ) : folderTab ? (
-        <ContextToolControls mode={props.mode} activeObject={props.activeObject} onAction={props.onMaterialAction} />
+        <ContextToolControls mode={props.mode} activeObject={props.activeObject} />
       ) : null}
       <modelMenu.ContextMenu>
         {menuModel ? (

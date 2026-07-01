@@ -24,10 +24,6 @@ export default function ToolOptions(props: {
   if (activeDoc.kind === 'model') {
     return (
       <C.HW_ToolOptions>
-        <C.HW_PillOn>
-          <C.HW_OptionLabel>MESH</C.HW_OptionLabel>
-          <C.HW_PillTextOn>{meshToolCommands().length} tools</C.HW_PillTextOn>
-        </C.HW_PillOn>
         {meshToolCommands().map((command) => {
           const active = meshToolActive(command.id, props.state.modelTool);
           const Btn = active ? C.HW_IconButtonOn : C.HW_IconButton;
@@ -58,10 +54,6 @@ export default function ToolOptions(props: {
   const actionCommands = COMMANDS.filter((command) => command.menu === activeMenu && command.surface !== 'model');
   return (
     <C.HW_ToolOptions>
-      <C.HW_PillOn>
-        <C.HW_OptionLabel>{activeMenu.toUpperCase()}</C.HW_OptionLabel>
-        <C.HW_PillTextOn>{actionCommands.length} commands</C.HW_PillTextOn>
-      </C.HW_PillOn>
       {actionCommands.map((command) => {
         const Btn = props.state.activeCommandId === command.id ? C.HW_IconButtonOn : C.HW_IconButton;
         return (

@@ -23,7 +23,6 @@ export default function Workspace(props: {
   onContext: () => void;
   onObject: (id: string) => void;
   onExitMaterialFocus: () => void;
-  onMaterialAction: (label: string) => void;
   onSelectColorStudioMaterial: (material: ColorStudioMaterialKey) => void;
   onColorStudioVariant: (variant: number) => void;
   onColorStudioSeed: () => void;

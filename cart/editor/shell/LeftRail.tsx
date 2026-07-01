@@ -14,9 +14,6 @@ export default function LeftRail({ state, onDomain }: { state: EditorState; onDo
           </Btn>
         );
       })}
-      <C.HW_Spacer />
-      <C.HW_RailButton onPress={() => onDomain('playtest')}><Icon name="PlayCircle" size={15} color={accentFor('textDim')} /></C.HW_RailButton>
-      <C.HW_RailButton onPress={() => onDomain('lighting')}><Icon name="Sun" size={15} color={accentFor('textDim')} /></C.HW_RailButton>
     </C.HW_LeftRail>
   );
 }

@@ -7,7 +7,6 @@ export default function MaterialCatalogRow(props: {
   active: boolean;
   onAsset: (asset: Asset) => void;
   onFavorite: (assetId: string) => void;
-  onVariant: (label: string) => void;
 }) {
   const Tile = props.active ? C.HW_MaterialTileOn : C.HW_MaterialTile;
   return (
