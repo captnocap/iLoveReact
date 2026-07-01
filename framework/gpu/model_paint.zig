@@ -690,7 +690,7 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
     const cx = PATCH_GUTTER + cu * span;
     const cy = PATCH_GUTTER + cv * span;
     const r = @max(radius, 0.6);
-    const amt = std.math.clamp(flow, 0.0, 1.0);
+    const flow_amt = std.math.clamp(flow, 0.0, 1.0);
     const tri_max: f32 = span; // texels where px+py <= span are inside the triangle
     const inv_span: f32 = if (span > 0.0) 1.0 / span else 1.0;
     var py: u32 = 0;
@@ -700,11 +700,18 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
             const fx: f32 = @floatFromInt(px);
             const fy: f32 = @floatFromInt(py);
             if (fx + fy > tri_max + 0.5) continue; // outside the face triangle → clipped
+            // Antialiased coverage: full inside the disc, ramping to 0 across the boundary texel,
+            // so a stroke reads as a smooth line instead of a staircase of hard-edged discs.
+            var cov: f32 = 1.0;
             if (!fill) {
                 const dx = fx + 0.5 - cx;
                 const dy = fy + 0.5 - cy;
-                if (dx * dx + dy * dy > r * r) continue; // outside the brush disc
+                const dist = @sqrt(dx * dx + dy * dy);
+                if (dist > r + 0.5) continue; // outside the antialiased disc
+                cov = std.math.clamp(r + 0.5 - dist, 0.0, 1.0); // 1-texel soft edge
             }
+            const amt = flow_amt * cov;
+            if (amt <= 0.0) continue;
             // Sample the material at this texel's patch-local uv (0..1 across the face,
             // tiled by scale), or use the flat colour when no material ink is dipped.
             const ink: [4]u8 = if (mat)
