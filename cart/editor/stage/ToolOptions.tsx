@@ -3,14 +3,14 @@ import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { COMMANDS, activeMenuFor, meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
 import { FLOORS, SNAP_MODES } from '../data/content';
-import type { Command, MockState, ViewMode } from '../data/types';
+import type { Command, EditorState, ViewMode } from '../data/types';
 
 // A model document owns the host-native mesh editor — the toolbar becomes the
 // home for its tools (icon-only), with select / gizmo / toggle groups divided.
 const MESH_GROUP_DIVIDER = new Set(['mesh-move', 'mesh-paint']);
 
 export default function ToolOptions(props: {
-  state: MockState;
+  state: EditorState;
   activeCommand: Command;
   onCommand: (id: string, source: string) => void;
   onTool: (id: string) => void;

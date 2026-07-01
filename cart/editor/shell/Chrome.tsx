@@ -3,10 +3,10 @@ import { useTelemetry } from '../../../runtime/hooks/useTelemetry';
 import { C, accentFor } from '../workspace.cls';
 import { activeMenuFor, MENUS } from '../data/commands';
 import { formatMs } from '../data/telemetry';
-import type { Command, Menu, MockState } from '../data/types';
+import type { Command, Menu, EditorState } from '../data/types';
 
 export default function Chrome(props: {
-  state: MockState;
+  state: EditorState;
   activeCommand: Command;
   onMenu: (menu: Menu) => void;
   onCommand: (id: string, source: string) => void;

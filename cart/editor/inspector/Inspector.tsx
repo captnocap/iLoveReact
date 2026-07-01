@@ -3,14 +3,14 @@ import { C, accentFor } from '../workspace.cls';
 import { commandById } from '../data/commands';
 import { FLOORS, PRESETS, RIGHT_PANES, SNAP_MODES, modelPackageById } from '../data/content';
 import { missionCounts, objectMetricRows } from '../data/readouts';
-import type { Asset, MockState, WorldObject } from '../data/types';
+import type { Asset, EditorState, WorldObject } from '../data/types';
 import ReadOnlySection from './ReadOnlySection';
 import PresetSection from './PresetSection';
 import MissionSection from './MissionSection';
 import ModelDetailBody from '../library/ModelDetailBody';
 
 export default function Inspector(props: {
-  state: MockState;
+  state: EditorState;
   activeObject: WorldObject;
   activeAsset: Asset;
   onPane: (pane: string) => void;

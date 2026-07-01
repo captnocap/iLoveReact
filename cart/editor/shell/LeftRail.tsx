@@ -1,9 +1,9 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { DOMAINS } from '../data/content';
-import type { MockState } from '../data/types';
+import type { EditorState } from '../data/types';
 
-export default function LeftRail({ state, onDomain }: { state: MockState; onDomain: (domain: string) => void }) {
+export default function LeftRail({ state, onDomain }: { state: EditorState; onDomain: (domain: string) => void }) {
   return (
     <C.HW_LeftRail>
       {DOMAINS.map(([domain, icon]) => {

@@ -185,6 +185,11 @@ export type ModelPaintVariant = {
   color: string;
 };
 
+// Per-model UI mutations (right-click actions). Models are snapshot-derived and
+// read-only, so rename/favorite/delete live here as overrides applied on read;
+// real model-store writes arrive with package materialization (Slice 2).
+export type ModelOverride = { name?: string; favorite?: boolean; hidden?: boolean };
+
 export type ModelPackage = {
   id: string;
   folderId: ContentFolderId;
@@ -192,6 +197,7 @@ export type ModelPackage = {
   path: string;
   kind: 'build' | 'prop' | 'character' | 'vehicle';
   stage: 'wip' | 'ready' | 'locked';
+  favorite?: boolean;
   color: string;
   source: string;
   viewerPath?: string;
@@ -263,7 +269,10 @@ export type HistoryEvent = {
   richMs?: number;
 };
 
-export type MockState = {
+// The editor's whole authoring state — one plain object threaded through every
+// panel, reduced by AppFrame. (Was `MockState` while the shell was a design
+// mock; it drives the real editor now, so the name reflects that.)
+export type EditorState = {
   openMenu: Menu | null;
   presetMenuOpen: boolean;
   actionMenu: Menu;
@@ -319,4 +328,7 @@ export type MockState = {
   seq: number;
   objects: WorldObject[];
   assetOverrides: Record<string, AssetOverride>;
+  modelOverrides: Record<string, ModelOverride>;
+  modelDupes: ModelPackage[];
+  modelRenamingId: string | null;
 };

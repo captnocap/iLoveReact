@@ -1,5 +1,5 @@
 import { selectedObject } from './content';
-import type { MockState, WorldObject } from './types';
+import type { EditorState, WorldObject } from './types';
 
 export type ValidationReadout = {
   errors: number;
@@ -11,17 +11,17 @@ export type MissionCounts = {
   points: number;
 };
 
-export function validationReadout(_state: MockState): ValidationReadout {
+export function validationReadout(_state: EditorState): ValidationReadout {
   // No compile/validation run is wired into this cart yet. Report the honest
   // empty result instead of carrying old mock warnings forward.
   return { errors: 0, warnings: 0 };
 }
 
-export function buildStatusLabel(state: MockState): string {
+export function buildStatusLabel(state: EditorState): string {
   return state.history.some((event) => event.undoable) ? 'dirty' : 'unbuilt';
 }
 
-export function selectionPosition(state: MockState, object: WorldObject = selectedObject(state)) {
+export function selectionPosition(state: EditorState, object: WorldObject = selectedObject(state)) {
   return {
     x: Math.round(object.left),
     y: state.floorIndex,
@@ -29,14 +29,14 @@ export function selectionPosition(state: MockState, object: WorldObject = select
   };
 }
 
-export function snapReadout(state: MockState) {
+export function snapReadout(state: EditorState) {
   return {
     gridMeters: state.snapGridMeters,
     angleDegrees: state.snapAngleDegrees,
   };
 }
 
-export function missionCounts(state: MockState): MissionCounts {
+export function missionCounts(state: EditorState): MissionCounts {
   let triggers = 0;
   let points = 0;
   for (const object of state.objects) {
@@ -47,7 +47,7 @@ export function missionCounts(state: MockState): MissionCounts {
   return { triggers, points };
 }
 
-export function objectMetricRows(state: MockState, object: WorldObject): Array<[string, string]> {
+export function objectMetricRows(state: EditorState, object: WorldObject): Array<[string, string]> {
   const pos = selectionPosition(state, object);
   return [
     ['x', String(pos.x)],

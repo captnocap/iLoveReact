@@ -4,7 +4,7 @@ import { C, accentFor } from '../workspace.cls';
 import { editTelemetry, formatMs } from '../data/telemetry';
 import { selectedObject } from '../data/content';
 import { formatBytes, formatCount, formatMeters, selectionPosition, snapReadout, validationReadout } from '../data/readouts';
-import type { BuildJournalSnapshot, MockState } from '../data/types';
+import type { BuildJournalSnapshot, EditorState } from '../data/types';
 
 export default function BuildDock({
   state,
@@ -14,7 +14,7 @@ export default function BuildDock({
   onPerf,
   onMemory,
 }: {
-  state: MockState;
+  state: EditorState;
   journal: BuildJournalSnapshot;
   onBuild: () => void;
   onEventbus: () => void;

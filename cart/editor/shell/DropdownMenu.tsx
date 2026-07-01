@@ -1,13 +1,13 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { COMMANDS, MENU_DROPDOWN_WIDTH, menuDropdownLeft } from '../data/commands';
-import type { MockState } from '../data/types';
+import type { EditorState } from '../data/types';
 
 // Dropdown for the active top-bar menu. Mounted at the app root (see AppFrame)
 // so it paints over the body and hit-tests correctly; positioned under its
 // menu-bar button via menuDropdownLeft.
 
-export default function DropdownMenu({ state, onCommand }: { state: MockState; onCommand: (id: string, source: string) => void }) {
+export default function DropdownMenu({ state, onCommand }: { state: EditorState; onCommand: (id: string, source: string) => void }) {
   // Model-surface tools live on the stage toolbar + context menu, not the menu
   // bar — keep them out of the dropdowns.
   const rows = COMMANDS.filter((command) => command.menu === state.openMenu && command.surface !== 'model');

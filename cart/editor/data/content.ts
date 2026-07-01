@@ -1,9 +1,9 @@
 // editor/data/content.ts - content tree, navigation enums, and folder helpers.
 import { MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
-import { HMSC_EDITOR_CATALOG } from './hmscAssetCatalog';
+import { HMSC_EDITOR_CATALOG, modelCategoryNodes } from './hmscAssetCatalog';
 import { commandById } from './commands';
 import { INITIAL_OBJECTS } from './initialState';
-import type { Asset, ContentFolderId, ContentNode, LibraryTab, MockState, ModelPackage, WorldObject } from './types';
+import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, WorldObject } from './types';
 
 export const DOMAINS = [
   ['world', 'Eye'],
@@ -74,9 +74,30 @@ export function isModelFolder(folder: ContentFolderId): boolean {
 // gallery and AppFrame's page clamp so paging never disagrees with the grid.
 export const MODEL_GALLERY_PAGE_SIZE = 12;
 
-export function modelPackagesForFolder(folder: ContentFolderId, search: string): ModelPackage[] {
+// The live model list: the catalog packages plus any duplicates, with per-model
+// renames/favorites applied and deleted (hidden) models removed. Everything that
+// lists models — the gallery, the tree, the counts — reads through this so a
+// right-click rename/delete/duplicate stays consistent everywhere.
+export function visibleModelPackages(
+  overrides: Record<string, ModelOverride>,
+  dupes: ModelPackage[],
+): ModelPackage[] {
+  return [...MODEL_PACKAGES, ...dupes]
+    .map((model) => {
+      const override = overrides[model.id];
+      if (!override) return model;
+      return { ...model, name: override.name ?? model.name, favorite: override.favorite ?? model.favorite };
+    })
+    .filter((model) => !overrides[model.id]?.hidden);
+}
+
+export function modelPackagesForFolder(
+  folder: ContentFolderId,
+  search: string,
+  models: ModelPackage[] = MODEL_PACKAGES,
+): ModelPackage[] {
   const needle = search.trim().toLowerCase();
-  return MODEL_PACKAGES
+  return models
     .filter((model) => {
       if (folder === 'models') return true;
       if (folder === 'models-build') return model.kind === 'build';
@@ -127,10 +148,26 @@ export function assetMatchesContentFolder(asset: Asset, folder: ContentFolderId)
   return false;
 }
 
-export function countAssetsForFolder(assets: Asset[], folder: ContentFolderId): number {
-  if (folder === 'game') return assets.length + MODEL_PACKAGE_COUNT;
-  if (isModelFolder(folder)) return modelPackagesForFolder(folder, '').length;
+export function countAssetsForFolder(
+  assets: Asset[],
+  folder: ContentFolderId,
+  models: ModelPackage[] = MODEL_PACKAGES,
+): number {
+  if (folder === 'game') return assets.length + models.length;
+  if (isModelFolder(folder)) return modelPackagesForFolder(folder, '', models).length;
   return assets.filter((asset) => assetMatchesContentFolder(asset, folder)).length;
+}
+
+// The content tree with its Models subtree rebuilt from a live model list, so
+// renames / duplicates / deletes show up in the tree exactly as they do in the
+// gallery. Only the Models node's children are swapped; the rest is untouched.
+export function liveContentTree(models: ModelPackage[]): ContentNode[] {
+  const swap = (node: ContentNode): ContentNode => {
+    if (node.id === 'models') return { ...node, children: modelCategoryNodes(models) };
+    if (node.children) return { ...node, children: node.children.map(swap) };
+    return node;
+  };
+  return CONTENT_TREE.map(swap);
 }
 
 export function rankAssets(a: Asset, b: Asset): number {
@@ -152,13 +189,13 @@ function materialSourceRank(asset: Asset): number {
   return 4;
 }
 
-export function selectedObject(state: MockState): WorldObject {
+export function selectedObject(state: EditorState): WorldObject {
   return state.objects.find((object) => object.id === state.selectedObjectId && !object.hidden)
     ?? state.objects.find((object) => !object.hidden)
     ?? INITIAL_OBJECTS[0]!;
 }
 
-export function panelModeFor(state: MockState, object: WorldObject): LibraryTab {
+export function panelModeFor(state: EditorState, object: WorldObject): LibraryTab {
   const command = commandById(state.activeCommandId);
   if (command.id === 'paint-material' || command.id === 'sample-material') return 'Skins';
   if (object.kind === 'TILE' || object.kind === 'CUTOUT') return 'Skins';

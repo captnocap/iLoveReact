@@ -1,9 +1,9 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { COMMANDS, commandById } from '../data/commands';
-import type { MockState } from '../data/types';
+import type { EditorState } from '../data/types';
 
-export default function ContextMenu({ state, onCommand }: { state: MockState; onCommand: (id: string, source: string) => void }) {
+export default function ContextMenu({ state, onCommand }: { state: EditorState; onCommand: (id: string, source: string) => void }) {
   const rows = COMMANDS.filter((command) => command.context && command.surface !== 'model');
   return (
     <C.HW_ContextMenu>

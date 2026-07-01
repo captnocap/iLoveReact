@@ -1,7 +1,7 @@
 // editor/data/commands.ts — command table + menu geometry helpers.
 //
 // Cloned from the hmsc-workspace-mock god-file. Pure data + pure helpers.
-import type { Command, Menu, MockState } from './types';
+import type { Command, Menu, EditorState } from './types';
 
 export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Story', 'Window', 'Help'];
 export const MENU_DROPDOWN_WIDTH = 420;
@@ -117,6 +117,6 @@ export function menuDropdownLeft(menu: Menu | null): number {
   return Math.max(MENU_DROPDOWN_GUTTER, left);
 }
 
-export function activeMenuFor(state: MockState): Menu {
+export function activeMenuFor(state: EditorState): Menu {
   return state.openMenu ?? state.actionMenu;
 }

@@ -1,12 +1,12 @@
 import { C } from '../workspace.cls';
-import type { Asset, ColorStudioMaterialKey, Command, MockState, ModelToolApi, ModelToolSnapshot, ViewMode } from '../data/types';
+import type { Asset, ColorStudioMaterialKey, Command, EditorState, ModelToolApi, ModelToolSnapshot, ViewMode } from '../data/types';
 import type { ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import ToolOptions from './ToolOptions';
 import Stage from './Stage';
 
 export default function Workspace(props: {
-  state: MockState;
+  state: EditorState;
   activeCommand: Command;
   activeAsset: Asset;
   onCommand: (id: string, source: string) => void;
@@ -31,7 +31,7 @@ export default function Workspace(props: {
   onColorStudioSlot: (slot: number) => void;
   onColorStudioFill: (color: string, source: string) => void;
   onColorStudioReset: () => void;
-  onColorStudioView: (view: MockState['colorStudioView']) => void;
+  onColorStudioView: (view: EditorState['colorStudioView']) => void;
   onColorSpineCurrent: (color: OklchColor) => void;
   onColorSpineAddToTray: () => void;
   onColorSpineTrayPick: (color: OklchColor) => void;

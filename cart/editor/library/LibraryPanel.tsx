@@ -1,6 +1,6 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
-import type { Asset, ContentFolderId, LibraryTab, MockState, ModelPackage, WorldObject } from '../data/types';
+import type { Asset, ContentFolderId, LibraryTab, EditorState, ModelPackage, WorldObject } from '../data/types';
 import { assetPageSizeFor, CATALOG_DIAGNOSTICS, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from '../data/catalog';
 import {
   CONTENT_TREE,
@@ -18,7 +18,7 @@ import MaterialControls from './MaterialControls';
 import ContextToolControls from './ContextToolControls';
 
 export default function LibraryPanel(props: {
-  state: MockState;
+  state: EditorState;
   catalogAssets: Asset[];
   assets: Asset[];
   mode: LibraryTab;

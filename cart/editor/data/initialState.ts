@@ -2,14 +2,14 @@
 import { CATALOG_DIAGNOSTICS, DEFAULT_ASSET_ID, DEFAULT_CONTENT_FOLDER, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from './catalog';
 import { WORLD_DOCUMENT, WORLD_DOCUMENT_ID } from './documents';
 import { INITIAL_EXPLORER_DIRECTORY_HISTORY, INITIAL_EXPLORER_HISTORY } from './fileExplorer';
-import type { MockState, WorldObject } from './types';
+import type { EditorState, WorldObject } from './types';
 import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
 
 export const INITIAL_OBJECTS: WorldObject[] = [
   { id: 'obj-tile', kind: 'TILE', name: 'Selected material', assetId: DEFAULT_ASSET_ID, left: 248, top: 116, width: 78, height: 70, metrics: [] },
 ];
 
-export function initialState(): MockState {
+export function initialState(): EditorState {
   return {
     openMenu: null,
     presetMenuOpen: false,
@@ -66,5 +66,8 @@ export function initialState(): MockState {
     seq: 1,
     objects: INITIAL_OBJECTS,
     assetOverrides: {},
+    modelOverrides: {},
+    modelDupes: [],
+    modelRenamingId: null,
   };
 }

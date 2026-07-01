@@ -1,13 +1,13 @@
 import { C } from '../workspace.cls';
-import type { MockState } from '../data/types';
+import type { EditorState } from '../data/types';
 
-const VIEW_OPTIONS: Array<{ id: MockState['colorStudioView']; label: string }> = [
+const VIEW_OPTIONS: Array<{ id: EditorState['colorStudioView']; label: string }> = [
   { id: 'materialPalette', label: 'Material Palette' },
   { id: 'workbench', label: 'Workbench' },
   { id: 'orbit', label: 'No-Modes' },
 ];
 
-export default function ColorStudioViewTabs(props: { view: MockState['colorStudioView']; onSelect: (view: MockState['colorStudioView']) => void }) {
+export default function ColorStudioViewTabs(props: { view: EditorState['colorStudioView']; onSelect: (view: EditorState['colorStudioView']) => void }) {
   return (
     <C.HW_SpineViewTrack>
       {VIEW_OPTIONS.map((option) => {

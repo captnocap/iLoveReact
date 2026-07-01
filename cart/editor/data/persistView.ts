@@ -11,14 +11,14 @@
 // in-process) — which is the wanted behaviour: a fresh launch starts clean.
 import { getHotState, setHotState } from '../../../runtime/hooks/useHotState';
 import { initialState } from './initialState';
-import type { MockState } from './types';
+import type { EditorState } from './types';
 
 const VIEW_HOT_KEY = 'editor:view:v1';
 
 // Transient surfaces that should NOT spring back open after a reload — even if
 // a menu/dialog/popover was open when the reload fired, the rehydrated view
 // starts with them closed.
-const RESET_ON_RELOAD: Partial<MockState> = {
+const RESET_ON_RELOAD: Partial<EditorState> = {
   openMenu: null,
   presetMenuOpen: false,
   contextOpen: false,
@@ -35,14 +35,14 @@ const RESET_ON_RELOAD: Partial<MockState> = {
 /** Boot state: the persisted view merged over fresh defaults (so fields added
  *  since the last save get their defaults), with transient overlays forced
  *  closed. Falls back to a clean initialState() on a cold start. */
-export function loadPersistedState(): MockState {
+export function loadPersistedState(): EditorState {
   const base = initialState();
-  const saved = getHotState<Partial<MockState> | null>(VIEW_HOT_KEY, null);
+  const saved = getHotState<Partial<EditorState> | null>(VIEW_HOT_KEY, null);
   if (!saved) return base;
   return { ...base, ...saved, ...RESET_ON_RELOAD, status: 'restored your last view' };
 }
 
 /** Mirror the current state into the hot atom so the next reload can rehydrate. */
-export function persistState(state: MockState): void {
+export function persistState(state: EditorState): void {
   setHotState(VIEW_HOT_KEY, state);
 }

@@ -13,21 +13,21 @@ import {
   rgbToVec3,
   slotAssistColors,
 } from '../data/colorStudio';
-import type { Asset, ColorStudioMaterialKey, MockState } from '../data/types';
+import type { Asset, ColorStudioMaterialKey, EditorState } from '../data/types';
 import type { ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import ColorStudioViewTabs from './ColorStudioViewTabs';
 import ColorStudioWorkbench from './ColorStudioWorkbench';
 import ColorStudioOrbit from './ColorStudioOrbit';
 
-const VIEW_LABELS: Record<MockState['colorStudioView'], string> = {
+const VIEW_LABELS: Record<EditorState['colorStudioView'], string> = {
   materialPalette: 'Material Palette',
   workbench: 'Workbench',
   orbit: 'No-Modes',
 };
 
 export default function MaterialFocusSurface(props: {
-  state: MockState;
+  state: EditorState;
   activeAsset: Asset;
   onExit: () => void;
   onAction: (label: string) => void;
@@ -38,7 +38,7 @@ export default function MaterialFocusSurface(props: {
   onSlot: (slot: number) => void;
   onFill: (color: string, source: string) => void;
   onReset: () => void;
-  onView: (view: MockState['colorStudioView']) => void;
+  onView: (view: EditorState['colorStudioView']) => void;
   onSpineCurrent: (color: OklchColor) => void;
   onSpineAddToTray: () => void;
   onSpineTrayPick: (color: OklchColor) => void;

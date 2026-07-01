@@ -1,9 +1,9 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { editTelemetry, formatMs } from '../data/telemetry';
-import type { MockState } from '../data/types';
+import type { EditorState } from '../data/types';
 
-export default function EventBusPopover({ state, onClose }: { state: MockState; onClose: () => void }) {
+export default function EventBusPopover({ state, onClose }: { state: EditorState; onClose: () => void }) {
   const telemetry = editTelemetry(state.history);
   const latest = telemetry.samples[0];
   const undoable = state.history.filter((event) => event.undoable).length;

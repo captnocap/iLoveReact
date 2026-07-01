@@ -1,8 +1,8 @@
 import { C } from '../workspace.cls';
 import { assetById } from '../data/catalog';
-import type { MockState } from '../data/types';
+import type { EditorState } from '../data/types';
 
-export default function IsoMap({ state, onObject }: { state: MockState; onObject: (id: string) => void }) {
+export default function IsoMap({ state, onObject }: { state: EditorState; onObject: (id: string) => void }) {
   const tiles = Array.from({ length: 42 }, (_, i) => ({
     left: 130 + (i % 7) * 45,
     top: 78 + Math.floor(i / 7) * 28,

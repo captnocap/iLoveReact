@@ -1,9 +1,9 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { assetById } from '../data/catalog';
-import type { MockState } from '../data/types';
+import type { EditorState } from '../data/types';
 
-export default function MiniMap({ state, onObject }: { state: MockState; onObject: (id: string) => void }) {
+export default function MiniMap({ state, onObject }: { state: EditorState; onObject: (id: string) => void }) {
   const grid = Array.from({ length: 12 }, (_, i) => i);
   return (
     <C.HW_FloatingCard style={{ right: 16, bottom: 18, width: 280, height: 190 }}>

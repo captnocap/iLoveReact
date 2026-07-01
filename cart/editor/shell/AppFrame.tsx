@@ -20,7 +20,7 @@ import FileExplorerDialog from '../dialogs/FileExplorerDialog';
 import ModelContextMenu from '../stage/ModelContextMenu';
 import RenderProbe from '../../../runtime/render_tracker';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
-import type { MockState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
+import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { commandById, isMeshToolCommand } from '../data/commands';
@@ -34,7 +34,7 @@ import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFil
 import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 
 export default function AppFrame() {
-  const [state, setState] = useState<MockState>(loadPersistedState);
+  const [state, setState] = useState<EditorState>(loadPersistedState);
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
 
   // The embedded model viewer hands its host-native tool handlers up here; the
@@ -82,7 +82,7 @@ export default function AppFrame() {
   // editMs is the REAL measured apply time of this edit (Date.now around the
   // reducer). emptyMs/richMs mirror it — we don't yet measure the empty-vs-rich
   // distinction, so that delta is an honest 0 (never a fabricated number).
-  const pushHistory = (prev: MockState, command: Command, target: string, meta: string, editMs: number): Pick<MockState, 'history' | 'redo' | 'seq'> => ({
+  const pushHistory = (prev: EditorState, command: Command, target: string, meta: string, editMs: number): Pick<EditorState, 'history' | 'redo' | 'seq'> => ({
     history: [
       { id: `h-${prev.seq}`, verb: command.name.split(' ')[0]!.toLowerCase(), target, meta, undoable: command.undoable, editMs, emptyMs: editMs, richMs: editMs },
       ...prev.history,
@@ -148,7 +148,7 @@ export default function AppFrame() {
       const t0 = Date.now();
       const object = selectedObject(prev);
       const asset = assetById(prev.activeAssetId, prev.assetOverrides);
-      let next: MockState = {
+      let next: EditorState = {
         ...prev,
         openMenu: source === 'stage' ? prev.openMenu : null,
         actionMenu: command.menu,
@@ -504,7 +504,7 @@ export default function AppFrame() {
     });
   };
 
-  const setColorStudioView = (view: MockState['colorStudioView']) => {
+  const setColorStudioView = (view: EditorState['colorStudioView']) => {
     setState((prev) => ({ ...prev, colorStudioView: view, status: `Color Studio view: ${view}` }));
   };
 

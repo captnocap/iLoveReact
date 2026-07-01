@@ -1,7 +1,7 @@
 // editor/data/colorStudio.ts — shader-slot color studio data + color math.
 //
 // Cloned from the hmsc-workspace-mock god-file. Pure data + pure helpers.
-import type { ColorStudioMaterialKey, MockState, PaletteSet, Rgb, ShaderMaterial } from './types';
+import type { ColorStudioMaterialKey, EditorState, PaletteSet, Rgb, ShaderMaterial } from './types';
 
 export const QUALITY_LABELS = ['PSX', 'PS2', 'Prev', 'Std', 'Max'];
 
@@ -97,7 +97,7 @@ export function complementRgb(rgb: Rgb): Rgb {
   return mixRgb([1 - rgb[0], 1 - rgb[1], 1 - rgb[2]], [0.14, 0.34, 0.48], 0.42);
 }
 
-export function colorStudioMaterial(state: MockState): ShaderMaterial {
+export function colorStudioMaterial(state: EditorState): ShaderMaterial {
   return SHADER_MATERIALS[state.colorStudioMaterial] ?? SHADER_MATERIALS.rot;
 }
 
@@ -109,7 +109,7 @@ export function bakedSlotRgb(material: ShaderMaterial, variant: number, slot: nu
   return material.variants[variant]?.[slot] ?? material.variants[0]?.[slot] ?? [0, 0, 0];
 }
 
-export function resolvedSlotColor(state: MockState, material: ShaderMaterial, slot: number): string {
+export function resolvedSlotColor(state: EditorState, material: ShaderMaterial, slot: number): string {
   const key = colorStudioOverrideKey(material.key, state.colorStudioVariant, slot);
   return state.colorStudioOverrides[key] ?? rgbToCss(bakedSlotRgb(material, state.colorStudioVariant, slot));
 }
@@ -137,7 +137,7 @@ export function materialPreviewCells(material: ShaderMaterial, colors: string[],
   });
 }
 
-export function slotAssistColors(material: ShaderMaterial, state: MockState): Array<{ label: string; color: string }> {
+export function slotAssistColors(material: ShaderMaterial, state: EditorState): Array<{ label: string; color: string }> {
   const base = bakedSlotRgb(material, state.colorStudioVariant, Math.min(material.heroSlot, material.slots.length - 1));
   const gray = ((base[0] + base[1] + base[2]) / 3) as number;
   const warm: Rgb = [clamp01(base[0] + 0.18), clamp01(base[1] + 0.07), clamp01(base[2] * 0.78)];
