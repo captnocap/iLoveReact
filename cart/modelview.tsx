@@ -26,6 +26,15 @@ import {
   loadLedger, putEntry, recordImport, exportCredits, pendingCount,
   AttributionPanel, AttributionStatusBadge, type Attribution, type Ledger,
 } from '@reactjit/runtime/attribution';
+// The ONE brush system (runtime/paint) — the same kit Color Studio, MaterialFocus,
+// brush_studio and the Studio pixel-painter use. The model viewer adopts it too: BrushKit
+// is the shared UI/state (tools, dials, colour wheel, palette); the actual per-face-safe 3D
+// stamping is a Zig host capability (model_paint.zig via the __model_paint_* doors), so this
+// is the brush MODEL driving a host backend, not a second brush implementation.
+import {
+  BrushKit, DEFAULT_BRUSH, defaultPalette, hexToRgb01, inkColorHex, DARK_THEME,
+  type Brush, type BrushTool, type Palette,
+} from '@reactjit/runtime/paint';
 
 const host = globalThis as any;
 
@@ -774,9 +783,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
         </Col>
       ) : null}
 
-      {/* Quality strip — live decimation. Drag to trade detail for triangles; the host
-          re-meshes from the retained full-res source. Lower end is "just the shape" for
-          the game (and the basis for baked LoD by render distance).
+      {/* Quality strip — commit-only decimation. Drag to trade detail for triangles; the
+          host owns the thumb mid-drag and re-meshes from the retained full-res source ONCE
+          on release (decimating every onChange frame melted the app). Lower end is "just the
+          shape" for the game (and the basis for baked LoD by render distance).
           Suppressed under hostChrome: the editor tucks Quality into its context menu. */}
       {!hostChrome && model && (
         <Row
@@ -792,7 +802,6 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
               value={quality}
               min={0}
               max={1}
-              onChange={(v: number) => applyQuality(v)}
               onCommit={(v: number) => applyQuality(v)}
               style={{ height: 24 }}
             />

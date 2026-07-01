@@ -45,7 +45,9 @@ export default function ModelContextMenu({ modelTool, onCommand, onQuality, onCl
           <C.HW_Spacer />
           <C.HW_KeyText>{modelTool.tris.toLocaleString()} tris</C.HW_KeyText>
         </C.HW_StageMenuQualityHead>
-        <Slider value={modelTool.quality} min={0} max={1} onChange={(v: number) => onQuality(v)} onCommit={(v: number) => onQuality(v)} style={{ height: 22 }} />
+        {/* Commit-only: the host owns the thumb mid-drag; decimation runs ONCE on
+            release. Re-decimating on every onChange frame melted the app. */}
+        <Slider value={modelTool.quality} min={0} max={1} onCommit={(v: number) => onQuality(v)} style={{ height: 22 }} />
       </C.HW_StageMenuQuality>
     </C.HW_StageContextMenu>
   );
