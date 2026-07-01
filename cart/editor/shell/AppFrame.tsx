@@ -5,6 +5,7 @@
 // commands / tunables) incrementally; this is the faithful layout first.
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { C } from '../workspace.cls';
+import { Box } from '../../../runtime/primitives';
 import Chrome from './Chrome';
 import DropdownMenu from './DropdownMenu';
 import LeftRail from './LeftRail';
@@ -888,36 +889,6 @@ export default function AppFrame() {
         </C.HW_PlayBody>
       ) : (
       <>
-      {state.modelTool.paint ? (
-        <RenderProbe id="Paint Toolbar">
-          <PaintToolbar
-            brush={state.modelTool.brush}
-            brushTool={state.modelTool.brushTool}
-            detail={state.modelTool.detail}
-            onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
-            onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
-            onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
-            popover={paintPopover}
-            onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
-            current={state.colorSpineCurrent}
-            palette={state.colorSpinePalette}
-            lens={state.colorSpineLens}
-            libraryFilter={state.colorSpineLibraryFilter}
-            rampSteps={state.colorSpineRampSteps}
-            scenePick={state.colorSpineScenePick}
-            spine={{
-              onSetCurrent: setColorSpineCurrent,
-              onAddToTray: addColorSpineToTray,
-              onPickTray: pickColorSpineTray,
-              onSetLens: setColorSpineLens,
-              onSetLibraryFilter: setColorSpineLibraryFilter,
-              onSetRampSteps: setColorSpineRampSteps,
-              onScenePick: pickColorSpineScene,
-              onLoadLibrarySet: loadColorSpineLibrarySet,
-            }}
-          />
-        </RenderProbe>
-      ) : null}
       <C.HW_Body>
         <RenderProbe id="Left Rail">
           <LeftRail state={state} onDomain={(activeDomain) => setState((prev) => ({ ...prev, activeDomain, status: `workspace context: ${activeDomain}` }))} />
@@ -1088,6 +1059,41 @@ export default function AppFrame() {
       {state.openMenu ? (
         <RenderProbe id="Menu Dropdown">
           <DropdownMenu state={state} onCommand={runCommand} onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)} />
+        </RenderProbe>
+      ) : null}
+      {!playing && state.modelTool.paint ? (
+        <RenderProbe id="Paint Toolbar">
+          {/* Floats INSIDE the viewport (below the model title strip), not an in-flow strip that
+              shifts the whole UI. Anchored just past the fixed rail(48)+content panel(350). Rendered
+              LATE so it paints over the 3D view (this layout paints in tree order). */}
+          <Box style={{ position: 'absolute', left: 410, top: 78 }}>
+            <PaintToolbar
+              brush={state.modelTool.brush}
+              brushTool={state.modelTool.brushTool}
+              detail={state.modelTool.detail}
+              onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
+              onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
+              onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
+              popover={paintPopover}
+              onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
+              current={state.colorSpineCurrent}
+              palette={state.colorSpinePalette}
+              lens={state.colorSpineLens}
+              libraryFilter={state.colorSpineLibraryFilter}
+              rampSteps={state.colorSpineRampSteps}
+              scenePick={state.colorSpineScenePick}
+              spine={{
+                onSetCurrent: setColorSpineCurrent,
+                onAddToTray: addColorSpineToTray,
+                onPickTray: pickColorSpineTray,
+                onSetLens: setColorSpineLens,
+                onSetLibraryFilter: setColorSpineLibraryFilter,
+                onSetRampSteps: setColorSpineRampSteps,
+                onScenePick: pickColorSpineScene,
+                onLoadLibrarySet: loadColorSpineLibrarySet,
+              }}
+            />
+          </Box>
         </RenderProbe>
       ) : null}
       {!playing && state.modelTool.paint && paintPopover ? (

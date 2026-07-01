@@ -74,7 +74,7 @@ export default function PaintToolbar(props: Ink & {
   const shaderInk = brush.ink.kind === 'shader' ? brush.ink : null;
 
   return (
-    <Row style={{ height: 40, alignItems: 'center', gap: 10, paddingLeft: 12, paddingRight: 12, backgroundColor: BAR, borderBottomWidth: 1, borderColor: LINE }}>
+    <Row style={{ height: 40, alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 10, backgroundColor: 'rgba(19,21,25,0.94)', borderWidth: 1, borderColor: LINE, borderRadius: 10 }}>
       <Pressable tooltip="Paint resolution — click to cycle" onPress={props.onCycleDetail} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 8, paddingRight: 8, height: 26, borderRadius: 6, borderWidth: 1, borderColor: LINE }}>
         <Icon name="Grid3x3" size={12} color={DIM} />
         <Text style={{ color: TEXT, fontSize: 11, fontFamily: 'ui-monospace' }}>{props.detail <= 1 ? 'fill' : `${props.detail}px`}</Text>
@@ -143,8 +143,8 @@ export function PaintPopovers(props: Ink & { popover: PaintPopover; onClose: () 
   };
 
   return (
-    // Full-screen scrim under the menu bar: click-away closes; the panel sits below the bar.
-    <Box style={{ position: 'absolute', left: 0, top: 74, right: 0, bottom: 0 }}>
+    // Click-away scrim starting just below the floating bar; the panel drops from the bar.
+    <Box style={{ position: 'absolute', left: 0, top: 122, right: 0, bottom: 0 }}>
       <Pressable onPress={props.onClose} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }} />
       {props.popover === 'ink' ? <InkPanel {...props} pickShader={pickShader} shaderInk={shaderInk} /> : null}
       {props.popover === 'brush' ? <BrushPanel brush={brush} patch={patch} onBrush={props.onBrush} /> : null}
@@ -157,7 +157,7 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; shaderInk:
   // browse shaders even while a color is active (and back).
   const [tab, setTab] = useState<'color' | 'shader'>(props.shaderInk ? 'shader' : 'color');
   return (
-    <Box style={{ position: 'absolute', left: 12, top: 0, width: 300, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12 }}>
+    <Box style={{ position: 'absolute', left: 410, top: 0, width: 300, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12 }}>
       <Row style={{ gap: 4, marginBottom: 10 }}>
         {(['color', 'shader'] as const).map((t) => {
           const on = tab === t;
@@ -206,7 +206,7 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; shaderInk:
 
 function BrushPanel({ brush, patch, onBrush }: { brush: Brush; patch: (b: Partial<Brush>) => void; onBrush: (b: Brush) => void }) {
   return (
-    <Box style={{ position: 'absolute', right: 12, top: 0, width: 260, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12, gap: 10 }}>
+    <Box style={{ position: 'absolute', left: 410, top: 0, width: 260, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12, gap: 10 }}>
       <Text style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>SHAPE</Text>
       <Row style={{ flexWrap: 'wrap', gap: 6 }}>
         {BRUSH_PRESETS.map((preset) => {
