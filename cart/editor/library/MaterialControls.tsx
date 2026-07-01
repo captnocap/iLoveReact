@@ -18,7 +18,6 @@ export default function MaterialControls({
 }) {
   const variants = (asset.variants?.length ? asset.variants : ['source']).slice(0, 3);
   const seed = asset.seed ?? 0;
-  const usageCount = 0;
   return (
     <C.HW_ToolPanel>
       <C.HW_GroupTitle>
@@ -31,15 +30,9 @@ export default function MaterialControls({
           <Icon name="Star" size={13} color={accentFor(asset.favorite ? 'warning' : 'textFaint')} />
         </C.HW_IconMiniButton>
       </C.HW_RenameRow>
+      {/* Usage/maps counts removed: nothing tracks material usage yet, so those
+          were fabricated zeros. Restore real cells when a usage signal exists. */}
       <C.HW_StatGrid>
-        <C.HW_StatCell>
-          <C.HW_StatValue>{usageCount}</C.HW_StatValue>
-          <C.HW_StatLabel>uses</C.HW_StatLabel>
-        </C.HW_StatCell>
-        <C.HW_StatCell>
-          <C.HW_StatValue>{usageCount}</C.HW_StatValue>
-          <C.HW_StatLabel>maps</C.HW_StatLabel>
-        </C.HW_StatCell>
         <C.HW_StatCell>
           <C.HW_StatValue>{variants.length}</C.HW_StatValue>
           <C.HW_StatLabel>variants</C.HW_StatLabel>
@@ -66,11 +59,6 @@ export default function MaterialControls({
         <C.HW_ToolLabel>seed</C.HW_ToolLabel>
         <C.HW_MiniBar><C.HW_MiniFill style={{ width: `${Math.min(100, Math.max(0, seed % 100))}%` }} /></C.HW_MiniBar>
         <C.HW_ToolValue>{seed}</C.HW_ToolValue>
-      </C.HW_ToolRow>
-      <C.HW_ToolRow>
-        <C.HW_ToolLabel>detail</C.HW_ToolLabel>
-        <C.HW_MiniBar><C.HW_MiniFill style={{ width: '0%' }} /></C.HW_MiniBar>
-        <C.HW_ToolValue>—</C.HW_ToolValue>
       </C.HW_ToolRow>
       <C.HW_ToolRow>
         <C.HW_ToolLabel>bank</C.HW_ToolLabel>
