@@ -16,17 +16,27 @@
 // buildId / capture id), never by display name. Renaming a thread changes only
 // its semanticName — every link keeps pointing at the same stableId.
 
-/** One delivered request resolution, presented as a build version in the journal stream.
+/** One request, presented as a build version in the journal stream. EVERY request
+ *  becomes a note the instant it lands — resolved or not — so an open bug is
+ *  threadable immediately and never waits on someone writing a trophy paragraph.
  *  Derived from a request-ledger entry; `buildId` is `deriveBuildNumber(requestId)`. */
 export interface BuildNote {
   /** Source request id, e.g. 'req_2163'. The ledger key this note was ingested from. */
   requestId: string;
   /** Derived build-number stream value, e.g. '1.0.0.2163'. */
   buildId: string;
-  /** Who handled it (the agent/actor that resolved the request). */
+  /** Who handled it (the agent/actor that touched the request), or its origin. */
   agent: string;
-  /** Compact human summary of how it was delivered (the request resolution). */
+  /** The request text — what the user actually asked, in their words. The honest half. */
+  ask: string;
+  /** The agent's CLAIM of what it did (the resolution paragraph). Empty until written.
+   *  Presented as a claim, never as fact — the evidence is `commits` + recurrence. */
   summary: string;
+  /** Lifecycle status metadata (new/doing/review/done). A faint tag, never a gate. */
+  status: string;
+  /** Commit shas attached to the request — the hard evidence an attempt shipped
+   *  anything. Zero commits behind a flowery claim reads as exactly that. */
+  commits: string[];
   /** Free trace tags carried for filtering the journal. */
   traceTags: string[];
   /** Stable ids of bug threads this note is linked to. */
@@ -59,6 +69,14 @@ export interface BugThread {
   linkedRequests: string[];
   /** Build-number stream values linked to this thread. */
   linkedBuilds: string[];
+  /** Per-attempt rating, requestId → 1..10. How good was that stab at the bug?
+   *  This is what turns a pile of attempts into a RANKED haystack: the needle
+   *  (the fix that worked) rates high and floats up, the drunk ones sink. */
+  ratings: Record<string, number>;
+  /** The one crowned attempt — the gospel. The requestId whose fix is THE answer,
+   *  pinned above the noise so a recurrence reads the needle instead of re-deriving.
+   *  Empty when the thread hasn't found its guiding light yet. */
+  gospel: string;
 }
 
 /** A recorded diagnostics/console slice. Created in-app (no terminal), it

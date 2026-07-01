@@ -15,7 +15,7 @@ import {
 } from '../../../runtime/buildjournal';
 import { listDir, readFile } from '../../../runtime/hooks/fs';
 import { CAPTURE_SHELF, loadThreadState, saveThreadState } from './journalStore';
-import type { BuildJournalSnapshot, BuildNote, BuildThread, JournalCapture } from './types';
+import type { BuildJournalSnapshot, BuildNote, BuildThread, JournalCapture, ThreadAttempt } from './types';
 
 const REQUEST_LEDGER_DIR = 'docs/game/_requests';
 const RECENT_NOTE_LIMIT = 48;
@@ -47,6 +47,9 @@ export interface JournalActions {
   setDescription(threadId: string, description: string): void;
   attachCapture(threadId: string, captureId: string): void;
   detachCapture(threadId: string, captureId: string): void;
+  rateAttempt(threadId: string, requestId: string, rating: number): void;
+  crownGospel(threadId: string, requestId: string): void;
+  uncrownGospel(threadId: string): void;
   captureShelf: JournalCapture[];
 }
 
@@ -57,16 +60,32 @@ function loadLedgerContext(): LedgerContext {
 
   const journal = new BuildJournal();
   const entriesById = new Map<string, LedgerEntry>();
-  const entries = collectDeliveredEntries(filenames);
+  const entries = collectRecentEntries(filenames);
   for (const entry of entries) {
     entriesById.set(entry.id, entry);
     journal.ingestRequest(entry);
   }
 
+  // Institutional memory: a thread must carry full context for EVERY recurrence
+  // it links, even ones older than the recent window. Read + ingest any linked
+  // request that the recent sweep missed, so an old attempt still shows its ask,
+  // claim, and commits instead of a bare id. This is the whole point of a thread.
+  const threadState = loadThreadState();
+  for (const thread of threadState.threads) {
+    for (const requestId of thread.linkedRequests) {
+      if (entriesById.has(requestId)) continue;
+      const entry = readLedgerEntry(`${requestId}.json`);
+      if (entry) {
+        entriesById.set(entry.id, entry);
+        journal.ingestRequest(entry);
+      }
+    }
+  }
+
   // Captures must be registered before hydrating threads so capture→note
   // mirroring can resolve; then persisted thread links re-wire the back-refs.
   for (const capture of CAPTURE_SHELF) journal.registerCapture(capture);
-  journal.importThreadState(loadThreadState());
+  journal.importThreadState(threadState);
 
   return {
     journal,
@@ -143,6 +162,18 @@ export function useBuildJournal(): { snapshot: BuildJournalSnapshot; actions: Jo
       ctxRef.current!.journal.detachFromThread(threadId, { captureId });
       commit();
     },
+    rateAttempt(threadId, requestId, rating) {
+      ctxRef.current!.journal.rateAttempt(threadId, requestId, rating);
+      commit();
+    },
+    crownGospel(threadId, requestId) {
+      ctxRef.current!.journal.crownGospel(threadId, requestId);
+      commit();
+    },
+    uncrownGospel(threadId) {
+      ctxRef.current!.journal.uncrownGospel(threadId);
+      commit();
+    },
     captureShelf: CAPTURE_SHELF.map(toDisplayCapture),
   };
 
@@ -164,11 +195,11 @@ function readLedgerEntry(filename: string): LedgerEntry | null {
   }
 }
 
-function collectDeliveredEntries(filenames: string[]): LedgerEntry[] {
+function collectRecentEntries(filenames: string[]): LedgerEntry[] {
   const entries: LedgerEntry[] = [];
   for (const filename of filenames) {
     const entry = readLedgerEntry(filename);
-    if (entry && entry.resolution?.trim()) entries.push(entry);
+    if (entry) entries.push(entry); // EVERY prompt is a note, resolved or not
     if (entries.length >= RECENT_NOTE_LIMIT) break;
   }
   return entries;
@@ -182,13 +213,41 @@ function toEditorNote(entry: LedgerEntry, note: JournalNote): BuildNote {
     status: statusFor(entry),
     agent: note.agent,
     ask: compact(firstUsefulLine(entry.text) || entry.id, 110),
-    handled: note.summary,
+    claim: note.summary,
+    commits: [...note.commits],
     trace: traceFor(entry, note),
     threadIds: [...note.threadIds],
   };
 }
 
+/** A thread's linked requests, resolved to ranked attempts and sorted so the
+ *  needle floats up: the gospel first, then by rating desc, then newest request.
+ *  This is what makes a recurrence readable at a glance — the fix that worked
+ *  sits on top of the dozen that didn't. */
+function rankedAttempts(thread: BugThread, journal: BuildJournal): ThreadAttempt[] {
+  const attempts = thread.linkedRequests.map((requestId): ThreadAttempt => {
+    const note = journal.noteByRequest(requestId);
+    return {
+      request: requestId,
+      build: note?.buildId ?? '',
+      ask: note ? compact(firstUsefulLine(note.ask) || requestId, 120) : requestId,
+      claim: note?.summary ?? '',
+      agent: note?.agent ?? 'unknown',
+      status: note?.status ?? 'new',
+      commits: note ? [...note.commits] : [],
+      rating: thread.ratings[requestId] ?? 0,
+      gospel: thread.gospel === requestId,
+    };
+  });
+  return attempts.sort((a, b) => {
+    if (a.gospel !== b.gospel) return a.gospel ? -1 : 1;
+    if (b.rating !== a.rating) return b.rating - a.rating;
+    return requestNumber(b.request) - requestNumber(a.request);
+  });
+}
+
 function toEditorThread(thread: BugThread, journal: BuildJournal): BuildThread {
+  const attempts = rankedAttempts(thread, journal);
   return {
     id: thread.stableId,
     title: thread.semanticName,
@@ -196,9 +255,11 @@ function toEditorThread(thread: BugThread, journal: BuildJournal): BuildThread {
     status: thread.tags[0] ?? 'linked',
     aliases: [...thread.aliases],
     tags: [...thread.tags],
-    deliveries: [...thread.linkedRequests],
+    attempts,
     captures: journal.capturesForThread(thread.stableId).map(toDisplayCapture),
     history: [...thread.linkedBuilds],
+    commitsBurned: attempts.reduce((sum, a) => sum + a.commits.length, 0),
+    hasGospel: thread.gospel !== '',
   };
 }
 

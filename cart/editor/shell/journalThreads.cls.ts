@@ -33,4 +33,34 @@ classifier({
   HW_JCaptureMain: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 1 } },
   HW_JCaptureAttach: { type: 'Box', style: { flexDirection: 'column', gap: 5, padding: 6, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
   HW_JCaptureBtn: { type: 'Pressable', style: { height: 22, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
+
+  // ── ranked attempts: the pile turned into a scored haystack ─────────────────
+  // A thread header tally — the anti-bullshit meter (attempts · commits · gospel).
+  HW_JTally: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, paddingTop: 2, paddingBottom: 2 } },
+  HW_JTallyText: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 700, letterSpacing: 0.4 } },
+  // One attempt row. The gospel variant glows gold so the needle is unmissable.
+  HW_JAttempt: { type: 'Box', style: { flexDirection: 'column', gap: 5, padding: 8, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
+  HW_JAttemptGospel: { type: 'Box', style: { flexDirection: 'column', gap: 5, padding: 8, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 2, borderColor: 'theme:warning' } },
+  HW_JAttemptHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 7 } },
+  HW_JAttemptMain: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 2 } },
+  HW_JAskText: { type: 'Text', fontSize: 10, color: 'theme:text', style: { fontFamily: MONO, fontWeight: 700, lineHeight: 14 } },
+  HW_JClaimText: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO, lineHeight: 13 } },
+  HW_JClaimLabel: { type: 'Text', fontSize: 8, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 0.6 } },
+  HW_JAttemptMeta: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 } },
+  HW_JMetaText: { type: 'Text', fontSize: 8, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 700, letterSpacing: 0.3 } },
+  // Crown toggle — press to anoint (or dethrone) the gospel.
+  HW_JCrown: { type: 'Pressable', style: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:warning' } },
+  HW_JCrownOn: { type: 'Pressable', style: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'theme:warning', borderWidth: 'theme:borderThin', borderColor: 'theme:warning' } },
+  // Commit-evidence chip. The "none" variant calls out zero-commit hot air.
+  HW_JCommitChip: { type: 'Box', style: { height: 16, flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 5, paddingRight: 6, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:success' } },
+  HW_JCommitNone: { type: 'Box', style: { height: 16, flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 5, paddingRight: 6, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:error' } },
+  HW_JCommitText: { type: 'Text', fontSize: 8, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 800 } },
+  // Rating strip — ten pips, click to score 1..10. Filled pips carry the band color.
+  HW_JRate: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 3 } },
+  HW_JRateLabel: { type: 'Text', fontSize: 8, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 0.5 } },
+  HW_JPip: { type: 'Pressable', style: { width: 12, height: 12, borderRadius: 3, backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_JScore: { type: 'Box', style: { minWidth: 30, height: 16, alignItems: 'center', justifyContent: 'center', paddingLeft: 5, paddingRight: 5, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:bgElevated' } },
+  HW_JScoreText: { type: 'Text', fontSize: 9, style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_JStatusTag: { type: 'Box', style: { height: 15, justifyContent: 'center', paddingLeft: 5, paddingRight: 5, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:bgElevated', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
+  HW_JStatusText: { type: 'Text', fontSize: 8, color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 0.4 } },
 });

@@ -100,9 +100,28 @@ export type BuildNote = {
   status: string;
   agent: string;
   ask: string;
-  handled: string;
+  // The agent's CLAIM of what it did (resolution). Empty when nobody wrote one.
+  // Rendered as a claim, never as fact — commits + recurrence are the evidence.
+  claim: string;
+  // Commit shas behind the attempt. length === 0 ⇒ "nothing shipped".
+  commits: string[];
   trace: string[];
   threadIds: string[];
+};
+
+// One attempt at a bug, as it appears ranked inside a thread. Carries its own
+// rating (1..10, 0 = unrated) and gospel flag so the thread can sort the pile:
+// gospel first, then rating desc — the needle floats above the drunk stabs.
+export type ThreadAttempt = {
+  request: string;
+  build: string;
+  ask: string;
+  claim: string;
+  agent: string;
+  status: string;
+  commits: string[];
+  rating: number;
+  gospel: boolean;
 };
 
 export type JournalCapture = {
@@ -122,9 +141,15 @@ export type BuildThread = {
   status: string;
   aliases: string[];
   tags: string[];
-  deliveries: string[];
+  // Ranked attempts (gospel first, then rating desc). Replaces the old flat
+  // `deliveries: string[]` — a thread is a ranked haystack, not a list of ids.
+  attempts: ThreadAttempt[];
   captures: JournalCapture[];
   history: string[];
+  // Tally shown in the header — the anti-bullshit meter. Commits burned across
+  // every attempt; whether a gospel has been crowned yet.
+  commitsBurned: number;
+  hasGospel: boolean;
 };
 
 export type BuildJournalSnapshot = {

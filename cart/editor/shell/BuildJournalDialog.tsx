@@ -3,11 +3,21 @@ import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import './journalThreads.cls';
 import type { JournalActions } from '../data/journal';
-import type { BuildJournalSnapshot, BuildNote, BuildThread, JournalCapture } from '../data/types';
+import type { BuildJournalSnapshot, BuildNote, BuildThread, JournalCapture, ThreadAttempt } from '../data/types';
 
 function statusAccent(status: string): string {
   if (status === 'active') return 'primary';
   if (status === 'watch' || status === 'linked') return 'warning';
+  return 'textDim';
+}
+
+// The band a rating lives in — this is the color language of the haystack: green
+// is the needle, red is three sheets to the wind, dim is untouched.
+function ratingAccent(rating: number): string {
+  if (rating >= 8) return 'success';
+  if (rating >= 5) return 'primary';
+  if (rating >= 3) return 'warning';
+  if (rating >= 1) return 'error';
   return 'textDim';
 }
 
@@ -16,7 +26,8 @@ function matchThreads(threads: BuildThread[], query: string): BuildThread[] {
   if (!needle) return threads;
   const tokens = needle.split(/\s+/);
   return threads.filter((thread) => {
-    const haystack = [thread.title, thread.id, ...thread.aliases, ...thread.tags, ...thread.deliveries].join(' ').toLowerCase();
+    const requests = thread.attempts.map((a) => a.request);
+    const haystack = [thread.title, thread.id, ...thread.aliases, ...thread.tags, ...requests].join(' ').toLowerCase();
     return tokens.every((token) => haystack.includes(token));
   });
 }
@@ -31,7 +42,7 @@ export default function BuildJournalDialog({ journal, actions, onClose }: { jour
   const [captureFor, setCaptureFor] = useState<string | null>(null);
 
   const threadById = new Map(journal.threads.map((thread) => [thread.id, thread]));
-  const attached = journal.threads.reduce((count, thread) => count + thread.deliveries.length, 0);
+  const attached = journal.threads.reduce((count, thread) => count + thread.attempts.length, 0);
 
   const openAttach = (request: string) => { setAttachRequest(request); setQuery(''); setCaptureFor(null); };
   const note = attachRequest ? journal.notes.find((item) => item.request === attachRequest) : undefined;
@@ -48,19 +59,19 @@ export default function BuildJournalDialog({ journal, actions, onClose }: { jour
         </C.HW_DialogHead>
         <C.HW_DialogBody>
           <C.HW_JournalIntro>
-            <C.HW_HeadTitle>Send deliveries into ongoing threads</C.HW_HeadTitle>
-            <C.HW_StatusText>{journal.deliveryCount} deliveries from {journal.requestCount} request files at {journal.loadedAt} · {attached} linked across {journal.threads.length} threads. Use "thread it" on a delivery to link it to a remembered bug thread; threads persist across sessions.</C.HW_StatusText>
+            <C.HW_HeadTitle>Every prompt is a note. Name the recurring ones. Rate the fixes.</C.HW_HeadTitle>
+            <C.HW_StatusText>{journal.requestCount} prompts on the ledger, {journal.notes.length} shown at {journal.loadedAt} · {attached} pulled into {journal.threads.length} threads. When a bug crawls back, "thread it" onto its remembered name — then crown the one fix that worked so next time you read the needle, not the haystack.</C.HW_StatusText>
           </C.HW_JournalIntro>
           <C.HW_JournalLayout>
             <C.HW_JournalColumn>
               <C.HW_GroupTitle>
                 <Icon name="ListChecks" size={12} color={accentFor('primary')} />
-                <C.HW_GroupText>RECENT DELIVERIES</C.HW_GroupText>
+                <C.HW_GroupText>EVERY PROMPT</C.HW_GroupText>
               </C.HW_GroupTitle>
               {journal.notes.length === 0 ? (
                 <C.HW_BuildNoteCard>
-                  <C.HW_HistoryTitle>No delivered request resolutions available</C.HW_HistoryTitle>
-                  <C.HW_HistoryMeta>The editor found no request entries with a resolution field in the live ledger path.</C.HW_HistoryMeta>
+                  <C.HW_HistoryTitle>No prompts found</C.HW_HistoryTitle>
+                  <C.HW_HistoryMeta>The editor found no request entries in the live ledger path.</C.HW_HistoryMeta>
                 </C.HW_BuildNoteCard>
               ) : null}
               {journal.notes.map((item) => (
@@ -93,7 +104,7 @@ export default function BuildJournalDialog({ journal, actions, onClose }: { jour
                       <C.HW_AccentBar style={{ backgroundColor: accentFor(statusAccent(thread.status)) }} />
                       <C.HW_JRowMain>
                         <C.HW_HistoryTitle>{thread.title}</C.HW_HistoryTitle>
-                        <C.HW_HistoryMeta>{thread.deliveries.length} deliveries · {thread.captures.length} captures · {thread.tags.join(' ')}</C.HW_HistoryMeta>
+                        <C.HW_HistoryMeta>{thread.attempts.length} attempts · {thread.captures.length} captures{thread.hasGospel ? ' · gospel crowned' : ''} · {thread.tags.join(' ')}</C.HW_HistoryMeta>
                       </C.HW_JRowMain>
                       <C.HW_DockLabel>{thread.status}</C.HW_DockLabel>
                     </C.HW_JRow>
@@ -116,7 +127,7 @@ export default function BuildJournalDialog({ journal, actions, onClose }: { jour
                     </C.HW_BuildNoteHead>
                     <C.HW_ReadRow>
                       <C.HW_AccentBar style={{ backgroundColor: accentFor('warning') }} />
-                      <C.HW_ReadValue>Pick "thread it" on any delivery to start an ongoing bug/build thread.</C.HW_ReadValue>
+                      <C.HW_ReadValue>Pick "thread it" on any prompt to start an ongoing bug/build thread.</C.HW_ReadValue>
                     </C.HW_ReadRow>
                   </C.HW_ThreadCard>
                 ) : null}
@@ -137,6 +148,8 @@ export default function BuildJournalDialog({ journal, actions, onClose }: { jour
                     onDescDraft={setDescDraft}
                     onDescribeCommit={() => { actions.setDescription(thread.id, descDraft); setDescribeId(null); }}
                     onDetach={(request) => actions.detachRequest(thread.id, request)}
+                    onRate={(request, rating) => actions.rateAttempt(thread.id, request, rating)}
+                    onCrown={(request) => (thread.attempts.find((a) => a.request === request)?.gospel ? actions.uncrownGospel(thread.id) : actions.crownGospel(thread.id, request))}
                     onCaptureToggle={() => setCaptureFor(captureFor === thread.id ? null : thread.id)}
                     onCaptureAttach={(captureId) => { actions.attachCapture(thread.id, captureId); setCaptureFor(null); }}
                     onCaptureDetach={(captureId) => actions.detachCapture(thread.id, captureId)}
@@ -162,12 +175,19 @@ function DeliveryCard({ note, threadById, active, onAttachOpen }: { note: BuildN
         <C.HW_DockLabel>{note.request}</C.HW_DockLabel>
         <C.HW_Tag><C.HW_TagText>{note.status}</C.HW_TagText></C.HW_Tag>
       </C.HW_BuildNoteHead>
-      <C.HW_HistoryTitle>{note.title}</C.HW_HistoryTitle>
-      <C.HW_HistoryMeta>delivery by {note.agent}: {note.handled}</C.HW_HistoryMeta>
-      <C.HW_HistoryMeta>request: {note.ask}</C.HW_HistoryMeta>
-      <C.HW_TraceRow>
+      <C.HW_JAskText>{note.ask}</C.HW_JAskText>
+      {note.claim ? (
+        <>
+          <C.HW_JClaimLabel>AGENT'S CLAIM · {note.agent}</C.HW_JClaimLabel>
+          <C.HW_JClaimText>{note.title}</C.HW_JClaimText>
+        </>
+      ) : (
+        <C.HW_JClaimLabel>NO CLAIM WRITTEN</C.HW_JClaimLabel>
+      )}
+      <C.HW_JAttemptMeta>
+        <CommitChip commits={note.commits} />
         {note.trace.map((trace) => <C.HW_TraceChip key={`${note.request}-${trace}`}><C.HW_KeyText>{trace}</C.HW_KeyText></C.HW_TraceChip>)}
-      </C.HW_TraceRow>
+      </C.HW_JAttemptMeta>
       <C.HW_JFoot>
         {threads.length > 0 ? (
           <>
@@ -208,12 +228,13 @@ function ThreadCard(props: {
   onDescDraft: (text: string) => void;
   onDescribeCommit: () => void;
   onDetach: (request: string) => void;
+  onRate: (request: string, rating: number) => void;
+  onCrown: (request: string) => void;
   onCaptureToggle: () => void;
   onCaptureAttach: (captureId: string) => void;
   onCaptureDetach: (captureId: string) => void;
 }) {
   const { thread } = props;
-  const accent = statusAccent(thread.status);
   const attachedIds = new Set(thread.captures.map((capture) => capture.id));
   const available = props.captureShelf.filter((capture) => !attachedIds.has(capture.id));
   return (
@@ -256,20 +277,22 @@ function ThreadCard(props: {
           {thread.tags.map((tag) => <C.HW_TraceChip key={tag}><C.HW_KeyText>{tag}</C.HW_KeyText></C.HW_TraceChip>)}
         </C.HW_TraceRow>
       ) : null}
-      {thread.deliveries.map((request) => (
-        <C.HW_JDelivery key={request}>
-          <Icon name="GitCommitHorizontal" size={11} color={accentFor('primary')} />
-          <C.HW_JDeliveryMain>
-            <C.HW_ReadValue>{request}</C.HW_ReadValue>
-          </C.HW_JDeliveryMain>
-          <C.HW_JMini onPress={() => props.onDetach(request)}><C.HW_JMiniText>detach</C.HW_JMiniText></C.HW_JMini>
-        </C.HW_JDelivery>
-      ))}
-      {thread.history.map((build) => (
-        <C.HW_ReadRow key={build}>
-          <C.HW_AccentBar style={{ backgroundColor: accentFor(accent) }} />
-          <C.HW_ReadValue>build {build}</C.HW_ReadValue>
-        </C.HW_ReadRow>
+      <C.HW_JTally>
+        <Icon name={thread.hasGospel ? 'Crown' : 'Bug'} size={11} color={accentFor(thread.hasGospel ? 'warning' : 'textDim')} />
+        <C.HW_JTallyText>{thread.attempts.length} attempts</C.HW_JTallyText>
+        <C.HW_JTallyText>·</C.HW_JTallyText>
+        <C.HW_JTallyText>{thread.commitsBurned} commits burned</C.HW_JTallyText>
+        <C.HW_JTallyText>·</C.HW_JTallyText>
+        <C.HW_JTallyText>{thread.hasGospel ? 'gospel found' : 'still hunting'}</C.HW_JTallyText>
+      </C.HW_JTally>
+      {thread.attempts.map((attempt) => (
+        <AttemptRow
+          key={attempt.request}
+          attempt={attempt}
+          onRate={(rating) => props.onRate(attempt.request, rating)}
+          onCrown={() => props.onCrown(attempt.request)}
+          onDetach={() => props.onDetach(attempt.request)}
+        />
       ))}
       {thread.captures.map((capture) => (
         <C.HW_JCapture key={capture.id}>
@@ -301,5 +324,82 @@ function ThreadCard(props: {
         </C.HW_JCaptureBtn>
       )}
     </C.HW_ThreadCard>
+  );
+}
+
+// Hard evidence, not prose: how many commits stood behind an attempt. Zero
+// commits behind a confident claim is the tell — it gets the red frame.
+function CommitChip({ commits }: { commits: string[] }) {
+  if (commits.length === 0) {
+    return (
+      <C.HW_JCommitNone>
+        <Icon name="GitCommitHorizontal" size={9} color={accentFor('error')} />
+        <C.HW_JCommitText>0 commits</C.HW_JCommitText>
+      </C.HW_JCommitNone>
+    );
+  }
+  return (
+    <C.HW_JCommitChip>
+      <Icon name="GitCommitHorizontal" size={9} color={accentFor('success')} />
+      <C.HW_JCommitText>{commits.length} commit{commits.length === 1 ? '' : 's'}</C.HW_JCommitText>
+    </C.HW_JCommitChip>
+  );
+}
+
+const RATING_PIPS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+// Ten pips, 1..10. Click a pip to score the attempt; click the current top pip
+// to clear it. Filled pips carry the band color, so the score reads at a glance.
+function RatingStrip({ rating, onRate }: { rating: number; onRate: (rating: number) => void }) {
+  const band = accentFor(ratingAccent(rating));
+  return (
+    <C.HW_JRate>
+      <C.HW_JRateLabel>RATE</C.HW_JRateLabel>
+      {RATING_PIPS.map((pip) => (
+        <C.HW_JPip
+          key={pip}
+          onPress={() => onRate(rating === pip ? 0 : pip)}
+          style={pip <= rating ? { backgroundColor: band, borderColor: band } : {}}
+        />
+      ))}
+      <C.HW_JScore><C.HW_JScoreText style={{ color: band }}>{rating > 0 ? `${rating}/10` : '—'}</C.HW_JScoreText></C.HW_JScore>
+    </C.HW_JRate>
+  );
+}
+
+// One attempt in the ranked pile. Crown it the gospel, rate it, or detach it.
+// The gospel wears a gold frame + crown; everything else is just an attempt
+// waiting to be scored.
+function AttemptRow({ attempt, onRate, onCrown, onDetach }: { attempt: ThreadAttempt; onRate: (rating: number) => void; onCrown: () => void; onDetach: () => void }) {
+  const Card = attempt.gospel ? C.HW_JAttemptGospel : C.HW_JAttempt;
+  const Crown = attempt.gospel ? C.HW_JCrownOn : C.HW_JCrown;
+  const crownColor = accentFor(attempt.gospel ? 'cardBg' : 'textDim');
+  return (
+    <Card>
+      <C.HW_JAttemptHead>
+        <Crown onPress={onCrown}>
+          <Icon name={attempt.gospel ? 'Crown' : 'Heart'} size={12} color={crownColor} />
+        </Crown>
+        <C.HW_JAttemptMain>
+          <C.HW_JAskText>{attempt.ask}</C.HW_JAskText>
+        </C.HW_JAttemptMain>
+        <C.HW_JStatusTag><C.HW_JStatusText>{attempt.status}</C.HW_JStatusText></C.HW_JStatusTag>
+        <CommitChip commits={attempt.commits} />
+      </C.HW_JAttemptHead>
+      {attempt.claim ? (
+        <>
+          <C.HW_JClaimLabel>{attempt.gospel ? 'THE GOSPEL' : 'AGENT’S CLAIM'} · {attempt.request}</C.HW_JClaimLabel>
+          <C.HW_JClaimText>{attempt.claim}</C.HW_JClaimText>
+        </>
+      ) : (
+        <C.HW_JClaimLabel>NO CLAIM WRITTEN · {attempt.request}</C.HW_JClaimLabel>
+      )}
+      <C.HW_JAttemptMeta>
+        <RatingStrip rating={attempt.rating} onRate={onRate} />
+        <C.HW_Spacer />
+        <C.HW_JMetaText>{attempt.build} · {attempt.agent}</C.HW_JMetaText>
+        <C.HW_JMini onPress={onDetach}><C.HW_JMiniText>detach</C.HW_JMiniText></C.HW_JMini>
+      </C.HW_JAttemptMeta>
+    </Card>
   );
 }

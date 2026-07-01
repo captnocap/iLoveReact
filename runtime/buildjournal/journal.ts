@@ -47,6 +47,21 @@ function agentOf(entry: RequestEntry): string {
   return entry.origin || 'unknown';
 }
 
+/** The lifecycle status of a ledger entry: the last state transition's target,
+ *  else an explicit status field, else 'new'. Pure metadata — a faint tag on the
+ *  note, never a gate that hides a prompt from the journal. */
+function statusOf(entry: RequestEntry): string {
+  const states = (entry.events ?? []).filter((e) => e.kind === 'state' && e.to);
+  if (states.length) return states[states.length - 1]!.to!;
+  return entry.status || 'new';
+}
+
+/** Clamp a raw rating into the 1..10 scale (0 = cleared/unrated). */
+function clampRating(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(10, Math.round(n)));
+}
+
 export class BuildJournal {
   private notesByRequest = new Map<string, BuildNote>();
   private threadsById = new Map<string, BugThread>();
@@ -55,19 +70,29 @@ export class BuildJournal {
 
   // ── ingest: request ledger → build notes ───────────────────────────────────
 
-  /** Ingest one resolved request-ledger entry into a BuildNote (idempotent by
-   *  request id; re-ingesting refreshes the delivery fields but preserves
-   *  accumulated links). Unresolved asks are bug/feature reports, not builds. */
+  /** Ingest one request-ledger entry into a BuildNote (idempotent by request id;
+   *  re-ingesting refreshes the derived fields but preserves accumulated links).
+   *  EVERY request becomes a note — resolved or not. An open bug is a note the
+   *  instant it lands, so it is threadable before anyone writes a resolution.
+   *  Returns undefined only when the id carries no request counter to derive a
+   *  build number from. */
   ingestRequest(entry: RequestEntry): BuildNote | undefined {
-    const resolution = entry.resolution?.trim();
-    if (!resolution) return undefined;
+    let buildId: string;
+    try {
+      buildId = deriveBuildNumber(entry.id);
+    } catch {
+      return undefined; // no request counter → not a real ledger entry
+    }
 
     const existing = this.notesByRequest.get(entry.id);
     const note: BuildNote = {
       requestId: entry.id,
-      buildId: deriveBuildNumber(entry.id),
+      buildId,
       agent: agentOf(entry),
-      summary: resolution,
+      ask: entry.text ?? '',
+      summary: entry.resolution?.trim() ?? '',
+      status: statusOf(entry),
+      commits: entry.shas ? [...entry.shas] : [],
       traceTags: existing?.traceTags ?? [],
       threadIds: existing?.threadIds ?? [],
       captureIds: existing?.captureIds ?? [],
@@ -76,7 +101,7 @@ export class BuildJournal {
     return note;
   }
 
-  /** Ingest a batch of ledger entries. Unresolved entries are skipped. */
+  /** Ingest a batch of ledger entries. Entries without a request counter are skipped. */
   ingestRequests(entries: RequestEntry[]): BuildNote[] {
     const notes: BuildNote[] = [];
     for (const entry of entries) {
@@ -145,9 +170,48 @@ export class BuildJournal {
       attachedCaptures: [],
       linkedRequests: [],
       linkedBuilds: [],
+      ratings: {},
+      gospel: '',
     };
     this.threadsById.set(stableId, thread);
     return thread;
+  }
+
+  // ── ratings + gospel: rank the pile so the needle floats up ─────────────────
+
+  /** Rate one attempt in a thread on the 1..10 scale (0 clears it). The rating is
+   *  per-thread: the same request can be a 9 for the bug it fixed and unrated
+   *  elsewhere. This is the force multiplier — rated attempts become a ranked
+   *  knowledge base instead of an undifferentiated scroll. */
+  rateAttempt(stableId: string, requestId: string, rating: number): BugThread {
+    const t = this.threadsById.get(stableId);
+    if (!t) throw new Error(`buildjournal: no thread '${stableId}' to rate`);
+    const score = clampRating(rating);
+    if (score === 0) delete t.ratings[requestId];
+    else t.ratings[requestId] = score;
+    // A cleared rating on the gospel un-crowns it; the gospel must earn its keep.
+    if (score === 0 && t.gospel === requestId) t.gospel = '';
+    return t;
+  }
+
+  /** Crown one attempt as the gospel — THE fix for this bug, pinned above the
+   *  noise. Crowning also floors its rating at 10 so the ranked view agrees with
+   *  the crown. Only one gospel per thread; crowning a new one replaces it. */
+  crownGospel(stableId: string, requestId: string): BugThread {
+    const t = this.threadsById.get(stableId);
+    if (!t) throw new Error(`buildjournal: no thread '${stableId}' to crown`);
+    t.gospel = requestId;
+    t.ratings[requestId] = 10;
+    return t;
+  }
+
+  /** Remove the gospel crown (the thread is back to searching for its answer).
+   *  Leaves the attempt's numeric rating intact. */
+  uncrownGospel(stableId: string): BugThread | undefined {
+    const t = this.threadsById.get(stableId);
+    if (!t) return undefined;
+    t.gospel = '';
+    return t;
   }
 
   /** Rename a thread. The stable id and ALL links are preserved; the old name is
@@ -195,6 +259,8 @@ export class BuildJournal {
         attachedCaptures: [...t.attachedCaptures],
         linkedRequests: [...t.linkedRequests],
         linkedBuilds: [...t.linkedBuilds],
+        ratings: { ...t.ratings },
+        gospel: t.gospel,
       })),
       captures: Array.from(this.capturesById.values()).map((c) => ({ ...c })),
     };
@@ -217,6 +283,8 @@ export class BuildJournal {
         attachedCaptures: [...(raw.attachedCaptures ?? [])],
         linkedRequests: [...(raw.linkedRequests ?? [])],
         linkedBuilds: [...(raw.linkedBuilds ?? [])],
+        ratings: { ...(raw.ratings ?? {}) },
+        gospel: raw.gospel ?? '',
       };
       this.threadsById.set(thread.stableId, thread);
       for (const requestId of thread.linkedRequests) {

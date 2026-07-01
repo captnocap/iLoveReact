@@ -65,32 +65,44 @@ test('a request id with no counter is rejected, not silently zeroed', () => {
 });
 
 // ── ingest: ledger entries → build notes ─────────────────────────────────────
-test('ingest turns a resolved ledger entry into a delivery build note', () => {
+test('ingest turns a resolved ledger entry into a build note with hard evidence', () => {
   const j = new BuildJournal();
   const note = j.ingestRequest(req2163);
   assert(note !== undefined, 'resolved request registers a note');
   const delivered = note!;
   assert(delivered.buildId === '1.0.0.2163', 'buildId derived from request id');
   assert(delivered.agent === 'e008', 'agent is the last state actor');
-  assert(delivered.summary.startsWith('Orbit moved'), 'summary is the delivery resolution');
+  assert(delivered.ask.startsWith('move the rotate'), 'ask is the request text — the honest half');
+  assert(delivered.summary.startsWith('Orbit moved'), 'summary is the agent claim (resolution)');
+  assert(delivered.status === 'review', 'status is the last state transition');
+  assert(delivered.commits[0] === 'c2fcd03f0', 'commits carry the sha evidence');
   assert(j.noteByRequest('req_2163') === delivered, 'looked up by request id');
   assert(j.noteByBuild('1.0.0.2163') === delivered, 'looked up by build number');
 });
 
-test('unresolved asks do not register as build notes', () => {
+test('an OPEN ask still registers a note — a bug is threadable before it is resolved', () => {
   const j = new BuildJournal();
   const note = j.ingestRequest(req0007);
-  assert(note === undefined, 'no resolution means no build note');
-  assert(j.notes().length === 0, 'journal stream stays empty');
-  assert(j.latestBuildNumber() === undefined, 'open request does not advance build');
+  assert(note !== undefined, 'unresolved request still registers a note');
+  assert(note!.summary === '', 'no claim written yet');
+  assert(note!.status === 'new', 'status reflects the open state');
+  assert(note!.commits.length === 0, 'nothing shipped — zero commits, honestly');
+  assert(j.notes().length === 1, 'the open prompt is in the stream');
+  assert(j.latestBuildNumber() === '1.0.0.7', 'an open request advances the build number too');
 });
 
-test('latestBuildNumber tracks the highest delivered request counter ingested', () => {
+test('a request id with no counter is skipped, not crashed', () => {
+  const j = new BuildJournal();
+  assert(j.ingestRequest({ id: 'req_', text: 'junk' }) === undefined, 'no counter → no note');
+  assert(j.notes().length === 0, 'nothing registered');
+});
+
+test('latestBuildNumber tracks the highest request counter ingested', () => {
   const j = new BuildJournal();
   j.ingestRequests([req0007, req2163]);
-  assert(j.latestBuildNumber() === '1.0.0.2163', 'newest delivered request leads the stream');
+  assert(j.latestBuildNumber() === '1.0.0.2163', 'newest request leads the stream');
   assert(j.notes()[0]!.requestId === 'req_2163', 'notes() is newest-first');
-  assert(j.noteByRequest('req_0007') === undefined, 'unresolved request was skipped');
+  assert(j.noteByRequest('req_0007') !== undefined, 'the open request is present, not skipped');
 });
 
 // ── threads: create, rename-preserves-links ──────────────────────────────────
@@ -234,6 +246,59 @@ test('describeThread sets a description that survives rename and the round-trip'
   const b = new BuildJournal();
   b.importThreadState(JSON.parse(JSON.stringify(a.exportThreadState())));
   assert(b.thread(t.stableId)!.description === 'player clips through shallow water near the docks', 'description restored from disk shape');
+});
+
+// ── ratings + gospel: rank the pile, crown the needle ────────────────────────
+test('rateAttempt scores an attempt on the 1..10 scale and clamps out of range', () => {
+  const j = new BuildJournal();
+  j.ingestRequest(req2163);
+  const t = j.createThread({ semanticName: 'water walk' });
+  j.attachToThread(t.stableId, { requestId: 'req_2163' });
+  j.rateAttempt(t.stableId, 'req_2163', 9);
+  assert(j.thread(t.stableId)!.ratings['req_2163'] === 9, 'rating stored');
+  j.rateAttempt(t.stableId, 'req_2163', 99);
+  assert(j.thread(t.stableId)!.ratings['req_2163'] === 10, 'clamped to 10');
+  j.rateAttempt(t.stableId, 'req_2163', 0);
+  assert(j.thread(t.stableId)!.ratings['req_2163'] === undefined, '0 clears the rating');
+});
+
+test('crownGospel pins one attempt as THE fix and floors its rating at 10', () => {
+  const j = new BuildJournal();
+  const t = j.createThread({ semanticName: 'jesus water walking' });
+  j.attachToThread(t.stableId, { requestId: 'req_2163' });
+  j.crownGospel(t.stableId, 'req_2163');
+  assert(j.thread(t.stableId)!.gospel === 'req_2163', 'gospel crowned');
+  assert(j.thread(t.stableId)!.ratings['req_2163'] === 10, 'crowning floors the rating at 10');
+});
+
+test('gospel is single-occupancy — crowning a new attempt replaces the old', () => {
+  const j = new BuildJournal();
+  const t = j.createThread({ semanticName: 'recurring bug' });
+  j.crownGospel(t.stableId, 'req_2163');
+  j.crownGospel(t.stableId, 'req_0007');
+  assert(j.thread(t.stableId)!.gospel === 'req_0007', 'new gospel replaced the old');
+  j.uncrownGospel(t.stableId);
+  assert(j.thread(t.stableId)!.gospel === '', 'uncrown clears the gospel');
+});
+
+test('clearing a rating dethrones the gospel it belonged to', () => {
+  const j = new BuildJournal();
+  const t = j.createThread({ semanticName: 'flaky' });
+  j.crownGospel(t.stableId, 'req_2163');
+  j.rateAttempt(t.stableId, 'req_2163', 0);
+  assert(j.thread(t.stableId)!.gospel === '', 'clearing the rating un-crowned the gospel');
+});
+
+test('ratings + gospel survive the export/import round-trip', () => {
+  const a = new BuildJournal();
+  const t = a.createThread({ semanticName: 'persist ratings' });
+  a.attachToThread(t.stableId, { requestId: 'req_2163' });
+  a.rateAttempt(t.stableId, 'req_2163', 6);
+  a.crownGospel(t.stableId, 'req_2163');
+  const b = new BuildJournal();
+  b.importThreadState(JSON.parse(JSON.stringify(a.exportThreadState())));
+  assert(b.thread(t.stableId)!.gospel === 'req_2163', 'gospel restored');
+  assert(b.thread(t.stableId)!.ratings['req_2163'] === 10, 'rating restored');
 });
 
 log(`\n${passed} passed, ${failed} failed`);
