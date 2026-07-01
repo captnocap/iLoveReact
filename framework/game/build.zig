@@ -215,9 +215,108 @@ pub const PlacedBuildPiece = struct {
     //   prefabPieceIndex, cells: []?TileKind (floor 3×3 micro-grid).
 };
 
+// ── edit / contract / tag composition ────────────────────────────────────────
+// Verbatim from game/build/{edits,pieces}.ts. The door-interaction internals
+// (reach/openSeconds/auto-radius/panel style/count) are runtime door behaviour,
+// not placement math — they port with the door module. Only the tag-delta
+// overrides and the per-kind edits/snap contract that placement + effectiveTags
+// read live here.
+
+/// Only the wall kind accepts the WallEdit vocabulary
+/// (pieces.ts BUILD_KIND_CONTRACTS[kind].edits === 'wall'; every other kind 'none').
+pub fn kindAcceptsWallEdits(kind: BuildPieceKind) bool {
+    return kind == .wall;
+}
+
+/// Per-kind default snap mode (pieces.ts BUILD_KIND_CONTRACTS[kind].snapDefault).
+pub fn kindSnapDefault(kind: BuildPieceKind) BuildSnapMode {
+    return switch (kind) {
+        .wall => .edge,
+        .floor, .ramp, .stairs, .elevator, .roof, .pillar => .grid,
+        .corner, .arch, .fence, .railing => .edge,
+        .trim, .sign => .surface,
+        .prop => .free,
+    };
+}
+
+/// The edit's tag deltas layered over base tags — verbatim the
+/// WALL_EDIT_DEFINITIONS[edit].overrides applied over base (edits.ts applyWallEdit).
+/// Pure; the one place edit semantics apply so authored and baked meaning agree.
+pub fn applyWallEdit(base: BuildGameplayTags, edit: WallEdit) BuildGameplayTags {
+    var t = base;
+    switch (edit) {
+        .solid => {}, // the identity edit — {}
+        .door => t.portal = true,
+        .window => t.blocksSight = false,
+        .doubleWindow => t.blocksSight = false,
+        .brokenWindow => {
+            t.blocksSight = false;
+            t.vaultable = true;
+        },
+        .garageDoor => t.portal = true,
+        .slidingDoor => {
+            t.portal = true;
+            t.blocksSight = false; // glass leaves see through even closed
+        },
+        .arch => t.portal = true,
+        .halfHeight => {
+            t.blocksSight = false;
+            t.cover = .low;
+            t.vaultable = true;
+        },
+    }
+    return t;
+}
+
+/// A placed piece's EFFECTIVE tags: the catalog row's tags with the edit's deltas
+/// applied (catalog.ts effectiveTags). null edit ⇒ the row's tags unchanged. The
+/// TS throws if a non-wall kind carries an edit; placement only stamps edits onto
+/// wall pieces, so that invariant is an assert here.
+pub fn effectiveTags(entry: BuildPieceDef, edit: ?WallEdit) BuildGameplayTags {
+    const e = edit orelse return entry.tags;
+    std.debug.assert(kindAcceptsWallEdits(entry.kind));
+    return applyWallEdit(entry.tags, e);
+}
+
+/// Can this kind take the WallEdit vocabulary? (placed.ts placedPieceAcceptsEdits)
+pub fn placedPieceAcceptsEdits(kind: BuildPieceKind) bool {
+    return kindAcceptsWallEdits(kind);
+}
+
 test "PLACED_TUNING values match the TS source verbatim" {
     try std.testing.expectEqual(@as(f32, 1.2), PLACED_TUNING.walkOpeningWidthMeters);
     try std.testing.expectEqual(@as(f32, 2.6), PLACED_TUNING.vehicleOpeningWidthMeters);
     try std.testing.expectEqual(@as(i32, 10), PLACED_TUNING.stairVisualSteps);
     try std.testing.expectEqual(@as(f32, 1e-6), PLACED_TUNING.wallJoinToleranceMeters);
+}
+
+test "applyWallEdit / effectiveTags match the TS overrides verbatim" {
+    const solid_wall = BuildGameplayTags{
+        .collision = true, .blocksSight = true, .blocksSound = true, .cover = .full,
+        .durability = null, .climbable = false, .vaultable = false, .portal = false,
+    };
+    // door: overrides { portal: true }
+    try std.testing.expect(applyWallEdit(solid_wall, .door).portal);
+    // window: overrides { blocksSight: false }
+    try std.testing.expect(!applyWallEdit(solid_wall, .window).blocksSight);
+    // halfHeight: { blocksSight:false, cover:'low', vaultable:true }
+    const hh = applyWallEdit(solid_wall, .halfHeight);
+    try std.testing.expect(!hh.blocksSight);
+    try std.testing.expectEqual(TileCoverHeight.low, hh.cover);
+    try std.testing.expect(hh.vaultable);
+    // solid: identity
+    try std.testing.expectEqual(solid_wall.portal, applyWallEdit(solid_wall, .solid).portal);
+    // effectiveTags: null edit ⇒ base row tags
+    const def = BuildPieceDef{
+        .id = "w", .kind = .wall, .label = "W", .theme = .common, .material = .concrete,
+        .size = .{ .widthMeters = 3, .heightMeters = 3, .depthMeters = 0.005 },
+        .snap = .edge, .tags = solid_wall,
+    };
+    try std.testing.expectEqual(solid_wall.portal, effectiveTags(def, null).portal);
+    try std.testing.expect(effectiveTags(def, .door).portal);
+    // contract: only wall accepts edits; snap defaults
+    try std.testing.expect(placedPieceAcceptsEdits(.wall));
+    try std.testing.expect(!placedPieceAcceptsEdits(.floor));
+    try std.testing.expectEqual(BuildSnapMode.grid, kindSnapDefault(.floor));
+    try std.testing.expectEqual(BuildSnapMode.surface, kindSnapDefault(.trim));
 }
