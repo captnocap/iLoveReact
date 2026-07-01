@@ -32,10 +32,15 @@
 //! Single-writer discipline: the main (V8) thread owns this. No locks.
 
 const std = @import("std");
-// sqlite is a NAMED module dependency (not a relative import) so editor_bus can be
-// built as an isolated module for unit tests. The host/test build provides it from
-// framework/storage/sqlite.zig (see build.zig + EDITOR_FOUNDATION_WIRING.md).
-const sqlite = @import("sqlite");
+// sqlite — relative import, uniform with the sibling framework/diag/event_bus.zig.
+// It USED to be a named `@import("sqlite")` module so the isolated unit test could
+// inject it, but once editor_bus is pulled into the host root module (v8_ingredients →
+// v8_bindings_editor_bus → here), that put framework/storage/sqlite.zig into TWO modules
+// at once — the named "sqlite" module AND root (where diag/event_bus + others relative-
+// import it) — which Zig rejects as "file exists in multiple modules". The relative path
+// resolves in both the host build and the unit test (it's resolved from THIS file's
+// location either way), so it's the collision-free form. No named "sqlite" module needed.
+const sqlite = @import("../storage/sqlite.zig");
 
 const alloc = std.heap.c_allocator;
 
