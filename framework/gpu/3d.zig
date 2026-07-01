@@ -1312,6 +1312,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
             var e: u32 = 0;
             while (e < n) : (e += 1) {
                 if (!mesh_edit.edgeIsBoundaryPub(e)) continue;
+                if (!mesh_edit.edgeInScopePub(e)) continue; // only the focused part's edges
                 // In edge mode a selected boundary edge draws bold-orange over the dim base.
                 const sel = mode == 2 and mesh_edit.edgeSelectedPub(e);
                 const ep = mesh_edit.edgeEndpointsPub(e);
@@ -1330,6 +1331,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
         const draw_all = n <= OV_MAX_VERT_DOTS;
         var i: u32 = 0;
         while (i < n) : (i += 1) {
+            if (!mesh_edit.vertInScopePub(i)) continue; // only the focused part's verts
             const selected = mesh_edit.vertSelectedPub(i);
             if (!selected and !draw_all) continue;
             const sp = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(i)) orelse continue;
@@ -1362,6 +1364,27 @@ pub fn meshEditSelectFace(idx: u32, additive: bool) bool {
 /// Select every face in the authored group range [lo, hi) — the outliner grabs a whole part.
 pub fn meshEditSelectGroupRange(lo: u32, hi: u32, additive: bool) i32 {
     return mesh_edit.selectFacesByGroupRange(lo, hi, additive);
+}
+/// Restrict editing (select + overlay) to the authored group range [lo, hi) — the outliner
+/// focusing ONE part. hi <= lo edits the whole model.
+pub fn meshEditSetScope(lo: u32, hi: u32) void {
+    mesh_edit.setEditScope(lo, hi);
+}
+/// Paint every face in the authored group range [lo, hi) a solid colour — the outliner tints
+/// each PART its own colour on load so a bare studio mesh reads as coloured parts, matching
+/// the outliner swatches. Returns the number of faces painted.
+pub fn meshPaintGroupRange(lo: u32, hi: u32, r: u8, g: u8, b: u8) u32 {
+    const fc = model_paint.faceCount();
+    var painted: u32 = 0;
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        const grp = model_source.faceGroupOf(f);
+        if (grp == model_source.NO_FACE_GROUP or grp < lo or grp >= hi) continue;
+        model_paint.paintFace(f, .{ r, g, b, 255 });
+        model_source.writeColor(@intCast(f), r, g, b);
+        painted += 1;
+    }
+    return painted;
 }
 /// Select an edge by welded-edge index (no raycast) — programmatic / headless.
 pub fn meshEditSelectEdge(idx: u32, additive: bool) bool {

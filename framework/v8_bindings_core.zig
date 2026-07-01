@@ -568,6 +568,30 @@ fn hostMeshEditSelectGroupRange(info_c: ?*const v8.c.FunctionCallbackInfo) callc
     setReturnNumber(info, @floatFromInt(n));
 }
 
+/// __mesh_edit_scope(lo, hi). Restrict editing to the group range [lo, hi) — the outliner
+/// focusing one part. hi <= lo edits the whole model.
+fn hostMeshEditScope(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
+    scene3d.meshEditSetScope(lo, hi);
+    state.markDirty();
+}
+
+/// __model_paint_group_range(lo, hi, r, g, b) → face count. Paint every face in the group
+/// range a solid colour — the outliner tints each part its own colour on load.
+fn hostModelPaintGroupRange(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
+    const r: u8 = @intCast(std.math.clamp(argToI32(info, 2) orelse 0, 0, 255));
+    const g: u8 = @intCast(std.math.clamp(argToI32(info, 3) orelse 0, 0, 255));
+    const b: u8 = @intCast(std.math.clamp(argToI32(info, 4) orelse 0, 0, 255));
+    const n = scene3d.meshPaintGroupRange(lo, hi, r, g, b);
+    state.markDirty();
+    setReturnNumber(info, @floatFromInt(n));
+}
+
 /// __mesh_edit_select_face(idx, additive) → bool. Select a face by index (no raycast) —
 /// programmatic selection (select-all / scripting) and the headless highlight proof.
 fn hostMeshEditSelectFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1562,6 +1586,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);
     v8_runtime.registerHostFn("__mesh_edit_select_group_range", hostMeshEditSelectGroupRange);
+    v8_runtime.registerHostFn("__mesh_edit_scope", hostMeshEditScope);
+    v8_runtime.registerHostFn("__model_paint_group_range", hostModelPaintGroupRange);
     v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
     v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);
     v8_runtime.registerHostFn("__mesh_edit_guard_resolve", hostMeshEditGuardResolve);

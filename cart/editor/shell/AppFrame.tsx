@@ -626,13 +626,22 @@ export default function AppFrame() {
     return { ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [mid]: [...parts, part] }, modelActivePartId: part.id, status: `added ${part.name}` };
   });
   const selectPart = (id: string) => {
-    // Highlight the whole part in the host by its face-group range (needs the rebuilt door).
+    // Focus a part = SCOPE editing to it: only its verts/edges/faces show + select, and the
+    // gizmo drives just it. Clicking the already-focused part toggles back to the whole model.
+    const host = globalThis as any;
     const mid = activePartsModelId(state);
-    if (mid) {
+    const alreadyFocused = state.modelActivePartId === id;
+    if (mid && !alreadyFocused) {
       const range = composeModelParts(state.modelParts[mid] ?? []).ranges.find((r) => r.id === id);
-      if (range) (globalThis as any).__mesh_edit_select_group_range?.(range.lo, range.hi, 0);
+      if (range) {
+        host.__mesh_edit_scope?.(range.lo, range.hi);
+        host.__mesh_edit_select_group_range?.(range.lo, range.hi, 0);
+      }
+    } else {
+      host.__mesh_edit_scope?.(0, 0); // toggle off → edit the whole model
+      host.__mesh_edit_clear?.();
     }
-    setState((prev) => ({ ...prev, modelActivePartId: id }));
+    setState((prev) => ({ ...prev, modelActivePartId: alreadyFocused ? null : id }));
   };
   const toggleVisiblePart = (id: string) => setState((prev) => {
     const mid = activePartsModelId(prev);

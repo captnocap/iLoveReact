@@ -69,13 +69,15 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
   const composed = outliner ? composeModelParts(outliner.parts) : null;
 
   if (composed) {
+    // Each part's group range → its outliner colour, so the viewer tints the parts on load.
+    const partColors = composed.ranges.map((r) => ({ lo: r.lo, hi: r.hi, color: outliner!.parts.find((p) => p.id === r.id)?.color ?? '#8fb6c9' }));
     // Every part hidden/deleted → nothing to draw (the outliner in Model Focus lets you add
     // or un-hide). A non-empty compose mounts the viewer keyed on the geometry signature.
     const modelView = composed.positions.length > 0 ? (
       <ModelView
         key={`${model.id}:${partsSignature(outliner!.parts)}`}
         initialTitle={model.name}
-        initialMesh={{ key: `${model.id}:${partsSignature(outliner!.parts)}`, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups }}
+        initialMesh={{ key: `${model.id}:${partsSignature(outliner!.parts)}`, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups, partColors }}
         allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState}
       />
     ) : (

@@ -54,6 +54,9 @@ export type ModelViewInitialMesh = {
   // an id came from the same authored n-gon face, so the host mesh editor selects /
   // outlines whole faces instead of fan slivers. Absent for plain triangle imports.
   faceGroups?: Uint32Array | number[];
+  // Per-part colour ranges (multi-part models): paint each part its outliner colour on load,
+  // so a bare studio mesh reads as coloured parts instead of blank white.
+  partColors?: { lo: number; hi: number; color: string }[];
 };
 // The live tool state, mirrored out so an embedding shell (the editor) can drive
 // the SAME host-native tools from its own toolbar / context menu instead of the
@@ -149,6 +152,12 @@ function loadModelVertices(mesh: ModelViewInitialMesh): Loaded | null {
       ? mesh.faceGroups
       : mesh.faceGroups ? new Uint32Array(mesh.faceGroups) : null;
     if (groups && groups.length > 0) host.__mesh_set_face_groups?.(groups);
+    // Tint each part its outliner colour (multi-part models) so a bare studio mesh isn't a
+    // blank white blob and the model matches the outliner swatches.
+    for (const pc of mesh.partColors ?? []) {
+      const [r, g, b] = hexToRgb01(pc.color);
+      host.__model_paint_group_range?.(pc.lo, pc.hi, Math.round(r * 255), Math.round(g * 255), Math.round(b * 255));
+    }
     return { key: o.key, count: o.count | 0, radius: o.radius || 1, name: mesh.name };
   } catch {
     return null;

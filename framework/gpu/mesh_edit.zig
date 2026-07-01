@@ -57,6 +57,17 @@ var g_edge_count: u32 = 0;
 // carries no grouping at all (a plain triangle soup — every edge is real). Selection and the
 // edit overlay use ONLY boundary edges, so a cube reads as 12 edges, not 18. (req_2367)
 var g_edge_boundary: ?[]bool = null;
+// Active edit SCOPE: when set, vertex/edge/face selection AND the overlay only consider faces
+// whose authored group is in [g_scope_lo, g_scope_hi) — the outliner focusing ONE part so you
+// edit just it, not the whole composed model. Inactive = the whole mesh. g_scope_vert/edge are
+// derived masks (a vert is in scope if it belongs to an in-scope face; an edge if both ends
+// are), rebuilt lazily when the scope or facecount changes. (req_2415)
+var g_scope_active: bool = false;
+var g_scope_lo: u32 = 0;
+var g_scope_hi: u32 = 0;
+var g_scope_vert: ?[]bool = null;
+var g_scope_edge: ?[]bool = null;
+var g_scope_built: u64 = 0;
 var g_affect_vert: ?[]bool = null; // scratch: logical verts affected by the active selection
 
 // ── Selection sets (one per element kind; modes keep their own) ──────────────────────
@@ -214,6 +225,8 @@ pub fn reset() void {
     if (g_corner_vert) |c| alloc.free(c);
     if (g_edges) |e| alloc.free(e);
     if (g_edge_boundary) |b| alloc.free(b);
+    if (g_scope_vert) |s| alloc.free(s);
+    if (g_scope_edge) |s| alloc.free(s);
     if (g_affect_vert) |s| alloc.free(s);
     if (g_sel_vert) |s| alloc.free(s);
     if (g_sel_edge) |s| alloc.free(s);
@@ -224,6 +237,9 @@ pub fn reset() void {
     g_corner_vert = null;
     g_edges = null;
     g_edge_boundary = null;
+    g_scope_vert = null;
+    g_scope_edge = null;
+    g_scope_built = 0;
     g_affect_vert = null;
     g_sel_vert = null;
     g_sel_edge = null;
@@ -231,6 +247,74 @@ pub fn reset() void {
     g_vert_count = 0;
     g_edge_count = 0;
     g_built_for = 0;
+}
+
+// ── Edit scope (focus one part) ──────────────────────────────────────────────────
+/// Restrict editing to the authored group range [lo, hi). hi <= lo clears the scope (edit
+/// the whole model). The outliner sets this to the focused part's range.
+pub fn setEditScope(lo: u32, hi: u32) void {
+    if (hi > lo) {
+        g_scope_active = true;
+        g_scope_lo = lo;
+        g_scope_hi = hi;
+    } else {
+        g_scope_active = false;
+    }
+}
+
+fn faceInScope(f: u32) bool {
+    if (!g_scope_active) return true;
+    const g = model_source.faceGroupOf(f);
+    return g != model_source.NO_FACE_GROUP and g >= g_scope_lo and g < g_scope_hi;
+}
+pub fn faceInScopePub(f: u32) bool {
+    return faceInScope(f);
+}
+
+/// Build the per-vert / per-edge scope masks for the active scope (lazy; keyed on
+/// facecount+range). A vert is in scope if any in-scope face touches it; an edge if both
+/// endpoints are. No-op when the scope is inactive or the topology isn't welded yet.
+fn ensureScopeMasks() void {
+    if (!g_scope_active or g_verts == null) return;
+    const sig = (@as(u64, model_paint.faceCount()) << 32) ^ (@as(u64, g_scope_lo) << 12) ^ @as(u64, g_scope_hi);
+    if (g_scope_built == sig and g_scope_vert != null) return;
+    if (g_scope_vert) |m| alloc.free(m);
+    if (g_scope_edge) |m| alloc.free(m);
+    g_scope_vert = alloc.alloc(bool, g_vert_count) catch return;
+    g_scope_edge = alloc.alloc(bool, g_edge_count) catch return;
+    @memset(g_scope_vert.?, false);
+    @memset(g_scope_edge.?, false);
+    const corners = g_corner_vert orelse return;
+    const fc = model_paint.faceCount();
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        if (!faceInScope(f)) continue;
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const v = corners[f * 3 + k];
+            if (v < g_vert_count) g_scope_vert.?[v] = true;
+        }
+    }
+    const edges = g_edges orelse return;
+    var e: u32 = 0;
+    while (e < g_edge_count) : (e += 1) {
+        const a = edges[e * 2];
+        const b = edges[e * 2 + 1];
+        g_scope_edge.?[e] = a < g_vert_count and b < g_vert_count and g_scope_vert.?[a] and g_scope_vert.?[b];
+    }
+    g_scope_built = sig;
+}
+pub fn vertInScopePub(v: u32) bool {
+    if (!g_scope_active) return true;
+    ensureScopeMasks();
+    const m = g_scope_vert orelse return true;
+    return v < m.len and m[v];
+}
+pub fn edgeInScopePub(e: u32) bool {
+    if (!g_scope_active) return true;
+    ensureScopeMasks();
+    const m = g_scope_edge orelse return true;
+    return e < m.len and m[e];
 }
 
 pub fn clearSelection() void {
@@ -692,12 +776,15 @@ pub fn pick(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, add
     const ready = if (g_mode == .face) ensureFaceSel() else ensureTopology();
     if (!ready) return -1;
 
-    const hit: i32 = switch (g_mode) {
+    var hit: i32 = switch (g_mode) {
         .face => model_paint.pick(cam, vp_w, vp_h, mx, my),
         .vertex => pickVertex(cam, vp_w, vp_h, mx, my),
         .edge => pickEdge(cam, vp_w, vp_h, mx, my),
         .none => -1,
     };
+    // A face pick raycasts the whole mesh; drop it if the hit face is outside the focused
+    // part (vertex/edge picks already skip out-of-scope elements). (req_2415)
+    if (g_mode == .face and hit >= 0 and !faceInScope(@intCast(hit))) hit = -1;
 
     const set = switch (g_mode) {
         .vertex => g_sel_vert.?,
@@ -782,6 +869,7 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
             const n: u32 = @intCast(set.len);
             var f: u32 = 0;
             while (f < n) : (f += 1) {
+                if (!faceInScope(f)) continue; // outside the focused part
                 const b = f * 9;
                 const c: [3]f32 = .{
                     (pos[b + 0] + pos[b + 3] + pos[b + 6]) / 3.0,
@@ -794,6 +882,7 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
         .vertex => {
             var i: u32 = 0;
             while (i < g_vert_count) : (i += 1) {
+                if (!vertInScopePub(i)) continue; // outside the focused part
                 if (inRect(model_paint.project(cam, vp_w, vp_h, vertPos(i)), minx, maxx, miny, maxy)) set[i] = true;
             }
         },
@@ -802,6 +891,7 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
             var e: u32 = 0;
             while (e < g_edge_count) : (e += 1) {
                 if (!edgeIsBoundaryPub(e)) continue; // diagonals aren't real edges
+                if (!edgeInScopePub(e)) continue; // outside the focused part
                 const a = vertPos(edges[e * 2 + 0]);
                 const b = vertPos(edges[e * 2 + 1]);
                 const mid: [3]f32 = .{ (a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, (a[2] + b[2]) * 0.5 };
@@ -819,6 +909,7 @@ fn pickVertex(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i
     var best_d2: f32 = VERT_PX * VERT_PX;
     var i: u32 = 0;
     while (i < g_vert_count) : (i += 1) {
+        if (!vertInScopePub(i)) continue; // outside the focused part
         const sp = model_paint.project(cam, vp_w, vp_h, vertPos(i)) orelse continue;
         const dx = sp[0] - mx;
         const dy = sp[1] - my;
@@ -841,6 +932,7 @@ fn pickEdge(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32
     var e: u32 = 0;
     while (e < g_edge_count) : (e += 1) {
         if (!edgeIsBoundaryPub(e)) continue; // diagonals aren't real edges — not pickable
+        if (!edgeInScopePub(e)) continue; // outside the focused part
         const va = vertPos(edges[e * 2 + 0]);
         const vb = vertPos(edges[e * 2 + 1]);
         const a = model_paint.project(cam, vp_w, vp_h, va) orelse continue;
