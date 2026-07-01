@@ -1,0 +1,18 @@
+{
+  "id": "req_2259",
+  "at": "2026-06-30T23:41:22.100Z",
+  "origin": "session:ed911d78",
+  "text": "ok next thing is if you look in the old app you will see there was a pipeline that would get a image of the model as a preview, we want to bring the same idea in here for the model menu and other applicable areas",
+  "status": "doing",
+  "sessionId": "ed911d78-92e5-4ede-807c-fc39210b0efb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T23:41:47.110Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

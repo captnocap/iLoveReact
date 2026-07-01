@@ -1,0 +1,18 @@
+{
+  "id": "req_2249",
+  "at": "2026-06-30T21:34:25.167Z",
+  "origin": "session:ed911d78",
+  "text": "give this the capability to have a description or something so it doesnt feel hollow [Image #4]",
+  "status": "doing",
+  "sessionId": "ed911d78-92e5-4ede-807c-fc39210b0efb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T21:34:52.356Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

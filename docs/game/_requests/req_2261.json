@@ -1,0 +1,18 @@
+{
+  "id": "req_2261",
+  "at": "2026-06-30T23:44:07.367Z",
+  "origin": "session:cb4f264c",
+  "text": "sorry i hate to keep stopping you. i just want to verify that everything goes into a context menu regardless if it has a quick option or not and so that is applicable to even the ones you just did. the face edge and vertex need to all be in a context menu somewhere. think of literally any software made in the last 20 years that is standard. every single thing lives inside of a context menu and it might also live in a toolbar. but it doesnt live in a toolbar and never in a context menu",
+  "status": "doing",
+  "sessionId": "cb4f264c-64be-4007-adcf-354ef1537645",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T23:45:19.690Z",
+      "actor": "opus-editor",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

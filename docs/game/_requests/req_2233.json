@@ -1,0 +1,10 @@
+{
+  "id": "req_2233",
+  "at": "2026-06-30T19:38:28.885Z",
+  "origin": "session:5b8beadc",
+  "text": "<task-notification>\n<task-id>bo9j8c387</task-id>\n<tool-use-id>toolu_01CQSiD6tqdWx71Rn91BaiDy</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/0f02d048-6266-4c5d-affe-6131b0e17f55/tasks/bo9j8c387.output</output-file>\n<status>completed</status>\n<summary>Background command \"Sample RSS over 12 seconds to detect growth trend\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "5b8beadc-b5ed-4f00-825d-d6ff6f2e880b",
+  "captureMode": "hook",
+  "events": []
+}

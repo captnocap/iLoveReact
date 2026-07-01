@@ -1,0 +1,18 @@
+{
+  "id": "req_2284",
+  "at": "2026-07-01T00:57:05.061Z",
+  "origin": "session:ed911d78",
+  "text": "hey its ok to steal the work of your peers and claim it in your own commit especially when they are also you in another thread wondering if they can commit but they dont want to do the same thing back to you. its that spiderman meme where you guys are all standing in the room pointing at eachother like i cant commit because of this guys work",
+  "status": "doing",
+  "sessionId": "ed911d78-92e5-4ede-807c-fc39210b0efb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T00:58:04.057Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

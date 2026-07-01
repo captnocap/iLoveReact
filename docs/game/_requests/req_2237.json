@@ -1,0 +1,30 @@
+{
+  "id": "req_2237",
+  "at": "2026-06-30T19:45:44.087Z",
+  "origin": "codex:019f1946",
+  "text": "ok great back to this tab surface, i do not ideally want the world to say world. it can just be a globe icon, and then there after, you need to ensure that this doesnt happen. look here already, this has a huge amount of dead space. not acceptable. [Image #1]",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T19:45:54.216Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T19:48:36.866Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Adjusted the editor stage document tab surface so the world document no longer renders the text-heavy World Editor/main.gamefile tab. The world document is now an icon-only globe tab, and regular document tabs use bounded compact sizing instead of the previous oversized active/inactive fixed widths, eliminating the dead space shown in the tab strip.",
+  "shas": [
+    "a836b3602"
+  ],
+  "resolvedAt": "2026-06-30T19:48:36.866Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2267",
+  "at": "2026-06-30T23:56:10.071Z",
+  "origin": "session:986b717b",
+  "text": "Thanks, will you bite that in the ass for me and write those in as priority concerns all of those that codex decided to leave absent",
+  "status": "review",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T23:56:37.929Z",
+      "actor": "986b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T23:57:55.080Z",
+      "actor": "986b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Backfilled the three design concerns that codex dropped from DESIGN_INTAKE.md, found by validating req_2168 plus/minus 5 against the doc. Added PRIORITY-flagged sections, faithful to the source request text and each citing its req id: Model Package Layout (req_2168) describing a model as a self-contained directory holding mesh data, a per-decomposition texture atlas for LoD and explosion break-up, arbitrarily many stored paint variations, and copied shader-code references, with global shader/image textures kept separate and copy-the-folder carrying everything end to end; Overlays Must Block Pointer Events behind them (req_2167) as a framework-level fix; and host-run pre-open Layout Reachability Validation in zig/ts with no python (req_2171/2172). Cross-referenced the Skeleton Object Model doc and the existing layoutValidateCli.ts. Note: the commit swept in pre-existing uncommitted doc additions on the same file (302 insertions total), all additive, nothing destroyed.",
+  "shas": [
+    "f831f5e97"
+  ],
+  "resolvedAt": "2026-06-30T23:57:55.080Z"
+}

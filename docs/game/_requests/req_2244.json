@@ -1,0 +1,18 @@
+{
+  "id": "req_2244",
+  "at": "2026-06-30T20:13:50.998Z",
+  "origin": "session:ed911d78",
+  "text": "cool now this next thing i am going to lose my god damn mind if we continue to do this lmao why do i have to scroll at all in the content browser. its just buttons and why for the love of god do i need to scroll when there is about more empty space in the entire panel than there isnt [Image #3]",
+  "status": "doing",
+  "sessionId": "ed911d78-92e5-4ede-807c-fc39210b0efb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T20:14:19.271Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

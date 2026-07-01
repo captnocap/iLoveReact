@@ -1,0 +1,30 @@
+{
+  "id": "req_2223",
+  "at": "2026-06-30T17:54:40.430Z",
+  "origin": "codex:019f1946",
+  "text": "your list is leaking behind the bottom cards [Image #1]",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T17:54:53.798Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T18:05:54.675Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the Top Consumers layout leak by giving the ranked area an owned clipped section and replacing the overflowing row stack with an explicit scrollable top-consumer container.",
+  "shas": [
+    "9442bceea"
+  ],
+  "resolvedAt": "2026-06-30T18:05:54.675Z"
+}

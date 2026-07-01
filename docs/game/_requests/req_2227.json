@@ -1,0 +1,30 @@
+{
+  "id": "req_2227",
+  "at": "2026-06-30T18:40:17.354Z",
+  "origin": "codex:019f1946",
+  "text": "sorry no so when i said tabs at the bottom, think of it like how when you open a document in vscode, and it now is a tabbed document that is open, this is what i mean. where the main editor here is the game editor but then if i end up clicking on a model in the content browser for example, its going to open up a document basically that is the mesh editor for that model without me saying take me to a mesh editor and then im going to open this model",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T18:40:29.734Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T18:48:33.539Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the bottom strip from fixed workflow modes to VS Code-style opened documents. Content-browser model cards now open/focus model document tabs automatically; saved Studio models mount the real StudioEditor, cooked model assets open a read-only source-data document, material focus opens a material document, and non-world tabs can be closed while the World Editor stays pinned.",
+  "shas": [
+    "b78d0b6e8"
+  ],
+  "resolvedAt": "2026-06-30T18:48:33.539Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_2257",
+  "at": "2026-06-30T23:38:13.928Z",
+  "origin": "session:cb4f264c",
+  "text": "right we were getting to those very next. and also the quality slider needs to be relocated also, and ideally it doesnt even need to be in focus ever until its called so tuck away in a menu for a conditional render",
+  "status": "doing",
+  "sessionId": "cb4f264c-64be-4007-adcf-354ef1537645",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T23:38:46.354Z",
+      "actor": "opus-editor",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

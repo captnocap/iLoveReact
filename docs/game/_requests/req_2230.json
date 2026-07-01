@@ -1,0 +1,30 @@
+{
+  "id": "req_2230",
+  "at": "2026-06-30T19:33:13.823Z",
+  "origin": "codex:019f1946",
+  "text": "nice can you do two things, one, split this into its own popover so its an isolated read out, too much going on in that panel all at once, and then second, on the dock itself, slide the fps and perf numbers over to the right side with the memory footprint indicator",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T19:33:23.593Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T19:38:50.639Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Split memory accumulation diagnostics out of the performance churn popover into its own Memory Accumulation popover with resettable RSS-growth baseline, summary tiles, and ranked memory bucket rows. Moved shared diagnostic row rendering into a reusable component, kept memory ranking in a TS helper, restored the performance popover to frame/render churn only, and moved the FPS/perf block to the dock right side beside a separate clickable MEM indicator.",
+  "shas": [
+    "85bbbfbe4"
+  ],
+  "resolvedAt": "2026-06-30T19:38:50.639Z"
+}

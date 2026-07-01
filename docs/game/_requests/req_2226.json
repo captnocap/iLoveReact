@@ -1,0 +1,30 @@
+{
+  "id": "req_2226",
+  "at": "2026-06-30T18:32:52.258Z",
+  "origin": "codex:019f1946",
+  "text": "ok good now the next slice to bring is the world editor that is inside of hmsc-int right now. the one that is the isometric 3d editor. we are going to place this into the center of this application and then at the bottom of its panel i want you to give us a thin tab strip, this is going to be what controls what is in view here, and will be how we progress from editing a mesh to placing it in the world all in the same interface",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T18:33:05.320Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T18:48:33.530Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Mounted the hmsc-int native LoaderIsoView as the default center World Editor document in the editor shell, using the existing baked editor gamefile and compiled-world/native camera feature path instead of the old mock isometric map. Added document-tab plumbing at the bottom of the center panel so the world editor remains the root open document.",
+  "shas": [
+    "b78d0b6e8"
+  ],
+  "resolvedAt": "2026-06-30T18:48:33.530Z"
+}

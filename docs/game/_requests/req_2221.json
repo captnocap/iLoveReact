@@ -1,0 +1,30 @@
+{
+  "id": "req_2221",
+  "at": "2026-06-30T17:49:19.529Z",
+  "origin": "codex:019f1946",
+  "text": "paint is t he problem. and its one that needs to be bit in the ass now because the interface has almost nothing in it",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T17:49:39.732Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T18:05:54.639Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reduced the editor paint problem by caching real asset previews and the heavy performance popover surfaces with StaticSurface, exposing StaticSurface through the shared classifier, and removing default-open menu/context chrome from idle boot so the monitor no longer adds hidden paint/layout pressure. Verified ReleaseFast editor ship plus screenshots; forced-open perf view reached the 4.1ms frame budget after cleanup.",
+  "shas": [
+    "9442bceea"
+  ],
+  "resolvedAt": "2026-06-30T18:05:54.639Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2175",
+  "at": "2026-06-30T10:09:44.717Z",
+  "origin": "codex:019f1624",
+  "text": "in the documentation i need you to make it extremely explicit that react = ui authoring. but all the actual tooling is going to be host owned",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T10:09:51.741Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T10:10:53.896Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Documented the architecture boundary explicitly in cart/hmsc-workspace-mock/DESIGN_INTAKE.md and docs/game/GUIDING_LIGHT.md: React/TSX is UI authoring for chrome, panels, menus, inspectors, preview sockets, and mock state; actual tooling is host/native-owned for execution, validation, timing, persistence, diagnostics, file IO, compile/export, and other real editor operations. Added the required command/eventbus flow and the rule that any React-side tool behavior before host support must be labeled as a mock/preview shim/adapter with a named native owner.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T10:10:53.896Z"
+}

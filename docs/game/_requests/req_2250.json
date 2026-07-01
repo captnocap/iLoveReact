@@ -1,0 +1,18 @@
+{
+  "id": "req_2250",
+  "at": "2026-06-30T21:48:13.948Z",
+  "origin": "session:ed911d78",
+  "text": "ok same idea here needs t o be carried on from the previous editor app, and that is the concept of keeping my active thing im viewing in state when the app hot reloads. and also the ux right now for the content browser when browsing a model and then clicking on a model is ass. the model menu closes, it gets replaced with the model now in focus, when the focus should entirely move across the screen into the focus inspector and then i have to literally reclick on the models in the content browser just to get the menu back of all of them. it blows ass",
+  "status": "doing",
+  "sessionId": "ed911d78-92e5-4ede-807c-fc39210b0efb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T21:48:39.203Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

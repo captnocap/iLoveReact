@@ -1,0 +1,10 @@
+{
+  "id": "req_2192",
+  "at": "2026-06-30T11:17:12.231Z",
+  "origin": "session:20a1fa6b",
+  "text": "yes it folds into everything. i think abstractly you need to think of the skeleton as a system that is more than just a body. it can be a prop, a skeleton can say this thing is static, that this thing has collision, that this thing animates this way or that way, it has these meshes at these positions or its all one mesh, props, items, clothing, player models, vehicles, buildings, everything fits a skeleton model if you think about it this way",
+  "status": "new",
+  "sessionId": "20a1fa6b-3dc7-4e24-89e1-6e852ab7ba30",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2246",
+  "at": "2026-06-30T21:20:34.954Z",
+  "origin": "codex:019f1946",
+  "text": "what the hell why is this pulling in the studio editor from hmsc-int ? remove that entirely. this is NOT what was asked of you",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T21:20:50.544Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T21:23:10.089Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the incorrect hmsc-int Studio editor dependency from editor model tabs. ModelDocumentSurface no longer imports StudioEditor, studioOpenModel, or useEffect side effects for studio models; model documents now stay on the ModelView/data path when mesh/path data exists and otherwise fall back to the existing read-only data surface. Verified no cart/editor references to StudioEditor/studiokit remain, and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor passes with the smaller bundle.",
+  "shas": [
+    "812ba61c1"
+  ],
+  "resolvedAt": "2026-06-30T21:23:10.089Z"
+}

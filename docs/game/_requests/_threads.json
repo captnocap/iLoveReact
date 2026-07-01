@@ -1,0 +1,68 @@
+{
+  "seq": 1,
+  "threads": [
+    {
+      "stableId": "thread_0001",
+      "semanticName": "dont_introduce_old_shit",
+      "aliases": [
+        "req_2246"
+      ],
+      "tags": [],
+      "searchTokens": [],
+      "attachedCaptures": [],
+      "linkedRequests": [
+        "req_2246"
+      ],
+      "linkedBuilds": [
+        "1.0.0.2246"
+      ]
+    }
+  ],
+  "captures": [
+    {
+      "id": "cap_gpu_cliff",
+      "name": "gpu cliff 4fps",
+      "channels": [
+        "gpu.bindgroup",
+        "render.frame"
+      ],
+      "timeRange": {
+        "start": 0,
+        "end": 0
+      },
+      "buildId": "1.0.0.2118",
+      "mapContext": "city_block_04",
+      "note": "bind-group count spikes once the map gets dense"
+    },
+    {
+      "id": "cap_place_latency",
+      "name": "rich map place lag",
+      "channels": [
+        "edit.place",
+        "authoring.cost"
+      ],
+      "timeRange": {
+        "start": 0,
+        "end": 0
+      },
+      "buildId": "1.0.0.2112",
+      "mapContext": "motel_prefab",
+      "note": "p95 edit time climbs with city size"
+    },
+    {
+      "id": "cap_idle_memory",
+      "name": "idle memory climb",
+      "channels": [
+        "memory.rss",
+        "render.rebake"
+      ],
+      "timeRange": {
+        "start": 0,
+        "end": 0
+      },
+      "buildId": "1.0.0.2228",
+      "mapContext": "traffic_layers",
+      "note": "resident memory grows while the editor sits idle"
+    }
+  ]
+}

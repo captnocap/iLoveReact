@@ -3,7 +3,7 @@
   "at": "2026-06-30T09:18:56.294Z",
   "origin": "session:e0080e48",
   "text": "so i cant get it to work because the model is always rotating, basically move the rotate to be from middle mouse down only and that should solve it",
-  "status": "doing",
+  "status": "review",
   "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-06-30T09:40:54.013Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Orbit moved to middle-mouse so left is free for selection/marquee. Implemented as part of the fully-native input loop: the engine routes middle-button drag to the host orbit camera (orbitDrag via event.motion xrel/yrel), gated behind the mesh-edit capture flag so only modelview is affected. Left-drag no longer orbits; it now does the active select tool. Built clean; verifies live in rjit dev (sha c2fcd03f0).",
+  "shas": [
+    "c2fcd03f0"
+  ],
+  "resolvedAt": "2026-06-30T09:40:54.012Z"
 }

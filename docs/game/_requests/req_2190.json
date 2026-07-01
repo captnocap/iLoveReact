@@ -1,0 +1,10 @@
+{
+  "id": "req_2190",
+  "at": "2026-06-30T11:09:22.071Z",
+  "origin": "session:20a1fa6b",
+  "text": "im thinking im going to fold the skeletons approach into the rigging system as a whole. and create a sort of skeleton-template system, like a player skeleton, a vehicle skeleton, etc. and so like a vehicle would carry things like bumpers, doors, windshield, wheels, and where player models sit inside of them. and then also the same for player model. and then i can extend this in a lot of ways. actually endless amounts of ways. and they all get the same sort of rigging treatment that i can give to a player model.ot just \"more templates\": a skeleton-template is itself just data conforming to a meta-structure (mounts + behaviors + contacts), so new kinds of things are new templates, authored the same way, not new code. A building skeleton: door-mounts, window-mounts, room-anchors, where-NPCs-path. A weapon skeleton: grip-mount (where the hand-contact goes), barrel-mount, magazine-mount (a \"door\" that ejects!), sight-mount. A turret: base-pivot, barrel-pivot, seat-anchor. A drawbridge, a crane, a robot, a vending machine (a door + a dispense-mount). Every articulated, multi-part, interactable thing in the game is a skeleton-template, and \"make a new kind of thing\" is \"declare a new template,\" which is data, which means anyone (including a forker of your engine) can define new thing-types without touching the engine. The endlessness is real because the template system is data-not-code at the level of object-kinds — you're not building vehicles and players and buildings as engine features, you're building a substrate for declaring what any kind of structured object is, and the kinds are content.",
+  "status": "new",
+  "sessionId": "20a1fa6b-3dc7-4e24-89e1-6e852ab7ba30",
+  "captureMode": "hook",
+  "events": []
+}

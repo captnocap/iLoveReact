@@ -1,0 +1,18 @@
+{
+  "id": "req_2254",
+  "at": "2026-06-30T22:26:46.649Z",
+  "origin": "session:cb4f264c",
+  "text": "nope but nice guesses. the first thing is to handle the control surface. this brought in vertex edge and face but i dont see that anywhere in any context menu controls at all. but i also see it as some ansilary button that sits right above this viewer that also does nothing. what does the document say about these",
+  "status": "doing",
+  "sessionId": "cb4f264c-64be-4007-adcf-354ef1537645",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T22:27:13.100Z",
+      "actor": "opus-editor",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

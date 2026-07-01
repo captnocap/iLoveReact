@@ -1,0 +1,18 @@
+{
+  "id": "req_2275",
+  "at": "2026-07-01T00:07:58.430Z",
+  "origin": "session:0a30633d",
+  "text": "You are going to create exactly this component @design_handoff_color_studio/ for @cart/editor/ following t he shape that is documentned in @cart/hmsc-workspace-mock/DESIGN_INTAKE.md for the matter. If you at any point are unsure of what to do you need to stop and make that clear rather than freestyle",
+  "status": "doing",
+  "sessionId": "0a30633d-7576-4069-96cf-0da5100a969a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T00:08:04.246Z",
+      "actor": "session-0a30",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

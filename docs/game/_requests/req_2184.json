@@ -1,0 +1,10 @@
+{
+  "id": "req_2184",
+  "at": "2026-06-30T10:51:32.303Z",
+  "origin": "session:a1184b2f",
+  "text": "da faq lol we cleared this all up and literally in a new thread i am getting this he 8 workstreams are queued as tasks with the right dependency edges (E ← A+D; shell ← B,C,A,F,G).\n  \n  The dispatch decision (your call)\n\n  You said spin up a host of workers. Two frictions I want you to decide on, not assume:\n\n  1. The repo bans the Agent/Task subagent (the vocabulary hook flags a ~57% false-claim rate on this codebase), and your established pattern\n  is the supervisor + worker kitty-pane setup. So the worker mechanism is yours to pick:",
+  "status": "new",
+  "sessionId": "a1184b2f-c069-43ed-8498-a7655b477140",
+  "captureMode": "hook",
+  "events": []
+}

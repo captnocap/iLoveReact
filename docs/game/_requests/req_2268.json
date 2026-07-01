@@ -1,0 +1,18 @@
+{
+  "id": "req_2268",
+  "at": "2026-06-30T23:58:55.058Z",
+  "origin": "session:986b717b",
+  "text": "Alright, now you know what im talking about, you want to start with the that to address since we already were headed that way",
+  "status": "doing",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T23:59:25.183Z",
+      "actor": "986b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

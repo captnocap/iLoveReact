@@ -1,0 +1,10 @@
+{
+  "id": "req_2208",
+  "at": "2026-06-30T12:39:08.548Z",
+  "origin": "session:20a1fa6b",
+  "text": "ok so the next slice is now to turn the mock components and add in the real systems. namely the very first thing to jump out was i said perf monitors in stat and i know they arnt in because this reads as 60 fps on my 240fps monitor",
+  "status": "new",
+  "sessionId": "20a1fa6b-3dc7-4e24-89e1-6e852ab7ba30",
+  "captureMode": "hook",
+  "events": []
+}

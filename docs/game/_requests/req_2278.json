@@ -1,0 +1,18 @@
+{
+  "id": "req_2278",
+  "at": "2026-07-01T00:40:56.401Z",
+  "origin": "session:cb4f264c",
+  "text": "yeah commit it just get er done and then we can do the next thing",
+  "status": "doing",
+  "sessionId": "cb4f264c-64be-4007-adcf-354ef1537645",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T00:42:00.360Z",
+      "actor": "opus-editor",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

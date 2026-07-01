@@ -1,0 +1,18 @@
+{
+  "id": "req_2273",
+  "at": "2026-07-01T00:03:11.975Z",
+  "origin": "session:ed911d78",
+  "text": "ok the live preview is nice except for lol when i go into vertex mode in some model all the models now start showing me their vertex xD",
+  "status": "doing",
+  "sessionId": "ed911d78-92e5-4ede-807c-fc39210b0efb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T00:03:46.132Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

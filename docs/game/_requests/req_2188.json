@@ -1,0 +1,30 @@
+{
+  "id": "req_2188",
+  "at": "2026-06-30T11:00:10.669Z",
+  "origin": "session:e0080e48",
+  "text": "can you make the vertex and edges more pronounced. the vertex are small and edges are white on a white model that loads in so its like a pain in my fkn ass to see anything",
+  "status": "review",
+  "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T11:01:00.680Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T11:05:59.747Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the edit-mode markers pronounced and fixed white-on-white. Two changes: (1) the scene3d wireframe was a fixed light-blue line that vanished on the light-grey default model; it's now ADAPTIVE per-fragment — a dark line over light surfaces, a light line over dark ones (luminance threshold biased low at 0.32 so the default model gets crisp dark edges). This is a strict improvement for every <Scene3D wireframe> user; the wire can no longer disappear into the surface. (2) Vertex dots are bigger and HALOED — every dot, edge highlight, and marquee line now draws twice (a dark disc/stroke under a bright fill) so it reads on a white model AND the dark void, which a single colour can't do. Unselected verts 8px white, selected 13px orange; selected edges 4px orange; marquee 2px; all with the dark halo (overlayDot/overlayLine helpers in 3d.zig). Built clean; headless RJIT_MESHMODE=1 shows bold dots over a clearly-dark wireframe. Live verifies in rjit dev.",
+  "shas": [
+    "5c5c98d61"
+  ],
+  "resolvedAt": "2026-06-30T11:05:59.747Z"
+}

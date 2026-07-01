@@ -1,0 +1,28 @@
+{
+  "id": "req_2167",
+  "at": "2026-06-30T09:25:15.984Z",
+  "origin": "codex:019f1624",
+  "text": "this is great menu. nice job. hey one thing it is exposing though and this is a framework problem is when that modal is open my clicks are still hitting the things behind all of it and thats a real problem to stab asap",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T09:25:31.592Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T09:33:13.301Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a framework-level blocksPointerEvents node prop so visual-only modal scrims can consume hit testing without no-op JS handlers. Wired it through V8 prop parsing/removal, layout/events hit tests, hover/right-click/scroll blocker paths, engine canvas/terminal fallback gating, hit diagnostics, and the hmsc workspace mock dialog scrim. Added a layout unit test proving an overlay beats an interactive sibling behind it. Verified with zig build test-layout and SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-workspace-mock.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T09:33:13.300Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2219",
+  "at": "2026-06-30T17:29:20.351Z",
+  "origin": "codex:019f1946",
+  "text": "lets do these as 1:1 aspect ratio display",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T17:29:34.326Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T17:32:58.204Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed the material browser previews to 1:1 square display: each tile is square, the shader/image/decal preview fills the square, and the material name is constrained to a small one-line bottom overlay. Kept the page at sixteen fixed slots and reduced the scrollable content tree height so the square grid and selected-material controls both remain visible.",
+  "shas": [
+    "4a979be6c"
+  ],
+  "resolvedAt": "2026-06-30T17:32:58.204Z"
+}

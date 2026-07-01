@@ -1,0 +1,30 @@
+{
+  "id": "req_2165",
+  "at": "2026-06-30T09:21:31.380Z",
+  "origin": "session:e0080e48",
+  "text": "keep it all native. no js in the loop. im already suspecting t he rect for the highlight is honestly going to eat shit because ive learned the lesson too many times now so honestly just go full native system",
+  "status": "review",
+  "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T09:23:14.330Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T09:40:54.021Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Full native model-editor input loop — no JS in the interaction loop and no React marquee rect (which would have stuttered). The host (engine.zig) now owns orbit (middle-drag), select + marquee (left, mode-dependent: pick on press, revert-to-marquee on drag, shift extends), wheel zoom, double-click focus, and Focus-tool pan, all behind r3d.meshEditCapturing() so every other cart and non-3D builds are untouched (stubs provided). meHitIsChrome gates left/wheel against the normal hitTest so toolbar buttons/sliders still dispatch; middle orbits anywhere. Exactly one JS callback (__meshEditSelChanged) fires per committed selection (on release, not per move) to refresh the count HUD off the hot path. New flags/getters in 3d.zig (setMeshEditCapture/FocusTool, meshEditModeRaw); doors __mesh_edit_capture/__mesh_edit_focus. The cart dropped the full input Pressable (now paint-only, mounted only in paint mode), the React marquee Box, and all per-event select/orbit JS + dead helpers; it only sets capture/mode/focus via doors and reads counts for the HUD. The native marquee RECTANGLE outline is deferred to the vertex/edge geometry-overlay pass (next slice); live face highlight is the sweep feedback today. Built clean, test-mesh-edit green, headless render shows the orange selected face. NOTE: wheel-zoom direction (event.wheel.y → orbitZoom) may need a sign flip — verify in dev.",
+  "shas": [
+    "c2fcd03f0"
+  ],
+  "resolvedAt": "2026-06-30T09:40:54.021Z"
+}

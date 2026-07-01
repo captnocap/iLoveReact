@@ -1,0 +1,10 @@
+{
+  "id": "req_2231",
+  "at": "2026-06-30T19:35:53.063Z",
+  "origin": "session:5b8beadc",
+  "text": "hey i have a dev server r unning right now. can u tell me what the memory footprint in total of that process is, im trying to get a read if the in-app monitor is giving real results or not",
+  "status": "new",
+  "sessionId": "5b8beadc-b5ed-4f00-825d-d6ff6f2e880b",
+  "captureMode": "hook",
+  "events": []
+}

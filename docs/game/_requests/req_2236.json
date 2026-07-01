@@ -1,0 +1,18 @@
+{
+  "id": "req_2236",
+  "at": "2026-06-30T19:44:37.719Z",
+  "origin": "session:ed911d78",
+  "text": "how do i move things around in here? [Image #2] not very user friendly from the current approach if the capability is truly there",
+  "status": "doing",
+  "sessionId": "ed911d78-92e5-4ede-807c-fc39210b0efb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T19:45:00.562Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

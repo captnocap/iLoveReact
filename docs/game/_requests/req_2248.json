@@ -1,0 +1,18 @@
+{
+  "id": "req_2248",
+  "at": "2026-06-30T21:31:37.696Z",
+  "origin": "session:cb4f264c",
+  "text": "sorry. before we go further heres a real bug that is now introduced that was not real in the standalone model demo we made before this. let me show you. so i can select many faces/verts/edges and they highlight right. ok so let me just show you one model where every single slide here im selecting EVERY single face, but it would say otherwise by the way its rendering. [Image #2] [Image #3] [Image #4] [Image #5] [Image #6] hit testing is completely off i can tell. its highlighting before my select even hits it [Image #7]",
+  "status": "doing",
+  "sessionId": "cb4f264c-64be-4007-adcf-354ef1537645",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T21:31:58.496Z",
+      "actor": "opus-editor",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

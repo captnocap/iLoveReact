@@ -1,0 +1,36 @@
+{
+  "id": "req_2239",
+  "at": "2026-06-30T19:47:18.362Z",
+  "origin": "session:986b717b",
+  "text": "hey in the editor your gonna fix this one for me its completely off its rocker. look here before i open a file menu [Image #2] and now after [Image #3] see where it rendered? literally nowhere under the file button",
+  "status": "review",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T19:47:28.822Z",
+      "actor": "986b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T19:53:59.234Z",
+      "actor": "986b",
+      "kind": "note",
+      "text": "Fixed: dropdown was mounted in the stage viewport so its absolute coords were stage-relative (mid-screen). Moved it to the app root as HW_App's last child (matches every other popover for paint order + hit-test), top under the chrome bar, left derived from real menu-bar geometry. Also removed SSOT kicker + 'capabilities'/wrench slop from the header. sha c7d2d2916"
+    },
+    {
+      "at": "2026-06-30T19:54:27.182Z",
+      "actor": "986b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The File/Edit/... menu dropdown rendered mid-screen because it was mounted inside the stage viewport, making its absolute left/top stage-relative, and menuDropdownLeft clamped against a hardcoded 1536 viewport width. Fixed by moving DropdownMenu to the app root as HW_App's last child (matching every other popover so it paints over the body and hit-tests its pressable rows correctly), setting top to sit flush under the 37px chrome bar, and deriving left from the real Chrome menu-bar geometry (padding + brand + per-item widths/gaps) so each menu's panel lands under its own button. Also removed the header slop: dropped the SSOT kicker, the 'capabilities' filler word, and the decorative wrench icon so the header just names the menu.",
+  "shas": [
+    "c7d2d2916"
+  ],
+  "resolvedAt": "2026-06-30T19:54:27.182Z"
+}

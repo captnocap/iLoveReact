@@ -1,0 +1,30 @@
+{
+  "id": "req_2225",
+  "at": "2026-06-30T18:02:01.538Z",
+  "origin": "codex:019f1946",
+  "text": "already doing huge difference, lets close this gap on the remaining 6 fps if we can but nice clean up so far [Image #1]",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T18:02:43.372Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T18:05:54.669Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Closed the remaining FPS gap by removing idle default-open Build/context surfaces behind the performance popover. The forced-open perf screenshot after cleanup reported a 4.1ms frame with paint around 0.3ms and layout around 0.6ms, effectively the 240fps budget.",
+  "shas": [
+    "9442bceea"
+  ],
+  "resolvedAt": "2026-06-30T18:05:54.669Z"
+}

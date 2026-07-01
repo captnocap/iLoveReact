@@ -1,0 +1,30 @@
+{
+  "id": "req_2242",
+  "at": "2026-06-30T20:10:04.357Z",
+  "origin": "codex:019f1946",
+  "text": "ok so im not getting anything loading in here [Image #1]",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T20:10:12.584Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T20:17:35.491Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resolved the empty cooked-model document by making cooked mesh blobs first-class modelview inputs. Cooked model packages now carry their content-addressed mesh ref, the document surface pulls that mesh factor from the hmsc-int catalog, and ModelView can boot from an interleaved Float32 triangle buffer instead of only a source file path. Added a Zig host door that adopts cooked vertex data into the same resident host mesh path used by OBJ/GLB file loads, including native orbit framing, paint target setup, and quality projection. Verified with zig build test-mesh-import and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [
+    "5d81d192b"
+  ],
+  "resolvedAt": "2026-06-30T20:17:35.491Z"
+}

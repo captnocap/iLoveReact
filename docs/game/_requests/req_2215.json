@@ -1,0 +1,30 @@
+{
+  "id": "req_2215",
+  "at": "2026-06-30T16:58:43.022Z",
+  "origin": "codex:019f1946",
+  "text": "ok the next things you are going to do are also very self explanitory, all the content browser assets are directly from existing data in hmsc-int, the way it is stored may be entirely wrong though. I am not talking about the typescript files that generate models. i am specifically talking about model data that is stored and texture data that is stored. as well, all existing shaders slot into here. Should not need much hand holding. do not be sloppy about porting the data either",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T16:58:55.071Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T17:15:15.940Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wired the editor content browser to real hmsc-int asset sources: stored model snapshots, cooked asset snapshots with mesh/texture refs, stored material/decal snapshots, texture files, and the canonical shader registry. Removed the generated mock material rows and fake vase/cd-player/ball model packages, and kept heavy blobs represented by compact refs/counts in the catalog UI.",
+  "shas": [
+    "11c10af42"
+  ],
+  "resolvedAt": "2026-06-30T17:15:15.940Z"
+}

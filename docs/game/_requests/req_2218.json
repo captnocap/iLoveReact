@@ -1,0 +1,30 @@
+{
+  "id": "req_2218",
+  "at": "2026-06-30T17:17:23.190Z",
+  "origin": "codex:019f1946",
+  "text": "ok we want to see real previews of our assets here and also you need to solve this problem with this wrapping that is fucking up everything here [Image #1] but let me show u this is what needs to be shown at minimum [Image #2]",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T17:17:39.168Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T17:32:58.195Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the material browser's wrapping row cards with fixed visual preview tiles backed by hmsc-int asset data: shader recipes/presets render real WGSL Effect previews, stored texture files render images, stored decals render DecalSurface docs, and cooked texture blobs resolve by hash without duplicating base64 into every row. Increased material paging to fixed visual slots and moved long row metadata into the selected-material controls so labels no longer wrap over neighboring content.",
+  "shas": [
+    "4a979be6c"
+  ],
+  "resolvedAt": "2026-06-30T17:32:58.195Z"
+}

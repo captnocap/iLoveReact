@@ -1,0 +1,28 @@
+{
+  "id": "req_2168",
+  "at": "2026-06-30T09:33:02.300Z",
+  "origin": "codex:019f1624",
+  "text": "ok and then so im looking at this content browser and i like it but lets set up this a bit more differently so that it slots into the architecture im looking to have. ideally, the exact behavior i want to have is i want to make a model / import a model. rig it up, and then when it comes to painting it i want to be able to store multiple versions of its textures for variations and decompositions of the model for LoD and breaking the model up for explosions etc. so i see something where there is a models folder, every model has its own directory. inside of that directory for the model is its data, and then there is a texture atlas for the model, and a texture atlas for every model decomp we store and then for that atlas we have paint that is applied and can be stored however many times over so i can have for example a ball, and that ball can be painted a million different ways and all those paintings live inside of that one models folder. now lets not confuse this with global textures like that which come from shaders or images. these are less model specific and are generally applied. however, if lets say in a painting i use a shader for part of it, that shader code reference is then stored with all the same data. so its all in one home and effectively i could copy the entire folder for the one model and have all my basis covered end to end. something like:\n\n-models/\n--props/\n---wip/...\n---vase/...\n---cd_player/...",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T09:33:13.401Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T09:39:05.802Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the hmsc workspace mock content browser around model-owned asset homes. Added a Models tree branch with /models/props/wip, /models/props/vase, /models/props/cd_player, and /models/props/wip/ball style mock packages. Each model package now owns source mesh, rig data, manifest, decompositions, atlas sets, paint variants, and captured shader/image references, while the existing material catalog is renamed Global Materials and remains separate. Added interactive model home/detail views with clickable folder, contract, atlas, paint, reference, painter, and save-variant actions; updated build notes/thread metadata; added classifiers for the model browser surface. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-workspace-mock.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T09:39:05.802Z"
+}

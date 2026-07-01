@@ -1,0 +1,10 @@
+{
+  "id": "req_2209",
+  "at": "2026-06-30T12:44:15.958Z",
+  "origin": "session:20a1fa6b",
+  "text": "this is half-way done, dont half ass it, right next to these same numbers is an average and the average is hardcoded to 11.2 when im getting sub 3",
+  "status": "new",
+  "sessionId": "20a1fa6b-3dc7-4e24-89e1-6e852ab7ba30",
+  "captureMode": "hook",
+  "events": []
+}

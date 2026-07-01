@@ -1,0 +1,18 @@
+{
+  "id": "req_2241",
+  "at": "2026-06-30T19:59:45.378Z",
+  "origin": "session:ed911d78",
+  "text": "sorry wasnt the document also very clear that i do not want to do this whole review nonsense anymore?",
+  "status": "doing",
+  "sessionId": "ed911d78-92e5-4ede-807c-fc39210b0efb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T20:00:40.651Z",
+      "actor": "claude",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

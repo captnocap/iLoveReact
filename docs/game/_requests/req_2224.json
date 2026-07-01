@@ -1,0 +1,30 @@
+{
+  "id": "req_2224",
+  "at": "2026-06-30T17:57:01.910Z",
+  "origin": "codex:019f1946",
+  "text": "top consumers needs a scroll container. but heres some numbers to chase [Image #1] we need to be at 240fps flat before we can do anything else",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T17:57:33.010Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T18:05:54.659Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made Top Consumers scrollable and retained peak consumers since reset, so a large paint spike remains visible at the top after the next telemetry poll. Also cached the diagnostic text surfaces and asset previews to cut glyph/paint pressure.",
+  "shas": [
+    "9442bceea"
+  ],
+  "resolvedAt": "2026-06-30T18:05:54.659Z"
+}

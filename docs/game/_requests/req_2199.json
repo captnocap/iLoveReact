@@ -3,7 +3,7 @@
   "at": "2026-06-30T12:08:22.831Z",
   "origin": "codex:019f184d",
   "text": "ok next thing to implement is safety guards for concave face edits and ask if the user wants to split quads and all the like as the studio mesh editor has now, as well you can with this implement edge controls like create face from edges, or extrude",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f184d-ba5d-7542-84c9-bf3b385705e3",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-06-30T12:21:00.551Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Implemented host-native modelview safety guards and edge topology tools: gizmo drags now snapshot mesh positions, detect collapsed/flipped triangle edits on release, and surface Split Quads / Ignore / Revert in the cart; edge mode now supports deterministic edge selection, extrude-one-edge, and create-face from two disjoint edges or closed 3/4-edge loops, remounting a new retained host mesh key while carrying paint colors/source geometry forward. Verified with zig build test-mesh-edit, zig build test-model-paint, SHIP_RUN_PACKAGE=0 ./tools/rjit ship modelview, plus headless shots shots/edge_extrude.png and shots/edge_create_face.png.",
+  "shas": [
+    "5f653fd4f"
+  ],
+  "resolvedAt": "2026-06-30T12:21:00.551Z"
 }

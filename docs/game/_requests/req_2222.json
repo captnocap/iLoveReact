@@ -1,0 +1,30 @@
+{
+  "id": "req_2222",
+  "at": "2026-06-30T17:50:57.710Z",
+  "origin": "codex:019f1946",
+  "text": "oh here it is. i jsut saw a paint at 163ms. this perf monitor i need you to surface the highest consumers to the top of the list not just anywhere in the list i didnt see the 163 til scrolling down",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T17:51:09.303Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T18:05:54.646Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed the FPS performance popover to compute a single ranked Top Consumers feed instead of burying spikes in separate lists. It now ranks frame buckets, secondary signals, React render churn, effect churn, draw pressure, visible node pressure, static captures, and glyph/rect pressure by score.",
+  "shas": [
+    "9442bceea"
+  ],
+  "resolvedAt": "2026-06-30T18:05:54.645Z"
+}

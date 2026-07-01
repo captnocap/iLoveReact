@@ -1,0 +1,30 @@
+{
+  "id": "req_2183",
+  "at": "2026-06-30T10:44:49.604Z",
+  "origin": "session:e0080e48",
+  "text": "the one thing i dont like so much is i am able to click on edges i cant even see (they are on the other side of a model) and same for verts",
+  "status": "review",
+  "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T10:46:19.316Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T10:49:57.386Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Occlusion-aware vertex/edge picking — you can no longer click a vertex or edge on the far side of the model that you can't see. Root cause: pickVertex/pickEdge were pure screen-nearest projections, blind to whether the surface hid the element. Added model_paint.occluded(cam, p): casts a ray from the eye to p and returns hidden when a FRONT-facing triangle lies in front of it (the renderer culls back faces, so only front faces visibly occlude; a scale-relative eps tolerates a vertex sitting on its own incident faces). pickVertex tests the vertex point, pickEdge tests the edge midpoint, and both run the test only for in-radius candidates that beat the current best, so a click costs just a handful of O(faces) raycasts (same order as a paint dab, never per-frame) — no fps regression. Unit-tested in model_paint (point behind a front face = occluded; on-surface and in-front = visible); both test-model-paint and test-mesh-edit green; built clean; render unchanged (dots still show back verts faintly, Blockbench-style — you SEE them but only pick visible ones). KNOWN: the live marquee still selects through hidden elements (kept fast; per-move occlusion would raycast every boxed element each move) — can add occlusion-on-release if the user wants marquee to match.",
+  "shas": [
+    "8985a54b1"
+  ],
+  "resolvedAt": "2026-06-30T10:49:57.386Z"
+}

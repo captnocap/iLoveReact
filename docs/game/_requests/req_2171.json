@@ -1,0 +1,28 @@
+{
+  "id": "req_2171",
+  "at": "2026-06-30T09:56:34.772Z",
+  "origin": "codex:019f1624",
+  "text": "a validation script that can enforce that menus and content is always reachable and isnt doing some jank ass wrap or missing a scroll container or what have you. the screens i showed you are good because im on the nose about it but the way i think about layout already is from a standpoint that everything is predetermined and has a fixed size even at runtime. thats just ideally how i think that building a ui is coherent. by that i mean for example i know a gutter is 420 px wide, and i know that percentages and flex have precise calculations against other constraints of style within the exact same set of nested elements, and even runtime data is going to load in a fixed component so ideally this is all verifiable at my breakpoint before i ever even open it to look at it",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T09:56:43.780Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T10:04:44.375Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a V8-backed TS layout validation gate for hmsc-workspace-mock and fixed the concrete issues it caught: menu dropdown positioning is clamped against the fixed editor stage, clipped browser/journal/history/file-tree panels declare scroll reachability, and the Color Studio preview grid now fits its fixed container. Verification passed with tools/validate-hmsc-workspace-layout, tools/tsc-check hmsc-workspace-mock, and SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-workspace-mock.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T10:04:44.375Z"
+}

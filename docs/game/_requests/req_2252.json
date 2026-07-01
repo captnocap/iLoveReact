@@ -1,0 +1,30 @@
+{
+  "id": "req_2252",
+  "at": "2026-06-30T22:22:36.940Z",
+  "origin": "codex:019f1946",
+  "text": "ok most of them are opening the model view but not all why doesnt this? [Image #1]",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T22:22:50.648Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T22:26:02.262Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resolved the model tab fallback for saved Studio models such as m4a1. These were sourceKind=studio-model records from model.snapshot, not cooked mesh blobs or OBJ/GLB source files, so the editor only displayed metadata. The catalog now lowers StoredPart.mesh data through the existing editMeshToGeometry path into an interleaved triangle buffer, and ModelDocumentSurface mounts ModelView for studio-model tabs via the same host __mesh_load_vertices viewer door used by cooked assets. If a saved model has no part geometry, the tab now reports MODEL PART GEOMETRY MISSING instead of silently showing the metadata fallback.",
+  "shas": [
+    "40b818998"
+  ],
+  "resolvedAt": "2026-06-30T22:26:02.262Z"
+}

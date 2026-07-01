@@ -1,0 +1,30 @@
+{
+  "id": "req_2228",
+  "at": "2026-06-30T19:23:19.912Z",
+  "origin": "codex:019f1946",
+  "text": "so the app has been sitting idle for about 30 minutes or so and my memory is just climbing. its now at 1.37g from where it was when i first looked. The next step is to just like the performance logs we need a breakdown of what is accumulating memory here",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T19:23:33.521Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T19:30:35.458Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added memory accumulation instrumentation to the editor performance dock: system telemetry now exposes process RSS high-water, anonymous/file/shared resident splits, VM data/stack/lib/swap, and thread count from /proc/self/status. The FPS/performance popover now includes a resettable memory accumulation section ranked by growth since reset, feeds memory rows into top consumers, and the dock MEM readout opens the same diagnostics surface.",
+  "shas": [
+    "0147d5393"
+  ],
+  "resolvedAt": "2026-06-30T19:30:35.458Z"
+}

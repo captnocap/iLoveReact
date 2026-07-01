@@ -1,0 +1,30 @@
+{
+  "id": "req_2214",
+  "at": "2026-06-30T16:48:47.565Z",
+  "origin": "codex:019f1946",
+  "text": "change up how this registers, it should be how you resolve a request is the build note. not my request itself. my request is effectively a 'bug report' or 'feature request' and these are the delivery of those",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T16:48:59.615Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T16:52:23.978Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed the build journal registration contract so a build note is created only from a resolved request delivery, not from the user's ask text. Runtime BuildJournal.ingestRequest now skips entries without a resolution, batch ingest filters unresolved asks, and tests lock that open bug/feature requests cannot advance latestBuildNumber. The editor snapshot now collects recent delivered entries only, derives the dock build from the newest delivered request, titles/body text from the resolution, and shows the original request separately as context.",
+  "shas": [
+    "5f472e82f"
+  ],
+  "resolvedAt": "2026-06-30T16:52:23.978Z"
+}

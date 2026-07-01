@@ -1,0 +1,28 @@
+{
+  "id": "req_2170",
+  "at": "2026-06-30T09:48:27.955Z",
+  "origin": "codex:019f1624",
+  "text": "design decision: let me spitball an idea to you i have had rolling in my head honestly for the last few weeks. and mainly ive been trying to think of how to frame it and it just clicked. so, you know how fortnite the game was save the world and then the BR was a side hustle that released early (which, became the actual game), well ive been thinking because of how well positioned this whole architecture is, i have been chewing on the idea of releasing a 'nogame' version where people could start tinkering around, build their own things ontop of what ive already made, and i still continue to work on my game like that of fortnite. the interesting part is that i would be making tooling for myself already, that others can get as regular updates, and then eventually i could deliver the game as a game to load into the loader. and since the loader is agnostic the way it is, it lets others build their own games already. also 'funny' or whatever u want to call it fact of the matter is, i effectively am kinda already doing this, because the entire app is all in my reactjit commits which are still regular so its already technically out there as a opensource game engine Which is why i would honestly just humbly put it out there. heres a new game engine. its a bit different than what your use to. its still heavily under development. its all ai development but real game content authoring, and its not being made for the sake of trying to get a leg in the door at the next unity or whatever, genuinely i already got here from shitposting trying to put a react app in a monitor in cs_office and have now spent half a year on reactjit from that which is only getting better and better quality as time goes on and im not expecting anyone to pay me anything but if u like what u see, take a stab at it. i think the one thing that hits is for what its worth it looks a lot like roblox right now, and people instantly connect with that look. its like minecraft in a sense. right so the interesting part is exactly what ive been converging on in the last few hours is, im going from roblox engine to roblox engine that somehow can also place a model that looks straight out of gta 5. right, its actually more in line with what i would say is like gmod but gmod was everything all in different programs and actual programming. this is not. i dont know how to program. i can click and i know when shit fucking sucks and i dont get hurt by it if anything its just encouraging to know what the better approach is  the one thing that is grounding for me is that i have some wild ideas that do and do not pan out. surprisingly some of the ones ive made with the game have panned out way better than could even expect and a lot of them just come from learning about one thing, kinda nerding out on it and seeing how much i can push it. thats how the entire game engine came to be was that i learned a tad bit about RLE and then took it to 100 and if it would have sucked i would be fine with that. and i have learned things that rle does suck for. like, dithering. lol. rle fucking hates dithering when storing pixel data. thats one i havent figured out a fix for but i will soonyeah well i was thinking and this was after watching a video from andrew kelley about memory and well ok so rather than store dithered pixel data store normal pixel data, store the dithering variables but build pixel dithering into the engine as a data format that can be consumed to run a function on that texture\n\nbranding: change from 'hmsc-int' to my shitty game engine. instead of world editor in the corner its Shitty Games",
+  "status": "review",
+  "sessionId": "019f1624-8b9e-7341-ac0a-b9702c6a42f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T09:48:37.154Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T09:54:58.742Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured the Shitty Games/nogame platform framing in the design intake, added a build-journal note/thread for the engine-first release direction, changed the mock chrome brand from WORLD EDITOR to SHITTY GAMES, and updated the cart description to reflect the interactive Shitty Games editor workspace. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship hmsc-workspace-mock.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T09:54:58.742Z"
+}

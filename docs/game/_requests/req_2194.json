@@ -1,0 +1,28 @@
+{
+  "id": "req_2194",
+  "at": "2026-06-30T11:29:54.692Z",
+  "origin": "session:e0080e48",
+  "text": "nice job. pass a /hand-over and the next thing from here is going to be reshaping these with the gizmo tool. pulling and bending shit. nice job",
+  "status": "review",
+  "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T11:30:25.771Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T11:32:22.810Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote the continuation handoff for the next session, preserving lineage from the inbound handoff that started this session (original_conversation_id 47bb26c9 unchanged; appended session e008 to the chain). The handoff packages the GIZMO task — reshape the mesh by pulling/bending via move/resize/rotate handles — as a fresh imperative brief: the goal (verbatim user ask), full state of everything shipped this session (camera focus, host-native vert/edge/face selection, real-time pick, marquee, fully-native input loop, overlay markers, occlusion, pronounced dots/wireframe — all SHAs listed and in review), the exact build steps reusing the capsule-overlay + native-input patterns, the one genuinely new piece (vertex-position mutation + incremental geometry re-upload, contrasted with the paint color-only path), files in play, gotchas (keep mesh_edit GPU-free, no JS in the drag loop, don't regress fps), the layer-model work that comes after (req_2147), and the report-back contract. File: /tmp/handoff-20260630-113036-modelview-gizmo-reshape-mesh-by-pulling-bending.md.",
+  "shas": [],
+  "resolvedAt": "2026-06-30T11:32:22.810Z"
+}

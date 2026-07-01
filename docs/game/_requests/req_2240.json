@@ -1,0 +1,30 @@
+{
+  "id": "req_2240",
+  "at": "2026-06-30T19:57:01.187Z",
+  "origin": "codex:019f1946",
+  "text": "Alright the next slice is, so there is the cart/modelview.tsx which was the incubation for the remake of the studio. what needs to happen is this, for starters, when clicking on a model in the content browser i want to see a new tab open up, the model loaded into this viewer",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T19:57:13.348Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T20:09:25.064Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Resolved by turning model packages with real viewer-loadable source paths into document-tab targets: ModelView now accepts an initial path/title for embedding, the editor model document surface renders that viewer for file-backed model packages, and the hmsc-int catalog exposes existing .glb/.obj data from imported props plus loose source model files such as Desk.glb and car.obj. Existing Studio snapshot documents still open StudioEditor, while cooked/indexed records remain on the metadata surface until a host loader exists for cooked mesh blobs. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [
+    "5e86e5481"
+  ],
+  "resolvedAt": "2026-06-30T20:09:25.064Z"
+}

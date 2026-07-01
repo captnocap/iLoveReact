@@ -1,0 +1,10 @@
+{
+  "id": "req_2212",
+  "at": "2026-06-30T12:58:31.683Z",
+  "origin": "session:20a1fa6b",
+  "text": "<task-notification>\n<task-id>batoo9gbg</task-id>\n<tool-use-id>toolu_01WguD9j8GmYdFJBd59MRhwR</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/47bb26c9-be86-45cb-8d46-c3abbc60ea02/tasks/batoo9gbg.output</output-file>\n<status>completed</status>\n<summary>Background command \"Ship + shot the real-telemetry dock\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "20a1fa6b-3dc7-4e24-89e1-6e852ab7ba30",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2173",
+  "at": "2026-06-30T09:59:21.824Z",
+  "origin": "session:e0080e48",
+  "text": "oh that worked fucking beautifully. like a hot knife to butter. alright lets get those vertex dots and edge selections in next :D",
+  "status": "review",
+  "sessionId": "e0080e48-21c0-46eb-b60b-81d3744a4c24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T10:00:25.661Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T10:12:02.895Z",
+      "actor": "e008",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Vertex dots + edge-highlight overlay + the native marquee rectangle (deferred from the input-loop slice). All three are drawn as screen-space capsules projected with the EXACT render camera, so each dot/line sits on the pixel its raycast shoots back through — pixel-locked at any zoom, the property the old JS overlay lacked. Capsules ride the existing 2D draw-command z-order, so emitting them right after the Scene3D composite (engine.zig drawEditorOverlay call) lands them on top with no new pipeline and no depth fight (draw-on-top is the Blockbench edit-mode convention). Vertex mode draws every vertex as a dot (selected orange+bigger, capped at 80k beyond which only selected draw — fps guard, wireframe still shows topology); edge mode highlights selected edges as orange lines over the wireframe; the marquee box outline now draws live during a left drag-select. The emit lives in 3d.zig because it needs the GPU/capsule module; mesh_edit stays GPU-free with plain read accessors (vertPosPub/vertSelectedPub/edgeEndpointsPub/edgeSelectedPub/ensureTopologyPub) so its topology+selection logic remains unit-testable without wgpu — that split is why test-mesh-edit still passes after the refactor. Built clean; headless RJIT_MESHMODE=1 shows dots at every vertex. Live feel verifies in rjit dev.",
+  "shas": [
+    "827aa8405"
+  ],
+  "resolvedAt": "2026-06-30T10:12:02.895Z"
+}

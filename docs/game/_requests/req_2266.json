@@ -1,0 +1,10 @@
+{
+  "id": "req_2266",
+  "at": "2026-06-30T23:53:35.694Z",
+  "origin": "session:986b717b",
+  "text": "well, codex was the one literally writing that file so thats why its a bit annoying. gather up all the requests before and after that by a quanity of +/- 5 in each direction and validate against the document",
+  "status": "new",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": []
+}

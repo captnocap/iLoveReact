@@ -1,0 +1,30 @@
+{
+  "id": "req_2243",
+  "at": "2026-06-30T20:11:34.606Z",
+  "origin": "codex:019f1946",
+  "text": "Yeah let me clarify, after an obj or glb or anything of the like is imported into here, its no longer that model. thats all just data of ours and thats nothing different from these same models that should render in the same viewer all the same. its just triangles",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T20:11:47.735Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T20:17:35.507Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the clarified model identity rule: after import/cook, the viewer treats the asset as our engine-owned triangle data, not as its original OBJ/GLB file. Added a tested mesh_import.fromInterleaved helper and __mesh_load_vertices host binding so cooked interleaved vertices become the same resident modelview hostKey as file imports. The editor now opens cooked content-browser assets like big_ass_sign in ModelView from their mesh blob data. Verified with zig build test-mesh-import and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [
+    "5d81d192b"
+  ],
+  "resolvedAt": "2026-06-30T20:17:35.507Z"
+}

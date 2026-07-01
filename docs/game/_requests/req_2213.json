@@ -1,0 +1,30 @@
+{
+  "id": "req_2213",
+  "at": "2026-06-30T16:29:25.332Z",
+  "origin": "codex:019f1946",
+  "text": "ok lets instrument the build versioning im still seeing it full of mock data",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T16:29:40.081Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T16:34:35.439Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Replaced the editor build-journal fixtures with a live snapshot loaded from docs/game/_requests. The bottom dock and build journal dialog now derive the active build from the newest request id, render recent real ledger entries with their actual status/origin/event metadata, and show an honest empty state for bug threads when no live thread links exist. Verified ship, screenshot, stale-string scan, and runtime buildjournal tests.",
+  "shas": [
+    "cf01f4507"
+  ],
+  "resolvedAt": "2026-06-30T16:34:35.439Z"
+}

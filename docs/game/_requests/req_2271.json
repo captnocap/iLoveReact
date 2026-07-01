@@ -1,0 +1,10 @@
+{
+  "id": "req_2271",
+  "at": "2026-07-01T00:02:14.154Z",
+  "origin": "session:cb4f264c",
+  "text": "ok great uh now that right click menu, can we have it land where the cursor is? i didnt notice til now but it just renders dead center",
+  "status": "new",
+  "sessionId": "cb4f264c-64be-4007-adcf-354ef1537645",
+  "captureMode": "hook",
+  "events": []
+}

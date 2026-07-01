@@ -1,0 +1,30 @@
+{
+  "id": "req_2217",
+  "at": "2026-06-30T17:03:35.196Z",
+  "origin": "codex:019f1946",
+  "text": "The thing that is a bit convoluted about the data is they all say prop because they all could only be assigned as prop as far as that interface got. but in that there are build pieces like walls and floor pieces and doors that are arguably not props at all",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T17:03:45.371Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T17:15:16.277Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added semantic classification above the transitional cooked-asset kind field so assets that were stored as kind=prop can still appear as build pieces when their names/descriptors indicate walls, floors, doors, windows, fences, stairs, pillars, or signs. Build-piece model homes now land under /Game/Models/Build Pieces instead of being flattened into Props.",
+  "shas": [
+    "11c10af42"
+  ],
+  "resolvedAt": "2026-06-30T17:15:16.277Z"
+}

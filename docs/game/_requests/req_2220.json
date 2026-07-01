@@ -1,0 +1,30 @@
+{
+  "id": "req_2220",
+  "at": "2026-06-30T17:32:23.906Z",
+  "origin": "codex:019f1946",
+  "text": "Alright, so lets drop back down to the performance indicators in the bottom dock and when i click on fps i want to get a popover that gives me a readout of what is causing churn, this means we need instrumentation on everything. What is re-rendering, what is causing performance loss",
+  "status": "review",
+  "sessionId": "019f1946-75af-7620-a00d-c83448b2ff68",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-30T17:32:38.902Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-30T17:42:42.739Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a clickable FPS performance diagnostics surface to the editor bottom dock. The FPS readout now opens a churn popover that combines real host frame buckets, GPU/node pressure, host mutation flush telemetry, React region render probes, and hook/effect churn. Added runtime RenderProbe aggregation via React Profiler for editor regions and exposed existing host-flush telemetry through useTelemetry, while keeping polling to the mounted popover/dock rather than per-frame logs.",
+  "shas": [
+    "fcdf52c03"
+  ],
+  "resolvedAt": "2026-06-30T17:42:42.739Z"
+}
