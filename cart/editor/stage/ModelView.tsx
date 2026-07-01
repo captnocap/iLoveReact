@@ -64,7 +64,10 @@ export type ModelViewInitialMesh = {
 // brushTool: 'fill' (per-face flood) · 'brush' (free-form disc). safety: 0 clip · 1 lock.
 // detail: 1 fill-only · 8/16/32 free-form texels/face. brush/palette: the shared kit model,
 // mirrored out so the editor's BrushKit dock is a controlled view of the viewer's brush.
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette };
+// litFlat/Key/Fill: the viewer light-rig switches, mirrored out so the editor's View menu +
+// right-click flyout can host + highlight them.
+export type LightId = 'flat' | 'key' | 'fill';
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean };
 // The handlers the viewer owns, handed out so an external surface can invoke
 // them. Same functions the floating buttons and hotkeys call — one owner, no
 // split-brain: the shell remote-controls; the viewer stays the source of truth.
@@ -87,6 +90,8 @@ export type ModelToolApi = {
   cycleDetail: () => void;
   setBrush: (b: Brush) => void;
   setPalette: (p: Palette) => void;
+  // Light-rig switches — flip a light on/off (Flat is the even paint-true master).
+  toggleLight: (which: LightId) => void;
 };
 export type ModelViewProps = {
   initialPath?: string;
@@ -270,6 +275,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
   const [palette, setPalette] = useState<Palette>(() => defaultPalette());
   const [safety, setSafety] = useState(0); // 0 clip · 1 lock
   const [detail, setDetail] = useState(1); // 1 fill-only · 8/16/32 free-form texels/face
+  // Light rig — flip via the View menu / right-click Lighting flyout. Flat = even paint-true
+  // light (no shading); otherwise a neutral ambient + a single Key directional, and Fill raises
+  // ambient so the orbited-away side isn't black. (The shader supports one directional + ambient.)
+  const [litFlat, setLitFlat] = useState(false);
+  const [litKey, setLitKey] = useState(true);
+  const [litFill, setLitFill] = useState(true);
   const [quality, setQuality] = useState(1); // slider 0..1; 1 = full detail on load
   // Attribution: the shared ledger + the current model's entry + the panel toggle.
   const [ledger, setLedger] = useState<Ledger>(() => loadLedger());
@@ -404,28 +415,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     cycleDetail,
     setBrush,
     setPalette,
+    toggleLight: (which) => {
+      if (which === 'flat') setLitFlat((v) => !v);
+      else if (which === 'key') setLitKey((v) => !v);
+      else setLitFill((v) => !v);
+    },
   };
+  // Hand the LIVE api object straight to the editor, re-registering every render. The old
+  // approach registered a one-shot wrapper that hand-listed every method — a duplicate list
+  // that silently drifted, so a method on the real api (toggleLight) missing from the wrapper
+  // made the editor call "X is not a function". Registering the real object can't drift.
+  // onModelToolApi only stores a ref, so this is a cheap assignment with no re-render.
+  useEffect(() => { onToolApi?.(toolApiRef.current!); });
   useEffect(() => {
-    onToolApi?.({
-      selMode: (m) => toolApiRef.current?.selMode(m),
-      gizmo: (t) => toolApiRef.current?.gizmo(t),
-      paint: () => toolApiRef.current?.paint(),
-      focus: () => toolApiRef.current?.focus(),
-      wire: () => toolApiRef.current?.wire(),
-      extrudeEdge: () => toolApiRef.current?.extrudeEdge(),
-      createFace: () => toolApiRef.current?.createFace(),
-      loopCut: () => toolApiRef.current?.loopCut(),
-      setQuality: (q) => toolApiRef.current?.setQuality(q),
-      brushTool: (t) => toolApiRef.current?.brushTool(t),
-      cycleSafety: () => toolApiRef.current?.cycleSafety(),
-      cycleDetail: () => toolApiRef.current?.cycleDetail(),
-      setBrush: (b) => toolApiRef.current?.setBrush(b),
-      setPalette: (p) => toolApiRef.current?.setPalette(p),
-    });
-  }, []);
-  useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette });
-  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill });
+  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill]);
 
   // W = wireframe, P = paint, F = focus, 1/2/3 = vertex/edge/face, Esc = clear/back to view.
   useModifiers({
@@ -611,8 +615,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
         <Scene3D.Camera orbit fov={50} />
         {/* A clean object-viewer wants no distance fade. */}
         <Scene3D.Fog enabled={false} />
-        <Scene3D.AmbientLight color="#6b7488" intensity={1.0} />
-        <Scene3D.DirectionalLight direction={[-0.5, -0.9, -0.4]} color="#ffffff" intensity={1.7} />
+        {/* Light rig — neutral WHITE ambient so painted colours read true (the old bluish
+            ambient tinted them). The shader supports ONE directional + ambient, so the switches
+            map to what actually changes the render: Flat = bright even ambient (no shading,
+            paint-true); Key = the single directional; Fill = raise ambient so the orbited-away
+            side lifts out of black. Flipped from the View menu / right-click Lighting flyout. */}
+        <Scene3D.AmbientLight color="#ffffff" intensity={litFlat ? 2.1 : (litFill ? 1.3 : 0.7)} />
+        {!litFlat && litKey ? <Scene3D.DirectionalLight direction={[-0.5, -0.8, -0.5]} color="#ffffff" intensity={1.3} /> : null}
         {/* White material: all colour comes from the host's per-face paint atlas
             (default grey until painted), so painted colours render true. */}
         {model && <Scene3D.Mesh hostKey={model.key} material="#ffffff" />}
