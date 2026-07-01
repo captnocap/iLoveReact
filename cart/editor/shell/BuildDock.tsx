@@ -3,7 +3,7 @@ import { useTelemetry } from '../../../runtime/hooks/useTelemetry';
 import { C, accentFor } from '../workspace.cls';
 import { editTelemetry, formatMs } from '../data/telemetry';
 import { selectedObject } from '../data/content';
-import { formatBytes, formatCount, formatMeters, selectionPosition, snapReadout, validationReadout } from '../data/readouts';
+import { formatBytes, formatCount, formatMeters, selectionPosition, snapReadout } from '../data/readouts';
 import type { BuildJournalSnapshot, EditorState } from '../data/types';
 
 export default function BuildDock({
@@ -30,7 +30,6 @@ export default function BuildDock({
   const activeObject = selectedObject(state);
   const position = selectionPosition(state, activeObject);
   const snap = snapReadout(state);
-  const validation = validationReadout(state);
   // Real host telemetry — polled at 2Hz (cheap; never per-frame). Empty sources
   // render as 0/— instead of seeded historical data.
   const { value: fps } = useTelemetry({ kind: 'fps', pollMs: 500 });
@@ -48,17 +47,6 @@ export default function BuildDock({
         <C.HW_DockValue>{journal.activeBuild}</C.HW_DockValue>
         <Icon name="CircleCheck" size={15} color={accentFor('success')} />
       </C.HW_DockBuild>
-      <C.HW_DockDivider />
-      <C.HW_DockGroup>
-        <Icon name={validation.errors === 0 ? 'CircleCheck' : 'TriangleAlert'} size={12} color={accentFor(validation.errors === 0 ? 'success' : 'error')} />
-        <C.HW_DockLabel>ERR</C.HW_DockLabel>
-        <C.HW_DockValue>{validation.errors}</C.HW_DockValue>
-      </C.HW_DockGroup>
-      <C.HW_DockGroup>
-        <Icon name="TriangleAlert" size={12} color={accentFor(validation.warnings === 0 ? 'textFaint' : 'warning')} />
-        <C.HW_DockLabel>WARN</C.HW_DockLabel>
-        <C.HW_DockValue>{validation.warnings}</C.HW_DockValue>
-      </C.HW_DockGroup>
       <C.HW_DockDivider />
       <C.HW_DockGroup>
         <C.HW_DockLabel>POS</C.HW_DockLabel>

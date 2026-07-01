@@ -1,21 +1,15 @@
 import { selectedObject } from './content';
 import type { EditorState, WorldObject } from './types';
 
-export type ValidationReadout = {
-  errors: number;
-  warnings: number;
-};
-
 export type MissionCounts = {
   triggers: number;
   points: number;
 };
 
-export function validationReadout(_state: EditorState): ValidationReadout {
-  // No compile/validation run is wired into this cart yet. Report the honest
-  // empty result instead of carrying old mock warnings forward.
-  return { errors: 0, warnings: 0 };
-}
+// No standing ERR/WARN tally exists here on purpose: the only real validator is the
+// mesh-edit guard, a contextual "live with it or revert now" alert you resolve at the
+// moment it fires — not something that accumulates into a counter. A permanently-0 badge
+// was theater, so it (and validationReadout) were removed (req_2417/req_2418).
 
 export function buildStatusLabel(state: EditorState): string {
   return state.history.some((event) => event.undoable) ? 'dirty' : 'unbuilt';
