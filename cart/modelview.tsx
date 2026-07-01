@@ -246,6 +246,26 @@ const DETAIL_LEVELS = [8, 16, 32] as const;
 // (~size 96) covers a whole patch at any detail; the disc clips to the triangle regardless.
 const brushRadius = (size: number, detail: number) => Math.max(0.6, (size / 96) * detail);
 
+// One light switch — a labelled on/off chip. Dimmed + inert when `disabled` (e.g. Key/Fill/Rim
+// under Flat, where directional lights don't apply).
+function LightSwitch(props: { label: string; on: boolean; onToggle: () => void; disabled?: boolean }) {
+  const active = props.on && !props.disabled;
+  return (
+    <Pressable
+      onPress={props.disabled ? undefined : props.onToggle}
+      tooltip={`Toggle ${props.label} light`}
+      style={{
+        paddingLeft: 9, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 5,
+        backgroundColor: active ? '#2a466e' : '#16233aee',
+        borderWidth: 1, borderColor: active ? '#5a86c0' : '#2c4a6a',
+        opacity: props.disabled ? 0.4 : 1,
+      }}
+    >
+      <Text style={{ color: active ? '#eaf2ff' : '#cfe0f5', fontSize: 11, fontWeight: 700 }}>{props.label}</Text>
+    </Pressable>
+  );
+}
+
 export default function ModelView({ initialPath, initialTitle, initialMesh, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState }: ModelViewProps = {}) {
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -265,6 +285,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
   const [safety, setSafety] = useState(0); // 0 clip · 1 lock
   const [detail, setDetail] = useState(1); // 1 fill-only · 8/16/32 free-form texels/face
   const [quality, setQuality] = useState(1); // slider 0..1; 1 = full detail on load
+  // Light rig for the viewer — the light switches. `flat` = pure even white light (true
+  // painted colours, no shading — the paint-true mode); otherwise a neutral ambient plus
+  // toggleable key / fill / rim so the far side is never the dark side of the moon.
+  const [litFlat, setLitFlat] = useState(false);
+  const [litKey, setLitKey] = useState(true);
+  const [litFill, setLitFill] = useState(true);
+  const [litRim, setLitRim] = useState(false);
   // Attribution: the shared ledger + the current model's entry + the panel toggle.
   const [ledger, setLedger] = useState<Ledger>(() => loadLedger());
   const [attribution, setAttribution] = useState<Attribution | null>(null);
@@ -605,8 +632,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
         <Scene3D.Camera orbit fov={50} />
         {/* A clean object-viewer wants no distance fade. */}
         <Scene3D.Fog enabled={false} />
-        <Scene3D.AmbientLight color="#6b7488" intensity={1.0} />
-        <Scene3D.DirectionalLight direction={[-0.5, -0.9, -0.4]} color="#ffffff" intensity={1.7} />
+        {/* Light rig — neutral WHITE ambient so painted colours read true (the old bluish
+            ambient tinted them). Flat = pure even light for painting; otherwise key + fill
+            + optional rim, toggled by the light switches. Fill sits opposite the key so the
+            orbited-away side isn't black. */}
+        <Scene3D.AmbientLight color="#ffffff" intensity={litFlat ? 2.1 : 0.85} />
+        {!litFlat && litKey ? <Scene3D.DirectionalLight direction={[-0.5, -0.8, -0.5]} color="#ffffff" intensity={1.25} /> : null}
+        {!litFlat && litFill ? <Scene3D.DirectionalLight direction={[0.55, -0.25, 0.6]} color="#ffffff" intensity={0.7} /> : null}
+        {!litFlat && litRim ? <Scene3D.DirectionalLight direction={[0.1, 0.6, 0.75]} color="#ffffff" intensity={0.65} /> : null}
         {/* White material: all colour comes from the host's per-face paint atlas
             (default grey until painted), so painted colours render true. */}
         {model && <Scene3D.Mesh hostKey={model.key} material="#ffffff" />}
@@ -650,6 +683,26 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
           onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
         />
+      )}
+
+      {/* Light switches — a compact rig control on the viewport. Flat = even, paint-true light
+          (no shading, colours read the same on every face); Key/Fill/Rim shape it (disabled
+          under Flat). Rendered after the paint overlay so the switches stay clickable while
+          painting. */}
+      {model && (
+        <Row
+          style={{
+            position: 'absolute', left: 12, bottom: 12, alignItems: 'center', gap: 6,
+            backgroundColor: 'rgba(12,14,20,0.82)', borderRadius: 8, borderWidth: 1, borderColor: '#1d2330',
+            paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6,
+          }}
+        >
+          <Text style={{ color: '#7d899c', fontSize: 10, fontWeight: 800, letterSpacing: 1, marginRight: 2 }}>LIGHTS</Text>
+          <LightSwitch label="Flat" on={litFlat} onToggle={() => setLitFlat((v) => !v)} />
+          <LightSwitch label="Key" on={litKey} onToggle={() => setLitKey((v) => !v)} disabled={litFlat} />
+          <LightSwitch label="Fill" on={litFill} onToggle={() => setLitFill((v) => !v)} disabled={litFlat} />
+          <LightSwitch label="Rim" on={litRim} onToggle={() => setLitRim((v) => !v)} disabled={litFlat} />
+        </Row>
       )}
 
       {/* Title strip — only changes on load, so this render is the one-and-only. */}
