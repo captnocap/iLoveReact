@@ -735,8 +735,11 @@ function storedModelPackages(snapshot: ModelSnapshot | null): ModelPackage[] {
       stage: 'wip',
       color,
       source: `${MODEL_SNAPSHOT}:${model.id}`,
-      rig: `${model.seatRig?.length ?? 0} seat faces`,
-      data: `${parts.length} parts`,
+      // Honest contract slots: seat rig only when it exists (not "0 seat faces"), and no
+      // fabricated manifest — a studio snapshot has no manifest file, and "N parts" just
+      // restated the Outliner (req_2416). Empty slots ('-') are hidden by ModelDetailBody.
+      rig: model.seatRig?.length ? `${model.seatRig.length} seat faces` : '-',
+      data: '-',
       triangles,
       lods: 0,
       decompositions: [
@@ -878,15 +881,10 @@ function cookedAtlases(asset: CookedAsset, triangles: number, textureBytes: numb
 }
 
 function storedModelAtlases(model: StoredModel, color: string): ModelAtlas[] {
-  const parts = orderedParts(model);
-  const rows: ModelAtlas[] = [{
-    id: `${model.id}:parts`,
-    label: 'parts',
-    scope: 'saved Studio geometry',
-    resolution: `${parts.length} parts`,
-    paints: 0,
-    color,
-  }];
+  // ATLAS SETS is for real texture atlases only. A geometry "parts" row here was a
+  // fabrication — it restated the part count (which the Outliner owns) and dressed
+  // it up as a texture set. A studio model with no paint has no atlas (req_2416).
+  const rows: ModelAtlas[] = [];
   if (model.paintRef) {
     rows.push({
       id: `${model.id}:paint`,

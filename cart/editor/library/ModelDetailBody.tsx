@@ -1,20 +1,29 @@
 // editor/library/ModelDetailBody.tsx — the focused-model detail content
 // (header, folder contract, atlas sets, paint variants). Pure real-data display
-// from the model package; renders in the right inspector when a model is in
-// focus. (The old "captured references" section and open/paint/save action row
-// were god-file-clone cruft that was never asked for — removed.)
+// from the model package; renders in the right inspector when a model is in focus.
+//
+// The card describes the model with facts NOTHING else on screen already shows. The
+// OUTLINER (right below) owns the parts and their count — so the card never restates
+// "N parts". A model's kind, its synthetic snapshot path, and empty contract slots are
+// noise, not data: we show the name, stage, real triangle count, and the single real
+// source, then gate every section to actual content (req_2406, req_2416).
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
 import ModelThumbnail from './ModelThumbnail';
 import ModelPaintVariants from './ModelPaintVariants';
 
-export default function ModelDetailBody({ model, partCount }: { model: ModelPackage; partCount: number }) {
-  // The card describes the CONTAINER, not its seed primitive. A primitive-seeded model has
-  // no real import provenance (source is synthetic "primitive/<kind>", rig/manifest empty),
-  // and its kind is already the Outliner's job — so we drop the path + kind restatements and
-  // the FOLDER CONTRACT for it, and report the honest container fact: how many parts (req_2406).
+// A folder-contract value counts as real only if it's present and not the "-" placeholder.
+const hasValue = (value?: string): value is string => !!value && value !== '-';
+
+export default function ModelDetailBody({ model }: { model: ModelPackage }) {
   const isPrimitive = model.sourceKind === 'primitive';
+  // Only the contract rows carrying real provenance survive — empty slots are hidden, not
+  // shown as dashes. Primitives have no provenance at all, so the whole section drops.
+  const contractRows = isPrimitive
+    ? []
+    : ([['source model', model.source], ['rig data', model.rig], ['manifest', model.data]] as const)
+        .filter(([, value]) => hasValue(value));
   return (
     <>
       <C.HW_ModelTop>
@@ -27,26 +36,21 @@ export default function ModelDetailBody({ model, partCount }: { model: ModelPack
             <C.HW_Spacer />
             <C.HW_MaterialStat>{model.stage}</C.HW_MaterialStat>
           </C.HW_MaterialTitleRow>
-          {!isPrimitive ? <C.HW_ModelPath>{model.path}</C.HW_ModelPath> : null}
-          <C.HW_ModelMetaRow>
-            <C.HW_MaterialStat>{`${partCount} part${partCount === 1 ? '' : 's'}`}</C.HW_MaterialStat>
-            {model.triangles > 0 ? <C.HW_MaterialStat>{`${formatCount(model.triangles)} tris`}</C.HW_MaterialStat> : null}
-            {!isPrimitive ? <C.HW_MaterialStat>{model.sourceKind ?? 'indexed'}</C.HW_MaterialStat> : null}
-          </C.HW_ModelMetaRow>
+          {model.triangles > 0 ? (
+            <C.HW_ModelMetaRow>
+              <C.HW_MaterialStat>{`${formatCount(model.triangles)} tris`}</C.HW_MaterialStat>
+            </C.HW_ModelMetaRow>
+          ) : null}
         </C.HW_ModelCardMain>
       </C.HW_ModelTop>
 
-      {!isPrimitive ? (
+      {contractRows.length > 0 ? (
         <C.HW_ModelSection>
           <C.HW_ModelSectionHead>
             <Icon name="PackageCheck" size={12} color={accentFor('primary')} />
             <C.HW_GroupText>FOLDER CONTRACT</C.HW_GroupText>
           </C.HW_ModelSectionHead>
-          {[
-            ['source model', model.source],
-            ['rig data', model.rig],
-            ['manifest', model.data],
-          ].map(([label, value]) => (
+          {contractRows.map(([label, value]) => (
             <C.HW_ModelDataRow key={label}>
               <C.HW_ToolLabel>{label}</C.HW_ToolLabel>
               <C.HW_ToolValue>{value}</C.HW_ToolValue>
@@ -55,27 +59,29 @@ export default function ModelDetailBody({ model, partCount }: { model: ModelPack
         </C.HW_ModelSection>
       ) : null}
 
-      <C.HW_ModelSection>
-        <C.HW_ModelSectionHead>
-          <Icon name="Layers" size={12} color={accentFor('primary')} />
-          <C.HW_GroupText>ATLAS SETS</C.HW_GroupText>
-        </C.HW_ModelSectionHead>
-        {model.atlases.map((atlas) => (
-          <C.HW_ModelAtlasCard key={atlas.id}>
-            <C.HW_VariantSwatch style={{ backgroundColor: atlas.color }} />
-            <C.HW_ModelCardMain>
-              <C.HW_MaterialTitleRow>
-                <C.HW_ToolValue>{atlas.label}</C.HW_ToolValue>
-                <C.HW_Spacer />
-                <C.HW_MaterialStat>{atlas.resolution}</C.HW_MaterialStat>
-              </C.HW_MaterialTitleRow>
-              <C.HW_ModelMetaRow>
-                <C.HW_MaterialStat>{atlas.scope}</C.HW_MaterialStat>
-              </C.HW_ModelMetaRow>
-            </C.HW_ModelCardMain>
-          </C.HW_ModelAtlasCard>
-        ))}
-      </C.HW_ModelSection>
+      {model.atlases.length > 0 ? (
+        <C.HW_ModelSection>
+          <C.HW_ModelSectionHead>
+            <Icon name="Layers" size={12} color={accentFor('primary')} />
+            <C.HW_GroupText>ATLAS SETS</C.HW_GroupText>
+          </C.HW_ModelSectionHead>
+          {model.atlases.map((atlas) => (
+            <C.HW_ModelAtlasCard key={atlas.id}>
+              <C.HW_VariantSwatch style={{ backgroundColor: atlas.color }} />
+              <C.HW_ModelCardMain>
+                <C.HW_MaterialTitleRow>
+                  <C.HW_ToolValue>{atlas.label}</C.HW_ToolValue>
+                  <C.HW_Spacer />
+                  <C.HW_MaterialStat>{atlas.resolution}</C.HW_MaterialStat>
+                </C.HW_MaterialTitleRow>
+                <C.HW_ModelMetaRow>
+                  <C.HW_MaterialStat>{atlas.scope}</C.HW_MaterialStat>
+                </C.HW_ModelMetaRow>
+              </C.HW_ModelCardMain>
+            </C.HW_ModelAtlasCard>
+          ))}
+        </C.HW_ModelSection>
+      ) : null}
 
       {/* Real paint variants — whole saved paintings of the model, read live from the editor
           store (honest-empty until one is saved). Replaces the old palette-slot swatches that

@@ -70,7 +70,7 @@ export default function Inspector(props: {
             <Icon name="PanelRightClose" size={12} color={accentFor('textFaint')} />
           </C.HW_PanelHead>
           <C.HW_InspectorBody>
-            <ModelDetailBody model={activeModel} partCount={props.state.modelParts[activeModel.id]?.length ?? 0} />
+            <ModelDetailBody model={activeModel} />
             {/* The OUTLINER — parts of this multi-part model (add / select / hide / delete).
                 Only primitive-authored models carry parts state. */}
             {props.state.modelParts[activeModel.id] ? (
