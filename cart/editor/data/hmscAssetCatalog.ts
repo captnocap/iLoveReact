@@ -210,12 +210,12 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
   const importedViewerSources = importedPropViewerSources(importedProps);
   const looseViewerSources = looseModelSources(importedViewerSources);
   const viewerModelCount = importedViewerSources.size + looseViewerSources.length;
-  const modelPackages = [
+  const modelPackages = dedupeModelsByName([
     ...importedPropModelPackages(importedProps),
     ...looseModelFilePackages(looseViewerSources),
     ...cookedModelPackages(cooked),
     ...storedModelPackages(models),
-  ].sort((a, b) => modelRank(a) - modelRank(b) || a.name.localeCompare(b.name));
+  ]).sort((a, b) => modelRank(a) - modelRank(b) || a.name.localeCompare(b.name));
   const assets = [...materialAssets, ...cookedAssets].sort((a, b) => sourceRank(a) - sourceRank(b) || a.name.localeCompare(b.name));
   const defaultAsset = assets.find((asset) => asset.tab === 'Skins') ?? assets[0];
   const defaultContentFolder = materialAssets.length > 0
@@ -861,6 +861,33 @@ function displayName(asset: CookedAsset): string {
 
 function modelFolderId(seed: string): `model-${string}` {
   return `model-${slug(seed)}`;
+}
+
+// A single model can exist in more than one source: you author it in the studio
+// mesh editor (studio-model), then export it as a prop to get it into the game
+// (imported-prop / cooked-asset / source-file). Those are the SAME model, so the
+// browser must show one row, not two. Collapse by name, keeping the most-editable
+// source (the studio original) over its exported/baked copies.
+function modelSourcePriority(model: ModelPackage): number {
+  switch (model.sourceKind) {
+    case 'studio-model': return 0;  // the editable original you authored
+    case 'source-file': return 1;   // a raw imported mesh file
+    case 'imported-prop': return 2; // an exported/imported prop
+    case 'cooked-asset': return 3;  // the baked game output
+    default: return 4;
+  }
+}
+
+function dedupeModelsByName(models: ModelPackage[]): ModelPackage[] {
+  const byName = new Map<string, ModelPackage>();
+  for (const model of models) {
+    const key = model.name.trim().toLowerCase();
+    const existing = byName.get(key);
+    if (!existing || modelSourcePriority(model) < modelSourcePriority(existing)) {
+      byName.set(key, model);
+    }
+  }
+  return [...byName.values()];
 }
 
 function modelRank(model: ModelPackage): number {
