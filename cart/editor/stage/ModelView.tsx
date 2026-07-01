@@ -265,9 +265,14 @@ const brushRgb = (b: Brush): RGB => {
 // Free-form detail levels: 8/16/32 texels per face. Higher = crisper strokes on low-poly
 // models; lower keeps dense meshes inside the paint-atlas memory budget. (1 = fill-only.)
 const DETAIL_LEVELS = [8, 16, 32] as const;
-// BrushKit size (texture-px diameter, default 32) → patch-texel disc radius. A full-face brush
-// (~size 96) covers a whole patch at any detail; the disc clips to the triangle regardless.
-const brushRadius = (size: number, detail: number) => Math.max(0.6, (size / 96) * detail);
+// BrushKit size is a DIRECT texel diameter: size N → an N-texel-wide dab (radius N/2), so the
+// slider gives real fine-motor control — size 1 is a single texel (for writing text on a face),
+// and 1 vs 9 are visibly different. The old detail-relative (size/96)*detail treated size as a
+// fraction of the whole face, which crushed the entire small end onto the 0.6 floor (every size
+// below ~40 painted the same 1px dot). The disc still clips to the face triangle; the host floors
+// the radius at ~0.6 (one texel). Higher detail = more texels per face, so the SAME size brush
+// paints finer there — exactly what you want when the strokes need to get small.
+const brushRadius = (size: number) => Math.max(0.5, size / 2);
 
 export default function ModelView({ initialPath, initialTitle, initialMesh, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState }: ModelViewProps = {}) {
   const [model, setModel] = useState<Loaded | null>(null);
@@ -675,7 +680,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
             const rgb = brushRgb(brush);
             if (brushTool === 'fill') { fillFaceAt(x, y, rgb); return; }
             strokeBeginAt(x, y); // capture the pressed face for LOCK-mode masking
-            stampAt(x, y, rgb, brushRadius(brush.size, detail), brush.flow);
+            stampAt(x, y, rgb, brushRadius(brush.size), brush.flow);
           }}
           onMouseMove={(p: any) => {
             if (!paintingRef.current) return;
@@ -687,7 +692,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
             const last = lastPtRef.current ?? { x, y };
             const dx = x - last.x, dy = y - last.y;
             const steps = Math.min(24, Math.max(1, Math.floor(Math.hypot(dx, dy) / 3)));
-            const radius = brushRadius(brush.size, detail);
+            const radius = brushRadius(brush.size);
             for (let i = 1; i <= steps; i += 1) {
               const t = i / steps;
               stampAt(last.x + dx * t, last.y + dy * t, rgb, radius, brush.flow);
