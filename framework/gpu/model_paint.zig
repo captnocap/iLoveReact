@@ -739,11 +739,19 @@ pub fn paintFaceTex(face: u32) void {
 }
 
 // ── Detail (patch size) toggle ────────────────────────────────────────────────────
-const ATLAS_BUDGET: usize = 64 * 1024 * 1024; // paint-atlas ceiling (bytes)
+// The ceiling is deliberately BLASTED wide: a low-poly cube has a dozen faces, so even
+// 512×512 texels/face is a few MB — plenty to paint fine text on a face. The atlas budget
+// is the only real limit (it clamps dense meshes down), so pick anything; the host returns
+// the detail that actually took.
+const ATLAS_BUDGET: usize = 256 * 1024 * 1024; // paint-atlas ceiling (bytes)
 pub fn detail() u32 {
     return g_patch;
 }
 fn snapPatch(p: u32) u32 {
+    if (p >= 512) return 512;
+    if (p >= 256) return 256;
+    if (p >= 128) return 128;
+    if (p >= 64) return 64;
     if (p >= 32) return 32;
     if (p >= 16) return 16;
     if (p >= 8) return 8;

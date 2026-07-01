@@ -117,6 +117,14 @@ export default function AppFrame() {
 
   const runCommand = (commandId: string, source: string) => {
     const command = commandById(commandId);
+    // Paint resolution (File → Paint Resolution): set exact texels/face on the viewer. The host
+    // clamps dense meshes to the atlas budget; the detail readout reflects what actually took.
+    if (commandId.startsWith('paint-res-')) {
+      const px = Number(commandId.slice('paint-res-'.length));
+      modelToolApiRef.current?.changeDetail(px);
+      setState((prev) => ({ ...prev, openMenu: null, status: `Paint resolution → ${px}×${px} texels/face` }));
+      return;
+    }
     // Model-surface tools route to the viewer's host-native tool api; the viewer
     // owns the state and reports it back, so we don't mutate world state here.
     if (isMeshToolCommand(commandId)) {

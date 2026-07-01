@@ -94,6 +94,7 @@ export type ModelToolApi = {
   brushTool: (t: BrushTool) => void;
   cycleSafety: () => void;
   cycleDetail: () => void;
+  changeDetail: (px: number) => void; // set an exact paint resolution (texels/face) — the File → Paint Resolution menu
   setBrush: (b: Brush) => void;
   setPalette: (p: Palette) => void;
   // Light-rig switches — flip a light on/off (Flat is the even paint-true master).
@@ -264,7 +265,7 @@ const brushRgb = (b: Brush): RGB => {
 
 // Free-form detail levels: 8/16/32 texels per face. Higher = crisper strokes on low-poly
 // models; lower keeps dense meshes inside the paint-atlas memory budget. (1 = fill-only.)
-const DETAIL_LEVELS = [8, 16, 32] as const;
+const DETAIL_LEVELS = [16, 32, 64, 128, 256] as const;
 // BrushKit size is a DIRECT texel diameter: size N → an N-texel-wide dab (radius N/2), so the
 // slider gives real fine-motor control — size 1 is a single texel (for writing text on a face),
 // and 1 vs 9 are visibly different. The old detail-relative (size/96)*detail treated size as a
@@ -402,7 +403,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
   // Free-form needs sub-face room, so entering the brush tool bumps detail off fill-only.
   const chooseBrushTool = (t: BrushTool) => {
     setBrushTool(t);
-    if (t !== 'fill' && detail < 8) changeDetail(16);
+    if (t !== 'fill' && detail < 16) changeDetail(64); // start fine enough to actually draw; File → Paint Resolution goes up to 512
   };
   const cycleSafety = () => setSafety((v) => (v === 0 ? 1 : 0));
 
@@ -430,6 +431,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     brushTool: chooseBrushTool,
     cycleSafety,
     cycleDetail,
+    changeDetail,
     setBrush,
     setPalette,
     toggleLight: (which) => {

@@ -23,6 +23,15 @@ const NEW_MESH_COMMANDS: Command[] = PRIMITIVE_MESHES.map((p) => ({
   key: '', context: false, native: true, undoable: false,
 }));
 
+// Paint resolution — texels per face for free-form model painting. A deep File submenu
+// (nested, out of the way) with the FULL range: pick any and the host takes it (dense meshes
+// clamp to the atlas budget). Higher = finer strokes; a cube at 512 fits real text on a face.
+export const PAINT_RESOLUTIONS = [16, 32, 64, 128, 256, 512] as const;
+const PAINT_RES_COMMANDS: Command[] = PAINT_RESOLUTIONS.map((px) => ({
+  id: `paint-res-${px}`, menu: 'File', submenu: 'Paint Resolution', name: `${px}×${px} texels / face`, icon: 'Grid3x3',
+  key: '', context: false, native: true, undoable: false,
+}));
+
 // Menu-bar geometry, derived from the Chrome styles (workspace.cls HW_*). The
 // dropdown is mounted at the app root, so these are window-relative pixels: the
 // first menu item begins after the chrome padding + brand block + chrome gap.
@@ -38,6 +47,7 @@ export const COMMANDS: Command[] = [
   // with the host-native mesh editor live. Generated from PRIMITIVE_MESHES so the submenu,
   // dispatch, and geometry stay in lockstep.
   ...NEW_MESH_COMMANDS,
+  ...PAINT_RES_COMMANDS,
   { id: 'open-map', menu: 'File', name: 'Open Workspace', icon: 'FolderOpen', key: 'Ctrl+O', context: false, native: true, undoable: false },
   { id: 'open-file-explorer', menu: 'File', name: 'Open Project File Explorer', icon: 'FolderSearch', key: 'Ctrl+P', context: false, native: true, undoable: false },
   { id: 'find-import-source', menu: 'File', name: 'Find Import Source', icon: 'SearchCode', key: 'Ctrl+Shift+P', context: false, native: true, undoable: false },
