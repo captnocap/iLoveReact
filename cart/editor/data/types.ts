@@ -7,7 +7,7 @@ import type {
   ExplorerFolderId,
   ExplorerHistoryEntry,
 } from './fileExplorer';
-import type { DecalDoc } from '../../hmsc-int/game/textures/decal';
+import type { DecalDoc } from '../textures/decal';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import type { Brush, BrushTool, Palette } from '../../../runtime/paint/model';
 import type { ColorLens } from './colorSpine';

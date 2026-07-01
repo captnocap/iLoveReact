@@ -4,9 +4,9 @@ import {
   HMSC_SHADERS,
   defaultShaderData,
   shaderSpec,
-} from '../../hmsc-int/game/textures/shaders';
-import { validateDecalDoc } from '../../hmsc-int/game/textures/decal';
-import { editMeshToGeometry, type EditMesh } from '../../hmsc-int/editors/model/editMesh';
+} from '../textures/shaders';
+import { validateDecalDoc } from '../textures/decal';
+import { editMeshToGeometry, type EditMesh } from '../model/editMesh';
 import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage } from './types';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 

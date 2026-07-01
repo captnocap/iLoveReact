@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { C } from '../workspace.cls';
 import type { Asset } from '../data/types';
 import { textureBlobDataUrl } from '../data/hmscAssetCatalog';
-import { DecalSurface } from '../../hmsc-int/game/textures/decalRender';
+import { DecalSurface } from '../textures/decalRender';
 
 const PREVIEW_FILL = { width: '100%', height: '100%' };
 const DECAL_PREVIEW_SIZE = 68;
