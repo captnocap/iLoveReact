@@ -1,14 +1,14 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import {
-  EXPLORER_FILES,
+  explorerIndex,
   type ExplorerFolder,
   type ExplorerFolderId,
   explorerMatchesFolder,
 } from '../data/fileExplorer';
 
 function folderCount(folder: ExplorerFolderId): number {
-  return EXPLORER_FILES.filter((file) => explorerMatchesFolder(file, folder)).length;
+  return explorerIndex().files.filter((file) => explorerMatchesFolder(file, folder)).length;
 }
 
 export default function ExplorerTreeNode(props: {

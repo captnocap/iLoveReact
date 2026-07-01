@@ -1,7 +1,6 @@
 // editor/data/initialState.ts - seed world objects, seed history, initial state.
 import { CATALOG_DIAGNOSTICS, DEFAULT_ASSET_ID, DEFAULT_CONTENT_FOLDER, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from './catalog';
 import { WORLD_DOCUMENT, WORLD_DOCUMENT_ID } from './documents';
-import { INITIAL_EXPLORER_DIRECTORY_HISTORY, INITIAL_EXPLORER_HISTORY } from './fileExplorer';
 import type { EditorState, ModelToolSnapshot, WorldObject } from './types';
 import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
 import { DEFAULT_BRUSH, defaultPalette } from '../../../runtime/paint/model';
@@ -47,11 +46,11 @@ export function initialState(): EditorState {
     memoryPopoverOpen: false,
     fileExplorerOpen: false,
     fileExplorerQuery: '',
-    fileExplorerFolder: 'imports-models',
-    fileExplorerExpanded: { workspace: true, imports: true, 'imports-models': true, mock: true, 'hmsc-int': true, 'hmsc-int-game': true, runtime: true },
-    fileExplorerSelectedId: 'desk-glb',
-    fileExplorerHistory: INITIAL_EXPLORER_HISTORY,
-    fileExplorerDirectoryHistory: INITIAL_EXPLORER_DIRECTORY_HISTORY,
+    fileExplorerFolder: 'all',
+    fileExplorerExpanded: { all: true, 'virt:imports': true },
+    fileExplorerSelectedId: '',
+    fileExplorerHistory: [],
+    fileExplorerDirectoryHistory: [],
     selectedObjectId: 'obj-tile',
     contentFolder: DEFAULT_CONTENT_FOLDER,
     expandedFolders: { game: true, models: true, 'models-build': true, 'models-props': true, missions: true, bankheist: true, materials: true, architecture: true },

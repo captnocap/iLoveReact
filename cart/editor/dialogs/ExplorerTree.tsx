@@ -1,5 +1,5 @@
 import { C } from '../workspace.cls';
-import { EXPLORER_FOLDERS, type ExplorerFolderId } from '../data/fileExplorer';
+import { explorerIndex, type ExplorerFolderId } from '../data/fileExplorer';
 import ExplorerTreeNode from './ExplorerTreeNode';
 
 export default function ExplorerTree(props: {
@@ -10,7 +10,7 @@ export default function ExplorerTree(props: {
 }) {
   return (
     <C.HW_FileTree>
-      {EXPLORER_FOLDERS.map((folder) => (
+      {explorerIndex().folders.map((folder) => (
         <ExplorerTreeNode
           key={folder.id}
           folder={folder}

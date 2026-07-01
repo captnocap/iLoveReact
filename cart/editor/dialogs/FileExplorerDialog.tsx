@@ -1,12 +1,11 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import {
-  EXPLORER_FILES,
+  explorerIndex,
   type ExplorerDirectoryHistoryEntry,
   type ExplorerFile,
   type ExplorerFolderId,
   type ExplorerHistoryEntry,
-  explorerFileById,
   explorerFolderLabel,
   explorerMatchesFolder,
   explorerSearchText,
@@ -29,6 +28,8 @@ type Props = {
   onToggleFolder: (folder: ExplorerFolderId) => void;
   onSelectFile: (fileId: string) => void;
   onOpenFile: (fileId: string, action: string) => void;
+  onImportFromDisk: () => void;
+  onRescan: () => void;
   onClose: () => void;
 };
 
@@ -38,43 +39,48 @@ function rankFile(file: ExplorerFile, query: string, recentIds: Set<string>): nu
   const q = query.trim().toLowerCase();
   const pathHit = q && file.path.toLowerCase().includes(q) ? 800 : 0;
   const nameHit = q && file.name.toLowerCase().includes(q) ? 1200 : 0;
-  const tagHit = q && file.tags.some((tag) => tag.toLowerCase().includes(q)) ? 500 : 0;
-  return file.opens + pathHit + nameHit + tagHit + (recentIds.has(file.id) ? 600 : 0);
+  return pathHit + nameHit + (recentIds.has(file.id) ? 600 : 0);
 }
 
 function visibleFiles(props: Props): ExplorerFile[] {
   const query = props.query.trim().toLowerCase();
   const recentIds = new Set(props.history.map((entry) => entry.fileId));
-  return EXPLORER_FILES
+  return explorerIndex().files
     .filter((file) => explorerMatchesFolder(file, props.selectedFolder))
     .filter((file) => !query || explorerSearchText(file).includes(query))
-    .sort((a, b) => rankFile(b, query, recentIds) - rankFile(a, query, recentIds) || a.path.localeCompare(b.path));
+    .sort((a, b) => rankFile(b, query, recentIds) - rankFile(a, query, recentIds) || b.mtimeMs - a.mtimeMs || a.path.localeCompare(b.path));
 }
 
 export default function FileExplorerDialog(props: Props) {
+  const index = explorerIndex();
   const files = visibleFiles(props);
   const selected = files.find((file) => file.id === props.selectedFileId)
-    ?? explorerFileById(props.selectedFileId);
+    ?? index.files.find((file) => file.id === props.selectedFileId)
+    ?? files[0]
+    ?? null;
   const recentIds = new Set(props.history.map((entry) => entry.fileId));
   const slots = files.slice(0, RESULT_SLOTS);
-  const emptySlots = Math.max(0, RESULT_SLOTS - slots.length);
   return (
     <C.HW_DialogScrim>
       <C.HW_FileExplorerDialog>
         <C.HW_FileExplorerHead>
           <Icon name="FolderSearch" size={16} color={accentFor('primary')} />
           <C.HW_HeadTitle>Project File Explorer</C.HW_HeadTitle>
-          <C.HW_PillOn><C.HW_PillTextOn>in-app index</C.HW_PillTextOn></C.HW_PillOn>
+          <C.HW_PillOn><C.HW_PillTextOn>{index.files.length} files indexed</C.HW_PillTextOn></C.HW_PillOn>
+          {index.truncated ? (
+            <C.HW_Pill><C.HW_PillText>INDEX CAPPED — deeper files not listed</C.HW_PillText></C.HW_Pill>
+          ) : null}
           <C.HW_Pill><C.HW_PillText>{files.length} matches</C.HW_PillText></C.HW_Pill>
           <C.HW_Spacer />
+          <C.HW_Pill onPress={props.onRescan}><C.HW_PillText>rescan</C.HW_PillText></C.HW_Pill>
           <C.HW_Pill onPress={props.onClose}><C.HW_PillText>close</C.HW_PillText></C.HW_Pill>
         </C.HW_FileExplorerHead>
         <C.HW_FileExplorerSearchRow>
           <Icon name="SearchCode" size={13} color={accentFor('textDim')} />
-          <C.HW_FileSearch placeholder="search directories, imports, models, tags..." value={props.query} onChange={props.onQuery} />
-          <C.HW_Pill onPress={() => props.onQuery('model')}><C.HW_PillText>models</C.HW_PillText></C.HW_Pill>
-          <C.HW_Pill onPress={() => props.onQuery('vehicle')}><C.HW_PillText>vehicle</C.HW_PillText></C.HW_Pill>
-          <C.HW_Pill onPress={() => props.onQuery('material')}><C.HW_PillText>material</C.HW_PillText></C.HW_Pill>
+          <C.HW_FileSearch placeholder="search project files by name or path..." value={props.query} onChange={props.onQuery} />
+          <C.HW_Pill onPress={() => props.onFolder('virt:models')}><C.HW_PillText>models</C.HW_PillText></C.HW_Pill>
+          <C.HW_Pill onPress={() => props.onFolder('virt:textures')}><C.HW_PillText>textures</C.HW_PillText></C.HW_Pill>
+          <C.HW_PillOn onPress={props.onImportFromDisk}><C.HW_PillTextOn>import from disk...</C.HW_PillTextOn></C.HW_PillOn>
         </C.HW_FileExplorerSearchRow>
         <C.HW_FileExplorerBody>
           <C.HW_FileExplorerNav>
@@ -95,19 +101,19 @@ export default function FileExplorerDialog(props: Props) {
               <FileResultRow
                 key={file.id}
                 file={file}
-                active={selected.id === file.id}
+                active={selected?.id === file.id}
                 recent={recentIds.has(file.id)}
                 onSelectFile={props.onSelectFile}
                 onOpenFile={props.onOpenFile}
               />
             ))}
-            {Array.from({ length: emptySlots }, (_, index) => (
-              <C.HW_FileResultEmpty key={index}>
-                <C.HW_StatusText>empty indexed row</C.HW_StatusText>
+            {slots.length === 0 ? (
+              <C.HW_FileResultEmpty>
+                <C.HW_StatusText>no files match — clear the search or rescan</C.HW_StatusText>
               </C.HW_FileResultEmpty>
-            ))}
+            ) : null}
           </C.HW_FileResults>
-          <FilePreview file={selected} query={props.query} onOpenFile={props.onOpenFile} />
+          <FilePreview file={selected} onOpenFile={props.onOpenFile} />
         </C.HW_FileExplorerBody>
         <HistoryStrip history={props.history} onOpenFile={props.onOpenFile} />
       </C.HW_FileExplorerDialog>

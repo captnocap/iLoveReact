@@ -27,6 +27,10 @@ const RESET_ON_RELOAD: Partial<EditorState> = {
   perfPopoverOpen: false,
   memoryPopoverOpen: false,
   fileExplorerOpen: false,
+  // Explorer folder/file ids come from the live disk index, which rebuilds on every
+  // reload — a persisted id may not exist in the fresh scan, so start at the root.
+  fileExplorerFolder: 'all',
+  fileExplorerSelectedId: '',
   // Tool state is owned by the (re-mounted) model viewer; start from its default
   // so the toolbar highlight matches a freshly re-mounted, view-mode viewer.
   modelTool: defaultModelTool(),

@@ -534,9 +534,44 @@ function looseModelFilePackages(sources: string[]): ModelPackage[] {
   });
 }
 
-function isViewerFile(path: string): boolean {
+export function isViewerFile(path: string): boolean {
   const lower = path.toLowerCase();
   return lower.endsWith('.glb') || lower.endsWith('.obj');
+}
+
+/// A ModelPackage for an arbitrary on-disk .glb/.obj — the Project File Explorer's
+/// import path (and the "import from disk" OS picker). The id embeds the path
+/// (`file:<path>`) so modelPackageById can re-synthesize the package with no side
+/// store, exactly like `primitive:<kind>:<n>` — a doc-tab switch away and back still
+/// resolves even for files outside the indexed catalog.
+export function fileModelPackage(source: string): ModelPackage {
+  const sourceFile = source.split('/').pop() || source;
+  const name = titleFromFilename(sourceFile);
+  const semantic = semanticKindFromText(name);
+  return {
+    id: `file:${source}`,
+    folderId: 'props',
+    name,
+    path: source,
+    kind: cookedUiCategory(semantic),
+    stage: 'ready',
+    color: colorFor(source),
+    source,
+    viewerPath: source,
+    rig: 'source model file',
+    data: `file ${sourceFile}`,
+    triangles: 0,
+    lods: 0,
+    decompositions: [
+      `semantic:${semantic}`,
+      `format:${sourceFile.split('.').pop()?.toLowerCase() ?? '-'}`,
+      'source:file-explorer',
+    ],
+    atlases: [],
+    paints: [],
+    sourceKind: 'source-file',
+    semanticKind: semantic,
+  };
 }
 
 function colorFromFloatRgb(rgb: number[] | undefined): string | null {

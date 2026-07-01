@@ -30,14 +30,15 @@ import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplore
 import { loadPersistedState, persistState } from '../data/persistView';
 import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
-import { primitivePartMesh, composeModelParts, storedModelParts, type PrimitiveParams } from '../data/hmscAssetCatalog';
+import { primitivePartMesh, composeModelParts, storedModelParts, fileModelPackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
+import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
 import { oklchName, type ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import { useBuildJournal } from '../data/journal';
-import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFileById } from '../data/fileExplorer';
+import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
 import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 
 export default function AppFrame() {
@@ -192,11 +193,17 @@ export default function AppFrame() {
         openMenu: null,
         actionMenu: 'File',
         fileExplorerOpen: true,
-        fileExplorerQuery: command.id === 'find-import-source' ? 'imports' : prev.fileExplorerQuery,
+        // Import search = jump straight to the Models import-class folder.
+        fileExplorerFolder: command.id === 'find-import-source' ? 'virt:models' : prev.fileExplorerFolder,
         status: command.id === 'find-import-source'
-          ? 'in-app file explorer opened for import search'
-          : 'in-app file explorer opened',
+          ? 'file explorer opened on importable models'
+          : 'file explorer opened',
       }));
+      return;
+    }
+    if (command.id === 'import-model-file') {
+      setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File' }));
+      void importModelFromDisk();
       return;
     }
     if (command.id === 'compile-rle') {
@@ -417,7 +424,7 @@ export default function AppFrame() {
 
   const selectExplorerFolder = (fileExplorerFolder: ExplorerFolderId) => {
     setState((prev) => {
-      const firstFile = EXPLORER_FILES.find((file) => explorerMatchesFolder(file, fileExplorerFolder));
+      const firstFile = explorerIndex().files.find((file) => explorerMatchesFolder(file, fileExplorerFolder));
       return {
         ...prev,
         fileExplorerFolder,
@@ -429,12 +436,12 @@ export default function AppFrame() {
             folderId: fileExplorerFolder,
             label: explorerFolderLabel(fileExplorerFolder),
             path: explorerFolderLabel(fileExplorerFolder),
-            at: 'now',
+            at: explorerNowLabel(),
           },
           ...prev.fileExplorerDirectoryHistory.filter((entry) => entry.folderId !== fileExplorerFolder),
         ].slice(0, 4),
         seq: prev.seq + 1,
-        status: `file explorer folder: ${fileExplorerFolder} - directory memory retained`,
+        status: `file explorer folder: ${explorerFolderLabel(fileExplorerFolder)}`,
       };
     });
   };
@@ -443,19 +450,30 @@ export default function AppFrame() {
     setState((prev) => ({
       ...prev,
       fileExplorerExpanded: { ...prev.fileExplorerExpanded, [folder]: !prev.fileExplorerExpanded[folder] },
-      status: `${prev.fileExplorerExpanded[folder] ? 'collapsed' : 'expanded'} file folder ${folder}`,
+      status: `${prev.fileExplorerExpanded[folder] ? 'collapsed' : 'expanded'} file folder ${explorerFolderLabel(folder)}`,
     }));
   };
 
+  // Open a .glb/.obj through the REAL import path: a `file:<path>` model document whose
+  // viewer loads the file via the native host mesh importer (__mesh_load_file).
+  const openModelFileDocument = (path: string) => {
+    openModelDocument(fileModelPackage(path));
+    setState((prev) => ({ ...prev, fileExplorerOpen: false }));
+  };
+
   const openExplorerFile = (fileId: string, action: string) => {
+    const file = explorerFileById(fileId);
+    if (!file) {
+      setState((prev) => ({ ...prev, status: `${fileId} is no longer on disk — rescan the index` }));
+      return;
+    }
     setState((prev) => {
-      const file = explorerFileById(fileId);
       const historyEntry: ExplorerHistoryEntry = {
         id: `fh-${prev.seq}`,
         fileId,
         action,
         query: prev.fileExplorerQuery.trim() || file.name,
-        at: 'now',
+        at: explorerNowLabel(),
       };
       return {
         ...prev,
@@ -465,9 +483,39 @@ export default function AppFrame() {
           ...prev.fileExplorerHistory.filter((entry) => entry.fileId !== fileId),
         ].slice(0, 5),
         seq: prev.seq + 1,
-        status: `${action} ${file.path} - in-app explorer history retained`,
+        status: `${action} ${file.path}`,
       };
     });
+    // Model files actually OPEN: into a model document on the stage via the native
+    // importer. Everything else just records (pin/history) — there is no text-file
+    // document surface yet.
+    if (file.importable && action === 'opened') openModelFileDocument(file.path);
+  };
+
+  // File → Import Model: the OS picker (zenity) for a .glb/.obj anywhere on disk,
+  // routed through the same native import path as in-project explorer rows.
+  const importModelFromDisk = async () => {
+    const path = await pickFile({
+      title: 'Import a 3D model',
+      filters: [
+        { name: '3D models', patterns: ['*.glb', '*.obj'] },
+        { name: 'All files', patterns: ['*'] },
+      ],
+    });
+    if (!path) return;
+    if (!isViewerFile(path)) {
+      setState((prev) => ({ ...prev, status: `cannot import ${path.split('/').pop()} — pick a .glb or .obj` }));
+      return;
+    }
+    openModelFileDocument(path);
+  };
+
+  const rescanExplorerIndex = () => {
+    const index = refreshExplorerIndex();
+    setState((prev) => ({
+      ...prev,
+      status: `file index rescanned: ${index.files.length} files${index.truncated ? ' (CAPPED — deeper files not listed)' : ''}`,
+    }));
   };
 
   const selectColorStudioMaterial = (materialKey: ColorStudioMaterialKey) => {
@@ -1050,8 +1098,10 @@ export default function AppFrame() {
             onQuery={(fileExplorerQuery) => setState((prev) => ({ ...prev, fileExplorerQuery, status: `file search: ${fileExplorerQuery || 'all indexed files'}` }))}
             onFolder={selectExplorerFolder}
             onToggleFolder={toggleExplorerFolder}
-            onSelectFile={(fileExplorerSelectedId) => setState((prev) => ({ ...prev, fileExplorerSelectedId, status: `selected file ${explorerFileById(fileExplorerSelectedId).path}` }))}
+            onSelectFile={(fileExplorerSelectedId) => setState((prev) => ({ ...prev, fileExplorerSelectedId, status: `selected file ${explorerFileById(fileExplorerSelectedId)?.path ?? fileExplorerSelectedId}` }))}
             onOpenFile={openExplorerFile}
+            onImportFromDisk={() => { void importModelFromDisk(); }}
+            onRescan={rescanExplorerIndex}
             onClose={() => setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'file explorer closed' }))}
           />
         </RenderProbe>

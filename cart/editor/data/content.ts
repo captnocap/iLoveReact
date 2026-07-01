@@ -1,6 +1,6 @@
 // editor/data/content.ts - content tree, navigation enums, and folder helpers.
 import { MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
-import { HMSC_EDITOR_CATALOG, modelCategoryNodes } from './hmscAssetCatalog';
+import { HMSC_EDITOR_CATALOG, fileModelPackage, modelCategoryNodes } from './hmscAssetCatalog';
 import { commandById, PRIMITIVE_MESHES } from './commands';
 import { INITIAL_OBJECTS } from './initialState';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, WorldObject } from './types';
@@ -164,6 +164,9 @@ export function primitiveModelPackage(id: string): ModelPackage {
 
 export function modelPackageById(id: string): ModelPackage | null {
   if (id.startsWith('primitive:')) return primitiveModelPackage(id);
+  // A file-explorer / disk-picker open (`file:<path>`) re-synthesizes from the path in
+  // the id — the file may live outside every indexed catalog dir.
+  if (id.startsWith('file:')) return fileModelPackage(id.slice('file:'.length));
   return MODEL_PACKAGES.find((model) => model.id === id) ?? null;
 }
 
