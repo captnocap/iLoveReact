@@ -1,8 +1,13 @@
+import { Fragment } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { COMMANDS, activeMenuFor } from '../data/commands';
+import { COMMANDS, activeMenuFor, meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
 import { FLOORS, SNAP_MODES } from '../data/content';
 import type { Command, MockState, ViewMode } from '../data/types';
+
+// A model document owns the host-native mesh editor — the toolbar becomes the
+// home for its tools (icon-only), with select / gizmo / toggle groups divided.
+const MESH_GROUP_DIVIDER = new Set(['mesh-move', 'mesh-paint']);
 
 export default function ToolOptions(props: {
   state: MockState;
@@ -13,8 +18,44 @@ export default function ToolOptions(props: {
   onFloor: () => void;
   onViewMode: (mode: ViewMode) => void;
 }) {
+  const activeDoc = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
+    ?? props.state.workspaceDocuments[0]!;
+
+  if (activeDoc.kind === 'model') {
+    return (
+      <C.HW_ToolOptions>
+        <C.HW_PillOn>
+          <C.HW_OptionLabel>MESH</C.HW_OptionLabel>
+          <C.HW_PillTextOn>{meshToolCommands().length} tools</C.HW_PillTextOn>
+        </C.HW_PillOn>
+        {meshToolCommands().map((command) => {
+          const active = meshToolActive(command.id, props.state.modelTool);
+          const Btn = active ? C.HW_IconButtonOn : C.HW_IconButton;
+          return (
+            <Fragment key={command.id}>
+              {MESH_GROUP_DIVIDER.has(command.id) ? <C.HW_OptionDivider /> : null}
+              <Btn tooltip={`${command.name} (${command.key})`} onPress={() => props.onCommand(command.id, 'action bar')}>
+                <Icon name={command.icon} size={14} color={accentFor(active ? 'primary' : 'textDim')} />
+              </Btn>
+            </Fragment>
+          );
+        })}
+        {/* Contextual topology ops — surface as quick icons only when the edge
+            selection makes them valid (also in the right-click context menu). */}
+        {meshTopoCommands(props.state.modelTool).map((command) => (
+          <Fragment key={command.id}>
+            <C.HW_OptionDivider />
+            <C.HW_IconButton tooltip={`${command.name} (${command.key})`} onPress={() => props.onCommand(command.id, 'action bar')}>
+              <Icon name={command.icon} size={14} color={accentFor('primary')} />
+            </C.HW_IconButton>
+          </Fragment>
+        ))}
+      </C.HW_ToolOptions>
+    );
+  }
+
   const activeMenu = activeMenuFor(props.state);
-  const actionCommands = COMMANDS.filter((command) => command.menu === activeMenu);
+  const actionCommands = COMMANDS.filter((command) => command.menu === activeMenu && command.surface !== 'model');
   return (
     <C.HW_ToolOptions>
       <C.HW_PillOn>

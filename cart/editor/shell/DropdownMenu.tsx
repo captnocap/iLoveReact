@@ -8,7 +8,9 @@ import type { MockState } from '../data/types';
 // menu-bar button via menuDropdownLeft.
 
 export default function DropdownMenu({ state, onCommand }: { state: MockState; onCommand: (id: string, source: string) => void }) {
-  const rows = COMMANDS.filter((command) => command.menu === state.openMenu);
+  // Model-surface tools live on the stage toolbar + context menu, not the menu
+  // bar — keep them out of the dropdowns.
+  const rows = COMMANDS.filter((command) => command.menu === state.openMenu && command.surface !== 'model');
   return (
     <C.HW_MenuDropdown style={{ left: menuDropdownLeft(state.openMenu), width: MENU_DROPDOWN_WIDTH }}>
       <C.HW_MenuDropHead>

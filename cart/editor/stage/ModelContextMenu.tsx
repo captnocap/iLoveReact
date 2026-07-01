@@ -1,0 +1,52 @@
+// The model surface's right-click menu content — the canonical home for every
+// mesh tool (select / gizmo / toggles), the contextual topology ops, and the
+// tucked-away Quality slider. Rendered at the app ROOT (see AppFrame) via
+// useContextMenu so it lands at the cursor: the menu positions relative to its
+// parent, and only the root sits at window origin (the stage is offset by the
+// rail + content browser). The toolbar mirrors the quick subset of this.
+import { C, accentFor } from '../workspace.cls';
+import { Icon } from '../../../runtime/icons/Icon';
+import { Slider } from '../../../runtime/primitives';
+import { meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
+import type { ModelToolSnapshot } from '../data/types';
+
+export default function ModelContextMenu({ modelTool, onCommand, onQuality, onClose }: {
+  modelTool: ModelToolSnapshot;
+  onCommand: (id: string, source: string) => void;
+  onQuality: (quality: number) => void;
+  onClose: () => void;
+}) {
+  return (
+    <C.HW_StageContextMenu>
+      {meshToolCommands().map((command) => {
+        const active = meshToolActive(command.id, modelTool);
+        return (
+          <C.HW_ContextRow key={command.id} onPress={() => { onCommand(command.id, 'context'); onClose(); }}>
+            <Icon name={command.icon} size={12} color={accentFor(active ? 'primary' : 'textDim')} />
+            <C.HW_ContextText>{command.name}</C.HW_ContextText>
+            <C.HW_Spacer />
+            <C.HW_KeyText>{command.key}</C.HW_KeyText>
+          </C.HW_ContextRow>
+        );
+      })}
+      {meshTopoCommands(modelTool).map((command) => (
+        <C.HW_ContextRow key={command.id} onPress={() => { onCommand(command.id, 'context'); onClose(); }}>
+          <Icon name={command.icon} size={12} color={accentFor('primary')} />
+          <C.HW_ContextText>{command.name}</C.HW_ContextText>
+          <C.HW_Spacer />
+          <C.HW_KeyText>{command.key}</C.HW_KeyText>
+        </C.HW_ContextRow>
+      ))}
+      {/* Quality lives here — tucked away, only present when the menu is called.
+          Dragging stays inside the menu, so it doesn't dismiss. */}
+      <C.HW_StageMenuQuality>
+        <C.HW_StageMenuQualityHead>
+          <C.HW_ContextText>Quality</C.HW_ContextText>
+          <C.HW_Spacer />
+          <C.HW_KeyText>{modelTool.tris.toLocaleString()} tris</C.HW_KeyText>
+        </C.HW_StageMenuQualityHead>
+        <Slider value={modelTool.quality} min={0} max={1} onChange={(v: number) => onQuality(v)} onCommit={(v: number) => onQuality(v)} style={{ height: 22 }} />
+      </C.HW_StageMenuQuality>
+    </C.HW_StageContextMenu>
+  );
+}

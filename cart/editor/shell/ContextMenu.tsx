@@ -4,7 +4,7 @@ import { COMMANDS, commandById } from '../data/commands';
 import type { MockState } from '../data/types';
 
 export default function ContextMenu({ state, onCommand }: { state: MockState; onCommand: (id: string, source: string) => void }) {
-  const rows = COMMANDS.filter((command) => command.context);
+  const rows = COMMANDS.filter((command) => command.context && command.surface !== 'model');
   return (
     <C.HW_ContextMenu>
       <C.HW_ContextHead>

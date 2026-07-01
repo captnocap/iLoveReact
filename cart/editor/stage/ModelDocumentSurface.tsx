@@ -1,10 +1,30 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
-import type { ModelPackage } from '../data/types';
+import type { ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
 import ModelView from '../../modelview';
 import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData } from '../data/hmscAssetCatalog';
 
-export default function ModelDocumentSurface({ model }: { model: ModelPackage | null }) {
+// The live viewer source for a model document: a file path, resident mesh data,
+// or a "data missing" placeholder. Resolved once so the render branches stay flat.
+type ViewerSource =
+  | { kind: 'path'; path: string }
+  | { kind: 'mesh'; key: string; vertices: Float32Array }
+  | { kind: 'missing'; title: string; label: string }
+  | null;
+
+export default function ModelDocumentSurface({ model, triggerProps, onToolApi, onToolState }: {
+  model: ModelPackage | null;
+  // Right-click trigger from the app-root context menu (useContextMenu lives in
+  // AppFrame so the menu lands at the cursor — see ModelContextMenu). Spread onto
+  // the surface so a right-click here opens it.
+  triggerProps: { onRightClick: (e: { x: number; y: number }) => void };
+  onToolApi: (api: ModelToolApi) => void;
+  onToolState: (state: ModelToolSnapshot) => void;
+}) {
+  // The model surface stays bland — its tools live in the editor toolbar and in
+  // the app-root context menu (opened by right-click here), both mirroring the one
+  // command registry. The viewer runs hostChrome (no floating buttons) and reports
+  // its host-native tool state up so both surfaces highlight the active tool.
   if (!model) {
     return (
       <C.HW_ModelDocument>
@@ -16,41 +36,26 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
     );
   }
 
-  if (model.viewerPath) {
+  const viewer = resolveViewer(model);
+
+  if (viewer && (viewer.kind === 'path' || viewer.kind === 'mesh')) {
+    const modelView = viewer.kind === 'path'
+      ? <ModelView key={model.id} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} />
+      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8) }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} />;
     return (
-      <C.HW_ModelDocument>
-        <ModelView key={model.id} initialPath={model.viewerPath} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} />
+      <C.HW_ModelDocument {...triggerProps}>
+        {modelView}
       </C.HW_ModelDocument>
     );
   }
 
-  const meshRef = viewerMeshRefFor(model);
-  if (meshRef) {
-    const vertices = cookedMeshBlobData(meshRef);
-    if (vertices) {
-      return <MeshDocument model={model} meshKey={meshRef} vertices={vertices} />;
-    }
+  if (viewer && viewer.kind === 'missing') {
     return (
       <C.HW_ModelDocument>
         <C.HW_ModelDocEmpty>
           <Icon name="SearchX" size={18} color={accentFor('textFaint')} />
-          <C.HW_StageSocketTitle>MODEL TRIANGLE DATA MISSING</C.HW_StageSocketTitle>
-          <C.HW_StatusText>{meshRef}</C.HW_StatusText>
-        </C.HW_ModelDocEmpty>
-      </C.HW_ModelDocument>
-    );
-  }
-
-  const storedModelId = viewerStoredModelId(model);
-  if (storedModelId) {
-    const vertices = storedModelMeshData(storedModelId);
-    if (vertices) return <MeshDocument model={model} meshKey={`studio:${storedModelId}`} vertices={vertices} />;
-    return (
-      <C.HW_ModelDocument>
-        <C.HW_ModelDocEmpty>
-          <Icon name="SearchX" size={18} color={accentFor('textFaint')} />
-          <C.HW_StageSocketTitle>MODEL PART GEOMETRY MISSING</C.HW_StageSocketTitle>
-          <C.HW_StatusText>{storedModelId}</C.HW_StatusText>
+          <C.HW_StageSocketTitle>{viewer.title}</C.HW_StageSocketTitle>
+          <C.HW_StatusText>{viewer.label}</C.HW_StatusText>
         </C.HW_ModelDocEmpty>
       </C.HW_ModelDocument>
     );
@@ -113,23 +118,28 @@ export default function ModelDocumentSurface({ model }: { model: ModelPackage | 
   );
 }
 
-function MeshDocument({ model, meshKey, vertices }: { model: ModelPackage; meshKey: string; vertices: Float32Array }) {
-  return (
-    <C.HW_ModelDocument>
-      <ModelView
-        key={model.id}
-        initialTitle={model.name}
-        initialMesh={{
-          key: meshKey,
-          name: model.name,
-          vertices,
-          count: Math.floor(vertices.length / 8),
-        }}
-        allowFilePicker={false}
-        trackAttribution={false}
-      />
-    </C.HW_ModelDocument>
-  );
+// A cooked file path, resident cooked mesh, resident studio part, a typed
+// "missing" placeholder, or null (no live viewer → the stored-data doc card).
+function resolveViewer(model: ModelPackage): ViewerSource {
+  if (model.viewerPath) return { kind: 'path', path: model.viewerPath };
+
+  const meshRef = viewerMeshRefFor(model);
+  if (meshRef) {
+    const vertices = cookedMeshBlobData(meshRef);
+    return vertices
+      ? { kind: 'mesh', key: meshRef, vertices }
+      : { kind: 'missing', title: 'MODEL TRIANGLE DATA MISSING', label: meshRef };
+  }
+
+  const storedModelId = viewerStoredModelId(model);
+  if (storedModelId) {
+    const vertices = storedModelMeshData(storedModelId);
+    return vertices
+      ? { kind: 'mesh', key: `studio:${storedModelId}`, vertices }
+      : { kind: 'missing', title: 'MODEL PART GEOMETRY MISSING', label: storedModelId };
+  }
+
+  return null;
 }
 
 function viewerMeshRefFor(model: ModelPackage): string | null {

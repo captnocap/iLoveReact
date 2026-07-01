@@ -41,7 +41,63 @@ export const COMMANDS: Command[] = [
   { id: 'author-sequence', menu: 'Story', name: 'Author Sequence Marker', icon: 'Route', key: 'Q', context: true, native: true, undoable: true, tool: true },
   { id: 'toggle-history', menu: 'Window', name: 'Toggle Eventbus Strip', icon: 'Workflow', key: 'Ctrl+H', context: false, native: true, undoable: false },
   { id: 'show-pipeline', menu: 'Help', name: 'Show Feature Pipeline', icon: 'Workflow', key: '?', context: false, native: false, undoable: false },
+
+  // Model-surface tools — the host-native mesh editor the model viewer brought.
+  // They only surface when a model document is active (toolbar + context menu +
+  // hotkeys), mirroring one registry instead of the viewer's floating buttons.
+  { id: 'mesh-vertex', menu: 'Edit', surface: 'model', name: 'Vertex Select', icon: 'Grip', key: '1', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-edge', menu: 'Edit', surface: 'model', name: 'Edge Select', icon: 'Spline', key: '2', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-face', menu: 'Edit', surface: 'model', name: 'Face Select', icon: 'Triangle', key: '3', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-move', menu: 'Edit', surface: 'model', name: 'Move Gizmo', icon: 'Move', key: 'G', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-scale', menu: 'Edit', surface: 'model', name: 'Scale Gizmo', icon: 'Scale3d', key: 'S', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-rotate', menu: 'Edit', surface: 'model', name: 'Rotate Gizmo', icon: 'Rotate3d', key: 'R', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-paint', menu: 'Edit', surface: 'model', name: 'Paint Faces', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-focus', menu: 'Edit', surface: 'model', name: 'Focus Pivot', icon: 'Focus', key: 'F', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-wire', menu: 'Edit', surface: 'model', name: 'Wireframe', icon: 'Grid3x3', key: 'W', context: false, native: true, undoable: false, tool: true },
+  // Contextual topology ops — only valid on an edge selection (1 edge -> extrude,
+  // 2+ edges -> create face). Surfaced in the toolbar + context menu only when
+  // applicable; see meshTopoCommands.
+  { id: 'mesh-extrude', menu: 'Edit', surface: 'model', name: 'Extrude Edge', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-create-face', menu: 'Edit', surface: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
 ];
+
+// The always-on model tool group (select / gizmo / toggles), in display order.
+// Kept as an explicit id list so the contextual topology ops stay out of it.
+const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-paint', 'mesh-focus', 'mesh-wire'];
+
+export function meshToolCommands(): Command[] {
+  return MESH_TOOL_IDS.map(commandById);
+}
+
+// The contextual topology ops that apply to the current selection: extrude on a
+// single edge, create-face on two or more. Empty when nothing applies. Surfaces
+// the same way in the toolbar and the context menu.
+export function meshTopoCommands(tool: { selMode: number; sel: number }): Command[] {
+  if (tool.selMode !== 2 || tool.sel < 1) return [];
+  return [commandById(tool.sel === 1 ? 'mesh-extrude' : 'mesh-create-face')];
+}
+
+export function isMeshToolCommand(id: string): boolean {
+  return commandById(id).surface === 'model';
+}
+
+// Is this model tool the active one, given the live tool snapshot? Drives the
+// toolbar/context-menu highlight. Gizmo tools only read active inside a select
+// mode (they act on a selection); view/paint/focus are mutually exclusive.
+export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean }): boolean {
+  switch (id) {
+    case 'mesh-vertex': return tool.selMode === 1 && !tool.paint && !tool.focus;
+    case 'mesh-edge': return tool.selMode === 2 && !tool.paint && !tool.focus;
+    case 'mesh-face': return tool.selMode === 3 && !tool.paint && !tool.focus;
+    case 'mesh-move': return tool.selMode !== 0 && tool.gizmoTool === 0;
+    case 'mesh-scale': return tool.selMode !== 0 && tool.gizmoTool === 1;
+    case 'mesh-rotate': return tool.selMode !== 0 && tool.gizmoTool === 2;
+    case 'mesh-paint': return tool.paint;
+    case 'mesh-focus': return tool.focus;
+    case 'mesh-wire': return tool.wire;
+    default: return false;
+  }
+}
 
 export function commandById(id: string): Command {
   return COMMANDS.find((command) => command.id === id) ?? COMMANDS[0]!;

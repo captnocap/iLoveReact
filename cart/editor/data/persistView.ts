@@ -27,6 +27,9 @@ const RESET_ON_RELOAD: Partial<MockState> = {
   perfPopoverOpen: false,
   memoryPopoverOpen: false,
   fileExplorerOpen: false,
+  // Tool state is owned by the (re-mounted) model viewer; start from its default
+  // so the toolbar highlight matches a freshly re-mounted, view-mode viewer.
+  modelTool: { selMode: 0, gizmoTool: 0, paint: false, focus: false, wire: false, sel: 0, quality: 1, tris: 0 },
 };
 
 /** Boot state: the persisted view merged over fresh defaults (so fields added

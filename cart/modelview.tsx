@@ -36,12 +36,40 @@ export type ModelViewInitialMesh = {
   vertices: Float32Array | number[];
   count?: number;
 };
+// The live tool state, mirrored out so an embedding shell (the editor) can drive
+// the SAME host-native tools from its own toolbar / context menu instead of the
+// viewer's floating buttons. selMode: 0 view · 1 vertex · 2 edge · 3 face.
+// gizmoTool: 0 move · 1 scale · 2 rotate.
+// sel: count of selected elements in the current mode. quality: live decimation
+// slider (0..1). tris: the resident triangle count (for the quality readout).
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number };
+// The handlers the viewer owns, handed out so an external surface can invoke
+// them. Same functions the floating buttons and hotkeys call — one owner, no
+// split-brain: the shell remote-controls; the viewer stays the source of truth.
+// extrudeEdge / createFace are the contextual topology ops (valid on an edge
+// selection); setQuality drives the live decimation knob.
+export type ModelToolApi = {
+  selMode: (m: number) => void;
+  gizmo: (t: number) => void;
+  paint: () => void;
+  focus: () => void;
+  wire: () => void;
+  extrudeEdge: () => void;
+  createFace: () => void;
+  setQuality: (q: number) => void;
+};
 export type ModelViewProps = {
   initialPath?: string;
   initialTitle?: string;
   initialMesh?: ModelViewInitialMesh;
   allowFilePicker?: boolean;
   trackAttribution?: boolean;
+  // When the editor hosts the viewer, its toolbar + context menu own the tool
+  // chrome — so the viewer drops its own floating button rows and the surface
+  // goes bland. The shell drives the tools through onToolApi / onToolState.
+  hostChrome?: boolean;
+  onToolApi?: (api: ModelToolApi) => void;
+  onToolState?: (state: ModelToolSnapshot) => void;
 };
 
 /** sha256 of the file bytes (host door) — keys attribution to the content. */
@@ -169,7 +197,7 @@ const PALETTE: RGB[] = [
 ];
 const rgbCss = (c: RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, allowFilePicker = true, trackAttribution = true }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState }: ModelViewProps = {}) {
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(false);
@@ -267,6 +295,38 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
   // (it owns the left-drag = pan-pivot gesture natively).
   const togglePaint = () => setPaintMode((v) => { const nv = !v; if (nv) { setFocusMode(false); meshFocusTool(false); setSelMode(0); meshSetMode(0); } return nv; });
   const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setSelMode(0); meshSetMode(0); } return nv; });
+
+  // ── Editor bridge ──────────────────────────────────────────────────────────
+  // Hand the tool handlers out (once) and mirror the live tool state back, so an
+  // embedding shell can drive the SAME tools its toolbar/context-menu present.
+  // The exposed api wraps a ref to the latest handlers so it stays referentially
+  // stable while always closing over fresh state — one owner, no split-brain.
+  const toolApiRef = useRef<ModelToolApi | null>(null);
+  toolApiRef.current = {
+    selMode: chooseSelMode,
+    gizmo: chooseGizmoTool,
+    paint: togglePaint,
+    focus: toggleFocus,
+    wire: () => setWire((v) => !v),
+    extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
+    createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
+    setQuality: (q) => applyQuality(q),
+  };
+  useEffect(() => {
+    onToolApi?.({
+      selMode: (m) => toolApiRef.current?.selMode(m),
+      gizmo: (t) => toolApiRef.current?.gizmo(t),
+      paint: () => toolApiRef.current?.paint(),
+      focus: () => toolApiRef.current?.focus(),
+      wire: () => toolApiRef.current?.wire(),
+      extrudeEdge: () => toolApiRef.current?.extrudeEdge(),
+      createFace: () => toolApiRef.current?.createFace(),
+      setQuality: (q) => toolApiRef.current?.setQuality(q),
+    });
+  }, []);
+  useEffect(() => {
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0 });
+  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count]);
 
   // W = wireframe, P = paint, F = focus, 1/2/3 = vertex/edge/face, Esc = clear/back to view.
   useModifiers({
@@ -506,7 +566,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
             <AttributionStatusBadge status={attribution.status} />
           </Pressable>
         )}
-        {model && (
+        {!hostChrome && model && (
           <Pressable
             onPress={togglePaint}
             tooltip="Toggle paint mode (P)"
@@ -518,7 +578,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
             <Text style={{ color: paintMode ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Paint</Text>
           </Pressable>
         )}
-        {model && (
+        {!hostChrome && model && (
           <Pressable
             onPress={toggleFocus}
             tooltip="Focus tool (F) — drag to move the pivot; double-click the model to recenter"
@@ -530,7 +590,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
             <Text style={{ color: focusMode ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Focus</Text>
           </Pressable>
         )}
-        {model && (
+        {!hostChrome && model && (
           <Pressable
             onPress={() => setWire((w) => !w)}
             tooltip="Toggle wireframe (W)"
@@ -585,8 +645,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
 
       {/* Mode toolbar — Object / Vertex / Edge / Face. The host-native selection modes;
           picking happens against the resident mesh with the exact render camera. Shares the
-          under-title row with the paint palette (they're mutually-exclusive tools). */}
-      {model && !paintMode && (
+          under-title row with the paint palette (they're mutually-exclusive tools).
+          Suppressed under hostChrome: the editor's toolbar + context menu own these. */}
+      {!hostChrome && model && !paintMode && (
         <Row
           style={{
             position: 'absolute', left: 0, top: 34, right: 0, height: 40,
@@ -715,8 +776,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
 
       {/* Quality strip — live decimation. Drag to trade detail for triangles; the host
           re-meshes from the retained full-res source. Lower end is "just the shape" for
-          the game (and the basis for baked LoD by render distance). */}
-      {model && (
+          the game (and the basis for baked LoD by render distance).
+          Suppressed under hostChrome: the editor tucks Quality into its context menu. */}
+      {!hostChrome && model && (
         <Row
           style={{
             position: 'absolute', left: 0, right: 0, bottom: 0, height: 46,
