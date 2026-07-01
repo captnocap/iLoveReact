@@ -1,3 +1,15 @@
+// editor/data/fileExplorer.ts — PREVIEW SHIM. The Import/File Explorer dialog's
+// folder tree, file rows, and per-model previews below (EXPLORER_FOLDERS /
+// EXPLORER_FILES and the seed history) are FABRICATED sample data, not a live
+// filesystem read: the owners, modified dates, open counts, triangle counts, and
+// import checks are authored to make the import-browse flow inspectable during
+// design (DESIGN_INTAKE → "React Is UI Authoring; Tools Are Host-Owned" allows
+// mock data ONLY when labeled as such and naming its future owner).
+//
+// FUTURE HOST OWNER: a host-backed file index over the fs door (runtime/hooks/fs
+// → framework/fs.zig) — the same door modelPackageStore.ts already writes
+// through. When that index exists, EXPLORER_FILES becomes a query over real
+// on-disk imports and this seed data goes away. Do not treat these rows as truth.
 export type ExplorerFolderId =
   | 'workspace'
   | 'imports'
