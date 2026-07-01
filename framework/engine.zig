@@ -438,6 +438,9 @@ const world_window = if (HAS_3D and HAS_COMPILED_WORLD) @import("gpu/world_windo
 // PANELWIN-0628: the editor-panel pop-out window — renders a 2D React subtree
 // into a second OS window (2nd monitor). Pure 2D, so no HAS_3D gate.
 const panel_window = @import("gpu/panel_window.zig");
+// Below this pane size (px), a Scene3D is a preview thumbnail, not an editable
+// viewport — the mesh-edit vertex/edge overlay is suppressed there.
+const EDITOR_OVERLAY_MIN_PANE: f32 = 128;
 const transition = if (HAS_TRANSITIONS) @import("gpu/transition.zig") else struct {
     pub fn tick(_: f32) bool {
         return false;
@@ -3161,8 +3164,17 @@ noinline fn paintNodeVisuals(node: *Node) void {
     // 3D.View — 3D viewport rendered offscreen, composited here
     if (node.scene3d) {
         _ = r3d.render(node, r.x, r.y, r.w, r.h, g_paint_opacity);
-        // Editor overlay (vertex dots / edge highlights / marquee) on top of the composite.
-        r3d.drawEditorOverlay(r.x, r.y);
+        // Editor overlay (vertex dots / edge highlights / marquee) on top of the
+        // composite. The overlay projects the ACTIVE mesh-edit session with the
+        // editor's own camera, so it only belongs on the interactive editor
+        // viewport — NOT on the many small Scene3D preview tiles (model
+        // thumbnails), which would otherwise get the edited mesh's dots smeared
+        // over them. Gate on pane size: real viewports are large, thumbnails
+        // ~50px. (Precise fix is to scope the overlay to the g_paint viewport
+        // rect inside 3d.zig; done here in engine.zig to stay off that file.)
+        if (r.w >= EDITOR_OVERLAY_MIN_PANE and r.h >= EDITOR_OVERLAY_MIN_PANE) {
+            r3d.drawEditorOverlay(r.x, r.y);
+        }
     }
 
     selection.paintHighlight(node, r.x, r.y);
