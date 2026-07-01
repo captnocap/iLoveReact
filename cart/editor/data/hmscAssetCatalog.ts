@@ -596,6 +596,10 @@ function storedModelPackages(snapshot: ModelSnapshot | null): ModelPackage[] {
     const name = model.name || model.id;
     const parts = orderedParts(model);
     const triangles = parts.reduce((sum, part) => sum + partTriangles(part), 0);
+    // Skip meshless studio models — the empty "new_mesh_*" rows the editor
+    // saved with no geometry. They have no mesh, no thumbnail, and only clutter
+    // the browser; the real (named) models all carry triangles.
+    if (triangles === 0) return [];
     const paletteSlots = model.palette?.slots ?? [];
     const color = paletteSlots[0]?.pseudo ?? parts.find((part) => part.color)?.color ?? colorFor(model.id);
     const semantic = semanticKindFromText(name);
