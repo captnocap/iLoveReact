@@ -705,6 +705,116 @@ pub fn validatePlacement(placement: PlacedBuildPiece) PlacementValidation {
     return v;
 }
 
+// ── picking: raycastPieces ───────────────────────────────────────────────────
+// Verbatim from placed.ts. placedPieceDepthSpan is just centeredDepthSpan (its
+// `pieces` param is `void pieces` — the wall-join extension is renderer-miter
+// geometry, placedPieceWallEnds, not this). Direct scan replaces the JS
+// piecesNear grid. The prop off-ground Y-band (propVerticalBand) is deferred →
+// band 0, so non-prop pieces pick exactly and props pick on a ground-anchored box.
+
+pub const Vec3 = struct { x: f32, y: f32, z: f32 };
+pub const PieceRay = struct { origin: Vec3, dir: Vec3 };
+pub const PieceHit = struct { piece: PlacedBuildPiece, t: f32, point: Vec3, normal: Vec3 };
+pub const PlacedPieceDepthSpan = struct { minV: f32, maxV: f32 };
+
+fn centeredDepthSpan(size: BuildPieceSize) PlacedPieceDepthSpan {
+    return .{ .minV = -size.depthMeters / 2.0, .maxV = size.depthMeters / 2.0 };
+}
+
+/// placed.ts placedPieceDepthSpan — the centered depth span (pieces param unused).
+pub fn placedPieceDepthSpan(piece: PlacedBuildPiece) PlacedPieceDepthSpan {
+    return centeredDepthSpan(placedPieceDef(piece).?.size);
+}
+
+/// placed.ts raycastPieces — the closest ray↔piece hit (oriented-box slab test in
+/// each piece's local frame), or null past maxDistance / on a clean miss.
+pub fn raycastPieces(ray: PieceRay, pieces: []const PlacedBuildPiece, maxDistance: f32) ?PieceHit {
+    var best: ?PieceHit = null;
+    for (pieces) |piece| {
+        const size = placedPieceDef(piece).?.size;
+        const depthSpan = placedPieceDepthSpan(piece);
+        const depthCenter = (depthSpan.minV + depthSpan.maxV) / 2.0;
+        const depthSize = depthSpan.maxV - depthSpan.minV;
+        const yawRadians = piece.yawDegrees * DEG;
+        const cos = @cos(-yawRadians);
+        const sin = @sin(-yawRadians);
+        const baseY: f32 = 0; // propVerticalBand deferred (coded-model content)
+        const heightY: f32 = size.heightMeters;
+        const centerY = piece.y + baseY + heightY / 2.0;
+        // ray → piece frame (translate to center, rotate by -yaw about +Y)
+        const relX = ray.origin.x - piece.x;
+        const relZ = ray.origin.z - piece.z;
+        const ox = relX * cos - relZ * sin;
+        const oy = ray.origin.y - centerY;
+        const oz = relX * sin + relZ * cos - depthCenter;
+        const dx = ray.dir.x * cos - ray.dir.z * sin;
+        const dy = ray.dir.y;
+        const dz = ray.dir.x * sin + ray.dir.z * cos;
+        const half = [3]f32{ size.widthMeters / 2.0, heightY / 2.0, depthSize / 2.0 };
+        const origin = [3]f32{ ox, oy, oz };
+        const dir = [3]f32{ dx, dy, dz };
+        // slab test
+        var tNear: f32 = 0;
+        var tFar: f32 = maxDistance;
+        var nearAxis: i32 = -1;
+        var nearSign: f32 = 0;
+        var miss = false;
+        var axis: usize = 0;
+        while (axis < 3) : (axis += 1) {
+            if (@abs(dir[axis]) < 1e-9) {
+                if (@abs(origin[axis]) > half[axis]) {
+                    miss = true;
+                    break;
+                }
+                continue;
+            }
+            var t0 = (-half[axis] - origin[axis]) / dir[axis];
+            var t1 = (half[axis] - origin[axis]) / dir[axis];
+            // the entry face is the one the ray travels AGAINST
+            const sign: f32 = if (dir[axis] > 0) -1 else 1;
+            if (t0 > t1) {
+                const swap = t0;
+                t0 = t1;
+                t1 = swap;
+            }
+            if (t0 > tNear) {
+                tNear = t0;
+                nearAxis = @intCast(axis);
+                nearSign = sign;
+            }
+            if (t1 < tFar) tFar = t1;
+            if (tNear > tFar) {
+                miss = true;
+                break;
+            }
+        }
+        if (miss or nearAxis < 0) continue;
+        if (best) |b| {
+            if (tNear >= b.t) continue;
+        }
+        // local face normal → world (rotate by +yaw)
+        var local = [3]f32{ 0, 0, 0 };
+        local[@intCast(nearAxis)] = nearSign;
+        const wcos = @cos(yawRadians);
+        const wsin = @sin(yawRadians);
+        best = .{
+            .piece = piece,
+            .t = tNear,
+            .point = .{
+                .x = ray.origin.x + ray.dir.x * tNear,
+                .y = ray.origin.y + ray.dir.y * tNear,
+                .z = ray.origin.z + ray.dir.z * tNear,
+            },
+            .normal = .{
+                .x = local[0] * wcos - local[2] * wsin,
+                .y = local[1],
+                .z = local[0] * wsin + local[2] * wcos,
+            },
+        };
+    }
+    return best;
+}
+
 test "PLACED_TUNING values match the TS source verbatim" {
     try std.testing.expectEqual(@as(f32, 1.2), PLACED_TUNING.walkOpeningWidthMeters);
     try std.testing.expectEqual(@as(f32, 2.6), PLACED_TUNING.vehicleOpeningWidthMeters);
@@ -813,4 +923,16 @@ test "placementFor / validatePlacement match the TS brain" {
     // non-finite position → position_not_finite
     const nan = std.math.nan(f32);
     try std.testing.expect(validatePlacement(.{ .id = "", .pieceId = "floor.concrete.common", .x = nan, .y = 0, .z = 0, .yawDegrees = 0 }).position_not_finite);
+}
+
+test "raycastPieces — down-ray hits the floor top, up normal" {
+    const scene = [_]PlacedBuildPiece{
+        .{ .id = "f", .pieceId = "floor.concrete.common", .x = 0, .y = 0, .z = 0, .yawDegrees = 0 },
+    };
+    const hit = raycastPieces(.{ .origin = .{ .x = 0, .y = 5, .z = 0 }, .dir = .{ .x = 0, .y = -1, .z = 0 } }, &scene, 100).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 4.95), hit.t, 1e-4); // 5 → floor top 0.05
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), hit.point.y, 1e-4);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0), hit.normal.y, 1e-4); // top face points up
+    // a ray that misses the footprint returns null
+    try std.testing.expect(raycastPieces(.{ .origin = .{ .x = 50, .y = 5, .z = 0 }, .dir = .{ .x = 0, .y = -1, .z = 0 } }, &scene, 100) == null);
 }
