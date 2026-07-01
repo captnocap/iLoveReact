@@ -306,15 +306,18 @@ fn ensureFaceSel() bool {
     return true;
 }
 
-fn weldKey(p: [3]f32) u64 {
-    const xi: i64 = @intFromFloat(@round(p[0] * WELD_Q));
-    const yi: i64 = @intFromFloat(@round(p[1] * WELD_Q));
-    const zi: i64 = @intFromFloat(@round(p[2] * WELD_Q));
-    // Pack three ~21-bit quantised coords into one key (sufficient for editor-scale models).
-    const ux: u64 = @bitCast(xi);
-    const uy: u64 = @bitCast(yi);
-    const uz: u64 = @bitCast(zi);
-    return (ux *% 0x9E3779B97F4A7C15) ^ (uy *% 0xC2B2AE3D27D4EB4F) ^ (uz *% 0x165667B19E3779F9);
+/// EXACT weld key: the position quantised to WELD_Q, kept as a 3-int tuple. It MUST be
+/// exact (not a hash packed into one integer) — a lossy pack collides for symmetric meshes.
+/// A perfect cube's 8 corners are all (±q,±q,±q), and the old `x*C1 ^ y*C2 ^ z*C3` pack
+/// XORed those sign-flips down to just 2 distinct values, welding 8 corners into 2 verts
+/// (irregular meshes like a scanned GLB never hit the collision, which hid the bug). Keying
+/// the AutoHashMap on the [3]i32 itself compares by value, so distinct positions never merge.
+fn weldKey(p: [3]f32) [3]i32 {
+    return .{
+        @intFromFloat(@round(p[0] * WELD_Q)),
+        @intFromFloat(@round(p[1] * WELD_Q)),
+        @intFromFloat(@round(p[2] * WELD_Q)),
+    };
 }
 
 /// Build (or rebuild) the welded topology from model_paint's CPU triangle positions.
@@ -335,7 +338,7 @@ fn ensureTopology() bool {
     const pos = model_paint.positions() orelse return false;
     if (pos.len < @as(usize, fc) * 9) return false;
 
-    var weld = std.AutoHashMapUnmanaged(u64, u32){};
+    var weld = std.AutoHashMapUnmanaged([3]i32, u32){};
     defer weld.deinit(alloc);
     var verts = std.ArrayListUnmanaged(f32){};
     var corner_vert = alloc.alloc(u32, @as(usize, fc) * 3) catch return false;
@@ -1029,6 +1032,43 @@ test "planeCutSoup leaves a non-crossing triangle whole" {
     }
     try testing.expectEqual(@as(u32, 1), r.tri_count);
     try testing.expectEqual(@as(u32, 9), r.groups.?[0]);
+}
+
+test "symmetric cube welds to 8 verts + 18 edges (weld key must be exact, not a lossy hash)" {
+    // The 8 corners of a unit cube (±0.5). The old x*C1 ^ y*C2 ^ z*C3 pack collapsed these
+    // symmetric sign-flips to 2 keys → welded 8 corners into 2 verts (the "1 edge" cube bug).
+    const c = [8][3]f32{
+        .{ -0.5, -0.5, -0.5 }, .{ 0.5, -0.5, -0.5 }, .{ 0.5, -0.5, 0.5 }, .{ -0.5, -0.5, 0.5 },
+        .{ -0.5, 0.5, -0.5 },  .{ 0.5, 0.5, -0.5 },  .{ 0.5, 0.5, 0.5 },  .{ -0.5, 0.5, 0.5 },
+    };
+    const quads = [6][4]u32{
+        .{ 4, 7, 6, 5 }, .{ 0, 1, 2, 3 }, .{ 0, 4, 5, 1 }, .{ 3, 2, 6, 7 }, .{ 0, 3, 7, 4 }, .{ 1, 5, 6, 2 },
+    };
+    var soup: [12 * 3 * 8]f32 = undefined;
+    var w: usize = 0;
+    for (quads) |q| {
+        const tri = [6]u32{ q[0], q[1], q[2], q[0], q[2], q[3] };
+        for (tri) |vi| {
+            const p = c[vi];
+            soup[w + 0] = p[0];
+            soup[w + 1] = p[1];
+            soup[w + 2] = p[2];
+            soup[w + 3] = 0;
+            soup[w + 4] = 0;
+            soup[w + 5] = 1;
+            soup[w + 6] = 0;
+            soup[w + 7] = 0;
+            w += 8;
+        }
+    }
+    model_paint.setTarget(778, soup[0..], 36);
+    defer {
+        reset();
+        model_paint.clear();
+    }
+    try testing.expect(ensureTopology());
+    try testing.expectEqual(@as(u32, 8), vertCount());
+    try testing.expectEqual(@as(u32, 18), edgeCount()); // 12 cube edges + 6 quad diagonals
 }
 
 test "weld builds 4 verts and 5 edges from a 2-tri quad" {
