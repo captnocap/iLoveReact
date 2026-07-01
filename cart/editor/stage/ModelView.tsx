@@ -95,7 +95,7 @@ export type ModelToolApi = {
   brushTool: (t: BrushTool) => void;
   cycleSafety: () => void;
   cycleDetail: () => void;
-  changeDetail: (px: number) => void; // set an exact paint resolution (texels/face) — the File → Paint Resolution menu
+  changeDetail: (px: number) => number; // set an exact paint resolution; returns the level the host ACTUALLY applied (budget may clamp)
   setBrush: (b: Brush) => void;
   setPalette: (p: Palette) => void;
   // Light-rig switches — flip a light on/off (Flat is the even paint-true master).
@@ -398,7 +398,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
   // ── Brush behaviour handlers ─────────────────────────────────────────────────
   // Apply a free-form detail level through the host (it re-tessellates the paint atlas and
   // re-uploads the mesh); the door returns the ACTUAL level after its memory-budget guard.
-  const changeDetail = (px: number) => setDetail(applyPaintDetail(px));
+  // Returns that applied level — < px when the budget clamps it — so callers can shout the clamp.
+  const changeDetail = (px: number): number => {
+    const applied = applyPaintDetail(px);
+    setDetail(applied);
+    return applied;
+  };
   const cycleDetail = () => {
     const i = DETAIL_LEVELS.indexOf(detail as (typeof DETAIL_LEVELS)[number]);
     changeDetail(DETAIL_LEVELS[(i + 1) % DETAIL_LEVELS.length]!);

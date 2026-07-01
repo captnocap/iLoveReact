@@ -122,8 +122,13 @@ export default function AppFrame() {
     // clamps dense meshes to the atlas budget; the detail readout reflects what actually took.
     if (commandId.startsWith('paint-res-')) {
       const px = Number(commandId.slice('paint-res-'.length));
-      modelToolApiRef.current?.changeDetail(px);
-      setState((prev) => ({ ...prev, openMenu: null, status: `Paint resolution → ${px}×${px} texels/face` }));
+      const applied = modelToolApiRef.current?.changeDetail(px) ?? px;
+      // Shout when the atlas budget clamped the pick — otherwise a plateau at high detail looks
+      // like a brush bug when it's really "this mesh has too many faces for that many texels".
+      const status = applied < px
+        ? `Paint resolution ${px} clamped → ${applied}×${applied} (atlas budget — fewer faces or lower detail for finer than this)`
+        : `Paint resolution → ${px}×${px} texels/face`;
+      setState((prev) => ({ ...prev, openMenu: null, status }));
       return;
     }
     // Model-surface tools route to the viewer's host-native tool api; the viewer
