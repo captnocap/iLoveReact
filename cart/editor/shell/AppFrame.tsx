@@ -843,6 +843,7 @@ export default function AppFrame() {
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
             onModelBrush={(brush) => modelToolApiRef.current?.setBrush(brush)}
+            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart }}
             colorSpine={{
               onSetCurrent: setColorSpineCurrent,
               onAddToTray: addColorSpineToTray,

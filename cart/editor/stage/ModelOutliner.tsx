@@ -7,6 +7,7 @@ import type { ModelPart, PrimitiveKind } from '../data/types';
 // PARTS (each its own mesh), and this panel lists them with the row verbs (select /
 // visibility / delete) plus an add-bar to drop another primitive as a new part. Selection
 // highlights the whole part in the host (via its face-group range) so the gizmo moves it.
+// Housed in the Model Focus panel (Inspector) — an inline block, not a viewport overlay.
 export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisible, onDelete, onAdd }: {
   parts: ModelPart[];
   activeId: string | null;
@@ -18,8 +19,8 @@ export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisib
   return (
     <Col
       style={{
-        position: 'absolute', right: 12, top: 46, width: 224, maxHeight: '70%',
-        backgroundColor: 'rgba(12,14,20,0.94)', borderWidth: 1, borderColor: '#1d2330',
+        width: '100%', marginTop: 10,
+        backgroundColor: 'rgba(12,14,20,0.55)', borderWidth: 1, borderColor: '#1d2330',
         borderRadius: 8, overflow: 'hidden',
       }}
     >
@@ -30,7 +31,7 @@ export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisib
         <Text style={{ color: '#5d6878', fontSize: 11, fontFamily: 'monospace' }}>{`${parts.length}`}</Text>
       </Row>
 
-      <ScrollView style={{ flexGrow: 1, minHeight: 0 }} contentContainerStyle={{ flexDirection: 'column' }}>
+      <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ flexDirection: 'column' }}>
         {parts.length === 0 ? (
           <Text style={{ color: '#5d6878', fontSize: 11, padding: 12 }}>No parts yet — add one below.</Text>
         ) : parts.map((part) => {

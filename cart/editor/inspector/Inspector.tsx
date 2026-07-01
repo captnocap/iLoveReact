@@ -9,6 +9,8 @@ import PresetSection from './PresetSection';
 import MissionSection from './MissionSection';
 import ModelDetailBody from '../library/ModelDetailBody';
 import ModelBrushDock, { type ColorSpineHandlers } from './ModelBrushDock';
+import ModelOutliner from '../stage/ModelOutliner';
+import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
 import type { Brush } from '../../../runtime/paint/model';
 
 export default function Inspector(props: {
@@ -21,6 +23,7 @@ export default function Inspector(props: {
   onPresetOption: (preset: string) => void;
   onModelBrush: (brush: Brush) => void;
   colorSpine: ColorSpineHandlers;
+  outlinerHandlers: OutlinerHandlers;
 }) {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
   const activeModel = activeDocument?.kind === 'model' && activeDocument.sourceId
@@ -68,6 +71,18 @@ export default function Inspector(props: {
           </C.HW_PanelHead>
           <C.HW_InspectorBody>
             <ModelDetailBody model={activeModel} />
+            {/* The OUTLINER — parts of this multi-part model (add / select / hide / delete).
+                Only primitive-authored models carry parts state. */}
+            {props.state.modelParts[activeModel.id] ? (
+              <ModelOutliner
+                parts={props.state.modelParts[activeModel.id]!}
+                activeId={props.state.modelActivePartId}
+                onSelect={props.outlinerHandlers.onSelectPart}
+                onToggleVisible={props.outlinerHandlers.onToggleVisiblePart}
+                onDelete={props.outlinerHandlers.onDeletePart}
+                onAdd={props.outlinerHandlers.onAddPart}
+              />
+            ) : null}
             {/* Paint mode swaps in the brush dock below the focus content. Colour comes from the
                 ONE Color Studio (the same colorSpine every editor surface shares); BrushKit here
                 is only the shape/size/flow dials. The tool / safety / detail toggles live in the

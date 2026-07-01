@@ -2,7 +2,6 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage, ModelPart, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
 import ModelView from './ModelView';
-import ModelOutliner from './ModelOutliner';
 import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData, primitiveMeshData, composeModelParts } from '../data/hmscAssetCatalog';
 
 // The composed geometry changes (add/delete/hide/reorder a part) → the host mesh must
@@ -64,23 +63,14 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
   }
 
   // Multi-part model: compose the parts into one host mesh and reload when its geometry
-  // signature changes. The outliner overlays the viewport. An imported/single model has no
-  // outliner and resolves the old way.
+  // signature changes. The outliner UI itself lives in the Model Focus panel (Inspector) —
+  // here we only consume the parts to build the mesh. An imported/single model has no parts
+  // and resolves the old way.
   const composed = outliner ? composeModelParts(outliner.parts) : null;
-  const outlinerPanel = outliner ? (
-    <ModelOutliner
-      parts={outliner.parts}
-      activeId={outliner.activePartId}
-      onSelect={outliner.onSelectPart}
-      onToggleVisible={outliner.onToggleVisiblePart}
-      onDelete={outliner.onDeletePart}
-      onAdd={outliner.onAddPart}
-    />
-  ) : null;
 
   if (composed) {
-    // Every part hidden/deleted → nothing to draw, but keep the outliner so you can add or
-    // un-hide. A non-empty compose mounts the viewer keyed on the geometry signature.
+    // Every part hidden/deleted → nothing to draw (the outliner in Model Focus lets you add
+    // or un-hide). A non-empty compose mounts the viewer keyed on the geometry signature.
     const modelView = composed.positions.length > 0 ? (
       <ModelView
         key={`${model.id}:${partsSignature(outliner!.parts)}`}
@@ -97,7 +87,6 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
     return (
       <C.HW_ModelDocument {...triggerProps}>
         {modelView}
-        {outlinerPanel}
       </C.HW_ModelDocument>
     );
   }
@@ -111,7 +100,6 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
     return (
       <C.HW_ModelDocument {...triggerProps}>
         {modelView}
-        {outlinerPanel}
       </C.HW_ModelDocument>
     );
   }
