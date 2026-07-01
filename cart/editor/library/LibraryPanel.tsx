@@ -91,9 +91,7 @@ export default function LibraryPanel(props: {
           search={props.state.search}
           page={props.state.assetPage}
           activeDocumentId={props.state.activeWorkspaceDocumentId}
-          onFolder={props.onFolder}
           onPage={props.onPage}
-          onAction={props.onMaterialAction}
           onModel={props.onModel}
         />
       ) : showMaterialCatalog ? (

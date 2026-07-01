@@ -64,9 +64,15 @@ export function isModelFolder(folder: ContentFolderId): boolean {
   return folder === 'models' ||
     folder === 'models-build' ||
     folder === 'models-props' ||
+    folder === 'models-characters' ||
+    folder === 'models-vehicles' ||
     folder === 'models-props-wip' ||
     String(folder).startsWith('model-');
 }
+
+// How many model thumbnails fill one gallery page. Shared by the picture
+// gallery and AppFrame's page clamp so paging never disagrees with the grid.
+export const MODEL_GALLERY_PAGE_SIZE = 12;
 
 export function modelPackagesForFolder(folder: ContentFolderId, search: string): ModelPackage[] {
   const needle = search.trim().toLowerCase();
@@ -75,6 +81,8 @@ export function modelPackagesForFolder(folder: ContentFolderId, search: string):
       if (folder === 'models') return true;
       if (folder === 'models-build') return model.kind === 'build';
       if (folder === 'models-props') return model.kind === 'prop';
+      if (folder === 'models-characters') return model.kind === 'character';
+      if (folder === 'models-vehicles') return model.kind === 'vehicle';
       if (folder === 'models-props-wip') return model.sourceKind === 'studio-model' || model.stage === 'wip';
       return model.folderId === folder;
     })

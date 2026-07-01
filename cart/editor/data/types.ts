@@ -8,6 +8,8 @@ import type {
   ExplorerHistoryEntry,
 } from './fileExplorer';
 import type { DecalDoc } from '../../hmsc-int/game/textures/decal';
+import type { OklchColor } from '../../../runtime/paint/colors';
+import type { ColorLens } from './colorSpine';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Window' | 'Help';
 export type LibraryTab = 'Build' | 'Props' | 'Skins';
@@ -34,6 +36,8 @@ export type ContentFolderId =
   | 'models-build'
   | 'models-props'
   | 'models-props-wip'
+  | 'models-characters'
+  | 'models-vehicles'
   | `model-${string}`
   | 'materials'
   | 'materials-core'
@@ -58,6 +62,25 @@ export type Command = {
   native: boolean;
   undoable: boolean;
   tool?: boolean;
+  // Which document surface a command belongs to. Absent = the world surface
+  // (the default toolset). 'model' commands only surface when a model document
+  // is active — they're the host-native mesh-edit tools the model viewer brought.
+  surface?: 'world' | 'model';
+};
+
+// Mirror of the model viewer's live tool state (host-native mesh editor), held
+// in editor state so the toolbar + context menu can highlight the active tool.
+// Shapes match modelview's exported ModelToolSnapshot / ModelToolApi (structural).
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number };
+export type ModelToolApi = {
+  selMode: (m: number) => void;
+  gizmo: (t: number) => void;
+  paint: () => void;
+  focus: () => void;
+  wire: () => void;
+  extrudeEdge: () => void;
+  createFace: () => void;
+  setQuality: (q: number) => void;
 };
 
 export type BuildNote = {
@@ -256,6 +279,13 @@ export type MockState = {
   colorStudioQuality: number;
   colorStudioActiveSlot: number;
   colorStudioOverrides: Record<string, string>;
+  colorStudioView: 'materialPalette' | 'workbench' | 'orbit';
+  colorSpineCurrent: OklchColor;
+  colorSpinePalette: OklchColor[];
+  colorSpineLens: ColorLens;
+  colorSpineLibraryFilter: 'match' | 'all';
+  colorSpineRampSteps: number;
+  colorSpineScenePick: string | null;
   buildDialogOpen: boolean;
   eventbusPopoverOpen: boolean;
   perfPopoverOpen: boolean;
@@ -281,6 +311,7 @@ export type MockState = {
   activeWorkspaceDocumentId: string;
   rightPane: string;
   contextOpen: boolean;
+  modelTool: ModelToolSnapshot;
   status: string;
   cursor: { x: number; y: number; z: number };
   history: HistoryEvent[];

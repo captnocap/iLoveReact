@@ -3,7 +3,7 @@
 // god-file; only the imports changed (one component per file, shared data/cls).
 // State will migrate onto the real foundation systems (editorbus / hot index /
 // commands / tunables) incrementally; this is the faithful layout first.
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { C } from '../workspace.cls';
 import Chrome from './Chrome';
 import DropdownMenu from './DropdownMenu';
@@ -17,13 +17,15 @@ import LibraryPanel from '../library/LibraryPanel';
 import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
 import FileExplorerDialog from '../dialogs/FileExplorerDialog';
+import ModelContextMenu from '../stage/ModelContextMenu';
 import RenderProbe from '../../../runtime/render_tracker';
-import type { MockState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelPackage } from '../data/types';
+import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
+import type { MockState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { loadPersistedState, persistState } from '../data/persistView';
-import { commandById } from '../data/commands';
+import { commandById, isMeshToolCommand } from '../data/commands';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, SNAP_MODES, FLOORS } from '../data/content';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
 import { useBuildJournal } from '../data/journal';
 import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFileById } from '../data/fileExplorer';
@@ -32,6 +34,18 @@ import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } fr
 export default function AppFrame() {
   const [state, setState] = useState<MockState>(loadPersistedState);
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
+
+  // The embedded model viewer hands its host-native tool handlers up here; the
+  // toolbar + context menu remote-control the SAME tools through this ref, and
+  // the viewer mirrors its live state back into state.modelTool for highlights.
+  const modelToolApiRef = useRef<ModelToolApi | null>(null);
+
+  // The model surface's right-click menu. Lives at the app ROOT (rendered below,
+  // as the last child of HW_App) so it lands at the cursor — an absolutely-placed
+  // menu positions relative to its parent, and only the root sits at window origin
+  // (the stage is offset right by the rail + content browser). The trigger spreads
+  // onto the model surface deep in the tree.
+  const modelMenu = useContextMenu();
 
   // Mirror the active view into hot-state so a dev hot reload rehydrates exactly
   // what you were looking at instead of snapping back to defaults.
@@ -77,6 +91,26 @@ export default function AppFrame() {
 
   const runCommand = (commandId: string, source: string) => {
     const command = commandById(commandId);
+    // Model-surface tools route to the viewer's host-native tool api; the viewer
+    // owns the state and reports it back, so we don't mutate world state here.
+    if (isMeshToolCommand(commandId)) {
+      const api = modelToolApiRef.current;
+      if (api) {
+        if (commandId === 'mesh-vertex') api.selMode(1);
+        else if (commandId === 'mesh-edge') api.selMode(2);
+        else if (commandId === 'mesh-face') api.selMode(3);
+        else if (commandId === 'mesh-move') api.gizmo(0);
+        else if (commandId === 'mesh-scale') api.gizmo(1);
+        else if (commandId === 'mesh-rotate') api.gizmo(2);
+        else if (commandId === 'mesh-paint') api.paint();
+        else if (commandId === 'mesh-focus') api.focus();
+        else if (commandId === 'mesh-wire') api.wire();
+        else if (commandId === 'mesh-extrude') api.extrudeEdge();
+        else if (commandId === 'mesh-create-face') api.createFace();
+      }
+      setState((prev) => ({ ...prev, status: `${command.name} - ${source}` }));
+      return;
+    }
     if (command.id === 'undo-local') {
       undoLocal();
       return;
@@ -567,7 +601,7 @@ export default function AppFrame() {
               const itemCount = isModelFolder(prev.contentFolder)
                 ? modelPackagesForFolder(prev.contentFolder, prev.search).length
                 : filteredAssets.length;
-              const pageSize = isModelFolder(prev.contentFolder) ? 5 : assetPageSizeFor(panelMode);
+              const pageSize = isModelFolder(prev.contentFolder) ? MODEL_GALLERY_PAGE_SIZE : assetPageSizeFor(panelMode);
               const maxPage = Math.max(0, Math.ceil(itemCount / pageSize) - 1);
               return { ...prev, assetPage: Math.max(0, Math.min(maxPage, prev.assetPage + delta)) };
             })}
@@ -582,6 +616,9 @@ export default function AppFrame() {
             activeCommand={activeCommand}
             activeAsset={activeAsset}
             onCommand={runCommand}
+            onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
+            onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => ({ ...prev, modelTool }))}
+            modelContextTrigger={modelMenu.triggerProps}
             onTool={(id) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` }))}
             onSnap={() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` }))}
             onFloor={() => runCommand('cycle-floor', 'toolbar')}
@@ -674,6 +711,19 @@ export default function AppFrame() {
         <RenderProbe id="Menu Dropdown">
           <DropdownMenu state={state} onCommand={runCommand} />
         </RenderProbe>
+      ) : null}
+      {/* Model context menu — rendered LAST at the root so it lands at the cursor
+          (window origin) and hit-tests above everything (paint order). Self-gates
+          on right-click; the kind check keeps it out of non-model surfaces. */}
+      {state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId)?.kind === 'model' ? (
+        <modelMenu.ContextMenu>
+          <ModelContextMenu
+            modelTool={state.modelTool}
+            onCommand={runCommand}
+            onQuality={(quality: number) => modelToolApiRef.current?.setQuality(quality)}
+            onClose={modelMenu.close}
+          />
+        </modelMenu.ContextMenu>
       ) : null}
     </C.HW_App>
   );

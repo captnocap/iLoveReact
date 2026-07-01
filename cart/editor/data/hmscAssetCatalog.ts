@@ -7,7 +7,7 @@ import {
 } from '../../hmsc-int/game/textures/shaders';
 import { validateDecalDoc } from '../../hmsc-int/game/textures/decal';
 import { editMeshToGeometry, type EditMesh } from '../../hmsc-int/editors/model/editMesh';
-import type { Asset, ContentNode, ModelAtlas, ModelPackage, ModelPaintVariant } from './types';
+import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, ModelPaintVariant } from './types';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
 const COOKED_SNAPSHOT = 'cart/hmsc-int/data/domains/cooked-asset/snapshots/cooked-asset.snapshot.json';
@@ -228,7 +228,7 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
   return {
     assets,
     modelPackages,
-    contentTree: contentTree(),
+    contentTree: contentTree(modelPackages),
     defaultAssetId: defaultAsset?.id ?? '',
     defaultContentFolder,
     diagnostics: {
@@ -624,7 +624,23 @@ function storedModelPackages(snapshot: ModelSnapshot | null): ModelPackage[] {
   });
 }
 
-function contentTree(): ContentNode[] {
+// The Models subtree mirrors the on-disk Model Package layout
+// (models/<category>/<model>/, see cart/editor/data/modelPackage.ts): one node
+// per category directory that actually has models, so the browse tree inherits
+// the same directory structure the packages do instead of source-kind buckets.
+function modelCategoryNodes(models: ModelPackage[]): ContentNode[] {
+  const categories: Array<[ModelPackage['kind'], ContentFolderId, string]> = [
+    ['prop', 'models-props', 'Props'],
+    ['build', 'models-build', 'Build'],
+    ['character', 'models-characters', 'Characters'],
+    ['vehicle', 'models-vehicles', 'Vehicles'],
+  ];
+  return categories
+    .filter(([kind]) => models.some((model) => model.kind === kind))
+    .map(([, id, label]) => ({ id, label }));
+}
+
+function contentTree(models: ModelPackage[]): ContentNode[] {
   return [
     {
       id: 'game',
@@ -637,11 +653,7 @@ function contentTree(): ContentNode[] {
           id: 'models',
           label: 'Models',
           icon: 'Box',
-          children: [
-            { id: 'models-build', label: 'Build Pieces' },
-            { id: 'models-props', label: 'Props' },
-            { id: 'models-props-wip', label: 'Saved Studio' },
-          ],
+          children: modelCategoryNodes(models),
         },
         {
           id: 'missions',
