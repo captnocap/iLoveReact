@@ -6,8 +6,8 @@ import {
   shaderSpec,
 } from '../textures/shaders';
 import { validateDecalDoc } from '../textures/decal';
-import { cuboid, editMeshToGeometry, type EditMesh } from '../model/editMesh';
-import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage } from './types';
+import { cuboid, cylinder, cone, pyramid, plane, sphere, icosphere, editMeshToGeometry, type EditMesh } from '../model/editMesh';
+import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, PrimitiveKind } from './types';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
@@ -192,14 +192,24 @@ export function storedModelFaceGroupData(modelId: string): Uint32Array | null {
   return storedModelFaceGroups[modelId] ?? null;
 }
 
-// A fresh primitive's geometry (File → New Mesh → Cube). Built through the SAME
-// cuboid() + editMeshToGeometry path a Studio cube takes — one authored-face id per
-// triangle — so it opens in the host editor as clean grouped faces and a side-by-side
-// against the Studio starts from identical topology (8 verts, 6 faces).
-export function primitiveMeshData(kind: 'cube'): { positions: Float32Array; faceGroups: Uint32Array } {
-  const mesh: EditMesh = cuboid(1, 1, 1);
+// A fresh primitive's geometry (File → New Mesh → …). Built through the SAME editMesh
+// generator + editMeshToGeometry path a Studio part takes — one authored-face id per
+// triangle — so it opens in the host editor as clean grouped faces (real quad/n-gon edges,
+// no triangulation diagonals). Unit-ish defaults; the user edits from there.
+function primitiveEditMesh(kind: PrimitiveKind): EditMesh {
+  switch (kind) {
+    case 'cube': return cuboid(1, 1, 1);
+    case 'cylinder': return cylinder(0.5, 1, 24);
+    case 'cone': return cone(0.5, 1, 24);
+    case 'pyramid': return pyramid(1, 1, 1);
+    case 'plane': return plane(1, 1);
+    case 'sphere': return sphere(0.5, 24);
+    case 'icosphere': return icosphere(0.5, 2);
+  }
+}
+export function primitiveMeshData(kind: PrimitiveKind): { positions: Float32Array; faceGroups: Uint32Array } {
   const groups: number[] = [];
-  const geo = editMeshToGeometry(mesh, undefined, groups);
+  const geo = editMeshToGeometry(primitiveEditMesh(kind), undefined, groups);
   return { positions: new Float32Array(geo.positions), faceGroups: new Uint32Array(groups) };
 }
 

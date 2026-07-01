@@ -1,10 +1,27 @@
 // editor/data/commands.ts — command table + menu geometry helpers.
 //
 // Cloned from the hmsc-workspace-mock god-file. Pure data + pure helpers.
-import type { Command, Menu, EditorState } from './types';
+import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
 export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Story', 'Window', 'Help'];
 export const MENU_DROPDOWN_WIDTH = 420;
+
+// The starter primitives under File → New Mesh. ONE list drives the submenu commands
+// (below), the id→kind dispatch (AppFrame), and the geometry (primitiveMeshData) — add a
+// row here + a generator case and the whole path lights up.
+export const PRIMITIVE_MESHES: { kind: PrimitiveKind; name: string; icon: string }[] = [
+  { kind: 'cube', name: 'Cube', icon: 'Box' },
+  { kind: 'cylinder', name: 'Cylinder', icon: 'Cylinder' },
+  { kind: 'cone', name: 'Cone', icon: 'Cone' },
+  { kind: 'pyramid', name: 'Pyramid', icon: 'Pyramid' },
+  { kind: 'plane', name: 'Plane', icon: 'Square' },
+  { kind: 'sphere', name: 'Sphere', icon: 'Globe' },
+  { kind: 'icosphere', name: 'Icosphere', icon: 'Hexagon' },
+];
+const NEW_MESH_COMMANDS: Command[] = PRIMITIVE_MESHES.map((p) => ({
+  id: `new-mesh-${p.kind}`, menu: 'File', submenu: 'New Mesh', name: p.name, icon: p.icon,
+  key: '', context: false, native: true, undoable: false,
+}));
 
 // Menu-bar geometry, derived from the Chrome styles (workspace.cls HW_*). The
 // dropdown is mounted at the app root, so these are window-relative pixels: the
@@ -17,10 +34,10 @@ const MENU_DROPDOWN_GUTTER = 12; // keep the panel off the window edge
 
 export const COMMANDS: Command[] = [
   { id: 'new-map', menu: 'File', name: 'New Map Workspace', icon: 'FilePlus2', key: 'Ctrl+N', context: false, native: true, undoable: false },
-  // File → New Mesh → Cube. A fresh primitive opens as its own model document with the
-  // host-native mesh editor live — the starting point for a side-by-side against the
-  // Studio's cube (same cuboid()+editMeshToGeometry authoring, same host editor).
-  { id: 'new-mesh-cube', menu: 'File', submenu: 'New Mesh', name: 'Cube', icon: 'Box', key: '', context: false, native: true, undoable: false },
+  // File → New Mesh → {Cube, Cylinder, …}. A fresh primitive opens as its own model document
+  // with the host-native mesh editor live. Generated from PRIMITIVE_MESHES so the submenu,
+  // dispatch, and geometry stay in lockstep.
+  ...NEW_MESH_COMMANDS,
   { id: 'open-map', menu: 'File', name: 'Open Workspace', icon: 'FolderOpen', key: 'Ctrl+O', context: false, native: true, undoable: false },
   { id: 'open-file-explorer', menu: 'File', name: 'Open Project File Explorer', icon: 'FolderSearch', key: 'Ctrl+P', context: false, native: true, undoable: false },
   { id: 'find-import-source', menu: 'File', name: 'Find Import Source', icon: 'SearchCode', key: 'Ctrl+Shift+P', context: false, native: true, undoable: false },

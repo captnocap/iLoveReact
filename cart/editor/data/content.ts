@@ -1,7 +1,7 @@
 // editor/data/content.ts - content tree, navigation enums, and folder helpers.
 import { MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
 import { HMSC_EDITOR_CATALOG, modelCategoryNodes } from './hmscAssetCatalog';
-import { commandById } from './commands';
+import { commandById, PRIMITIVE_MESHES } from './commands';
 import { INITIAL_OBJECTS } from './initialState';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, WorldObject } from './types';
 
@@ -127,34 +127,32 @@ export function modelPackagesForFolder(
     });
 }
 
-// A freshly-authored primitive is fully described by its id (`primitive:cube:<n>`), so
+// A freshly-authored primitive is fully described by its id (`primitive:<kind>:<n>`), so
 // modelPackageById can synthesize it with no side store — the geometry is built lazily by
 // the viewer (see ModelDocumentSurface / primitiveMeshData). Each <n> is a distinct pristine
-// document so "New Mesh → Cube" always opens a clean cube.
+// document so "New Mesh → X" always opens a clean primitive.
 export function primitiveModelPackage(id: string): ModelPackage {
-  const rest = id.slice('primitive:'.length); // 'cube' | 'cube:3'
-  const [kind, seq] = rest.split(':');
-  const primitive = (kind === 'cube' ? 'cube' : 'cube') as 'cube';
-  const label = primitive.charAt(0).toUpperCase() + primitive.slice(1);
+  const [, kind, seq] = id.split(':'); // 'primitive:cylinder:3' → ['primitive','cylinder','3']
+  const meta = PRIMITIVE_MESHES.find((p) => p.kind === kind) ?? PRIMITIVE_MESHES[0]!;
   return {
     id,
     folderId: 'props',
-    name: seq ? `${label} ${seq}` : label,
-    path: `primitive/${primitive}`,
+    name: seq ? `${meta.name} ${seq}` : meta.name,
+    path: `primitive/${meta.kind}`,
     kind: 'prop',
     stage: 'wip',
     color: '#5a86c0',
     source: 'primitive',
     rig: '-',
     data: '-',
-    triangles: 12,
+    triangles: 0,
     lods: 1,
     decompositions: [],
     atlases: [],
     paints: [],
     sourceKind: 'primitive',
-    semanticKind: primitive,
-    primitive,
+    semanticKind: meta.kind,
+    primitive: meta.kind,
   };
 }
 

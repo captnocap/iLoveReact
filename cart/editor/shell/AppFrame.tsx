@@ -126,12 +126,13 @@ export default function AppFrame() {
       redoLocal();
       return;
     }
-    if (command.id === 'new-mesh-cube') {
-      // Fresh primitive → its own model document with the host-native mesh editor live.
-      // A per-cube sequence keeps every "New Mesh → Cube" a distinct pristine document.
-      const seq = state.workspaceDocuments.filter((doc) => doc.id.startsWith('model:primitive:cube:')).length + 1;
-      openModelDocument(primitiveModelPackage(`primitive:cube:${seq}`));
-      setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `new cube mesh (Cube ${seq})` }));
+    if (command.id.startsWith('new-mesh-')) {
+      // Fresh primitive → its own model document with the host-native mesh editor live. A
+      // per-kind sequence keeps every "New Mesh → X" a distinct pristine document.
+      const kind = command.id.slice('new-mesh-'.length);
+      const seq = state.workspaceDocuments.filter((doc) => doc.id.startsWith(`model:primitive:${kind}:`)).length + 1;
+      openModelDocument(primitiveModelPackage(`primitive:${kind}:${seq}`));
+      setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `new ${kind} mesh (${command.name} ${seq})` }));
       return;
     }
     if (command.id === 'open-map' || command.id === 'open-file-explorer' || command.id === 'find-import-source') {

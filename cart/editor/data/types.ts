@@ -13,6 +13,9 @@ import type { Brush, BrushTool, Palette } from '../../../runtime/paint/model';
 import type { ColorLens } from './colorSpine';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Window' | 'Help';
+// The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
+// (cuboid/cylinder/…); see PRIMITIVE_MESHES (commands.ts) + primitiveMeshData (catalog).
+export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere';
 export type LibraryTab = 'Build' | 'Props' | 'Skins';
 export type ViewMode = '3D' | '2D';
 export type WorkspaceDocumentKind = 'world' | 'model' | 'material';
@@ -246,10 +249,10 @@ export type ModelPackage = {
   paints: ModelPaintVariant[];
   sourceKind?: 'cooked-asset' | 'studio-model' | 'imported-prop' | 'source-file' | 'primitive';
   semanticKind?: string;
-  // A freshly-authored primitive (File → New Mesh → Cube). The viewer builds the
-  // geometry from the in-cart EditMesh primitives (cuboid()+editMeshToGeometry), the same
-  // path studio models take, so it opens as clean grouped faces and edits in the host.
-  primitive?: 'cube';
+  // A freshly-authored primitive (File → New Mesh → …). The viewer builds the geometry
+  // from the in-cart EditMesh generators (cuboid/cylinder/…, via editMeshToGeometry), the
+  // same path studio models take, so it opens as clean grouped faces and edits in the host.
+  primitive?: PrimitiveKind;
 };
 
 export type Rgb = [number, number, number];
