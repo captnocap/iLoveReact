@@ -1,11 +1,17 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { editTelemetry, formatMs } from '../data/telemetry';
 import type { EditorState } from '../data/types';
 
+// Eventbus Review — an honest look at the in-memory edit stream: what events happened,
+// what's undoable/redoable, and the plain fact that the eventbus host isn't wired yet.
+//
+// It is NOT a performance dashboard. The old perf grid (avg/p95/"rich map delta"/latest)
+// and "authoring cost trace" were theater: they measured an empty-vs-rich-placement
+// distinction the editor never actually records (emptyMs === richMs === editMs in
+// AppFrame), so "rich map delta" was structurally always +0.0ms and the "target: empty
+// map placement ~= fully authored rich map placement" line was a design goal leaked into
+// the UI. Real frame/gpu telemetry lives in the Performance popover, not here (req_2422).
 export default function EventBusPopover({ state, onClose }: { state: EditorState; onClose: () => void }) {
-  const telemetry = editTelemetry(state.history);
-  const latest = telemetry.samples[0];
   const undoable = state.history.filter((event) => event.undoable).length;
   return (
     <C.HW_DockPopover>
@@ -18,55 +24,18 @@ export default function EventBusPopover({ state, onClose }: { state: EditorState
         <C.HW_Spacer />
         <C.HW_Pill onPress={onClose}><C.HW_PillText>close</C.HW_PillText></C.HW_Pill>
       </C.HW_DockPopoverHead>
-      <C.HW_DockPerfGrid>
-        <C.HW_PerfTile>
-          <C.HW_PerfValue>{formatMs(telemetry.avg)}</C.HW_PerfValue>
-          <C.HW_PerfLabel>avg time / edit</C.HW_PerfLabel>
-        </C.HW_PerfTile>
-        <C.HW_PerfTile>
-          <C.HW_PerfValue>{formatMs(telemetry.p95)}</C.HW_PerfValue>
-          <C.HW_PerfLabel>p95 edit cost</C.HW_PerfLabel>
-        </C.HW_PerfTile>
-        <C.HW_PerfTile>
-          <C.HW_PerfValue>+{formatMs(telemetry.delta)}</C.HW_PerfValue>
-          <C.HW_PerfLabel>rich map delta</C.HW_PerfLabel>
-        </C.HW_PerfTile>
-        <C.HW_PerfTile>
-          <C.HW_PerfValue>{latest ? formatMs(latest.richMs) : '0.0ms'}</C.HW_PerfValue>
-          <C.HW_PerfLabel>latest event</C.HW_PerfLabel>
-        </C.HW_PerfTile>
-      </C.HW_DockPerfGrid>
-      <C.HW_DockTrace>
-        <C.HW_GroupTitle>
-          <Icon name="Activity" size={12} color={accentFor('primary')} />
-          <C.HW_GroupText>AUTHORING COST TRACE</C.HW_GroupText>
-          <C.HW_Spacer />
-          <C.HW_StatusText>target: empty map placement ~= fully authored rich map placement</C.HW_StatusText>
-        </C.HW_GroupTitle>
-        <C.HW_Sparkline>
-          {telemetry.samples.map((event) => (
-            <C.HW_SparkCell key={event.id} style={{ height: Math.max(8, Math.min(38, Math.floor(event.richMs * 1.8))), backgroundColor: event.richMs - event.emptyMs <= 1 ? accentFor('primary') : accentFor('warning') }} />
-          ))}
-        </C.HW_Sparkline>
-      </C.HW_DockTrace>
-      {/* Honest status: the edit log is an in-memory, session-local list — there
-          is no autosave or multiplayer yet. Persistence + fan-out arrive when the
-          eventbus host (DESIGN_INTAKE "Eventbus Direction") owns this stream. */}
+      {/* Honest status: the edit log is an in-memory, session-local list — no autosave,
+          no multiplayer, no fan-out yet. Those arrive when the eventbus host owns this
+          stream. Until then this popover is a straight review of the in-memory events. */}
       <C.HW_EventSummary>
-        <C.HW_DockGroup>
-          <Icon name="Radio" size={12} color={accentFor('primary')} />
-          <C.HW_DockValue>session local</C.HW_DockValue>
-        </C.HW_DockGroup>
-        <C.HW_DockGroup>
-          <Icon name="Cpu" size={12} color={accentFor('textDim')} />
-          <C.HW_DockValue>in-memory only</C.HW_DockValue>
-        </C.HW_DockGroup>
         <C.HW_DockGroup>
           <Icon name="Workflow" size={12} color={accentFor('textDim')} />
           <C.HW_DockValue>eventbus host: not wired</C.HW_DockValue>
         </C.HW_DockGroup>
-        <C.HW_Spacer />
-        <C.HW_StatusText>review surface only - editor canvas keeps its height</C.HW_StatusText>
+        <C.HW_DockGroup>
+          <Icon name="Cpu" size={12} color={accentFor('textDim')} />
+          <C.HW_DockValue>session-local, in-memory</C.HW_DockValue>
+        </C.HW_DockGroup>
       </C.HW_EventSummary>
       <C.HW_DockHistoryRows>
         {state.history.map((event) => (
@@ -75,10 +44,6 @@ export default function EventBusPopover({ state, onClose }: { state: EditorState
             <C.HW_FormValue>{event.target}</C.HW_FormValue>
             <C.HW_HistoryMeta>{event.meta}</C.HW_HistoryMeta>
             <C.HW_Spacer />
-            <C.HW_DockLabel>empty</C.HW_DockLabel>
-            <C.HW_DockValue>{formatMs(event.emptyMs ?? 0)}</C.HW_DockValue>
-            <C.HW_DockLabel>rich</C.HW_DockLabel>
-            <C.HW_DockValue>{formatMs(event.richMs ?? 0)}</C.HW_DockValue>
             <C.HW_DockLabel>{event.undoable ? 'undoable' : 'checkpoint'}</C.HW_DockLabel>
           </C.HW_DockHistoryRow>
         ))}
