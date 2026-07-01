@@ -1,9 +1,10 @@
 // editor/library/ModelPaintVariants.tsx — the real PAINT VARIANTS section of the Model Focus
 // dock. A variant is a whole saved painting of the model, stored in the editor's own store
 // (paintVariants.ts), read LIVE here — not the fabricated palette-slot swatches this section
-// used to show. Save reads the model's current paint atlas from the host (__model_atlas_read)
-// and persists it; loading a variant blits it back (__model_atlas_apply). Honest-empty until
-// the first painting is saved.
+// used to show. Save persists the model's STROKE PROGRAM (__model_paint_program_read) — the
+// durable recipe, not the rasterized atlas (GUIDING_LIGHT: store the strokes, not the pixels);
+// loading replays it (__model_paint_program_apply). Legacy atlas variants still load via
+// __model_atlas_apply. Honest-empty until the first painting is saved.
 import { useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
@@ -18,28 +19,29 @@ export default function ModelPaintVariants({ modelId }: { modelId: string }) {
   const refresh = () => setRev((r) => r + 1);
 
   const onSave = () => {
-    // Read the model's live atlas from the host. "" = no paint target (open + paint the model
-    // first); undefined = the host predates the door (rebuild). Both get an honest note, never
-    // a fake save.
-    const json = host.__model_atlas_read?.();
-    if (typeof json !== 'string' || json.length === 0) {
+    // The durable form is the STROKE PROGRAM (recipe), not the rasterized atlas. "" = nothing
+    // painted (open + paint first); undefined = the host predates the door (rebuild). Both get an
+    // honest note, never a fake save.
+    const prog = host.__model_paint_program_read?.();
+    if (typeof prog !== 'string' || prog.length === 0) {
       setNote('Open this model in the viewer and paint it before saving a variant.');
       return;
     }
-    try {
-      const atlas = JSON.parse(json) as { w: number; h: number; detail: number; data: string };
-      const v = savePaintVariant(modelId, atlas);
-      setNote(`Saved ${v.name}.`);
-      refresh();
-    } catch {
-      setNote('Could not read the current painting.');
-    }
+    // Display metadata (w/h/detail) only — the program itself is self-describing and loads on its own.
+    let meta = { w: 0, h: 0, detail: 1 };
+    try { meta = { ...meta, ...JSON.parse(host.__model_atlas_read?.() || '{}') }; } catch { /* metadata is optional */ }
+    const v = savePaintVariant(modelId, { w: meta.w, h: meta.h, detail: meta.detail, data: prog, format: 'program' });
+    setNote(`Saved ${v.name}.`);
+    refresh();
   };
 
   const onLoad = (id: string) => {
     const v = listPaintVariants(modelId).find((x) => x.id === id);
     if (!v) return;
-    const ok = host.__model_atlas_apply?.(v.detail, v.data) === 1;
+    // Replay the stroke program; legacy atlas variants blit their pixels.
+    const ok = v.format === 'program'
+      ? host.__model_paint_program_apply?.(v.data) === 1
+      : host.__model_atlas_apply?.(v.detail, v.data) === 1;
     setNote(ok ? `Loaded ${v.name} onto the model.` : `Couldn't load ${v.name} (open this model in the viewer first).`);
   };
 

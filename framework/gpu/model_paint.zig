@@ -68,6 +68,21 @@ pub fn consumeDirtyRows() ?[2]u32 {
     return r;
 }
 
+/// Wipe the atlas back to the default face colour on every texel (all rows dirty) — the
+/// blank canvas a paint-program replay paints onto. No-op if there's no atlas.
+pub fn clearAtlas() void {
+    const buf = g_rgba orelse return;
+    var i: usize = 0;
+    while (i < buf.len) : (i += 4) {
+        buf[i + 0] = DEFAULT_FACE[0];
+        buf[i + 1] = DEFAULT_FACE[1];
+        buf[i + 2] = DEFAULT_FACE[2];
+        buf[i + 3] = DEFAULT_FACE[3];
+    }
+    g_has_dirty = false;
+    if (g_atlas_h > 0) markRows(0, g_atlas_h - 1);
+}
+
 pub fn hasTarget() bool {
     return g_positions != null;
 }

@@ -23,6 +23,7 @@ const scene3d = @import("gpu/3d.zig");
 const mesh_import = @import("world/mesh_import.zig");
 const model_source = @import("gpu/model_source.zig");
 const material_tex = @import("gpu/material_tex.zig");
+const paint_program = @import("gpu/paint_program.zig");
 
 // Retained FULL-RES source mesh + its path, so the live quality slider can re-decimate
 // from the original at any level (model_set_quality) without re-reading the file.
@@ -770,7 +771,12 @@ fn hostModelPaintMaterial(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     const w = std.mem.readInt(u32, raw[0..4], .little);
     const h = std.mem.readInt(u32, raw[4..8], .little);
     const ok = scene3d.setPaintMaterial(raw[8..], w, h, scale);
-    if (ok) state.markDirty();
+    if (ok) {
+        // Register this shader ink in the stroke program (WGSL + params embedded) so a saved
+        // painting re-bakes it at load with no catalog — the program stays self-contained.
+        paint_program.activateMaterial(key, wgsl, data orelse &.{}, scale);
+        state.markDirty();
+    }
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
@@ -778,6 +784,7 @@ fn hostModelPaintMaterial(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
 fn hostModelPaintMaterialClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     scene3d.clearPaintMaterial();
+    paint_program.deactivateMaterial();
     setReturnNumber(info, 1);
 }
 
@@ -842,6 +849,57 @@ fn hostModelAtlasApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         return;
     };
     const ok = scene3d.applyPaintAtlas(detail, raw);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __model_paint_program_read() → base64 of the recorded STROKE PROGRAM (the durable painting —
+/// strokes + params, not the rasterized atlas), or "" if nothing's been painted. This is what
+/// the editor persists instead of the atlas (GUIDING_LIGHT: store the recipe, not the pixels).
+fn hostModelPaintProgramRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    const blob = scene3d.paintProgramRead() orelse {
+        setReturnString(info, "");
+        return;
+    };
+    defer alloc.free(blob);
+    const enc = std.base64.standard.Encoder;
+    const b64 = alloc.alloc(u8, enc.calcSize(blob.len)) catch {
+        setReturnString(info, "");
+        return;
+    };
+    defer alloc.free(b64);
+    _ = enc.encode(b64, blob);
+    setReturnString(info, b64);
+}
+
+/// __model_paint_program_apply(base64) → 1 on success, 0 on failure. Replay a saved stroke
+/// program onto the resident model, rebuilding the atlas from the recipe (re-baking any shader
+/// inks from their embedded WGSL). The self-contained restore that replaces atlas-blit.
+fn hostModelPaintProgramApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    const b64 = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer alloc.free(b64);
+    const dec = std.base64.standard.Decoder;
+    const n = dec.calcSizeForSlice(b64) catch {
+        setReturnNumber(info, 0);
+        return;
+    };
+    const blob = alloc.alloc(u8, n) catch {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer alloc.free(blob);
+    dec.decode(blob, b64) catch {
+        setReturnNumber(info, 0);
+        return;
+    };
+    const ok = scene3d.paintProgramApply(blob);
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
 }
@@ -1659,6 +1717,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
+    v8_runtime.registerHostFn("__model_paint_program_read", hostModelPaintProgramRead);
+    v8_runtime.registerHostFn("__model_paint_program_apply", hostModelPaintProgramApply);
     v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);
     v8_runtime.registerHostFn("__model_set_quality", hostModelSetQuality);
     v8_runtime.registerHostFn("__file_sha256", hostFileSha256);

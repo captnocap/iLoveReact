@@ -16,6 +16,7 @@ const layout = @import("../layout.zig");
 const effect_assemble = @import("effect_assemble.zig");
 const static_instance_policy = @import("static_instance_policy.zig");
 const model_paint = @import("model_paint.zig");
+const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
 const mesh_edit = @import("mesh_edit.zig");
 const capsules = @import("capsules.zig");
@@ -576,6 +577,7 @@ fn applyMeshMutation(m: mesh_edit.Mutation) bool {
 /// it. Called by the load door before stashing.
 pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
     clearActiveEditMesh();
+    paint_program.reset(); // a fresh model starts with an empty stroke program
     model_paint.setTarget(hashKey(key), verts, count);
     const need = @as(usize, count) * 8;
     if (verts.len >= need) {
@@ -1413,11 +1415,13 @@ pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
     const face = model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my));
     if (face < 0) return -1;
     // With a material ink dipped, fill the face with the shader's LOOK; else the flat colour.
-    if (model_paint.hasMaterialInk()) {
+    const mat = model_paint.hasMaterialInk();
+    if (mat) {
         model_paint.paintFaceTex(@intCast(face));
     } else {
         model_paint.paintFace(@intCast(face), .{ r, g, b, 255 });
     }
+    paint_program.recordFill(@intCast(face), mat, .{ r, g, b }); // the stroke program is the durable form, not the atlas
     return face;
 }
 
@@ -1432,6 +1436,24 @@ pub fn clearPaintMaterial() void {
 }
 pub fn hasPaintMaterial() bool {
     return model_paint.hasMaterialInk();
+}
+
+// ── Paint program (the durable form) ────────────────────────────────────────────────
+/// Serialize the recorded stroke program (the durable painting — strokes, not pixels), or
+/// null if nothing's been painted. Caller frees the returned blob.
+pub fn paintProgramRead() ?[]u8 {
+    return paint_program.serialize();
+}
+/// Replay a serialized stroke program onto the resident model, rebuilding the atlas from
+/// the recipe. Sets the program's detail first (re-tessellate + re-upload the mesh — which
+/// the paint module can't do) so face+bary dabs land at the resolution they were made.
+/// False if there's no resident mesh or the blob is malformed.
+pub fn paintProgramApply(blob: []const u8) bool {
+    if (g_edit_verts == null or g_edit_count == 0) return false;
+    if (paint_program.programDetail(blob)) |d| {
+        if (@as(u32, d) != model_paint.detail()) _ = setPaintDetail(@intCast(d));
+    }
+    return paint_program.apply(blob);
 }
 
 /// Carry a per-face colour set onto the active paint target (length ≥ facecount*4) —
@@ -1498,10 +1520,12 @@ pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f3
     if (g_paint_mode == 1) {
         const uv = model_paint.baryOnFace(cam, g_paint_vp_w, g_paint_vp_h, lx, ly, g_locked_face) orelse return -1;
         if (mat) model_paint.paintStampTex(g_locked_face, uv[0], uv[1], radius, flow) else model_paint.paintStamp(g_locked_face, uv[0], uv[1], radius, rgba, flow);
+        paint_program.recordDab(g_locked_face, uv[0], uv[1], radius, flow, mat, .{ r, g, b });
         return @intCast(g_locked_face);
     }
     const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, lx, ly) orelse return -1;
     if (mat) model_paint.paintStampTex(hit.face, hit.u, hit.v, radius, flow) else model_paint.paintStamp(hit.face, hit.u, hit.v, radius, rgba, flow);
+    paint_program.recordDab(hit.face, hit.u, hit.v, radius, flow, mat, .{ r, g, b });
     return @intCast(hit.face);
 }
 
