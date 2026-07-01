@@ -9,7 +9,12 @@ import type { ModelPackage } from '../data/types';
 import ModelThumbnail from './ModelThumbnail';
 import ModelPaintVariants from './ModelPaintVariants';
 
-export default function ModelDetailBody({ model }: { model: ModelPackage }) {
+export default function ModelDetailBody({ model, partCount }: { model: ModelPackage; partCount: number }) {
+  // The card describes the CONTAINER, not its seed primitive. A primitive-seeded model has
+  // no real import provenance (source is synthetic "primitive/<kind>", rig/manifest empty),
+  // and its kind is already the Outliner's job — so we drop the path + kind restatements and
+  // the FOLDER CONTRACT for it, and report the honest container fact: how many parts (req_2406).
+  const isPrimitive = model.sourceKind === 'primitive';
   return (
     <>
       <C.HW_ModelTop>
@@ -22,31 +27,33 @@ export default function ModelDetailBody({ model }: { model: ModelPackage }) {
             <C.HW_Spacer />
             <C.HW_MaterialStat>{model.stage}</C.HW_MaterialStat>
           </C.HW_MaterialTitleRow>
-          <C.HW_ModelPath>{model.path}</C.HW_ModelPath>
+          {!isPrimitive ? <C.HW_ModelPath>{model.path}</C.HW_ModelPath> : null}
           <C.HW_ModelMetaRow>
-            <C.HW_MaterialStat>{model.triangles > 0 ? `${formatCount(model.triangles)} tris` : 'tris —'}</C.HW_MaterialStat>
-            <C.HW_MaterialStat>{model.semanticKind ?? model.kind}</C.HW_MaterialStat>
-            <C.HW_MaterialStat>{model.sourceKind ?? 'indexed'}</C.HW_MaterialStat>
+            <C.HW_MaterialStat>{`${partCount} part${partCount === 1 ? '' : 's'}`}</C.HW_MaterialStat>
+            {model.triangles > 0 ? <C.HW_MaterialStat>{`${formatCount(model.triangles)} tris`}</C.HW_MaterialStat> : null}
+            {!isPrimitive ? <C.HW_MaterialStat>{model.sourceKind ?? 'indexed'}</C.HW_MaterialStat> : null}
           </C.HW_ModelMetaRow>
         </C.HW_ModelCardMain>
       </C.HW_ModelTop>
 
-      <C.HW_ModelSection>
-        <C.HW_ModelSectionHead>
-          <Icon name="PackageCheck" size={12} color={accentFor('primary')} />
-          <C.HW_GroupText>FOLDER CONTRACT</C.HW_GroupText>
-        </C.HW_ModelSectionHead>
-        {[
-          ['source model', model.source],
-          ['rig data', model.rig],
-          ['manifest', model.data],
-        ].map(([label, value]) => (
-          <C.HW_ModelDataRow key={label}>
-            <C.HW_ToolLabel>{label}</C.HW_ToolLabel>
-            <C.HW_ToolValue>{value}</C.HW_ToolValue>
-          </C.HW_ModelDataRow>
-        ))}
-      </C.HW_ModelSection>
+      {!isPrimitive ? (
+        <C.HW_ModelSection>
+          <C.HW_ModelSectionHead>
+            <Icon name="PackageCheck" size={12} color={accentFor('primary')} />
+            <C.HW_GroupText>FOLDER CONTRACT</C.HW_GroupText>
+          </C.HW_ModelSectionHead>
+          {[
+            ['source model', model.source],
+            ['rig data', model.rig],
+            ['manifest', model.data],
+          ].map(([label, value]) => (
+            <C.HW_ModelDataRow key={label}>
+              <C.HW_ToolLabel>{label}</C.HW_ToolLabel>
+              <C.HW_ToolValue>{value}</C.HW_ToolValue>
+            </C.HW_ModelDataRow>
+          ))}
+        </C.HW_ModelSection>
+      ) : null}
 
       <C.HW_ModelSection>
         <C.HW_ModelSectionHead>

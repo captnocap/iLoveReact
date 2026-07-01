@@ -14,7 +14,10 @@ export function modelDocument(model: ModelPackage): WorkspaceDocument {
     id: `model:${model.id}`,
     kind: 'model',
     title: model.name,
-    subtitle: model.sourceKind === 'studio-model' ? 'Studio mesh' : model.semanticKind ?? model.kind,
+    // No seed-kind subtitle. A model is a container of parts (the Outliner) — a "cone"
+    // subtitle goes stale the instant a second part joins. Studio meshes keep their
+    // real provenance label; everything else rides on the title alone (req_2406).
+    subtitle: model.sourceKind === 'studio-model' ? 'Studio mesh' : undefined,
     sourceId: model.id,
   };
 }

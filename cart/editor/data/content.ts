@@ -131,13 +131,19 @@ export function modelPackagesForFolder(
 // modelPackageById can synthesize it with no side store — the geometry is built lazily by
 // the viewer (see ModelDocumentSurface / primitiveMeshData). Each <n> is a distinct pristine
 // document so "New Mesh → X" always opens a clean primitive.
+//
+// The CONTAINER is named generically ("Model 3"), NOT after its seed primitive. A model is a
+// bag of parts (the Outliner is that list) — the moment you add a cube to a cone-seeded model,
+// a name like "Cone 3" would be a lie. So the seed kind lives on ONLY as filter/search data
+// (semanticKind/primitive/path); the seed's own name shows up exactly once, as the first
+// Outliner part. See docs on the identity-conflation fix (req_2406).
 export function primitiveModelPackage(id: string): ModelPackage {
   const [, kind, seq] = id.split(':'); // 'primitive:cylinder:3' → ['primitive','cylinder','3']
   const meta = PRIMITIVE_MESHES.find((p) => p.kind === kind) ?? PRIMITIVE_MESHES[0]!;
   return {
     id,
     folderId: 'props',
-    name: seq ? `${meta.name} ${seq}` : meta.name,
+    name: seq ? `Model ${seq}` : 'Model',
     path: `primitive/${meta.kind}`,
     kind: 'prop',
     stage: 'wip',

@@ -3,6 +3,7 @@ import type { Asset, ColorStudioMaterialKey, EditorState, ModelToolApi, ModelToo
 import type { ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import { modelPackageById } from '../data/content';
+import { modelDocument } from '../data/documents';
 import ContextMenu from '../shell/ContextMenu';
 import MaterialFocusSurface from './MaterialFocusSurface';
 import ModelDocumentSurface, { type OutlinerHandlers } from './ModelDocumentSurface';
@@ -51,6 +52,14 @@ export default function Stage(props: {
   const outliner = activeModel && activeParts
     ? { parts: activeParts, activePartId: props.state.modelActivePartId, ...props.outlinerHandlers }
     : null;
+  // Tab titles are DERIVED from the live model, not the doc's frozen snapshot — a model's
+  // name (e.g. a generic "Model 3") can change out from under an old persisted doc, and the
+  // tab must follow it rather than show a stale seed name like "Cone 1" (req_2406).
+  const tabDocuments = props.state.workspaceDocuments.map((doc) => {
+    if (doc.kind !== 'model' || !doc.sourceId) return doc;
+    const live = modelPackageById(doc.sourceId);
+    return live ? modelDocument(live) : doc;
+  });
   return (
     <C.HW_StagePanel>
       <C.HW_StageViewport>
@@ -91,7 +100,7 @@ export default function Stage(props: {
         {activeDocument.kind === 'material' && props.state.contextOpen ? <ContextMenu state={props.state} onCommand={props.onCommand} /> : null}
       </C.HW_StageViewport>
       <StageTabs
-        documents={props.state.workspaceDocuments}
+        documents={tabDocuments}
         activeId={activeDocument.id}
         onDocument={props.onWorkspaceDocument}
         onCloseDocument={props.onCloseWorkspaceDocument}
