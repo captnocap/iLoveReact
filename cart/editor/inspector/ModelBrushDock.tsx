@@ -3,10 +3,15 @@
 // material surface uses, bound to the SAME persistent colorSpine state — not BrushKit's generic
 // hue-wheel, which is exactly the "conventional colour picker" the Color Studio handoff replaces
 // (req_2313/2314). BrushKit stays only for the non-colour brush controls (shape / size /
-// hardness / flow / blend); its colour + palette sections are hidden. The brush's ink is a live
-// mirror of the studio's current colour, so painting a face and authoring a material share one
-// colour + one palette.
-import { useEffect } from 'react';
+// hardness / flow / blend); its colour + palette sections are hidden.
+//
+// The live brush is owned by the model viewer and only mirrors back here through a 2-commit
+// snapshot cascade, which lagged the host <Slider>s so badly the thumbs fought every drag and
+// felt dead (req_2322). So the dock edits a SYNCHRONOUS local draft — the sliders are controlled
+// by immediate state (responsive) — and pushes each change out to the viewer for painting. An
+// external brush change (e.g. the studio ink) is adopted, but the echo of our own edit is
+// ignored so it never snaps mid-drag.
+import { useEffect, useRef, useState } from 'react';
 import { Col, Text } from '../../../runtime/primitives';
 import { BrushKit, DARK_THEME, type Brush, type BrushTool } from '@reactjit/runtime/paint';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
@@ -36,13 +41,29 @@ export default function ModelBrushDock(props: {
   scenePick: string | null;
   spine: ColorSpineHandlers;
 }) {
-  // The brush ink mirrors the studio's current colour — one colour, everywhere. When the studio
-  // colour changes, push it onto the brush (as hex) so the paint stroke deposits it. Guarded so
-  // it only fires on a real change.
+  // Synchronous local brush so the host sliders don't lag behind the round-trip.
+  const [draft, setDraft] = useState<Brush>(props.brush);
+  const lastSent = useRef<string>('');
+
+  // Adopt external brush changes (nothing we originated), but ignore the echo of our own edit
+  // coming back through the snapshot — otherwise it resets the slider the instant you drag it.
+  useEffect(() => {
+    if (JSON.stringify(props.brush) === lastSent.current) return;
+    setDraft(props.brush);
+  }, [props.brush]);
+
+  const edit = (b: Brush) => {
+    lastSent.current = JSON.stringify(b);
+    setDraft(b);
+    props.onBrush(b);
+  };
+
+  // The brush ink mirrors the studio's current colour — one colour, everywhere. Apply through
+  // the same edit path so the draft stays in sync and the stroke deposits it.
   const hex = oklchToHex(props.current);
   useEffect(() => {
-    if (props.brush.ink.kind === 'color' && props.brush.ink.hex.toLowerCase() === hex.toLowerCase()) return;
-    props.onBrush({ ...props.brush, ink: { kind: 'color', hex } });
+    if (draft.ink.kind === 'color' && draft.ink.hex.toLowerCase() === hex.toLowerCase()) return;
+    edit({ ...draft, ink: { kind: 'color', hex } });
   }, [hex]);
 
   return (
@@ -66,8 +87,8 @@ export default function ModelBrushDock(props: {
       />
       <Text style={{ color: DARK_THEME.dim, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>BRUSH</Text>
       <BrushKit
-        brush={props.brush}
-        onBrushChange={props.onBrush}
+        brush={draft}
+        onBrushChange={edit}
         tool={props.tool}
         onToolChange={() => { /* tool lives in the toolbar; the dock owns shape/size/flow */ }}
         palette={{ swatches: [], recents: [] }}
