@@ -1,11 +1,11 @@
 // editor/inspector/ModelShaderBucket.tsx — the "paint bucket": dip the brush into a SHADER
-// instead of a flat colour. Picking a bucket sets the brush's shader ink (a shader-spec id +
+// instead of a flat color. Picking a bucket sets the brush's shader ink (a shader-spec id +
 // its tuned params); ModelView bakes that recipe to pixels the host samples per dab, so the
 // stroke deposits the material's LOOK onto the low-poly model (paint-with-a-shader, the
 // __model_paint_material door). The sliders expose EVERY knob the spec declares — reshape any
 // shader without touching WGSL — and only commit on release (the engine owns the thumb; the
 // GPU re-bake never runs mid-drag). Sibling of the Color Studio in ModelBrushDock: picking a
-// bucket switches to shader-paint, "Colour" hands painting back to the studio's current colour.
+// bucket switches to shader-paint, "Color" hands painting back to the studio's current color.
 import { useState } from 'react';
 import { Col, Row, Text, Pressable, ScrollView, Slider } from '../../../runtime/primitives';
 import { DARK_THEME, type Brush } from '@reactjit/runtime/paint';
@@ -64,7 +64,7 @@ export default function ModelShaderBucket(props: { brush: Brush; onBrush: (b: Br
     commit(e);
   };
 
-  const backToColour = () => {
+  const backToColor = () => {
     setEditing(null);
     setShowList(true);
     props.onBrush({ ...props.brush, ink: { kind: 'color', hex: props.colorHex } });
@@ -165,8 +165,8 @@ export default function ModelShaderBucket(props: { brush: Brush; onBrush: (b: Br
           <Pressable onPress={() => setShowList(true)}>
             <Text style={{ color: '#6ea8fe', fontSize: 10 }}>change</Text>
           </Pressable>
-          <Pressable onPress={backToColour}>
-            <Text style={{ color: DARK_THEME.dim, fontSize: 10 }}>colour</Text>
+          <Pressable onPress={backToColor}>
+            <Text style={{ color: DARK_THEME.dim, fontSize: 10 }}>color</Text>
           </Pressable>
         </Row>
       </Row>
