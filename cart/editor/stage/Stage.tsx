@@ -1,5 +1,7 @@
 import { C } from '../workspace.cls';
-import type { Asset, ColorStudioMaterialKey, MockState } from '../data/types';
+import type { Asset, ColorStudioMaterialKey, MockState, ModelToolApi, ModelToolSnapshot } from '../data/types';
+import type { ColorLens } from '../data/colorSpine';
+import type { OklchColor } from '../../../runtime/paint/colors';
 import { modelPackageById } from '../data/content';
 import ContextMenu from '../shell/ContextMenu';
 import MaterialFocusSurface from './MaterialFocusSurface';
@@ -13,6 +15,9 @@ export default function Stage(props: {
   onWorkspaceDocument: (id: string) => void;
   onCloseWorkspaceDocument: (id: string) => void;
   onCommand: (id: string, source: string) => void;
+  onModelToolApi: (api: ModelToolApi) => void;
+  onModelToolState: (state: ModelToolSnapshot) => void;
+  modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
   onStage: () => void;
   onContext: () => void;
   onObject: (id: string) => void;
@@ -25,6 +30,15 @@ export default function Stage(props: {
   onColorStudioSlot: (slot: number) => void;
   onColorStudioFill: (color: string, source: string) => void;
   onColorStudioReset: () => void;
+  onColorStudioView: (view: MockState['colorStudioView']) => void;
+  onColorSpineCurrent: (color: OklchColor) => void;
+  onColorSpineAddToTray: () => void;
+  onColorSpineTrayPick: (color: OklchColor) => void;
+  onColorSpineLens: (lens: ColorLens) => void;
+  onColorSpineLibraryFilter: (filter: 'match' | 'all') => void;
+  onColorSpineRampSteps: (steps: number) => void;
+  onColorSpineScenePick: (color: OklchColor, css: string) => void;
+  onColorSpineLoadLibrarySet: (colors: OklchColor[]) => void;
 }) {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
     ?? props.state.workspaceDocuments[0]!;
@@ -38,7 +52,12 @@ export default function Stage(props: {
         {activeDocument.kind === 'world' ? (
           <WorldEditorSurface />
         ) : activeDocument.kind === 'model' ? (
-          <ModelDocumentSurface model={activeModel} />
+          <ModelDocumentSurface
+            model={activeModel}
+            triggerProps={props.modelContextTrigger}
+            onToolApi={props.onModelToolApi}
+            onToolState={props.onModelToolState}
+          />
         ) : (
           <MaterialFocusSurface
             state={props.state}
@@ -52,6 +71,15 @@ export default function Stage(props: {
             onSlot={props.onColorStudioSlot}
             onFill={props.onColorStudioFill}
             onReset={props.onColorStudioReset}
+            onView={props.onColorStudioView}
+            onSpineCurrent={props.onColorSpineCurrent}
+            onSpineAddToTray={props.onColorSpineAddToTray}
+            onSpineTrayPick={props.onColorSpineTrayPick}
+            onSpineLens={props.onColorSpineLens}
+            onSpineLibraryFilter={props.onColorSpineLibraryFilter}
+            onSpineRampSteps={props.onColorSpineRampSteps}
+            onSpineScenePick={props.onColorSpineScenePick}
+            onSpineLoadLibrarySet={props.onColorSpineLoadLibrarySet}
           />
         )}
         {activeDocument.kind === 'material' && props.state.contextOpen ? <ContextMenu state={props.state} onCommand={props.onCommand} /> : null}

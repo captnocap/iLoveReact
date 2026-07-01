@@ -94,3 +94,71 @@ export function hsvToHex(hsv: HsvColor): string {
   const [r, g, b] = hsvToRgb01(hsv);
   return rgb01ToHex(r, g, b);
 }
+
+// ---------------------------------------------------------------------------
+// OKLCH — perceptually-even lightness/chroma/hue. Used by Color Studio's
+// harmony/ramp/library lenses (hue rotation stays uniform in a way HSV can't
+// give you). Same dependency-free contract as the HSV helpers above.
+
+export type OklchColor = { l: number; c: number; h: number };
+
+function srgbToLinear(v: number): number {
+  const c = clamp01(v);
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function linearToSrgb(v: number): number {
+  const c = Math.max(0, Math.min(1, v));
+  return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+}
+
+export function rgb01ToOklch(r: number, g: number, b: number): OklchColor {
+  const lr = srgbToLinear(r), lg = srgbToLinear(g), lb = srgbToLinear(b);
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  const okL = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+  const okA = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+  const okB = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+  const c = Math.sqrt(okA * okA + okB * okB);
+  const h = c < 0.0001 ? 0 : normDeg((Math.atan2(okB, okA) * 180) / Math.PI);
+  return { l: okL, c, h };
+}
+
+export function oklchToRgb01(oklch: OklchColor): [number, number, number] {
+  const hRad = (normDeg(oklch.h) * Math.PI) / 180;
+  const okA = oklch.c * Math.cos(hRad);
+  const okB = oklch.c * Math.sin(hRad);
+  const l_ = oklch.l + 0.3963377774 * okA + 0.2158037573 * okB;
+  const m_ = oklch.l - 0.1055613458 * okA - 0.0638541728 * okB;
+  const s_ = oklch.l - 0.0894841775 * okA - 1.2914855480 * okB;
+  const l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+  const lr = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  const lg = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  const lb = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+  return [clamp01(linearToSrgb(lr)), clamp01(linearToSrgb(lg)), clamp01(linearToSrgb(lb))];
+}
+
+export function oklchToHex(oklch: OklchColor): string {
+  const [r, g, b] = oklchToRgb01(oklch);
+  return rgb01ToHex(r, g, b);
+}
+
+export function hexToOklch(hex: string | null | undefined): OklchColor {
+  const [r, g, b] = hexToRgb01(hex);
+  return rgb01ToOklch(r, g, b);
+}
+
+function normDeg(deg: number): number {
+  return ((deg % 360) + 360) % 360;
+}
+
+export function rotateHue(oklch: OklchColor, degrees: number): OklchColor {
+  return { l: oklch.l, c: oklch.c, h: normDeg(oklch.h + degrees) };
+}
+
+/** Shortest angular distance between two hues, in degrees [0, 180]. */
+export function hueDistance(a: number, b: number): number {
+  const d = normDeg(a - b);
+  return Math.min(d, 360 - d);
+}

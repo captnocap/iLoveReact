@@ -305,7 +305,7 @@ classifier({
   HW_LensBody: { type: 'Box', style: { minHeight: 188, flexDirection: 'column' } },
 
   HW_FieldSurface: { type: 'Box', style: { position: 'relative', width: '100%', height: 168, borderRadius: 'theme:radiusLg', overflow: 'hidden', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
-  HW_FieldNode: { type: 'Box', style: { position: 'absolute', borderRadius: 999, boxShadow: '0 3px 10px -2px rgba(0,0,0,.7)' } },
+  HW_FieldNode: { type: 'Pressable', style: { position: 'absolute', borderRadius: 999, boxShadow: '0 3px 10px -2px rgba(0,0,0,.7)' } },
   HW_FieldAxisLabel: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO, position: 'absolute' } },
   HW_FieldCaption: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO, marginTop: 9 } },
 

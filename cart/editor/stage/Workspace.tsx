@@ -1,5 +1,7 @@
 import { C } from '../workspace.cls';
-import type { Asset, ColorStudioMaterialKey, Command, MockState, ViewMode } from '../data/types';
+import type { Asset, ColorStudioMaterialKey, Command, MockState, ModelToolApi, ModelToolSnapshot, ViewMode } from '../data/types';
+import type { ColorLens } from '../data/colorSpine';
+import type { OklchColor } from '../../../runtime/paint/colors';
 import ToolOptions from './ToolOptions';
 import Stage from './Stage';
 
@@ -8,6 +10,9 @@ export default function Workspace(props: {
   activeCommand: Command;
   activeAsset: Asset;
   onCommand: (id: string, source: string) => void;
+  onModelToolApi: (api: ModelToolApi) => void;
+  onModelToolState: (state: ModelToolSnapshot) => void;
+  modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
   onTool: (id: string) => void;
   onSnap: () => void;
   onFloor: () => void;
@@ -26,6 +31,15 @@ export default function Workspace(props: {
   onColorStudioSlot: (slot: number) => void;
   onColorStudioFill: (color: string, source: string) => void;
   onColorStudioReset: () => void;
+  onColorStudioView: (view: MockState['colorStudioView']) => void;
+  onColorSpineCurrent: (color: OklchColor) => void;
+  onColorSpineAddToTray: () => void;
+  onColorSpineTrayPick: (color: OklchColor) => void;
+  onColorSpineLens: (lens: ColorLens) => void;
+  onColorSpineLibraryFilter: (filter: 'match' | 'all') => void;
+  onColorSpineRampSteps: (steps: number) => void;
+  onColorSpineScenePick: (color: OklchColor, css: string) => void;
+  onColorSpineLoadLibrarySet: (colors: OklchColor[]) => void;
 }) {
   return (
     <C.HW_Workspace>

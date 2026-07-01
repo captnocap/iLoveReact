@@ -3,6 +3,7 @@ import { CATALOG_DIAGNOSTICS, DEFAULT_ASSET_ID, DEFAULT_CONTENT_FOLDER, MATERIAL
 import { WORLD_DOCUMENT, WORLD_DOCUMENT_ID } from './documents';
 import { INITIAL_EXPLORER_DIRECTORY_HISTORY, INITIAL_EXPLORER_HISTORY } from './fileExplorer';
 import type { MockState, WorldObject } from './types';
+import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
 
 export const INITIAL_OBJECTS: WorldObject[] = [
   { id: 'obj-tile', kind: 'TILE', name: 'Selected material', assetId: DEFAULT_ASSET_ID, left: 248, top: 116, width: 78, height: 70, metrics: [] },
@@ -25,6 +26,13 @@ export function initialState(): MockState {
     colorStudioQuality: 3,
     colorStudioActiveSlot: 2,
     colorStudioOverrides: {},
+    colorStudioView: 'materialPalette',
+    colorSpineCurrent: { ...SPINE_DEFAULT_CURRENT },
+    colorSpinePalette: SPINE_DEFAULT_PALETTE.map((c) => ({ ...c })),
+    colorSpineLens: 'field',
+    colorSpineLibraryFilter: 'match',
+    colorSpineRampSteps: 7,
+    colorSpineScenePick: null,
     buildDialogOpen: false,
     eventbusPopoverOpen: false,
     perfPopoverOpen: false,
@@ -50,6 +58,7 @@ export function initialState(): MockState {
     activeWorkspaceDocumentId: WORLD_DOCUMENT_ID,
     rightPane: 'inspector',
     contextOpen: false,
+    modelTool: { selMode: 0, gizmoTool: 0, paint: false, focus: false, wire: false, sel: 0, quality: 1, tris: 0 },
     status: `eventbus idle - ${MODEL_PACKAGE_COUNT} model homes + ${MATERIAL_ASSET_COUNT} materials indexed from ${CATALOG_DIAGNOSTICS.source} in ${CATALOG_DIAGNOSTICS.loadedMs}ms`,
     cursor: { x: 0, y: 0, z: 0 },
     history: [],

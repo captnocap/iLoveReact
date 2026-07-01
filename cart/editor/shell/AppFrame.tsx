@@ -27,6 +27,8 @@ import { commandById, isMeshToolCommand } from '../data/commands';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
+import { oklchName, type ColorLens } from '../data/colorSpine';
+import type { OklchColor } from '../../../runtime/paint/colors';
 import { useBuildJournal } from '../data/journal';
 import { EXPLORER_FILES, explorerMatchesFolder, explorerFolderLabel, explorerFileById } from '../data/fileExplorer';
 import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } from '../data/documents';
@@ -502,6 +504,47 @@ export default function AppFrame() {
     });
   };
 
+  const setColorStudioView = (view: MockState['colorStudioView']) => {
+    setState((prev) => ({ ...prev, colorStudioView: view, status: `Color Studio view: ${view}` }));
+  };
+
+  const setColorSpineCurrent = (color: OklchColor) => {
+    setState((prev) => ({ ...prev, colorSpineCurrent: color, status: `Color Studio current: ${oklchName(color)}` }));
+  };
+
+  const addColorSpineToTray = () => {
+    setState((prev) => ({ ...prev, colorSpinePalette: [...prev.colorSpinePalette, { ...prev.colorSpineCurrent }], status: 'added current color to palette' }));
+  };
+
+  const pickColorSpineTray = (color: OklchColor) => {
+    setState((prev) => ({ ...prev, colorSpineCurrent: color, status: `Color Studio current: ${oklchName(color)}` }));
+  };
+
+  const setColorSpineLens = (lens: ColorLens) => {
+    setState((prev) => ({ ...prev, colorSpineLens: lens, status: `Color Studio lens: ${lens}` }));
+  };
+
+  const setColorSpineLibraryFilter = (filter: 'match' | 'all') => {
+    setState((prev) => ({ ...prev, colorSpineLibraryFilter: filter }));
+  };
+
+  const setColorSpineRampSteps = (steps: number) => {
+    setState((prev) => ({ ...prev, colorSpineRampSteps: steps }));
+  };
+
+  const pickColorSpineScene = (color: OklchColor, css: string) => {
+    setState((prev) => ({ ...prev, colorSpineCurrent: color, colorSpineScenePick: css, status: `Color Studio current: ${oklchName(color)} (from scene)` }));
+  };
+
+  const loadColorSpineLibrarySet = (colors: OklchColor[]) => {
+    setState((prev) => ({
+      ...prev,
+      colorSpinePalette: colors.map((c) => ({ ...c })),
+      colorSpineCurrent: colors[0] ? { ...colors[0] } : prev.colorSpineCurrent,
+      status: 'loaded library palette into tray',
+    }));
+  };
+
   const focusMaterialDocument = () => {
     setState((prev) => {
       const asset = assetById(prev.activeAssetId, prev.assetOverrides);
@@ -637,6 +680,15 @@ export default function AppFrame() {
             onColorStudioSlot={activateColorStudioSlot}
             onColorStudioFill={fillColorStudioSlot}
             onColorStudioReset={resetColorStudioSlots}
+            onColorStudioView={setColorStudioView}
+            onColorSpineCurrent={setColorSpineCurrent}
+            onColorSpineAddToTray={addColorSpineToTray}
+            onColorSpineTrayPick={pickColorSpineTray}
+            onColorSpineLens={setColorSpineLens}
+            onColorSpineLibraryFilter={setColorSpineLibraryFilter}
+            onColorSpineRampSteps={setColorSpineRampSteps}
+            onColorSpineScenePick={pickColorSpineScene}
+            onColorSpineLoadLibrarySet={loadColorSpineLibrarySet}
           />
         </RenderProbe>
         <RenderProbe id="Inspector">
