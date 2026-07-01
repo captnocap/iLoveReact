@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# validate-hmsc-workspace-layout — static layout budget gate for the workspace mock.
+#
+# Runs under tools/v8cli, not node/python. It validates the fixed breakpoint,
+# panel budgets, dropdown reachability, fixed page slots, and required scroll
+# containers before the mock is opened for visual review.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="$ROOT/cart/hmsc-workspace-mock/layoutValidateCli.ts"
+OUT="$ROOT/cart/hmsc-workspace-mock/bundle-layout-validate.js"
+
+if [ ! -f "$OUT" ] || [ -n "$(find "$ROOT/cart/hmsc-workspace-mock" -maxdepth 1 \( -name '*.ts' -o -name '*.tsx' -o -name '*.json' \) -newer "$OUT" -print -quit 2>/dev/null)" ]; then
+  "$ROOT/tools/esbuild" "$SRC" --bundle --format=iife --platform=neutral --target=es2022 --outfile="$OUT" --log-level=error
+fi
+
+cd "$ROOT"
+exec "$ROOT/tools/v8cli" "$OUT" "$@"

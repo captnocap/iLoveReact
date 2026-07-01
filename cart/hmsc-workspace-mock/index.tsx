@@ -19,6 +19,12 @@ type ContentFolderId =
   | 'mission-assets'
   | 'scripts'
   | 'ui'
+  | 'models'
+  | 'models-props'
+  | 'models-props-wip'
+  | 'model-vase'
+  | 'model-cd-player'
+  | 'model-ball'
   | 'materials'
   | 'materials-core'
   | 'materials-generated'
@@ -54,10 +60,24 @@ type BuildNote = {
   trace: string[];
 };
 
+type ThreadCapture = {
+  id: string;
+  name: string;
+  channels: string[];
+  range: string;
+  build: string;
+  context: string;
+  note: string;
+};
+
 type BuildThread = {
   id: string;
   title: string;
   status: string;
+  aliases: string[];
+  tags: string[];
+  deliveries: string[];
+  captures: ThreadCapture[];
   history: string[];
 };
 
@@ -86,6 +106,68 @@ type MaterialSource = {
   variants: string[];
 };
 
+type ModelAtlas = {
+  id: string;
+  label: string;
+  scope: string;
+  resolution: string;
+  paints: number;
+  color: string;
+};
+
+type ModelPaintVariant = {
+  id: string;
+  name: string;
+  atlas: string;
+  used: number;
+  shaderRefs: string[];
+  imageRefs: string[];
+  color: string;
+};
+
+type ModelPackage = {
+  id: string;
+  folderId: ContentFolderId;
+  name: string;
+  path: string;
+  kind: 'prop' | 'character' | 'vehicle';
+  stage: 'wip' | 'ready' | 'locked';
+  color: string;
+  source: string;
+  rig: string;
+  data: string;
+  triangles: number;
+  lods: number;
+  decompositions: string[];
+  atlases: ModelAtlas[];
+  paints: ModelPaintVariant[];
+};
+
+type Rgb = [number, number, number];
+type ColorStudioMaterialKey = 'rot' | 'stucco' | 'pool';
+
+type ShaderSlot = {
+  name: string;
+  role: string;
+};
+
+type ShaderMaterial = {
+  key: ColorStudioMaterialKey;
+  name: string;
+  shaderFn: string;
+  board: string;
+  materialId: number;
+  heroSlot: number;
+  slots: ShaderSlot[];
+  variants: Rgb[][];
+};
+
+type PaletteSet = {
+  name: string;
+  tag: string;
+  colors: Rgb[];
+};
+
 type ContentNode = {
   id: ContentFolderId;
   label: string;
@@ -105,6 +187,75 @@ type WorldObject = {
   metrics: Array<[string, string]>;
   hidden?: boolean;
 };
+
+const QUALITY_LABELS = ['PSX', 'PS2', 'Prev', 'Std', 'Max'];
+
+const SHADER_MATERIALS: Record<ColorStudioMaterialKey, ShaderMaterial> = {
+  rot: {
+    key: 'rot',
+    name: 'Rot Siding',
+    shaderFn: 'rot_siding',
+    board: 'B / Condemned',
+    materialId: 18,
+    heroSlot: 2,
+    slots: [
+      { name: 'Wood low', role: 'grain shadow' },
+      { name: 'Wood high', role: 'grain lift' },
+      { name: 'Paint', role: 'variant color' },
+      { name: 'Rot', role: 'damage mask' },
+      { name: 'Seam', role: 'board cut' },
+    ],
+    variants: [
+      [[0.28, 0.17, 0.09], [0.58, 0.39, 0.20], [0.58, 0.62, 0.54], [0.035, 0.04, 0.026], [0.018, 0.016, 0.014]],
+      [[0.28, 0.17, 0.09], [0.58, 0.39, 0.20], [0.28, 0.47, 0.58], [0.035, 0.04, 0.026], [0.018, 0.016, 0.014]],
+      [[0.28, 0.17, 0.09], [0.58, 0.39, 0.20], [0.70, 0.56, 0.35], [0.035, 0.04, 0.026], [0.018, 0.016, 0.014]],
+    ],
+  },
+  stucco: {
+    key: 'stucco',
+    name: 'Neon Stucco',
+    shaderFn: 'neon_stucco',
+    board: 'D / NeonRot',
+    materialId: 31,
+    heroSlot: 1,
+    slots: [
+      { name: 'Base low', role: 'plaster shadow' },
+      { name: 'Base high', role: 'plaster lift' },
+      { name: 'Drip', role: 'leak accent' },
+    ],
+    variants: [
+      [[0.50, 0.10, 0.24], [0.98, 0.45, 0.66], [0.98, 0.78, 0.18]],
+      [[0.07, 0.37, 0.42], [0.36, 0.92, 0.88], [0.98, 0.78, 0.18]],
+      [[0.26, 0.19, 0.46], [0.84, 0.68, 0.96], [0.98, 0.78, 0.18]],
+    ],
+  },
+  pool: {
+    key: 'pool',
+    name: 'Pool Tile',
+    shaderFn: 'pool_tile',
+    board: 'D / NeonRot',
+    materialId: 34,
+    heroSlot: 1,
+    slots: [
+      { name: 'Tile A', role: 'checker low' },
+      { name: 'Tile B', role: 'checker high' },
+      { name: 'Caustic', role: 'light sweep' },
+      { name: 'Mildew', role: 'grout dirt' },
+    ],
+    variants: [
+      [[0.05, 0.50, 0.62], [0.48, 0.96, 0.92], [0.90, 1.00, 0.85], [0.015, 0.05, 0.035]],
+      [[0.12, 0.10, 0.42], [0.96, 0.20, 0.56], [0.90, 1.00, 0.85], [0.015, 0.05, 0.035]],
+      [[0.16, 0.44, 0.34], [0.86, 0.74, 0.34], [0.90, 1.00, 0.85], [0.015, 0.05, 0.035]],
+    ],
+  },
+};
+
+const COLOR_LIBRARY_SETS: PaletteSet[] = [
+  { name: 'Condemned Wood', tag: 'rot siding compatible', colors: [[0.28, 0.17, 0.09], [0.58, 0.39, 0.20], [0.28, 0.47, 0.58], [0.035, 0.04, 0.026]] },
+  { name: 'Neon Motel', tag: 'stucco night read', colors: [[0.50, 0.10, 0.24], [0.98, 0.45, 0.66], [0.36, 0.92, 0.88], [0.98, 0.78, 0.18]] },
+  { name: 'Pool Rot', tag: 'wet tile breakup', colors: [[0.05, 0.50, 0.62], [0.48, 0.96, 0.92], [0.90, 1.00, 0.85], [0.015, 0.05, 0.035]] },
+  { name: 'Ashphalt Warm', tag: 'street grime', colors: [[0.13, 0.15, 0.16], [0.31, 0.32, 0.31], [0.62, 0.55, 0.40], [0.72, 0.36, 0.29]] },
+];
 
 type HistoryEvent = {
   id: string;
@@ -127,7 +278,19 @@ type MockState = {
   activeAssetId: string;
   assetPage: number;
   materialFocused: boolean;
+  colorStudioMaterial: ColorStudioMaterialKey;
+  colorStudioVariant: number;
+  colorStudioSeed: number;
+  colorStudioQuality: number;
+  colorStudioActiveSlot: number;
+  colorStudioOverrides: Record<string, string>;
   buildDialogOpen: boolean;
+  threads: BuildThread[];
+  journalAttachRequest: string | null;
+  journalThreadQuery: string;
+  journalRenameThreadId: string | null;
+  journalThreadDraft: string;
+  journalCaptureForThread: string | null;
   eventbusPopoverOpen: boolean;
   fileExplorerOpen: boolean;
   fileExplorerQuery: string;
@@ -156,6 +319,10 @@ type MockState = {
 };
 
 const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Story', 'Window', 'Help'];
+const MENU_DROPDOWN_WIDTH = 420;
+const MENU_LEFT_BASE = 154;
+const MENU_LEFT_STEP = 46;
+const MENU_STAGE_GUTTER = 12;
 
 const COMMANDS: Command[] = [
   { id: 'new-map', menu: 'File', name: 'New Map Workspace', icon: 'FilePlus2', key: 'Ctrl+N', context: false, native: true, undoable: false },
@@ -174,6 +341,7 @@ const COMMANDS: Command[] = [
   { id: 'place-piece', menu: 'Build', name: 'Place Piece', icon: 'Pencil', key: 'B', context: true, native: true, undoable: true, tool: true },
   { id: 'move-selection', menu: 'Build', name: 'Move Selection', icon: 'Move', key: 'V', context: true, native: true, undoable: true, tool: true },
   { id: 'paint-material', menu: 'Build', name: 'Paint Material', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true },
+  { id: 'open-color-studio', menu: 'Build', name: 'Open Color Studio', icon: 'Palette', key: 'C', context: true, native: true, undoable: false, tool: true },
   { id: 'sample-material', menu: 'Build', name: 'Sample Material', icon: 'Pipette', key: 'I', context: true, native: true, undoable: false, tool: true },
   { id: 'add-trigger', menu: 'Map', name: 'Add Trigger Volume', icon: 'BoxSelect', key: 'T', context: true, native: true, undoable: true, tool: true },
   { id: 'set-spawn', menu: 'Map', name: 'Set Spawn Point', icon: 'MapPin', key: 'S', context: true, native: true, undoable: true, tool: true },
@@ -283,6 +451,86 @@ const ASSETS: Asset[] = [
 
 const MATERIAL_ASSET_COUNT = ASSETS.filter((asset) => asset.tab === 'Skins').length;
 
+const MODEL_PACKAGES: ModelPackage[] = [
+  {
+    id: 'vase',
+    folderId: 'model-vase',
+    name: 'vase',
+    path: '/models/props/vase',
+    kind: 'prop',
+    stage: 'ready',
+    color: '#8f7a68',
+    source: 'source/vase_high.glb',
+    rig: 'rig/prop_static.anchor.json',
+    data: 'data/model.package.json',
+    triangles: 8420,
+    lods: 4,
+    decompositions: ['decomp/intact', 'decomp/shards_12', 'decomp/chunks_04'],
+    atlases: [
+      { id: 'vase-atlas-main', label: 'atlas/main', scope: 'intact model', resolution: '2048', paints: 7, color: '#8f7a68' },
+      { id: 'vase-atlas-shards', label: 'atlas/shards_12', scope: 'explosion shards', resolution: '1024', paints: 4, color: '#6f5f55' },
+      { id: 'vase-atlas-lod', label: 'atlas/lod_proxy', scope: 'low detail proxy', resolution: '512', paints: 2, color: '#514844' },
+    ],
+    paints: [
+      { id: 'vase-paint-porcelain', name: 'blue porcelain', atlas: 'atlas/main', used: 18, shaderRefs: ['ceramic_clearcoat'], imageRefs: ['stamp-floral-02'], color: '#6f8fa5' },
+      { id: 'vase-paint-cracked', name: 'cracked motel', atlas: 'atlas/main', used: 9, shaderRefs: ['edge_dirt'], imageRefs: ['scratch-mask-01'], color: '#b1a18e' },
+      { id: 'vase-paint-shards', name: 'broken inside', atlas: 'atlas/shards_12', used: 4, shaderRefs: ['fresh_ceramic_cut'], imageRefs: ['dust-noise-03'], color: '#7d7068' },
+    ],
+  },
+  {
+    id: 'cd-player',
+    folderId: 'model-cd-player',
+    name: 'cd_player',
+    path: '/models/props/cd_player',
+    kind: 'prop',
+    stage: 'ready',
+    color: '#56616d',
+    source: 'source/cd_player_scan.glb',
+    rig: 'rig/hinge_lid.socket.json',
+    data: 'data/model.package.json',
+    triangles: 12840,
+    lods: 3,
+    decompositions: ['decomp/body_lid_buttons', 'decomp/explosion_09'],
+    atlases: [
+      { id: 'cd-atlas-body', label: 'atlas/body', scope: 'body + lid', resolution: '2048', paints: 5, color: '#56616d' },
+      { id: 'cd-atlas-buttons', label: 'atlas/buttons', scope: 'button decomp', resolution: '512', paints: 3, color: '#2c343d' },
+      { id: 'cd-atlas-scrap', label: 'atlas/scrap_09', scope: 'explosion pieces', resolution: '1024', paints: 2, color: '#3f4a55' },
+    ],
+    paints: [
+      { id: 'cd-paint-black', name: 'black plastic', atlas: 'atlas/body', used: 12, shaderRefs: ['dusty_plastic'], imageRefs: ['label-compact-disc'], color: '#252b31' },
+      { id: 'cd-paint-store', name: 'thrift sticker', atlas: 'atlas/body', used: 6, shaderRefs: ['sticker_edge_lift'], imageRefs: ['price-tag-99c'], color: '#6a737d' },
+      { id: 'cd-paint-broken', name: 'opened broken', atlas: 'atlas/scrap_09', used: 3, shaderRefs: ['sharp_plastic_edge'], imageRefs: ['scratch-mask-02'], color: '#404852' },
+    ],
+  },
+  {
+    id: 'ball',
+    folderId: 'model-ball',
+    name: 'ball',
+    path: '/models/props/wip/ball',
+    kind: 'prop',
+    stage: 'wip',
+    color: '#b06a58',
+    source: 'source/ball_blockout.glb',
+    rig: 'rig/physics_sphere.anchor.json',
+    data: 'data/model.package.json',
+    triangles: 2160,
+    lods: 2,
+    decompositions: ['decomp/intact', 'decomp/deflated_shell'],
+    atlases: [
+      { id: 'ball-atlas-main', label: 'atlas/main', scope: 'sphere body', resolution: '1024', paints: 11, color: '#b06a58' },
+      { id: 'ball-atlas-deflated', label: 'atlas/deflated_shell', scope: 'damage state', resolution: '512', paints: 3, color: '#7f5148' },
+      { id: 'ball-atlas-lod', label: 'atlas/lod_billboard', scope: 'distance card', resolution: '256', paints: 2, color: '#553d3a' },
+    ],
+    paints: [
+      { id: 'ball-paint-red', name: 'red rubber', atlas: 'atlas/main', used: 20, shaderRefs: ['rubber_scuff'], imageRefs: ['court-grime-01'], color: '#b94d3f' },
+      { id: 'ball-paint-soccer', name: 'panel soccer', atlas: 'atlas/main', used: 14, shaderRefs: ['stitched_panel'], imageRefs: ['hex-panel-mask'], color: '#d4d2c8' },
+      { id: 'ball-paint-deflated', name: 'deflated dirty', atlas: 'atlas/deflated_shell', used: 5, shaderRefs: ['rubber_fold_shadow'], imageRefs: ['mud-splatter-02'], color: '#7b5a4f' },
+    ],
+  },
+];
+
+const MODEL_PACKAGE_COUNT = MODEL_PACKAGES.length;
+
 const DOMAINS = [
   ['world', 'Eye'],
   ['grid', 'Grid3X3'],
@@ -307,6 +555,23 @@ const CONTENT_TREE: ContentNode[] = [
       { id: 'characters', label: 'Characters' },
       { id: 'locations', label: 'Locations' },
       {
+        id: 'models',
+        label: 'Models',
+        icon: 'Box',
+        children: [
+          {
+            id: 'models-props',
+            label: 'props',
+            children: [
+              { id: 'models-props-wip', label: 'wip' },
+              { id: 'model-vase', label: 'vase' },
+              { id: 'model-cd-player', label: 'cd_player' },
+              { id: 'model-ball', label: 'ball' },
+            ],
+          },
+        ],
+      },
+      {
         id: 'missions',
         label: 'Missions',
         children: [
@@ -323,10 +588,10 @@ const CONTENT_TREE: ContentNode[] = [
       },
       {
         id: 'materials',
-        label: 'Materials',
+        label: 'Global Materials',
         children: [
-          { id: 'materials-core', label: 'Core' },
-          { id: 'materials-generated', label: 'Generated' },
+          { id: 'materials-core', label: 'Defaults' },
+          { id: 'materials-generated', label: 'Procedural' },
           { id: 'materials-favorites', label: 'Favorites' },
           { id: 'materials-recent', label: 'Recent' },
         ],
@@ -367,6 +632,51 @@ const INITIAL_HISTORY: HistoryEvent[] = [
 ];
 
 const BUILD_NOTES: BuildNote[] = [
+  {
+    request: 'req_2172',
+    build: '1.0.0.2172',
+    title: 'V8 layout validation gate',
+    status: 'mocked',
+    agent: 'codex',
+    handled: 'Added a no-Python TS/V8 layout validator that checks the mock breakpoint, fixed workspace budgets, menu dropdown reachability, fixed page slots, scroll reachability, and wrap allow-list before visual review.',
+    trace: ['layout validation', 'v8 cli', 'fixed budgets', 'reachable menus'],
+  },
+  {
+    request: 'req_2171',
+    build: '1.0.0.2171',
+    title: 'Workspace reachability checks',
+    status: 'mocked',
+    agent: 'codex',
+    handled: 'Formalized the layout expectation that fixed panels, dropdowns, paged content, and scroll containers must be verifiable at the target breakpoint before opening the app.',
+    trace: ['layout gate', 'scroll containers', 'content reachability', 'fixed sizes'],
+  },
+  {
+    request: 'req_2170',
+    build: '1.0.0.2170',
+    title: 'Shitty Games platform framing',
+    status: 'mocked',
+    agent: 'codex',
+    handled: 'Reframed the workspace mock around Shitty Games as an engine-first nogame release: the editor/tooling can ship independently while hmsc becomes a loadable game data package.',
+    trace: ['branding', 'nogame release', 'loader', 'engine as platform'],
+  },
+  {
+    request: 'req_2169',
+    build: '1.0.0.2169',
+    title: 'Color Studio material palette',
+    status: 'mocked',
+    agent: 'codex',
+    handled: 'Turned the focused material surface into a shader-slot Color Studio mock where baked vec3f defaults are exposed per material, variant, seed, and quality with reset and fill-assist flows.',
+    trace: ['color studio', 'material palette', 'shader slots', 'vec3f defaults'],
+  },
+  {
+    request: 'req_2168',
+    build: '1.0.0.2168',
+    title: 'Model package content browser',
+    status: 'mocked',
+    agent: 'codex',
+    handled: 'Changed the content browser architecture so model folders own source mesh, rig data, decompositions, atlas sets, paint variants, and captured shader/image references while global materials remain separate.',
+    trace: ['content browser', 'models folder', 'texture atlas', 'paint variants'],
+  },
   {
     request: 'req_2118',
     build: '1.0.0.2118',
@@ -450,40 +760,120 @@ const BUILD_NOTES: BuildNote[] = [
   },
 ];
 
+// Diagnostic captures the raw console can mint from the live feed; any of these
+// can be attached onto an ongoing bug/build thread so a useful slice travels
+// with the issue history instead of getting lost in a file somewhere.
+const CAPTURE_POOL: ThreadCapture[] = [
+  { id: 'cap-gpu-cliff', name: 'gpu cliff 4fps', channels: ['gpu.bindgroup', 'render.frame'], range: '14:02-14:05', build: '1.0.0.2118', context: 'city_block_04', note: 'bind-group count spikes once the map gets dense' },
+  { id: 'cap-place-latency', name: 'rich map place lag', channels: ['edit.place', 'authoring.cost'], range: '09:41-09:43', build: '1.0.0.2112', context: 'motel_prefab', note: 'p95 edit time climbs with city size' },
+  { id: 'cap-eventbus-flood', name: 'idle eventbus burst', channels: ['eventbus.emit', 'render.rebake'], range: '11:20-11:21', build: '1.0.0.2118', context: 'traffic_layers', note: 'idle re-render storm floods the bus' },
+  { id: 'cap-layout-clip', name: 'menu clipped offscreen', channels: ['layout.validate'], range: '16:09-16:10', build: '1.0.0.2172', context: 'mission_night_raid', note: 'dropdown ran past the stage gutter' },
+];
+
 const BUILD_THREADS: BuildThread[] = [
   {
     id: 'bug-gpu-bind-groups',
     title: 'GPU bind-group creation cliff',
     status: 'watch',
+    aliases: ['jesus water walking', 'frame cliff'],
+    tags: ['gpu', 'perf', 'regression'],
+    deliveries: [],
+    captures: [CAPTURE_POOL[0]!],
     history: ['req_1739 root cause: 240 -> 4fps cliff', 'future repeats attach here instead of creating isolated memory'],
   },
   {
     id: 'ux-request-ledger',
     title: 'Request ledger visibility and closure burden',
     status: 'active',
+    aliases: ['build journal'],
+    tags: ['ux', 'journal', 'requests'],
+    deliveries: ['req_2108'],
+    captures: [],
     history: ['req_2108 turns requests into build notes', 'manual review becomes journal state, not a blocking chore'],
   },
   {
     id: 'ux-material-browser',
     title: 'Material browser scale and usability',
     status: 'active',
-    history: ['req_2104 generated catalog scale', 'req_2105 added stats/variants/actions', 'req_2106 moved it under content browser hierarchy', 'req_2111 fixed page slots keep controls visible'],
+    aliases: ['material catalog'],
+    tags: ['ux', 'materials', 'browser'],
+    deliveries: ['req_2104', 'req_2105', 'req_2106', 'req_2111', 'req_2168', 'req_2169'],
+    captures: [],
+    history: ['req_2104 generated catalog scale', 'req_2105 added stats/variants/actions', 'req_2106 moved it under content browser hierarchy', 'req_2111 fixed page slots keep controls visible', 'req_2168 splits model-owned paint/atlas data from global materials', 'req_2169 exposes shader color constants as named slots'],
+  },
+  {
+    id: 'platform-nogame-release',
+    title: 'Shitty Games engine-first release',
+    status: 'active',
+    aliases: ['nogame release'],
+    tags: ['platform', 'branding', 'release'],
+    deliveries: ['req_2170'],
+    captures: [],
+    history: ['req_2170 frames the public release as a nogame engine/tooling build', 'hmsc remains the first loadable game package, not the whole platform', 'engine data formats should keep serving other games built on the loader'],
+  },
+  {
+    id: 'ux-layout-validation',
+    title: 'Layout reachability must be preflighted',
+    status: 'active',
+    aliases: ['layout gate'],
+    tags: ['layout', 'validation', 'ci'],
+    deliveries: ['req_2171', 'req_2172'],
+    captures: [],
+    history: ['req_2171 defines fixed breakpoint validation for menus/content', 'req_2172 locks the validator to the repo TS/V8 CLI toolchain, no Python'],
   },
   {
     id: 'perf-authoring-parity',
     title: 'Authoring cost must not scale with map richness',
     status: 'watch',
+    aliases: ['placement parity'],
+    tags: ['perf', 'authoring', 'latency'],
+    deliveries: ['req_2112'],
+    captures: [],
     history: ['req_2112 exposes avg/p95 edit timing in the dock', 'placement on an empty map and a rich map should stay the same delta'],
   },
   {
     id: 'ux-eventbus-review',
     title: 'Eventbus review should not occupy permanent workspace space',
     status: 'active',
+    aliases: ['eventbus dock'],
+    tags: ['ux', 'eventbus', 'dock'],
+    deliveries: ['req_2118'],
+    captures: [],
     history: ['req_2118 moves event stream review into a dock popover', 'event data stays one click away without shrinking the editor stage'],
   },
 ];
 
 const ACTIVE_BUILD = BUILD_NOTES[0]!;
+
+function buildNoteByRequest(request: string): BuildNote | undefined {
+  return BUILD_NOTES.find((note) => note.request === request);
+}
+
+function threadForRequest(threads: BuildThread[], request: string): BuildThread | undefined {
+  return threads.find((thread) => thread.deliveries.includes(request));
+}
+
+function threadStatusAccent(status: string): string {
+  if (status === 'active') return 'primary';
+  if (status === 'watch') return 'warning';
+  return 'textDim';
+}
+
+function threadSearchHaystack(thread: BuildThread): string {
+  return [thread.title, thread.id, ...thread.aliases, ...thread.tags, ...thread.deliveries].join(' ').toLowerCase();
+}
+
+function matchThreads(threads: BuildThread[], query: string): BuildThread[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return threads;
+  const tokens = needle.split(/\s+/);
+  return threads.filter((thread) => tokens.every((token) => threadSearchHaystack(thread).includes(token)));
+}
+
+function unattachedCaptures(threads: BuildThread[]): ThreadCapture[] {
+  const used = new Set(threads.flatMap((thread) => thread.captures.map((capture) => capture.id)));
+  return CAPTURE_POOL.filter((capture) => !used.has(capture.id));
+}
 
 function applyAssetOverride(asset: Asset, override?: AssetOverride): Asset {
   return {
@@ -508,6 +898,93 @@ function assetPageSizeFor(tab: LibraryTab): number {
 
 function commandById(id: string): Command {
   return COMMANDS.find((command) => command.id === id) ?? COMMANDS[0]!;
+}
+
+function menuDropdownLeft(menu: Menu | null): number {
+  const viewportWidth = 1536;
+  const stageWidth = viewportWidth - 48 - 350 - 326;
+  const rawLeft = MENU_LEFT_BASE + MENUS.indexOf(menu ?? 'Build') * MENU_LEFT_STEP;
+  return Math.max(MENU_STAGE_GUTTER, Math.min(rawLeft, stageWidth - MENU_DROPDOWN_WIDTH - MENU_STAGE_GUTTER));
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function rgbToCss(rgb: Rgb): string {
+  return `rgb(${Math.round(clamp01(rgb[0]) * 255)}, ${Math.round(clamp01(rgb[1]) * 255)}, ${Math.round(clamp01(rgb[2]) * 255)})`;
+}
+
+function rgbToVec3(rgb: Rgb): string {
+  return `vec3f(${rgb.map((value) => value.toFixed(3)).join(', ')})`;
+}
+
+function mixRgb(a: Rgb, b: Rgb, amount: number): Rgb {
+  const t = clamp01(amount);
+  return [
+    clamp01(a[0] + (b[0] - a[0]) * t),
+    clamp01(a[1] + (b[1] - a[1]) * t),
+    clamp01(a[2] + (b[2] - a[2]) * t),
+  ];
+}
+
+function complementRgb(rgb: Rgb): Rgb {
+  return mixRgb([1 - rgb[0], 1 - rgb[1], 1 - rgb[2]], [0.14, 0.34, 0.48], 0.42);
+}
+
+function colorStudioMaterial(state: MockState): ShaderMaterial {
+  return SHADER_MATERIALS[state.colorStudioMaterial] ?? SHADER_MATERIALS.rot;
+}
+
+function colorStudioOverrideKey(material: ColorStudioMaterialKey, variant: number, slot: number): string {
+  return `${material}:${variant}:${slot}`;
+}
+
+function bakedSlotRgb(material: ShaderMaterial, variant: number, slot: number): Rgb {
+  return material.variants[variant]?.[slot] ?? material.variants[0]?.[slot] ?? [0, 0, 0];
+}
+
+function resolvedSlotColor(state: MockState, material: ShaderMaterial, slot: number): string {
+  const key = colorStudioOverrideKey(material.key, state.colorStudioVariant, slot);
+  return state.colorStudioOverrides[key] ?? rgbToCss(bakedSlotRgb(material, state.colorStudioVariant, slot));
+}
+
+function materialPreviewCells(material: ShaderMaterial, colors: string[], seed: number, quality: number): string[] {
+  const cells = Array.from({ length: 72 }, (_, index) => index);
+  return cells.map((index) => {
+    const col = index % 9;
+    const row = Math.floor(index / 9);
+    const jitter = (index * 17 + seed * 11 + row * 5) % 29;
+    if (material.key === 'rot') {
+      if (col === 0 || col === 8 || (col + seed) % 7 === 0) return colors[4] ?? '#111';
+      if (jitter === 0 || jitter === 1) return colors[3] ?? '#111';
+      if (row < 3) return colors[2] ?? '#777';
+      return jitter % 3 === 0 ? colors[0] ?? '#333' : colors[1] ?? '#666';
+    }
+    if (material.key === 'stucco') {
+      if ((col + seed) % 11 === 0 && row > 1) return colors[2] ?? '#f4c542';
+      if (jitter < 8 + quality) return colors[1] ?? '#ddd';
+      return colors[0] ?? '#333';
+    }
+    if (col % 4 === 0 || row % 4 === 0) return jitter < 8 ? colors[3] ?? '#092014' : '#071014';
+    if ((index + seed) % (13 - Math.min(quality, 4)) === 0) return colors[2] ?? '#fff';
+    return (col + row + seed) % 2 === 0 ? colors[0] ?? '#088' : colors[1] ?? '#aff';
+  });
+}
+
+function slotAssistColors(material: ShaderMaterial, state: MockState): Array<{ label: string; color: string }> {
+  const base = bakedSlotRgb(material, state.colorStudioVariant, Math.min(material.heroSlot, material.slots.length - 1));
+  const gray = ((base[0] + base[1] + base[2]) / 3) as number;
+  const warm: Rgb = [clamp01(base[0] + 0.18), clamp01(base[1] + 0.07), clamp01(base[2] * 0.78)];
+  const cool: Rgb = [clamp01(base[0] * 0.76), clamp01(base[1] + 0.08), clamp01(base[2] + 0.20)];
+  return [
+    { label: 'shade', color: rgbToCss(mixRgb(base, [0, 0, 0], 0.42)) },
+    { label: 'tint', color: rgbToCss(mixRgb(base, [1, 1, 1], 0.40)) },
+    { label: 'mute', color: rgbToCss(mixRgb(base, [gray, gray, gray], 0.58)) },
+    { label: 'warm', color: rgbToCss(warm) },
+    { label: 'cool', color: rgbToCss(cool) },
+    { label: 'comp', color: rgbToCss(complementRgb(base)) },
+  ];
 }
 
 function editTimingFor(seq: number, commandId: string): Pick<HistoryEvent, 'editMs' | 'emptyMs' | 'richMs'> {
@@ -579,6 +1056,7 @@ function panelModeFor(state: MockState, object: WorldObject): LibraryTab {
 }
 
 function tabForContentFolder(folder: ContentFolderId): LibraryTab | null {
+  if (isModelFolder(folder)) return null;
   if (folder === 'materials' || folder === 'materials-core' || folder === 'materials-generated' || folder === 'materials-favorites' || folder === 'materials-recent') return 'Skins';
   if (folder === 'props') return 'Props';
   if (folder === 'architecture' || folder === 'build-pieces' || folder === 'prefabs' || folder === 'mission-assets') return 'Build';
@@ -607,7 +1085,44 @@ function isMaterialFolder(folder: ContentFolderId): boolean {
   return tabForContentFolder(folder) === 'Skins';
 }
 
+function isModelFolder(folder: ContentFolderId): boolean {
+  return folder === 'models' ||
+    folder === 'models-props' ||
+    folder === 'models-props-wip' ||
+    MODEL_PACKAGES.some((model) => model.folderId === folder);
+}
+
+function modelPackagesForFolder(folder: ContentFolderId, search: string): ModelPackage[] {
+  const needle = search.trim().toLowerCase();
+  return MODEL_PACKAGES
+    .filter((model) => {
+      if (folder === 'models') return true;
+      if (folder === 'models-props') return model.kind === 'prop';
+      if (folder === 'models-props-wip') return model.stage === 'wip';
+      return model.folderId === folder;
+    })
+    .filter((model) => {
+      if (!needle) return true;
+      const haystack = [
+        model.name,
+        model.path,
+        model.source,
+        model.rig,
+        model.data,
+        ...model.decompositions,
+        ...model.atlases.map((atlas) => `${atlas.label} ${atlas.scope}`),
+        ...model.paints.map((paint) => `${paint.name} ${paint.atlas} ${paint.shaderRefs.join(' ')} ${paint.imageRefs.join(' ')}`),
+      ].join(' ').toLowerCase();
+      return haystack.includes(needle);
+    });
+}
+
+function exactModelForFolder(folder: ContentFolderId): ModelPackage | null {
+  return MODEL_PACKAGES.find((model) => model.folderId === folder) ?? null;
+}
+
 function assetMatchesContentFolder(asset: Asset, folder: ContentFolderId): boolean {
+  if (isModelFolder(folder)) return false;
   if (folder === 'game') return true;
   if (folder === 'materials') return asset.tab === 'Skins';
   if (folder === 'materials-core') return asset.tab === 'Skins' && !asset.id.startsWith('mock-mat-');
@@ -620,7 +1135,8 @@ function assetMatchesContentFolder(asset: Asset, folder: ContentFolderId): boole
 }
 
 function countAssetsForFolder(assets: Asset[], folder: ContentFolderId): number {
-  if (folder === 'game') return assets.length;
+  if (folder === 'game') return assets.length + MODEL_PACKAGE_COUNT;
+  if (isModelFolder(folder)) return modelPackagesForFolder(folder, '').length;
   return assets.filter((asset) => assetMatchesContentFolder(asset, folder)).length;
 }
 
@@ -648,7 +1164,19 @@ function initialState(): MockState {
     activeAssetId: 'grass',
     assetPage: 0,
     materialFocused: false,
+    colorStudioMaterial: 'rot',
+    colorStudioVariant: 1,
+    colorStudioSeed: 4,
+    colorStudioQuality: 3,
+    colorStudioActiveSlot: 2,
+    colorStudioOverrides: {},
     buildDialogOpen: false,
+    threads: BUILD_THREADS,
+    journalAttachRequest: null,
+    journalThreadQuery: '',
+    journalRenameThreadId: null,
+    journalThreadDraft: '',
+    journalCaptureForThread: null,
     eventbusPopoverOpen: false,
     fileExplorerOpen: false,
     fileExplorerQuery: '',
@@ -658,8 +1186,8 @@ function initialState(): MockState {
     fileExplorerHistory: INITIAL_EXPLORER_HISTORY,
     fileExplorerDirectoryHistory: INITIAL_EXPLORER_DIRECTORY_HISTORY,
     selectedObjectId: 'obj-tile',
-    contentFolder: 'materials',
-    expandedFolders: { game: true, missions: true, bankheist: true, materials: true, architecture: true },
+    contentFolder: 'model-vase',
+    expandedFolders: { game: true, models: true, 'models-props': true, missions: true, bankheist: true, materials: true, architecture: true },
     search: '',
     surfacePreset: 'default',
     snapIndex: 0,
@@ -667,7 +1195,7 @@ function initialState(): MockState {
     viewMode: '3D',
     rightPane: 'inspector',
     contextOpen: true,
-    status: `eventbus idle - ${MATERIAL_ASSET_COUNT} materials indexed`,
+    status: `eventbus idle - ${MODEL_PACKAGE_COUNT} model homes + ${MATERIAL_ASSET_COUNT} global materials indexed`,
     cursor: { x: 142, y: 0, z: 88 },
     history: INITIAL_HISTORY,
     redo: [],
@@ -772,6 +1300,8 @@ function AppFrame() {
           ...next,
           objects: prev.objects.map((item) => item.id === object.id ? { ...item, assetId: asset.id, name: item.kind === 'TILE' ? asset.name : item.name } : item),
         };
+      } else if (command.id === 'open-color-studio') {
+        next = { ...next, materialFocused: true, contextOpen: false, openMenu: null };
       } else if (command.id === 'sample-material') {
         next = { ...next, activeAssetId: object.assetId, activeTab: assetById(object.assetId, prev.assetOverrides).tab };
       } else if (command.id === 'duplicate-selection') {
@@ -962,6 +1492,195 @@ function AppFrame() {
     });
   };
 
+  const selectColorStudioMaterial = (materialKey: ColorStudioMaterialKey) => {
+    setState((prev) => {
+      const material = SHADER_MATERIALS[materialKey];
+      return {
+        ...prev,
+        colorStudioMaterial: materialKey,
+        colorStudioVariant: 0,
+        colorStudioActiveSlot: material.heroSlot,
+        status: `Color Studio material: ${material.name} - hero slot selected`,
+      };
+    });
+  };
+
+  const setColorStudioVariant = (variant: number) => {
+    setState((prev) => {
+      const material = colorStudioMaterial(prev);
+      return {
+        ...prev,
+        colorStudioVariant: variant,
+        colorStudioActiveSlot: Math.min(prev.colorStudioActiveSlot, material.slots.length - 1),
+        status: `Color Studio variant v${variant}: ${material.name}`,
+      };
+    });
+  };
+
+  const rollColorStudioSeed = () => {
+    setState((prev) => {
+      const nextSeed = ((prev.colorStudioSeed * 37 + 19) % 97) + 1;
+      return {
+        ...prev,
+        colorStudioSeed: nextSeed,
+        status: `Color Studio seed rolled: ${nextSeed}`,
+      };
+    });
+  };
+
+  const setColorStudioQuality = (quality: number) => {
+    setState((prev) => ({
+      ...prev,
+      colorStudioQuality: quality,
+      status: `Color Studio quality D[3]: ${QUALITY_LABELS[quality] ?? quality}`,
+    }));
+  };
+
+  const activateColorStudioSlot = (slot: number) => {
+    setState((prev) => {
+      const material = colorStudioMaterial(prev);
+      const slotName = material.slots[slot]?.name ?? 'slot';
+      return {
+        ...prev,
+        colorStudioActiveSlot: slot,
+        status: `Color Studio active slot: ${material.name} / ${slotName}`,
+      };
+    });
+  };
+
+  const fillColorStudioSlot = (color: string, source: string) => {
+    setState((prev) => {
+      const material = colorStudioMaterial(prev);
+      const slot = Math.min(prev.colorStudioActiveSlot, material.slots.length - 1);
+      const slotName = material.slots[slot]?.name ?? 'slot';
+      const key = colorStudioOverrideKey(material.key, prev.colorStudioVariant, slot);
+      return {
+        ...prev,
+        colorStudioOverrides: { ...prev.colorStudioOverrides, [key]: color },
+        history: [
+          { id: `h-${prev.seq}`, verb: 'slot', target: `${material.name} ${slotName}`, meta: `${source} -> ${color}`, undoable: true, ...editTimingFor(prev.seq, 'paint-material') },
+          ...prev.history,
+        ].slice(0, 8),
+        redo: [],
+        seq: prev.seq + 1,
+        status: `filled ${material.name} ${slotName} from ${source}`,
+      };
+    });
+  };
+
+  const resetColorStudioSlots = () => {
+    setState((prev) => {
+      const material = colorStudioMaterial(prev);
+      const nextOverrides = { ...prev.colorStudioOverrides };
+      material.slots.forEach((_, slot) => delete nextOverrides[colorStudioOverrideKey(material.key, prev.colorStudioVariant, slot)]);
+      return {
+        ...prev,
+        colorStudioOverrides: nextOverrides,
+        history: [
+          { id: `h-${prev.seq}`, verb: 'reset', target: `${material.name} v${prev.colorStudioVariant}`, meta: 'Color Studio reset to baked vec3f defaults', undoable: true, ...editTimingFor(prev.seq, 'paint-material') },
+          ...prev.history,
+        ].slice(0, 8),
+        redo: [],
+        seq: prev.seq + 1,
+        status: `reset ${material.name} v${prev.colorStudioVariant} to baked defaults`,
+      };
+    });
+  };
+
+  const openThreadAttach = (request: string) =>
+    setState((prev) => ({ ...prev, journalAttachRequest: request, journalThreadQuery: '', journalCaptureForThread: null, status: `attach ${request} to a thread` }));
+
+  const cancelThreadAttach = () =>
+    setState((prev) => ({ ...prev, journalAttachRequest: null, journalThreadQuery: '', status: 'thread attach cancelled' }));
+
+  const setThreadQuery = (journalThreadQuery: string) =>
+    setState((prev) => ({ ...prev, journalThreadQuery }));
+
+  const attachDeliveryToThread = (threadId: string) =>
+    setState((prev) => {
+      const request = prev.journalAttachRequest;
+      if (!request) return prev;
+      const threads = prev.threads.map((thread) => {
+        const without = thread.deliveries.filter((delivery) => delivery !== request);
+        if (thread.id === threadId) return { ...thread, deliveries: [request, ...without] };
+        return without.length === thread.deliveries.length ? thread : { ...thread, deliveries: without };
+      });
+      const target = threads.find((thread) => thread.id === threadId);
+      return { ...prev, threads, journalAttachRequest: null, journalThreadQuery: '', status: `attached ${request} to "${target?.title ?? threadId}"` };
+    });
+
+  const createThreadFromDelivery = () =>
+    setState((prev) => {
+      const request = prev.journalAttachRequest;
+      if (!request) return prev;
+      const note = buildNoteByRequest(request);
+      const name = prev.journalThreadQuery.trim() || note?.title || request;
+      const id = `thread-${request}`;
+      const cleaned = prev.threads.map((thread) => ({ ...thread, deliveries: thread.deliveries.filter((delivery) => delivery !== request) }));
+      const opened: BuildThread = {
+        id,
+        title: name,
+        status: 'active',
+        aliases: [],
+        tags: note ? note.trace.slice(0, 3) : [],
+        deliveries: [request],
+        captures: [],
+        history: [`opened from ${request}${note ? ` (${note.build})` : ''}`, 'future repeats attach here instead of a fresh card'],
+      };
+      return { ...prev, threads: [opened, ...cleaned], journalAttachRequest: null, journalThreadQuery: '', status: `opened thread "${name}" from ${request}` };
+    });
+
+  const detachDelivery = (threadId: string, request: string) =>
+    setState((prev) => ({
+      ...prev,
+      threads: prev.threads.map((thread) => (thread.id === threadId ? { ...thread, deliveries: thread.deliveries.filter((delivery) => delivery !== request) } : thread)),
+      status: `detached ${request} from thread`,
+    }));
+
+  const startRenameThread = (threadId: string) =>
+    setState((prev) => {
+      const thread = prev.threads.find((item) => item.id === threadId);
+      return { ...prev, journalRenameThreadId: threadId, journalThreadDraft: thread?.title ?? '', status: `rename "${thread?.title ?? threadId}"` };
+    });
+
+  const setThreadDraft = (journalThreadDraft: string) =>
+    setState((prev) => ({ ...prev, journalThreadDraft }));
+
+  const commitRenameThread = () =>
+    setState((prev) => {
+      const id = prev.journalRenameThreadId;
+      if (!id) return prev;
+      const draft = prev.journalThreadDraft.trim();
+      const threads = prev.threads.map((thread) => {
+        if (thread.id !== id || !draft || draft === thread.title) return thread;
+        const aliases = thread.aliases.includes(thread.title) ? thread.aliases : [thread.title, ...thread.aliases];
+        return { ...thread, title: draft, aliases };
+      });
+      const renamed = threads.find((thread) => thread.id === id);
+      return { ...prev, threads, journalRenameThreadId: null, journalThreadDraft: '', status: `named "${renamed?.title ?? draft}" - links stay on ${id}` };
+    });
+
+  const beginCaptureAttach = (threadId: string) =>
+    setState((prev) => ({ ...prev, journalCaptureForThread: prev.journalCaptureForThread === threadId ? null : threadId, status: 'attach a diagnostic capture' }));
+
+  const attachCaptureToThread = (threadId: string, captureId: string) =>
+    setState((prev) => {
+      const capture = CAPTURE_POOL.find((item) => item.id === captureId);
+      if (!capture) return prev;
+      return {
+        ...prev,
+        threads: prev.threads.map((thread) => (thread.id === threadId ? { ...thread, captures: [capture, ...thread.captures.filter((item) => item.id !== captureId)] } : thread)),
+        journalCaptureForThread: null,
+        status: `attached capture "${capture.name}"`,
+      };
+    });
+
+  const copyCapture = (capture: ThreadCapture) =>
+    setState((prev) => ({ ...prev, status: `copied "${capture.name}" feed (${capture.channels.length} channels) to clipboard` }));
+
+  const closeBuildJournal = () =>
+    setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, journalAttachRequest: null, journalThreadQuery: '', journalRenameThreadId: null, journalThreadDraft: '', journalCaptureForThread: null, status: 'build journal closed' }));
+
   return (
     <C.HW_App>
       <Chrome
@@ -1010,6 +1729,13 @@ function AppFrame() {
           onObject={selectObject}
           onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
           onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+          onSelectColorStudioMaterial={selectColorStudioMaterial}
+          onColorStudioVariant={setColorStudioVariant}
+          onColorStudioSeed={rollColorStudioSeed}
+          onColorStudioQuality={setColorStudioQuality}
+          onColorStudioSlot={activateColorStudioSlot}
+          onColorStudioFill={fillColorStudioSlot}
+          onColorStudioReset={resetColorStudioSlots}
         />
         <Inspector
           state={state}
@@ -1033,7 +1759,27 @@ function AppFrame() {
         />
       ) : null}
       {state.buildDialogOpen ? (
-        <BuildJournalDialog onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, status: 'build journal closed' }))} />
+        <BuildJournalDialog
+          threads={state.threads}
+          attachRequest={state.journalAttachRequest}
+          threadQuery={state.journalThreadQuery}
+          renameThreadId={state.journalRenameThreadId}
+          threadDraft={state.journalThreadDraft}
+          captureForThread={state.journalCaptureForThread}
+          onClose={closeBuildJournal}
+          onAttachOpen={openThreadAttach}
+          onAttachCancel={cancelThreadAttach}
+          onThreadQuery={setThreadQuery}
+          onAttachToThread={attachDeliveryToThread}
+          onCreateThread={createThreadFromDelivery}
+          onDetach={detachDelivery}
+          onRenameStart={startRenameThread}
+          onThreadDraft={setThreadDraft}
+          onRenameCommit={commitRenameThread}
+          onCaptureAttachBegin={beginCaptureAttach}
+          onCaptureAttach={attachCaptureToThread}
+          onCaptureCopy={copyCapture}
+        />
       ) : null}
       {state.fileExplorerOpen ? (
         <FileExplorerDialog
@@ -1069,7 +1815,7 @@ function Chrome(props: {
     <C.HW_Chrome>
       <C.HW_Brand>
         <Icon name="Box" size={15} color={accentFor('primary')} />
-        <C.HW_BrandText>WORLD EDITOR</C.HW_BrandText>
+        <C.HW_BrandText>SHITTY GAMES</C.HW_BrandText>
       </C.HW_Brand>
       <C.HW_MenuBar>
         {MENUS.map((menu) => {
@@ -1185,6 +1931,7 @@ function BuildDock({ state, onBuild, onEventbus }: { state: MockState; onBuild: 
       <C.HW_DockGroup>
         <Icon name="GitMerge" size={12} color={accentFor('primary')} />
         <C.HW_DockValue>{BUILD_NOTES.length} build notes</C.HW_DockValue>
+        <C.HW_DockLabel>{state.threads.length} threads</C.HW_DockLabel>
         <C.HW_DockLabel>{reversible} reversible</C.HW_DockLabel>
       </C.HW_DockGroup>
       <C.HW_Spacer />
@@ -1278,7 +2025,30 @@ function EventBusPopover({ state, onClose }: { state: MockState; onClose: () => 
   );
 }
 
-function BuildJournalDialog({ onClose }: { onClose: () => void }) {
+type JournalDialogProps = {
+  threads: BuildThread[];
+  attachRequest: string | null;
+  threadQuery: string;
+  renameThreadId: string | null;
+  threadDraft: string;
+  captureForThread: string | null;
+  onClose: () => void;
+  onAttachOpen: (request: string) => void;
+  onAttachCancel: () => void;
+  onThreadQuery: (query: string) => void;
+  onAttachToThread: (threadId: string) => void;
+  onCreateThread: () => void;
+  onDetach: (threadId: string, request: string) => void;
+  onRenameStart: (threadId: string) => void;
+  onThreadDraft: (text: string) => void;
+  onRenameCommit: () => void;
+  onCaptureAttachBegin: (threadId: string) => void;
+  onCaptureAttach: (threadId: string, captureId: string) => void;
+  onCaptureCopy: (capture: ThreadCapture) => void;
+};
+
+function BuildJournalDialog(props: JournalDialogProps) {
+  const attached = props.threads.reduce((count, thread) => count + thread.deliveries.length, 0);
   return (
     <C.HW_DialogScrim>
       <C.HW_BuildDialog>
@@ -1287,60 +2057,199 @@ function BuildJournalDialog({ onClose }: { onClose: () => void }) {
           <C.HW_HeadTitle>Build Journal</C.HW_HeadTitle>
           <C.HW_PillOn><C.HW_PillTextOn>{ACTIVE_BUILD.build}</C.HW_PillTextOn></C.HW_PillOn>
           <C.HW_Spacer />
-          <C.HW_Pill onPress={onClose}><C.HW_PillText>close</C.HW_PillText></C.HW_Pill>
+          <C.HW_Pill onPress={props.onClose}><C.HW_PillText>close</C.HW_PillText></C.HW_Pill>
         </C.HW_DialogHead>
         <C.HW_DialogBody>
           <C.HW_JournalIntro>
-            <C.HW_HeadTitle>Requests become build notes</C.HW_HeadTitle>
-            <C.HW_StatusText>Handled requests auto-increment the editor build and remain searchable history. Review is metadata, not a blocking inbox.</C.HW_StatusText>
+            <C.HW_HeadTitle>Deliveries roll into ongoing threads</C.HW_HeadTitle>
+            <C.HW_StatusText>{BUILD_NOTES.length} build notes, {attached} attached to {props.threads.length} threads. Send a delivery to a remembered thread so a recurring bug keeps its history instead of fresh isolated cards.</C.HW_StatusText>
           </C.HW_JournalIntro>
           <C.HW_JournalLayout>
             <C.HW_JournalColumn>
               <C.HW_GroupTitle>
                 <Icon name="ListChecks" size={12} color={accentFor('primary')} />
-                <C.HW_GroupText>RECENT BUILD NOTES</C.HW_GroupText>
+                <C.HW_GroupText>RECENT DELIVERIES</C.HW_GroupText>
               </C.HW_GroupTitle>
               {BUILD_NOTES.map((note) => (
-                <C.HW_BuildNoteCard key={note.request}>
-                  <C.HW_BuildNoteHead>
-                    <C.HW_DockValue>{note.build}</C.HW_DockValue>
-                    <C.HW_Spacer />
-                    <C.HW_DockLabel>{note.request}</C.HW_DockLabel>
-                    <C.HW_Tag><C.HW_TagText>{note.status}</C.HW_TagText></C.HW_Tag>
-                  </C.HW_BuildNoteHead>
-                  <C.HW_HistoryTitle>{note.title}</C.HW_HistoryTitle>
-                  <C.HW_HistoryMeta>{note.agent}: {note.handled}</C.HW_HistoryMeta>
-                  <C.HW_TraceRow>
-                    {note.trace.map((trace) => <C.HW_TraceChip key={trace}><C.HW_KeyText>{trace}</C.HW_KeyText></C.HW_TraceChip>)}
-                  </C.HW_TraceRow>
-                </C.HW_BuildNoteCard>
+                <JournalDeliveryCard
+                  key={note.request}
+                  note={note}
+                  thread={threadForRequest(props.threads, note.request)}
+                  active={props.attachRequest === note.request}
+                  onAttachOpen={props.onAttachOpen}
+                />
               ))}
             </C.HW_JournalColumn>
-            <C.HW_JournalColumn>
-              <C.HW_GroupTitle>
-                <Icon name="Bug" size={12} color={accentFor('warning')} />
-                <C.HW_GroupText>ONGOING THREADS</C.HW_GroupText>
-              </C.HW_GroupTitle>
-              {BUILD_THREADS.map((thread) => (
-                <C.HW_ThreadCard key={thread.id}>
-                  <C.HW_BuildNoteHead>
-                    <C.HW_HistoryTitle>{thread.title}</C.HW_HistoryTitle>
-                    <C.HW_Spacer />
-                    <C.HW_DockLabel>{thread.status}</C.HW_DockLabel>
-                  </C.HW_BuildNoteHead>
-                  {thread.history.map((item) => (
-                    <C.HW_ReadRow key={item}>
-                      <C.HW_AccentBar style={{ backgroundColor: accentFor(thread.status === 'active' ? 'primary' : 'warning') }} />
-                      <C.HW_ReadValue>{item}</C.HW_ReadValue>
-                    </C.HW_ReadRow>
-                  ))}
-                </C.HW_ThreadCard>
-              ))}
-            </C.HW_JournalColumn>
+            {props.attachRequest ? (
+              <ThreadAttachPanel props={props} request={props.attachRequest} />
+            ) : (
+              <C.HW_JournalColumn>
+                <C.HW_GroupTitle>
+                  <Icon name="Bug" size={12} color={accentFor('warning')} />
+                  <C.HW_GroupText>ONGOING THREADS</C.HW_GroupText>
+                </C.HW_GroupTitle>
+                {props.threads.map((thread) => (
+                  <ThreadCard key={thread.id} thread={thread} props={props} />
+                ))}
+              </C.HW_JournalColumn>
+            )}
           </C.HW_JournalLayout>
         </C.HW_DialogBody>
       </C.HW_BuildDialog>
     </C.HW_DialogScrim>
+  );
+}
+
+function JournalDeliveryCard({ note, thread, active, onAttachOpen }: { note: BuildNote; thread: BuildThread | undefined; active: boolean; onAttachOpen: (request: string) => void }) {
+  const Card = active ? C.HW_BuildNoteCardOn : C.HW_BuildNoteCard;
+  return (
+    <Card>
+      <C.HW_BuildNoteHead>
+        <C.HW_DockValue>{note.build}</C.HW_DockValue>
+        <C.HW_Spacer />
+        <C.HW_DockLabel>{note.request}</C.HW_DockLabel>
+        <C.HW_Tag><C.HW_TagText>{note.status}</C.HW_TagText></C.HW_Tag>
+      </C.HW_BuildNoteHead>
+      <C.HW_HistoryTitle>{note.title}</C.HW_HistoryTitle>
+      <C.HW_HistoryMeta>{note.agent}: {note.handled}</C.HW_HistoryMeta>
+      <C.HW_TraceRow>
+        {note.trace.map((trace) => <C.HW_TraceChip key={trace}><C.HW_KeyText>{trace}</C.HW_KeyText></C.HW_TraceChip>)}
+      </C.HW_TraceRow>
+      <C.HW_BuildNoteFoot>
+        {thread ? (
+          <>
+            <Icon name="GitMerge" size={11} color={accentFor('primary')} />
+            <C.HW_KeyText>{thread.title}</C.HW_KeyText>
+            <C.HW_Spacer />
+            <C.HW_MiniBtn onPress={() => onAttachOpen(note.request)}><C.HW_MiniText>move thread</C.HW_MiniText></C.HW_MiniBtn>
+          </>
+        ) : (
+          <>
+            <Icon name="GitBranchPlus" size={11} color={accentFor('textDim')} />
+            <C.HW_KeyText>no thread</C.HW_KeyText>
+            <C.HW_Spacer />
+            <C.HW_MiniBtnOn onPress={() => onAttachOpen(note.request)}><C.HW_MiniTextOn>thread it</C.HW_MiniTextOn></C.HW_MiniBtnOn>
+          </>
+        )}
+      </C.HW_BuildNoteFoot>
+    </Card>
+  );
+}
+
+function ThreadAttachPanel({ props, request }: { props: JournalDialogProps; request: string }) {
+  const note = buildNoteByRequest(request);
+  const matched = matchThreads(props.threads, props.threadQuery);
+  const newName = props.threadQuery.trim() || note?.title || request;
+  return (
+    <C.HW_AttachPanel>
+      <C.HW_GroupTitle>
+        <Icon name="GitBranchPlus" size={12} color={accentFor('primary')} />
+        <C.HW_GroupText>SEND {request} TO A THREAD</C.HW_GroupText>
+        <C.HW_Spacer />
+        <C.HW_MiniBtn onPress={props.onAttachCancel}><C.HW_MiniText>cancel</C.HW_MiniText></C.HW_MiniBtn>
+      </C.HW_GroupTitle>
+      <C.HW_StatusText>Type a remembered name. Pick an ongoing thread to inherit its history, or open a new one.</C.HW_StatusText>
+      <C.HW_FileSearch placeholder="search threads by name, alias, tag..." value={props.threadQuery} onChange={props.onThreadQuery} />
+      <C.HW_CreateThreadBtn onPress={props.onCreateThread}>
+        <Icon name="Plus" size={12} color={accentFor('primary')} />
+        <C.HW_HistoryMeta>open new thread "{newName}"</C.HW_HistoryMeta>
+      </C.HW_CreateThreadBtn>
+      <C.HW_AttachResults>
+        {matched.map((thread) => (
+          <C.HW_AttachRow key={thread.id} onPress={() => props.onAttachToThread(thread.id)}>
+            <C.HW_AccentBar style={{ backgroundColor: accentFor(threadStatusAccent(thread.status)) }} />
+            <C.HW_AttachMain>
+              <C.HW_HistoryTitle>{thread.title}</C.HW_HistoryTitle>
+              <C.HW_HistoryMeta>{thread.deliveries.length} deliveries · {thread.captures.length} captures · {thread.tags.join(' ')}</C.HW_HistoryMeta>
+            </C.HW_AttachMain>
+            <C.HW_DockLabel>{thread.status}</C.HW_DockLabel>
+          </C.HW_AttachRow>
+        ))}
+        {matched.length === 0 ? <C.HW_HistoryMeta>no thread matches "{props.threadQuery}" - open a new one above</C.HW_HistoryMeta> : null}
+      </C.HW_AttachResults>
+    </C.HW_AttachPanel>
+  );
+}
+
+function ThreadCard({ thread, props }: { thread: BuildThread; props: JournalDialogProps }) {
+  const renaming = props.renameThreadId === thread.id;
+  const accent = threadStatusAccent(thread.status);
+  const pickingCapture = props.captureForThread === thread.id;
+  const available = unattachedCaptures(props.threads);
+  return (
+    <C.HW_ThreadCard>
+      <C.HW_BuildNoteHead>
+        {renaming ? (
+          <C.HW_ThreadNameInput placeholder="semantic name" value={props.threadDraft} onChange={props.onThreadDraft} />
+        ) : (
+          <C.HW_HistoryTitle>{thread.title}</C.HW_HistoryTitle>
+        )}
+        <C.HW_Spacer />
+        {renaming ? (
+          <C.HW_MiniBtnOn onPress={props.onRenameCommit}><C.HW_MiniTextOn>save</C.HW_MiniTextOn></C.HW_MiniBtnOn>
+        ) : (
+          <C.HW_MiniBtn onPress={() => props.onRenameStart(thread.id)}><C.HW_MiniText>rename</C.HW_MiniText></C.HW_MiniBtn>
+        )}
+        <C.HW_DockLabel>{thread.status}</C.HW_DockLabel>
+      </C.HW_BuildNoteHead>
+      <C.HW_ThreadIdRow>
+        <C.HW_KeyText>{thread.id}</C.HW_KeyText>
+        {thread.aliases.map((alias) => <C.HW_AliasChip key={alias}><C.HW_KeyText>aka {alias}</C.HW_KeyText></C.HW_AliasChip>)}
+      </C.HW_ThreadIdRow>
+      {thread.tags.length > 0 ? (
+        <C.HW_TraceRow>
+          {thread.tags.map((tag) => <C.HW_TraceChip key={tag}><C.HW_KeyText>{tag}</C.HW_KeyText></C.HW_TraceChip>)}
+        </C.HW_TraceRow>
+      ) : null}
+      {thread.deliveries.map((request) => {
+        const note = buildNoteByRequest(request);
+        return (
+          <C.HW_ThreadDelivery key={request}>
+            <Icon name="GitCommitHorizontal" size={11} color={accentFor('primary')} />
+            <C.HW_ThreadDeliveryMain>
+              <C.HW_ReadValue>{note?.build ?? request} · {note?.title ?? request}</C.HW_ReadValue>
+              <C.HW_HistoryMeta>{request}{note ? ` · ${note.agent}` : ''}</C.HW_HistoryMeta>
+            </C.HW_ThreadDeliveryMain>
+            <C.HW_MiniBtn onPress={() => props.onDetach(thread.id, request)}><C.HW_MiniText>detach</C.HW_MiniText></C.HW_MiniBtn>
+          </C.HW_ThreadDelivery>
+        );
+      })}
+      {thread.history.map((item) => (
+        <C.HW_ReadRow key={item}>
+          <C.HW_AccentBar style={{ backgroundColor: accentFor(accent) }} />
+          <C.HW_ReadValue>{item}</C.HW_ReadValue>
+        </C.HW_ReadRow>
+      ))}
+      {thread.captures.map((capture) => (
+        <C.HW_CaptureRow key={capture.id}>
+          <Icon name="FileText" size={11} color={accentFor('warning')} />
+          <C.HW_CaptureMain>
+            <C.HW_ReadValue>{capture.name}</C.HW_ReadValue>
+            <C.HW_HistoryMeta>{capture.channels.join(', ')} · {capture.range} · {capture.build} · {capture.context}</C.HW_HistoryMeta>
+          </C.HW_CaptureMain>
+          <C.HW_MiniBtn onPress={() => props.onCaptureCopy(capture)}><C.HW_MiniText>copy</C.HW_MiniText></C.HW_MiniBtn>
+        </C.HW_CaptureRow>
+      ))}
+      {pickingCapture ? (
+        <C.HW_CaptureAttach>
+          {available.map((capture) => (
+            <C.HW_AttachRow key={capture.id} onPress={() => props.onCaptureAttach(thread.id, capture.id)}>
+              <Icon name="Paperclip" size={11} color={accentFor('primary')} />
+              <C.HW_AttachMain>
+                <C.HW_ReadValue>{capture.name}</C.HW_ReadValue>
+                <C.HW_HistoryMeta>{capture.channels.join(', ')} · {capture.build}</C.HW_HistoryMeta>
+              </C.HW_AttachMain>
+            </C.HW_AttachRow>
+          ))}
+          {available.length === 0 ? <C.HW_HistoryMeta>no unattached captures in the console feed</C.HW_HistoryMeta> : null}
+        </C.HW_CaptureAttach>
+      ) : (
+        <C.HW_CaptureAttachBtn onPress={() => props.onCaptureAttachBegin(thread.id)}>
+          <Icon name="Paperclip" size={11} color={accentFor('textDim')} />
+          <C.HW_MiniText>attach diagnostic capture</C.HW_MiniText>
+        </C.HW_CaptureAttachBtn>
+      )}
+    </C.HW_ThreadCard>
   );
 }
 
@@ -1376,6 +2285,7 @@ function LibraryPanel(props: {
       ? contentFolderLabel(props.contentFolder).toUpperCase()
       : contentFolderLabel(props.contentFolder).toUpperCase();
   const folderTab = tabForContentFolder(props.contentFolder);
+  const showModelPackages = isModelFolder(props.contentFolder);
   const showMaterialCatalog = isMaterialFolder(props.contentFolder);
   const canBrowseAssets = showMaterialCatalog || Boolean(folderTab);
   const selectedFolderCount = countAssetsForFolder(props.catalogAssets, props.contentFolder);
@@ -1385,9 +2295,9 @@ function LibraryPanel(props: {
         <Icon name="FolderOpen" size={13} color={accentFor('primary')} />
         <C.HW_Kicker>CONTENT BROWSER</C.HW_Kicker>
         <C.HW_Spacer />
-        <C.HW_StatusText>{MATERIAL_ASSET_COUNT} materials</C.HW_StatusText>
+        <C.HW_StatusText>{MODEL_PACKAGE_COUNT} models · {MATERIAL_ASSET_COUNT} materials</C.HW_StatusText>
       </C.HW_PanelHead>
-      <C.HW_Search placeholder="search assets..." value={props.state.search} onChange={props.onSearch} />
+      <C.HW_Search placeholder="search models, paints, materials..." value={props.state.search} onChange={props.onSearch} />
       <ContentTree
         nodes={CONTENT_TREE}
         assets={props.catalogAssets}
@@ -1410,7 +2320,14 @@ function LibraryPanel(props: {
           <C.HW_Pill onPress={() => props.onPage(1)}><Icon name="ChevronRight" size={11} color={accentFor('textDim')} /></C.HW_Pill>
         </C.HW_PageBar>
       ) : null}
-      {showMaterialCatalog ? (
+      {showModelPackages ? (
+        <ModelPackageBrowser
+          folder={props.contentFolder}
+          search={props.state.search}
+          onFolder={props.onFolder}
+          onAction={props.onMaterialAction}
+        />
+      ) : showMaterialCatalog ? (
         <C.HW_MaterialList>
           {pageAssets.length === 0 ? (
             <C.HW_EmptyState>
@@ -1467,6 +2384,165 @@ function LibraryPanel(props: {
         <ContextToolControls mode={props.mode} activeObject={props.activeObject} onAction={props.onMaterialAction} />
       ) : null}
     </C.HW_SidePanel>
+  );
+}
+
+function ModelPackageBrowser({
+  folder,
+  search,
+  onFolder,
+  onAction,
+}: {
+  folder: ContentFolderId;
+  search: string;
+  onFolder: (folder: ContentFolderId) => void;
+  onAction: (label: string) => void;
+}) {
+  const exactModel = exactModelForFolder(folder);
+  const models = modelPackagesForFolder(folder, search);
+  if (exactModel) {
+    return <ModelPackageDetail model={exactModel} onAction={onAction} />;
+  }
+  return (
+    <C.HW_ModelBrowser>
+      <C.HW_GroupTitle>
+        <Icon name="Box" size={12} color={accentFor('primary')} />
+        <C.HW_GroupText>MODEL HOMES</C.HW_GroupText>
+        <C.HW_Spacer />
+        <C.HW_StatusText>{models.length} folders</C.HW_StatusText>
+      </C.HW_GroupTitle>
+      {models.length === 0 ? (
+        <C.HW_EmptyState>
+          <Icon name="SearchX" size={16} color={accentFor('textFaint')} />
+          <C.HW_StatusText>no model homes</C.HW_StatusText>
+        </C.HW_EmptyState>
+      ) : models.map((model) => (
+        <C.HW_ModelCard key={model.id} onPress={() => onFolder(model.folderId)}>
+          <C.HW_ModelThumb style={{ backgroundColor: model.color }} />
+          <C.HW_ModelCardMain>
+            <C.HW_MaterialTitleRow>
+              <C.HW_MaterialName>{model.name}</C.HW_MaterialName>
+              <C.HW_Spacer />
+              <C.HW_MaterialStat>{model.stage}</C.HW_MaterialStat>
+            </C.HW_MaterialTitleRow>
+            <C.HW_ModelPath>{model.path}</C.HW_ModelPath>
+            <C.HW_ModelMetaRow>
+              <C.HW_MaterialStat>{model.atlases.length} atlases</C.HW_MaterialStat>
+              <C.HW_MaterialStat>{model.paints.length} paints</C.HW_MaterialStat>
+              <C.HW_MaterialStat>{model.decompositions.length} decomps</C.HW_MaterialStat>
+            </C.HW_ModelMetaRow>
+          </C.HW_ModelCardMain>
+          <C.HW_IconMiniButton onPress={() => onAction(`open model home ${model.name}`)}>
+            <Icon name="FolderOpen" size={13} color={accentFor('primary')} />
+          </C.HW_IconMiniButton>
+        </C.HW_ModelCard>
+      ))}
+      {Array.from({ length: Math.max(0, 4 - models.length) }, (_, index) => (
+        <C.HW_MaterialSlotEmpty key={`model-empty-${index}`}>
+          <C.HW_StatusText>empty model slot</C.HW_StatusText>
+        </C.HW_MaterialSlotEmpty>
+      ))}
+    </C.HW_ModelBrowser>
+  );
+}
+
+function ModelPackageDetail({ model, onAction }: { model: ModelPackage; onAction: (label: string) => void }) {
+  return (
+    <C.HW_ModelBrowser>
+      <C.HW_ModelHomePanel>
+        <C.HW_ModelTop>
+          <C.HW_ModelThumb style={{ backgroundColor: model.color }} />
+          <C.HW_ModelCardMain>
+            <C.HW_MaterialTitleRow>
+              <C.HW_MaterialName>{model.name}</C.HW_MaterialName>
+              <C.HW_Spacer />
+              <C.HW_MaterialStat>{model.stage}</C.HW_MaterialStat>
+            </C.HW_MaterialTitleRow>
+            <C.HW_ModelPath>{model.path}</C.HW_ModelPath>
+            <C.HW_ModelMetaRow>
+              <C.HW_MaterialStat>{model.triangles.toLocaleString()} tris</C.HW_MaterialStat>
+              <C.HW_MaterialStat>{model.lods} LoD</C.HW_MaterialStat>
+              <C.HW_MaterialStat>{model.paints.reduce((sum, paint) => sum + paint.used, 0)} uses</C.HW_MaterialStat>
+            </C.HW_ModelMetaRow>
+          </C.HW_ModelCardMain>
+        </C.HW_ModelTop>
+
+        <C.HW_ModelSection>
+          <C.HW_ModelSectionHead>
+            <Icon name="PackageCheck" size={12} color={accentFor('primary')} />
+            <C.HW_GroupText>FOLDER CONTRACT</C.HW_GroupText>
+          </C.HW_ModelSectionHead>
+          {[
+            ['source model', model.source],
+            ['rig data', model.rig],
+            ['manifest', model.data],
+          ].map(([label, value]) => (
+            <C.HW_ModelDataRow key={label} onPress={() => onAction(`${model.name} ${label}`)}>
+              <C.HW_ToolLabel>{label}</C.HW_ToolLabel>
+              <C.HW_ToolValue>{value}</C.HW_ToolValue>
+            </C.HW_ModelDataRow>
+          ))}
+        </C.HW_ModelSection>
+
+        <C.HW_ModelSection>
+          <C.HW_ModelSectionHead>
+            <Icon name="Layers" size={12} color={accentFor('primary')} />
+            <C.HW_GroupText>ATLAS SETS</C.HW_GroupText>
+          </C.HW_ModelSectionHead>
+          {model.atlases.map((atlas) => (
+            <C.HW_ModelAtlasCard key={atlas.id} onPress={() => onAction(`${model.name} ${atlas.label}`)}>
+              <C.HW_VariantSwatch style={{ backgroundColor: atlas.color }} />
+              <C.HW_ModelCardMain>
+                <C.HW_MaterialTitleRow>
+                  <C.HW_ToolValue>{atlas.label}</C.HW_ToolValue>
+                  <C.HW_Spacer />
+                  <C.HW_MaterialStat>{atlas.resolution}px</C.HW_MaterialStat>
+                </C.HW_MaterialTitleRow>
+                <C.HW_ModelMetaRow>
+                  <C.HW_MaterialStat>{atlas.scope}</C.HW_MaterialStat>
+                  <C.HW_MaterialStat>{atlas.paints} paints</C.HW_MaterialStat>
+                </C.HW_ModelMetaRow>
+              </C.HW_ModelCardMain>
+            </C.HW_ModelAtlasCard>
+          ))}
+        </C.HW_ModelSection>
+
+        <C.HW_ModelSection>
+          <C.HW_ModelSectionHead>
+            <Icon name="Brush" size={12} color={accentFor('primary')} />
+            <C.HW_GroupText>PAINT VARIANTS</C.HW_GroupText>
+          </C.HW_ModelSectionHead>
+          <C.HW_ModelPaintGrid>
+            {model.paints.map((paint) => (
+              <C.HW_ModelPaintCard key={paint.id} onPress={() => onAction(`${model.name} paint ${paint.name}`)}>
+                <C.HW_SelectedVariantSwatch style={{ backgroundColor: paint.color }} />
+                <C.HW_ToolValue>{paint.name}</C.HW_ToolValue>
+                <C.HW_ToolHint>{paint.atlas}</C.HW_ToolHint>
+              </C.HW_ModelPaintCard>
+            ))}
+          </C.HW_ModelPaintGrid>
+        </C.HW_ModelSection>
+
+        <C.HW_ModelSection>
+          <C.HW_ModelSectionHead>
+            <Icon name="Workflow" size={12} color={accentFor('primary')} />
+            <C.HW_GroupText>CAPTURED REFERENCES</C.HW_GroupText>
+          </C.HW_ModelSectionHead>
+          <C.HW_ChipRow>
+            {Array.from(new Set(model.paints.flatMap((paint) => [...paint.shaderRefs, ...paint.imageRefs]))).map((ref) => (
+              <C.HW_TraceChip key={ref} onPress={() => onAction(`${model.name} reference ${ref}`)}>
+                <C.HW_MaterialStat>{ref}</C.HW_MaterialStat>
+              </C.HW_TraceChip>
+            ))}
+          </C.HW_ChipRow>
+        </C.HW_ModelSection>
+
+        <C.HW_ButtonRow>
+          <C.HW_SmallButton onPress={() => onAction(`open painter for ${model.name}`)}><C.HW_FormValue>paint model</C.HW_FormValue></C.HW_SmallButton>
+          <C.HW_SmallButton onPress={() => onAction(`save new variant for ${model.name}`)}><C.HW_FormValue>save variant</C.HW_FormValue></C.HW_SmallButton>
+        </C.HW_ButtonRow>
+      </C.HW_ModelHomePanel>
+    </C.HW_ModelBrowser>
   );
 }
 
@@ -1708,6 +2784,13 @@ function Workspace(props: {
   onObject: (id: string) => void;
   onExitMaterialFocus: () => void;
   onMaterialAction: (label: string) => void;
+  onSelectColorStudioMaterial: (material: ColorStudioMaterialKey) => void;
+  onColorStudioVariant: (variant: number) => void;
+  onColorStudioSeed: () => void;
+  onColorStudioQuality: (quality: number) => void;
+  onColorStudioSlot: (slot: number) => void;
+  onColorStudioFill: (color: string, source: string) => void;
+  onColorStudioReset: () => void;
 }) {
   return (
     <C.HW_Workspace>
@@ -1774,6 +2857,13 @@ function Stage(props: {
   onObject: (id: string) => void;
   onExitMaterialFocus: () => void;
   onMaterialAction: (label: string) => void;
+  onSelectColorStudioMaterial: (material: ColorStudioMaterialKey) => void;
+  onColorStudioVariant: (variant: number) => void;
+  onColorStudioSeed: () => void;
+  onColorStudioQuality: (quality: number) => void;
+  onColorStudioSlot: (slot: number) => void;
+  onColorStudioFill: (color: string, source: string) => void;
+  onColorStudioReset: () => void;
 }) {
   return (
       <C.HW_Stage onPress={props.state.materialFocused ? () => undefined : props.onStage} onRightClick={props.onContext}>
@@ -1784,6 +2874,13 @@ function Stage(props: {
           activeAsset={props.activeAsset}
           onExit={props.onExitMaterialFocus}
           onAction={props.onMaterialAction}
+          onSelectMaterial={props.onSelectColorStudioMaterial}
+          onVariant={props.onColorStudioVariant}
+          onSeed={props.onColorStudioSeed}
+          onQuality={props.onColorStudioQuality}
+          onSlot={props.onColorStudioSlot}
+          onFill={props.onColorStudioFill}
+          onReset={props.onColorStudioReset}
         />
       ) : (
         <>
@@ -1802,118 +2899,203 @@ function MaterialFocusSurface(props: {
   activeAsset: Asset;
   onExit: () => void;
   onAction: (label: string) => void;
+  onSelectMaterial: (material: ColorStudioMaterialKey) => void;
+  onVariant: (variant: number) => void;
+  onSeed: () => void;
+  onQuality: (quality: number) => void;
+  onSlot: (slot: number) => void;
+  onFill: (color: string, source: string) => void;
+  onReset: () => void;
 }) {
-  const variants = props.activeAsset.variants ?? ['base', 'alt', 'detail'];
-  const layers = [
-    ['base color', 'locked default'],
-    ['edge wear', 'override ready'],
-    ['noise mask', 'seed linked'],
-    ['export slot', 'new variant'],
-  ];
-  const brushes = [
-    ['round', '32'],
-    ['line', '12'],
-    ['mask', '18'],
-    ['erase', '24'],
-  ];
+  const material = colorStudioMaterial(props.state);
+  const materialKeys = Object.keys(SHADER_MATERIALS) as ColorStudioMaterialKey[];
+  const slotColors = material.slots.map((slot, index) => ({
+    slot,
+    index,
+    color: resolvedSlotColor(props.state, material, index),
+    baked: bakedSlotRgb(material, props.state.colorStudioVariant, index),
+    active: index === props.state.colorStudioActiveSlot,
+  }));
+  const previewCells = materialPreviewCells(material, slotColors.map((slot) => slot.color), props.state.colorStudioSeed, props.state.colorStudioQuality);
+  const activeSlot = slotColors[Math.min(props.state.colorStudioActiveSlot, slotColors.length - 1)] ?? slotColors[0]!;
+  const activeOverrideKey = colorStudioOverrideKey(material.key, props.state.colorStudioVariant, activeSlot.index);
+  const hasOverride = props.state.colorStudioOverrides[activeOverrideKey] !== undefined;
+  const assistColors = slotAssistColors(material, props.state);
+  const dDescriptor = `[${material.materialId}, ${props.state.colorStudioVariant}, ${props.state.colorStudioSeed}, ${props.state.colorStudioQuality}, ${material.board.split(' ')[0]}]`;
+
   return (
     <C.HW_MaterialFocus>
       <C.HW_FocusHeader>
-        <Icon name="Brush" size={14} color={accentFor('primary')} />
-        <C.HW_HeadTitle>{props.activeAsset.name} Material</C.HW_HeadTitle>
-        <C.HW_PillOn><C.HW_PillTextOn>{props.activeAsset.recipe ?? 'catalog recipe'}</C.HW_PillTextOn></C.HW_PillOn>
+        <Icon name="Palette" size={14} color={accentFor('primary')} />
+        <C.HW_HeadTitle>Color Studio</C.HW_HeadTitle>
+        <C.HW_PillOn><C.HW_PillTextOn>Material Palette</C.HW_PillTextOn></C.HW_PillOn>
+        <C.HW_Pill><C.HW_PillText>{material.shaderFn}</C.HW_PillText></C.HW_Pill>
+        <C.HW_Pill><C.HW_PillText>D {dDescriptor}</C.HW_PillText></C.HW_Pill>
         <C.HW_Spacer />
-        <C.HW_Pill onPress={() => props.onAction('export focused material')}><C.HW_PillText>export variant</C.HW_PillText></C.HW_Pill>
+        <C.HW_Pill onPress={() => props.onAction(`save ${material.name} palette variant`)}><C.HW_PillText>save variant</C.HW_PillText></C.HW_Pill>
         <C.HW_Pill onPress={props.onExit}><C.HW_PillText>return to world</C.HW_PillText></C.HW_Pill>
       </C.HW_FocusHeader>
-      <C.HW_FocusLayout>
-        <C.HW_FocusRail>
-          <C.HW_GroupTitle>
-            <Icon name="SlidersHorizontal" size={12} color={accentFor('primary')} />
-            <C.HW_GroupText>SHADER RECIPE</C.HW_GroupText>
-          </C.HW_GroupTitle>
-          <C.HW_ToolRow>
-            <C.HW_ToolLabel>recipe</C.HW_ToolLabel>
-            <C.HW_ToolValue>{props.activeAsset.recipe ?? 'catalog asset'}</C.HW_ToolValue>
-          </C.HW_ToolRow>
-          <C.HW_ToolRow>
-            <C.HW_ToolLabel>seed</C.HW_ToolLabel>
-            <C.HW_MiniBar><C.HW_MiniFill style={{ width: `${Math.max(18, (props.activeAsset.seed ?? 72) % 100)}%` }} /></C.HW_MiniBar>
-            <C.HW_ToolValue>{props.activeAsset.seed ?? 72}</C.HW_ToolValue>
-          </C.HW_ToolRow>
-          <C.HW_ToolRow>
-            <C.HW_ToolLabel>detail</C.HW_ToolLabel>
-            <C.HW_MiniBar><C.HW_MiniFill style={{ width: '64%' }} /></C.HW_MiniBar>
-            <C.HW_ToolValue>std</C.HW_ToolValue>
-          </C.HW_ToolRow>
-          <C.HW_ToolRow>
-            <C.HW_ToolLabel>variant</C.HW_ToolLabel>
-            <C.HW_ChipRow>
-              {variants.map((variant, index) => {
-                const Chip = index === 1 ? C.HW_PresetChipOn : C.HW_PresetChip;
-                return <Chip key={variant} onPress={() => props.onAction(`focus variant ${variant}`)}><C.HW_ToolValue>{variant}</C.HW_ToolValue></Chip>;
-              })}
-            </C.HW_ChipRow>
-          </C.HW_ToolRow>
-          <C.HW_ToolRow>
-            <C.HW_ToolLabel>bus</C.HW_ToolLabel>
-            <C.HW_ToolValue>session local</C.HW_ToolValue>
-            <C.HW_Spacer />
-            <C.HW_ToolHint>autosave</C.HW_ToolHint>
-          </C.HW_ToolRow>
-        </C.HW_FocusRail>
-        <C.HW_FocusPreview>
-          <C.HW_PreviewToolbar>
-            <C.HW_PillOn><C.HW_PillTextOn>paint layer</C.HW_PillTextOn></C.HW_PillOn>
-            <C.HW_Pill><C.HW_PillText>mask</C.HW_PillText></C.HW_Pill>
-            <C.HW_Pill><C.HW_PillText>compose</C.HW_PillText></C.HW_Pill>
-            <C.HW_Spacer />
-            <C.HW_StatusText>same route - context retained</C.HW_StatusText>
-          </C.HW_PreviewToolbar>
-          <C.HW_PreviewGrid>
-            {Array.from({ length: 40 }, (_, index) => (
-              <C.HW_PreviewTile
-                key={index}
-                style={{
-                  backgroundColor: index % 7 === 0
-                    ? '#111922'
-                    : index % 5 === 0
-                      ? '#728082'
-                      : props.activeAsset.color,
-                }}
-              />
-            ))}
-          </C.HW_PreviewGrid>
-        </C.HW_FocusPreview>
-        <C.HW_FocusRail>
-          <C.HW_GroupTitle>
-            <Icon name="Layers" size={12} color={accentFor('primary')} />
-            <C.HW_GroupText>LAYERS</C.HW_GroupText>
-          </C.HW_GroupTitle>
-          {layers.map(([name, value], index) => {
-            const Row = index === 1 ? C.HW_LayerRowOn : C.HW_LayerRow;
+      <C.HW_ColorStudioShell>
+        <C.HW_ColorMaterialStrip>
+          {materialKeys.map((key) => {
+            const option = SHADER_MATERIALS[key];
+            const Card = key === material.key ? C.HW_ColorMaterialCardOn : C.HW_ColorMaterialCard;
+            const first = option.variants[0]!;
             return (
-              <Row key={name} onPress={() => props.onAction(`layer ${name}`)}>
-                <C.HW_FormValue>{name}</C.HW_FormValue>
+              <Card key={key} onPress={() => props.onSelectMaterial(key)}>
+                <C.HW_ColorMaterialMini>
+                  {first.slice(0, 4).map((rgb, index) => (
+                    <C.HW_ColorMiniBand key={index} style={{ backgroundColor: rgbToCss(rgb) }} />
+                  ))}
+                </C.HW_ColorMaterialMini>
+                <C.HW_ColorMaterialText>
+                  <C.HW_FormValue>{option.name}</C.HW_FormValue>
+                  <C.HW_KeyText>{option.board} - {option.shaderFn}</C.HW_KeyText>
+                </C.HW_ColorMaterialText>
                 <C.HW_Spacer />
-                <C.HW_KeyText>{value}</C.HW_KeyText>
-              </Row>
+                <C.HW_PillText>{option.slots.length} slots</C.HW_PillText>
+              </Card>
             );
           })}
-          <C.HW_GroupTitle>
-            <Icon name="Paintbrush" size={12} color={accentFor('primary')} />
-            <C.HW_GroupText>CORE BRUSHES</C.HW_GroupText>
-          </C.HW_GroupTitle>
-          <C.HW_BrushGrid>
-            {brushes.map(([name, size]) => (
-              <C.HW_BrushCell key={name} onPress={() => props.onAction(`brush ${name}`)}>
-                <C.HW_BrushDot style={{ width: Number(size), height: Number(size), borderRadius: Number(size) / 2 }} />
-                <C.HW_KeyText>{name}</C.HW_KeyText>
-              </C.HW_BrushCell>
-            ))}
-          </C.HW_BrushGrid>
-        </C.HW_FocusRail>
-      </C.HW_FocusLayout>
+        </C.HW_ColorMaterialStrip>
+        <C.HW_ColorStudioBody>
+          <C.HW_ColorPreviewPanel>
+            <C.HW_ColorPreviewHead>
+              <Icon name="SwatchBook" size={13} color={accentFor('primary')} />
+              <C.HW_HeadTitle>{material.name}</C.HW_HeadTitle>
+              <C.HW_PillOn><C.HW_PillTextOn>{material.board}</C.HW_PillTextOn></C.HW_PillOn>
+              <C.HW_Pill><C.HW_PillText>opened from {props.activeAsset.name}</C.HW_PillText></C.HW_Pill>
+              <C.HW_Spacer />
+              <C.HW_StatusText>{hasOverride ? 'override active' : 'baked defaults'}</C.HW_StatusText>
+            </C.HW_ColorPreviewHead>
+            <C.HW_ColorPreviewGrid>
+              {previewCells.map((color, index) => (
+                <C.HW_ColorPreviewCell
+                  key={index}
+                  style={{
+                    backgroundColor: color,
+                    borderColor: props.state.colorStudioQuality <= 1 ? accentFor('stageBg') : accentFor('borderSoft'),
+                  }}
+                />
+              ))}
+            </C.HW_ColorPreviewGrid>
+            <C.HW_ColorControlRow>
+              <C.HW_ColorControlGroup>
+                <C.HW_KeyText>VARIANT</C.HW_KeyText>
+                <C.HW_ColorSegmentTrack>
+                  {[0, 1, 2].map((variant) => {
+                    const Btn = variant === props.state.colorStudioVariant ? C.HW_ColorSegmentOn : C.HW_ColorSegment;
+                    const Label = variant === props.state.colorStudioVariant ? C.HW_ColorSegmentLabelOn : C.HW_ColorSegmentLabel;
+                    return <Btn key={variant} onPress={() => props.onVariant(variant)}><Label>v{variant}</Label></Btn>;
+                  })}
+                </C.HW_ColorSegmentTrack>
+              </C.HW_ColorControlGroup>
+              <C.HW_ColorControlGroup>
+                <C.HW_KeyText>SEED</C.HW_KeyText>
+                <C.HW_ColorSeedButton onPress={props.onSeed}>
+                  <Icon name="Dices" size={12} color={accentFor('primary')} />
+                  <C.HW_FormValue>{props.state.colorStudioSeed}</C.HW_FormValue>
+                </C.HW_ColorSeedButton>
+              </C.HW_ColorControlGroup>
+              <C.HW_ColorControlGroupWide>
+                <C.HW_KeyText>QUALITY - D[3]</C.HW_KeyText>
+                <C.HW_ColorSegmentTrack>
+                  {QUALITY_LABELS.map((label, quality) => {
+                    const Btn = quality === props.state.colorStudioQuality ? C.HW_ColorSegmentOn : C.HW_ColorSegment;
+                    const Label = quality === props.state.colorStudioQuality ? C.HW_ColorSegmentLabelOn : C.HW_ColorSegmentLabel;
+                    return <Btn key={label} onPress={() => props.onQuality(quality)}><Label>{label}</Label></Btn>;
+                  })}
+                </C.HW_ColorSegmentTrack>
+              </C.HW_ColorControlGroupWide>
+            </C.HW_ColorControlRow>
+            <C.HW_ColorSlotHead>
+              <C.HW_GroupTitle>
+                <Icon name="Pipette" size={12} color={accentFor('primary')} />
+                <C.HW_GroupText>PALETTE SLOTS</C.HW_GroupText>
+              </C.HW_GroupTitle>
+              <C.HW_Spacer />
+              <C.HW_Pill onPress={props.onReset}><C.HW_PillText>reset to baked</C.HW_PillText></C.HW_Pill>
+            </C.HW_ColorSlotHead>
+            <C.HW_ColorSlotGrid>
+              {slotColors.map((entry) => {
+                const Slot = entry.active ? C.HW_ColorSlotOn : C.HW_ColorSlot;
+                const overrideKey = colorStudioOverrideKey(material.key, props.state.colorStudioVariant, entry.index);
+                return (
+                  <Slot key={entry.slot.name} onPress={() => props.onSlot(entry.index)}>
+                    <C.HW_ColorSlotSwatch style={{ backgroundColor: entry.color }} />
+                    <C.HW_ColorSlotText>
+                      <C.HW_FormValue>{entry.slot.name}</C.HW_FormValue>
+                      <C.HW_KeyText>{entry.slot.role}</C.HW_KeyText>
+                    </C.HW_ColorSlotText>
+                    <C.HW_Spacer />
+                    <C.HW_KeyText>{props.state.colorStudioOverrides[overrideKey] ? 'owned' : 'baked'}</C.HW_KeyText>
+                  </Slot>
+                );
+              })}
+            </C.HW_ColorSlotGrid>
+          </C.HW_ColorPreviewPanel>
+          <C.HW_ColorAssistPanel>
+            <C.HW_GroupTitle>
+              <Icon name="SlidersHorizontal" size={12} color={accentFor('primary')} />
+              <C.HW_GroupText>ACTIVE SLOT</C.HW_GroupText>
+            </C.HW_GroupTitle>
+            <C.HW_ColorActiveSlot>
+              <C.HW_ColorActiveSwatch style={{ backgroundColor: activeSlot.color }} />
+              <C.HW_ColorActiveText>
+                <C.HW_HeadTitle>{activeSlot.slot.name}</C.HW_HeadTitle>
+                <C.HW_KeyText>{activeSlot.slot.role} - {hasOverride ? 'you own it' : 'shader default'}</C.HW_KeyText>
+                <C.HW_ColorCode>was baked: {rgbToVec3(activeSlot.baked)}</C.HW_ColorCode>
+              </C.HW_ColorActiveText>
+            </C.HW_ColorActiveSlot>
+            <C.HW_ColorReadoutGrid>
+              <C.HW_PerfTile>
+                <C.HW_PerfValue>{material.materialId}</C.HW_PerfValue>
+                <C.HW_PerfLabel>materialId</C.HW_PerfLabel>
+              </C.HW_PerfTile>
+              <C.HW_PerfTile>
+                <C.HW_PerfValue>{props.state.colorStudioVariant}</C.HW_PerfValue>
+                <C.HW_PerfLabel>variant</C.HW_PerfLabel>
+              </C.HW_PerfTile>
+              <C.HW_PerfTile>
+                <C.HW_PerfValue>{props.state.colorStudioSeed}</C.HW_PerfValue>
+                <C.HW_PerfLabel>seed</C.HW_PerfLabel>
+              </C.HW_PerfTile>
+            </C.HW_ColorReadoutGrid>
+            <C.HW_GroupTitle>
+              <Icon name="Sparkles" size={12} color={accentFor('primary')} />
+              <C.HW_GroupText>FITS {material.name.toUpperCase()}</C.HW_GroupText>
+            </C.HW_GroupTitle>
+            <C.HW_ColorAssistGrid>
+              {assistColors.map((entry) => (
+                <C.HW_ColorAssistSwatch key={entry.label} onPress={() => props.onFill(entry.color, `fit ${entry.label}`)}>
+                  <C.HW_ColorAssistChip style={{ backgroundColor: entry.color }} />
+                  <C.HW_KeyText>{entry.label}</C.HW_KeyText>
+                </C.HW_ColorAssistSwatch>
+              ))}
+            </C.HW_ColorAssistGrid>
+            <C.HW_GroupTitle>
+              <Icon name="Library" size={12} color={accentFor('primary')} />
+              <C.HW_GroupText>LIBRARY SLOT PULL</C.HW_GroupText>
+            </C.HW_GroupTitle>
+            <C.HW_ColorLibraryList>
+              {COLOR_LIBRARY_SETS.map((set) => (
+                <C.HW_ColorLibraryRow key={set.name}>
+                  <C.HW_ColorLibraryName>
+                    <C.HW_FormValue>{set.name}</C.HW_FormValue>
+                    <C.HW_KeyText>{set.tag}</C.HW_KeyText>
+                  </C.HW_ColorLibraryName>
+                  <C.HW_ColorLibrarySwatches>
+                    {set.colors.map((rgb, index) => {
+                      const color = rgbToCss(rgb);
+                      return <C.HW_ColorLibrarySwatch key={index} onPress={() => props.onFill(color, set.name)} style={{ backgroundColor: color }} />;
+                    })}
+                  </C.HW_ColorLibrarySwatches>
+                </C.HW_ColorLibraryRow>
+              ))}
+            </C.HW_ColorLibraryList>
+          </C.HW_ColorAssistPanel>
+        </C.HW_ColorStudioBody>
+      </C.HW_ColorStudioShell>
     </C.HW_MaterialFocus>
   );
 }
@@ -1956,7 +3138,7 @@ function IsoMap({ state, onObject }: { state: MockState; onObject: (id: string) 
 function DropdownMenu({ state, onCommand }: { state: MockState; onCommand: (id: string, source: string) => void }) {
   const rows = COMMANDS.filter((command) => command.menu === state.openMenu);
   return (
-    <C.HW_MenuDropdown style={{ left: 154 + MENUS.indexOf(state.openMenu ?? 'Build') * 46 }}>
+    <C.HW_MenuDropdown style={{ left: menuDropdownLeft(state.openMenu), width: MENU_DROPDOWN_WIDTH }}>
       <C.HW_MenuDropHead>
         <Icon name="Wrench" size={14} color={accentFor('primary')} />
         <C.HW_HeadTitle>{state.openMenu} capabilities</C.HW_HeadTitle>

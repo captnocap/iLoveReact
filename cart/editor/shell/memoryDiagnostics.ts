@@ -16,6 +16,18 @@ export type SystemTelemetry = {
   process_threads?: number;
   mem_total_bytes?: number;
   mem_available_bytes?: number;
+  // ── Per-subsystem attribution (framework/diag/mem_breakdown.zig) ──────────
+  // GPU fields are device-local (VRAM); js_*/host_* fields are process RSS.
+  gpu_geom_intern_bytes?: number;
+  gpu_glyph_atlas_bytes?: number;
+  gpu_glyph_buffer_bytes?: number;
+  gpu_ui_rect_bytes?: number;
+  gpu_paint_texture_bytes?: number;
+  js_heap_used_bytes?: number;
+  js_heap_total_bytes?: number;
+  js_external_bytes?: number;
+  js_malloced_bytes?: number;
+  host_mesh_stash_bytes?: number;
 };
 
 type MemoryField = {
@@ -130,7 +142,7 @@ export function memoryBaselineFor(system: SystemTelemetry | null | undefined): R
   for (const field of MEMORY_FIELDS) {
     baseline[field.id] = memoryNumber(system, field.key);
   }
-  return baseline;
+  return { ...baseline, ...memorySubsystemBaseline(system) };
 }
 
 export function memorySignature(system: SystemTelemetry | null): string {
@@ -166,4 +178,141 @@ export function memoryConsumers(system: SystemTelemetry | null, baseline: Record
     });
   }
   return rows.sort((a, b) => b.score - a.score).slice(0, 12);
+}
+
+// ── Per-subsystem attribution ────────────────────────────────────────────────
+// What *inside the app* holds the memory, grouped by where it originates (World/
+// map vs Shell/UI vs JS Runtime) and which pool it lives in (gpu = device-local
+// VRAM, host = process RSS). The two pools are NOT summed together against RSS —
+// see memoryReconcile.
+
+export type Pool = 'gpu' | 'host';
+export type Origin = 'World' | 'Shell' | 'Runtime';
+
+type Subsystem = {
+  id: string;
+  key: keyof SystemTelemetry;
+  label: string;
+  origin: Origin;
+  pool: Pool;
+  detail: string;
+  warnBytes?: number;
+};
+
+const SUBSYSTEMS: Subsystem[] = [
+  { id: 'geom', key: 'gpu_geom_intern_bytes', label: 'geometry intern', origin: 'World', pool: 'gpu', detail: 'interned world meshes (props, buildings, chunks) - never evicts', warnBytes: 256 * MiB },
+  { id: 'stash', key: 'host_mesh_stash_bytes', label: 'mesh stash', origin: 'World', pool: 'host', detail: 'host-parked vertex copies awaiting intern' },
+  { id: 'atlas', key: 'gpu_glyph_atlas_bytes', label: 'glyph atlas', origin: 'Shell', pool: 'gpu', detail: '4096-square RGBA font atlas texture' },
+  { id: 'glyphbuf', key: 'gpu_glyph_buffer_bytes', label: 'glyph buffer', origin: 'Shell', pool: 'gpu', detail: 'per-glyph GPU instance buffer capacity' },
+  { id: 'uirect', key: 'gpu_ui_rect_bytes', label: 'ui rect buffer', origin: 'Shell', pool: 'gpu', detail: 'instanced-rect chrome buffer capacity' },
+  { id: 'paint', key: 'gpu_paint_texture_bytes', label: 'paint surfaces', origin: 'Shell', pool: 'gpu', detail: 'paintable RGBA textures (Studio, decals)' },
+  { id: 'jsheap', key: 'js_heap_total_bytes', label: 'v8 js heap', origin: 'Runtime', pool: 'host', detail: 'managed JS object heap (React tree + cart state)', warnBytes: 256 * MiB },
+  { id: 'jsext', key: 'js_external_bytes', label: 'v8 external', origin: 'Runtime', pool: 'host', detail: 'ArrayBuffers + external bytes outside the JS heap', warnBytes: 256 * MiB },
+  { id: 'jsmalloc', key: 'js_malloced_bytes', label: 'v8 malloced', origin: 'Runtime', pool: 'host', detail: 'V8 internal C++ malloc (zone, parser, compiler)' },
+];
+
+const ORIGIN_LABEL: Record<Origin, string> = {
+  World: 'World / Map',
+  Shell: 'Shell / UI',
+  Runtime: 'JS Runtime',
+};
+
+export function memorySubsystemBaseline(system: SystemTelemetry | null | undefined): Record<string, number> {
+  const baseline: Record<string, number> = {};
+  for (const sub of SUBSYSTEMS) baseline[`sub:${sub.id}`] = memoryNumber(system, sub.key);
+  return baseline;
+}
+
+/** Subsystem rows for the drill-down list — what holds memory, ranked by growth. */
+export function memorySubsystems(system: SystemTelemetry | null, baseline: Record<string, number> | null): DiagnosticConsumer[] {
+  if (!system) return [];
+  const rows: DiagnosticConsumer[] = [];
+  for (const sub of SUBSYSTEMS) {
+    const current = memoryNumber(system, sub.key);
+    if (current <= 0) continue;
+    const start = baseline?.[`sub:${sub.id}`] ?? current;
+    const delta = current - start;
+    const growthScore = Math.max(0, delta) / MiB;
+    const residentScore = current / (64 * MiB);
+    rows.push({
+      id: `subsystem:${sub.id}`,
+      source: sub.pool,
+      label: sub.label,
+      value: formatMemory(current),
+      detail: `${ORIGIN_LABEL[sub.origin]} - ${formatSignedMemory(delta)} since reset - ${sub.detail}`,
+      score: growthScore * 8 + residentScore,
+      hot: current >= (sub.warnBytes ?? Number.POSITIVE_INFINITY),
+    });
+  }
+  return rows.sort((a, b) => b.score - a.score);
+}
+
+/** Top-line origin buckets: how much the map vs the shell vs the runtime holds. */
+export function memoryOriginBuckets(system: SystemTelemetry | null, baseline: Record<string, number> | null): DiagnosticConsumer[] {
+  if (!system) return [];
+  const origins: Origin[] = ['World', 'Shell', 'Runtime'];
+  const rows: DiagnosticConsumer[] = [];
+  for (const origin of origins) {
+    const subs = SUBSYSTEMS.filter((s) => s.origin === origin);
+    let bytes = 0;
+    let delta = 0;
+    let gpu = 0;
+    let host = 0;
+    for (const sub of subs) {
+      const current = memoryNumber(system, sub.key);
+      bytes += current;
+      delta += current - (baseline?.[`sub:${sub.id}`] ?? current);
+      if (sub.pool === 'gpu') gpu += current; else host += current;
+    }
+    if (bytes <= 0) continue;
+    const pool = gpu > 0 && host > 0 ? 'mixed' : gpu > 0 ? 'gpu' : 'host';
+    const poolNote = pool === 'mixed' ? `${formatMemory(gpu)} vram + ${formatMemory(host)} rss` : pool === 'gpu' ? 'device-local vram' : 'process rss';
+    rows.push({
+      id: `origin:${origin}`,
+      source: pool,
+      label: ORIGIN_LABEL[origin],
+      value: formatMemory(bytes),
+      detail: `${formatSignedMemory(delta)} since reset - ${poolNote}`,
+      score: bytes,
+      hot: false,
+    });
+  }
+  // Native/driver remainder: process RSS the host-side subsystems do NOT explain.
+  const rss = memoryNumber(system, 'process_rss_bytes');
+  const reconcile = memoryReconcile(system);
+  if (rss > 0) {
+    rows.push({
+      id: 'origin:unattributed',
+      source: 'native',
+      label: 'Native / driver',
+      value: formatMemory(reconcile.unattributed),
+      detail: `process rss not held by tracked host allocations (Dawn/GPU driver, libc, V8 zones)`,
+      score: reconcile.unattributed,
+      hot: reconcile.unattributed >= 512 * MiB,
+    });
+  }
+  return rows.sort((a, b) => b.score - a.score);
+}
+
+export type MemoryReconcile = {
+  rss: number;
+  hostTracked: number;
+  gpuTracked: number;
+  unattributed: number;
+};
+
+/**
+ * Reconcile tracked subsystems against the OS-reported RSS. Only host-pool
+ * subsystems count against RSS; GPU-pool bytes live in VRAM and are reported
+ * on their own. `unattributed` is the honest host remainder (native/driver).
+ */
+export function memoryReconcile(system: SystemTelemetry | null | undefined): MemoryReconcile {
+  let hostTracked = 0;
+  let gpuTracked = 0;
+  for (const sub of SUBSYSTEMS) {
+    const bytes = memoryNumber(system, sub.key);
+    if (sub.pool === 'gpu') gpuTracked += bytes; else hostTracked += bytes;
+  }
+  const rss = memoryNumber(system, 'process_rss_bytes');
+  return { rss, hostTracked, gpuTracked, unattributed: Math.max(0, rss - hostTracked) };
 }
