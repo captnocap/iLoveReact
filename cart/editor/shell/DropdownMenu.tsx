@@ -28,15 +28,6 @@ function MenuRow({ command, indent, onCommand }: { command: Command; indent?: bo
       <C.HW_MenuDropText>{command.name}</C.HW_MenuDropText>
       <C.HW_Spacer />
       <C.HW_MenuDropSub>{command.key}</C.HW_MenuDropSub>
-      {command.context ? (
-        <C.HW_CheckCell><Icon name="MousePointerClick" size={9} color={accentFor('primary')} /></C.HW_CheckCell>
-      ) : <C.HW_CheckCellOff />}
-      {command.native ? (
-        <C.HW_CheckCell><Icon name="Cpu" size={9} color={accentFor('primary')} /></C.HW_CheckCell>
-      ) : <C.HW_CheckCellOff />}
-      {command.undoable ? (
-        <C.HW_CheckCell><Icon name="History" size={9} color={accentFor('primary')} /></C.HW_CheckCell>
-      ) : <C.HW_CheckCellOff />}
     </C.HW_MenuDropRow>
   );
 }
