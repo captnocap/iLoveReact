@@ -93,6 +93,13 @@ export default function LibraryPanel(props: {
         expanded={props.expandedFolders}
         onFolder={props.onFolder}
         onToggle={props.onToggleFolder}
+        onNodeContext={(id, event) => {
+          // Only model-home rows (whose id is a model's folderId) open the menu.
+          const model = props.models.find((item) => item.folderId === id);
+          if (!model) return;
+          setMenuModel(model);
+          modelMenu.triggerProps.onRightClick(event);
+        }}
       />
       <C.HW_ContentCrumb>
         <C.HW_Kicker>{title}</C.HW_Kicker>

@@ -11,6 +11,7 @@ export default function ContentTreeNode(props: {
   expanded: Partial<Record<ContentFolderId, boolean>>;
   onFolder: (folder: ContentFolderId) => void;
   onToggle: (folder: ContentFolderId) => void;
+  onNodeContext?: (id: ContentFolderId, event: { x: number; y: number }) => void;
 }) {
   const hasChildren = Boolean(props.node.children?.length);
   const isExpanded = Boolean(props.expanded[props.node.id]);
@@ -18,7 +19,10 @@ export default function ContentTreeNode(props: {
   const count = countAssetsForFolder(props.assets, props.node.id);
   return (
     <>
-      <Row onPress={() => props.onFolder(props.node.id)}>
+      <Row
+        onPress={() => props.onFolder(props.node.id)}
+        onRightClick={(event: { x: number; y: number }) => props.onNodeContext?.(props.node.id, event)}
+      >
         {Array.from({ length: props.depth }, (_, index) => <C.HW_TreeIndent key={index} />)}
         <C.HW_TreeToggle onPress={() => hasChildren ? props.onToggle(props.node.id) : props.onFolder(props.node.id)}>
           <Icon name={hasChildren ? (isExpanded ? 'ChevronDown' : 'ChevronRight') : 'Minus'} size={11} color={accentFor('textDim')} />
@@ -38,6 +42,7 @@ export default function ContentTreeNode(props: {
           expanded={props.expanded}
           onFolder={props.onFolder}
           onToggle={props.onToggle}
+          onNodeContext={props.onNodeContext}
         />
       )) : null}
     </>

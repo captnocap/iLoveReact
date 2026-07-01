@@ -9,6 +9,7 @@ export default function ContentTree(props: {
   expanded: Partial<Record<ContentFolderId, boolean>>;
   onFolder: (folder: ContentFolderId) => void;
   onToggle: (folder: ContentFolderId) => void;
+  onNodeContext?: (id: ContentFolderId, event: { x: number; y: number }) => void;
 }) {
   return (
     <C.HW_ContentTree>
@@ -22,6 +23,7 @@ export default function ContentTree(props: {
           expanded={props.expanded}
           onFolder={props.onFolder}
           onToggle={props.onToggle}
+          onNodeContext={props.onNodeContext}
         />
       ))}
     </C.HW_ContentTree>
