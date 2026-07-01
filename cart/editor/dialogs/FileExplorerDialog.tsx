@@ -89,7 +89,7 @@ export default function FileExplorerDialog(props: Props) {
             <C.HW_FileResultsHead>
               <C.HW_Kicker>{explorerFolderLabel(props.selectedFolder).toUpperCase()}</C.HW_Kicker>
               <C.HW_Spacer />
-              <C.HW_StatusText>{slots.length} / {files.length} visible fixed rows</C.HW_StatusText>
+              <C.HW_StatusText>{slots.length} of {files.length}</C.HW_StatusText>
             </C.HW_FileResultsHead>
             {slots.map((file) => (
               <FileResultRow

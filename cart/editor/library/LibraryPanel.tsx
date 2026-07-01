@@ -108,7 +108,7 @@ export default function LibraryPanel(props: {
       {canBrowseAssets ? (
         <C.HW_PageBar>
           <C.HW_Pill onPress={() => props.onPage(-1)}><Icon name="ChevronLeft" size={11} color={accentFor('textDim')} /></C.HW_Pill>
-          <C.HW_PageText>{firstAsset}-{lastAsset} / {props.assets.length} - {pageSize} fixed slots</C.HW_PageText>
+          <C.HW_PageText>{firstAsset}-{lastAsset} / {props.assets.length}</C.HW_PageText>
           <C.HW_Spacer />
           <C.HW_PageText>{page + 1}/{maxPage + 1}</C.HW_PageText>
           <C.HW_Pill onPress={() => props.onPage(1)}><Icon name="ChevronRight" size={11} color={accentFor('textDim')} /></C.HW_Pill>
