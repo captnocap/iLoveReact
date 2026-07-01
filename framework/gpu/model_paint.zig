@@ -609,14 +609,67 @@ pub fn baryOnFace(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, face: u32
     return .{ u, v };
 }
 
+// ── Material ink: paint WITH a shader, not a flat colour ─────────────────────────
+// A brush can "dip into a bucket of shader": the host renders a shader recipe to a
+// small RGBA image (material_tex.bakePixels) and hands the pixels here; a dab then
+// SAMPLES that image per texel instead of laying one flat colour, so the stroke
+// deposits the material's LOOK onto the low-poly face. `g_mat_scale` tiles the image
+// across each face patch. Cleared → dabs go back to flat-colour painting.
+var g_mat_rgba: ?[]u8 = null;
+var g_mat_w: u32 = 0;
+var g_mat_h: u32 = 0;
+var g_mat_scale: f32 = 1.0;
+
+/// Adopt a material image as the active brush ink (copied — the caller keeps ownership
+/// of `rgba`). `scale` tiles the image across each face patch. False on a malformed image.
+pub fn setMaterialInk(rgba: []const u8, w: u32, h: u32, scale: f32) bool {
+    if (w == 0 or h == 0 or rgba.len != @as(usize, w) * @as(usize, h) * 4) return false;
+    const copy = alloc.alloc(u8, rgba.len) catch return false;
+    @memcpy(copy, rgba);
+    if (g_mat_rgba) |old| alloc.free(old);
+    g_mat_rgba = copy;
+    g_mat_w = w;
+    g_mat_h = h;
+    g_mat_scale = if (scale > 0.0) scale else 1.0;
+    return true;
+}
+
+/// Drop the material ink — dabs go back to depositing their flat colour.
+pub fn clearMaterialInk() void {
+    if (g_mat_rgba) |old| alloc.free(old);
+    g_mat_rgba = null;
+    g_mat_w = 0;
+    g_mat_h = 0;
+    g_mat_scale = 1.0;
+}
+
+pub fn hasMaterialInk() bool {
+    return g_mat_rgba != null;
+}
+
+/// Nearest-sample the material image at uv, wrapped so scaled uv tiles the material.
+fn sampleMat(u: f32, v: f32) [4]u8 {
+    const src = g_mat_rgba orelse return .{ 255, 255, 255, 255 };
+    const fu = u - @floor(u);
+    const fv = v - @floor(v);
+    const sx = @min(@as(u32, @intFromFloat(fu * @as(f32, @floatFromInt(g_mat_w)))), g_mat_w - 1);
+    const sy = @min(@as(u32, @intFromFloat(fv * @as(f32, @floatFromInt(g_mat_h)))), g_mat_h - 1);
+    const si = (@as(usize, sy) * g_mat_w + sx) * 4;
+    return .{ src[si], src[si + 1], src[si + 2], src[si + 3] };
+}
+
 /// Stamp a brush dab onto a face's patch: a disc of `radius` texels around the hit's
 /// barycentric, CLIPPED to the face's triangle (so overhang never touches a neighbour —
-/// each face owns its texels). `flow` (0..1) is the blend toward `rgba`. At g_patch==1
-/// there's no sub-face room, so it degrades to a per-face fill.
-pub fn paintStamp(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, flow: f32) void {
+/// each face owns its texels). `flow` (0..1) is the blend toward the ink. When `mat` is
+/// set the ink is SAMPLED from the material image (paint-with-a-shader) rather than the
+/// flat `rgba`; `fill` skips the disc test to flood the whole triangle (bucket fill). At
+/// g_patch==1 there's no sub-face room, so it degrades to a per-face fill.
+fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, fill: bool) void {
     const buf = g_rgba orelse return;
     if (face >= g_facecount) return;
-    if (g_patch <= 1) return paintFace(face, rgba);
+    if (g_patch <= 1) {
+        return paintFace(face, if (mat) sampleMat(0.5 * g_mat_scale, 0.5 * g_mat_scale) else rgba);
+    }
     const o = patchOrigin(face);
     const span = patchSpan();
     const cx = PATCH_GUTTER + cu * span;
@@ -624,6 +677,7 @@ pub fn paintStamp(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, flow: f
     const r = @max(radius, 0.6);
     const amt = std.math.clamp(flow, 0.0, 1.0);
     const tri_max: f32 = span; // texels where px+py <= span are inside the triangle
+    const inv_span: f32 = if (span > 0.0) 1.0 / span else 1.0;
     var py: u32 = 0;
     while (py < g_patch) : (py += 1) {
         var px: u32 = 0;
@@ -631,19 +685,42 @@ pub fn paintStamp(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, flow: f
             const fx: f32 = @floatFromInt(px);
             const fy: f32 = @floatFromInt(py);
             if (fx + fy > tri_max + 0.5) continue; // outside the face triangle → clipped
-            const dx = fx + 0.5 - cx;
-            const dy = fy + 0.5 - cy;
-            if (dx * dx + dy * dy > r * r) continue; // outside the brush disc
+            if (!fill) {
+                const dx = fx + 0.5 - cx;
+                const dy = fy + 0.5 - cy;
+                if (dx * dx + dy * dy > r * r) continue; // outside the brush disc
+            }
+            // Sample the material at this texel's patch-local uv (0..1 across the face,
+            // tiled by scale), or use the flat colour when no material ink is dipped.
+            const ink: [4]u8 = if (mat)
+                sampleMat((fx - PATCH_GUTTER) * inv_span * g_mat_scale, (fy - PATCH_GUTTER) * inv_span * g_mat_scale)
+            else
+                rgba;
             const d = (@as(usize, o[1] + py) * g_atlas_w + o[0] + px) * 4;
             inline for (0..3) |c| {
                 const base: f32 = @floatFromInt(buf[d + c]);
-                const tc: f32 = @floatFromInt(rgba[c]);
+                const tc: f32 = @floatFromInt(ink[c]);
                 buf[d + c] = @intFromFloat(std.math.clamp(base + (tc - base) * amt, 0.0, 255.0));
             }
             buf[d + 3] = 255;
         }
     }
     markRows(o[1], o[1] + g_patch - 1);
+}
+
+pub fn paintStamp(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, flow: f32) void {
+    stampInner(face, cu, cv, radius, rgba, false, flow, false);
+}
+
+/// Free-form dab that deposits the active material ink (paint-with-a-shader). Same disc +
+/// triangle clip as paintStamp; samples flat white if no material is set.
+pub fn paintStampTex(face: u32, cu: f32, cv: f32, radius: f32, flow: f32) void {
+    stampInner(face, cu, cv, radius, DEFAULT_FACE, true, flow, false);
+}
+
+/// Bucket-fill a whole face triangle with the material ink (the fill tool, material mode).
+pub fn paintFaceTex(face: u32) void {
+    stampInner(face, 0.34, 0.33, 0.0, DEFAULT_FACE, true, 1.0, true);
 }
 
 // ── Detail (patch size) toggle ────────────────────────────────────────────────────

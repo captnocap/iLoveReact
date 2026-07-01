@@ -1412,8 +1412,26 @@ pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const face = model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my));
     if (face < 0) return -1;
-    model_paint.paintFace(@intCast(face), .{ r, g, b, 255 });
+    // With a material ink dipped, fill the face with the shader's LOOK; else the flat colour.
+    if (model_paint.hasMaterialInk()) {
+        model_paint.paintFaceTex(@intCast(face));
+    } else {
+        model_paint.paintFace(@intCast(face), .{ r, g, b, 255 });
+    }
     return face;
+}
+
+// ── Paint-with-a-shader: the brush's material ink ───────────────────────────────────
+// The door renders a shader recipe to pixels (material_tex.bakePixels) and hands them
+// here; while set, every dab/fill SAMPLES the material instead of a flat colour.
+pub fn setPaintMaterial(rgba: []const u8, w: u32, h: u32, scale: f32) bool {
+    return model_paint.setMaterialInk(rgba, w, h, scale);
+}
+pub fn clearPaintMaterial() void {
+    model_paint.clearMaterialInk();
+}
+pub fn hasPaintMaterial() bool {
+    return model_paint.hasMaterialInk();
 }
 
 /// Carry a per-face colour set onto the active paint target (length ≥ facecount*4) —
@@ -1476,13 +1494,14 @@ pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f3
     const lx = vpLocalX(mx);
     const ly = vpLocalY(my);
     const rgba = [4]u8{ r, g, b, 255 };
+    const mat = model_paint.hasMaterialInk(); // dip into a shader bucket → sample it per dab
     if (g_paint_mode == 1) {
         const uv = model_paint.baryOnFace(cam, g_paint_vp_w, g_paint_vp_h, lx, ly, g_locked_face) orelse return -1;
-        model_paint.paintStamp(g_locked_face, uv[0], uv[1], radius, rgba, flow);
+        if (mat) model_paint.paintStampTex(g_locked_face, uv[0], uv[1], radius, flow) else model_paint.paintStamp(g_locked_face, uv[0], uv[1], radius, rgba, flow);
         return @intCast(g_locked_face);
     }
     const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, lx, ly) orelse return -1;
-    model_paint.paintStamp(hit.face, hit.u, hit.v, radius, rgba, flow);
+    if (mat) model_paint.paintStampTex(hit.face, hit.u, hit.v, radius, flow) else model_paint.paintStamp(hit.face, hit.u, hit.v, radius, rgba, flow);
     return @intCast(hit.face);
 }
 

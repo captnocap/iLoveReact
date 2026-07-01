@@ -41,6 +41,9 @@ import {
   BrushKit, DEFAULT_BRUSH, defaultPalette, hexToRgb01, inkColorHex, DARK_THEME,
   type Brush, type BrushTool, type Palette,
 } from '@reactjit/runtime/paint';
+// The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
+// its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
+import { shaderSpec, defaultShaderData } from '../textures/shaders';
 
 const host = globalThis as any;
 
@@ -436,6 +439,28 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
   // made the editor call "X is not a function". Registering the real object can't drift.
   // onModelToolApi only stores a ref, so this is a cheap assignment with no re-render.
   useEffect(() => { onToolApi?.(toolApiRef.current!); });
+
+  // Paint-with-a-shader: keep the HOST paint-material in sync with the brush ink. A shader
+  // ink bakes its recipe (spec WGSL + tuned params) into a pixel bucket the brush samples;
+  // any other ink clears it back to flat-colour painting. Runs only when the ink changes —
+  // never per dab — so the one-shot GPU bake + readback stays off the paint hot path.
+  useEffect(() => {
+    const ink = brush.ink;
+    if (ink.kind === 'shader') {
+      const spec = shaderSpec(ink.surface);
+      if (spec) {
+        const data = ink.data && ink.data.length ? ink.data : defaultShaderData(spec);
+        const tiles = ink.tiles && ink.tiles > 0 ? ink.tiles : 1;
+        // Vary the bake key per param set — the host materialize() caches per key, so a
+        // fixed key would keep re-serving the first look after the user tunes the shader.
+        const key = `paint:${ink.surface}:${data.map((n) => Math.round(n * 1000)).join(',')}`;
+        const bytes = new Uint8Array(new Float32Array(data).buffer);
+        host.__model_paint_material?.(key, spec.shader, bytes, 256, tiles);
+        return;
+      }
+    }
+    host.__model_paint_material_clear?.();
+  }, [brush.ink]);
   useEffect(() => {
     onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill });
   }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill]);

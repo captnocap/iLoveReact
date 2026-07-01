@@ -22,6 +22,7 @@ const animations = @import("gpu/animations.zig");
 const scene3d = @import("gpu/3d.zig");
 const mesh_import = @import("world/mesh_import.zig");
 const model_source = @import("gpu/model_source.zig");
+const material_tex = @import("gpu/material_tex.zig");
 
 // Retained FULL-RES source mesh + its path, so the live quality slider can re-decimate
 // from the original at any level (model_set_quality) without re-reading the file.
@@ -662,7 +663,9 @@ fn hostModelPaintAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     const b: u8 = @intCast(std.math.clamp(argToI32(info, 4) orelse 0, 0, 255));
     const face = scene3d.paintAt(x, y, r, g, b);
     if (face >= 0) {
-        model_source.writeColor(face, r, g, b); // keep the source paint authoritative
+        // A material-ink fill has no single face colour (it samples a shader), so — like the
+        // free-form stamp — it lives on the atlas only and skips the authoritative source store.
+        if (!scene3d.hasPaintMaterial()) model_source.writeColor(face, r, g, b);
         state.markDirty();
     }
     setReturnNumber(info, if (face >= 0) 1 else 0);
@@ -722,6 +725,60 @@ fn hostModelPaintStamp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     const face = scene3d.paintStampAt(x, y, r, g, b, radius, flow);
     if (face >= 0) state.markDirty();
     setReturnNumber(info, if (face >= 0) 1 else 0);
+}
+
+/// __model_paint_material(key, wgsl, data, size, scale) → 1 if the shader baked and is now
+/// the active brush ink, 0 otherwise. Renders the shader recipe (key + WGSL + optional
+/// Float32Array params) to a size×size image the host samples per dab — "dip the brush into a
+/// bucket of shader". `key` must vary per param set (materialize caches per key). While set,
+/// every dab/fill deposits the material's look instead of a flat colour, until _material_clear.
+fn hostModelPaintMaterial(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const key = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(key);
+    const wgsl = argToStringAlloc(info, 1) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(wgsl);
+    // Optional shader params as a Float32Array's bytes; empty/absent → the shader's own defaults.
+    const data: ?[]const f32 = blk: {
+        const bytes = argBytes(info, 2) orelse break :blk null;
+        if (bytes.len == 0 or bytes.len % @sizeOf(f32) != 0) break :blk null;
+        break :blk @alignCast(std.mem.bytesAsSlice(f32, bytes));
+    };
+    const size: u32 = @intCast(std.math.clamp(argToI32(info, 3) orelse 256, 8, 1024));
+    const scale: f32 = @floatCast(argToF64(info, 4) orelse 1.0);
+    if (key.len == 0 or wgsl.len == 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    // bakePixels returns readbackStaticSurface's layout: 8-byte header (u32 w, u32 h LE) + RGBA,
+    // page-allocated — we own it and free after copying the pixels into the paint module.
+    const raw = material_tex.bakePixels(key, wgsl, data, size) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.page_allocator.free(raw);
+    if (raw.len < 8) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const w = std.mem.readInt(u32, raw[0..4], .little);
+    const h = std.mem.readInt(u32, raw[4..8], .little);
+    const ok = scene3d.setPaintMaterial(raw[8..], w, h, scale);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+/// __model_paint_material_clear() → drop the material ink; dabs go back to flat-colour painting.
+fn hostModelPaintMaterialClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    scene3d.clearPaintMaterial();
+    setReturnNumber(info, 1);
 }
 
 /// __model_set_paint_detail(px) → the ACTUAL detail after the change (1/8/16/32). Re-tessellates
@@ -1597,6 +1654,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_paint_mode", hostModelPaintMode);
     v8_runtime.registerHostFn("__model_paint_stroke_begin", hostModelPaintStrokeBegin);
     v8_runtime.registerHostFn("__model_paint_stamp", hostModelPaintStamp);
+    v8_runtime.registerHostFn("__model_paint_material", hostModelPaintMaterial);
+    v8_runtime.registerHostFn("__model_paint_material_clear", hostModelPaintMaterialClear);
     v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);

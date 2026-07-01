@@ -94,7 +94,10 @@ export type StampSource =
 export type PaintInk =
   | { kind: 'color'; hex: string }
   | { kind: 'texture'; key: string }
-  | { kind: 'shader'; surface: string };
+  // A shader "paint bucket": `surface` is the shader-spec id, `data` its tuned params
+  // (absent = the spec's defaults), `tiles` how many times the material repeats across a
+  // face. The host bakes (surface, data) → pixels a brush samples (paint-with-a-shader).
+  | { kind: 'shader'; surface: string; data?: number[]; tiles?: number };
 
 export function inkColorHex(ink: PaintInk): string | null {
   return ink.kind === 'color' ? ink.hex : null;

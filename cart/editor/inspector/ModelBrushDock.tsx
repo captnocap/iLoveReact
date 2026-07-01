@@ -17,6 +17,7 @@ import { BrushKit, DARK_THEME, type Brush, type BrushTool } from '@reactjit/runt
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import type { ColorLens } from '../data/colorSpine';
 import ColorStudioWorkbench from '../stage/ColorStudioWorkbench';
+import ModelShaderBucket from './ModelShaderBucket';
 
 export type ColorSpineHandlers = {
   onSetCurrent: (color: OklchColor) => void;
@@ -99,6 +100,10 @@ export default function ModelBrushDock(props: {
       />
       <Text style={{ color: DARK_THEME.dim, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>BRUSH</Text>
       <BrushDials seed={props.brush} tool={props.tool} inkHex={oklchToHex(props.current)} onSync={props.onBrush} />
+      {/* Paint-with-a-shader: dip the brush into a shader bucket instead of the flat colour above.
+          Selecting a bucket sets a shader ink (surface + tuned params); "colour" hands the brush
+          back to the Color Studio's current colour. */}
+      <ModelShaderBucket brush={props.brush} onBrush={props.onBrush} colorHex={oklchToHex(props.current)} />
     </Col>
   );
 }
