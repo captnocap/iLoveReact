@@ -692,7 +692,7 @@ export default function AppFrame() {
               return { ...prev, assetPage: Math.max(0, Math.min(maxPage, prev.assetPage + delta)) };
             })}
             onFocusMaterial={focusMaterialDocument}
-            onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+            onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name} — no host tool wired yet` }))}
             onModel={openModelDocument}
             contentTree={contentTreeNodes}
             models={visibleModels}
@@ -724,7 +724,7 @@ export default function AppFrame() {
             onContext={() => setState((prev) => ({ ...prev, contextOpen: !prev.contextOpen, openMenu: null, status: prev.contextOpen ? 'context menu closed' : 'context menu opened' }))}
             onObject={selectObject}
             onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
-            onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
+            onMaterialAction={(label) => setState((prev) => ({ ...prev, status: `${label}: ${assetById(prev.activeAssetId, prev.assetOverrides).name} — no host tool wired yet` }))}
             onSelectColorStudioMaterial={selectColorStudioMaterial}
             onColorStudioVariant={setColorStudioVariant}
             onColorStudioSeed={rollColorStudioSeed}
@@ -752,7 +752,7 @@ export default function AppFrame() {
             onCommand={runCommand}
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
-            onModelAction={(label) => setState((prev) => ({ ...prev, status: label }))}
+            onModelAction={(label) => setState((prev) => ({ ...prev, status: `${label} — no host tool wired yet` }))}
           />
         </RenderProbe>
       </C.HW_Body>
