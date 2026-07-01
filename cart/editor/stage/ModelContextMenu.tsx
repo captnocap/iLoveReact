@@ -8,12 +8,22 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import { Slider } from '../../../runtime/primitives';
 import { meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
-import type { ModelToolSnapshot } from '../data/types';
+import type { LightId, ModelToolSnapshot } from '../data/types';
 
-export default function ModelContextMenu({ modelTool, onCommand, onQuality, onClose }: {
+// The viewer light-rig switches, in menu order. Flat is the even paint-true master; Key/Fill/Rim
+// only apply when Flat is off. `field` reads the on-state off the tool snapshot.
+const LIGHT_ROWS: { id: LightId; label: string; field: 'litFlat' | 'litKey' | 'litFill' | 'litRim' }[] = [
+  { id: 'flat', label: 'Flat (even, paint-true)', field: 'litFlat' },
+  { id: 'key', label: 'Key light', field: 'litKey' },
+  { id: 'fill', label: 'Fill light', field: 'litFill' },
+  { id: 'rim', label: 'Rim light', field: 'litRim' },
+];
+
+export default function ModelContextMenu({ modelTool, onCommand, onQuality, onToggleLight, onClose }: {
   modelTool: ModelToolSnapshot;
   onCommand: (id: string, source: string) => void;
   onQuality: (quality: number) => void;
+  onToggleLight: (which: LightId) => void;
   onClose: () => void;
 }) {
   return (
@@ -37,6 +47,20 @@ export default function ModelContextMenu({ modelTool, onCommand, onQuality, onCl
           <C.HW_KeyText>{command.key}</C.HW_KeyText>
         </C.HW_ContextRow>
       ))}
+      {/* Lighting — the viewer's light switches, with a real home here (the toolbar mirrors
+          them for quick access). Toggling keeps the menu open so you can flip several. */}
+      {LIGHT_ROWS.map((row) => {
+        const disabled = row.id !== 'flat' && modelTool.litFlat;
+        const on = modelTool[row.field] && !disabled;
+        return (
+          <C.HW_ContextRow key={row.id} onPress={() => { if (!disabled) onToggleLight(row.id); }}>
+            <Icon name={on ? 'Lightbulb' : 'LightbulbOff'} size={12} color={accentFor(on ? 'primary' : 'textDim')} />
+            <C.HW_ContextText>{row.label}</C.HW_ContextText>
+            <C.HW_Spacer />
+            <C.HW_KeyText>{disabled ? '—' : on ? 'on' : 'off'}</C.HW_KeyText>
+          </C.HW_ContextRow>
+        );
+      })}
       {/* Quality lives here — tucked away, only present when the menu is called.
           Dragging stays inside the menu, so it doesn't dismiss. */}
       <C.HW_StageMenuQuality>

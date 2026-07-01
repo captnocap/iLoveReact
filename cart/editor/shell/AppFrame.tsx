@@ -788,6 +788,7 @@ export default function AppFrame() {
             onCommand={runCommand}
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
             onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => ({ ...prev, modelTool }))}
+            onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)}
             modelContextTrigger={modelMenu.triggerProps}
             outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart }}
             onTool={(id) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` }))}

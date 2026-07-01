@@ -58,7 +58,10 @@ export type ModelViewInitialMesh = {
 // brushTool: 'fill' (per-face flood) · 'brush' (free-form disc). safety: 0 clip · 1 lock.
 // detail: 1 fill-only · 8/16/32 free-form texels/face. brush/palette: the shared kit model,
 // mirrored out so the editor's BrushKit dock is a controlled view of the viewer's brush.
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette };
+// litFlat/Key/Fill/Rim: the viewer light-rig switches, mirrored out so the editor's menu +
+// toolbar can host + highlight them (a real menu home, not just the viewport chip).
+export type LightId = 'flat' | 'key' | 'fill' | 'rim';
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean };
 // The handlers the viewer owns, handed out so an external surface can invoke
 // them. Same functions the floating buttons and hotkeys call — one owner, no
 // split-brain: the shell remote-controls; the viewer stays the source of truth.
@@ -81,6 +84,8 @@ export type ModelToolApi = {
   cycleDetail: () => void;
   setBrush: (b: Brush) => void;
   setPalette: (p: Palette) => void;
+  // Light-rig switches — flip a light on/off (Flat is the even paint-true master).
+  toggleLight: (which: LightId) => void;
 };
 export type ModelViewProps = {
   initialPath?: string;
@@ -425,6 +430,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     cycleDetail,
     setBrush,
     setPalette,
+    toggleLight: (which) => {
+      if (which === 'flat') setLitFlat((v) => !v);
+      else if (which === 'key') setLitKey((v) => !v);
+      else if (which === 'fill') setLitFill((v) => !v);
+      else setLitRim((v) => !v);
+    },
   };
   useEffect(() => {
     onToolApi?.({
@@ -442,11 +453,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
       cycleDetail: () => toolApiRef.current?.cycleDetail(),
       setBrush: (b) => toolApiRef.current?.setBrush(b),
       setPalette: (p) => toolApiRef.current?.setPalette(p),
+      toggleLight: (which) => toolApiRef.current?.toggleLight(which),
     });
   }, []);
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette });
-  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim });
+  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, litRim]);
 
   // W = wireframe, P = paint, F = focus, 1/2/3 = vertex/edge/face, Esc = clear/back to view.
   useModifiers({
@@ -685,14 +697,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
         />
       )}
 
-      {/* Light switches — a compact rig control on the viewport. Flat = even, paint-true light
-          (no shading, colours read the same on every face); Key/Fill/Rim shape it (disabled
-          under Flat). Rendered after the paint overlay so the switches stay clickable while
-          painting. */}
-      {model && (
+      {/* Light switches — the compact viewport rig control, STANDALONE only. In the editor
+          embed (hostChrome) the same switches live in the model menu + toolbar (a real, findable
+          home), driven through onToolApi.toggleLight, so the viewport stays bland here. Flat =
+          even, paint-true light; Key/Fill/Rim shape it (disabled under Flat). */}
+      {!hostChrome && model && (
         <Row
           style={{
-            position: 'absolute', left: 12, bottom: 12, alignItems: 'center', gap: 6,
+            position: 'absolute', left: 12, bottom: 54, alignItems: 'center', gap: 6,
             backgroundColor: 'rgba(12,14,20,0.82)', borderRadius: 8, borderWidth: 1, borderColor: '#1d2330',
             paddingLeft: 9, paddingRight: 9, paddingTop: 6, paddingBottom: 6,
           }}
