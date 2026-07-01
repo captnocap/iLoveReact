@@ -54,9 +54,8 @@ export default function ColorLensLibrary(props: {
         ))}
       </C.HW_SpineLibraryList>
       <C.HW_SpineLibraryFooter>
-        <C.HW_KeyText>from your library - {rows.length} sets</C.HW_KeyText>
+        <C.HW_KeyText>{rows.length} sets</C.HW_KeyText>
         <C.HW_Spacer />
-        <C.HW_Pill><C.HW_PillText>+ discover online</C.HW_PillText></C.HW_Pill>
       </C.HW_SpineLibraryFooter>
     </C.HW_LensBody>
   );

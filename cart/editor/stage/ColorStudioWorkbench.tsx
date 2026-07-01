@@ -30,13 +30,9 @@ export default function ColorStudioWorkbench(props: {
 
   return (
     <C.HW_ColorPreviewPanel>
-      <C.HW_ColorPreviewHead>
-        <C.HW_HeadTitle>Workbench</C.HW_HeadTitle>
-        <C.HW_KeyText>one color, five lenses</C.HW_KeyText>
-      </C.HW_ColorPreviewHead>
       <C.HW_ColorStudioBody style={{ flexDirection: 'column', padding: 14, gap: 14 }}>
         <ColorSpineHeader current={props.current} onAddToTray={props.onAddToTray} />
-        <C.HW_KeyText>FITS WELL RIGHT NOW - derived live, click to switch</C.HW_KeyText>
+        <C.HW_KeyText>FITS WELL</C.HW_KeyText>
         <C.HW_SpineFitsRow>
           {fits.map((fit, index) => (
             <C.HW_SpineFitSwatch key={index} onPress={() => props.onSetCurrent(fit.color)} style={{ backgroundColor: fit.css }} />

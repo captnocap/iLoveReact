@@ -30,7 +30,6 @@ export default function ColorLensRamp(props: {
         </C.HW_RampStepsTrack>
         <C.HW_Spacer />
       </C.HW_RampControlRow>
-      <C.HW_RampCaption>perceptually even in OKLCH - no muddy mid-tones, no banding. click a step to adopt it.</C.HW_RampCaption>
     </C.HW_LensBody>
   );
 }

@@ -11,7 +11,6 @@ export default function ColorLensMix(props: { onPick: (color: OklchColor) => voi
           <C.HW_MixPigmentChip key={pigment.name} onPress={() => props.onPick(pigment.color)} style={{ backgroundColor: pigment.css }} />
         ))}
       </C.HW_MixPigmentRow>
-      <C.HW_MixCaption>tap a pigment to pull it into current - drag-mix pad is a future host-owned brush surface.</C.HW_MixCaption>
     </C.HW_LensBody>
   );
 }

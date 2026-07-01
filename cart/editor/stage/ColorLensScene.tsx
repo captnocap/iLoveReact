@@ -6,7 +6,6 @@ export default function ColorLensScene(props: { scenePick: string | null; onPick
   const swatches = sceneSwatches(props.scenePick);
   return (
     <C.HW_LensBody>
-      <C.HW_SceneCaption>EXTRACTED FROM SCENE - new picks lock to these so assets stay cohesive</C.HW_SceneCaption>
       <C.HW_SceneStrip>
         {swatches.map((swatch, index) => (
           <C.HW_SceneSwatch

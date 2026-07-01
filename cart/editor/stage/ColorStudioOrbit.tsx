@@ -21,10 +21,6 @@ export default function ColorStudioOrbit(props: {
 
   return (
     <C.HW_ColorPreviewPanel>
-      <C.HW_ColorPreviewHead>
-        <C.HW_HeadTitle>No-Modes</C.HW_HeadTitle>
-        <C.HW_KeyText>pick once, see everything</C.HW_KeyText>
-      </C.HW_ColorPreviewHead>
       <C.HW_ColorStudioBody style={{ flexDirection: 'column', padding: 14, gap: 14 }}>
         <ColorSpineHeader current={props.current} onAddToTray={props.onAddToTray} />
         <C.HW_OrbitStage>
