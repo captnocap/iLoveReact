@@ -683,6 +683,40 @@ export default function AppFrame() {
     const parts = (prev.modelParts[mid] ?? []).filter((p) => p.id !== id);
     return { ...prev, modelParts: { ...prev.modelParts, [mid]: parts }, modelActivePartId: prev.modelActivePartId === id ? (parts[0]?.id ?? null) : prev.modelActivePartId };
   });
+  // After a mesh edit (delete), drop any part whose geometry is entirely gone: ask the host
+  // how many faces survive in each part's group range and remove the empties from the
+  // outliner. Visible parts only (a hidden part isn't in the host mesh — it's hidden, not
+  // deleted). Runs off the triangle-count drop below.
+  const reconcileEmptyParts = () => {
+    const mid = activePartsModelId(state);
+    if (!mid) return;
+    const parts = state.modelParts[mid] ?? [];
+    if (parts.length === 0) return;
+    const hostFns = globalThis as any;
+    const empty = new Set<string>();
+    for (const r of composeModelParts(parts).ranges) {
+      if ((hostFns.__mesh_group_face_count?.(r.lo, r.hi) ?? -1) === 0) empty.add(r.id);
+    }
+    if (empty.size === 0) return;
+    setState((prev) => {
+      const list = (prev.modelParts[mid] ?? []).filter((p) => !empty.has(p.id));
+      return {
+        ...prev,
+        modelParts: { ...prev.modelParts, [mid]: list },
+        modelActivePartId: prev.modelActivePartId && empty.has(prev.modelActivePartId) ? (list[0]?.id ?? null) : prev.modelActivePartId,
+        status: `removed ${empty.size} emptied part${empty.size === 1 ? '' : 's'}`,
+      };
+    });
+  };
+  // The model's live triangle count is mirrored up via onToolState. A DROP means faces were
+  // removed (a delete) — reconcile emptied parts. Decimation/hide also drop tris but never
+  // zero a part, so those are harmless no-ops.
+  const prevTrisRef = useRef(0);
+  useEffect(() => {
+    const tris = state.modelTool.tris;
+    if (tris < prevTrisRef.current) reconcileEmptyParts();
+    prevTrisRef.current = tris;
+  }, [state.modelTool.tris]);
 
   const openModelDocument = (model: ModelPackage) => {
     const doc = modelDocument(model);

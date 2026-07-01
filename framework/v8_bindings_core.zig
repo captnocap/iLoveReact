@@ -554,6 +554,15 @@ fn hostMeshDeleteSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_group_face_count(lo, hi) → surviving faces in the group range. The outliner asks
+/// this after a delete to drop parts whose geometry is entirely gone.
+fn hostMeshGroupFaceCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
+    setReturnNumber(info, @floatFromInt(scene3d.meshGroupFaceCount(lo, hi)));
+}
+
 /// __mesh_edit_snapshot() — save the selection before an instant mousedown pick.
 fn hostMeshEditSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     _ = info_c;
@@ -1707,6 +1716,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
     v8_runtime.registerHostFn("__mesh_delete_selection", hostMeshDeleteSelection);
+    v8_runtime.registerHostFn("__mesh_group_face_count", hostMeshGroupFaceCount);
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);

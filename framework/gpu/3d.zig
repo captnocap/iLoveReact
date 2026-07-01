@@ -1423,6 +1423,18 @@ pub fn meshEditSelectGroupRange(lo: u32, hi: u32, additive: bool) i32 {
 pub fn meshEditSetScope(lo: u32, hi: u32) void {
     mesh_edit.setEditScope(lo, hi);
 }
+/// Count the surviving faces whose authored group is in [lo, hi) — the outliner asks this
+/// after a delete to drop parts that have no geometry left.
+pub fn meshGroupFaceCount(lo: u32, hi: u32) u32 {
+    const fc = model_paint.faceCount();
+    var n: u32 = 0;
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        const grp = model_source.faceGroupOf(f);
+        if (grp != model_source.NO_FACE_GROUP and grp >= lo and grp < hi) n += 1;
+    }
+    return n;
+}
 /// Paint every face in the authored group range [lo, hi) a solid colour — the outliner tints
 /// each PART its own colour on load so a bare studio mesh reads as coloured parts, matching
 /// the outliner swatches. Returns the number of faces painted.
