@@ -89,6 +89,11 @@ export type ModelToolApi = {
   createFace: () => void;
   loopCut: () => void;
   deleteSelection: () => void;
+  // Host-authoritative part ops: append a new part (returns its group range), hide/show a
+  // part's range, delete a part's range. The host mesh is the source of truth.
+  appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string) => { lo: number; hi: number } | null;
+  setPartHidden: (lo: number, hi: number, hidden: boolean) => void;
+  deletePartRange: (lo: number, hi: number) => void;
   setQuality: (q: number) => void;
   // Brush controls — the editor toolbar drives tool/safety/detail, the BrushKit dock drives
   // the brush + palette. The viewer stays the single owner of the live brush state.
@@ -179,7 +184,7 @@ const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
 // the host's: welded topology, selection sets, AND the input loop (engine.zig). The cart
 // only sets mode/tool/capture and reads counts for the HUD — never a per-event handler.
 type SelInfo = { mode: number; verts: number; edges: number; sel: number };
-type TopoResult = { ok: number; key?: string; count?: number };
+type TopoResult = { ok: number; key?: string; count?: number; lo?: number; hi?: number };
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 const meshClearSel = () => host.__mesh_edit_clear?.();
@@ -210,6 +215,18 @@ const meshCreateFace = () => readTopoResult(host.__mesh_topo_create_face?.());
 const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
 // Delete exactly the selected elements (faces, or faces touching a selected vert/edge).
 const meshDeleteSelection = () => readTopoResult(host.__mesh_delete_selection?.());
+// ── Host-authoritative part ops ──────────────────────────────────────────────────
+// A part is metadata + a group range; its geometry lives in the host mesh. Adding APPENDS to
+// the live edit mesh (preserving prior edits — no JS recompose); hide/delete are host ops on
+// the range. Only the new part's geometry (append) or a range (hide/delete) crosses the bridge.
+const meshAppendGroup = (positions: Float32Array, faceGroups: Uint32Array) =>
+  readTopoResult(host.__mesh_append_group?.(positions, Math.floor(positions.length / 8), faceGroups));
+const meshSetGroupHidden = (lo: number, hi: number, hidden: boolean) =>
+  readTopoResult(host.__mesh_set_group_hidden?.(lo, hi, hidden ? 1 : 0));
+const meshDeleteGroupRange = (lo: number, hi: number) => {
+  host.__mesh_edit_select_group_range?.(lo, hi, 0);
+  return readTopoResult(host.__mesh_delete_selection?.());
+};
 const readGuard = (): GuardInfo | null => {
   try {
     const j = host.__mesh_edit_guard?.();
@@ -358,6 +375,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     }
   };
 
+  // Adopt a host op's new mesh key WITHOUT forcing a select mode (append/hide/delete-part just
+  // change the resident mesh; they don't imply an edit mode like the topo ops do).
+  const adoptMesh = (r: TopoResult | null): boolean => {
+    if (r?.ok && typeof r.key === 'string' && typeof r.count === 'number') {
+      setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
+      setSelInfo(readSelInfo() ?? selInfo);
+      return true;
+    }
+    return false;
+  };
+
   const closeGuard = (action: number) => {
     resolveGuard(action);
     setGuard(null);
@@ -442,6 +470,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
     loopCut: () => applyTopo(meshLoopCut(), 'Select exactly one edge to loop-cut across'),
     deleteSelection: () => applyTopo(meshDeleteSelection(), 'Nothing selected to delete'),
+    // Host-authoritative part ops (the outliner). Append preserves prior edits; hide/delete
+    // act on the part's group range. All adopt the new host mesh key without a JS recompose.
+    appendPart: (positions, faceGroups, color) => {
+      const r = meshAppendGroup(positions, faceGroups);
+      if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
+      const [rr, gg, bb] = hexToRgb01(color);
+      host.__model_paint_group_range?.(r.lo, r.hi, Math.round(rr * 255), Math.round(gg * 255), Math.round(bb * 255));
+      return { lo: r.lo, hi: r.hi };
+    },
+    setPartHidden: (lo, hi, hidden) => { adoptMesh(meshSetGroupHidden(lo, hi, hidden)); },
+    deletePartRange: (lo, hi) => { adoptMesh(meshDeleteGroupRange(lo, hi)); },
     setQuality: (q) => applyQuality(q),
     brushTool: chooseBrushTool,
     cycleSafety,

@@ -71,13 +71,15 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
   if (composed) {
     // Each part's group range → its outliner colour, so the viewer tints the parts on load.
     const partColors = composed.ranges.map((r) => ({ lo: r.lo, hi: r.hi, color: outliner!.parts.find((p) => p.id === r.id)?.color ?? '#8fb6c9' }));
-    // Every part hidden/deleted → nothing to draw (the outliner in Model Focus lets you add
-    // or un-hide). A non-empty compose mounts the viewer keyed on the geometry signature.
+    // The viewer is keyed on the MODEL id only (stable) — host-authoritative. The composed
+    // mesh is the SEED loaded once on mount; every later part op (add/hide/delete) mutates the
+    // host mesh in place (no remount, no JS recompose), so edits persist. A remount happens
+    // only on a real doc switch, which rebuilds the seed from the parts.
     const modelView = composed.positions.length > 0 ? (
       <ModelView
-        key={`${model.id}:${partsSignature(outliner!.parts)}`}
+        key={model.id}
         initialTitle={model.name}
-        initialMesh={{ key: `${model.id}:${partsSignature(outliner!.parts)}`, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups, partColors }}
+        initialMesh={{ key: model.id, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups, partColors }}
         allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState}
       />
     ) : (

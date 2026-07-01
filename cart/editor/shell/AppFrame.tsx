@@ -642,101 +642,115 @@ export default function AppFrame() {
   // The dialog confirmed: build the primitive at the chosen params — a new PART on the model in
   // view, or a fresh model document seeded with it. Same part-vs-new-model split as before, now
   // decided here so both entry points (File → New Mesh and the outliner +) share it.
-  const createPrimitive = (kind: PrimitiveKind, params: PrimitiveParams) => setState((prev) => {
-    const activeModel = activePartsModelId(prev);
-    if (activeModel) {
-      const parts = prev.modelParts[activeModel] ?? [];
-      const part = makePart(kind, parts, prev.seq, params);
-      return { ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...parts, part] }, modelActivePartId: part.id, newMeshPrompt: null, status: `added ${part.name}` };
+  // Range of a part in the host mesh: its stored [lo, hi) (set on seed/append). The host mesh
+  // is authoritative — these ids are stable across deletes and appends within a session.
+  const partRange = (part: ModelPart): { lo: number; hi: number } | null =>
+    part.lo != null && part.hi != null ? { lo: part.lo, hi: part.hi } : null;
+
+  const createPrimitive = (kind: PrimitiveKind, params: PrimitiveParams) => {
+    const activeModel = activePartsModelId(state);
+    const api = modelToolApiRef.current;
+    if (activeModel && api) {
+      // Add a PART to the model in view = APPEND its geometry to the live host mesh (preserving
+      // every prior edit — no JS recompose). The host returns the group range it landed in.
+      const parts = state.modelParts[activeModel] ?? [];
+      const part = makePart(kind, parts, state.seq, params);
+      const geo = composeModelParts([{ ...part, visible: true }]);
+      const range = geo.positions.length > 0 ? api.appendPart(geo.positions, geo.faceGroups, part.color) : null;
+      if (!range) {
+        setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'could not add mesh' }));
+        return;
+      }
+      const placed: ModelPart = { ...part, lo: range.lo, hi: range.hi };
+      setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name}` }));
+      return;
     }
-    const docSeq = prev.workspaceDocuments.filter((doc) => doc.id.startsWith('model:primitive:')).length + 1;
-    const mid = `primitive:${kind}:${docSeq}`;
-    const doc = modelDocument(primitiveModelPackage(mid));
-    const part = makePart(kind, [], prev.seq, params);
-    return {
-      ...prev, seq: prev.seq + 1,
-      workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
-      activeWorkspaceDocumentId: doc.id,
-      modelParts: { ...prev.modelParts, [mid]: [part] },
-      modelActivePartId: part.id,
-      materialFocused: false, contextOpen: false, newMeshPrompt: null,
-      status: `new ${kind} mesh`,
-    };
-  });
+    // No model in view → a fresh model document seeded with this one part (mount composes it).
+    setState((prev) => {
+      const docSeq = prev.workspaceDocuments.filter((doc) => doc.id.startsWith('model:primitive:')).length + 1;
+      const mid = `primitive:${kind}:${docSeq}`;
+      const doc = modelDocument(primitiveModelPackage(mid));
+      const base = makePart(kind, [], prev.seq, params);
+      const range = composeModelParts([base]).ranges[0];
+      const part: ModelPart = { ...base, lo: range?.lo ?? 0, hi: range?.hi ?? 0 };
+      return {
+        ...prev, seq: prev.seq + 1,
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
+        activeWorkspaceDocumentId: doc.id,
+        modelParts: { ...prev.modelParts, [mid]: [part] },
+        modelActivePartId: part.id,
+        materialFocused: false, contextOpen: false, newMeshPrompt: null,
+        status: `new ${kind} mesh`,
+      };
+    });
+  };
   const selectPart = (id: string) => {
     // Focus a part = SCOPE editing to it: only its verts/edges/faces show + select, and the
     // gizmo drives just it. Clicking the already-focused part toggles back to the whole model.
     const host = globalThis as any;
     const mid = activePartsModelId(state);
+    const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
+    const range = part ? partRange(part) : null;
     const alreadyFocused = state.modelActivePartId === id;
-    if (mid && !alreadyFocused) {
-      const range = composeModelParts(state.modelParts[mid] ?? []).ranges.find((r) => r.id === id);
-      if (range) {
-        host.__mesh_edit_scope?.(range.lo, range.hi);
-        host.__mesh_edit_select_group_range?.(range.lo, range.hi, 0);
-      }
+    if (range && !alreadyFocused) {
+      host.__mesh_edit_scope?.(range.lo, range.hi);
+      host.__mesh_edit_select_group_range?.(range.lo, range.hi, 0);
     } else {
       host.__mesh_edit_scope?.(0, 0); // toggle off → edit the whole model
       host.__mesh_edit_clear?.();
     }
     setState((prev) => ({ ...prev, modelActivePartId: alreadyFocused ? null : id }));
   };
-  const toggleVisiblePart = (id: string) => setState((prev) => {
-    const mid = activePartsModelId(prev);
-    if (!mid) return prev;
-    return { ...prev, modelParts: { ...prev.modelParts, [mid]: (prev.modelParts[mid] ?? []).map((p) => (p.id === id ? { ...p, visible: !p.visible } : p)) } };
-  });
-  const deletePart = (id: string) => setState((prev) => {
-    const mid = activePartsModelId(prev);
-    if (!mid) return prev;
-    const parts = (prev.modelParts[mid] ?? []).filter((p) => p.id !== id);
-    return { ...prev, modelParts: { ...prev.modelParts, [mid]: parts }, modelActivePartId: prev.modelActivePartId === id ? (parts[0]?.id ?? null) : prev.modelActivePartId };
-  });
-  // After a mesh edit (delete), WRITE THE DELETION BACK into each part's stored EditMesh so it
-  // survives a later recompose (add/hide) instead of springing back. The host keeps the
-  // geometry — only the small list of surviving group ids crosses the bridge — and we prune
-  // each part's faces to those survivors, dropping parts left with nothing. Visible parts only
-  // (a hidden part isn't in the host mesh — it's hidden, not deleted). Runs off the tri drop.
-  const reconcileParts = () => {
+  const toggleVisiblePart = (id: string) => {
+    const mid = activePartsModelId(state);
+    const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
+    const range = part ? partRange(part) : null;
+    if (range) modelToolApiRef.current?.setPartHidden(range.lo, range.hi, part!.visible); // hide if currently shown
+    setState((prev) => ({ ...prev, modelParts: { ...prev.modelParts, [mid!]: (prev.modelParts[mid!] ?? []).map((p) => (p.id === id ? { ...p, visible: !p.visible } : p)) } }));
+  };
+  const deletePart = (id: string) => {
+    const mid = activePartsModelId(state);
+    const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
+    const range = part ? partRange(part) : null;
+    if (range && part!.visible) modelToolApiRef.current?.deletePartRange(range.lo, range.hi);
+    setState((prev) => {
+      const parts = (prev.modelParts[mid!] ?? []).filter((p) => p.id !== id);
+      return { ...prev, modelParts: { ...prev.modelParts, [mid!]: parts }, modelActivePartId: prev.modelActivePartId === id ? (parts[0]?.id ?? null) : prev.modelActivePartId };
+    });
+  };
+  // The host mesh is authoritative, so a delete just changes it — parts are metadata. After a
+  // delete, drop any part whose group range now has ZERO surviving faces (metadata only; no
+  // geometry crosses the bridge, no recompose). Visible parts only (a hidden part is stashed in
+  // the host, not deleted). Runs off the full-quality triangle drop below.
+  const reconcileEmptyParts = () => {
     const mid = activePartsModelId(state);
     if (!mid) return;
-    const parts = state.modelParts[mid] ?? [];
-    if (parts.length === 0) return;
     const hostFns = globalThis as any;
-    const rangeById = new Map(composeModelParts(parts).ranges.map((r) => [r.id, r]));
-    let changed = false;
-    const pruned = parts.map((part) => {
-      const r = rangeById.get(part.id);
-      if (!r || !part.mesh) return part; // hidden / not in the composed host mesh
-      const s = hostFns.__mesh_surviving_groups?.(r.lo, r.hi);
-      if (typeof s !== 'string') return part;
-      const surviving = s ? s.split(',').map(Number) : [];
-      if (surviving.length >= part.mesh.faces.length) return part; // nothing deleted from this part
-      changed = true;
-      const keep = new Set(surviving.map((g) => g - r.lo));
-      return { ...part, mesh: { ...part.mesh, faces: part.mesh.faces.filter((_, i) => keep.has(i)) } };
-    });
-    const list = pruned.filter((p) => !p.mesh || p.mesh.faces.length > 0);
-    if (!changed && list.length === parts.length) return;
+    const empty = new Set<string>();
+    for (const p of state.modelParts[mid] ?? []) {
+      const r = partRange(p);
+      if (!p.visible || !r) continue;
+      if ((hostFns.__mesh_group_face_count?.(r.lo, r.hi) ?? -1) === 0) empty.add(p.id);
+    }
+    if (empty.size === 0) return;
     setState((prev) => {
-      const alive = new Set(list.map((p) => p.id));
+      const list = (prev.modelParts[mid] ?? []).filter((p) => !empty.has(p.id));
       return {
         ...prev,
         modelParts: { ...prev.modelParts, [mid]: list },
-        modelActivePartId: prev.modelActivePartId && alive.has(prev.modelActivePartId) ? prev.modelActivePartId : (list[0]?.id ?? null),
-        status: list.length < parts.length ? `removed ${parts.length - list.length} emptied part(s)` : 'synced deletion to parts',
+        modelActivePartId: prev.modelActivePartId && empty.has(prev.modelActivePartId) ? (list[0]?.id ?? null) : prev.modelActivePartId,
+        status: `removed ${empty.size} emptied part(s)`,
       };
     });
   };
-  // The model's live triangle count is mirrored up via onToolState. A DROP at FULL quality
-  // means faces were deleted (loop cut only grows; gizmo moves don't change the count) — write
-  // it back to the parts. The full-quality gate matters: decimation drops the DISPLAYED count
-  // without touching the source faces, so reconciling then would falsely prune un-displayed
-  // faces. Below full quality we skip it (edit at full res to persist deletes).
+  // The model's live triangle count is mirrored up via onToolState. A DROP at FULL quality means
+  // faces were deleted (loop cut only grows; gizmo moves don't change the count) → drop any part
+  // left empty. The full-quality gate matters: decimation drops the DISPLAYED count without
+  // touching source faces, so a group's count could read 0 mid-decimation and falsely prune.
   const prevTrisRef = useRef(0);
   useEffect(() => {
     const tris = state.modelTool.tris;
-    if (tris < prevTrisRef.current && state.modelTool.quality >= 0.999) reconcileParts();
+    if (tris < prevTrisRef.current && state.modelTool.quality >= 0.999) reconcileEmptyParts();
     prevTrisRef.current = tris;
   }, [state.modelTool.tris]);
 
@@ -756,17 +770,29 @@ export default function AppFrame() {
     }));
   };
 
-  // Seed the outliner from a Studio model's stored parts the first time it's the active doc
-  // (covers a fresh click AND a hot reload of an already-open model). A model the user has
-  // already edited this session keeps its parts. Primitive models seed themselves on create.
+  // On a model doc activating: seed its parts (Studio models bring stored parts; primitive
+  // models seed themselves on create) AND stamp each part's [lo, hi] group range from the
+  // compose that the viewer loads on THIS mount. Refreshing on every activate keeps the ranges
+  // matched to the freshly-composed host mesh after a doc switch (the host is authoritative
+  // only within a session; a remount rebuilds the seed). Fires once per activate.
   useEffect(() => {
     const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
     const mid = doc?.kind === 'model' ? doc.sourceId : undefined;
-    if (!mid || state.modelParts[mid]) return;
-    const bareId = mid.startsWith('studio:') ? mid.slice('studio:'.length) : mid;
-    const seeded = storedModelParts(bareId);
-    if (!seeded) return;
-    setState((prev) => (prev.modelParts[mid] ? prev : { ...prev, modelParts: { ...prev.modelParts, [mid]: seeded }, modelActivePartId: seeded[0]?.id ?? prev.modelActivePartId }));
+    if (!mid) return;
+    const existing = state.modelParts[mid];
+    let parts = existing;
+    if (!parts) {
+      const bareId = mid.startsWith('studio:') ? mid.slice('studio:'.length) : mid;
+      parts = storedModelParts(bareId) ?? undefined;
+      if (!parts) return;
+    }
+    const rangeById = new Map(composeModelParts(parts).ranges.map((r) => [r.id, r]));
+    const withRanges = parts.map((p) => { const r = rangeById.get(p.id); return { ...p, lo: r?.lo, hi: r?.hi }; });
+    setState((prev) => ({
+      ...prev,
+      modelParts: { ...prev.modelParts, [mid]: withRanges },
+      modelActivePartId: existing ? prev.modelActivePartId : (withRanges[0]?.id ?? prev.modelActivePartId),
+    }));
   }, [state.activeWorkspaceDocumentId]);
 
   const selectWorkspaceDocument = (activeWorkspaceDocumentId: string) => {
