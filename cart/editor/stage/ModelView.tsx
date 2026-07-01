@@ -671,13 +671,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
         </Text>
         {model && (
           <Text style={{ color: '#7d899c', fontSize: 12, marginLeft: 12 }}>
-            {paintMode
-              ? `${(model.count / 3).toLocaleString()} tris · click a face to fill · drag to paint · middle-drag orbits`
-              : focusMode
-                ? `${(model.count / 3).toLocaleString()} tris · drag to pan focus · double-click to recenter`
-                : selMode !== 0
-                  ? `${SEL_MODES[selMode]} · ${GIZMO_TOOLS[gizmoTool]} gizmo · ${selInfo.sel} selected · click · shift-click adds · drag = box · middle-drag orbits`
-                  : `${(model.count / 3).toLocaleString()} tris · middle-drag orbits · wheel zoom · double-click recenter`}
+            {selMode !== 0
+              ? `${SEL_MODES[selMode]} · ${GIZMO_TOOLS[gizmoTool]} gizmo · ${selInfo.sel} selected`
+              : `${(model.count / 3).toLocaleString()} tris`}
           </Text>
         )}
         <Box style={{ flexGrow: 1 }} />

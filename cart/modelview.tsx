@@ -645,13 +645,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
         {/* A clean object-viewer wants no distance fade. */}
         <Scene3D.Fog enabled={false} />
         {/* Light rig — neutral WHITE ambient so painted colours read true (the old bluish
-            ambient tinted them). Flat = pure even light for painting; otherwise key + fill
-            + optional rim, toggled by the light switches. Fill sits opposite the key so the
-            orbited-away side isn't black. */}
-        <Scene3D.AmbientLight color="#ffffff" intensity={litFlat ? 2.1 : 0.85} />
-        {!litFlat && litKey ? <Scene3D.DirectionalLight direction={[-0.5, -0.8, -0.5]} color="#ffffff" intensity={1.25} /> : null}
-        {!litFlat && litFill ? <Scene3D.DirectionalLight direction={[0.55, -0.25, 0.6]} color="#ffffff" intensity={0.7} /> : null}
-        {!litFlat && litRim ? <Scene3D.DirectionalLight direction={[0.1, 0.6, 0.75]} color="#ffffff" intensity={0.65} /> : null}
+            ambient tinted them). The model shader supports ONE directional + ambient, so the
+            switches map to what actually works: Flat = bright even ambient (no shading, paint-
+            true); Key = the single directional (form/shading); Fill = raise ambient so the
+            orbited-away side lifts out of black. All three visibly change the render. */}
+        <Scene3D.AmbientLight color="#ffffff" intensity={litFlat ? 2.1 : (litFill ? 1.3 : 0.7)} />
+        {!litFlat && litKey ? <Scene3D.DirectionalLight direction={[-0.5, -0.8, -0.5]} color="#ffffff" intensity={1.3} /> : null}
         {/* White material: all colour comes from the host's per-face paint atlas
             (default grey until painted), so painted colours render true. */}
         {model && <Scene3D.Mesh hostKey={model.key} material="#ffffff" />}
@@ -713,7 +712,6 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
           <LightSwitch label="Flat" on={litFlat} onToggle={() => setLitFlat((v) => !v)} />
           <LightSwitch label="Key" on={litKey} onToggle={() => setLitKey((v) => !v)} disabled={litFlat} />
           <LightSwitch label="Fill" on={litFill} onToggle={() => setLitFill((v) => !v)} disabled={litFlat} />
-          <LightSwitch label="Rim" on={litRim} onToggle={() => setLitRim((v) => !v)} disabled={litFlat} />
         </Row>
       )}
 
@@ -730,13 +728,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
         </Text>
         {model && (
           <Text style={{ color: '#7d899c', fontSize: 12, marginLeft: 12 }}>
-            {paintMode
-              ? `${(model.count / 3).toLocaleString()} tris · click a face to fill · drag to paint · middle-drag orbits`
-              : focusMode
-                ? `${(model.count / 3).toLocaleString()} tris · drag to pan focus · double-click to recenter`
-                : selMode !== 0
-                  ? `${SEL_MODES[selMode]} · ${GIZMO_TOOLS[gizmoTool]} gizmo · ${selInfo.sel} selected · click · shift-click adds · drag = box · middle-drag orbits`
-                  : `${(model.count / 3).toLocaleString()} tris · middle-drag orbits · wheel zoom · double-click recenter`}
+            {selMode !== 0
+              ? `${SEL_MODES[selMode]} · ${GIZMO_TOOLS[gizmoTool]} gizmo · ${selInfo.sel} selected`
+              : `${(model.count / 3).toLocaleString()} tris`}
           </Text>
         )}
         <Box style={{ flexGrow: 1 }} />
