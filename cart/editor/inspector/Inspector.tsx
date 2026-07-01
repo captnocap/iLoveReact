@@ -8,8 +8,8 @@ import ReadOnlySection from './ReadOnlySection';
 import PresetSection from './PresetSection';
 import MissionSection from './MissionSection';
 import ModelDetailBody from '../library/ModelDetailBody';
-import ModelBrushDock from './ModelBrushDock';
-import type { Brush, Palette } from '../../../runtime/paint/model';
+import ModelBrushDock, { type ColorSpineHandlers } from './ModelBrushDock';
+import type { Brush } from '../../../runtime/paint/model';
 
 export default function Inspector(props: {
   state: EditorState;
@@ -20,7 +20,7 @@ export default function Inspector(props: {
   onPreset: () => void;
   onPresetOption: (preset: string) => void;
   onModelBrush: (brush: Brush) => void;
-  onModelPalette: (palette: Palette) => void;
+  colorSpine: ColorSpineHandlers;
 }) {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
   const activeModel = activeDocument?.kind === 'model' && activeDocument.sourceId
@@ -68,16 +68,22 @@ export default function Inspector(props: {
           </C.HW_PanelHead>
           <C.HW_InspectorBody>
             <ModelDetailBody model={activeModel} />
-            {/* Paint mode swaps in the shared brush kit below the focus content — the ONE
-                brush system (runtime/paint), same panel every editor surface uses. The tool /
-                safety / detail toggles live in the top toolbar; this dock owns the brush. */}
+            {/* Paint mode swaps in the brush dock below the focus content. Colour comes from the
+                ONE Color Studio (the same colorSpine every editor surface shares); BrushKit here
+                is only the shape/size/flow dials. The tool / safety / detail toggles live in the
+                top toolbar. */}
             {props.state.modelTool.paint ? (
               <ModelBrushDock
                 brush={props.state.modelTool.brush}
-                palette={props.state.modelTool.palette}
                 tool={props.state.modelTool.brushTool}
                 onBrush={props.onModelBrush}
-                onPalette={props.onModelPalette}
+                current={props.state.colorSpineCurrent}
+                palette={props.state.colorSpinePalette}
+                lens={props.state.colorSpineLens}
+                libraryFilter={props.state.colorSpineLibraryFilter}
+                rampSteps={props.state.colorSpineRampSteps}
+                scenePick={props.state.colorSpineScenePick}
+                spine={props.colorSpine}
               />
             ) : null}
           </C.HW_InspectorBody>

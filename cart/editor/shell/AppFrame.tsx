@@ -753,7 +753,16 @@ export default function AppFrame() {
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
             onModelBrush={(brush) => modelToolApiRef.current?.setBrush(brush)}
-            onModelPalette={(palette) => modelToolApiRef.current?.setPalette(palette)}
+            colorSpine={{
+              onSetCurrent: setColorSpineCurrent,
+              onAddToTray: addColorSpineToTray,
+              onPickTray: pickColorSpineTray,
+              onSetLens: setColorSpineLens,
+              onSetLibraryFilter: setColorSpineLibraryFilter,
+              onSetRampSteps: setColorSpineRampSteps,
+              onScenePick: pickColorSpineScene,
+              onLoadLibrarySet: loadColorSpineLibrarySet,
+            }}
           />
         </RenderProbe>
       </C.HW_Body>
