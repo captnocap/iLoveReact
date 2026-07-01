@@ -532,6 +532,17 @@ fn hostMeshTopoCreateFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_topo_loop_cut() → JSON {"ok","key","count"}. Slice the mesh by the plane
+/// perpendicular to the ONE selected edge, through its midpoint — the host-native loop
+/// cut. Straddling faces split; authored grouping carries through so each crossed face
+/// becomes two clean faces.
+fn hostMeshTopoLoopCut(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = scene3d.meshTopoLoopCut();
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_edit_snapshot() — save the selection before an instant mousedown pick.
 fn hostMeshEditSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     _ = info_c;
@@ -1534,6 +1545,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
     v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
+    v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);

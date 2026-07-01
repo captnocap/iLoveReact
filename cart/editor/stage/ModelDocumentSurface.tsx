@@ -2,7 +2,7 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage, ModelToolApi, ModelToolSnapshot } from '../data/types';
 import ModelView from './ModelView';
-import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData } from '../data/hmscAssetCatalog';
+import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData, primitiveMeshData } from '../data/hmscAssetCatalog';
 
 // The live viewer source for a model document: a file path, resident mesh data,
 // or a "data missing" placeholder. Resolved once so the render branches stay flat.
@@ -123,6 +123,12 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
 // A cooked file path, resident cooked mesh, resident studio part, a typed
 // "missing" placeholder, or null (no live viewer → the stored-data doc card).
 function resolveViewer(model: ModelPackage): ViewerSource {
+  // A freshly-authored primitive builds its geometry on the spot (cuboid → grouped soup),
+  // keyed by the doc id so each new cube is its own resident mesh.
+  if (model.primitive) {
+    const built = primitiveMeshData(model.primitive);
+    return { kind: 'mesh', key: `primitive:${model.primitive}:${model.id}`, vertices: built.positions, faceGroups: built.faceGroups };
+  }
   if (model.viewerPath) return { kind: 'path', path: model.viewerPath };
 
   const meshRef = viewerMeshRefFor(model);

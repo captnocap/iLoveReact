@@ -72,6 +72,7 @@ export type ModelToolApi = {
   wire: () => void;
   extrudeEdge: () => void;
   createFace: () => void;
+  loopCut: () => void;
   setQuality: (q: number) => void;
   // Brush controls — the editor toolbar drives tool/safety/detail, the BrushKit dock drives
   // the brush + palette. The viewer stays the single owner of the live brush state.
@@ -180,6 +181,8 @@ const readTopoResult = (json: any): TopoResult | null => {
 };
 const meshExtrudeEdge = (distance: number) => readTopoResult(host.__mesh_topo_extrude_edge?.(distance));
 const meshCreateFace = () => readTopoResult(host.__mesh_topo_create_face?.());
+// Loop cut: slice the mesh by the plane perpendicular to the ONE selected edge (host op).
+const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
 const readGuard = (): GuardInfo | null => {
   try {
     const j = host.__mesh_edit_guard?.();
@@ -386,6 +389,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     wire: () => setWire((v) => !v),
     extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
+    loopCut: () => applyTopo(meshLoopCut(), 'Select exactly one edge to loop-cut across'),
     setQuality: (q) => applyQuality(q),
     brushTool: chooseBrushTool,
     cycleSafety,
@@ -402,6 +406,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
       wire: () => toolApiRef.current?.wire(),
       extrudeEdge: () => toolApiRef.current?.extrudeEdge(),
       createFace: () => toolApiRef.current?.createFace(),
+      loopCut: () => toolApiRef.current?.loopCut(),
       setQuality: (q) => toolApiRef.current?.setQuality(q),
       brushTool: (t) => toolApiRef.current?.brushTool(t),
       cycleSafety: () => toolApiRef.current?.cycleSafety(),
@@ -558,7 +563,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     }
     const edgeOp = callHost<string | null>('__env_get', null, 'RJIT_EDGEOP');
     if (edgeOp) {
-      const r = edgeOp === 'face' ? meshCreateFace() : meshExtrudeEdge(0);
+      const r = edgeOp === 'face' ? meshCreateFace() : edgeOp === 'loopcut' ? meshLoopCut() : meshExtrudeEdge(0);
       if (r?.ok && r.key && typeof r.count === 'number') {
         setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
         setSelMode(2);
@@ -828,6 +833,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
                       }}
                     >
                       <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Extrude</Text>
+                    </Pressable>
+                  )}
+                  {selInfo.sel === 1 && (
+                    <Pressable
+                      onPress={() => applyTopo(meshLoopCut(), 'Select exactly one edge to loop-cut across')}
+                      tooltip="Loop cut across the ring perpendicular to this edge"
+                      style={{
+                        paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                        backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                      }}
+                    >
+                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Loop Cut</Text>
                     </Pressable>
                   )}
                   {selInfo.sel >= 2 && (

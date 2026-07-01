@@ -6,7 +6,7 @@ import {
   shaderSpec,
 } from '../textures/shaders';
 import { validateDecalDoc } from '../textures/decal';
-import { editMeshToGeometry, type EditMesh } from '../model/editMesh';
+import { cuboid, editMeshToGeometry, type EditMesh } from '../model/editMesh';
 import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage } from './types';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 
@@ -190,6 +190,17 @@ export function storedModelMeshData(modelId: string): Float32Array | null {
 
 export function storedModelFaceGroupData(modelId: string): Uint32Array | null {
   return storedModelFaceGroups[modelId] ?? null;
+}
+
+// A fresh primitive's geometry (File → New Mesh → Cube). Built through the SAME
+// cuboid() + editMeshToGeometry path a Studio cube takes — one authored-face id per
+// triangle — so it opens in the host editor as clean grouped faces and a side-by-side
+// against the Studio starts from identical topology (8 verts, 6 faces).
+export function primitiveMeshData(kind: 'cube'): { positions: Float32Array; faceGroups: Uint32Array } {
+  const mesh: EditMesh = cuboid(1, 1, 1);
+  const groups: number[] = [];
+  const geo = editMeshToGeometry(mesh, undefined, groups);
+  return { positions: new Float32Array(geo.positions), faceGroups: new Uint32Array(groups) };
 }
 
 function loadHmscEditorCatalog(): HmscEditorCatalog {

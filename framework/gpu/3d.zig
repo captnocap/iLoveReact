@@ -836,6 +836,92 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     return replaced;
 }
 
+/// Loop cut: slice the resident mesh by the plane perpendicular to the ONE selected edge,
+/// through that edge's midpoint (Blender's rule — the new loop runs across the ring the
+/// edge belongs to). Straddling faces split; authored face grouping (studio meshes)
+/// carries through so each crossed n-gon becomes two clean faces — the host-native twin of
+/// the Studio's loopCut(EditMesh). The heavy work is mesh_edit.planeCutSoup (pure, tested);
+/// this derives the plane, rebuilds the interleaved edit mesh, and re-applies the grouping.
+pub fn meshTopoLoopCut() bool {
+    if (!model_paint.hasTarget()) return false;
+    const edge_idx = mesh_edit.selectedEdgeIndexPub() orelse return false;
+    const ep = mesh_edit.edgeEndpointsPub(edge_idx);
+    const a = mesh_edit.vertPosPub(ep[0]);
+    const b = mesh_edit.vertPosPub(ep[1]);
+    var nrm = vsub(b, a);
+    const l2 = vdot(nrm, nrm);
+    if (l2 < 1e-12) return false;
+    nrm = vmul(nrm, 1.0 / @sqrt(l2));
+    const mid = vmul(vadd(a, b), 0.5);
+    const d = vdot(nrm, mid);
+
+    const verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
+
+    // Extract a positions-only soup (9 f32/tri) from the interleaved edit mesh.
+    const pos = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return false;
+    defer std.heap.c_allocator.free(pos);
+    {
+        var f: u32 = 0;
+        while (f < tri_count) : (f += 1) {
+            var k: u32 = 0;
+            while (k < 3) : (k += 1) {
+                const src = (@as(usize, f) * 3 + k) * 8;
+                const dst = (@as(usize, f) * 3 + k) * 3;
+                if (src + 2 >= verts.len) return false;
+                pos[dst + 0] = verts[src + 0];
+                pos[dst + 1] = verts[src + 1];
+                pos[dst + 2] = verts[src + 2];
+            }
+        }
+    }
+
+    // Per-tri authored group (null when this mesh has no grouping — plain imports).
+    var groups_buf: ?[]u32 = null;
+    defer if (groups_buf) |g| std.heap.c_allocator.free(g);
+    if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
+        const g = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+        var i: u32 = 0;
+        while (i < tri_count) : (i += 1) g[i] = model_source.faceGroupOf(i);
+        groups_buf = g;
+    }
+
+    const groups_arg: ?[]const u32 = if (groups_buf) |g| g else null;
+    const cut = mesh_edit.planeCutSoup(pos, tri_count, nrm, d, groups_arg) orelse return false;
+    defer std.heap.c_allocator.free(cut.positions);
+    defer if (cut.groups) |g| std.heap.c_allocator.free(g);
+    if (cut.tri_count <= tri_count) return false; // the plane missed every face → not a cut
+
+    // Rebuild the interleaved edit mesh (appendTri recomputes normals; UVs are rewritten by
+    // setPaintTarget on install), then re-apply the fresh grouping AFTER the retain (which
+    // clears it).
+    var out = std.ArrayListUnmanaged(f32){};
+    var t: u32 = 0;
+    while (t < cut.tri_count) : (t += 1) {
+        const bse = @as(usize, t) * 9;
+        const p0: [3]f32 = .{ cut.positions[bse + 0], cut.positions[bse + 1], cut.positions[bse + 2] };
+        const p1: [3]f32 = .{ cut.positions[bse + 3], cut.positions[bse + 4], cut.positions[bse + 5] };
+        const p2: [3]f32 = .{ cut.positions[bse + 6], cut.positions[bse + 7], cut.positions[bse + 8] };
+        if (!appendTri(&out, p0, p1, p2)) {
+            out.deinit(std.heap.c_allocator);
+            return false;
+        }
+    }
+    const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
+        out.deinit(std.heap.c_allocator);
+        return false;
+    };
+    defer std.heap.c_allocator.free(owned);
+
+    const ok = replaceActiveEditMesh(owned, cut.tri_count * 3);
+    if (ok) {
+        if (cut.groups) |g| model_source.setFaceGroups(g);
+        mesh_edit.setMode(.edge);
+    }
+    return ok;
+}
+
 fn faceCrossFromPositions(pos: []const f32, face: u32) [3]f32 {
     const b = @as(usize, face) * 9;
     if (b + 8 >= pos.len) return .{ 0, 0, 0 };

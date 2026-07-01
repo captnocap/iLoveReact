@@ -25,7 +25,7 @@ import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplore
 import { loadPersistedState, persistState } from '../data/persistView';
 import { commandById, isMeshToolCommand } from '../data/commands';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
 import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
 import { oklchName, type ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
@@ -109,6 +109,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-wire') api.wire();
         else if (commandId === 'mesh-extrude') api.extrudeEdge();
         else if (commandId === 'mesh-create-face') api.createFace();
+        else if (commandId === 'mesh-loopcut') api.loopCut();
         else if (commandId === 'mesh-paint-fill') api.brushTool('fill');
         else if (commandId === 'mesh-paint-brush') api.brushTool('brush');
         else if (commandId === 'mesh-paint-safety') api.cycleSafety();
@@ -123,6 +124,14 @@ export default function AppFrame() {
     }
     if (command.id === 'redo-local') {
       redoLocal();
+      return;
+    }
+    if (command.id === 'new-mesh-cube') {
+      // Fresh primitive → its own model document with the host-native mesh editor live.
+      // A per-cube sequence keeps every "New Mesh → Cube" a distinct pristine document.
+      const seq = state.workspaceDocuments.filter((doc) => doc.id.startsWith('model:primitive:cube:')).length + 1;
+      openModelDocument(primitiveModelPackage(`primitive:cube:${seq}`));
+      setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `new cube mesh (Cube ${seq})` }));
       return;
     }
     if (command.id === 'open-map' || command.id === 'open-file-explorer' || command.id === 'find-import-source') {

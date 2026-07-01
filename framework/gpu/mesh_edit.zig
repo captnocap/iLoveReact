@@ -834,6 +834,148 @@ fn restoreAllFaces() void {
     g_face_base.clearRetainingCapacity();
 }
 
+// ── Loop cut (plane split of a triangle soup) ────────────────────────────────────
+// The host mesh editor keeps the live mesh as a non-indexed triangle soup (positions
+// only matter here — normals are recomputed and UVs rewritten on install). A loop cut is
+// a PLANE split of that soup: every triangle straddling the plane is sliced, the two
+// halves keep their outward winding, and — when the mesh carries authored face grouping
+// (studio EditMesh, one id per source face) — each crossed face splits into TWO
+// independently-grouped faces (negative side keeps its id, positive side gets a fresh
+// one). That keeps the result reading as clean n-gons, exactly like the Studio's
+// loopCut(EditMesh) does, but on the resident host mesh so it stays fast on big meshes.
+// This is PURE (no wgpu, no globals) so it unit-tests standalone; 3d.zig derives the
+// cut plane from the selected edge and installs the result.
+pub const CutResult = struct { positions: []f32, groups: ?[]u32, tri_count: u32 };
+
+const CUT_EPS: f32 = 1e-5;
+
+fn triArea2Local(a: [3]f32, b: [3]f32, c: [3]f32) f32 {
+    const cr = vecCross(vecSub(b, a), vecSub(c, a));
+    return vecDot(cr, cr);
+}
+
+fn emitTriPos(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: [3]f32) bool {
+    inline for (.{ a, b, c }) |v| {
+        list.append(alloc, v[0]) catch return false;
+        list.append(alloc, v[1]) catch return false;
+        list.append(alloc, v[2]) catch return false;
+    }
+    return true;
+}
+
+fn remapGroup(remap: *std.AutoHashMapUnmanaged(u32, u32), og: u32, next_id: *u32) u32 {
+    if (og == model_source.NO_FACE_GROUP) return og;
+    const gop = remap.getOrPut(alloc, og) catch return og;
+    if (!gop.found_existing) {
+        gop.value_ptr.* = next_id.*;
+        next_id.* += 1;
+    }
+    return gop.value_ptr.*;
+}
+
+/// Sutherland–Hodgman clip of one triangle to a half-space of the plane. keep_positive
+/// keeps the side where the signed distance is >= 0, else the <= 0 side. On-plane corners
+/// are kept on BOTH sides (shared cut points); a strictly-crossed edge contributes one
+/// interpolated point. A single plane cuts a triangle into a convex polygon of <= 4 verts.
+fn planeClipSide(p: [3][3]f32, s: [3]f32, keep_positive: bool, out: *[4][3]f32) u32 {
+    var n_out: u32 = 0;
+    var i: usize = 0;
+    while (i < 3) : (i += 1) {
+        const cur = p[i];
+        const cs = s[i];
+        const j = (i + 1) % 3;
+        const ns = s[j];
+        const cur_in = if (keep_positive) cs >= -CUT_EPS else cs <= CUT_EPS;
+        if (cur_in and n_out < 4) {
+            out[n_out] = cur;
+            n_out += 1;
+        }
+        const cross = (cs > CUT_EPS and ns < -CUT_EPS) or (cs < -CUT_EPS and ns > CUT_EPS);
+        if (cross and n_out < 4) {
+            const t = cs / (cs - ns);
+            const nx = p[j];
+            out[n_out] = .{ cur[0] + (nx[0] - cur[0]) * t, cur[1] + (nx[1] - cur[1]) * t, cur[2] + (nx[2] - cur[2]) * t };
+            n_out += 1;
+        }
+    }
+    return n_out;
+}
+
+/// Plane-cut a non-indexed triangle soup (`pos` = tri_count*9 floats, positions only) by
+/// the plane {p : dot(n,p) = d}. Returns a fresh soup (caller frees .positions and, if
+/// present, .groups). When groups_in is given (one id per input tri), the result carries
+/// one id per OUTPUT tri with the negative/positive split described above; null ⇒ no
+/// grouping is produced. Returns null only on allocation failure.
+pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_in: ?[]const u32) ?CutResult {
+    var out_pos = std.ArrayListUnmanaged(f32){};
+    var out_grp = std.ArrayListUnmanaged(u32){};
+    const want_groups = groups_in != null;
+
+    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    defer remap.deinit(alloc);
+    var next_id: u32 = 0;
+    if (groups_in) |g| {
+        var mx: u32 = 0;
+        const lim = @min(@as(usize, tri_count), g.len);
+        for (g[0..lim]) |v| {
+            if (v != model_source.NO_FACE_GROUP and v > mx) mx = v;
+        }
+        next_id = mx + 1;
+    }
+
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        const base = @as(usize, f) * 9;
+        if (base + 8 >= pos.len) break;
+        const p = [3][3]f32{
+            .{ pos[base + 0], pos[base + 1], pos[base + 2] },
+            .{ pos[base + 3], pos[base + 4], pos[base + 5] },
+            .{ pos[base + 6], pos[base + 7], pos[base + 8] },
+        };
+        const s = [3]f32{
+            n[0] * p[0][0] + n[1] * p[0][1] + n[2] * p[0][2] - d,
+            n[0] * p[1][0] + n[1] * p[1][1] + n[2] * p[1][2] - d,
+            n[0] * p[2][0] + n[1] * p[2][1] + n[2] * p[2][2] - d,
+        };
+        var strict_neg: u32 = 0;
+        var strict_pos: u32 = 0;
+        for (s) |v| {
+            if (v > CUT_EPS) strict_pos += 1;
+            if (v < -CUT_EPS) strict_neg += 1;
+        }
+        const og: u32 = if (groups_in) |g| (if (f < g.len) g[f] else model_source.NO_FACE_GROUP) else 0;
+
+        if (strict_pos == 0 or strict_neg == 0) {
+            // Entirely on one side (or coplanar) — copy unchanged, grouped by side.
+            if (!emitTriPos(&out_pos, p[0], p[1], p[2])) return null;
+            if (want_groups) {
+                const gid = if (strict_pos == 0) og else remapGroup(&remap, og, &next_id);
+                out_grp.append(alloc, gid) catch return null;
+            }
+        } else {
+            // Straddles the plane — clip each side and fan-triangulate, dropping slivers.
+            inline for (.{ false, true }) |keep_pos| {
+                var poly: [4][3]f32 = undefined;
+                const cnt = planeClipSide(p, s, keep_pos, &poly);
+                var k: u32 = 1;
+                while (k + 1 < cnt) : (k += 1) {
+                    if (triArea2Local(poly[0], poly[k], poly[k + 1]) < 1e-14) continue;
+                    if (!emitTriPos(&out_pos, poly[0], poly[k], poly[k + 1])) return null;
+                    if (want_groups) {
+                        const gid = if (keep_pos) remapGroup(&remap, og, &next_id) else og;
+                        out_grp.append(alloc, gid) catch return null;
+                    }
+                }
+            }
+        }
+    }
+
+    const tris: u32 = @intCast(out_pos.items.len / 9);
+    const positions = out_pos.toOwnedSlice(alloc) catch return null;
+    const groups: ?[]u32 = if (want_groups) (out_grp.toOwnedSlice(alloc) catch null) else null;
+    return CutResult{ .positions = positions, .groups = groups, .tri_count = tris };
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────────
 const testing = std.testing;
 
@@ -851,6 +993,42 @@ fn setupQuad() void {
         0, 1, 0, 0, 0, 1, 0, 0,
     };
     model_paint.setTarget(777, &verts, 6);
+}
+
+test "planeCutSoup splits a crossing triangle and regroups the positive side" {
+    // Triangle (0,0)-(2,0)-(2,2) on z=0, cut by the plane x=1 (n=+X, d=1).
+    var pos = [_]f32{ 0, 0, 0, 2, 0, 0, 2, 2, 0 };
+    const groups = [_]u32{5};
+    const r = planeCutSoup(pos[0..], 1, .{ 1, 0, 0 }, 1.0, groups[0..]).?;
+    defer {
+        alloc.free(r.positions);
+        if (r.groups) |g| alloc.free(g);
+    }
+    // Negative side is one small triangle; positive side is a quad → 2 triangles.
+    try testing.expectEqual(@as(u32, 3), r.tri_count);
+    const g = r.groups.?;
+    try testing.expectEqual(@as(usize, 3), g.len);
+    var neg: u32 = 0;
+    var new: u32 = 0;
+    for (g) |v| {
+        if (v == 5) neg += 1;
+        if (v == 6) new += 1; // one fresh id above the max existing group (5)
+    }
+    try testing.expectEqual(@as(u32, 1), neg); // negative half keeps the source id
+    try testing.expectEqual(@as(u32, 2), new); // positive half gets the new id
+}
+
+test "planeCutSoup leaves a non-crossing triangle whole" {
+    // Same triangle, plane x=5 well past it → untouched, keeps its group.
+    var pos = [_]f32{ 0, 0, 0, 2, 0, 0, 2, 2, 0 };
+    const groups = [_]u32{9};
+    const r = planeCutSoup(pos[0..], 1, .{ 1, 0, 0 }, 5.0, groups[0..]).?;
+    defer {
+        alloc.free(r.positions);
+        if (r.groups) |g| alloc.free(g);
+    }
+    try testing.expectEqual(@as(u32, 1), r.tri_count);
+    try testing.expectEqual(@as(u32, 9), r.groups.?[0]);
 }
 
 test "weld builds 4 verts and 5 edges from a 2-tri quad" {

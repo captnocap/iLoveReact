@@ -17,6 +17,10 @@ const MENU_DROPDOWN_GUTTER = 12; // keep the panel off the window edge
 
 export const COMMANDS: Command[] = [
   { id: 'new-map', menu: 'File', name: 'New Map Workspace', icon: 'FilePlus2', key: 'Ctrl+N', context: false, native: true, undoable: false },
+  // File → New Mesh → Cube. A fresh primitive opens as its own model document with the
+  // host-native mesh editor live — the starting point for a side-by-side against the
+  // Studio's cube (same cuboid()+editMeshToGeometry authoring, same host editor).
+  { id: 'new-mesh-cube', menu: 'File', submenu: 'New Mesh', name: 'Cube', icon: 'Box', key: '', context: false, native: true, undoable: false },
   { id: 'open-map', menu: 'File', name: 'Open Workspace', icon: 'FolderOpen', key: 'Ctrl+O', context: false, native: true, undoable: false },
   { id: 'open-file-explorer', menu: 'File', name: 'Open Project File Explorer', icon: 'FolderSearch', key: 'Ctrl+P', context: false, native: true, undoable: false },
   { id: 'find-import-source', menu: 'File', name: 'Find Import Source', icon: 'SearchCode', key: 'Ctrl+Shift+P', context: false, native: true, undoable: false },
@@ -59,6 +63,8 @@ export const COMMANDS: Command[] = [
   // applicable; see meshTopoCommands.
   { id: 'mesh-extrude', menu: 'Edit', surface: 'model', name: 'Extrude Edge', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-create-face', menu: 'Edit', surface: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
+  // Loop cut: slice the ring perpendicular to the ONE selected edge (host-native op).
+  { id: 'mesh-loopcut', menu: 'Edit', surface: 'model', name: 'Loop Cut', icon: 'Scissors', key: 'L', context: true, native: true, undoable: true, tool: true },
   // Paint sub-tools — the two brush behaviours plus the free-form face-safety and detail
   // toggles. Surface only while paint mode is active (see meshPaintCommands); the brush's
   // colour/size/flow live in the Model Focus dock's BrushKit, not the toolbar.
@@ -81,7 +87,10 @@ export function meshToolCommands(): Command[] {
 // the same way in the toolbar and the context menu.
 export function meshTopoCommands(tool: { selMode: number; sel: number }): Command[] {
   if (tool.selMode !== 2 || tool.sel < 1) return [];
-  return [commandById(tool.sel === 1 ? 'mesh-extrude' : 'mesh-create-face')];
+  // One edge → extrude OR loop-cut across its ring; two+ edges → bridge into a face.
+  return tool.sel === 1
+    ? [commandById('mesh-extrude'), commandById('mesh-loopcut')]
+    : [commandById('mesh-create-face')];
 }
 
 // The two brush behaviours (fill · free-form), surfaced as toolbar icon buttons only while

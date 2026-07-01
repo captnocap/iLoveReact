@@ -67,6 +67,9 @@ export type Command = {
   // (the default toolset). 'model' commands only surface when a model document
   // is active — they're the host-native mesh-edit tools the model viewer brought.
   surface?: 'world' | 'model';
+  // Groups this command under an expandable parent flyout in its menu dropdown
+  // (e.g. File → New Mesh → Cube). Rows without a submenu render at the top level.
+  submenu?: string;
 };
 
 // Mirror of the model viewer's live tool state (host-native mesh editor), held
@@ -81,6 +84,7 @@ export type ModelToolApi = {
   wire: () => void;
   extrudeEdge: () => void;
   createFace: () => void;
+  loopCut: () => void;
   setQuality: (q: number) => void;
   brushTool: (t: BrushTool) => void;
   cycleSafety: () => void;
@@ -215,8 +219,12 @@ export type ModelPackage = {
   decompositions: string[];
   atlases: ModelAtlas[];
   paints: ModelPaintVariant[];
-  sourceKind?: 'cooked-asset' | 'studio-model' | 'imported-prop' | 'source-file';
+  sourceKind?: 'cooked-asset' | 'studio-model' | 'imported-prop' | 'source-file' | 'primitive';
   semanticKind?: string;
+  // A freshly-authored primitive (File → New Mesh → Cube). The viewer builds the
+  // geometry from the in-cart EditMesh primitives (cuboid()+editMeshToGeometry), the same
+  // path studio models take, so it opens as clean grouped faces and edits in the host.
+  primitive?: 'cube';
 };
 
 export type Rgb = [number, number, number];

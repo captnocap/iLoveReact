@@ -127,7 +127,39 @@ export function modelPackagesForFolder(
     });
 }
 
+// A freshly-authored primitive is fully described by its id (`primitive:cube:<n>`), so
+// modelPackageById can synthesize it with no side store — the geometry is built lazily by
+// the viewer (see ModelDocumentSurface / primitiveMeshData). Each <n> is a distinct pristine
+// document so "New Mesh → Cube" always opens a clean cube.
+export function primitiveModelPackage(id: string): ModelPackage {
+  const rest = id.slice('primitive:'.length); // 'cube' | 'cube:3'
+  const [kind, seq] = rest.split(':');
+  const primitive = (kind === 'cube' ? 'cube' : 'cube') as 'cube';
+  const label = primitive.charAt(0).toUpperCase() + primitive.slice(1);
+  return {
+    id,
+    folderId: 'props',
+    name: seq ? `${label} ${seq}` : label,
+    path: `primitive/${primitive}`,
+    kind: 'prop',
+    stage: 'wip',
+    color: '#5a86c0',
+    source: 'primitive',
+    rig: '-',
+    data: '-',
+    triangles: 12,
+    lods: 1,
+    decompositions: [],
+    atlases: [],
+    paints: [],
+    sourceKind: 'primitive',
+    semanticKind: primitive,
+    primitive,
+  };
+}
+
 export function modelPackageById(id: string): ModelPackage | null {
+  if (id.startsWith('primitive:')) return primitiveModelPackage(id);
   return MODEL_PACKAGES.find((model) => model.id === id) ?? null;
 }
 
