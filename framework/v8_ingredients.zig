@@ -96,6 +96,7 @@ const v8_bindings_core = if (has_gpu_flag) @import("v8_bindings_core.zig") else 
     pub fn registerCore(_: anytype) void {}
 };
 const v8_bindings_eventbus = @import("v8_bindings_eventbus.zig");
+const v8_bindings_editor_bus = @import("events/v8_bindings_editor_bus.zig");
 const v8_bindings_editor_diag = @import("diag/v8_bindings_editor_diag.zig");
 const v8_bindings_ifttt = @import("v8_bindings_ifttt.zig");
 const v8_bindings_env = @import("v8_bindings_env.zig");
@@ -317,6 +318,12 @@ pub const INGREDIENTS = [_]Ingredient{
     // gets free crash/overflow/perf diagnostics with no opt-in. Cost is
     // five host fns and a circular ring; nothing the cart has to import.
     .{ .name = "eventbus", .required = true, .grep_prefix = "", .reg_fn = "registerEventBus", .mod = v8_bindings_eventbus },
+    // Authoring eventbus (framework/events/editor_bus.zig) — always-on like the other
+    // buses. registerEditorBus() also calls editor_bus.init() (opens the durable SQLite
+    // log best-effort) and installs the __ffiEmit broadcaster, so no boot line elsewhere.
+    // This is the durable, seq-ordered, multiplayer-shaped source of truth the editor's
+    // runtime/editorbus door fronts; the door degrades to an in-process log when absent.
+    .{ .name = "editor_bus", .required = true, .grep_prefix = "", .reg_fn = "registerEditorBus", .mod = v8_bindings_editor_bus },
     // editor diagnostics registry — always-on observability (same rationale as the
     // eventbus above): registers __diag_emit/set_enabled/set_sample/recent/channels_state
     // and the in-app raw-console feed sink. The editor's first-class instrumentation.

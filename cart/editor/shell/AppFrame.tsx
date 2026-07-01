@@ -25,6 +25,7 @@ import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { loadPersistedState, persistState } from '../data/persistView';
+import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
 import { primitivePartMesh, composeModelParts, storedModelParts } from '../data/hmscAssetCatalog';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
@@ -62,6 +63,19 @@ export default function AppFrame() {
   // Mirror the active view into hot-state so a dev hot reload rehydrates exactly
   // what you were looking at instead of snapping back to defaults.
   useEffect(() => { persistState(state); }, [state]);
+
+  // Board the bus: every recorded edit (state.seq bumps once per edit; undo/redo
+  // don't) is dispatched onto the real editorbus door as it happens. history[0] is
+  // always the newest entry. The first run just baselines seq so a restored session's
+  // prior history isn't re-emitted onto the durable log (req_2424).
+  const lastBusSeq = useRef<number | null>(null);
+  useEffect(() => {
+    if (lastBusSeq.current === null) { lastBusSeq.current = state.seq; return; }
+    if (state.seq <= lastBusSeq.current) return;
+    lastBusSeq.current = state.seq;
+    const latest = state.history[0];
+    if (latest) dispatchEdit(latest);
+  }, [state.seq]);
 
   const activeCommand = commandById(state.activeCommandId);
   const activeObject = selectedObject(state);
