@@ -35,17 +35,11 @@ export default function Chrome(props: {
         })}
       </C.HW_MenuBar>
       <C.HW_Spacer />
-      <C.HW_Pill>
-        <Icon name={props.activeCommand.icon} size={12} color={accentFor('primary')} />
-        <C.HW_PillText>{props.activeCommand.name}</C.HW_PillText>
+      <C.HW_Pill onPress={props.onUndo} tooltip="Undo">
+        <Icon name="Undo2" size={13} color={accentFor(undoCount > 0 ? 'textSecondary' : 'textFaint')} />
       </C.HW_Pill>
-      <C.HW_Pill onPress={props.onUndo}>
-        <Icon name="Undo2" size={12} color={accentFor(undoCount > 0 ? 'textSecondary' : 'textFaint')} />
-        <C.HW_PillText>{String(undoCount).padStart(3, '0')}</C.HW_PillText>
-      </C.HW_Pill>
-      <C.HW_Pill onPress={props.onRedo}>
-        <Icon name="Redo2" size={12} color={accentFor(props.state.redo.length > 0 ? 'textSecondary' : 'textFaint')} />
-        <C.HW_PillText>{String(props.state.redo.length).padStart(3, '0')}</C.HW_PillText>
+      <C.HW_Pill onPress={props.onRedo} tooltip="Redo">
+        <Icon name="Redo2" size={13} color={accentFor(props.state.redo.length > 0 ? 'textSecondary' : 'textFaint')} />
       </C.HW_Pill>
       <C.HW_Compile onPress={() => props.onCommand('compile-rle', 'chrome')}>
         <Icon name="Download" size={13} color={accentFor('primary')} />
