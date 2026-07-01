@@ -30,6 +30,10 @@ const DEFAULT_TOOLS: BrushTool[] = ['brush', 'eraser', 'line', 'rect', 'ellipse'
 export interface BrushKitProps {
   brush: Brush;
   onBrushChange: (b: Brush) => void;
+  /** settled brush, fired once when a control finishes (slider release, chip/shape click).
+   *  Consumers whose onBrushChange is expensive (syncs to a heavy store) use this to defer
+   *  that sync off the per-move hot path; when omitted, only onBrushChange fires. */
+  onBrushCommit?: (b: Brush) => void;
   tool: BrushTool;
   onToolChange: (t: BrushTool) => void;
   palette: Palette;
@@ -75,6 +79,10 @@ export function BrushKit(props: BrushKitProps) {
   const sec = props.sections ?? {};
   const show = (k: keyof NonNullable<BrushKitProps['sections']>) => sec[k] !== false;
   const patch = (delta: Partial<Brush>) => props.onBrushChange({ ...b, ...delta });
+  // Live change AND settle in one go — for discrete controls (shape/blend chips) that have no
+  // drag, and for a slider's release. onBrushChange keeps any live preview in sync; onBrushCommit
+  // lets an expensive consumer sync once, off the hot path.
+  const commit = (delta: Partial<Brush>) => { const nb = { ...b, ...delta }; props.onBrushChange(nb); props.onBrushCommit?.(nb); };
 
   const tools = props.tools ?? DEFAULT_TOOLS;
   const blendOpts: ChipOption<string>[] = BLEND_MODES.map((m) => ({ value: m, label: m }));
@@ -131,7 +139,7 @@ export function BrushKit(props: BrushKitProps) {
                 <Pressable
                   key={p.id}
                   tooltip={p.label}
-                  onMouseDown={() => props.onBrushChange(normalizeBrush({ ...b, ...p.brush, ink: b.ink, size: b.size }))}
+                  onMouseDown={() => commit(normalizeBrush({ ...b, ...p.brush, ink: b.ink, size: b.size }))}
                   style={{
                     width: 34, height: 34, borderRadius: 6, alignItems: 'center', justifyContent: 'center',
                     backgroundColor: sel ? T.accent : T.control, borderWidth: 1, borderColor: sel ? T.accent : T.frame,
@@ -147,18 +155,18 @@ export function BrushKit(props: BrushKitProps) {
 
       {show('dials') ? (
         <Section title="Dials" theme={T}>
-          <BrushScalar label="Size" value={b.size} min={1} max={512} precision={0} unit="px" log onChange={(v) => patch({ size: Math.round(v) })} theme={T} />
-          <BrushScalar label="Hardness" value={b.hardness} min={0} max={1} precision={2} onChange={(v) => patch({ hardness: v })} theme={T} />
-          <BrushScalar label="Flow" value={b.flow} min={0.02} max={1} precision={2} onChange={(v) => patch({ flow: v })} theme={T} />
-          <BrushScalar label="Scatter" value={b.scatter} min={0} max={3} precision={2} onChange={(v) => patch({ scatter: v })} theme={T} />
-          <BrushScalar label="Angle" value={b.angleDeg} min={-180} max={180} precision={0} unit="°" onChange={(v) => patch({ angleDeg: Math.round(v) })} theme={T} />
-          <BrushScalar label="Aspect" value={b.aspect} min={0.2} max={8} precision={2} onChange={(v) => patch({ aspect: v })} theme={T} />
+          <BrushScalar label="Size" value={b.size} min={1} max={512} precision={0} unit="px" log onChange={(v) => patch({ size: Math.round(v) })} onCommit={(v) => commit({ size: Math.round(v) })} theme={T} />
+          <BrushScalar label="Hardness" value={b.hardness} min={0} max={1} precision={2} onChange={(v) => patch({ hardness: v })} onCommit={(v) => commit({ hardness: v })} theme={T} />
+          <BrushScalar label="Flow" value={b.flow} min={0.02} max={1} precision={2} onChange={(v) => patch({ flow: v })} onCommit={(v) => commit({ flow: v })} theme={T} />
+          <BrushScalar label="Scatter" value={b.scatter} min={0} max={3} precision={2} onChange={(v) => patch({ scatter: v })} onCommit={(v) => commit({ scatter: v })} theme={T} />
+          <BrushScalar label="Angle" value={b.angleDeg} min={-180} max={180} precision={0} unit="°" onChange={(v) => patch({ angleDeg: Math.round(v) })} onCommit={(v) => commit({ angleDeg: Math.round(v) })} theme={T} />
+          <BrushScalar label="Aspect" value={b.aspect} min={0.2} max={8} precision={2} onChange={(v) => patch({ aspect: v })} onCommit={(v) => commit({ aspect: v })} theme={T} />
         </Section>
       ) : null}
 
       {show('blend') ? (
         <Section title="Blend" theme={T}>
-          <ChipRow options={blendOpts} value={b.blend} onChange={(m) => patch({ blend: m as Brush['blend'] })} theme={T} wrap />
+          <ChipRow options={blendOpts} value={b.blend} onChange={(m) => commit({ blend: m as Brush['blend'] })} theme={T} wrap />
         </Section>
       ) : null}
 

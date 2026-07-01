@@ -32,7 +32,11 @@ export interface BrushScalarProps {
   unit?: string;
   /** logarithmic size track (maps via stroke.sizeTrackToPx). */
   log?: boolean;
+  /** live value, fired continuously while dragging. */
   onChange: (v: number) => void;
+  /** settled value, fired once on release (or text commit). Consumers that sync to an
+   *  expensive store use this to defer the write off the per-move hot path. */
+  onCommit?: (v: number) => void;
   theme?: PaintTheme;
   width?: number;
 }
@@ -51,8 +55,17 @@ export function BrushScalar(props: BrushScalarProps) {
   const commitDraft = () => {
     const n = Number(draft);
     setEditing(false);
-    if (Number.isFinite(n)) props.onChange(Math.max(props.min, Math.min(props.max, n)));
-    else setDraft(fmt(props.value, precision));
+    if (Number.isFinite(n)) {
+      const v = Math.max(props.min, Math.min(props.max, n));
+      props.onChange(v);
+      props.onCommit?.(v);
+    } else setDraft(fmt(props.value, precision));
+  };
+  // End of a drag: settle the value once (props.value is the last live onChange result).
+  const endDrag = () => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    props.onCommit?.(props.value);
   };
 
   // Drag via a Pressable + measured track — the SAME general-hit-test path BrushKit's colour
@@ -79,8 +92,8 @@ export function BrushScalar(props: BrushScalarProps) {
         <Pressable
           onMouseDown={(p: any) => { draggingRef.current = true; commitFromPointer(p); }}
           onMouseMove={(p: any) => { if (draggingRef.current) commitFromPointer(p); }}
-          onMouseUp={() => { draggingRef.current = false; }}
-          onMouseLeave={() => { draggingRef.current = false; }}
+          onMouseUp={endDrag}
+          onMouseLeave={endDrag}
         >
           <Box
             onLayout={(r: any) => { rectRef.current = { x: r.x, width: r.width }; setTrackW(r.width); }}

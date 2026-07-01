@@ -5,12 +5,12 @@
 // (req_2313/2314). BrushKit stays only for the non-colour brush controls (shape / size /
 // hardness / flow / blend); its colour + palette sections are hidden.
 //
-// The live brush is owned by the model viewer and only mirrors back here through a 2-commit
-// snapshot cascade, which lagged the host <Slider>s so badly the thumbs fought every drag and
-// felt dead (req_2322). So the dock edits a SYNCHRONOUS local draft — the sliders are controlled
-// by immediate state (responsive) — and pushes each change out to the viewer for painting. An
-// external brush change (e.g. the studio ink) is adopted, but the echo of our own edit is
-// ignored so it never snaps mid-drag.
+// Performance shape (req_2365): the live brush lives in the VIEWER, and syncing to it costs a
+// full editor re-render + a whole-state persist. Doing that per slider-move dropped 240fps → 0.
+// So the dials live in an ISOLATED child (BrushDials) with a local draft: dragging re-renders
+// only that child — never the sibling Color Studio (whose WGSL field would re-bake) — and it
+// syncs out to the viewer ONLY on release (onBrushCommit), off the hot path. Discrete controls
+// (shape/blend chips) commit immediately since they don't drag.
 import { useEffect, useRef, useState } from 'react';
 import { Col, Text } from '../../../runtime/primitives';
 import { BrushKit, DARK_THEME, type Brush, type BrushTool } from '@reactjit/runtime/paint';
@@ -29,6 +29,43 @@ export type ColorSpineHandlers = {
   onLoadLibrarySet: (colors: OklchColor[]) => void;
 };
 
+// The dials, isolated. Owns a synchronous local draft so sliders are responsive, and its
+// re-renders never touch the Color Studio sibling. Syncs to the viewer only on commit.
+function BrushDials(props: { seed: Brush; tool: BrushTool; inkHex: string; onSync: (b: Brush) => void }) {
+  const [draft, setDraft] = useState<Brush>(props.seed);
+  const lastSync = useRef<string>('');
+
+  // Adopt an external brush change (rare), ignoring the echo of our own committed edit.
+  useEffect(() => {
+    if (JSON.stringify(props.seed) === lastSync.current) return;
+    setDraft(props.seed);
+  }, [props.seed]);
+
+  const sync = (b: Brush) => { lastSync.current = JSON.stringify(b); props.onSync(b); };
+
+  // Studio colour (low frequency — a click) flows into the brush ink and syncs immediately.
+  useEffect(() => {
+    if (draft.ink.kind === 'color' && draft.ink.hex.toLowerCase() === props.inkHex.toLowerCase()) return;
+    const nb: Brush = { ...draft, ink: { kind: 'color', hex: props.inkHex } };
+    setDraft(nb);
+    sync(nb);
+  }, [props.inkHex]);
+
+  return (
+    <BrushKit
+      brush={draft}
+      onBrushChange={setDraft}                       // live: LOCAL only, no viewer round-trip
+      onBrushCommit={(b) => { setDraft(b); sync(b); }} // settled: sync to the viewer once
+      tool={props.tool}
+      onToolChange={() => { /* tool lives in the toolbar; the dock owns shape/size/flow */ }}
+      palette={{ swatches: [], recents: [] }}
+      theme={DARK_THEME}
+      width={244}
+      sections={{ tools: false, color: false, palette: false }}
+    />
+  );
+}
+
 export default function ModelBrushDock(props: {
   brush: Brush;
   tool: BrushTool;
@@ -41,31 +78,6 @@ export default function ModelBrushDock(props: {
   scenePick: string | null;
   spine: ColorSpineHandlers;
 }) {
-  // Synchronous local brush so the host sliders don't lag behind the round-trip.
-  const [draft, setDraft] = useState<Brush>(props.brush);
-  const lastSent = useRef<string>('');
-
-  // Adopt external brush changes (nothing we originated), but ignore the echo of our own edit
-  // coming back through the snapshot — otherwise it resets the slider the instant you drag it.
-  useEffect(() => {
-    if (JSON.stringify(props.brush) === lastSent.current) return;
-    setDraft(props.brush);
-  }, [props.brush]);
-
-  const edit = (b: Brush) => {
-    lastSent.current = JSON.stringify(b);
-    setDraft(b);
-    props.onBrush(b);
-  };
-
-  // The brush ink mirrors the studio's current colour — one colour, everywhere. Apply through
-  // the same edit path so the draft stays in sync and the stroke deposits it.
-  const hex = oklchToHex(props.current);
-  useEffect(() => {
-    if (draft.ink.kind === 'color' && draft.ink.hex.toLowerCase() === hex.toLowerCase()) return;
-    edit({ ...draft, ink: { kind: 'color', hex } });
-  }, [hex]);
-
   return (
     <Col style={{ gap: 8, paddingTop: 10, marginTop: 10, borderTopWidth: 1, borderColor: DARK_THEME.frame }}>
       <Text style={{ color: DARK_THEME.dim, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>BRUSH COLOR</Text>
@@ -86,16 +98,7 @@ export default function ModelBrushDock(props: {
         onLoadLibrarySet={props.spine.onLoadLibrarySet}
       />
       <Text style={{ color: DARK_THEME.dim, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>BRUSH</Text>
-      <BrushKit
-        brush={draft}
-        onBrushChange={edit}
-        tool={props.tool}
-        onToolChange={() => { /* tool lives in the toolbar; the dock owns shape/size/flow */ }}
-        palette={{ swatches: [], recents: [] }}
-        theme={DARK_THEME}
-        width={244}
-        sections={{ tools: false, color: false, palette: false }}
-      />
+      <BrushDials seed={props.brush} tool={props.tool} inkHex={oklchToHex(props.current)} onSync={props.onBrush} />
     </Col>
   );
 }
