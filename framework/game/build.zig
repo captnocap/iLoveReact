@@ -815,6 +815,73 @@ pub fn raycastPieces(ray: PieceRay, pieces: []const PlacedBuildPiece, maxDistanc
     return best;
 }
 
+// ── editor queries: piecesNearPoint / connectedPieceIds ──────────────────────
+// Verbatim from placed.ts, allocation-free (caller-owned buffers, matching the
+// host-binding style). The JS spatial grid (piecesNear) is a candidate superset
+// whose callers re-check exactly — a direct bounds-overlap scan is an equally
+// valid superset, so results are identical.
+
+/// placed.ts piecesNearPoint — pieces whose footprint may sit within radius of
+/// (x,z). Writes matches into `out`, returns the count (capped at out.len).
+pub fn piecesNearPoint(pieces: []const PlacedBuildPiece, x: f32, z: f32, radiusMeters: f32, out: []PlacedBuildPiece) usize {
+    const minX = x - radiusMeters;
+    const maxX = x + radiusMeters;
+    const minZ = z - radiusMeters;
+    const maxZ = z + radiusMeters;
+    var n: usize = 0;
+    for (pieces) |piece| {
+        if (n >= out.len) break;
+        const b = pieceBounds(piece);
+        if (b.minX <= maxX and b.maxX >= minX and b.minZ <= maxZ and b.maxZ >= minZ) {
+            out[n] = piece;
+            n += 1;
+        }
+    }
+    return n;
+}
+
+/// placed.ts connectedPieceIds — every piece TRANSITIVELY touching the seed (BFS
+/// over pieceBounds envelope contact). Writes connected INDICES into `out` (the
+/// binding maps to ids), returns the count; the seed is always included, an
+/// unknown seed → 0. `visited` is caller scratch (len ≥ pieces.len); `out` doubles
+/// as the BFS queue (a head pointer walks the appended indices).
+pub fn connectedPieceIds(
+    seedId: []const u8,
+    pieces: []const PlacedBuildPiece,
+    toleranceMeters: f32,
+    visited: []bool,
+    out: []usize,
+) usize {
+    @memset(visited[0..pieces.len], false);
+    var seedIdx: ?usize = null;
+    for (pieces, 0..) |p, i| {
+        if (std.mem.eql(u8, p.id, seedId)) {
+            seedIdx = i;
+            break;
+        }
+    }
+    const si = seedIdx orelse return 0;
+    var count: usize = 0;
+    visited[si] = true;
+    out[count] = si;
+    count += 1;
+    var head: usize = 0;
+    while (head < count) : (head += 1) {
+        const current = pieceBounds(pieces[out[head]]);
+        for (pieces, 0..) |cand, i| {
+            if (visited[i]) continue;
+            const cb = pieceBounds(cand);
+            if (boundsTouch(current, cb, toleranceMeters)) {
+                visited[i] = true;
+                if (count >= out.len) return count;
+                out[count] = i;
+                count += 1;
+            }
+        }
+    }
+    return count;
+}
+
 test "PLACED_TUNING values match the TS source verbatim" {
     try std.testing.expectEqual(@as(f32, 1.2), PLACED_TUNING.walkOpeningWidthMeters);
     try std.testing.expectEqual(@as(f32, 2.6), PLACED_TUNING.vehicleOpeningWidthMeters);
@@ -935,4 +1002,23 @@ test "raycastPieces — down-ray hits the floor top, up normal" {
     try std.testing.expectApproxEqAbs(@as(f32, 1.0), hit.normal.y, 1e-4); // top face points up
     // a ray that misses the footprint returns null
     try std.testing.expect(raycastPieces(.{ .origin = .{ .x = 50, .y = 5, .z = 0 }, .dir = .{ .x = 0, .y = -1, .z = 0 } }, &scene, 100) == null);
+}
+
+test "piecesNearPoint / connectedPieceIds match the TS queries" {
+    const scene = [_]PlacedBuildPiece{
+        .{ .id = "f0", .pieceId = "floor.concrete.common", .x = 0, .y = 0, .z = 0, .yawDegrees = 0 },
+        .{ .id = "w0", .pieceId = "wall.concrete.common", .x = 0, .y = 0, .z = 0, .yawDegrees = 0 },
+        .{ .id = "far", .pieceId = "floor.concrete.common", .x = 100, .y = 0, .z = 0, .yawDegrees = 0 },
+    };
+    // near (0,0) r=1 → the two at origin, not the far one
+    var near_buf: [8]PlacedBuildPiece = undefined;
+    try std.testing.expectEqual(@as(usize, 2), piecesNearPoint(&scene, 0, 0, 1, &near_buf));
+    try std.testing.expectEqual(@as(usize, 1), piecesNearPoint(&scene, 100, 0, 1, &near_buf));
+    // connected from the wall → wall + its floor (2), the far floor excluded
+    var visited: [8]bool = undefined;
+    var out: [8]usize = undefined;
+    const n = connectedPieceIds("w0", &scene, PLACED_TUNING.touchToleranceMeters, &visited, &out);
+    try std.testing.expectEqual(@as(usize, 2), n);
+    // unknown seed → 0
+    try std.testing.expectEqual(@as(usize, 0), connectedPieceIds("nope", &scene, PLACED_TUNING.touchToleranceMeters, &visited, &out));
 }
