@@ -1306,6 +1306,67 @@ pub fn paintFaceCount() u32 {
     return model_paint.faceCount();
 }
 
+// ── Free-form brush stroke (per-face-safe sub-face painting) ────────────────────────
+// The one brush system paints two ways: a per-face fill (paintAt/paintFaceByIndex above)
+// and a free-form stroke that lays sub-face dabs WITHOUT leaking onto neighbour faces
+// (req_2281). Two face-safety modes, user-toggleable (req_2283): CLIP paints whichever
+// face each dab lands on (overhang clipped to that triangle); LOCK masks the whole stroke
+// to the face pressed at stroke-begin. Sub-face room only exists once detail>1 (setPaintDetail);
+// at detail 1 a dab degrades to a fill, so the fill path never regresses.
+var g_paint_mode: u8 = 0; // 0 = clip, 1 = lock
+var g_locked_face: u32 = 0;
+
+/// Toggle the free-form face-safety mode: 0 = clip (paint the face under the dab), 1 = lock
+/// (mask the stroke to the face captured by paintStrokeBegin).
+pub fn paintModeSet(mode: i32) void {
+    g_paint_mode = if (mode == 1) 1 else 0;
+}
+
+/// LOCK-mode stroke begin: pick the face under the cursor and remember it, so every dab in
+/// this stroke masks to that one face. Returns the face index, or -1 on a miss / no target.
+pub fn paintStrokeBegin(mx: f32, my: f32) i32 {
+    if (!model_paint.hasTarget()) return -1;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)) orelse return -1;
+    g_locked_face = hit.face;
+    return @intCast(hit.face);
+}
+
+/// One free-form brush dab. CLIP: paint whichever face the ray hits, clipped to its triangle.
+/// LOCK: paint g_locked_face (from paintStrokeBegin) where the ray meets that face's plane,
+/// even if the cursor drifted onto a neighbour. `radius`/`flow` are the brush disc (patch-texel
+/// units) and its blend. Reuses vpLocalX/Y so the embedded-editor viewport offset is honoured
+/// (req_2248) exactly like paintAt. Returns the painted face, or -1 on a miss.
+pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f32) i32 {
+    if (!model_paint.hasTarget()) return -1;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const lx = vpLocalX(mx);
+    const ly = vpLocalY(my);
+    const rgba = [4]u8{ r, g, b, 255 };
+    if (g_paint_mode == 1) {
+        const uv = model_paint.baryOnFace(cam, g_paint_vp_w, g_paint_vp_h, lx, ly, g_locked_face) orelse return -1;
+        model_paint.paintStamp(g_locked_face, uv[0], uv[1], radius, rgba, flow);
+        return @intCast(g_locked_face);
+    }
+    const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, lx, ly) orelse return -1;
+    model_paint.paintStamp(hit.face, hit.u, hit.v, radius, rgba, flow);
+    return @intCast(hit.face);
+}
+
+/// Set the free-form detail (patch size 8/16/32; 1 = fill-only). Re-tessellates the paint
+/// atlas, rewrites the resident mesh UVs in place, then re-uploads the whole mesh so the new
+/// mapping draws. Returns the ACTUAL detail after the call (the budget guard may keep the old
+/// one), so the UI can reflect what really took.
+pub fn setPaintDetail(px: i32) i32 {
+    const verts = g_edit_verts orelse return -1;
+    if (g_edit_count == 0) return -1;
+    const want: u32 = if (px < 0) 1 else @intCast(px);
+    model_paint.setDetail(want, verts, g_edit_count);
+    const face_count = g_edit_count / 3;
+    if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
+    return @intCast(model_paint.detail());
+}
+
 var g_dbg_frame: u64 = 0; // req_0727: rate-limit the r3d-census diagnostic print
 
 // ── Dynamic geometry region (variable-size bump) ────────────────────────────

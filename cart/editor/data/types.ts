@@ -9,6 +9,7 @@ import type {
 } from './fileExplorer';
 import type { DecalDoc } from '../../hmsc-int/game/textures/decal';
 import type { OklchColor } from '../../../runtime/paint/colors';
+import type { Brush, BrushTool, Palette } from '../../../runtime/paint/model';
 import type { ColorLens } from './colorSpine';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Window' | 'Help';
@@ -71,7 +72,7 @@ export type Command = {
 // Mirror of the model viewer's live tool state (host-native mesh editor), held
 // in editor state so the toolbar + context menu can highlight the active tool.
 // Shapes match modelview's exported ModelToolSnapshot / ModelToolApi (structural).
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette };
 export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
@@ -81,6 +82,11 @@ export type ModelToolApi = {
   extrudeEdge: () => void;
   createFace: () => void;
   setQuality: (q: number) => void;
+  brushTool: (t: BrushTool) => void;
+  cycleSafety: () => void;
+  cycleDetail: () => void;
+  setBrush: (b: Brush) => void;
+  setPalette: (p: Palette) => void;
 };
 
 export type BuildNote = {

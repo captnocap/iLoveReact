@@ -51,7 +51,10 @@ export type ModelViewInitialMesh = {
 // gizmoTool: 0 move · 1 scale · 2 rotate.
 // sel: count of selected elements in the current mode. quality: live decimation
 // slider (0..1). tris: the resident triangle count (for the quality readout).
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number };
+// brushTool: 'fill' (per-face flood) · 'brush' (free-form disc). safety: 0 clip · 1 lock.
+// detail: 1 fill-only · 8/16/32 free-form texels/face. brush/palette: the shared kit model,
+// mirrored out so the editor's BrushKit dock is a controlled view of the viewer's brush.
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette };
 // The handlers the viewer owns, handed out so an external surface can invoke
 // them. Same functions the floating buttons and hotkeys call — one owner, no
 // split-brain: the shell remote-controls; the viewer stays the source of truth.
@@ -66,6 +69,13 @@ export type ModelToolApi = {
   extrudeEdge: () => void;
   createFace: () => void;
   setQuality: (q: number) => void;
+  // Brush controls — the editor toolbar drives tool/safety/detail, the BrushKit dock drives
+  // the brush + palette. The viewer stays the single owner of the live brush state.
+  brushTool: (t: BrushTool) => void;
+  cycleSafety: () => void;
+  cycleDetail: () => void;
+  setBrush: (b: Brush) => void;
+  setPalette: (p: Palette) => void;
 };
 export type ModelViewProps = {
   initialPath?: string;
@@ -193,18 +203,35 @@ const qualityToGrid = (q: number) => {
   const snapped = Math.round(q * QUALITY_STEPS) / QUALITY_STEPS;
   return Math.round(8 + snapped * snapped * 248);
 };
-// Paint the face under viewport pixel (x,y) — the host raycasts the resident mesh and
-// colours exactly the face hit. No verts or UVs cross the bridge.
-const paintAt = (x: number, y: number, rgb: RGB) => host.__model_paint_at?.(x, y, rgb[0], rgb[1], rgb[2]) === 1;
-
 type RGB = [number, number, number];
-// A small fixed palette — this is for colouring faces, not a full art package.
-const PALETTE: RGB[] = [
-  [222, 70, 64], [238, 142, 48], [240, 206, 74], [112, 196, 96],
-  [66, 158, 226], [126, 112, 222], [226, 120, 196], [244, 244, 248],
-  [126, 134, 150], [26, 28, 36],
-];
-const rgbCss = (c: RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
+
+// The two brush behaviours, both host-backed (model_paint.zig). FILL raycasts the resident
+// mesh and floods the whole face hit (__model_paint_at). BRUSH lays a sub-face disc clipped to
+// the face triangle (__model_paint_stamp) — face-safe, so a scribble never bleeds onto the
+// neighbour face. No verts or UVs cross the bridge; only the pixel + colour do.
+const fillFaceAt = (x: number, y: number, rgb: RGB) => host.__model_paint_at?.(x, y, rgb[0], rgb[1], rgb[2]) === 1;
+const stampAt = (x: number, y: number, rgb: RGB, radius: number, flow: number) =>
+  host.__model_paint_stamp?.(x, y, rgb[0], rgb[1], rgb[2], radius, flow) === 1;
+const strokeBeginAt = (x: number, y: number) => host.__model_paint_stroke_begin?.(x, y) ?? -1;
+// Face-safety mode for free-form: 0 = clip (paint whatever face the dab is over), 1 = lock
+// (mask the whole stroke to the face pressed at stroke-begin).
+const setPaintSafety = (mode: number) => host.__model_paint_mode?.(mode);
+// Set the free-form patch detail; returns the ACTUAL detail after the budget guard.
+const applyPaintDetail = (px: number): number => host.__model_set_paint_detail?.(px) ?? px;
+
+// The RGB (0..255) a colour-ink brush deposits — texture/shader inks fall back to white until
+// the host dest-sampling pass lands. Mirrors runtime/paint's brushDabRgb, scaled to bytes.
+const brushRgb = (b: Brush): RGB => {
+  const [r, g, bl] = hexToRgb01(inkColorHex(b.ink) ?? '#ffffff');
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(bl * 255)];
+};
+
+// Free-form detail levels: 8/16/32 texels per face. Higher = crisper strokes on low-poly
+// models; lower keeps dense meshes inside the paint-atlas memory budget. (1 = fill-only.)
+const DETAIL_LEVELS = [8, 16, 32] as const;
+// BrushKit size (texture-px diameter, default 32) → patch-texel disc radius. A full-face brush
+// (~size 96) covers a whole patch at any detail; the disc clips to the triangle regardless.
+const brushRadius = (size: number, detail: number) => Math.max(0.6, (size / 96) * detail);
 
 export default function ModelView({ initialPath, initialTitle, initialMesh, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState }: ModelViewProps = {}) {
   const [model, setModel] = useState<Loaded | null>(null);
@@ -216,7 +243,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
   const [gizmoTool, setGizmoTool] = useState(0); // 0 move · 1 scale · 2 rotate
   const [selInfo, setSelInfo] = useState<SelInfo>({ mode: 0, verts: 0, edges: 0, sel: 0 });
   const [guard, setGuard] = useState<GuardInfo | null>(null);
-  const [color, setColor] = useState<RGB>(PALETTE[0]);
+  // Brush state (the ONE brush system). `brush`/`palette` are the shared kit model; `brushTool`
+  // picks the behaviour ('fill' = per-face flood · 'brush' = free-form disc); `safety` is the
+  // free-form face-safety mode (0 clip · 1 lock); `detail` is the patch resolution.
+  const [brush, setBrush] = useState<Brush>(() => ({ ...DEFAULT_BRUSH, ink: { kind: 'color', hex: '#e0463f' } }));
+  const [brushTool, setBrushTool] = useState<BrushTool>('fill');
+  const [palette, setPalette] = useState<Palette>(() => defaultPalette());
+  const [safety, setSafety] = useState(0); // 0 clip · 1 lock
+  const [detail, setDetail] = useState(1); // 1 fill-only · 8/16/32 free-form texels/face
   const [quality, setQuality] = useState(1); // slider 0..1; 1 = full detail on load
   // Attribution: the shared ledger + the current model's entry + the panel toggle.
   const [ledger, setLedger] = useState<Ledger>(() => loadLedger());
@@ -283,6 +317,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
   // marquee, focus, and zoom are owned entirely by the host's native input loop — there is
   // no per-move React state for them, which is the whole point (no JS in the loop).
   const paintingRef = useRef(false);
+  // Last painted viewport point, so a fast drag interpolates dabs along the segment instead of
+  // leaving gaps (the host stamps one disc per call; JS walks the segment between moves).
+  const lastPtRef = useRef<{ x: number; y: number } | null>(null);
 
   // Switch tool: selecting a mesh mode (or going back to view) is the active tool, so it
   // turns off Paint/Focus, and pushes the mode to the host. Mode 0 = plain view/orbit.
@@ -305,6 +342,26 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
   const togglePaint = () => setPaintMode((v) => { const nv = !v; if (nv) { setFocusMode(false); meshFocusTool(false); setSelMode(0); meshSetMode(0); } return nv; });
   const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setSelMode(0); meshSetMode(0); } return nv; });
 
+  // ── Brush behaviour handlers ─────────────────────────────────────────────────
+  // Apply a free-form detail level through the host (it re-tessellates the paint atlas and
+  // re-uploads the mesh); the door returns the ACTUAL level after its memory-budget guard.
+  const changeDetail = (px: number) => setDetail(applyPaintDetail(px));
+  const cycleDetail = () => {
+    const i = DETAIL_LEVELS.indexOf(detail as (typeof DETAIL_LEVELS)[number]);
+    changeDetail(DETAIL_LEVELS[(i + 1) % DETAIL_LEVELS.length]!);
+  };
+  // Free-form needs sub-face room, so entering the brush tool bumps detail off fill-only.
+  const chooseBrushTool = (t: BrushTool) => {
+    setBrushTool(t);
+    if (t !== 'fill' && detail < 8) changeDetail(16);
+  };
+  const cycleSafety = () => setSafety((v) => (v === 0 ? 1 : 0));
+
+  // Push the free-form face-safety mode to the host whenever it (or paint mode) changes.
+  useEffect(() => { if (paintMode) setPaintSafety(safety); }, [safety, paintMode]);
+  // A fresh model resets the host paint atlas to fill-only (patch=1) — mirror that in state.
+  useEffect(() => { setDetail(1); }, [model?.key]);
+
   // ── Editor bridge ──────────────────────────────────────────────────────────
   // Hand the tool handlers out (once) and mirror the live tool state back, so an
   // embedding shell can drive the SAME tools its toolbar/context-menu present.
@@ -320,6 +377,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
     setQuality: (q) => applyQuality(q),
+    brushTool: chooseBrushTool,
+    cycleSafety,
+    cycleDetail,
+    setBrush,
+    setPalette,
   };
   useEffect(() => {
     onToolApi?.({
@@ -331,11 +393,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
       extrudeEdge: () => toolApiRef.current?.extrudeEdge(),
       createFace: () => toolApiRef.current?.createFace(),
       setQuality: (q) => toolApiRef.current?.setQuality(q),
+      brushTool: (t) => toolApiRef.current?.brushTool(t),
+      cycleSafety: () => toolApiRef.current?.cycleSafety(),
+      cycleDetail: () => toolApiRef.current?.cycleDetail(),
+      setBrush: (b) => toolApiRef.current?.setBrush(b),
+      setPalette: (p) => toolApiRef.current?.setPalette(p),
     });
   }, []);
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0 });
-  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette });
+  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette]);
 
   // W = wireframe, P = paint, F = focus, 1/2/3 = vertex/edge/face, Esc = clear/back to view.
   useModifiers({
@@ -430,9 +497,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     // its OWN colour, which is exactly the bug the old UV-atlas dedup couldn't avoid.
     if (callHost<string | null>('__env_get', null, 'RJIT_PAINT')) {
       setPaintMode(true);
+      const proof: RGB[] = [[222, 70, 64], [238, 142, 48], [240, 206, 74], [112, 196, 96], [66, 158, 226], [126, 112, 222], [226, 120, 196], [244, 244, 248]];
       const n = Number(host.__model_face_count?.() ?? 0);
       for (let f = 0; f < n; f += 1) {
-        const c = PALETTE[f % PALETTE.length];
+        const c = proof[f % proof.length]!;
         host.__model_paint_face?.(f, c[0], c[1], c[2]);
       }
     }
@@ -534,10 +602,34 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
           mounted, viewport mouse events reach that native loop directly. */}
       {model && paintMode && (
         <Pressable
-          onMouseDown={(p: any) => { paintingRef.current = true; paintAt(p?.x ?? 0, p?.y ?? 0, color); }}
-          onMouseMove={(p: any) => { if (paintingRef.current) paintAt(p?.x ?? 0, p?.y ?? 0, color); }}
-          onMouseUp={() => { paintingRef.current = false; }}
-          onMouseLeave={() => { paintingRef.current = false; }}
+          onMouseDown={(p: any) => {
+            const x = p?.x ?? 0, y = p?.y ?? 0;
+            paintingRef.current = true;
+            lastPtRef.current = { x, y };
+            const rgb = brushRgb(brush);
+            if (brushTool === 'fill') { fillFaceAt(x, y, rgb); return; }
+            strokeBeginAt(x, y); // capture the pressed face for LOCK-mode masking
+            stampAt(x, y, rgb, brushRadius(brush.size, detail), brush.flow);
+          }}
+          onMouseMove={(p: any) => {
+            if (!paintingRef.current) return;
+            const x = p?.x ?? 0, y = p?.y ?? 0;
+            const rgb = brushRgb(brush);
+            if (brushTool === 'fill') { fillFaceAt(x, y, rgb); lastPtRef.current = { x, y }; return; }
+            // Free-form: walk the screen segment from the last dab in ~3px steps (bounded) so a
+            // fast drag stays gap-free — each step is one host stamp (raycast + clipped disc).
+            const last = lastPtRef.current ?? { x, y };
+            const dx = x - last.x, dy = y - last.y;
+            const steps = Math.min(24, Math.max(1, Math.floor(Math.hypot(dx, dy) / 3)));
+            const radius = brushRadius(brush.size, detail);
+            for (let i = 1; i <= steps; i += 1) {
+              const t = i / steps;
+              stampAt(last.x + dx * t, last.y + dy * t, rgb, radius, brush.flow);
+            }
+            lastPtRef.current = { x, y };
+          }}
+          onMouseUp={() => { paintingRef.current = false; lastPtRef.current = null; }}
+          onMouseLeave={() => { paintingRef.current = false; lastPtRef.current = null; }}
           onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
         />
@@ -624,32 +716,43 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
         ) : null}
       </Row>
 
-      {/* Palette strip — appears under the title bar in paint mode. Click a swatch to
-          set the active colour; it's drawn over the input overlay so clicks land here. */}
-      {model && paintMode && (
-        <Row
+      {/* Standalone brush panel — the ONE brush kit (runtime/paint), mounted on the left in
+          paint mode. In the editor embed (hostChrome) the kit lives in the Model Focus dock and
+          the tool/safety/detail toggles live in the top toolbar, so this whole panel is
+          suppressed there. The two mandatory behaviours (fill · free-form) plus the clip/lock
+          safety toggle and the 8/16/32 detail toggle are surfaced here for standalone use. */}
+      {!hostChrome && model && paintMode && (
+        <Col
           style={{
-            position: 'absolute', left: 0, top: 34, right: 0, height: 40,
-            alignItems: 'center', paddingLeft: 12, paddingRight: 12,
-            backgroundColor: 'rgba(12,14,20,0.82)', borderBottomWidth: 1, borderColor: '#1d2330',
+            position: 'absolute', left: 10, top: 44, width: 238,
+            backgroundColor: 'rgba(12,14,20,0.92)', borderWidth: 1, borderColor: '#1d2330',
+            borderRadius: 8, padding: 10, gap: 10,
           }}
         >
-          {PALETTE.map((c, i) => {
-            const active = c[0] === color[0] && c[1] === color[1] && c[2] === color[2];
-            return (
-              <Pressable
-                key={i}
-                onPress={() => setColor(c)}
-                style={{
-                  width: 24, height: 24, borderRadius: 5, marginRight: 8,
-                  backgroundColor: rgbCss(c),
-                  borderWidth: active ? 2 : 1,
-                  borderColor: active ? '#ffffff' : '#00000055',
-                }}
-              />
-            );
-          })}
-        </Row>
+          <Row style={{ alignItems: 'center', gap: 8 }}>
+            <Pressable
+              onPress={cycleSafety}
+              tooltip="Face safety: clip paints the face under the dab; lock masks the whole stroke to the pressed face"
+              style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+            >
+              <Text style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 700 }}>{safety === 0 ? 'Clip' : 'Lock'}</Text>
+            </Pressable>
+            <Pressable
+              onPress={cycleDetail}
+              tooltip="Free-form detail — texels per face (higher = crisper strokes on low-poly)"
+              style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+            >
+              <Text style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 700 }}>{detail <= 1 ? 'Detail —' : `Detail ${detail}`}</Text>
+            </Pressable>
+          </Row>
+          <BrushKit
+            brush={brush} onBrushChange={setBrush}
+            tool={brushTool} onToolChange={chooseBrushTool}
+            palette={palette} onPaletteChange={setPalette}
+            tools={['fill', 'brush', 'eyedropper']}
+            theme={DARK_THEME} width={218}
+          />
+        </Col>
       )}
 
       {/* Mode toolbar — Object / Vertex / Edge / Face. The host-native selection modes;

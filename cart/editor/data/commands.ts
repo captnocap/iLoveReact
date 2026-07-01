@@ -59,6 +59,13 @@ export const COMMANDS: Command[] = [
   // applicable; see meshTopoCommands.
   { id: 'mesh-extrude', menu: 'Edit', surface: 'model', name: 'Extrude Edge', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-create-face', menu: 'Edit', surface: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
+  // Paint sub-tools — the two brush behaviours plus the free-form face-safety and detail
+  // toggles. Surface only while paint mode is active (see meshPaintCommands); the brush's
+  // colour/size/flow live in the Model Focus dock's BrushKit, not the toolbar.
+  { id: 'mesh-paint-fill', menu: 'Edit', surface: 'model', name: 'Fill Face', icon: 'PaintBucket', key: 'B', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-paint-brush', menu: 'Edit', surface: 'model', name: 'Free Brush', icon: 'Paintbrush', key: 'N', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-paint-safety', menu: 'Edit', surface: 'model', name: 'Face Safety', icon: 'Lock', key: 'X', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-paint-detail', menu: 'Edit', surface: 'model', name: 'Brush Detail', icon: 'Grid2x2', key: 'Y', context: true, native: true, undoable: false, tool: true },
 ];
 
 // The always-on model tool group (select / gizmo / toggles), in display order.
@@ -77,6 +84,14 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }): Comman
   return [commandById(tool.sel === 1 ? 'mesh-extrude' : 'mesh-create-face')];
 }
 
+// The two brush behaviours (fill · free-form), surfaced as toolbar icon buttons only while
+// paint mode is active. The safety + detail toggles render as their own state-reading pills
+// (see ToolOptions), so they're not in this icon-button list.
+export function meshPaintCommands(tool: { paint: boolean }): Command[] {
+  if (!tool.paint) return [];
+  return [commandById('mesh-paint-fill'), commandById('mesh-paint-brush')];
+}
+
 export function isMeshToolCommand(id: string): boolean {
   return commandById(id).surface === 'model';
 }
@@ -84,7 +99,7 @@ export function isMeshToolCommand(id: string): boolean {
 // Is this model tool the active one, given the live tool snapshot? Drives the
 // toolbar/context-menu highlight. Gizmo tools only read active inside a select
 // mode (they act on a selection); view/paint/focus are mutually exclusive.
-export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean }): boolean {
+export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; brushTool?: string; safety?: number; detail?: number }): boolean {
   switch (id) {
     case 'mesh-vertex': return tool.selMode === 1 && !tool.paint && !tool.focus;
     case 'mesh-edge': return tool.selMode === 2 && !tool.paint && !tool.focus;
@@ -93,6 +108,8 @@ export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: n
     case 'mesh-scale': return tool.selMode !== 0 && tool.gizmoTool === 1;
     case 'mesh-rotate': return tool.selMode !== 0 && tool.gizmoTool === 2;
     case 'mesh-paint': return tool.paint;
+    case 'mesh-paint-fill': return tool.paint && tool.brushTool === 'fill';
+    case 'mesh-paint-brush': return tool.paint && tool.brushTool !== 'fill';
     case 'mesh-focus': return tool.focus;
     case 'mesh-wire': return tool.wire;
     default: return false;

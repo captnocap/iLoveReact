@@ -2,12 +2,20 @@
 import { CATALOG_DIAGNOSTICS, DEFAULT_ASSET_ID, DEFAULT_CONTENT_FOLDER, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from './catalog';
 import { WORLD_DOCUMENT, WORLD_DOCUMENT_ID } from './documents';
 import { INITIAL_EXPLORER_DIRECTORY_HISTORY, INITIAL_EXPLORER_HISTORY } from './fileExplorer';
-import type { EditorState, WorldObject } from './types';
+import type { EditorState, ModelToolSnapshot, WorldObject } from './types';
 import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
+import { DEFAULT_BRUSH, defaultPalette } from '../../../runtime/paint/model';
 
 export const INITIAL_OBJECTS: WorldObject[] = [
   { id: 'obj-tile', kind: 'TILE', name: 'Selected material', assetId: DEFAULT_ASSET_ID, left: 248, top: 116, width: 78, height: 70, metrics: [] },
 ];
+
+// A freshly re-mounted, view-mode viewer's tool state — shared by initialState() and the
+// hot-reload reset so the toolbar highlight always matches a clean viewer. A fresh palette
+// per call (defaultPalette()) keeps the recents ring from being shared across resets.
+export function defaultModelTool(): ModelToolSnapshot {
+  return { selMode: 0, gizmoTool: 0, paint: false, focus: false, wire: false, sel: 0, quality: 1, tris: 0, brushTool: 'fill', safety: 0, detail: 1, brush: DEFAULT_BRUSH, palette: defaultPalette() };
+}
 
 export function initialState(): EditorState {
   return {
@@ -58,7 +66,7 @@ export function initialState(): EditorState {
     activeWorkspaceDocumentId: WORLD_DOCUMENT_ID,
     rightPane: 'inspector',
     contextOpen: false,
-    modelTool: { selMode: 0, gizmoTool: 0, paint: false, focus: false, wire: false, sel: 0, quality: 1, tris: 0 },
+    modelTool: defaultModelTool(),
     status: `eventbus idle - ${MODEL_PACKAGE_COUNT} model homes + ${MATERIAL_ASSET_COUNT} materials indexed from ${CATALOG_DIAGNOSTICS.source} in ${CATALOG_DIAGNOSTICS.loadedMs}ms`,
     cursor: { x: 0, y: 0, z: 0 },
     history: [],

@@ -55,8 +55,11 @@ var g_affect_vert: ?[]bool = null; // scratch: logical verts affected by the act
 var g_sel_vert: ?[]bool = null;
 var g_sel_edge: ?[]bool = null;
 var g_sel_face: ?[]bool = null;
-// Faces currently tinted as selected, with the base colour to restore on deselect.
-var g_face_base: std.AutoHashMapUnmanaged(u32, [4]u8) = .{};
+// Faces currently tinted as selected, each holding the EXACT saved patch bytes to
+// restore on deselect. Storing the whole patch (not one base colour) preserves sub-face
+// free-form paint when detail>1 — a flat base restore would wipe it (req_2281).
+var g_face_base: std.AutoHashMapUnmanaged(u32, []u8) = .{};
+const SELECT_TINT: [4]u8 = .{ 255, 138, 61, 255 };
 // Pre-press snapshot of the active set, so a press that turns into an orbit-drag can
 // undo its instant pick (select on mousedown for paint-like immediacy, revert if you drag).
 var g_snap: ?[]bool = null;
@@ -772,24 +775,35 @@ fn applyFaceHighlight() void {
         if (f >= sel.len or !sel[f]) to_restore.append(alloc, f) catch {};
     }
     for (to_restore.items) |f| {
-        if (g_face_base.get(f)) |base| model_paint.paintFace(f, base);
+        if (g_face_base.get(f)) |patch| {
+            model_paint.restoreFacePatch(f, patch);
+            alloc.free(patch);
+        }
         _ = g_face_base.remove(f);
     }
-    // Tint newly selected faces.
+    // Tint newly selected faces — save the WHOLE patch so free-form paint survives.
     var f: u32 = 0;
     while (f < sel.len) : (f += 1) {
         if (!sel[f]) continue;
         if (g_face_base.contains(f)) continue;
-        const base = model_paint.faceColor(f) orelse continue;
-        g_face_base.put(alloc, f, base) catch continue;
-        model_paint.paintFace(f, blendSelect(base));
+        const patch = alloc.alloc(u8, model_paint.facePatchLen()) catch continue;
+        if (!model_paint.saveFacePatch(f, patch)) {
+            alloc.free(patch);
+            continue;
+        }
+        g_face_base.put(alloc, f, patch) catch {
+            alloc.free(patch);
+            continue;
+        };
+        model_paint.tintFacePatch(f, SELECT_TINT, SELECT_MIX);
     }
 }
 
 fn restoreAllFaces() void {
     var it = g_face_base.iterator();
     while (it.next()) |entry| {
-        model_paint.paintFace(entry.key_ptr.*, entry.value_ptr.*);
+        model_paint.restoreFacePatch(entry.key_ptr.*, entry.value_ptr.*);
+        alloc.free(entry.value_ptr.*);
     }
     g_face_base.clearRetainingCapacity();
 }

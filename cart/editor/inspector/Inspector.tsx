@@ -8,6 +8,8 @@ import ReadOnlySection from './ReadOnlySection';
 import PresetSection from './PresetSection';
 import MissionSection from './MissionSection';
 import ModelDetailBody from '../library/ModelDetailBody';
+import ModelBrushDock from './ModelBrushDock';
+import type { Brush, Palette } from '../../../runtime/paint/model';
 
 export default function Inspector(props: {
   state: EditorState;
@@ -17,6 +19,8 @@ export default function Inspector(props: {
   onCommand: (id: string, source: string) => void;
   onPreset: () => void;
   onPresetOption: (preset: string) => void;
+  onModelBrush: (brush: Brush) => void;
+  onModelPalette: (palette: Palette) => void;
 }) {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
   const activeModel = activeDocument?.kind === 'model' && activeDocument.sourceId
@@ -64,6 +68,18 @@ export default function Inspector(props: {
           </C.HW_PanelHead>
           <C.HW_InspectorBody>
             <ModelDetailBody model={activeModel} />
+            {/* Paint mode swaps in the shared brush kit below the focus content — the ONE
+                brush system (runtime/paint), same panel every editor surface uses. The tool /
+                safety / detail toggles live in the top toolbar; this dock owns the brush. */}
+            {props.state.modelTool.paint ? (
+              <ModelBrushDock
+                brush={props.state.modelTool.brush}
+                palette={props.state.modelTool.palette}
+                tool={props.state.modelTool.brushTool}
+                onBrush={props.onModelBrush}
+                onPalette={props.onModelPalette}
+              />
+            ) : null}
           </C.HW_InspectorBody>
         </C.HW_Inspector>
         <C.HW_RightRail>

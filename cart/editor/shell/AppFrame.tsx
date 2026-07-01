@@ -109,6 +109,10 @@ export default function AppFrame() {
         else if (commandId === 'mesh-wire') api.wire();
         else if (commandId === 'mesh-extrude') api.extrudeEdge();
         else if (commandId === 'mesh-create-face') api.createFace();
+        else if (commandId === 'mesh-paint-fill') api.brushTool('fill');
+        else if (commandId === 'mesh-paint-brush') api.brushTool('brush');
+        else if (commandId === 'mesh-paint-safety') api.cycleSafety();
+        else if (commandId === 'mesh-paint-detail') api.cycleDetail();
       }
       setState((prev) => ({ ...prev, status: `${command.name} - ${source}` }));
       return;
@@ -750,6 +754,8 @@ export default function AppFrame() {
             onCommand={runCommand}
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
+            onModelBrush={(brush) => modelToolApiRef.current?.setBrush(brush)}
+            onModelPalette={(palette) => modelToolApiRef.current?.setPalette(palette)}
           />
         </RenderProbe>
       </C.HW_Body>

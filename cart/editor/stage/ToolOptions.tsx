@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { COMMANDS, activeMenuFor, meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
+import { COMMANDS, activeMenuFor, meshToolCommands, meshToolActive, meshTopoCommands, meshPaintCommands } from '../data/commands';
 import { FLOORS, SNAP_MODES } from '../data/content';
 import type { Command, EditorState, ViewMode } from '../data/types';
 
@@ -46,6 +46,33 @@ export default function ToolOptions(props: {
             </C.HW_IconButton>
           </Fragment>
         ))}
+        {/* Paint sub-tools — the two brush behaviours (fill · free-form) as icon buttons, then
+            the face-safety and detail toggles as state-reading pills. Only while painting. */}
+        {meshPaintCommands(props.state.modelTool).map((command, i) => {
+          const active = meshToolActive(command.id, props.state.modelTool);
+          const Btn = active ? C.HW_IconButtonOn : C.HW_IconButton;
+          return (
+            <Fragment key={command.id}>
+              {i === 0 ? <C.HW_OptionDivider /> : null}
+              <Btn tooltip={`${command.name} (${command.key})`} onPress={() => props.onCommand(command.id, 'action bar')}>
+                <Icon name={command.icon} size={14} color={accentFor(active ? 'primary' : 'textDim')} />
+              </Btn>
+            </Fragment>
+          );
+        })}
+        {props.state.modelTool.paint ? (
+          <Fragment>
+            <C.HW_OptionDivider />
+            <C.HW_Pill tooltip="Face safety — Clip paints the face under the dab; Lock masks the stroke to the pressed face" onPress={() => props.onCommand('mesh-paint-safety', 'action bar')}>
+              <C.HW_OptionLabel>SAFE</C.HW_OptionLabel>
+              <C.HW_PillText>{props.state.modelTool.safety === 0 ? 'Clip' : 'Lock'}</C.HW_PillText>
+            </C.HW_Pill>
+            <C.HW_Pill tooltip="Free-form detail — texels per face (higher = crisper strokes on low-poly)" onPress={() => props.onCommand('mesh-paint-detail', 'action bar')}>
+              <C.HW_OptionLabel>DETAIL</C.HW_OptionLabel>
+              <C.HW_PillText>{props.state.modelTool.detail <= 1 ? '—' : String(props.state.modelTool.detail)}</C.HW_PillText>
+            </C.HW_Pill>
+          </Fragment>
+        ) : null}
       </C.HW_ToolOptions>
     );
   }

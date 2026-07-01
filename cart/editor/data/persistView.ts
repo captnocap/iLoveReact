@@ -10,7 +10,7 @@
 // Survives hot reload; resets on a cold process restart (hotstate is
 // in-process) — which is the wanted behaviour: a fresh launch starts clean.
 import { getHotState, setHotState } from '../../../runtime/hooks/useHotState';
-import { initialState } from './initialState';
+import { initialState, defaultModelTool } from './initialState';
 import type { EditorState } from './types';
 
 const VIEW_HOT_KEY = 'editor:view:v1';
@@ -29,7 +29,7 @@ const RESET_ON_RELOAD: Partial<EditorState> = {
   fileExplorerOpen: false,
   // Tool state is owned by the (re-mounted) model viewer; start from its default
   // so the toolbar highlight matches a freshly re-mounted, view-mode viewer.
-  modelTool: { selMode: 0, gizmoTool: 0, paint: false, focus: false, wire: false, sel: 0, quality: 1, tris: 0 },
+  modelTool: defaultModelTool(),
 };
 
 /** Boot state: the persisted view merged over fresh defaults (so fields added

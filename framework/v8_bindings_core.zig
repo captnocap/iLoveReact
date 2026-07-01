@@ -624,6 +624,51 @@ fn hostModelFaceCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnNumber(info, @floatFromInt(scene3d.paintFaceCount()));
 }
 
+/// __model_paint_mode(mode) → sets the free-form face-safety mode (0 = clip, 1 = lock).
+fn hostModelPaintMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    scene3d.paintModeSet(argToI32(info, 0) orelse 0);
+}
+
+/// __model_paint_stroke_begin(x, y) → face index the stroke locks onto (LOCK mode), or -1
+/// on a miss. Call once on brush-down; the ensuing dabs read the captured face.
+fn hostModelPaintStrokeBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    setReturnNumber(info, @floatFromInt(scene3d.paintStrokeBegin(x, y)));
+}
+
+/// __model_paint_stamp(x, y, r, g, b, radius, flow) → 1 if a face was dabbed, 0 on a miss.
+/// One free-form sub-face brush dab (see scene3d.paintStampAt); fired per pointer-move during
+/// a stroke. radius is in patch-texel units, flow 0..1. Free-form paint lands directly on the
+/// paint atlas (not the per-face source store — sub-face detail has no single face colour), so
+/// it marks the frame dirty to re-upload the atlas but does not touch model_source.
+fn hostModelPaintStamp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const r: u8 = @intCast(std.math.clamp(argToI32(info, 2) orelse 0, 0, 255));
+    const g: u8 = @intCast(std.math.clamp(argToI32(info, 3) orelse 0, 0, 255));
+    const b: u8 = @intCast(std.math.clamp(argToI32(info, 4) orelse 0, 0, 255));
+    const radius: f32 = @floatCast(argToF64(info, 5) orelse 2.0);
+    const flow: f32 = @floatCast(argToF64(info, 6) orelse 1.0);
+    const face = scene3d.paintStampAt(x, y, r, g, b, radius, flow);
+    if (face >= 0) state.markDirty();
+    setReturnNumber(info, if (face >= 0) 1 else 0);
+}
+
+/// __model_set_paint_detail(px) → the ACTUAL detail after the change (1/8/16/32). Re-tessellates
+/// the paint atlas to px texels per face and re-uploads the mesh (see scene3d.setPaintDetail).
+/// The budget guard may keep the old detail, so the return is the truth, not the request.
+fn hostModelSetPaintDetail(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const px = argToI32(info, 0) orelse 1;
+    const applied = scene3d.setPaintDetail(px);
+    state.markDirty();
+    setReturnNumber(info, @floatFromInt(applied));
+}
+
 /// __file_sha256(path) → 64-char lowercase hex of the file's bytes, or "" on read
 /// failure. Content-addresses an imported asset so its attribution follows the BYTES,
 /// not the filename — a renamed or re-downloaded copy resolves to the same entry.
@@ -1424,6 +1469,10 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_counts", hostMeshEditCounts);
     v8_runtime.registerHostFn("__model_paint_at", hostModelPaintAt);
     v8_runtime.registerHostFn("__model_paint_face", hostModelPaintFace);
+    v8_runtime.registerHostFn("__model_paint_mode", hostModelPaintMode);
+    v8_runtime.registerHostFn("__model_paint_stroke_begin", hostModelPaintStrokeBegin);
+    v8_runtime.registerHostFn("__model_paint_stamp", hostModelPaintStamp);
+    v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
     v8_runtime.registerHostFn("__model_face_count", hostModelFaceCount);
     v8_runtime.registerHostFn("__model_set_quality", hostModelSetQuality);
     v8_runtime.registerHostFn("__file_sha256", hostFileSha256);
