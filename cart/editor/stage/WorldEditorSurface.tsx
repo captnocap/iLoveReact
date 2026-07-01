@@ -4,8 +4,9 @@ import { LoaderIsoView } from '../../hmsc-int/LoaderIsoView';
 import type { PlacedBuildPiece } from '../../hmsc-int/game/build/placed';
 import type { Armed } from '../../hmsc-int/buildArmed';
 import type { BuildEditEvent } from '../../hmsc-int/game';
-import { mapChunkCount, mapGrowChunk, mapHostLive, mapSetTool } from '../../../runtime/game/map';
+import { mapChunkCount, mapGrowChunk, mapHostLive, mapSetGroundLook, mapSetTool } from '../../../runtime/game/map';
 import MapPaintDock, { DEFAULT_MAP_PAINT, type MapPaintState } from './MapPaintDock';
+import { EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE } from '../render3d/groundFormula';
 
 const EDITOR_GAME_FILE = 'zig-out/game/editor/main.gamefile';
 const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
@@ -38,6 +39,7 @@ function pushMapTool(s: MapPaintState): void {
     rampMax: s.rampMax,
     rampWide: s.rampWide,
     smoothStrength: s.smoothStrength,
+    kindIdx: s.tileKindIdx,
   });
 }
 
@@ -65,10 +67,12 @@ export default function WorldEditorSurface() {
   }, []);
 
   // First arm seeds the world's chunk (0,0) so strokes have canvas — the grown
-  // chunk grid gets its own chrome with the multi-chunk workspace.
+  // chunk grid gets its own chrome with the multi-chunk workspace — and pushes
+  // the tile channel's ground look (formula + kind palette) once.
   useEffect(() => {
     if (!paint.active || !mapHostLive()) return;
     if (mapChunkCount() === 0) mapGrowChunk(0, 0);
+    mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE);
     pushMapTool(paint);
   }, [paint.active]);
 

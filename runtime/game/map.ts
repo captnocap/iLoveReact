@@ -112,6 +112,13 @@ export function mapSetTool(tool: MapTool): void {
   callHost('__map_set_tool', undefined, buf);
 }
 
+/** Push the tile channel's shader contract: a WGSL body defining
+ *  `fn hf_ground_rgb(uv) -> vec3f` over the engine's D stream, plus the kind
+ *  palette (rgb triples in legend order). Content — push once at UI rate. */
+export function mapSetGroundLook(formulaWgsl: string, paletteRgb: Float32Array): void {
+  callHost('__map_set_ground_look', undefined, formulaWgsl, paletteRgb);
+}
+
 /** Begin a stroke at a world-meter point (chrome-driven path). */
 export function mapStrokeBegin(x: number, z: number): void {
   callHost('__map_stroke_begin', undefined, x, z);

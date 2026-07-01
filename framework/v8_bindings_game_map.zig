@@ -91,6 +91,17 @@ fn setReturnF32Buffer(info: v8.FunctionCallbackInfo, floats: []f32) void {
     info.getReturnValue().set(ab);
 }
 
+fn argStringAlloc(alloc: std.mem.Allocator, info: v8.FunctionCallbackInfo, idx: u32) ?[]u8 {
+    if (info.length() <= idx) return null;
+    const iso = info.getIsolate();
+    const ctx = iso.getCurrentContext();
+    const str = info.getArg(idx).toString(ctx) catch return null;
+    const len = str.lenUtf8(iso);
+    const buf = alloc.alloc(u8, len) catch return null;
+    _ = str.writeUtf8(iso, buf);
+    return buf;
+}
+
 fn argChunkCoords(info: v8.FunctionCallbackInfo) ?[2]i32 {
     const cx = argToF64(info, 0) orelse return null;
     const cz = argToF64(info, 1) orelse return null;
@@ -176,6 +187,23 @@ fn hostSetTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         .flora_lane = @intFromFloat(@max(0, @min(2, p[15]))),
         .zone_idx = @intFromFloat(@max(-1, p[16])),
     });
+}
+
+// __map_set_ground_look(wgslBody, paletteFloat32Array) — the tile channel's
+// shader contract: a WGSL body defining hf_ground_rgb(uv) reading the D stream,
+// plus the kind palette (rgb triples in legend order). Content, pushed once at
+// UI rate; the engine copies both.
+fn hostSetGroundLook(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const formula = argStringAlloc(alloc, info, 0) orelse &[_]u8{};
+    defer if (formula.len > 0) alloc.free(formula);
+    const bytes = argBytes(info, 1) orelse &[_]u8{};
+    const palette: []const f32 = if (bytes.len >= @sizeOf(f32)) blk: {
+        const ptr: [*]const f32 = @ptrCast(@alignCast(bytes.ptr));
+        break :blk ptr[0 .. bytes.len / @sizeOf(f32)];
+    } else &[_]f32{};
+    engine.setGroundLook(formula, palette);
 }
 
 fn argWorldPoint(info: v8.FunctionCallbackInfo) ?[2]f32 {
@@ -277,6 +305,7 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_chunk_count", hostChunkCount);
     v8_runtime.registerHostFn("__map_open_neighbors", hostOpenNeighbors);
     v8_runtime.registerHostFn("__map_set_tool", hostSetTool);
+    v8_runtime.registerHostFn("__map_set_ground_look", hostSetGroundLook);
     v8_runtime.registerHostFn("__map_stroke_begin", hostStrokeBegin);
     v8_runtime.registerHostFn("__map_stroke_move", hostStrokeMove);
     v8_runtime.registerHostFn("__map_stroke_end", hostStrokeEnd);

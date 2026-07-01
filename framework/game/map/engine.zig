@@ -667,6 +667,65 @@ pub fn downsampleFloorHeights(src: *const [chunks.SAMPLE_CELLS]f32, dst: []f32) 
     }
 }
 
+// ── the ground look (the tile channel's shader contract) ─────────────────────
+// The tile channel renders through the per-fragment ground FORMULA (the
+// data-shape ground): the cart supplies a WGSL body defining
+// `fn hf_ground_rgb(uv) -> vec3f` that reads the D reference stream, and the
+// engine encodes each chunk's D stream from its cell grid. Layout matches the
+// hmsc encodeTileMap contract (heightfieldSurface.tsx:20): [0]cols [1]rows
+// [2]paletteCount, paletteCount×3 rgb floats, rows×cols cell indices (−1 empty).
+// Formula + palette are CONTENT — pushed once at UI rate, kept across map reset.
+
+pub const MAX_PALETTE: usize = 256;
+
+var g_ground_formula: ?[]u8 = null;
+var g_palette: [MAX_PALETTE][3]f32 = undefined;
+var g_palette_count: usize = 0;
+const look_alloc = std.heap.page_allocator;
+
+pub fn setGroundLook(formula: []const u8, palette_rgb: []const f32) void {
+    if (g_ground_formula) |old| look_alloc.free(old);
+    g_ground_formula = null;
+    if (formula.len > 0) {
+        const copy = look_alloc.alloc(u8, formula.len) catch return;
+        @memcpy(copy, formula);
+        g_ground_formula = copy;
+    }
+    g_palette_count = @min(MAX_PALETTE, palette_rgb.len / 3);
+    for (0..g_palette_count) |i| {
+        g_palette[i] = .{ palette_rgb[i * 3], palette_rgb[i * 3 + 1], palette_rgb[i * 3 + 2] };
+    }
+}
+
+pub fn groundFormula() ?[]const u8 {
+    return g_ground_formula;
+}
+
+/// Floats one chunk's D stream needs at the current palette.
+pub fn groundDataFloats() usize {
+    return 3 + g_palette_count * 3 + chunks.TILE_CELLS;
+}
+
+/// Encode a chunk's tile grid as the ground formula's D stream. dst.len must be
+/// ≥ groundDataFloats(). Returns the floats written.
+pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
+    dst[0] = @floatFromInt(chunks.TILE_COLS);
+    dst[1] = @floatFromInt(chunks.TILE_COLS);
+    dst[2] = @floatFromInt(g_palette_count);
+    var n: usize = 3;
+    for (g_palette[0..g_palette_count]) |rgb| {
+        dst[n] = rgb[0];
+        dst[n + 1] = rgb[1];
+        dst[n + 2] = rgb[2];
+        n += 3;
+    }
+    for (chunk.tiles) |cell| {
+        dst[n] = @floatFromInt(cell);
+        n += 1;
+    }
+    return n;
+}
+
 // ── dirty bookkeeping ─────────────────────────────────────────────────────────
 
 pub fn dirtyChunkCount() u32 {

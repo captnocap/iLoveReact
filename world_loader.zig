@@ -3121,6 +3121,9 @@ pub const Runtime = struct {
     paint_slot_ver: [MAX_PAINT_SLOTS]u32 = @splat(0),
     paint_slot_key: [MAX_PAINT_SLOTS]?[]u8 = @splat(null),
     paint_slot_floor: [MAX_PAINT_SLOTS]?[]f32 = @splat(null),
+    /// owned per-slot ground-formula D stream (tile channel), re-encoded on a
+    /// dirty tiles channel — the 3d.zig ground pipeline re-reads it every frame
+    paint_slot_ground: [MAX_PAINT_SLOTS]?[]f32 = @splat(null),
     paint_drop_warned: bool = false,
     paint_hover: ?[3]f32 = null,
     paint_stroking: bool = false,
@@ -3259,6 +3262,9 @@ pub const Runtime = struct {
         }
         for (self.paint_slot_floor) |maybe_floor| {
             if (maybe_floor) |floor| self.allocator.free(floor);
+        }
+        for (self.paint_slot_ground) |maybe_ground| {
+            if (maybe_ground) |ground| self.allocator.free(ground);
         }
         {
             var it = self.live_slot_keys.valueIterator();
@@ -6715,56 +6721,93 @@ fn applyPaintLayer(runtime: *Runtime) void {
             };
         }
         const i = slot.?;
-        if (!fresh and !chunk.dirty.height) continue;
+        const height_dirty = fresh or chunk.dirty.height;
+        const tiles_dirty = fresh or chunk.dirty.tiles;
+        if (!height_dirty and !tiles_dirty) continue;
 
-        const floor = runtime.paint_slot_floor[i] orelse blk: {
-            const buf = runtime.allocator.alloc(f32, map_paint.FLOOR_CELLS) catch continue;
-            runtime.paint_slot_floor[i] = buf;
-            break :blk buf;
-        };
-        map_paint.downsampleFloorHeights(&chunk.height, floor);
-        chunk.dirty.height = false;
-        runtime.paint_slot_ver[i] += 1;
-        if (runtime.paint_slot_key[i]) |old| runtime.allocator.free(old);
-        const key = std.fmt.allocPrint(runtime.allocator, "~hf~paint-{d}-{d}~{d}", .{ chunk.cx, chunk.cz, runtime.paint_slot_ver[i] }) catch continue;
-        runtime.paint_slot_key[i] = key;
-        runtime.paint_slot_used[i] = true;
-        runtime.paint_slot_chunk[i] = .{ chunk.cx, chunk.cz };
-
-        var max_abs: f32 = 0;
-        for (floor) |v| max_abs = @max(max_abs, @abs(v));
         const half_span = map_chunks.CHUNK_METERS / 2;
         const node = &runtime.kid_list.items[first + i];
-        node.* = .{
-            .scene3d_mesh = true,
-            .scene3d_geom_key = key,
-            .scene3d_heights = floor,
-            .scene3d_hf_cols = @intCast(map_paint.FLOOR_RES),
-            .scene3d_hf_rows = @intCast(map_paint.FLOOR_RES),
-            .scene3d_hf_width = map_chunks.CHUNK_METERS,
-            .scene3d_hf_depth = map_chunks.CHUNK_METERS,
-            .scene3d_hf_base = 0,
-            .scene3d_bounds_radius = @sqrt(half_span * half_span * 2 + max_abs * max_abs),
-            .scene3d_pos_x = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS,
-            .scene3d_pos_y = 0,
-            .scene3d_pos_z = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS,
-            // editor terrain tint until the ground-texture channel lands (phase 3)
-            .scene3d_color_r = 0.42,
-            .scene3d_color_g = 0.52,
-            .scene3d_color_b = 0.34,
-        };
+        if (fresh) {
+            // one-time placement: the chunk is CENTERED at (cx·120, cz·120)
+            node.* = .{
+                .scene3d_hf_cols = @intCast(map_paint.FLOOR_RES),
+                .scene3d_hf_rows = @intCast(map_paint.FLOOR_RES),
+                .scene3d_hf_width = map_chunks.CHUNK_METERS,
+                .scene3d_hf_depth = map_chunks.CHUNK_METERS,
+                .scene3d_hf_base = 0,
+                .scene3d_pos_x = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS,
+                .scene3d_pos_y = 0,
+                .scene3d_pos_z = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS,
+            };
+            runtime.paint_slot_used[i] = true;
+            runtime.paint_slot_chunk[i] = .{ chunk.cx, chunk.cz };
+        }
 
-        // collider mirror: same grid the render bakes — see-it == walk-it
-        _ = game_physics.registerHeightfield(.{
-            .id = PAINT_COLLIDER_BASE + i,
-            .origin_x = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS - half_span,
-            .origin_z = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS - half_span,
-            .cell = map_chunks.CHUNK_METERS / @as(f32, @floatFromInt(map_paint.FLOOR_RES - 1)),
-            .cols = map_paint.FLOOR_RES,
-            .rows = map_paint.FLOOR_RES,
-            .base_y = 0,
-            .walk_cos = 0.6,
-        }, std.mem.sliceAsBytes(floor));
+        if (height_dirty) {
+            const floor = runtime.paint_slot_floor[i] orelse blk: {
+                const buf = runtime.allocator.alloc(f32, map_paint.FLOOR_CELLS) catch continue;
+                runtime.paint_slot_floor[i] = buf;
+                break :blk buf;
+            };
+            map_paint.downsampleFloorHeights(&chunk.height, floor);
+            chunk.dirty.height = false;
+            runtime.paint_slot_ver[i] += 1;
+            if (runtime.paint_slot_key[i]) |old| runtime.allocator.free(old);
+            const key = std.fmt.allocPrint(runtime.allocator, "~hf~paint-{d}-{d}~{d}", .{ chunk.cx, chunk.cz, runtime.paint_slot_ver[i] }) catch continue;
+            runtime.paint_slot_key[i] = key;
+
+            var max_abs: f32 = 0;
+            for (floor) |v| max_abs = @max(max_abs, @abs(v));
+            node.scene3d_mesh = true;
+            node.scene3d_geom_key = key;
+            node.scene3d_heights = floor;
+            node.scene3d_bounds_radius = @sqrt(half_span * half_span * 2 + max_abs * max_abs);
+
+            // collider mirror: same grid the render bakes — see-it == walk-it
+            _ = game_physics.registerHeightfield(.{
+                .id = PAINT_COLLIDER_BASE + i,
+                .origin_x = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS - half_span,
+                .origin_z = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS - half_span,
+                .cell = map_chunks.CHUNK_METERS / @as(f32, @floatFromInt(map_paint.FLOOR_RES - 1)),
+                .cols = map_paint.FLOOR_RES,
+                .rows = map_paint.FLOOR_RES,
+                .base_y = 0,
+                .walk_cos = 0.6,
+            }, std.mem.sliceAsBytes(floor));
+        }
+
+        // ground texture (the tile channel): encode the chunk's cell grid as the
+        // ground formula's D stream. The 3d.zig ground pipeline re-reads the
+        // node's slice every frame, so no geometry re-key is needed — painting a
+        // tile shows next frame. Falls back to the flat editor tint until the
+        // cart pushes a formula (__map_set_ground_look).
+        if (tiles_dirty) {
+            chunk.dirty.tiles = false;
+            if (map_paint.groundFormula()) |formula| {
+                const need = map_paint.groundDataFloats();
+                var ground = runtime.paint_slot_ground[i];
+                if (ground == null or ground.?.len < need) {
+                    if (ground) |old| runtime.allocator.free(old);
+                    ground = runtime.allocator.alloc(f32, need) catch null;
+                    runtime.paint_slot_ground[i] = ground;
+                }
+                if (ground) |buf| {
+                    const used = map_paint.encodeGroundData(chunk, buf);
+                    node.scene3d_ground_formula = formula;
+                    node.scene3d_ground_data = buf[0..used];
+                    // whitened: the ground pipeline multiplies inst_color in
+                    node.scene3d_color_r = 1;
+                    node.scene3d_color_g = 1;
+                    node.scene3d_color_b = 1;
+                }
+            }
+        }
+        if (node.scene3d_ground_formula == null) {
+            // bare-terrain tint (no formula pushed / nothing painted yet)
+            node.scene3d_color_r = 0.42;
+            node.scene3d_color_g = 0.52;
+            node.scene3d_color_b = 0.34;
+        }
     }
 
     // the brush beam: a translucent column over the footprint at the hover point

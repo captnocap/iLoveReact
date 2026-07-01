@@ -3,15 +3,16 @@
 // dock floats INSIDE the world viewport (the paint-bar convention, req_2469) and
 // only ever calls the __map_* doors at UI rate.
 //
-// Channels surfaced here grow with the migration: TERRAIN + WATER now; TILE,
-// FLORA, and ZONE arrive with their legend palettes.
+// Channels surfaced here grow with the migration: TERRAIN + TILE + WATER now;
+// FLORA and ZONE arrive with their legend palettes.
 import { Fragment } from 'react';
 import { C } from '../workspace.cls';
 import type { MapBrushProfile, MapBrushShape, MapTerrainTool } from '../../../runtime/game/map';
+import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 
 export type MapPaintState = {
   active: boolean;
-  channel: 'terrain' | 'water';
+  channel: 'terrain' | 'tile' | 'water';
   mode: 'paint' | 'erase';
   terrainTool: MapTerrainTool;
   shape: MapBrushShape;
@@ -24,6 +25,8 @@ export type MapPaintState = {
   rampMax: number;
   rampWide: number;
   smoothStrength: number;
+  /** armed ground tile kind — index into TILE_KINDS (the engine legend order) */
+  tileKindIdx: number;
 };
 
 export const DEFAULT_MAP_PAINT: MapPaintState = {
@@ -40,9 +43,18 @@ export const DEFAULT_MAP_PAINT: MapPaintState = {
   rampMax: 4,
   rampWide: 3,
   smoothStrength: 0.5,
+  tileKindIdx: Math.max(0, TILE_KINDS.indexOf('sidewalk')),
 };
 
-const CHANNELS: MapPaintState['channel'][] = ['terrain', 'water'];
+// The paintable GROUND kinds for the dock's palette — kinds whose placement is
+// authored ground (road-grammar kinds land with the road channel's stroke
+// tools, not the hand brush).
+export const PAINTABLE_TILE_KINDS: readonly number[] = TILE_KINDS
+  .map((k, i) => [k, i] as const)
+  .filter(([k]) => !['laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'junction', 'crosswalk', 'median'].includes(k))
+  .map(([, i]) => i);
+
+const CHANNELS: MapPaintState['channel'][] = ['terrain', 'tile', 'water'];
 const TERRAIN_TOOLS: MapTerrainTool[] = ['brush', 'ramp', 'slope', 'smooth'];
 const SHAPES: MapBrushShape[] = ['circle', 'square', 'diamond'];
 const PROFILES: MapBrushProfile[] = ['cone', 'flat', 'dome'];
@@ -96,6 +108,23 @@ export default function MapPaintDock(props: {
             <Fragment>
               <C.HW_OptionDivider />
               <PillRow items={TERRAIN_TOOLS} value={s.terrainTool} onPick={(terrainTool) => props.onPatch({ terrainTool })} />
+            </Fragment>
+          ) : null}
+          {s.channel === 'tile' ? (
+            <Fragment>
+              <C.HW_OptionDivider />
+              {PAINTABLE_TILE_KINDS.map((idx) => {
+                const kind = TILE_KINDS[idx]!;
+                const def = tileKindDefinition(kind);
+                const Pill = idx === s.tileKindIdx ? C.HW_PillOn : C.HW_Pill;
+                const Label = idx === s.tileKindIdx ? C.HW_PillTextOn : C.HW_PillText;
+                return (
+                  <Pill key={kind} tooltip={def.label} onPress={() => props.onPatch({ tileKindIdx: idx, mode: 'paint' })}>
+                    <C.HW_TileSwatch style={{ backgroundColor: def.render.color }} />
+                    <Label>{def.label.toUpperCase()}</Label>
+                  </Pill>
+                );
+              })}
             </Fragment>
           ) : null}
           <C.HW_OptionDivider />
