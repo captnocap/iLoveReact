@@ -83,24 +83,9 @@ export default function Inspector(props: {
                 onAdd={props.outlinerHandlers.onAddPart}
               />
             ) : null}
-            {/* Paint mode swaps in the brush dock below the focus content. Colour comes from the
-                ONE Color Studio (the same colorSpine every editor surface shares); BrushKit here
-                is only the shape/size/flow dials. The tool / safety / detail toggles live in the
-                top toolbar. */}
-            {props.state.modelTool.paint ? (
-              <ModelBrushDock
-                brush={props.state.modelTool.brush}
-                tool={props.state.modelTool.brushTool}
-                onBrush={props.onModelBrush}
-                current={props.state.colorSpineCurrent}
-                palette={props.state.colorSpinePalette}
-                lens={props.state.colorSpineLens}
-                libraryFilter={props.state.colorSpineLibraryFilter}
-                rampSteps={props.state.colorSpineRampSteps}
-                scenePick={props.state.colorSpineScenePick}
-                spine={props.colorSpine}
-              />
-            ) : null}
+            {/* Brush controls moved OUT of this corner dock to the top PaintToolbar (req_2466):
+                paint controls belong at the top as icons, not a bottom-right text-pill panel.
+                The Inspector now stays focused on selection/material inspection. */}
           </C.HW_InspectorBody>
         </C.HW_Inspector>
         <C.HW_RightRail>

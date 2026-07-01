@@ -12,6 +12,7 @@ import BuildDock from './BuildDock';
 import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
 import NewMeshDialog from './NewMeshDialog';
+import PaintToolbar, { PaintPopovers, type PaintPopover } from './PaintToolbar';
 import PerformancePopover from './PerformancePopover';
 import MemoryPopover from './MemoryPopover';
 import LibraryPanel from '../library/LibraryPanel';
@@ -48,6 +49,9 @@ export default function AppFrame() {
   const playing = path === '/play';
   const [state, setState] = useState<EditorState>(loadPersistedState);
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
+  // The open paint-toolbar popover (ink / brush). Local, not persisted — the popovers render
+  // LATE (below) so they sit over the body; the bar (early) only toggles this.
+  const [paintPopover, setPaintPopover] = useState<PaintPopover>(null);
 
   // The embedded model viewer hands its host-native tool handlers up here; the
   // toolbar + context menu remote-control the SAME tools through this ref, and
@@ -845,6 +849,36 @@ export default function AppFrame() {
         </C.HW_PlayBody>
       ) : (
       <>
+      {state.modelTool.paint ? (
+        <RenderProbe id="Paint Toolbar">
+          <PaintToolbar
+            brush={state.modelTool.brush}
+            brushTool={state.modelTool.brushTool}
+            detail={state.modelTool.detail}
+            onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
+            onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
+            onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
+            popover={paintPopover}
+            onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
+            current={state.colorSpineCurrent}
+            palette={state.colorSpinePalette}
+            lens={state.colorSpineLens}
+            libraryFilter={state.colorSpineLibraryFilter}
+            rampSteps={state.colorSpineRampSteps}
+            scenePick={state.colorSpineScenePick}
+            spine={{
+              onSetCurrent: setColorSpineCurrent,
+              onAddToTray: addColorSpineToTray,
+              onPickTray: pickColorSpineTray,
+              onSetLens: setColorSpineLens,
+              onSetLibraryFilter: setColorSpineLibraryFilter,
+              onSetRampSteps: setColorSpineRampSteps,
+              onScenePick: pickColorSpineScene,
+              onLoadLibrarySet: loadColorSpineLibrarySet,
+            }}
+          />
+        </RenderProbe>
+      ) : null}
       <C.HW_Body>
         <RenderProbe id="Left Rail">
           <LeftRail state={state} onDomain={(activeDomain) => setState((prev) => ({ ...prev, activeDomain, status: `workspace context: ${activeDomain}` }))} />
@@ -1015,6 +1049,32 @@ export default function AppFrame() {
       {state.openMenu ? (
         <RenderProbe id="Menu Dropdown">
           <DropdownMenu state={state} onCommand={runCommand} onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)} />
+        </RenderProbe>
+      ) : null}
+      {!playing && state.modelTool.paint && paintPopover ? (
+        <RenderProbe id="Paint Popovers">
+          <PaintPopovers
+            popover={paintPopover}
+            onClose={() => setPaintPopover(null)}
+            brush={state.modelTool.brush}
+            onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
+            current={state.colorSpineCurrent}
+            palette={state.colorSpinePalette}
+            lens={state.colorSpineLens}
+            libraryFilter={state.colorSpineLibraryFilter}
+            rampSteps={state.colorSpineRampSteps}
+            scenePick={state.colorSpineScenePick}
+            spine={{
+              onSetCurrent: setColorSpineCurrent,
+              onAddToTray: addColorSpineToTray,
+              onPickTray: pickColorSpineTray,
+              onSetLens: setColorSpineLens,
+              onSetLibraryFilter: setColorSpineLibraryFilter,
+              onSetRampSteps: setColorSpineRampSteps,
+              onScenePick: pickColorSpineScene,
+              onLoadLibrarySet: loadColorSpineLibrarySet,
+            }}
+          />
         </RenderProbe>
       ) : null}
       {/* Model context menu — rendered LAST at the root so it lands at the cursor
