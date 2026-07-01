@@ -408,10 +408,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     const i = DETAIL_LEVELS.indexOf(detail as (typeof DETAIL_LEVELS)[number]);
     changeDetail(DETAIL_LEVELS[(i + 1) % DETAIL_LEVELS.length]!);
   };
-  // Free-form needs sub-face room, so entering the brush tool bumps detail off fill-only.
+  // Auto-pick a paint resolution when entering the brush so painting is usable without touching
+  // the menu: low-poly gets FINE per-face detail (big faces need sub-face room to draw a line),
+  // dense meshes stay coarse (tiny faces are already fine, and the atlas can't afford more). A
+  // cube lands at 256 → crisp text; the host clamps to the atlas budget regardless. This is the
+  // stopgap for the real density knob (texels-per-area) — it approximates it off the tri count.
+  const autoDetailForTris = (tris: number): number =>
+    tris <= 100 ? 256 : tris <= 1000 ? 128 : tris <= 10000 ? 32 : 8;
   const chooseBrushTool = (t: BrushTool) => {
     setBrushTool(t);
-    if (t !== 'fill' && detail < 16) changeDetail(64); // start fine enough to actually draw; File → Paint Resolution goes up to 512
+    if (t !== 'fill' && detail < 16) changeDetail(autoDetailForTris(model ? model.count / 3 : 0));
   };
   const cycleSafety = () => setSafety((v) => (v === 0 ? 1 : 0));
 
