@@ -653,6 +653,58 @@ fn boundsTouch(a: PieceBounds, b: PieceBounds, tolerance: f32) bool {
         a.baseY <= b.topY + tolerance and b.baseY <= a.topY + tolerance;
 }
 
+// ── the brain: placementFor / validatePlacement ──────────────────────────────
+// Verbatim from placed.ts. These are what the iso editor commits through — arm a
+// catalog def, resolve a pose, build the placement, validate it, commit the
+// piecePlaced event.
+
+pub const PlacementPose = struct { x: f32, y: f32, z: f32, yawDegrees: f32 };
+
+/// placed.ts placementFor — the placement record for a def at a pose. `id` is
+/// minted by the world-stream materializer (the TS returns Omit<...,'id'>, so
+/// id is left empty here); a wall row's defaultEdit rides onto every placement.
+pub fn placementFor(def: BuildPieceDef, at: PlacementPose) PlacedBuildPiece {
+    return .{
+        .id = "", // minted downstream by the materializer (replay-deterministic)
+        .pieceId = def.id,
+        .x = at.x,
+        .y = at.y,
+        .z = at.z,
+        .yawDegrees = at.yawDegrees,
+        .edit = def.defaultEdit,
+    };
+}
+
+/// The typed reasons a placement is invalid (placed.ts validatePlacement returns
+/// the equivalent human strings; the binding renders these). `ok()` = the TS
+/// empty-list valid result.
+pub const PlacementValidation = struct {
+    unknown_piece: bool = false,
+    kind_accepts_no_edits: bool = false,
+    position_not_finite: bool = false,
+
+    pub fn ok(self: PlacementValidation) bool {
+        return !self.unknown_piece and !self.kind_accepts_no_edits and !self.position_not_finite;
+    }
+};
+
+/// placed.ts validatePlacement — every way a placement is invalid; ok() = valid.
+/// Unknown piece short-circuits (the TS returns immediately with only that).
+pub fn validatePlacement(placement: PlacedBuildPiece) PlacementValidation {
+    var v = PlacementValidation{};
+    if (!isCatalogId(placement.pieceId)) {
+        v.unknown_piece = true;
+        return v;
+    }
+    if (placement.edit != null and !kindAcceptsWallEdits(catalogEntry(placement.pieceId).?.kind)) {
+        v.kind_accepts_no_edits = true;
+    }
+    if (!std.math.isFinite(placement.x) or !std.math.isFinite(placement.y) or !std.math.isFinite(placement.z)) {
+        v.position_not_finite = true;
+    }
+    return v;
+}
+
 test "PLACED_TUNING values match the TS source verbatim" {
     try std.testing.expectEqual(@as(f32, 1.2), PLACED_TUNING.walkOpeningWidthMeters);
     try std.testing.expectEqual(@as(f32, 2.6), PLACED_TUNING.vehicleOpeningWidthMeters);
@@ -739,4 +791,26 @@ test "leaf geometry — bounds, roofRise, liftedWallBaseY match the TS math" {
     try std.testing.expectApproxEqAbs(@as(f32, 0.05), liftedWallBaseY(scene[1], &scene), 1e-5);
     // a floor never rests (not a wall-rest kind) → its own y
     try std.testing.expectApproxEqAbs(@as(f32, 0), liftedWallBaseY(scene[0], &scene), 1e-5);
+}
+
+test "placementFor / validatePlacement match the TS brain" {
+    // a plain floor at a pose → the pose, no edit
+    const floorDef = catalogEntry("floor.concrete.common").?;
+    const p = placementFor(floorDef, .{ .x = 3, .y = 0, .z = -6, .yawDegrees = 90 });
+    try std.testing.expectEqualStrings("floor.concrete.common", p.pieceId);
+    try std.testing.expectEqual(@as(f32, 3), p.x);
+    try std.testing.expectEqual(@as(?WallEdit, null), p.edit);
+    try std.testing.expect(validatePlacement(p).ok());
+    // a doorway wall row rides its defaultEdit onto the placement
+    const doorDef = catalogEntry("wall.concrete.doorway").?;
+    const dp = placementFor(doorDef, .{ .x = 0, .y = 0, .z = 0, .yawDegrees = 0 });
+    try std.testing.expectEqual(WallEdit.door, dp.edit.?);
+    try std.testing.expect(validatePlacement(dp).ok());
+    // unknown piece → unknown_piece, short-circuits
+    try std.testing.expect(validatePlacement(.{ .id = "", .pieceId = "wall.nope", .x = 0, .y = 0, .z = 0, .yawDegrees = 0 }).unknown_piece);
+    // an edit on a non-wall kind → kind_accepts_no_edits
+    try std.testing.expect(validatePlacement(.{ .id = "", .pieceId = "floor.concrete.common", .x = 0, .y = 0, .z = 0, .yawDegrees = 0, .edit = .door }).kind_accepts_no_edits);
+    // non-finite position → position_not_finite
+    const nan = std.math.nan(f32);
+    try std.testing.expect(validatePlacement(.{ .id = "", .pieceId = "floor.concrete.common", .x = nan, .y = 0, .z = 0, .yawDegrees = 0 }).position_not_finite);
 }
