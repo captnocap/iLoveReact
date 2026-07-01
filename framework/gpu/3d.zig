@@ -1619,6 +1619,12 @@ pub fn meshEditSelectGroupRange(lo: u32, hi: u32, additive: bool) i32 {
 pub fn meshEditSetScope(lo: u32, hi: u32) void {
     mesh_edit.setEditScope(lo, hi);
 }
+/// Adopt the outliner's part ranges (flattened [lo,hi) group-id pairs) and rebuild the
+/// welded topology, so coincident verts in DIFFERENT parts stay separate logical verts.
+pub fn meshEditSetPartRanges(pairs: []const u32) void {
+    model_source.setPartRanges(pairs);
+    mesh_edit.reset();
+}
 /// Count the surviving faces whose authored group is in [lo, hi) — the outliner asks this
 /// after a delete to drop parts that have no geometry left.
 pub fn meshGroupFaceCount(lo: u32, hi: u32) u32 {

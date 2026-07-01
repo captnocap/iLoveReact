@@ -18,6 +18,12 @@ var g_face_to_source: ?[]u32 = null; // current displayed face -> source face
 // n-gon (studio EditMesh, via editMeshToGeometry). Absent for plain triangle imports.
 var g_source_face_group: ?[]u32 = null;
 pub const NO_FACE_GROUP: u32 = std.math.maxInt(u32);
+// Flattened [lo,hi) pairs of authored-group ids, sorted and non-overlapping — one pair
+// per outliner PART of a composed multi-part model. The mesh editor welds coincident
+// positions only WITHIN a part, so two stacked cubes stay independently editable.
+// Absent (like face groups) for plain imports; cleared by the next retain().
+var g_part_ranges: ?[]u32 = null;
+pub const NO_PART: u32 = std.math.maxInt(u32);
 
 pub fn retain(model_path: []const u8, mesh_verts: []const f32, source_count: u32) void {
     clear();
@@ -49,11 +55,13 @@ pub fn clear() void {
     if (g_source_colors) |c| alloc.free(c);
     if (g_face_to_source) |m| alloc.free(m);
     if (g_source_face_group) |m| alloc.free(m);
+    if (g_part_ranges) |m| alloc.free(m);
     g_source_verts = null;
     g_source_path = null;
     g_source_colors = null;
     g_face_to_source = null;
     g_source_face_group = null;
+    g_part_ranges = null;
     g_source_count = 0;
 }
 
@@ -84,6 +92,39 @@ pub fn setFaceMap(m: []const u32) void {
 pub fn setFaceGroups(m: []const u32) void {
     if (g_source_face_group) |old| alloc.free(old);
     g_source_face_group = alloc.dupe(u32, m) catch null;
+}
+
+/// Adopt the per-part group ranges: flattened [lo,hi) pairs, sorted, non-overlapping.
+/// Empty clears (back to position-only welding). The editor cart sends this after every
+/// load/append so the weld knows which authored groups form one independent part.
+pub fn setPartRanges(pairs: []const u32) void {
+    if (g_part_ranges) |old| alloc.free(old);
+    g_part_ranges = if (pairs.len >= 2) alloc.dupe(u32, pairs) catch null else null;
+}
+
+pub fn hasPartRanges() bool {
+    return g_part_ranges != null;
+}
+
+/// The PART index an authored group id falls in (binary search over the [lo,hi) pairs).
+/// NO_PART when no ranges are set, the group is ungrouped, or it falls in a gap — all
+/// such faces weld together, which is exactly the pre-part behaviour.
+pub fn partIndexOf(group: u32) u32 {
+    const r = g_part_ranges orelse return NO_PART;
+    if (group == NO_FACE_GROUP) return NO_PART;
+    var lo: usize = 0;
+    var hi: usize = r.len / 2;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (group < r[mid * 2]) {
+            hi = mid;
+        } else if (group >= r[mid * 2 + 1]) {
+            lo = mid + 1;
+        } else {
+            return @intCast(mid);
+        }
+    }
+    return NO_PART;
 }
 
 /// The authored-face group a DISPLAYED face belongs to — composes displayed->source

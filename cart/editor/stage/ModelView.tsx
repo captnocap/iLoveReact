@@ -223,6 +223,15 @@ const meshAppendGroup = (positions: Float32Array, faceGroups: Uint32Array) =>
   readTopoResult(host.__mesh_append_group?.(positions, Math.floor(positions.length / 8), faceGroups));
 const meshSetGroupHidden = (lo: number, hi: number, hidden: boolean) =>
   readTopoResult(host.__mesh_set_group_hidden?.(lo, hi, hidden ? 1 : 0));
+// Tell the weld which group ranges are PARTS: coincident verts in different parts stay
+// separate logical verts, so editing a focused part can't drag a stacked twin with it.
+// Sent (full list) after every load and part op; empty clears to position-only welding.
+const meshSetPartRanges = (ranges: { lo: number; hi: number }[]) => {
+  const sorted = ranges.slice().sort((a, b) => a.lo - b.lo);
+  const pairs = new Uint32Array(sorted.length * 2);
+  sorted.forEach((r, i) => { pairs[i * 2] = r.lo; pairs[i * 2 + 1] = r.hi; });
+  host.__mesh_set_part_ranges?.(pairs);
+};
 const meshDeleteGroupRange = (lo: number, hi: number) => {
   host.__mesh_edit_select_group_range?.(lo, hi, 0);
   return readTopoResult(host.__mesh_delete_selection?.());
@@ -392,6 +401,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     setSelInfo(readSelInfo() ?? selInfo);
   };
 
+  // The outliner part ranges currently resident in the host mesh — the source for
+  // meshSetPartRanges. Seeded from initialMesh.partColors on load, maintained through
+  // appendPart/deletePartRange (hide leaves geometry, so ranges don't change).
+  const partRangesRef = useRef<{ lo: number; hi: number }[]>([]);
+
   // Only the paint stroke is JS-driven now (and only while in paint mode). Orbit, select,
   // marquee, focus, and zoom are owned entirely by the host's native input loop — there is
   // no per-move React state for them, which is the whole point (no JS in the loop).
@@ -472,15 +486,22 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     deleteSelection: () => applyTopo(meshDeleteSelection(), 'Nothing selected to delete'),
     // Host-authoritative part ops (the outliner). Append preserves prior edits; hide/delete
     // act on the part's group range. All adopt the new host mesh key without a JS recompose.
+    // Each op re-sends the full part-range list so the weld keeps parts independent.
     appendPart: (positions, faceGroups, color) => {
       const r = meshAppendGroup(positions, faceGroups);
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
       const [rr, gg, bb] = hexToRgb01(color);
       host.__model_paint_group_range?.(r.lo, r.hi, Math.round(rr * 255), Math.round(gg * 255), Math.round(bb * 255));
+      partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
+      meshSetPartRanges(partRangesRef.current);
       return { lo: r.lo, hi: r.hi };
     },
     setPartHidden: (lo, hi, hidden) => { adoptMesh(meshSetGroupHidden(lo, hi, hidden)); },
-    deletePartRange: (lo, hi) => { adoptMesh(meshDeleteGroupRange(lo, hi)); },
+    deletePartRange: (lo, hi) => {
+      adoptMesh(meshDeleteGroupRange(lo, hi));
+      partRangesRef.current = partRangesRef.current.filter((r) => r.lo !== lo || r.hi !== hi);
+      meshSetPartRanges(partRangesRef.current);
+    },
     setQuality: (q) => applyQuality(q),
     brushTool: chooseBrushTool,
     cycleSafety,
@@ -558,6 +579,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
       setError(null);
       setQuality(1); // a fresh model loads full-res
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 }); // new mesh → selection cleared
+      partRangesRef.current = []; // a plain file import is one unstructured mesh, no parts
       recordAttribution(path); // account for where this asset came from
     } else {
       setError(`Could not load ${path.split('/').pop()}`);
@@ -571,6 +593,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
       setError(null);
       setQuality(1);
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 });
+      // Seed the weld's part ranges from the composed parts (partColors carries every
+      // part's [lo,hi)) so stacked parts stay independently editable from the first frame.
+      partRangesRef.current = (mesh.partColors ?? []).map((pc) => ({ lo: pc.lo, hi: pc.hi }));
+      meshSetPartRanges(partRangesRef.current);
     } else {
       setError(`Could not load ${mesh.name}`);
     }

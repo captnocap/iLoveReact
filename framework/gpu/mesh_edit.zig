@@ -527,6 +527,13 @@ fn weldKey(p: [3]f32) [3]i32 {
     };
 }
 
+/// Weld identity: quantised position PLUS the outliner part the face belongs to. Two
+/// stacked cubes are two PARTS — their coincident corners must stay separate logical
+/// verts or the gizmo writeback drags both cubes at once (edits "bleed"). Faces within
+/// one part (a cube's 6 authored faces) still share the position key and weld normally.
+/// With no part ranges set, every face is NO_PART and this degrades to position-only.
+const WeldKey = struct { pos: [3]i32, part: u32 };
+
 /// Build (or rebuild) the welded topology from model_paint's CPU triangle positions.
 /// Returns false if there's no resident mesh. Idempotent for a given facecount.
 fn ensureTopology() bool {
@@ -545,18 +552,19 @@ fn ensureTopology() bool {
     const pos = model_paint.positions() orelse return false;
     if (pos.len < @as(usize, fc) * 9) return false;
 
-    var weld = std.AutoHashMapUnmanaged([3]i32, u32){};
+    var weld = std.AutoHashMapUnmanaged(WeldKey, u32){};
     defer weld.deinit(alloc);
     var verts = std.ArrayListUnmanaged(f32){};
     var corner_vert = alloc.alloc(u32, @as(usize, fc) * 3) catch return false;
 
     var f: u32 = 0;
     while (f < fc) : (f += 1) {
+        const part = model_source.partIndexOf(model_source.faceGroupOf(f));
         var k: u32 = 0;
         while (k < 3) : (k += 1) {
             const base = f * 9 + k * 3;
             const p: [3]f32 = .{ pos[base + 0], pos[base + 1], pos[base + 2] };
-            const key = weldKey(p);
+            const key = WeldKey{ .pos = weldKey(p), .part = part };
             const gop = weld.getOrPut(alloc, key) catch return false;
             if (!gop.found_existing) {
                 gop.value_ptr.* = @intCast(verts.items.len / 3);
@@ -1379,6 +1387,37 @@ test "grouped cube exposes 12 boundary edges — the 6 quad diagonals are hidden
     try testing.expect(ensureTopology());
     try testing.expectEqual(@as(u32, 18), edgeCount()); // topology still has all 18 welded edges
     try testing.expectEqual(@as(u32, 12), boundaryEdgeCount()); // but only 12 are REAL edges
+}
+
+test "two coincident cubes in DIFFERENT parts weld to 16 verts, not 8" {
+    // The "edits bleed across stacked parts" bug: two identical cubes composed at the
+    // origin. Position-only welding merged their corners into 8 shared logical verts, so
+    // the gizmo moving cube 2's vert dragged cube 1 too. With part ranges set, the weld
+    // keys on (position, part) and each cube keeps its own 8 verts.
+    var soup: [2 * 12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(soup[0 .. 12 * 3 * 8]);
+    buildCubeSoup(soup[12 * 3 * 8 ..][0 .. 12 * 3 * 8]);
+    // Cube 1 owns groups 0..6, cube 2 owns groups 6..12 (two tris per authored quad).
+    var groups: [24]u32 = undefined;
+    for (&groups, 0..) |*g, i| g.* = @intCast(i / 2);
+    model_source.setFaceGroups(groups[0..]);
+    model_paint.setTarget(780, soup[0..], 72);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+    }
+
+    // No part ranges → coincident corners weld across the cubes (the old behaviour).
+    try testing.expect(ensureTopology());
+    try testing.expectEqual(@as(u32, 8), vertCount());
+
+    // Part ranges [0,6) and [6,12) → each cube welds independently: 16 verts, 36 edges.
+    model_source.setPartRanges(&[_]u32{ 0, 6, 6, 12 });
+    reset();
+    try testing.expect(ensureTopology());
+    try testing.expectEqual(@as(u32, 16), vertCount());
+    try testing.expectEqual(@as(u32, 36), edgeCount()); // 18 welded edges per cube
 }
 
 test "weld builds 4 verts and 5 edges from a 2-tri quad" {

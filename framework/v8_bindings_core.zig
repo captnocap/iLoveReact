@@ -670,6 +670,27 @@ fn hostMeshEditScope(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     state.markDirty();
 }
 
+/// __mesh_set_part_ranges(u32Pairs) → 1|0. Adopt the outliner's PART ranges — flattened
+/// [lo,hi) authored-group pairs, sorted, non-overlapping. The weld keys on (position, part)
+/// so coincident verts in different parts never merge and edits can't bleed across stacked
+/// parts. Empty array clears (position-only weld). Sent after every load/append.
+fn hostMeshSetPartRanges(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        scene3d.meshEditSetPartRanges(&.{});
+        setReturnNumber(info, 1);
+        return;
+    };
+    if (bytes.len % (2 * @sizeOf(u32)) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const pairs: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    scene3d.meshEditSetPartRanges(pairs);
+    state.markDirty();
+    setReturnNumber(info, 1);
+}
+
 /// __model_paint_group_range(lo, hi, r, g, b) → face count. Paint every face in the group
 /// range a solid colour — the outliner tints each part its own colour on load.
 fn hostModelPaintGroupRange(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1797,6 +1818,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);
     v8_runtime.registerHostFn("__mesh_edit_select_group_range", hostMeshEditSelectGroupRange);
     v8_runtime.registerHostFn("__mesh_edit_scope", hostMeshEditScope);
+    v8_runtime.registerHostFn("__mesh_set_part_ranges", hostMeshSetPartRanges);
     v8_runtime.registerHostFn("__model_paint_group_range", hostModelPaintGroupRange);
     v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
     v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);
