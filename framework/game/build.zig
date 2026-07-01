@@ -487,6 +487,172 @@ pub fn placedPieceDef(piece: PlacedBuildPiece) ?BuildPieceDef {
     return catalogEntry(piece.pieceId);
 }
 
+// ── leaf geometry ────────────────────────────────────────────────────────────
+// Verbatim from placed.ts. The JS WeakMap perf-grid (pieceGridOf/piecesNear) is
+// an identity-cached candidate narrower whose predicates re-check exactly — the
+// TS notes "the result is identical" — so liftedWallBaseY scans directly here;
+// the spatial index ports later if host profiling needs it. The prop-specific
+// visualBounds Y-band (propLocalYBand) is coded-model content and is deferred.
+// placedPieceDef is unwrapped with `.?` — the world stream only stores valid
+// ids, and the TS placedPieceDef throws on an unknown id (same invariant).
+
+const DEG: f32 = std.math.pi / 180.0;
+
+pub const PieceBounds = struct {
+    minX: f32,
+    maxX: f32,
+    minZ: f32,
+    maxZ: f32,
+    baseY: f32,
+    topY: f32,
+};
+
+pub const RoofProfile = struct { shape: RoofShape, pitch: f32 };
+
+fn normalizeYaw(yawDegrees: f32) f32 {
+    return @mod(@mod(yawDegrees, 360.0) + 360.0, 360.0);
+}
+
+/// yaw snapped onto a quarter turn, or null when genuinely free-angled (placed.ts).
+fn quarterTurns(yawDegrees: f32) ?i32 {
+    const yaw = normalizeYaw(yawDegrees);
+    const quarter = @mod(@as(i32, @intFromFloat(@round(yaw / 90.0))), 4);
+    if (@abs(yaw - @as(f32, @floatFromInt(quarter)) * 90.0) < 1e-6 or @abs(yaw - 360.0) < 1e-6) return quarter;
+    return null;
+}
+
+/// placed.ts placedPieceSize — the row's size with a roof's dragged footprint
+/// (ROOFSPAN) substituted for width/depth. ONE source for visuals/bounds/snap/colliders.
+pub fn placedPieceSize(piece: PlacedBuildPiece) BuildPieceSize {
+    const size = placedPieceDef(piece).?.size;
+    if (piece.roofSpan) |rs| {
+        if (rs.widthMeters > 0 and rs.depthMeters > 0) {
+            return .{ .widthMeters = rs.widthMeters, .heightMeters = size.heightMeters, .depthMeters = rs.depthMeters };
+        }
+    }
+    return size;
+}
+
+/// placed.ts placedRoofProfile — a pitched roof's effective (shape, pitch);
+/// non-roof / flat rows report shape .flat, pitch 0.
+pub fn placedRoofProfile(piece: PlacedBuildPiece) RoofProfile {
+    const def = placedPieceDef(piece).?;
+    if (def.kind != .roof) return .{ .shape = .flat, .pitch = 0 };
+    return .{ .shape = def.roofShape orelse .flat, .pitch = def.roofPitch orelse ROOF_PITCH.semiSlant };
+}
+
+/// placed.ts roofRiseMeters — the ridge/apex rise above the eave, scaled to the
+/// footprint span. run = full depth (shed), half depth (gable), or half the short
+/// axis (hip/pyramid). 0 for flat roofs and non-roof pieces.
+pub fn roofRiseMeters(piece: PlacedBuildPiece) f32 {
+    const prof = placedRoofProfile(piece);
+    if (prof.shape == .flat) return 0;
+    const size = placedPieceSize(piece);
+    const run = switch (prof.shape) {
+        .shed => size.depthMeters,
+        .gable => size.depthMeters / 2.0,
+        .hip, .pyramid => @min(size.widthMeters, size.depthMeters) / 2.0,
+        .flat => unreachable, // returned above
+    };
+    return @max(0, prof.pitch * run);
+}
+
+/// placed.ts placedPieceTags — catalog row + edit, the one composition point.
+pub fn placedPieceTags(piece: PlacedBuildPiece) BuildGameplayTags {
+    return effectiveTags(placedPieceDef(piece).?, piece.edit);
+}
+
+/// placed.ts pieceBounds — axis-aligned world envelope (exact for quarter-turn
+/// yaw, the rotated envelope otherwise). topY tops out at the ridge for pitched roofs.
+pub fn pieceBounds(piece: PlacedBuildPiece) PieceBounds {
+    const size = placedPieceSize(piece);
+    const halfW = size.widthMeters / 2.0;
+    const halfD = size.depthMeters / 2.0;
+    var hx: f32 = undefined;
+    var hz: f32 = undefined;
+    if (quarterTurns(piece.yawDegrees)) |quarter| {
+        const swapped = @mod(quarter, 2) == 1;
+        hx = if (swapped) halfD else halfW;
+        hz = if (swapped) halfW else halfD;
+    } else {
+        const cos = @abs(@cos(piece.yawDegrees * DEG));
+        const sin = @abs(@sin(piece.yawDegrees * DEG));
+        hx = cos * halfW + sin * halfD;
+        hz = sin * halfW + cos * halfD;
+    }
+    return .{
+        .minX = piece.x - hx,
+        .maxX = piece.x + hx,
+        .minZ = piece.z - hz,
+        .maxZ = piece.z + hz,
+        .baseY = piece.y,
+        .topY = piece.y + @max(size.heightMeters, roofRiseMeters(piece)),
+    };
+}
+
+/// placed.ts pieceVisualBounds — the selection/highlight envelope. For a prop
+/// whose mesh sits off the ground the TS lifts Y to propLocalYBand (coded-model
+/// content, deferred); every non-prop piece is exactly pieceBounds.
+pub fn pieceVisualBounds(piece: PlacedBuildPiece) PieceBounds {
+    const base = pieceBounds(piece);
+    // prop kind: propLocalYBand lift deferred with the prop/cooked module.
+    return base;
+}
+
+fn isSupportPlate(kind: BuildPieceKind) bool {
+    return kind == .floor or kind == .roof;
+}
+
+// WALLTOP (placed.ts): wall-family pieces ALWAYS rest on the floor at their cell.
+fn isWallRestKind(kind: BuildPieceKind) bool {
+    return switch (kind) {
+        .wall, .fence, .railing, .pillar, .corner, .arch => true,
+        else => false,
+    };
+}
+const WALL_REST_MAX_RISE_METERS: f32 = 1.5;
+const WALL_REST_EPSILON_METERS: f32 = 0.02;
+
+/// placed.ts liftedWallBaseY — the Y a wall-family piece should REST at: the top
+/// of the highest floor/roof plate overlapping its footprint at its own storey,
+/// else its authored Y. READ-TIME projection; idempotent. (Direct scan; see note.)
+pub fn liftedWallBaseY(piece: PlacedBuildPiece, pieces: []const PlacedBuildPiece) f32 {
+    if (!isWallRestKind(placedPieceDef(piece).?.kind)) return piece.y;
+    const wall = pieceBounds(piece);
+    var restY = piece.y;
+    for (pieces) |other| {
+        if (std.mem.eql(u8, other.id, piece.id)) continue;
+        if (!isSupportPlate(placedPieceDef(other).?.kind)) continue;
+        const plate = pieceBounds(other);
+        if (@min(wall.maxX, plate.maxX) <= @max(wall.minX, plate.minX)) continue; // no plan overlap (x)
+        if (@min(wall.maxZ, plate.maxZ) <= @max(wall.minZ, plate.minZ)) continue; // no plan overlap (z)
+        if (plate.topY < piece.y - WALL_REST_EPSILON_METERS) continue; // below the wall
+        if (plate.topY > piece.y + WALL_REST_MAX_RISE_METERS) continue; // a storey up
+        if (plate.topY > restY) restY = plate.topY;
+    }
+    return restY;
+}
+
+/// placed.ts liftWallsOntoFloors — the piece list with every wall-family piece
+/// lifted onto the floor beneath it (READ-TIME; stored data unchanged). Idempotent.
+/// Caller owns the returned slice.
+pub fn liftWallsOntoFloors(allocator: std.mem.Allocator, pieces: []const PlacedBuildPiece) ![]PlacedBuildPiece {
+    const out = try allocator.alloc(PlacedBuildPiece, pieces.len);
+    for (pieces, 0..) |piece, i| {
+        out[i] = piece;
+        const restY = liftedWallBaseY(piece, pieces);
+        if (restY > piece.y + WALL_REST_EPSILON_METERS) out[i].y = restY;
+    }
+    return out;
+}
+
+/// placed.ts boundsTouch — two envelopes come within tolerance on every axis.
+fn boundsTouch(a: PieceBounds, b: PieceBounds, tolerance: f32) bool {
+    return a.minX <= b.maxX + tolerance and b.minX <= a.maxX + tolerance and
+        a.minZ <= b.maxZ + tolerance and b.minZ <= a.maxZ + tolerance and
+        a.baseY <= b.topY + tolerance and b.baseY <= a.topY + tolerance;
+}
+
 test "PLACED_TUNING values match the TS source verbatim" {
     try std.testing.expectEqual(@as(f32, 1.2), PLACED_TUNING.walkOpeningWidthMeters);
     try std.testing.expectEqual(@as(f32, 2.6), PLACED_TUNING.vehicleOpeningWidthMeters);
@@ -548,4 +714,29 @@ test "applyWallEdit / effectiveTags match the TS overrides verbatim" {
     try std.testing.expect(!placedPieceAcceptsEdits(.floor));
     try std.testing.expectEqual(BuildSnapMode.grid, kindSnapDefault(.floor));
     try std.testing.expectEqual(BuildSnapMode.surface, kindSnapDefault(.trim));
+}
+
+test "leaf geometry — bounds, roofRise, liftedWallBaseY match the TS math" {
+    // a 3×3 floor at origin, yaw 0 → ±1.5 footprint, base 0, top 0.05 (FLOOR_SIZE height)
+    const floor = PlacedBuildPiece{ .id = "f", .pieceId = "floor.concrete.common", .x = 0, .y = 0, .z = 0, .yawDegrees = 0 };
+    const fb = pieceBounds(floor);
+    try std.testing.expectApproxEqAbs(@as(f32, -1.5), fb.minX, 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), fb.maxX, 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), fb.topY, 1e-5);
+    // quarter-turn swap: a WALL_SIZE piece (3 wide × 0.005 deep) yawed 90° swaps x/z half-extents
+    const wall90 = PlacedBuildPiece{ .id = "w", .pieceId = "wall.concrete.common", .x = 0, .y = 0, .z = 0, .yawDegrees = 90 };
+    const wb = pieceBounds(wall90);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.0025), wb.maxX, 1e-5); // half of 0.005 depth
+    try std.testing.expectApproxEqAbs(@as(f32, 1.5), wb.maxZ, 1e-5); // half of 3 width
+    // roofRise: flat → 0; gable pitch 0.5 over depth 3 → 0.5 * (3/2) = 0.75
+    try std.testing.expectApproxEqAbs(@as(f32, 0), roofRiseMeters(.{ .id = "r", .pieceId = "roof.flat.common", .x = 0, .y = 0, .z = 0, .yawDegrees = 0 }), 1e-5);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.75), roofRiseMeters(.{ .id = "g", .pieceId = "roof.gable.suburb", .x = 0, .y = 0, .z = 0, .yawDegrees = 0 }), 1e-5);
+    // liftedWallBaseY: a wall authored at y=0 over a floor whose top is 0.05 rests at 0.05
+    const scene = [_]PlacedBuildPiece{
+        floor,
+        .{ .id = "w2", .pieceId = "wall.concrete.common", .x = 0, .y = 0, .z = 0, .yawDegrees = 0 },
+    };
+    try std.testing.expectApproxEqAbs(@as(f32, 0.05), liftedWallBaseY(scene[1], &scene), 1e-5);
+    // a floor never rests (not a wall-rest kind) → its own y
+    try std.testing.expectApproxEqAbs(@as(f32, 0), liftedWallBaseY(scene[0], &scene), 1e-5);
 }
