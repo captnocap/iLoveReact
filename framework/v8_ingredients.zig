@@ -247,6 +247,14 @@ const v8_bindings_physics_lab = if (enabledFor("physics_lab")) @import("v8_bindi
 const v8_bindings_game_physics = if (enabledFor("game_physics")) @import("v8_bindings_game_physics.zig") else struct {
     pub fn registerGamePhysics(_: anytype) void {}
 };
+// The game's build placement (framework/game/build.zig, req_2349): host-owned
+// raycast/placement/validate/queries — the iso world editor's placement brain,
+// ported verbatim from game/build/*.ts so the editor stops importing the whole
+// game cart to place a piece. __game_build_* host fns. Gated INGREDIENT — when
+// off, framework/game/build.zig is never parsed.
+const v8_bindings_game_build = if (enabledFor("game_build")) @import("v8_bindings_game_build.zig") else struct {
+    pub fn registerGameBuild(_: anytype) void {}
+};
 // The game's pathing (framework/game/pathing.zig, V5/V18): grid A* + lane
 // discipline + deterministic motion plans, __path_*/__game_pathing_* host
 // fns. Gated INGREDIENT — when off, the module is never even parsed.
@@ -363,6 +371,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "paintable", .required = false, .grep_prefix = "__paintable_", .reg_fn = "registerPaintable", .mod = v8_bindings_paintable },
     .{ .name = "physics_lab", .required = false, .grep_prefix = "__physics_lab_", .reg_fn = "registerPhysicsLab", .mod = v8_bindings_physics_lab },
     .{ .name = "game_physics", .required = false, .grep_prefix = "__hmsc_", .reg_fn = "registerGamePhysics", .mod = v8_bindings_game_physics },
+    .{ .name = "game_build", .required = false, .grep_prefix = "__game_build_", .reg_fn = "registerGameBuild", .mod = v8_bindings_game_build },
     .{ .name = "game_pathing", .required = false, .grep_prefix = "__path_", .reg_fn = "registerGamePathing", .mod = v8_bindings_game_pathing },
     .{ .name = "game_camera", .required = false, .grep_prefix = "__game_camera_", .reg_fn = "registerGameCamera", .mod = v8_bindings_game_camera },
     .{ .name = "compiled_world", .required = false, .grep_prefix = "__compiled_world_", .reg_fn = "registerCompiledWorld", .mod = v8_bindings_compiled_world },

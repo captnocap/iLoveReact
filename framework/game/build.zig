@@ -714,7 +714,7 @@ pub fn validatePlacement(placement: PlacedBuildPiece) PlacementValidation {
 
 pub const Vec3 = struct { x: f32, y: f32, z: f32 };
 pub const PieceRay = struct { origin: Vec3, dir: Vec3 };
-pub const PieceHit = struct { piece: PlacedBuildPiece, t: f32, point: Vec3, normal: Vec3 };
+pub const PieceHit = struct { piece: PlacedBuildPiece, index: usize, t: f32, point: Vec3, normal: Vec3 };
 pub const PlacedPieceDepthSpan = struct { minV: f32, maxV: f32 };
 
 fn centeredDepthSpan(size: BuildPieceSize) PlacedPieceDepthSpan {
@@ -730,7 +730,7 @@ pub fn placedPieceDepthSpan(piece: PlacedBuildPiece) PlacedPieceDepthSpan {
 /// each piece's local frame), or null past maxDistance / on a clean miss.
 pub fn raycastPieces(ray: PieceRay, pieces: []const PlacedBuildPiece, maxDistance: f32) ?PieceHit {
     var best: ?PieceHit = null;
-    for (pieces) |piece| {
+    for (pieces, 0..) |piece, piece_index| {
         const size = placedPieceDef(piece).?.size;
         const depthSpan = placedPieceDepthSpan(piece);
         const depthCenter = (depthSpan.minV + depthSpan.maxV) / 2.0;
@@ -799,6 +799,7 @@ pub fn raycastPieces(ray: PieceRay, pieces: []const PlacedBuildPiece, maxDistanc
         const wsin = @sin(yawRadians);
         best = .{
             .piece = piece,
+            .index = piece_index,
             .t = tNear,
             .point = .{
                 .x = ray.origin.x + ray.dir.x * tNear,

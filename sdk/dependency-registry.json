@@ -859,6 +859,21 @@
       ],
       "note": "The game's host-side physics + movement (framework/game/physics.zig + movement.zig, V1/V7/V18), registered by framework/v8_bindings_game_physics.zig. Host fns keep their legacy __hmsc_* names (plus honest __game_physics_* aliases) so cart JS callers keep working. Fires for carts shipping the hmsc host-physics bridge or anything importing the cart/hmsc-int/game/ ground floor. A 2D interface cart pays zero bytes and zero host fns."
     },
+    "game-build": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/game/build.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-game-build"
+      ],
+      "v8Bindings": [
+        "game_build"
+      ],
+      "note": "The iso world editor's placement brain — raycast/placementFor/validatePlacement/piece queries — ported verbatim from cart/hmsc-int/game/build/*.ts into host-owned framework/game/build.zig (req_2349), registered by framework/v8_bindings_game_build.zig as __game_build_*. Fires when a cart bundles the runtime/game/build.ts door. This is what lets the editor stop cross-importing the whole game cart (req_2178) to place a floor: it calls the host fns instead."
+    },
     "game-pathing": {
       "triggers": [
         {
