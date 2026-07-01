@@ -106,6 +106,7 @@ export type ModelToolApi = {
   extrudeEdge: () => void;
   createFace: () => void;
   loopCut: () => void;
+  deleteSelection: () => void;
   setQuality: (q: number) => void;
   brushTool: (t: BrushTool) => void;
   cycleSafety: () => void;

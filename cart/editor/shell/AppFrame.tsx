@@ -150,6 +150,15 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: `${command.name} - ${source}` }));
       return;
     }
+    // Delete Selection on a model document deletes the mesh selection (not a world object).
+    if (command.id === 'delete-selection') {
+      const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+      if (doc?.kind === 'model') {
+        modelToolApiRef.current?.deleteSelection();
+        setState((prev) => ({ ...prev, status: 'deleted mesh selection' }));
+        return;
+      }
+    }
     if (command.id === 'undo-local') {
       undoLocal();
       return;

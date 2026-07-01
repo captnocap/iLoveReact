@@ -422,6 +422,67 @@ pub fn selectAll() i32 {
     return @intCast(selCount());
 }
 
+/// Fill `out` (one bool per displayed triangle) with which triangles the current selection
+/// deletes — exactly what's selected, nothing more: face mode drops selected faces; vertex
+/// mode drops any face touching a selected vertex; edge mode drops any face using a selected
+/// edge. Returns the count to delete. `out.len` must be >= facecount.
+pub fn buildDeleteMask(out: []bool) u32 {
+    const fc = model_paint.faceCount();
+    if (out.len < fc) return 0;
+    @memset(out[0..fc], false);
+    switch (g_mode) {
+        .face => {
+            const sel = g_sel_face orelse return 0;
+            var f: u32 = 0;
+            while (f < fc) : (f += 1) {
+                if (f < sel.len and sel[f]) out[f] = true;
+            }
+        },
+        .vertex => {
+            if (!ensureTopology()) return 0;
+            const sel = g_sel_vert orelse return 0;
+            const corners = g_corner_vert orelse return 0;
+            var f: u32 = 0;
+            while (f < fc) : (f += 1) {
+                var k: u32 = 0;
+                while (k < 3) : (k += 1) {
+                    const v = corners[f * 3 + k];
+                    if (v < sel.len and sel[v]) {
+                        out[f] = true;
+                        break;
+                    }
+                }
+            }
+        },
+        .edge => {
+            if (!ensureTopology()) return 0;
+            const sel = g_sel_edge orelse return 0;
+            const edges = g_edges orelse return 0;
+            const corners = g_corner_vert orelse return 0;
+            var eset = std.AutoHashMapUnmanaged(u64, void){};
+            defer eset.deinit(alloc);
+            var e: u32 = 0;
+            while (e < g_edge_count) : (e += 1) {
+                if (e < sel.len and sel[e]) eset.put(alloc, edgeKey(edges[e * 2], edges[e * 2 + 1]), {}) catch {};
+            }
+            var f: u32 = 0;
+            while (f < fc) : (f += 1) {
+                const a = corners[f * 3 + 0];
+                const b = corners[f * 3 + 1];
+                const cc = corners[f * 3 + 2];
+                if (eset.contains(edgeKey(a, b)) or eset.contains(edgeKey(b, cc)) or eset.contains(edgeKey(cc, a))) out[f] = true;
+            }
+        },
+        .none => {},
+    }
+    var count: u32 = 0;
+    var i: u32 = 0;
+    while (i < fc) : (i += 1) {
+        if (out[i]) count += 1;
+    }
+    return count;
+}
+
 /// Select an edge by welded-edge index (no raycast) — used by toolbar/headless flows that
 /// need a deterministic edge set for topology operations.
 pub fn selectEdgeByIndex(idx: u32, additive: bool) bool {

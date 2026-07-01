@@ -545,6 +545,15 @@ fn hostMeshTopoLoopCut(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_delete_selection() → JSON {"ok","key","count"}. Delete exactly the selected mesh
+/// elements (selected faces, or faces touching a selected vert/edge) and rebuild the mesh.
+fn hostMeshDeleteSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = scene3d.meshDeleteSelection();
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_edit_snapshot() — save the selection before an instant mousedown pick.
 fn hostMeshEditSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     _ = info_c;
@@ -1697,6 +1706,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
+    v8_runtime.registerHostFn("__mesh_delete_selection", hostMeshDeleteSelection);
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);

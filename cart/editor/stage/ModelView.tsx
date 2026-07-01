@@ -88,6 +88,7 @@ export type ModelToolApi = {
   extrudeEdge: () => void;
   createFace: () => void;
   loopCut: () => void;
+  deleteSelection: () => void;
   setQuality: (q: number) => void;
   // Brush controls — the editor toolbar drives tool/safety/detail, the BrushKit dock drives
   // the brush + palette. The viewer stays the single owner of the live brush state.
@@ -207,6 +208,8 @@ const meshExtrudeEdge = (distance: number) => readTopoResult(host.__mesh_topo_ex
 const meshCreateFace = () => readTopoResult(host.__mesh_topo_create_face?.());
 // Loop cut: slice the mesh by the plane perpendicular to the ONE selected edge (host op).
 const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
+// Delete exactly the selected elements (faces, or faces touching a selected vert/edge).
+const meshDeleteSelection = () => readTopoResult(host.__mesh_delete_selection?.());
 const readGuard = (): GuardInfo | null => {
   try {
     const j = host.__mesh_edit_guard?.();
@@ -427,6 +430,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
     loopCut: () => applyTopo(meshLoopCut(), 'Select exactly one edge to loop-cut across'),
+    deleteSelection: () => applyTopo(meshDeleteSelection(), 'Nothing selected to delete'),
     setQuality: (q) => applyQuality(q),
     brushTool: chooseBrushTool,
     cycleSafety,
@@ -481,6 +485,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     s: () => chooseGizmoTool(1), S: () => chooseGizmoTool(1),
     r: () => chooseGizmoTool(2), R: () => chooseGizmoTool(2),
     '1': () => chooseSelMode(1), '2': () => chooseSelMode(2), '3': () => chooseSelMode(3),
+    // Delete/Backspace removes exactly the selected elements. Only fires when no text field is
+    // focused (the engine routes the key to inputs first), so it never fights text editing.
+    delete: () => { if (selMode !== 0) applyTopo(meshDeleteSelection(), 'Nothing selected to delete'); },
+    backspace: () => { if (selMode !== 0) applyTopo(meshDeleteSelection(), 'Nothing selected to delete'); },
     Escape: () => { if (selMode !== 0) { meshClearSel(); setSelInfo(readSelInfo() ?? selInfo); } },
   });
 

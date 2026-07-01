@@ -924,6 +924,52 @@ pub fn meshTopoLoopCut() bool {
     return ok;
 }
 
+/// Delete exactly the selected mesh elements: drop every triangle the current selection
+/// marks (mesh_edit.buildDeleteMask — selected faces, or faces touching a selected vert/edge)
+/// and rebuild the edit mesh from the survivors, carrying their face groups. Refuses to empty
+/// the mesh (a no-op when nothing is selected or everything would go).
+pub fn meshDeleteSelection() bool {
+    if (!model_paint.hasTarget()) return false;
+    const verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
+
+    const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
+    defer std.heap.c_allocator.free(mask);
+    const del = mesh_edit.buildDeleteMask(mask);
+    if (del == 0 or del >= tri_count) return false;
+
+    const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+    var out = std.ArrayListUnmanaged(f32){};
+    var groups = std.ArrayListUnmanaged(u32){};
+    defer groups.deinit(std.heap.c_allocator);
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (mask[f]) continue;
+        const base = @as(usize, f) * 24; // 3 verts × 8 interleaved floats
+        if (base + 24 > verts.len) break;
+        if (!appendFloats(&out, verts[base .. base + 24])) {
+            out.deinit(std.heap.c_allocator);
+            return false;
+        }
+        if (has_groups) groups.append(std.heap.c_allocator, model_source.faceGroupOf(f)) catch {};
+    }
+    const kept: u32 = @intCast(out.items.len / 8);
+    if (kept < 3) {
+        out.deinit(std.heap.c_allocator);
+        return false;
+    }
+    const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
+        out.deinit(std.heap.c_allocator);
+        return false;
+    };
+    defer std.heap.c_allocator.free(owned);
+
+    const ok = replaceActiveEditMesh(owned, kept);
+    if (ok and has_groups) model_source.setFaceGroups(groups.items);
+    return ok;
+}
+
 fn faceCrossFromPositions(pos: []const f32, face: u32) [3]f32 {
     const b = @as(usize, face) * 9;
     if (b + 8 >= pos.len) return .{ 0, 0, 0 };
