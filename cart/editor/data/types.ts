@@ -121,8 +121,10 @@ export type ModelToolApi = {
   loopCut: () => void;
   deleteSelection: () => void;
   appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string) => { lo: number; hi: number } | null;
-  setPartHidden: (lo: number, hi: number, hidden: boolean) => void;
-  deletePartRange: (lo: number, hi: number) => void;
+  // Returns the host op's outcome (count = triangles remaining in the live mesh) so the
+  // shell can report it LOUDLY — a part op that silently no-ops reads as "it all vanished".
+  setPartHidden: (lo: number, hi: number, hidden: boolean) => { ok: boolean; count: number } | null;
+  deletePartRange: (lo: number, hi: number) => { ok: boolean; count: number } | null;
   setQuality: (q: number) => void;
   brushTool: (t: BrushTool) => void;
   cycleSafety: () => void;

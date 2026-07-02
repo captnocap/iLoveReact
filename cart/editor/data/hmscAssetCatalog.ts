@@ -1,4 +1,4 @@
-import { listDir, readFile, stat } from '../../../runtime/hooks/fs';
+import { exists, listDir, readFile, readFileBase64, stat, writeFileBase64Atomic } from '../../../runtime/hooks/fs';
 import {
   HMSC_BROWSE_SHADER_PRESETS,
   HMSC_SHADERS,
@@ -8,7 +8,8 @@ import {
 import { validateDecalDoc } from '../textures/decal';
 import { cuboid, cylinder, cone, pyramid, plane, sphere, icosphere, editMeshToGeometry, type EditMesh } from '../model/editMesh';
 import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, ModelPart, PrimitiveKind } from './types';
-import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
+import { MODEL_PACKAGE_SUBDIRS, displayPath, modelSlug, subDir } from './modelPackage';
+import { loadMaterializedPackages, materializeModelPackage } from './modelPackageStore';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
 const COOKED_SNAPSHOT = 'cart/hmsc-int/data/domains/cooked-asset/snapshots/cooked-asset.snapshot.json';
@@ -352,6 +353,9 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
   const looseViewerSources = looseModelSources(importedViewerSources);
   const viewerModelCount = importedViewerSources.size + looseViewerSources.length;
   const modelPackages = dedupeModelsByName([
+    // Materialized on-disk packages FIRST (they win a name collision): the durable
+    // per-model directories under cart/editor/data/models — imported files land here.
+    ...loadMaterializedPackages(),
     ...importedPropModelPackages(importedProps),
     ...looseModelFilePackages(looseViewerSources),
     ...cookedModelPackages(cooked),
@@ -572,6 +576,40 @@ export function fileModelPackage(source: string): ModelPackage {
     sourceKind: 'source-file',
     semanticKind: semantic,
   };
+}
+
+/// IMPORT a .glb/.obj for keeps: copy the file into its own on-disk Model Package
+/// (cart/editor/data/models/<category>/<slug>/mesh/<file>) and write the manifest, so
+/// the model is in the content browser on every future launch — and travels with the
+/// repo — instead of needing a re-import each session (req_2504). Idempotent: importing
+/// the same filename again returns the already-registered package. Returns null on an
+/// IO failure (caller falls back to a session-only file: open and says so).
+export function importModelFilePackage(sourcePath: string): ModelPackage | null {
+  if (!isViewerFile(sourcePath)) return null;
+  const filename = sourcePath.split('/').pop() || sourcePath;
+  const id = `import:${modelSlug(filename.replace(/\.[^.]+$/, '')).toLowerCase()}`;
+  const registered = HMSC_EDITOR_CATALOG.modelPackages.find((m) => m.id === id);
+  if (registered) return registered;
+  const probe = fileModelPackage(sourcePath);
+  const meshDest = `${subDir(probe.kind, id, 'mesh')}/${filename}`;
+  const pkg: ModelPackage = {
+    ...probe,
+    id,
+    path: displayPath(probe.kind, id),
+    source: sourcePath,
+    viewerPath: meshDest,
+    decompositions: [...probe.decompositions.filter((d) => d !== 'source:file-explorer'), `imported-from:${sourcePath}`],
+  };
+  // Directory skeleton + manifest first (creates the mesh/ subdir), then the bytes.
+  if (!materializeModelPackage(pkg).ok) return null;
+  if (!exists(meshDest)) {
+    const bytes = readFileBase64(sourcePath);
+    if (!bytes || !writeFileBase64Atomic(meshDest, bytes)) return null;
+  }
+  // Register for THIS session too — the catalog array is the live roster the content
+  // browser reads; next boot loadMaterializedPackages() picks the package up from disk.
+  HMSC_EDITOR_CATALOG.modelPackages.push(pkg);
+  return pkg;
 }
 
 function colorFromFloatRgb(rgb: number[] | undefined): string | null {

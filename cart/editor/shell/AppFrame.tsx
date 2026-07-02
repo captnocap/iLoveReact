@@ -32,10 +32,10 @@ import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
-import { primitivePartMesh, composeModelParts, storedModelParts, fileModelPackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
+import { primitivePartMesh, composeModelParts, storedModelParts, fileModelPackage, importModelFilePackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
 import { colorStudioSpec, colorStudioOverrideKey, paletteForSpecVariant, rgbToCss } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
 import { image as imageOps, quantize as quantizeImage } from '../../../runtime/image';
@@ -499,10 +499,15 @@ export default function AppFrame() {
   // surface mounts straight into parts mode (outliner live, part ops working) — never as
   // a view-only model. Its [lo, hi) range is stamped after the host parses the file.
   const openModelFileDocument = (path: string) => {
-    const pkg = fileModelPackage(path);
+    // Import for keeps: copy the file into its own Model Package (content browser +
+    // every future launch). A failed copy still opens the model, but session-only —
+    // and the status says so LOUDLY instead of pretending it was saved.
+    const imported = importModelFilePackage(path);
+    const pkg = imported ?? fileModelPackage(path);
     const doc = modelDocument(pkg);
+    const partPath = pkg.viewerPath ?? path;
     setState((prev) => {
-      const seeded = prev.modelParts[pkg.id] ?? [filePartSeed(path, pkg.name)];
+      const seeded = prev.modelParts[pkg.id] ?? [filePartSeed(partPath, pkg.name)];
       return {
         ...prev,
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
@@ -512,7 +517,9 @@ export default function AppFrame() {
         fileExplorerOpen: false,
         modelParts: { ...prev.modelParts, [pkg.id]: seeded },
         modelActivePartId: prev.modelParts[pkg.id] ? prev.modelActivePartId : (seeded[0]?.id ?? prev.modelActivePartId),
-        status: `imported ${pkg.name}`,
+        status: imported
+          ? `imported ${pkg.name} — saved to the model library (${imported.path})`
+          : `opened ${pkg.name} — NOT saved to the library (file copy failed)`,
       };
     });
   };
@@ -894,17 +901,32 @@ export default function AppFrame() {
     const mid = activePartsModelId(state);
     const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
     const range = part ? partRange(part) : null;
-    if (range) modelToolApiRef.current?.setPartHidden(range.lo, range.hi, part!.visible); // hide if currently shown
-    setState((prev) => ({ ...prev, modelParts: { ...prev.modelParts, [mid!]: (prev.modelParts[mid!] ?? []).map((p) => (p.id === id ? { ...p, visible: !p.visible } : p)) } }));
+    // Hide if currently shown. The outcome is reported LOUDLY: a silent no-op here reads
+    // as "everything vanished" with no trail. verb+range+remaining tris tell the story.
+    const r = range ? modelToolApiRef.current?.setPartHidden(range.lo, range.hi, part!.visible) : null;
+    const verb = part?.visible ? 'hid' : 'showed';
+    const status = !part
+      ? 'part not found'
+      : !range
+        ? `cannot ${part.visible ? 'hide' : 'show'} ${part.name} — its host range is not stamped yet`
+        : r?.ok
+          ? `${verb} ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain in the mesh`
+          : `could not ${part.visible ? 'hide' : 'show'} ${part.name} [${range.lo},${range.hi}) — host op failed`;
+    setState((prev) => ({ ...prev, status, modelParts: { ...prev.modelParts, [mid!]: (prev.modelParts[mid!] ?? []).map((p) => (p.id === id ? { ...p, visible: !p.visible } : p)) } }));
   };
   const deletePart = (id: string) => {
     const mid = activePartsModelId(state);
     const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
     const range = part ? partRange(part) : null;
-    if (range && part!.visible) modelToolApiRef.current?.deletePartRange(range.lo, range.hi);
+    const r = range && part!.visible ? modelToolApiRef.current?.deletePartRange(range.lo, range.hi) : null;
+    const status = part && range && part.visible
+      ? (r?.ok
+        ? `deleted ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`
+        : `could not delete ${part.name} [${range.lo},${range.hi}) — host op failed`)
+      : `removed ${part?.name ?? id} from the outliner`;
     setState((prev) => {
       const parts = (prev.modelParts[mid!] ?? []).filter((p) => p.id !== id);
-      return { ...prev, modelParts: { ...prev.modelParts, [mid!]: parts }, modelActivePartId: prev.modelActivePartId === id ? (parts[0]?.id ?? null) : prev.modelActivePartId };
+      return { ...prev, status, modelParts: { ...prev.modelParts, [mid!]: parts }, modelActivePartId: prev.modelActivePartId === id ? (parts[0]?.id ?? null) : prev.modelActivePartId };
     });
   };
   // The host mesh is authoritative, so a delete just changes it — parts are metadata. After a
@@ -992,11 +1014,13 @@ export default function AppFrame() {
     const existing = state.modelParts[mid];
     let parts = existing;
     if (!parts) {
-      if (mid.startsWith('file:')) {
-        // An imported .glb/.obj is a model OF ONE PART (the whole file) — outliner-first,
-        // like everything else. Its range is stamped by the viewer after the host parses it.
-        const path = mid.slice('file:'.length);
-        parts = [filePartSeed(path, fileModelPackage(path).name)];
+      // Any package whose viewer source is a raw .glb/.obj file (import: packages,
+      // file: opens, content-browser loose files, imported props) is a model OF ONE
+      // PART (the whole file) — outliner-first, like everything else. Its range is
+      // stamped by the viewer after the host parses it.
+      const filePath = modelPackageById(mid)?.viewerPath;
+      if (filePath && isViewerFile(filePath)) {
+        parts = [filePartSeed(filePath, modelPackageById(mid)!.name)];
       } else {
         const bareId = mid.startsWith('studio:') ? mid.slice('studio:'.length) : mid;
         parts = storedModelParts(bareId) ?? undefined;

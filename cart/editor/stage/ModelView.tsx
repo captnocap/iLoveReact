@@ -92,8 +92,10 @@ export type ModelToolApi = {
   // Host-authoritative part ops: append a new part (returns its group range), hide/show a
   // part's range, delete a part's range. The host mesh is the source of truth.
   appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string) => { lo: number; hi: number } | null;
-  setPartHidden: (lo: number, hi: number, hidden: boolean) => void;
-  deletePartRange: (lo: number, hi: number) => void;
+  // Both return the host op's outcome ({ok, count} — count = triangles remaining) so the
+  // shell reports it loudly; null = the door itself failed.
+  setPartHidden: (lo: number, hi: number, hidden: boolean) => { ok: boolean; count: number } | null;
+  deletePartRange: (lo: number, hi: number) => { ok: boolean; count: number } | null;
   setQuality: (q: number) => void;
   // Brush controls — the editor toolbar drives tool/safety/detail, the BrushKit dock drives
   // the brush + palette. The viewer stays the single owner of the live brush state.
@@ -516,11 +518,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       meshSetPartRanges(partRangesRef.current);
       return { lo: r.lo, hi: r.hi };
     },
-    setPartHidden: (lo, hi, hidden) => { adoptMesh(meshSetGroupHidden(lo, hi, hidden)); },
+    setPartHidden: (lo, hi, hidden) => {
+      const r = meshSetGroupHidden(lo, hi, hidden);
+      const ok = adoptMesh(r) && Boolean(r?.ok);
+      return r ? { ok, count: Math.floor((r.count ?? 0) / 3) } : null;
+    },
     deletePartRange: (lo, hi) => {
-      adoptMesh(meshDeleteGroupRange(lo, hi));
-      partRangesRef.current = partRangesRef.current.filter((r) => r.lo !== lo || r.hi !== hi);
+      const r = meshDeleteGroupRange(lo, hi);
+      const ok = adoptMesh(r) && Boolean(r?.ok);
+      partRangesRef.current = partRangesRef.current.filter((pr) => pr.lo !== lo || pr.hi !== hi);
       meshSetPartRanges(partRangesRef.current);
+      return r ? { ok, count: Math.floor((r.count ?? 0) / 3) } : null;
     },
     setQuality: (q) => applyQuality(q),
     brushTool: chooseBrushTool,
