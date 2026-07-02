@@ -191,6 +191,14 @@ export function webpAvailable(): boolean {
   return callHost<boolean>('__imageops_webp_available', false);
 }
 
+/** Median-cut palette quantization (host, no dithering) — the pixel-texture
+ *  import probe. Returns the host's binary layout
+ *  [w u32][h u32][k u32][mse f32][palette k*3][indices w*h] or null; callers
+ *  parse it with their format module (the editor's textures/pixelTexture.ts). */
+export function quantize(input: ImageInput, colors = 64, maxSize = 128): Uint8Array | null {
+  return callHost<Uint8Array | null>('__imageops_quantize', null, input, colors | 0, maxSize | 0);
+}
+
 function clampQuality(q: number): number {
   return Math.max(1, Math.min(100, Math.round(q)));
 }

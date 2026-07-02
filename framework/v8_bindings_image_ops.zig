@@ -26,6 +26,7 @@ const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const codec = @import("image/codec.zig");
+const quantize = @import("image/quantize.zig");
 
 const alloc = std.heap.page_allocator;
 
@@ -253,6 +254,53 @@ fn webpAvailable(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     info.getReturnValue().set(v8.Boolean.init(info.getIsolate(), codec.webpAvailable()));
 }
 
+/// __imageops_quantize(input, colors, maxSize) → Uint8Array | null.
+/// The pixel-texture import probe: decode, clamp the longest side to maxSize
+/// (default 128 — a texture's canvas is one tile), median-cut to `colors`
+/// (2..255, default 64), remap. Output layout:
+///   [w u32 LE][h u32 LE][k u32 LE][mse f32 LE][palette k*3 RGB][indices w*h]
+/// index 0xFF = transparent. mse (mean squared RGB error over opaque pixels)
+/// is the "does this image WANT to be a palette texture" signal.
+fn quantizeOp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const in = readInput(info, 0) orelse return returnNull(info);
+    defer freeInput(in);
+    const colors: u32 = @intCast(std.math.clamp(argI32(info, 1, 64), 2, 255));
+    const max_size: u32 = @intCast(std.math.clamp(argI32(info, 2, 128), 8, 512));
+
+    var img = codec.decode(alloc, in.bytes) catch return returnNull(info);
+    defer img.deinit();
+
+    // Clamp the longest side, preserving aspect (never upscale).
+    var src = img;
+    var scaled: ?codec.Image = null;
+    defer if (scaled) |s| s.deinit();
+    const longest = @max(img.width, img.height);
+    if (longest > max_size) {
+        const ow = @max(1, img.width * max_size / longest);
+        const oh = @max(1, img.height * max_size / longest);
+        scaled = codec.resize(alloc, img, ow, oh) catch return returnNull(info);
+        src = scaled.?;
+    }
+
+    const q = quantize.quantize(alloc, src.data(), src.width, src.height, colors) catch return returnNull(info);
+    defer q.deinit(alloc);
+
+    const count: usize = @as(usize, src.width) * @as(usize, src.height);
+    const out = alloc.alloc(u8, 16 + q.palette.len * 3 + count) catch return returnNull(info);
+    std.mem.writeInt(u32, out[0..4], src.width, .little);
+    std.mem.writeInt(u32, out[4..8], src.height, .little);
+    std.mem.writeInt(u32, out[8..12], @intCast(q.palette.len), .little);
+    std.mem.writeInt(u32, out[12..16], @bitCast(q.mse), .little);
+    for (q.palette, 0..) |pc, i| {
+        out[16 + i * 3] = pc[0];
+        out[16 + i * 3 + 1] = pc[1];
+        out[16 + i * 3 + 2] = pc[2];
+    }
+    @memcpy(out[16 + q.palette.len * 3 ..], q.indices);
+    returnBytes(info, out);
+}
+
 /// __imageops_write_file(path, bytes) → bool. Keeps toFile() inside this gate
 /// so a cart using @reactjit/image doesn't have to also pull @reactjit fs.
 fn writeFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -276,4 +324,5 @@ pub fn registerImageOps(_: anytype) void {
     v8_runtime.registerHostFn("__imageops_encode_raw", encodeRaw);
     v8_runtime.registerHostFn("__imageops_webp_available", webpAvailable);
     v8_runtime.registerHostFn("__imageops_write_file", writeFile);
+    v8_runtime.registerHostFn("__imageops_quantize", quantizeOp);
 }

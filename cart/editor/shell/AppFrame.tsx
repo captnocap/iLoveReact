@@ -36,7 +36,12 @@ import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
 import { colorStudioSpec, colorStudioOverrideKey, paletteForSpecVariant, rgbToCss } from '../data/colorStudio';
-import { FILL_GRADES, FILL_SEED_MAX, shaderSpec } from '../textures/shaders';
+import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
+import { image as imageOps, quantize as quantizeImage } from '../../../runtime/image';
+import { encodeRows, parseQuantizeProbe } from '../textures/pixelTexture';
+import { loadTexturePackages, textureSpec, savePixelTexture, saveExactImage } from '../data/texturePackage';
+import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageDialog';
+import { readFileBase64 } from '../../../runtime/hooks/fs';
 import { oklchName, type ColorLens } from '../data/colorSpine';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import { useBuildJournal } from '../data/journal';
@@ -61,6 +66,22 @@ export default function AppFrame() {
   // The open paint-toolbar popover (ink / brush). Local, not persisted — the popovers render
   // LATE (below) so they sit over the body; the bar (early) only toggles this.
   const [paintPopover, setPaintPopover] = useState<PaintPopover>(null);
+  // A pending image import awaiting the pixel-vs-exact decision. Transient.
+  const [importPlan, setImportPlan] = useState<ImportImagePlan | null>(null);
+
+  // Imported textures register as dynamic ShaderSpecs at boot (and after every
+  // import), so they are first-class materials everywhere a catalog material is.
+  const reloadImportedTextures = () => {
+    const specs = loadTexturePackages()
+      .map((pkg) => textureSpec(pkg, (b64) => imageOps(b64).raw()))
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+    registerImportedSpecs(specs);
+    return specs.length;
+  };
+  useEffect(() => {
+    const n = reloadImportedTextures();
+    if (n > 0) setState((prev) => ({ ...prev, status: `${prev.status} · ${n} imported texture${n === 1 ? '' : 's'} registered` }));
+  }, []);
 
   // The embedded model viewer hands its host-native tool handlers up here; the
   // toolbar + context menu remote-control the SAME tools through this ref, and
@@ -503,20 +524,74 @@ export default function AppFrame() {
 
   // File → Import Model: the OS picker (zenity) for a .glb/.obj anywhere on disk,
   // routed through the same native import path as in-project explorer rows.
+  // The ONE import door: models open as documents; images run the quantize
+  // probe and land in the dual-preview decision dialog (pixel texture vs
+  // exact image — see ImportImageDialog).
+  const IMAGE_EXT_RE = /\.(png|jpe?g|webp)$/i;
   const importModelFromDisk = async () => {
     const path = await pickFile({
-      title: 'Import a 3D model',
+      title: 'Import a model or image',
       filters: [
         { name: '3D models', patterns: ['*.glb', '*.obj'] },
+        { name: 'Images', patterns: ['*.png', '*.jpg', '*.jpeg', '*.webp'] },
         { name: 'All files', patterns: ['*'] },
       ],
     });
     if (!path) return;
+    if (IMAGE_EXT_RE.test(path)) {
+      probeImageImport(path);
+      return;
+    }
     if (!isViewerFile(path)) {
-      setState((prev) => ({ ...prev, status: `cannot import ${path.split('/').pop()} — pick a .glb or .obj` }));
+      setState((prev) => ({ ...prev, status: `cannot import ${path.split('/').pop()} — pick a .glb/.obj model or a .png/.jpg/.webp image` }));
       return;
     }
     openModelFileDocument(path);
+  };
+
+  const probeImageImport = (path: string) => {
+    const name = path.split('/').pop() ?? path;
+    const base64 = readFileBase64(path);
+    if (!base64) {
+      setState((prev) => ({ ...prev, status: `cannot read ${name}` }));
+      return;
+    }
+    const meta = imageOps(base64).metadata();
+    const probe = parseQuantizeProbe(quantizeImage(base64, 64, 128));
+    if (!meta || !probe) {
+      setState((prev) => ({ ...prev, status: `cannot decode ${name} — not a supported image` }));
+      return;
+    }
+    // Serialized pixel payload size — the decision-facing number; computed for
+    // real (probe → RLE JSON) rather than guessed.
+    const pixelJson = JSON.stringify(encodeRows(probe.indices, probe.width, probe.height));
+    setImportPlan({
+      sourcePath: path,
+      name,
+      probe,
+      sourceWidth: meta.width,
+      sourceHeight: meta.height,
+      sourceKb: Math.max(1, Math.round((base64.length * 0.75) / 1024)),
+      pixelKb: Math.max(1, Math.round(pixelJson.length / 1024)),
+    });
+  };
+
+  const commitImageImport = (form: 'pixel' | 'exact') => {
+    const plan = importPlan;
+    if (!plan) return;
+    setImportPlan(null);
+    const manifest = form === 'pixel'
+      ? savePixelTexture(plan.name, plan.name, plan.probe)
+      : saveExactImage(plan.name, plan.sourcePath, plan.sourceWidth, plan.sourceHeight);
+    if (!manifest) {
+      setState((prev) => ({ ...prev, status: `import FAILED for ${plan.name} — could not write the texture package` }));
+      return;
+    }
+    reloadImportedTextures();
+    setState((prev) => ({
+      ...prev,
+      status: `imported ${manifest.name} as ${form === 'pixel' ? `pixel texture (${manifest.colors} colors)` : 'exact image'} → ${manifest.id}`,
+    }));
   };
 
   const rescanExplorerIndex = () => {
@@ -1256,6 +1331,11 @@ export default function AppFrame() {
               onLoadLibrarySet: loadColorSpineLibrarySet,
             }}
           />
+        </RenderProbe>
+      ) : null}
+      {importPlan ? (
+        <RenderProbe id="Import Image Dialog">
+          <ImportImageDialog plan={importPlan} onPick={commitImageImport} onCancel={() => setImportPlan(null)} />
         </RenderProbe>
       ) : null}
       {/* Model context menu — rendered LAST at the root so it lands at the cursor
