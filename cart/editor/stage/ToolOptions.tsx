@@ -69,7 +69,7 @@ export default function ToolOptions(props: {
               <C.HW_OptionLabel>SAFE</C.HW_OptionLabel>
               <C.HW_PillText>{props.state.modelTool.safety === 0 ? 'Clip' : 'Lock'}</C.HW_PillText>
             </C.HW_Pill>
-            <C.HW_Pill tooltip="Free-form detail — texels per face (higher = crisper strokes on low-poly)" onPress={() => props.onCommand('mesh-paint-detail', 'action bar')}>
+            <C.HW_Pill tooltip="Free-form detail — texels per triangle patch (higher = crisper strokes on low-poly)" onPress={() => props.onCommand('mesh-paint-detail', 'action bar')}>
               <C.HW_OptionLabel>DETAIL</C.HW_OptionLabel>
               <C.HW_PillText>{props.state.modelTool.detail <= 1 ? '—' : String(props.state.modelTool.detail)}</C.HW_PillText>
             </C.HW_Pill>

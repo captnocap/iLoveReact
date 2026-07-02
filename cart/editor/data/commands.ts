@@ -23,12 +23,14 @@ const NEW_MESH_COMMANDS: Command[] = PRIMITIVE_MESHES.map((p) => ({
   key: '', context: false, native: true, undoable: false,
 }));
 
-// Paint resolution — texels per face for free-form model painting. A deep File submenu
-// (nested, out of the way) with the FULL range: pick any and the host takes it (dense meshes
-// clamp to the atlas budget). Higher = finer strokes; a cube at 512 fits real text on a face.
+// Paint resolution — texels per TRIANGLE patch for free-form model painting (a quad face
+// is two triangle patches; "face" would misread a cube's 6 as its 12 — req_2509). A deep
+// File submenu (nested, out of the way) with the FULL range: pick any and the host takes
+// it (dense meshes clamp to the atlas budget). Higher = finer strokes; a cube at 512 fits
+// real text on a face.
 export const PAINT_RESOLUTIONS = [16, 32, 64, 128, 256, 512] as const;
 const PAINT_RES_COMMANDS: Command[] = PAINT_RESOLUTIONS.map((px) => ({
-  id: `paint-res-${px}`, menu: 'File', submenu: 'Paint Resolution', name: `${px}×${px} texels / face`, icon: 'Grid3x3',
+  id: `paint-res-${px}`, menu: 'File', submenu: 'Paint Resolution', name: `${px}×${px} texels / triangle`, icon: 'Grid3x3',
   key: '', context: false, native: true, undoable: false,
 }));
 

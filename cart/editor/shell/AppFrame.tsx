@@ -170,7 +170,7 @@ export default function AppFrame() {
       // like a brush bug when it's really "this mesh has too many faces for that many texels".
       const status = applied < px
         ? `Paint resolution ${px} clamped → ${applied}×${applied} (atlas budget — fewer faces or lower detail for finer than this)`
-        : `Paint resolution → ${px}×${px} texels/face`;
+        : `Paint resolution → ${px}×${px} texels/triangle`;
       setState((prev) => ({ ...prev, openMenu: null, status }));
       return;
     }

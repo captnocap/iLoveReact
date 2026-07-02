@@ -463,6 +463,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // explicit. atlasReadyRef survives edit-op key changes and resets on a fresh load.
   const atlasReadyRef = useRef(false);
   const [atlasPrompt, setAtlasPrompt] = useState(false);
+  // AUTHORED face count (a cube has 6, not its 12 triangles) — from the mesh's face
+  // groups when it carries authored grouping; null for plain/per-triangle imports. The
+  // prompt reads faces to the user and triangles to the byte math, never conflating them.
+  const [authoredFaces, setAuthoredFaces] = useState<number | null>(null);
   const enterPaint = () => {
     setFocusMode(false);
     meshFocusTool(false);
@@ -672,6 +676,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setQuality(1); // a fresh model loads full-res
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 }); // new mesh → selection cleared
       freshModelPaintReset();
+      setAuthoredFaces(null); // a raw import carries no authored n-gon grouping
       partRangesRef.current = []; // a plain file import is one unstructured mesh, no parts
       recordAttribution(path); // account for where this asset came from
     } else {
@@ -687,6 +692,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setQuality(1);
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 });
       freshModelPaintReset();
+      // Distinct authored-face ids (a studio cube: 6 quads over 12 triangles) — what the
+      // atlas prompt reads to the user as "faces".
+      setAuthoredFaces(mesh.faceGroups && mesh.faceGroups.length > 0 ? new Set(mesh.faceGroups).size : null);
       // Seed the weld's part ranges from the composed parts (partColors carries every
       // part's [lo,hi)) so stacked parts stay independently editable from the first frame.
       partRangesRef.current = (mesh.partColors ?? []).map((pc) => ({ lo: pc.lo, hi: pc.hi }));
@@ -733,6 +741,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setQuality(1);
     setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 });
     freshModelPaintReset();
+    // The import's groups are per-TRIANGLE (no authored n-gons), so "faces" would just
+    // repeat the triangle count — the prompt talks triangles for these.
+    setAuthoredFaces(null);
     onPartRanges?.(ranges);
   };
 
@@ -1028,7 +1039,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             </Pressable>
             <Pressable
               onPress={cycleDetail}
-              tooltip="Free-form detail — texels per face (higher = crisper strokes on low-poly)"
+              tooltip="Free-form detail — texels per triangle patch (higher = crisper strokes on low-poly)"
               style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
             >
               <Text style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 700 }}>{detail <= 1 ? 'Detail —' : `Detail ${detail}`}</Text>
@@ -1223,7 +1234,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           >
             <Text style={{ color: '#dbe7ff', fontSize: 14, fontWeight: 700 }}>Create Paint Atlas</Text>
             <Text style={{ color: '#b9c4d4', fontSize: 12, marginTop: 6 }}>
-              {`${Math.floor(model.count / 3)} faces — each face gets its own patch of texels. Higher = finer strokes, bigger texture.`}
+              {`${authoredFaces && authoredFaces !== Math.floor(model.count / 3)
+                ? `${authoredFaces} faces (${Math.floor(model.count / 3)} triangles)`
+                : `${Math.floor(model.count / 3)} triangles`} — the atlas gives each TRIANGLE its own texel patch (a quad face is two). Higher = finer strokes, bigger texture.`}
             </Text>
             {(() => {
               const fc = Math.max(1, Math.floor(model.count / 3));
@@ -1252,7 +1265,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   >
                     <Row style={{ alignItems: 'center', gap: 8 }}>
                       <Text style={{ color: ok ? '#e6f1ff' : '#5d6878', fontSize: 12, fontWeight: 700 }}>
-                        {px === 1 ? 'Fill only — one color per face' : `${px}×${px} texels / face`}
+                        {px === 1 ? 'Fill only — one color per face' : `${px}×${px} texels / triangle`}
                       </Text>
                       {rec ? <Text style={{ color: '#8fc9bb', fontSize: 11, fontWeight: 700 }}>recommended</Text> : null}
                       <Box style={{ flexGrow: 1 }} />
