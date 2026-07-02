@@ -40,6 +40,8 @@ type Ink = {
   // Color Studio slot overrides for (specId, variant) — folded into a picked
   // shader ink's data[] so the brush deposits the USER'S palette.
   paletteFor?: (specId: string, variant: number) => Rgb[] | null;
+  // Jump from the dipped shader ink to its Color Studio focus page.
+  onEditMaterial?: (specId: string) => void;
 };
 
 type Tool = { id: BrushTool; icon: string; tip: string };
@@ -245,6 +247,15 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; pickColor:
                   </Col>
                 ))}
               </Col>
+              {props.shaderInk && props.onEditMaterial ? (
+                <Pressable
+                  onPress={() => props.onEditMaterial!(props.shaderInk!.surface)}
+                  style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 30, borderRadius: 8, borderWidth: 1, borderColor: LINE, backgroundColor: '#141518' }}
+                >
+                  <Icon name="Palette" size={12} color={ACCENT} />
+                  <Text style={{ color: TEXT, fontSize: 11, fontWeight: '700' }}>open in Color Studio</Text>
+                </Pressable>
+              ) : null}
             </Col>
           );
         })()

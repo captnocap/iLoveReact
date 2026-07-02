@@ -35,7 +35,7 @@ export default function LibraryPanel(props: {
   onFavorite: (assetId: string) => void;
   onRename: (assetId: string, name: string) => void;
   onPage: (delta: number) => void;
-  onFocusMaterial: () => void;
+  onFocusMaterial: (variant?: number) => void;
   onModel: (model: ModelPackage) => void;
   contentTree: ContentNode[];
   models: ModelPackage[];

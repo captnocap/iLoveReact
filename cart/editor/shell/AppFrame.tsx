@@ -668,18 +668,55 @@ export default function AppFrame() {
     }));
   };
 
-  const focusMaterialDocument = () => {
+  const focusMaterialDocument = (variant?: number) => {
     setState((prev) => {
       const asset = assetById(prev.activeAssetId, prev.assetOverrides);
       const doc = materialDocument(asset);
+      // Route the selection INTO the Color Studio: a shader-recipe asset's
+      // recipe IS a catalog spec id, so focusing lands the studio on that
+      // material (and on the take, when a variant chip was the entry point).
+      const spec = asset.recipe ? shaderSpec(asset.recipe) : undefined;
+      const studio = spec
+        ? {
+            colorStudioMaterial: spec.id,
+            colorStudioVariant: Math.min(variant ?? prev.colorStudioVariant, Math.max(0, spec.variants.length - 1)),
+            colorStudioActiveSlot: 0,
+            colorStudioView: 'materialPalette' as const,
+          }
+        : {};
       return {
         ...prev,
         materialFocused: true,
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
         activeWorkspaceDocumentId: doc.id,
-        status: `opened material document: ${asset.name}`,
+        ...studio,
+        status: spec ? `opened Color Studio: ${asset.name}` : `opened material document: ${asset.name}`,
       };
     });
+  };
+
+  // The ink popover's "open in Color Studio" — jump from a dipped shader ink to
+  // its editing page (selecting the matching library asset when there is one).
+  const openColorStudioForSpec = (specId: string) => {
+    const spec = shaderSpec(specId);
+    if (!spec) return;
+    setState((prev) => {
+      const match = catalogAssets.find((a) => a.recipe === specId);
+      const asset = match ?? assetById(prev.activeAssetId, prev.assetOverrides);
+      const doc = materialDocument(asset);
+      return {
+        ...prev,
+        materialFocused: true,
+        activeAssetId: match ? match.id : prev.activeAssetId,
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
+        activeWorkspaceDocumentId: doc.id,
+        colorStudioMaterial: spec.id,
+        colorStudioActiveSlot: 0,
+        colorStudioView: 'materialPalette' as const,
+        status: `opened Color Studio: ${spec.label}`,
+      };
+    });
+    setPaintPopover(null);
   };
 
   // ── Model outliner (multi-part authoring) ───────────────────────────────────
@@ -1207,6 +1244,7 @@ export default function AppFrame() {
             rampSteps={state.colorSpineRampSteps}
             scenePick={state.colorSpineScenePick}
             paletteFor={paintPaletteFor}
+            onEditMaterial={openColorStudioForSpec}
             spine={{
               onSetCurrent: setColorSpineCurrent,
               onAddToTray: addColorSpineToTray,

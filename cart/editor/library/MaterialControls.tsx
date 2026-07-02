@@ -10,7 +10,9 @@ export default function MaterialControls({
   onRename,
 }: {
   asset: Asset;
-  onFocus: () => void;
+  // Opens the Color Studio on this material; a variant chip passes its take
+  // index so the studio lands on that take.
+  onFocus: (variant?: number) => void;
   onFavorite: (assetId: string) => void;
   onRename: (assetId: string, name: string) => void;
 }) {
@@ -44,18 +46,20 @@ export default function MaterialControls({
         <C.HW_ToolLabel>source</C.HW_ToolLabel>
         <C.HW_ToolValue numberOfLines={1} noWrap>{asset.sourceKind ?? 'indexed'}</C.HW_ToolValue>
       </C.HW_ToolRow>
+      {/* A chip is a VERB: it opens the Color Studio on that take. */}
       <C.HW_SelectedVariants>
         {variants.map((variant, index) => (
-          <C.HW_SelectedVariant key={variant}>
+          <C.HW_SelectedVariant key={variant} onPress={() => onFocus(index)}>
             <C.HW_SelectedVariantSwatch style={{ backgroundColor: variantColor(asset, index) }} />
             <C.HW_ToolValue numberOfLines={1} noWrap>{variant}</C.HW_ToolValue>
             <C.HW_ToolHint>{index === 0 ? 'default' : index === 1 ? 'alt' : 'override'}</C.HW_ToolHint>
           </C.HW_SelectedVariant>
         ))}
       </C.HW_SelectedVariants>
+      {/* Plain readout — the old bar drew seed%100 as a fill width, a slider
+          that wasn't one. The real seed control lives in the focus page. */}
       <C.HW_ToolRow>
         <C.HW_ToolLabel>seed</C.HW_ToolLabel>
-        <C.HW_MiniBar><C.HW_MiniFill style={{ width: `${Math.min(100, Math.max(0, seed % 100))}%` }} /></C.HW_MiniBar>
         <C.HW_ToolValue>{seed}</C.HW_ToolValue>
       </C.HW_ToolRow>
       <C.HW_ToolRow>
