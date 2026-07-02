@@ -287,6 +287,15 @@ fn surface_blend(kind: i32, base: vec3f, over: vec3f, f: f32) -> vec3f {
   return blend_over(base, over, f);
 }
 
+fn mat_pal(i: i32, baked: vec3f) -> vec3f {
+  if (arrayLength(&D) < 7u) { return baked; }
+  let n = i32(D[5] + 0.5);
+  if (i >= n) { return baked; }
+  let base = u32(6 + i * 3);
+  if (arrayLength(&D) < base + 3u) { return baked; }
+  return vec3f(D[base], D[base + 1u], D[base + 2u]);
+}
+
 // @material road
 // @slug road
 // @name Road
@@ -298,21 +307,21 @@ fn surface_blend(kind: i32, base: vec3f, over: vec3f, f: f32) -> vec3f {
 fn road(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let coarse = fbm(uv.x * 18.0 + seed, uv.y * 18.0 - seed, 5.0) * 0.5 + 0.5;
   let tar = fbm(uv.x * 5.0 - seed * 0.4, uv.y * 11.0 + seed * 0.3, 4.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.030, 0.033, 0.034), vec3f(0.125, 0.128, 0.122), coarse);
-  col = mix(col, vec3f(0.012, 0.014, 0.015), smoothstep(0.72, 0.98, tar) * 0.38);
-  col = col + vec3f(0.13, 0.13, 0.12) * speckle(px, 2.4, seed, 0.948);
-  col = col - vec3f(0.045, 0.043, 0.040) * speckle(px + vec2f(19.0, 7.0), 3.5, seed, 0.955);
-  col = col - vec3f(0.055, 0.054, 0.052) * crack_field(uv, seed, 8.0);
+  var col = mix(mat_pal(0, vec3f(0.030, 0.033, 0.034)), mat_pal(1, vec3f(0.125, 0.128, 0.122)), coarse);
+  col = mix(col, mat_pal(2, vec3f(0.012, 0.014, 0.015)), smoothstep(0.72, 0.98, tar) * 0.38);
+  col = col + mat_pal(3, vec3f(0.13, 0.13, 0.12)) * speckle(px, 2.4, seed, 0.948);
+  col = col - mat_pal(4, vec3f(0.045, 0.043, 0.040)) * speckle(px + vec2f(19.0, 7.0), 3.5, seed, 0.955);
+  col = col - mat_pal(5, vec3f(0.055, 0.054, 0.052)) * crack_field(uv, seed, 8.0);
   if (variant < 0.5) {
     let dash = step(0.38, fract(uv.y * 5.0 + 0.08));
     let stripe = line_near(uv.x - 0.50 + snoise(uv.y * 2.0, seed) * 0.010, 0.022) * dash;
-    col = mix(col, vec3f(0.96, 0.74, 0.26), stripe * 0.90);
+    col = mix(col, mat_pal(6, vec3f(0.96, 0.74, 0.26)), stripe * 0.90);
   } else if (variant < 1.5) {
     let side = line_near(uv.x - 0.18, 0.012) + line_near(uv.x - 0.82, 0.012);
-    col = mix(col, vec3f(0.78, 0.80, 0.75), sat(side) * 0.62);
+    col = mix(col, mat_pal(7, vec3f(0.78, 0.80, 0.75)), sat(side) * 0.62);
   } else {
     let tar_patch = smoothstep(0.54, 0.63, fbm(uv.x * 6.0 + 8.0, uv.y * 6.0 + seed, 4.0) * 0.5 + 0.5);
-    col = mix(col, vec3f(0.018, 0.020, 0.021), tar_patch * 0.36);
+    col = mix(col, mat_pal(8, vec3f(0.018, 0.020, 0.021)), tar_patch * 0.36);
   }
   return sat3(col);
 }
@@ -328,7 +337,7 @@ fn road(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn concrete(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let cloud = fbm(uv.x * 7.0 + seed * 0.7, uv.y * 7.0 - seed, 5.0) * 0.5 + 0.5;
   let trowel = sin((uv.x * 0.9 + uv.y * 1.6 + fbm(uv.x * 2.5, uv.y * 2.5 + seed, 3.0) * 0.18) * 24.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.40, 0.405, 0.390), vec3f(0.72, 0.72, 0.68), cloud) + vec3f(trowel * 0.035);
+  var col = mix(mat_pal(0, vec3f(0.40, 0.405, 0.390)), mat_pal(1, vec3f(0.72, 0.72, 0.68)), cloud) + vec3f(trowel * 0.035);
   if (variant < 0.5) {
     col = col + vec3f(line_near(sin((uv.x + fbm(uv.x * 2.0, uv.y * 4.0, 3.0) * 0.03) * 95.0), 0.16) * 0.035);
   } else if (variant < 1.5) {
@@ -361,19 +370,19 @@ fn brick(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let mortar = max(1.0 - smoothstep(0.030, 0.055, near_x), 1.0 - smoothstep(0.035, 0.065, near_y));
   let tone = rand(cell + vec2f(seed, seed * 2.0));
   let soot = fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5;
-  var a = vec3f(0.45, 0.13, 0.075);
-  var b = vec3f(0.82, 0.31, 0.16);
+  var a = mat_pal(0, vec3f(0.45, 0.13, 0.075));
+  var b = mat_pal(1, vec3f(0.82, 0.31, 0.16));
   if (variant > 0.5 && variant < 1.5) {
-    a = vec3f(0.30, 0.105, 0.085);
-    b = vec3f(0.62, 0.20, 0.13);
+    a = mat_pal(2, vec3f(0.30, 0.105, 0.085));
+    b = mat_pal(3, vec3f(0.62, 0.20, 0.13));
   } else if (variant >= 1.5) {
-    a = vec3f(0.58, 0.42, 0.31);
-    b = vec3f(0.84, 0.62, 0.45);
+    a = mat_pal(4, vec3f(0.58, 0.42, 0.31));
+    b = mat_pal(5, vec3f(0.84, 0.62, 0.45));
   }
   var col = mix(a, b, tone * 0.65 + soot * 0.35);
   let chip = speckle(px + cell * 9.0, 5.0, seed, 0.935) * smoothstep(0.10, 0.22, near_x) * smoothstep(0.10, 0.22, near_y);
-  col = mix(col, vec3f(0.18, 0.12, 0.10), chip * 0.34);
-  col = mix(col, vec3f(0.55, 0.53, 0.48), mortar * (0.88 - variant * 0.08));
+  col = mix(col, mat_pal(6, vec3f(0.18, 0.12, 0.10)), chip * 0.34);
+  col = mix(col, mat_pal(7, vec3f(0.55, 0.53, 0.48)), mortar * (0.88 - variant * 0.08));
   return sat3(col);
 }
 
@@ -389,14 +398,14 @@ fn sand(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let dune_warp = fbm(uv.x * 3.0 + seed, uv.y * 2.0 - seed, 4.0);
   let ripple = line_near(sin(uv.y * (34.0 + variant * 5.0) + uv.x * (9.0 - variant * 2.0) + dune_warp * 4.0), 0.055 + variant * 0.012);
   let noise = fbm(uv.x * 20.0, uv.y * 20.0 + seed, 4.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.66, 0.50, 0.30), vec3f(0.90, 0.76, 0.48), noise);
+  var col = mix(mat_pal(0, vec3f(0.66, 0.50, 0.30)), mat_pal(1, vec3f(0.90, 0.76, 0.48)), noise);
   if (variant > 0.5 && variant < 1.5) {
-    col = mix(col, vec3f(0.43, 0.34, 0.24), smoothstep(0.20, 0.88, uv.y) * 0.48);
+    col = mix(col, mat_pal(2, vec3f(0.43, 0.34, 0.24)), smoothstep(0.20, 0.88, uv.y) * 0.48);
   } else if (variant >= 1.5) {
-    col = mix(col, vec3f(0.80, 0.57, 0.30), 0.36);
+    col = mix(col, mat_pal(3, vec3f(0.80, 0.57, 0.30)), 0.36);
   }
-  col = col + vec3f(0.12, 0.10, 0.06) * ripple;
-  col = col + vec3f(0.09, 0.075, 0.045) * speckle(px, 1.8, seed, 0.72) - vec3f(0.10, 0.075, 0.045) * speckle(px + vec2f(5.0, 13.0), 2.6, seed, 0.82);
+  col = col + mat_pal(4, vec3f(0.12, 0.10, 0.06)) * ripple;
+  col = col + mat_pal(5, vec3f(0.09, 0.075, 0.045)) * speckle(px, 1.8, seed, 0.72) - mat_pal(6, vec3f(0.10, 0.075, 0.045)) * speckle(px + vec2f(5.0, 13.0), 2.6, seed, 0.82);
   return sat3(col);
 }
 
@@ -414,18 +423,18 @@ fn water(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let wave_a = sin((uv.x * 38.0 + uv.y * 11.0) + warp * 5.0 + t * (1.1 + variant * 0.2));
   let wave_b = sin((uv.x * -18.0 + uv.y * 42.0) + snoise(uv.x * 8.0, uv.y * 8.0 + seed) * 3.0 - t * 1.4);
   let caustic = smoothstep(0.72, 0.98, wave_a * 0.5 + wave_b * 0.5);
-  var deep = vec3f(0.025, 0.13, 0.22);
-  var shallow = vec3f(0.08, 0.55, 0.70);
+  var deep = mat_pal(0, vec3f(0.025, 0.13, 0.22));
+  var shallow = mat_pal(1, vec3f(0.08, 0.55, 0.70));
   if (variant > 0.5 && variant < 1.5) {
-    deep = vec3f(0.010, 0.050, 0.13);
-    shallow = vec3f(0.07, 0.27, 0.60);
+    deep = mat_pal(2, vec3f(0.010, 0.050, 0.13));
+    shallow = mat_pal(3, vec3f(0.07, 0.27, 0.60));
   } else if (variant >= 1.5) {
-    deep = vec3f(0.035, 0.18, 0.17);
-    shallow = vec3f(0.19, 0.72, 0.62);
+    deep = mat_pal(4, vec3f(0.035, 0.18, 0.17));
+    shallow = mat_pal(5, vec3f(0.19, 0.72, 0.62));
   }
-  var col = mix(deep, shallow, sat(uv.y * 0.55 + warp * 0.25 + 0.45)) + vec3f(0.22, 0.36, 0.40) * caustic;
+  var col = mix(deep, shallow, sat(uv.y * 0.55 + warp * 0.25 + 0.45)) + mat_pal(6, vec3f(0.22, 0.36, 0.40)) * caustic;
   let foam = line_near(sin(uv.y * 22.0 + uv.x * 8.0 + t * 0.8), 0.035) * smoothstep(0.78, 1.0, variant);
-  return sat3(mix(col, vec3f(0.82, 0.95, 0.91), foam * 0.36));
+  return sat3(mix(col, mat_pal(7, vec3f(0.82, 0.95, 0.91)), foam * 0.36));
 }
 
 // @material grass
@@ -440,18 +449,18 @@ fn grass(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let wind = snoise(uv.x * 2.0 + U.time * 0.30 + seed, uv.y * 4.0 - U.time * 0.30);
   let blade = line_near(sin((uv.x + wind * 0.035) * (88.0 + variant * 18.0) + uv.y * 8.0), 0.18);
   let clump = fbm(uv.x * 8.0 + seed, uv.y * 8.0, 5.0) * 0.5 + 0.5;
-  var low = vec3f(0.035, 0.18, 0.070);
-  var high = vec3f(0.24, 0.58, 0.16);
+  var low = mat_pal(0, vec3f(0.035, 0.18, 0.070));
+  var high = mat_pal(1, vec3f(0.24, 0.58, 0.16));
   if (variant > 0.5 && variant < 1.5) {
-    low = vec3f(0.020, 0.12, 0.065);
-    high = vec3f(0.18, 0.46, 0.25);
+    low = mat_pal(2, vec3f(0.020, 0.12, 0.065));
+    high = mat_pal(3, vec3f(0.18, 0.46, 0.25));
   } else if (variant >= 1.5) {
-    low = vec3f(0.22, 0.19, 0.075);
-    high = vec3f(0.62, 0.52, 0.20);
+    low = mat_pal(4, vec3f(0.22, 0.19, 0.075));
+    high = mat_pal(5, vec3f(0.62, 0.52, 0.20));
   }
-  var col = mix(low, high, clump) + vec3f(0.10, 0.18, 0.06) * blade;
+  var col = mix(low, high, clump) + mat_pal(6, vec3f(0.10, 0.18, 0.06)) * blade;
   let seed_head = speckle(px, 8.0, seed, 0.965) * smoothstep(0.15, 0.95, uv.y);
-  return sat3(mix(col, vec3f(0.80, 0.72, 0.42), seed_head * (0.28 + variant * 0.10)));
+  return sat3(mix(col, mat_pal(7, vec3f(0.80, 0.72, 0.42)), seed_head * (0.28 + variant * 0.10)));
 }
 
 // @material wood
@@ -463,14 +472,14 @@ fn grass(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags environment, wood
 // @author legacy
 fn wood(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var low = vec3f(0.38, 0.18, 0.070);
-  var high = vec3f(0.80, 0.47, 0.20);
+  var low = mat_pal(0, vec3f(0.38, 0.18, 0.070));
+  var high = mat_pal(1, vec3f(0.80, 0.47, 0.20));
   if (variant > 0.5 && variant < 1.5) {
-    low = vec3f(0.18, 0.095, 0.055);
-    high = vec3f(0.52, 0.30, 0.15);
+    low = mat_pal(2, vec3f(0.18, 0.095, 0.055));
+    high = mat_pal(3, vec3f(0.52, 0.30, 0.15));
   } else if (variant >= 1.5) {
-    low = vec3f(0.52, 0.34, 0.16);
-    high = vec3f(0.92, 0.72, 0.40);
+    low = mat_pal(4, vec3f(0.52, 0.34, 0.16));
+    high = mat_pal(5, vec3f(0.92, 0.72, 0.40));
   }
   var grain = 0.0;
   if (variant < 1.5) {
@@ -482,7 +491,7 @@ fn wood(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
     grain = sin(length(p * vec2f(1.0, 1.12)) * 92.0 + fbm(uv.x * 12.0, uv.y * 12.0 + seed, 4.0) * 7.0) * 0.5 + 0.5;
   }
   var col = mix(low, high, grain * 0.72 + 0.16);
-  col = col - vec3f(0.10, 0.07, 0.035) * speckle(px, 3.0, seed, 0.945);
+  col = col - mat_pal(6, vec3f(0.10, 0.07, 0.035)) * speckle(px, 3.0, seed, 0.945);
   col = col + vec3f(line_near(sin(uv.x * 220.0 + seed), 0.10) * 0.025);
   return sat3(col);
 }
@@ -497,11 +506,11 @@ fn wood(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @author legacy
 fn mold_wall(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let paper = fbm(uv.x * 9.0 + seed, uv.y * 9.0 - seed, 5.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.35, 0.32, 0.25), vec3f(0.70, 0.65, 0.52), paper);
-  col = mix(col, vec3f(0.54, 0.42, 0.27), 0.22 + variant * 0.10);
+  var col = mix(mat_pal(0, vec3f(0.35, 0.32, 0.25)), mat_pal(1, vec3f(0.70, 0.65, 0.52)), paper);
+  col = mix(col, mat_pal(2, vec3f(0.54, 0.42, 0.27)), 0.22 + variant * 0.10);
   let mold = sat(blotch(uv, vec2f(0.24, 0.68), 0.18 + variant * 0.03, vec2f(1.2, 0.8), seed) + blotch(uv, vec2f(0.74, 0.33), 0.15, vec2f(0.8, 1.4), seed + 4.0));
-  col = mix(col, vec3f(0.045, 0.090, 0.045), mold * 0.74);
-  col = mix(col, vec3f(0.23, 0.19, 0.13), line_near(length((uv - vec2f(0.30, 0.30)) * vec2f(1.0, 1.25)) - 0.23, 0.022) * (0.35 + variant * 0.15));
+  col = mix(col, mat_pal(3, vec3f(0.045, 0.090, 0.045)), mold * 0.74);
+  col = mix(col, mat_pal(4, vec3f(0.23, 0.19, 0.13)), line_near(length((uv - vec2f(0.30, 0.30)) * vec2f(1.0, 1.25)) - 0.23, 0.022) * (0.35 + variant * 0.15));
   col = col - vec3f(vertical_drips(uv, seed, variant) * 0.22 + crack_field(uv, seed, 6.0) * 0.18 + speckle(px, 2.0, seed, 0.92) * 0.10);
   return sat3(col);
 }
@@ -515,21 +524,21 @@ fn mold_wall(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags condemned, peel, paint
 // @author legacy
 fn peel_paint(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var top_col = vec3f(0.62, 0.67, 0.55);
-  var under_col = vec3f(0.36, 0.25, 0.18);
+  var top_col = mat_pal(0, vec3f(0.62, 0.67, 0.55));
+  var under_col = mat_pal(1, vec3f(0.36, 0.25, 0.18));
   if (variant > 0.5 && variant < 1.5) {
-    top_col = vec3f(0.30, 0.48, 0.43);
-    under_col = vec3f(0.67, 0.55, 0.38);
+    top_col = mat_pal(2, vec3f(0.30, 0.48, 0.43));
+    under_col = mat_pal(3, vec3f(0.67, 0.55, 0.38));
   } else if (variant >= 1.5) {
-    top_col = vec3f(0.68, 0.58, 0.42);
-    under_col = vec3f(0.18, 0.16, 0.14);
+    top_col = mat_pal(4, vec3f(0.68, 0.58, 0.42));
+    under_col = mat_pal(5, vec3f(0.18, 0.16, 0.14));
   }
   let grain = fbm(uv.x * 12.0 + seed, uv.y * 12.0, 5.0) * 0.5 + 0.5;
   let peel = smoothstep(0.44, 0.59, fbm(uv.x * 5.0 + seed, uv.y * 5.0 - seed, 5.0) * 0.5 + 0.5);
   var col = mix(top_col, under_col, peel);
-  col = col + vec3f(0.10, 0.09, 0.07) * line_near(fbm(uv.x * 7.0 + seed, uv.y * 7.0, 4.0), 0.035) * peel;
-  col = col - vec3f(0.11, 0.09, 0.07) * vertical_drips(uv, seed + 2.0, 1.0);
-  col = mix(col, vec3f(0.035, 0.070, 0.035), blotch(uv, vec2f(0.76, 0.72), 0.17, vec2f(1.0, 0.9), seed) * 0.46);
+  col = col + mat_pal(6, vec3f(0.10, 0.09, 0.07)) * line_near(fbm(uv.x * 7.0 + seed, uv.y * 7.0, 4.0), 0.035) * peel;
+  col = col - mat_pal(7, vec3f(0.11, 0.09, 0.07)) * vertical_drips(uv, seed + 2.0, 1.0);
+  col = mix(col, mat_pal(8, vec3f(0.035, 0.070, 0.035)), blotch(uv, vec2f(0.76, 0.72), 0.17, vec2f(1.0, 0.9), seed) * 0.46);
   col = col + vec3f((grain - 0.5) * 0.08) - vec3f(speckle(px, 3.0, seed, 0.90) * 0.08);
   return sat3(col);
 }
@@ -548,16 +557,16 @@ fn linoleum(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let local = fract(grid);
   let seam_mark = max(1.0 - smoothstep(0.025, 0.055, min(local.x, 1.0 - local.x)), 1.0 - smoothstep(0.025, 0.055, min(local.y, 1.0 - local.y)));
   let tone = rand(cell + vec2f(seed, seed * 2.0));
-  var col = mix(vec3f(0.46, 0.42, 0.30), vec3f(0.78, 0.73, 0.52), tone);
+  var col = mix(mat_pal(0, vec3f(0.46, 0.42, 0.30)), mat_pal(1, vec3f(0.78, 0.73, 0.52)), tone);
   if (variant > 0.5 && variant < 1.5) {
-    col = mix(vec3f(0.18, 0.36, 0.34), vec3f(0.62, 0.74, 0.63), tone);
+    col = mix(mat_pal(2, vec3f(0.18, 0.36, 0.34)), mat_pal(3, vec3f(0.62, 0.74, 0.63)), tone);
   } else if (variant >= 1.5) {
-    col = mix(vec3f(0.25, 0.20, 0.18), vec3f(0.52, 0.47, 0.38), tone);
+    col = mix(mat_pal(4, vec3f(0.25, 0.20, 0.18)), mat_pal(5, vec3f(0.52, 0.47, 0.38)), tone);
   }
   col = col + vec3f((fbm(uv.x * 26.0 + seed, uv.y * 26.0, 5.0) * 0.5) * 0.16);
-  col = mix(col, vec3f(0.08, 0.07, 0.055), seam_mark * 0.76);
+  col = mix(col, mat_pal(6, vec3f(0.08, 0.07, 0.055)), seam_mark * 0.76);
   col = col - vec3f(crack_field(uv + vec2f(0.1, 0.0), seed, 8.0) * 0.26);
-  col = mix(col, vec3f(0.025, 0.020, 0.018), (1.0 - smoothstep(0.025, 0.075, length(uv - vec2f(0.67, 0.42)))) * 0.82);
+  col = mix(col, mat_pal(7, vec3f(0.025, 0.020, 0.018)), (1.0 - smoothstep(0.025, 0.075, length(uv - vec2f(0.67, 0.42)))) * 0.82);
   return sat3(col - vec3f(speckle(px, 2.4, seed, 0.88) * 0.08));
 }
 
@@ -575,15 +584,15 @@ fn bath_tile(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let local = fract(grid);
   let grout = max(1.0 - smoothstep(0.045, 0.075, min(local.x, 1.0 - local.x)), 1.0 - smoothstep(0.045, 0.075, min(local.y, 1.0 - local.y)));
   let shade = rand(cell + vec2f(seed, seed));
-  var col = mix(vec3f(0.66, 0.69, 0.63), vec3f(0.93, 0.91, 0.82), shade);
+  var col = mix(mat_pal(0, vec3f(0.66, 0.69, 0.63)), mat_pal(1, vec3f(0.93, 0.91, 0.82)), shade);
   if (variant > 0.5 && variant < 1.5) {
-    col = mix(vec3f(0.42, 0.57, 0.55), vec3f(0.76, 0.87, 0.82), shade);
+    col = mix(mat_pal(2, vec3f(0.42, 0.57, 0.55)), mat_pal(3, vec3f(0.76, 0.87, 0.82)), shade);
   } else if (variant >= 1.5) {
-    col = mix(vec3f(0.38, 0.32, 0.28), vec3f(0.72, 0.65, 0.55), shade);
+    col = mix(mat_pal(4, vec3f(0.38, 0.32, 0.28)), mat_pal(5, vec3f(0.72, 0.65, 0.55)), shade);
   }
   let mildew = grout * (0.45 + 0.55 * smoothstep(0.35, 0.70, fbm(uv.x * 13.0 + seed, uv.y * 13.0, 4.0) * 0.5 + 0.5));
-  col = mix(col, vec3f(0.020, 0.055, 0.030), mildew * 0.82);
-  col = mix(col, vec3f(0.55, 0.20, 0.055), vertical_drips(uv - vec2f(0.10, 0.0), seed + 5.0, 1.0) * smoothstep(0.40, 1.4, variant) * 0.58);
+  col = mix(col, mat_pal(6, vec3f(0.020, 0.055, 0.030)), mildew * 0.82);
+  col = mix(col, mat_pal(7, vec3f(0.55, 0.20, 0.055)), vertical_drips(uv - vec2f(0.10, 0.0), seed + 5.0, 1.0) * smoothstep(0.40, 1.4, variant) * 0.58);
   return sat3(col - vec3f(crack_field(uv, seed, 11.0) * 0.18 + speckle(px, 1.8, seed, 0.94) * 0.11));
 }
 
@@ -600,9 +609,9 @@ fn mildew_brick(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let damp = smoothstep(0.40, 0.96, uv.y);
   let green = smoothstep(0.42, 0.70, fbm(uv.x * 6.0 + seed, uv.y * 9.0, 5.0) * 0.5 + 0.5) * damp;
   let black = smoothstep(0.64, 0.90, fbm(uv.x * 12.0 - seed, uv.y * 8.0 + seed, 4.0) * 0.5 + 0.5) * (0.4 + variant * 0.3);
-  col = mix(col, vec3f(0.050, 0.12, 0.045), green * 0.62);
-  col = mix(col, vec3f(0.030, 0.025, 0.020), black * 0.44);
-  return sat3(mix(col, vec3f(0.82, 0.80, 0.68), speckle(px, 6.0, seed, 0.94) * smoothstep(1.0, 1.8, variant) * 0.58));
+  col = mix(col, mat_pal(0, vec3f(0.050, 0.12, 0.045)), green * 0.62);
+  col = mix(col, mat_pal(1, vec3f(0.030, 0.025, 0.020)), black * 0.44);
+  return sat3(mix(col, mat_pal(2, vec3f(0.82, 0.80, 0.68)), speckle(px, 6.0, seed, 0.94) * smoothstep(1.0, 1.8, variant) * 0.58));
 }
 
 // @material rot_siding
@@ -619,16 +628,16 @@ fn rot_siding(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let local_x = fract(uv.x * planks);
   let seam_mark = 1.0 - smoothstep(0.025, 0.055, min(local_x, 1.0 - local_x));
   let board_tone = rand(vec2f(plank_id, seed));
-  var wood_col = mix(vec3f(0.28, 0.17, 0.09), vec3f(0.58, 0.39, 0.20), board_tone);
+  var wood_col = mix(mat_pal(0, vec3f(0.28, 0.17, 0.09)), mat_pal(1, vec3f(0.58, 0.39, 0.20)), board_tone);
   wood_col = wood_col + vec3f(line_near(sin((uv.y + fbm(uv.x * 4.0 + seed, uv.y * 8.0, 4.0) * 0.05) * 90.0), 0.12) * 0.055);
-  var paint = vec3f(0.58, 0.62, 0.54);
-  if (variant > 0.5 && variant < 1.5) { paint = vec3f(0.28, 0.47, 0.58); }
-  else if (variant >= 1.5) { paint = vec3f(0.70, 0.56, 0.35); }
+  var paint = mat_pal(2, vec3f(0.58, 0.62, 0.54));
+  if (variant > 0.5 && variant < 1.5) { paint = mat_pal(3, vec3f(0.28, 0.47, 0.58)); }
+  else if (variant >= 1.5) { paint = mat_pal(4, vec3f(0.70, 0.56, 0.35)); }
   let peel = smoothstep(0.52, 0.68, fbm(uv.x * 7.0 + seed, uv.y * 5.0 - seed, 5.0) * 0.5 + 0.5);
   var col = mix(paint, wood_col, peel);
   let rot = smoothstep(0.46, 0.92, uv.y) * smoothstep(0.40, 0.72, fbm(uv.x * 9.0, uv.y * 6.0 + seed, 4.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.035, 0.040, 0.026), rot * 0.78);
-  col = mix(col, vec3f(0.018, 0.016, 0.014), seam_mark * 0.80);
+  col = mix(col, mat_pal(5, vec3f(0.035, 0.040, 0.026)), rot * 0.78);
+  col = mix(col, mat_pal(6, vec3f(0.018, 0.016, 0.014)), seam_mark * 0.80);
   return sat3(col - vec3f(vertical_drips(uv, seed, variant) * 0.20 + speckle(px, 3.0, seed, 0.90) * 0.10));
 }
 
@@ -643,13 +652,13 @@ fn rot_siding(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn rust_sheet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let corr = sin(uv.x * (55.0 + variant * 16.0));
   let ridge = corr * 0.5 + 0.5;
-  var metal = mix(vec3f(0.25, 0.27, 0.26), vec3f(0.61, 0.62, 0.57), ridge * 0.45 + 0.25);
+  var metal = mix(mat_pal(0, vec3f(0.25, 0.27, 0.26)), mat_pal(1, vec3f(0.61, 0.62, 0.57)), ridge * 0.45 + 0.25);
   metal = metal + vec3f((fbm(uv.x * 18.0 + seed, uv.y * 18.0, 4.0) * 0.5 - 0.25) * 0.11);
   let rust_noise = fbm(uv.x * 8.0 + seed, uv.y * 8.0 - seed, 5.0) * 0.5 + 0.5;
   let rust = smoothstep(0.45 - variant * 0.05, 0.76, rust_noise);
-  var col = mix(metal, mix(vec3f(0.26, 0.08, 0.025), vec3f(0.78, 0.30, 0.065), rust_noise), rust * 0.85);
-  col = mix(col, vec3f(0.64, 0.18, 0.035), vertical_drips(uv, seed + 3.0, variant + 1.0) * 0.55);
-  col = mix(col, vec3f(0.055, 0.050, 0.042), speckle(px, 5.5, seed, 0.94) * rust * 0.72);
+  var col = mix(metal, mix(mat_pal(2, vec3f(0.26, 0.08, 0.025)), mat_pal(3, vec3f(0.78, 0.30, 0.065)), rust_noise), rust * 0.85);
+  col = mix(col, mat_pal(4, vec3f(0.64, 0.18, 0.035)), vertical_drips(uv, seed + 3.0, variant + 1.0) * 0.55);
+  col = mix(col, mat_pal(5, vec3f(0.055, 0.050, 0.042)), speckle(px, 5.5, seed, 0.94) * rust * 0.72);
   return sat3(col - vec3f(line_near(corr, 0.030) * 0.08));
 }
 
@@ -664,25 +673,25 @@ fn rust_sheet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn blade_steel(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let broad = fbm(uv.x * 5.0 + seed, uv.y * 8.0 - seed, 4.0) * 0.5 + 0.5;
   let brush = sin((uv.x + fbm(uv.x * 7.0, uv.y * 4.0 + seed, 3.0) * 0.035) * (180.0 + variant * 28.0)) * 0.5 + 0.5;
-  var low = vec3f(0.34, 0.36, 0.36);
-  var high = vec3f(0.82, 0.84, 0.80);
+  var low = mat_pal(0, vec3f(0.34, 0.36, 0.36));
+  var high = mat_pal(1, vec3f(0.82, 0.84, 0.80));
   if (variant > 0.5 && variant < 1.5) {
-    low = vec3f(0.18, 0.20, 0.21);
-    high = vec3f(0.54, 0.57, 0.56);
+    low = mat_pal(2, vec3f(0.18, 0.20, 0.21));
+    high = mat_pal(3, vec3f(0.54, 0.57, 0.56));
   } else if (variant >= 1.5) {
-    low = vec3f(0.42, 0.36, 0.29);
-    high = vec3f(0.78, 0.72, 0.62);
+    low = mat_pal(4, vec3f(0.42, 0.36, 0.29));
+    high = mat_pal(5, vec3f(0.78, 0.72, 0.62));
   }
   var col = mix(low, high, broad * 0.44 + brush * 0.34 + 0.12);
   let bevel = line_near(uv.y - 0.76 + snoise(uv.x * 4.0 + seed, seed) * 0.018, 0.026);
   let spine = line_near(uv.y - 0.22 + snoise(uv.x * 3.0 - seed, seed) * 0.014, 0.014);
   let scratch = line_near(snoise(uv.x * 12.0 + seed, uv.y * 42.0 - seed), 0.014) * smoothstep(0.25, 0.80, fbm(uv.x * 4.0, uv.y * 4.0 + seed, 4.0) * 0.5 + 0.5);
   let nick = speckle(px, 5.0, seed, 0.955) * smoothstep(0.66, 0.95, uv.y);
-  col = mix(col, vec3f(0.95, 0.96, 0.90), bevel * 0.45 + spine * 0.22);
-  col = col + vec3f(0.18, 0.18, 0.16) * scratch - vec3f(0.24, 0.22, 0.18) * nick;
+  col = mix(col, mat_pal(6, vec3f(0.95, 0.96, 0.90)), bevel * 0.45 + spine * 0.22);
+  col = col + mat_pal(7, vec3f(0.18, 0.18, 0.16)) * scratch - mat_pal(8, vec3f(0.24, 0.22, 0.18)) * nick;
   if (variant >= 1.5) {
     let tarnish = blotch(uv, vec2f(0.25, 0.72), 0.16, vec2f(1.6, 0.7), seed + 8.0) + blotch(uv, vec2f(0.72, 0.30), 0.12, vec2f(1.2, 1.0), seed + 11.0);
-    col = mix(col, vec3f(0.40, 0.17, 0.055), sat(tarnish) * 0.22);
+    col = mix(col, mat_pal(9, vec3f(0.40, 0.17, 0.055)), sat(tarnish) * 0.22);
   }
   return sat3(col);
 }
@@ -698,23 +707,23 @@ fn blade_steel(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn gunmetal(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let fine = fbm(uv.x * 20.0 + seed, uv.y * 20.0, 4.0) * 0.5 + 0.5;
   let oil = fbm(uv.x * 4.0 - seed, uv.y * 5.0 + seed, 5.0) * 0.5 + 0.5;
-  var low = vec3f(0.045, 0.052, 0.060);
-  var high = vec3f(0.25, 0.29, 0.31);
+  var low = mat_pal(0, vec3f(0.045, 0.052, 0.060));
+  var high = mat_pal(1, vec3f(0.25, 0.29, 0.31));
   if (variant > 0.5 && variant < 1.5) {
-    low = vec3f(0.070, 0.075, 0.070);
-    high = vec3f(0.34, 0.35, 0.31);
+    low = mat_pal(2, vec3f(0.070, 0.075, 0.070));
+    high = mat_pal(3, vec3f(0.34, 0.35, 0.31));
   } else if (variant >= 1.5) {
-    low = vec3f(0.10, 0.105, 0.105);
-    high = vec3f(0.50, 0.50, 0.45);
+    low = mat_pal(4, vec3f(0.10, 0.105, 0.105));
+    high = mat_pal(5, vec3f(0.50, 0.50, 0.45));
   }
   var col = mix(low, high, fine * 0.44 + oil * 0.22);
   let slide_groove = line_near(sin((uv.y + snoise(uv.x * 2.0, seed) * 0.010) * (74.0 + variant * 12.0)), 0.050);
   let machining = line_near(sin(uv.x * (120.0 + variant * 30.0)), 0.070);
   let holster_wear = smoothstep(0.57, 0.93, uv.x) * smoothstep(0.35, 0.82, uv.y);
   let scratch = line_near(snoise(uv.x * 18.0 + seed, uv.y * 28.0 - seed), 0.016);
-  col = col + vec3f(0.055, 0.060, 0.055) * slide_groove + vec3f(0.030, 0.032, 0.030) * machining;
-  col = mix(col, vec3f(0.58, 0.57, 0.50), holster_wear * speckle(px, 3.0, seed, 0.90) * (0.28 + variant * 0.08));
-  col = col + vec3f(0.14, 0.13, 0.11) * scratch - vec3f(speckle(px, 4.0, seed + 4.0, 0.94) * 0.10);
+  col = col + mat_pal(6, vec3f(0.055, 0.060, 0.055)) * slide_groove + mat_pal(7, vec3f(0.030, 0.032, 0.030)) * machining;
+  col = mix(col, mat_pal(8, vec3f(0.58, 0.57, 0.50)), holster_wear * speckle(px, 3.0, seed, 0.90) * (0.28 + variant * 0.08));
+  col = col + mat_pal(9, vec3f(0.14, 0.13, 0.11)) * scratch - vec3f(speckle(px, 4.0, seed + 4.0, 0.94) * 0.10);
   return sat3(col);
 }
 
@@ -727,14 +736,14 @@ fn gunmetal(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags props, grip, polymer
 // @author legacy
 fn grip_polymer(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var low = vec3f(0.028, 0.030, 0.034);
-  var high = vec3f(0.18, 0.19, 0.19);
+  var low = mat_pal(0, vec3f(0.028, 0.030, 0.034));
+  var high = mat_pal(1, vec3f(0.18, 0.19, 0.19));
   if (variant > 0.5 && variant < 1.5) {
-    low = vec3f(0.080, 0.070, 0.055);
-    high = vec3f(0.32, 0.28, 0.20);
+    low = mat_pal(2, vec3f(0.080, 0.070, 0.055));
+    high = mat_pal(3, vec3f(0.32, 0.28, 0.20));
   } else if (variant >= 1.5) {
-    low = vec3f(0.030, 0.060, 0.055);
-    high = vec3f(0.16, 0.24, 0.20);
+    low = mat_pal(4, vec3f(0.030, 0.060, 0.055));
+    high = mat_pal(5, vec3f(0.16, 0.24, 0.20));
   }
   let grain = fbm(uv.x * 26.0 + seed, uv.y * 26.0 - seed, 4.0) * 0.5 + 0.5;
   var col = mix(low, high, grain * 0.54 + 0.10);
@@ -743,8 +752,8 @@ fn grip_polymer(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let diamond = 1.0 - smoothstep(0.045, 0.082, min(diag_a, diag_b));
   let stipple = speckle(px, 2.6 - variant * 0.25, seed, 0.66 + variant * 0.04);
   let worn_high = speckle(px + vec2f(21.0, 13.0), 4.0, seed, 0.93);
-  col = col + vec3f(0.10, 0.10, 0.09) * diamond + vec3f(0.055, 0.055, 0.050) * stipple;
-  col = mix(col, vec3f(0.42, 0.41, 0.36), worn_high * smoothstep(1.0, 1.8, variant) * 0.38);
+  col = col + mat_pal(6, vec3f(0.10, 0.10, 0.09)) * diamond + mat_pal(7, vec3f(0.055, 0.055, 0.050)) * stipple;
+  col = mix(col, mat_pal(8, vec3f(0.42, 0.41, 0.36)), worn_high * smoothstep(1.0, 1.8, variant) * 0.38);
   return sat3(col);
 }
 
@@ -759,22 +768,22 @@ fn grip_polymer(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn leather(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let pore = fbm(uv.x * 30.0 + seed, uv.y * 26.0 - seed, 5.0) * 0.5 + 0.5;
   let wrinkle = line_near(snoise(uv.x * 8.0 + seed, uv.y * 19.0 - seed), 0.022);
-  var low = vec3f(0.17, 0.075, 0.030);
-  var high = vec3f(0.58, 0.28, 0.11);
+  var low = mat_pal(0, vec3f(0.17, 0.075, 0.030));
+  var high = mat_pal(1, vec3f(0.58, 0.28, 0.11));
   if (variant > 0.5 && variant < 1.5) {
-    low = vec3f(0.030, 0.026, 0.022);
-    high = vec3f(0.24, 0.21, 0.17);
+    low = mat_pal(2, vec3f(0.030, 0.026, 0.022));
+    high = mat_pal(3, vec3f(0.24, 0.21, 0.17));
   } else if (variant >= 1.5) {
-    low = vec3f(0.42, 0.25, 0.12);
-    high = vec3f(0.78, 0.52, 0.25);
+    low = mat_pal(4, vec3f(0.42, 0.25, 0.12));
+    high = mat_pal(5, vec3f(0.78, 0.52, 0.25));
   }
   var col = mix(low, high, pore * 0.58 + 0.20);
   let crease = line_near(snoise(uv.x * 13.0 - seed, uv.y * 9.0 + seed), 0.018);
   let seam = line_near(uv.x - 0.18, 0.010) * smoothstep(0.25, 0.85, uv.y);
   let stitch = seam * step(0.55, fract(uv.y * 18.0 + variant * 0.3));
-  col = col - vec3f(0.16, 0.10, 0.06) * wrinkle - vec3f(0.12, 0.075, 0.040) * crease;
-  col = mix(col, vec3f(0.86, 0.69, 0.48), stitch * 0.72);
-  col = mix(col, vec3f(0.95, 0.72, 0.38), speckle(px, 6.0, seed, 0.95) * smoothstep(1.0, 1.8, variant) * 0.40);
+  col = col - mat_pal(6, vec3f(0.16, 0.10, 0.06)) * wrinkle - mat_pal(7, vec3f(0.12, 0.075, 0.040)) * crease;
+  col = mix(col, mat_pal(8, vec3f(0.86, 0.69, 0.48)), stitch * 0.72);
+  col = mix(col, mat_pal(9, vec3f(0.95, 0.72, 0.38)), speckle(px, 6.0, seed, 0.95) * smoothstep(1.0, 1.8, variant) * 0.40);
   return sat3(col);
 }
 
@@ -790,19 +799,19 @@ fn denim(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let weave_a = line_near(sin((uv.x + uv.y * 0.62) * (106.0 + variant * 12.0)), 0.13);
   let weave_b = line_near(sin((uv.y - uv.x * 0.20) * (82.0 + variant * 8.0)), 0.11);
   let fade = fbm(uv.x * 5.0 + seed, uv.y * 5.0 - seed, 4.0) * 0.5 + 0.5;
-  var low = vec3f(0.025, 0.075, 0.18);
-  var high = vec3f(0.18, 0.35, 0.62);
+  var low = mat_pal(0, vec3f(0.025, 0.075, 0.18));
+  var high = mat_pal(1, vec3f(0.18, 0.35, 0.62));
   if (variant > 0.5 && variant < 1.5) {
-    low = vec3f(0.020, 0.024, 0.032);
-    high = vec3f(0.18, 0.20, 0.24);
+    low = mat_pal(2, vec3f(0.020, 0.024, 0.032));
+    high = mat_pal(3, vec3f(0.18, 0.20, 0.24));
   } else if (variant >= 1.5) {
-    low = vec3f(0.18, 0.23, 0.30);
-    high = vec3f(0.56, 0.66, 0.76);
+    low = mat_pal(4, vec3f(0.18, 0.23, 0.30));
+    high = mat_pal(5, vec3f(0.56, 0.66, 0.76));
   }
   var col = mix(low, high, fade * 0.48 + weave_a * 0.18 + weave_b * 0.10);
   let fray = line_near(snoise(uv.x * 20.0 + seed, uv.y * 6.0 - seed), 0.020) * smoothstep(0.55, 0.94, uv.x);
   let lint = speckle(px, 3.0, seed, 0.92);
-  col = mix(col, vec3f(0.72, 0.78, 0.82), fray * 0.36 + lint * 0.18);
+  col = mix(col, mat_pal(6, vec3f(0.72, 0.78, 0.82)), fray * 0.36 + lint * 0.18);
   return sat3(col);
 }
 
@@ -818,20 +827,20 @@ fn fabric_fill(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let warp = line_near(sin((uv.x + fbm(uv.x * 2.0 + seed, uv.y * 2.0, 3.0) * 0.020) * 95.0), 0.10);
   let weft = line_near(sin((uv.y + fbm(uv.x * 2.0, uv.y * 2.0 - seed, 3.0) * 0.020) * 88.0), 0.11);
   let weave = sat(warp * 0.58 + weft * 0.48);
-  var col = mix(vec3f(0.16, 0.22, 0.12), vec3f(0.48, 0.55, 0.34), weave);
+  var col = mix(mat_pal(0, vec3f(0.16, 0.22, 0.12)), mat_pal(1, vec3f(0.48, 0.55, 0.34)), weave);
   if (variant > 0.5 && variant < 1.5) {
     let stripe_a = line_near(sin(uv.x * 28.0), 0.13);
     let stripe_b = line_near(sin(uv.y * 19.0), 0.12);
-    col = mix(vec3f(0.16, 0.08, 0.09), vec3f(0.70, 0.58, 0.42), weave * 0.40 + stripe_a * 0.32);
-    col = mix(col, vec3f(0.08, 0.12, 0.17), stripe_b * 0.36);
+    col = mix(mat_pal(2, vec3f(0.16, 0.08, 0.09)), mat_pal(3, vec3f(0.70, 0.58, 0.42)), weave * 0.40 + stripe_a * 0.32);
+    col = mix(col, mat_pal(4, vec3f(0.08, 0.12, 0.17)), stripe_b * 0.36);
   } else if (variant >= 1.5) {
     let camo_a = blotch(uv, vec2f(0.24, 0.36), 0.22, vec2f(1.4, 0.8), seed);
     let camo_b = blotch(uv, vec2f(0.70, 0.68), 0.20, vec2f(0.9, 1.5), seed + 5.0);
     let camo_c = blotch(uv, vec2f(0.58, 0.22), 0.15, vec2f(1.2, 1.0), seed + 8.0);
-    col = mix(vec3f(0.18, 0.22, 0.14), vec3f(0.44, 0.40, 0.24), weave * 0.25);
-    col = mix(col, vec3f(0.08, 0.13, 0.08), camo_a * 0.68);
-    col = mix(col, vec3f(0.38, 0.31, 0.18), camo_b * 0.58);
-    col = mix(col, vec3f(0.055, 0.060, 0.050), camo_c * 0.50);
+    col = mix(mat_pal(5, vec3f(0.18, 0.22, 0.14)), mat_pal(6, vec3f(0.44, 0.40, 0.24)), weave * 0.25);
+    col = mix(col, mat_pal(7, vec3f(0.08, 0.13, 0.08)), camo_a * 0.68);
+    col = mix(col, mat_pal(8, vec3f(0.38, 0.31, 0.18)), camo_b * 0.58);
+    col = mix(col, mat_pal(9, vec3f(0.055, 0.060, 0.050)), camo_c * 0.50);
   }
   col = col + vec3f((fbm(uv.x * 18.0 + seed, uv.y * 18.0, 4.0) - 0.5) * 0.070) - vec3f(speckle(px, 3.0, seed, 0.93) * 0.060);
   return sat3(col);
@@ -848,23 +857,23 @@ fn fabric_fill(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn skin_fill(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let mottle = fbm(uv.x * 7.0 + seed, uv.y * 8.0 - seed, 5.0) * 0.5 + 0.5;
   let pore_noise = fbm(uv.x * 42.0 - seed, uv.y * 39.0 + seed, 4.0) * 0.5 + 0.5;
-  var low = vec3f(0.70, 0.43, 0.31);
-  var high = vec3f(0.98, 0.72, 0.55);
+  var low = mat_pal(0, vec3f(0.70, 0.43, 0.31));
+  var high = mat_pal(1, vec3f(0.98, 0.72, 0.55));
   if (variant > 0.5 && variant < 1.5) {
-    low = vec3f(0.42, 0.23, 0.16);
-    high = vec3f(0.76, 0.48, 0.32);
+    low = mat_pal(2, vec3f(0.42, 0.23, 0.16));
+    high = mat_pal(3, vec3f(0.76, 0.48, 0.32));
   } else if (variant >= 1.5) {
-    low = vec3f(0.18, 0.095, 0.065);
-    high = vec3f(0.44, 0.25, 0.16);
+    low = mat_pal(4, vec3f(0.18, 0.095, 0.065));
+    high = mat_pal(5, vec3f(0.44, 0.25, 0.16));
   }
   var col = mix(low, high, mottle * 0.58 + pore_noise * 0.10 + 0.14);
   let pore = speckle(px, 2.2, seed, 0.80) * 0.055;
   let freckle = speckle(px + vec2f(17.0, 31.0), 6.5, seed, 0.965) * smoothstep(0.0, 1.1, 1.2 - variant * 0.25);
   let crease = line_near(snoise(uv.x * 10.0 + seed, uv.y * 15.0 - seed), 0.014) * smoothstep(0.40, 0.86, fbm(uv.x * 4.0, uv.y * 4.0 + seed, 3.0) * 0.5 + 0.5);
   let scar = line_near(uv.y - 0.42 - sin(uv.x * 9.0 + seed) * 0.025, 0.010) * smoothstep(1.0, 1.8, variant);
-  col = col - vec3f(pore) - vec3f(0.18, 0.09, 0.04) * freckle;
-  col = mix(col, vec3f(0.54, 0.24, 0.18), crease * 0.16);
-  col = mix(col, vec3f(0.84, 0.60, 0.48), scar * 0.34);
+  col = col - vec3f(pore) - mat_pal(6, vec3f(0.18, 0.09, 0.04)) * freckle;
+  col = mix(col, mat_pal(7, vec3f(0.54, 0.24, 0.18)), crease * 0.16);
+  col = mix(col, mat_pal(8, vec3f(0.84, 0.60, 0.48)), scar * 0.34);
   return sat3(col);
 }
 
@@ -879,23 +888,23 @@ fn skin_fill(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn peel_wallpaper_vice(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let stripe = line_near(sin(uv.x * (32.0 + variant * 8.0)), 0.18);
   let flourish = line_near(sin((uv.x * 18.0 + sin(uv.y * 21.0 + seed) * 2.0) + seed), 0.09) * line_near(sin(uv.y * 23.0), 0.13);
-  var paper_a = vec3f(0.95, 0.40, 0.66);
-  var paper_b = vec3f(0.16, 0.84, 0.86);
+  var paper_a = mat_pal(0, vec3f(0.95, 0.40, 0.66));
+  var paper_b = mat_pal(1, vec3f(0.16, 0.84, 0.86));
   if (variant > 0.5 && variant < 1.5) {
-    paper_a = vec3f(0.84, 0.70, 0.25);
-    paper_b = vec3f(0.14, 0.62, 0.70);
+    paper_a = mat_pal(2, vec3f(0.84, 0.70, 0.25));
+    paper_b = mat_pal(3, vec3f(0.14, 0.62, 0.70));
   } else if (variant >= 1.5) {
-    paper_a = vec3f(0.78, 0.52, 0.82);
-    paper_b = vec3f(0.13, 0.17, 0.26);
+    paper_a = mat_pal(4, vec3f(0.78, 0.52, 0.82));
+    paper_b = mat_pal(5, vec3f(0.13, 0.17, 0.26));
   }
   let age = fbm(uv.x * 7.0 + seed, uv.y * 7.0 - seed, 5.0) * 0.5 + 0.5;
   var col = mix(paper_b, paper_a, stripe * 0.55 + flourish * 0.34 + age * 0.20);
   let peel = smoothstep(0.48 - variant * 0.04, 0.67, fbm(uv.x * 5.0 + seed, uv.y * 6.0 - seed, 5.0) * 0.5 + 0.5);
   let curl_edge = line_near(fbm(uv.x * 7.0 + seed, uv.y * 8.0, 4.0) - 0.42, 0.025);
-  let plaster = mix(vec3f(0.31, 0.27, 0.22), vec3f(0.65, 0.58, 0.46), age);
+  let plaster = mix(mat_pal(6, vec3f(0.31, 0.27, 0.22)), mat_pal(7, vec3f(0.65, 0.58, 0.46)), age);
   col = mix(col, plaster, peel * 0.72);
-  col = mix(col, vec3f(0.95, 0.86, 0.62), curl_edge * peel * 0.45);
-  col = mix(col, vec3f(0.025, 0.055, 0.030), blotch(uv, vec2f(0.24, 0.78), 0.18, vec2f(1.4, 0.8), seed) * 0.58);
+  col = mix(col, mat_pal(8, vec3f(0.95, 0.86, 0.62)), curl_edge * peel * 0.45);
+  col = mix(col, mat_pal(9, vec3f(0.025, 0.055, 0.030)), blotch(uv, vec2f(0.24, 0.78), 0.18, vec2f(1.4, 0.8), seed) * 0.58);
   return neon_grime(uv, px, col, seed, variant);
 }
 
@@ -911,19 +920,19 @@ fn motel_carpet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let pile = fbm(uv.x * 34.0 + seed, uv.y * 34.0 - seed, 5.0) * 0.5 + 0.5;
   let zig_a = line_near(sin((uv.x + uv.y) * (42.0 + variant * 5.0)), 0.16);
   let zig_b = line_near(sin((uv.x - uv.y) * (38.0 + variant * 6.0)), 0.16);
-  var base = mix(vec3f(0.10, 0.08, 0.20), vec3f(0.34, 0.12, 0.40), pile);
+  var base = mix(mat_pal(0, vec3f(0.10, 0.08, 0.20)), mat_pal(1, vec3f(0.34, 0.12, 0.40)), pile);
   if (variant > 0.5 && variant < 1.5) {
-    base = mix(vec3f(0.06, 0.21, 0.22), vec3f(0.18, 0.48, 0.44), pile);
+    base = mix(mat_pal(2, vec3f(0.06, 0.21, 0.22)), mat_pal(3, vec3f(0.18, 0.48, 0.44)), pile);
   } else if (variant >= 1.5) {
-    base = mix(vec3f(0.22, 0.10, 0.06), vec3f(0.72, 0.34, 0.16), pile);
+    base = mix(mat_pal(4, vec3f(0.22, 0.10, 0.06)), mat_pal(5, vec3f(0.72, 0.34, 0.16)), pile);
   }
-  var col = mix(base, vec3f(0.95, 0.17, 0.55), zig_a * 0.28);
-  col = mix(col, vec3f(0.08, 0.88, 0.86), zig_b * 0.20);
+  var col = mix(base, mat_pal(6, vec3f(0.95, 0.17, 0.55)), zig_a * 0.28);
+  col = mix(col, mat_pal(7, vec3f(0.08, 0.88, 0.86)), zig_b * 0.20);
   let burn = blotch(uv, vec2f(0.34, 0.52), 0.11, vec2f(1.0, 0.8), seed + 4.0);
   let stain = blotch(uv, vec2f(0.72, 0.70), 0.20, vec2f(0.7, 1.3), seed + 9.0);
-  col = mix(col, vec3f(0.018, 0.014, 0.012), burn * 0.62);
-  col = mix(col, vec3f(0.13, 0.08, 0.035), stain * 0.45);
-  col = mix(col, vec3f(0.70, 0.74, 0.60), speckle(px, 4.5, seed, 0.95) * 0.34);
+  col = mix(col, mat_pal(8, vec3f(0.018, 0.014, 0.012)), burn * 0.62);
+  col = mix(col, mat_pal(9, vec3f(0.13, 0.08, 0.035)), stain * 0.45);
+  col = mix(col, mat_pal(10, vec3f(0.70, 0.74, 0.60)), speckle(px, 4.5, seed, 0.95) * 0.34);
   return neon_grime(uv, px, col, seed + 2.0, variant);
 }
 
@@ -941,18 +950,18 @@ fn rotten_rug(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let border = sat(border_x + border_y);
   let medallion = line_near(length((uv - vec2f(0.5, 0.5)) * vec2f(1.0, 1.35)) - 0.24, 0.030);
   let thread = fbm(uv.x * 28.0 + seed, uv.y * 24.0 - seed, 5.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.18, 0.035, 0.09), vec3f(0.58, 0.12, 0.23), thread);
+  var col = mix(mat_pal(0, vec3f(0.18, 0.035, 0.09)), mat_pal(1, vec3f(0.58, 0.12, 0.23)), thread);
   if (variant > 0.5 && variant < 1.5) {
-    col = mix(vec3f(0.08, 0.18, 0.20), vec3f(0.28, 0.66, 0.62), thread);
+    col = mix(mat_pal(2, vec3f(0.08, 0.18, 0.20)), mat_pal(3, vec3f(0.28, 0.66, 0.62)), thread);
   } else if (variant >= 1.5) {
-    col = mix(vec3f(0.20, 0.14, 0.06), vec3f(0.72, 0.58, 0.24), thread);
+    col = mix(mat_pal(4, vec3f(0.20, 0.14, 0.06)), mat_pal(5, vec3f(0.72, 0.58, 0.24)), thread);
   }
-  col = mix(col, vec3f(0.96, 0.68, 0.22), border * 0.44);
-  col = mix(col, vec3f(0.05, 0.82, 0.90), medallion * 0.32);
+  col = mix(col, mat_pal(6, vec3f(0.96, 0.68, 0.22)), border * 0.44);
+  col = mix(col, mat_pal(7, vec3f(0.05, 0.82, 0.90)), medallion * 0.32);
   let worn = smoothstep(0.45, 0.76, fbm(uv.x * 8.0 - seed, uv.y * 8.0 + seed, 5.0) * 0.5 + 0.5);
   let fray = (speckle(px, 2.4, seed, 0.78) + line_near(snoise(uv.x * 30.0, uv.y * 10.0 + seed), 0.018)) * smoothstep(0.55, 0.95, border);
-  col = mix(col, vec3f(0.20, 0.18, 0.14), worn * 0.45);
-  col = mix(col, vec3f(0.82, 0.78, 0.58), fray * 0.28);
+  col = mix(col, mat_pal(8, vec3f(0.20, 0.18, 0.14)), worn * 0.45);
+  col = mix(col, mat_pal(9, vec3f(0.82, 0.78, 0.58)), fray * 0.28);
   return neon_grime(uv, px, col, seed + 5.0, variant);
 }
 
@@ -967,18 +976,18 @@ fn rotten_rug(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn neon_stucco(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let stucco = fbm(uv.x * 28.0 + seed, uv.y * 28.0 - seed, 5.0) * 0.5 + 0.5;
   let larger = fbm(uv.x * 5.0 - seed, uv.y * 5.0 + seed, 4.0) * 0.5 + 0.5;
-  var low = vec3f(0.50, 0.10, 0.24);
-  var high = vec3f(0.98, 0.45, 0.66);
+  var low = mat_pal(0, vec3f(0.50, 0.10, 0.24));
+  var high = mat_pal(1, vec3f(0.98, 0.45, 0.66));
   if (variant > 0.5 && variant < 1.5) {
-    low = vec3f(0.07, 0.37, 0.42);
-    high = vec3f(0.36, 0.92, 0.88);
+    low = mat_pal(2, vec3f(0.07, 0.37, 0.42));
+    high = mat_pal(3, vec3f(0.36, 0.92, 0.88));
   } else if (variant >= 1.5) {
-    low = vec3f(0.26, 0.19, 0.46);
-    high = vec3f(0.84, 0.68, 0.96);
+    low = mat_pal(4, vec3f(0.26, 0.19, 0.46));
+    high = mat_pal(5, vec3f(0.84, 0.68, 0.96));
   }
   var col = mix(low, high, stucco * 0.62 + larger * 0.18);
   col = col - vec3f(crack_field(uv, seed, 9.0) * 0.18);
-  col = mix(col, vec3f(0.98, 0.78, 0.18), vertical_drips(uv, seed + 2.0, variant + 1.0) * 0.18);
+  col = mix(col, mat_pal(6, vec3f(0.98, 0.78, 0.18)), vertical_drips(uv, seed + 2.0, variant + 1.0) * 0.18);
   return neon_grime(uv, px, col, seed + 6.0, variant);
 }
 
@@ -996,16 +1005,16 @@ fn pool_tile_vice(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let local = fract(grid);
   let grout = max(1.0 - smoothstep(0.035, 0.070, min(local.x, 1.0 - local.x)), 1.0 - smoothstep(0.035, 0.070, min(local.y, 1.0 - local.y)));
   let tile_tone = rand(cell + vec2f(seed, seed * 2.0));
-  var col = mix(vec3f(0.05, 0.50, 0.62), vec3f(0.48, 0.96, 0.92), tile_tone);
+  var col = mix(mat_pal(0, vec3f(0.05, 0.50, 0.62)), mat_pal(1, vec3f(0.48, 0.96, 0.92)), tile_tone);
   if (variant > 0.5 && variant < 1.5) {
-    col = mix(vec3f(0.12, 0.10, 0.42), vec3f(0.96, 0.20, 0.56), tile_tone);
+    col = mix(mat_pal(2, vec3f(0.12, 0.10, 0.42)), mat_pal(3, vec3f(0.96, 0.20, 0.56)), tile_tone);
   } else if (variant >= 1.5) {
-    col = mix(vec3f(0.16, 0.44, 0.34), vec3f(0.86, 0.74, 0.34), tile_tone);
+    col = mix(mat_pal(4, vec3f(0.16, 0.44, 0.34)), mat_pal(5, vec3f(0.86, 0.74, 0.34)), tile_tone);
   }
   let caustic = line_near(sin(uv.x * 50.0 + uv.y * 17.0 + U.time * 0.8 + seed), 0.055);
   let mildew = grout * smoothstep(0.40, 0.82, fbm(uv.x * 15.0 + seed, uv.y * 15.0, 4.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.90, 1.0, 0.85), caustic * 0.18);
-  col = mix(col, vec3f(0.015, 0.050, 0.035), mildew * 0.78);
+  col = mix(col, mat_pal(6, vec3f(0.90, 1.0, 0.85)), caustic * 0.18);
+  col = mix(col, mat_pal(7, vec3f(0.015, 0.050, 0.035)), mildew * 0.78);
   return neon_grime(uv, px, col, seed + 8.0, variant);
 }
 
@@ -1020,16 +1029,16 @@ fn pool_tile_vice(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn booth_vinyl(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let rib = line_near(sin((uv.x + sin(uv.y * 4.0 + seed) * 0.012) * (45.0 + variant * 11.0)), 0.12);
   let sheen = smoothstep(0.36, 0.96, sin((uv.x * 1.2 + uv.y * 1.6 + seed) * 6.0) * 0.5 + 0.5);
-  var col = mix(vec3f(0.34, 0.025, 0.12), vec3f(0.92, 0.08, 0.40), rib * 0.40 + sheen * 0.24);
+  var col = mix(mat_pal(0, vec3f(0.34, 0.025, 0.12)), mat_pal(1, vec3f(0.92, 0.08, 0.40)), rib * 0.40 + sheen * 0.24);
   if (variant > 0.5 && variant < 1.5) {
-    col = mix(vec3f(0.025, 0.16, 0.18), vec3f(0.08, 0.78, 0.76), rib * 0.40 + sheen * 0.24);
+    col = mix(mat_pal(2, vec3f(0.025, 0.16, 0.18)), mat_pal(3, vec3f(0.08, 0.78, 0.76)), rib * 0.40 + sheen * 0.24);
   } else if (variant >= 1.5) {
-    col = mix(vec3f(0.24, 0.14, 0.03), vec3f(0.92, 0.62, 0.16), rib * 0.34 + sheen * 0.25);
+    col = mix(mat_pal(4, vec3f(0.24, 0.14, 0.03)), mat_pal(5, vec3f(0.92, 0.62, 0.16)), rib * 0.34 + sheen * 0.25);
   }
   let seam = line_near(uv.x - 0.50, 0.014) + line_near(uv.y - 0.50, 0.014);
   let tear = line_near(snoise(uv.x * 11.0 + seed, uv.y * 18.0 - seed), 0.015) * smoothstep(0.46, 0.78, fbm(uv.x * 6.0, uv.y * 6.0 + seed, 4.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.03, 0.02, 0.018), sat(seam) * 0.46 + tear * 0.62);
-  col = mix(col, vec3f(0.86, 0.82, 0.66), speckle(px, 4.0, seed, 0.94) * 0.26);
+  col = mix(col, mat_pal(6, vec3f(0.03, 0.02, 0.018)), sat(seam) * 0.46 + tear * 0.62);
+  col = mix(col, mat_pal(7, vec3f(0.86, 0.82, 0.66)), speckle(px, 4.0, seed, 0.94) * 0.26);
   return neon_grime(uv, px, col, seed + 10.0, variant);
 }
 
@@ -1046,16 +1055,16 @@ fn drop_ceiling(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let local = fract(grid);
   let seam_mark = max(1.0 - smoothstep(0.018, 0.050, min(local.x, 1.0 - local.x)), 1.0 - smoothstep(0.018, 0.050, min(local.y, 1.0 - local.y)));
   let fiber = fbm(uv.x * 38.0 + seed, uv.y * 34.0 - seed, 5.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.52, 0.46, 0.38), vec3f(0.86, 0.78, 0.62), fiber);
+  var col = mix(mat_pal(0, vec3f(0.52, 0.46, 0.38)), mat_pal(1, vec3f(0.86, 0.78, 0.62)), fiber);
   if (variant > 0.5 && variant < 1.5) {
-    col = mix(vec3f(0.42, 0.28, 0.32), vec3f(0.82, 0.62, 0.72), fiber);
+    col = mix(mat_pal(2, vec3f(0.42, 0.28, 0.32)), mat_pal(3, vec3f(0.82, 0.62, 0.72)), fiber);
   } else if (variant >= 1.5) {
-    col = mix(vec3f(0.30, 0.38, 0.34), vec3f(0.70, 0.82, 0.70), fiber);
+    col = mix(mat_pal(4, vec3f(0.30, 0.38, 0.34)), mat_pal(5, vec3f(0.70, 0.82, 0.70)), fiber);
   }
   let water_ring = line_near(length((uv - vec2f(0.34, 0.38)) * vec2f(1.2, 0.8)) - 0.20, 0.028);
   let sag = smoothstep(0.52, 0.90, fbm(uv.x * 5.0 + seed, uv.y * 5.0, 4.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.10, 0.075, 0.045), water_ring * 0.58 + sag * 0.20);
-  col = mix(col, vec3f(0.055, 0.050, 0.045), seam_mark * 0.66);
+  col = mix(col, mat_pal(6, vec3f(0.10, 0.075, 0.045)), water_ring * 0.58 + sag * 0.20);
+  col = mix(col, mat_pal(7, vec3f(0.055, 0.050, 0.045)), seam_mark * 0.66);
   return neon_grime(uv, px, col, seed + 12.0, variant);
 }
 
@@ -1070,14 +1079,14 @@ fn drop_ceiling(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn pdx_carpet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let pile = fbm(uv.x * 32.0 + seed, uv.y * 32.0 - seed, 5.0) * 0.5 + 0.5;
   let low_thread = line_near(sin((uv.x * 1.8 + uv.y) * 92.0), 0.13);
-  var base_a = vec3f(0.015, 0.23, 0.24);
-  var base_b = vec3f(0.04, 0.48, 0.48);
+  var base_a = mat_pal(0, vec3f(0.015, 0.23, 0.24));
+  var base_b = mat_pal(1, vec3f(0.04, 0.48, 0.48));
   if (variant > 0.5 && variant < 1.5) {
-    base_a = vec3f(0.018, 0.14, 0.19);
-    base_b = vec3f(0.06, 0.36, 0.46);
+    base_a = mat_pal(2, vec3f(0.018, 0.14, 0.19));
+    base_b = mat_pal(3, vec3f(0.06, 0.36, 0.46));
   } else if (variant >= 1.5) {
-    base_a = vec3f(0.10, 0.20, 0.16);
-    base_b = vec3f(0.35, 0.50, 0.34);
+    base_a = mat_pal(4, vec3f(0.10, 0.20, 0.16));
+    base_b = mat_pal(5, vec3f(0.35, 0.50, 0.34));
   }
   var col = mix(base_a, base_b, pile * 0.62 + low_thread * 0.12);
 
@@ -1087,33 +1096,33 @@ fn pdx_carpet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
     segment_mark(uv, vec2f(0.45, 0.54), vec2f(0.47, 0.14), 0.026) +
     segment_mark(uv, vec2f(0.36, 0.44), vec2f(0.20, 0.18), 0.023) +
     segment_mark(uv, vec2f(0.58, 0.43), vec2f(0.82, 0.34), 0.023);
-  col = mix(col, vec3f(0.010, 0.045, 0.050), sat(taxi_shadow) * 0.62);
+  col = mix(col, mat_pal(6, vec3f(0.010, 0.045, 0.050)), sat(taxi_shadow) * 0.62);
 
   let main_lane = segment_mark(uv, vec2f(0.10, 0.80), vec2f(0.88, 0.18), 0.020);
   let cross_lane = segment_mark(uv, vec2f(0.17, 0.35), vec2f(0.82, 0.64), 0.014);
   let tower_lane = segment_mark(uv, vec2f(0.45, 0.54), vec2f(0.47, 0.14), 0.012);
   let west_lane = segment_mark(uv, vec2f(0.36, 0.44), vec2f(0.20, 0.18), 0.010);
   let east_lane = segment_mark(uv, vec2f(0.58, 0.43), vec2f(0.82, 0.34), 0.010);
-  col = mix(col, vec3f(0.10, 0.95, 0.92), main_lane * 0.78);
-  col = mix(col, vec3f(0.18, 0.34, 0.95), cross_lane * 0.68);
-  col = mix(col, vec3f(0.94, 0.12, 0.50), tower_lane * 0.64);
-  col = mix(col, vec3f(0.96, 0.68, 0.16), west_lane * 0.62);
-  col = mix(col, vec3f(0.72, 0.24, 0.96), east_lane * 0.58);
+  col = mix(col, mat_pal(7, vec3f(0.10, 0.95, 0.92)), main_lane * 0.78);
+  col = mix(col, mat_pal(8, vec3f(0.18, 0.34, 0.95)), cross_lane * 0.68);
+  col = mix(col, mat_pal(9, vec3f(0.94, 0.12, 0.50)), tower_lane * 0.64);
+  col = mix(col, mat_pal(10, vec3f(0.96, 0.68, 0.16)), west_lane * 0.62);
+  col = mix(col, mat_pal(11, vec3f(0.72, 0.24, 0.96)), east_lane * 0.58);
 
   let node_a = dot_mark(uv, vec2f(0.45, 0.54), 0.034);
   let node_b = dot_mark(uv, vec2f(0.27, 0.66), 0.022);
   let node_c = dot_mark(uv, vec2f(0.70, 0.32), 0.025);
   let node_d = dot_mark(uv, vec2f(0.82, 0.64), 0.019);
-  col = mix(col, vec3f(0.92, 0.96, 0.72), node_a * 0.82);
-  col = mix(col, vec3f(0.95, 0.20, 0.18), node_b * 0.70);
-  col = mix(col, vec3f(0.06, 0.95, 0.72), node_c * 0.72);
-  col = mix(col, vec3f(0.88, 0.60, 0.96), node_d * 0.62);
+  col = mix(col, mat_pal(12, vec3f(0.92, 0.96, 0.72)), node_a * 0.82);
+  col = mix(col, mat_pal(13, vec3f(0.95, 0.20, 0.18)), node_b * 0.70);
+  col = mix(col, mat_pal(14, vec3f(0.06, 0.95, 0.72)), node_c * 0.72);
+  col = mix(col, mat_pal(15, vec3f(0.88, 0.60, 0.96)), node_d * 0.62);
 
   let scuff = blotch(uv, vec2f(0.63, 0.70), 0.15, vec2f(1.5, 0.7), seed + 2.0);
   let gum = dot_mark(uv, vec2f(0.23, 0.78), 0.025) * smoothstep(1.0, 1.8, variant);
   let worn_track = segment_mark(uv, vec2f(0.08, 0.52), vec2f(0.92, 0.56), 0.040) * speckle(px, 3.0, seed, 0.76);
-  col = mix(col, vec3f(0.07, 0.09, 0.08), scuff * 0.34 + worn_track * 0.20);
-  col = mix(col, vec3f(0.62, 0.58, 0.48), gum * 0.72);
+  col = mix(col, mat_pal(16, vec3f(0.07, 0.09, 0.08)), scuff * 0.34 + worn_track * 0.20);
+  col = mix(col, mat_pal(17, vec3f(0.62, 0.58, 0.48)), gum * 0.72);
   return neon_grime(uv, px, col, seed + 16.0, variant);
 }
 
@@ -1129,17 +1138,17 @@ fn stucco_facade(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Pastel stucco wall + lit window grid + neon rim. The canonical CityBuilding /
   // Storefront face — a richer replacement for textures.ts facadeTex.
   let mottle = fbm(uv.x * 9.0 + seed, uv.y * 9.0 - seed, 5.0) * 0.5 + 0.5;
-  var wall_lo = vec3f(0.42, 0.20, 0.30);
-  var wall_hi = vec3f(0.86, 0.52, 0.62);
-  var neon = vec3f(0.98, 0.24, 0.62);
+  var wall_lo = mat_pal(0, vec3f(0.42, 0.20, 0.30));
+  var wall_hi = mat_pal(1, vec3f(0.86, 0.52, 0.62));
+  var neon = mat_pal(2, vec3f(0.98, 0.24, 0.62));
   if (variant > 0.5 && variant < 1.5) {
-    wall_lo = vec3f(0.10, 0.30, 0.34);
-    wall_hi = vec3f(0.34, 0.74, 0.74);
-    neon = vec3f(0.10, 0.92, 0.92);
+    wall_lo = mat_pal(3, vec3f(0.10, 0.30, 0.34));
+    wall_hi = mat_pal(4, vec3f(0.34, 0.74, 0.74));
+    neon = mat_pal(5, vec3f(0.10, 0.92, 0.92));
   } else if (variant >= 1.5) {
-    wall_lo = vec3f(0.30, 0.22, 0.46);
-    wall_hi = vec3f(0.62, 0.50, 0.84);
-    neon = vec3f(0.66, 0.36, 0.98);
+    wall_lo = mat_pal(6, vec3f(0.30, 0.22, 0.46));
+    wall_hi = mat_pal(7, vec3f(0.62, 0.50, 0.84));
+    neon = mat_pal(8, vec3f(0.66, 0.36, 0.98));
   }
   let wall = mix(wall_lo, wall_hi, mottle * 0.6 + 0.2);
   let grid = uv * vec2f(4.0, 6.0);
@@ -1148,8 +1157,8 @@ fn stucco_facade(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let frame = max(1.0 - smoothstep(0.10, 0.16, min(local.x, 1.0 - local.x)), 1.0 - smoothstep(0.10, 0.16, min(local.y, 1.0 - local.y)));
   let lit = step(0.46, rand(cell + vec2f(seed, seed * 2.0)));
   let pane_sheen = smoothstep(0.7, 0.95, 1.0 - local.y);
-  var glass = mix(vec3f(0.04, 0.05, 0.08), neon, lit * (0.5 + pane_sheen * 0.5));
-  glass = mix(glass, vec3f(0.06, 0.07, 0.10), (1.0 - lit) * 0.7);
+  var glass = mix(mat_pal(9, vec3f(0.04, 0.05, 0.08)), neon, lit * (0.5 + pane_sheen * 0.5));
+  glass = mix(glass, mat_pal(10, vec3f(0.06, 0.07, 0.10)), (1.0 - lit) * 0.7);
   var col = mix(glass, wall, frame);
   let rim = max(1.0 - smoothstep(0.0, 0.03, uv.x), 1.0 - smoothstep(0.0, 0.03, 1.0 - uv.x));
   let rim2 = max(1.0 - smoothstep(0.0, 0.03, uv.y), 1.0 - smoothstep(0.0, 0.03, 1.0 - uv.y));
@@ -1168,10 +1177,10 @@ fn stucco_facade(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn neon_tube(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Buzzing bent-glass sign tube on a dark backing board — the Sign thingymajigger.
   let buzz = 0.85 + 0.15 * sin(U.time * 40.0 + seed) * step(0.5, fract(U.time * 7.0 + seed));
-  var tube = vec3f(0.98, 0.18, 0.62);
-  if (variant > 0.5 && variant < 1.5) { tube = vec3f(0.12, 0.92, 0.96); }
-  else if (variant >= 1.5) { tube = vec3f(0.98, 0.58, 0.12); }
-  var col = mix(vec3f(0.02, 0.02, 0.03), vec3f(0.06, 0.05, 0.07), fbm(uv.x * 8.0 + seed, uv.y * 8.0, 4.0) * 0.5 + 0.5);
+  var tube = mat_pal(0, vec3f(0.98, 0.18, 0.62));
+  if (variant > 0.5 && variant < 1.5) { tube = mat_pal(1, vec3f(0.12, 0.92, 0.96)); }
+  else if (variant >= 1.5) { tube = mat_pal(2, vec3f(0.98, 0.58, 0.12)); }
+  var col = mix(mat_pal(3, vec3f(0.02, 0.02, 0.03)), mat_pal(4, vec3f(0.06, 0.05, 0.07)), fbm(uv.x * 8.0 + seed, uv.y * 8.0, 4.0) * 0.5 + 0.5);
   let path_y = 0.5 + sin(uv.x * 9.0 + seed) * 0.22;
   let d = abs(uv.y - path_y);
   let core = 1.0 - smoothstep(0.012, 0.022, d);
@@ -1195,20 +1204,20 @@ fn neon_tube(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn sunset_grad(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Outrun dusk: gradient sky, banded sun, reflective grid floor. The skybox /
   // backdrop the world-as-shader-quad wants behind the meshed city.
-  var top = vec3f(0.10, 0.04, 0.26);
-  var mid = vec3f(0.86, 0.22, 0.42);
-  var sun_c = vec3f(1.0, 0.82, 0.30);
-  var floor_c = vec3f(0.12, 0.02, 0.20);
+  var top = mat_pal(0, vec3f(0.10, 0.04, 0.26));
+  var mid = mat_pal(1, vec3f(0.86, 0.22, 0.42));
+  var sun_c = mat_pal(2, vec3f(1.0, 0.82, 0.30));
+  var floor_c = mat_pal(3, vec3f(0.12, 0.02, 0.20));
   if (variant > 0.5 && variant < 1.5) {
-    top = vec3f(0.02, 0.02, 0.10);
-    mid = vec3f(0.20, 0.06, 0.34);
-    sun_c = vec3f(0.62, 0.30, 0.78);
-    floor_c = vec3f(0.02, 0.01, 0.08);
+    top = mat_pal(4, vec3f(0.02, 0.02, 0.10));
+    mid = mat_pal(5, vec3f(0.20, 0.06, 0.34));
+    sun_c = mat_pal(6, vec3f(0.62, 0.30, 0.78));
+    floor_c = mat_pal(7, vec3f(0.02, 0.01, 0.08));
   } else if (variant >= 1.5) {
-    top = vec3f(0.18, 0.20, 0.42);
-    mid = vec3f(0.96, 0.56, 0.32);
-    sun_c = vec3f(1.0, 0.92, 0.62);
-    floor_c = vec3f(0.20, 0.10, 0.10);
+    top = mat_pal(8, vec3f(0.18, 0.20, 0.42));
+    mid = mat_pal(9, vec3f(0.96, 0.56, 0.32));
+    sun_c = mat_pal(10, vec3f(1.0, 0.92, 0.62));
+    floor_c = mat_pal(11, vec3f(0.20, 0.10, 0.10));
   }
   let horizon = 0.62;
   var col = vec3f(0.0, 0.0, 0.0);
@@ -1243,20 +1252,20 @@ fn wet_asphalt(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Night street with neon puddle reflections — the road zone after the dream
   // turns wet. variant 2 is an oil slick (rainbow interference).
   let grain = fbm(uv.x * 22.0 + seed, uv.y * 22.0 - seed, 5.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.02, 0.02, 0.025), vec3f(0.09, 0.09, 0.10), grain);
-  col = col + vec3f(0.06, 0.06, 0.06) * speckle(px, 2.5, seed, 0.94);
+  var col = mix(mat_pal(0, vec3f(0.02, 0.02, 0.025)), mat_pal(1, vec3f(0.09, 0.09, 0.10)), grain);
+  col = col + mat_pal(2, vec3f(0.06, 0.06, 0.06)) * speckle(px, 2.5, seed, 0.94);
   let puddle = smoothstep(0.55, 0.75, fbm(uv.x * 4.0 + seed, uv.y * 4.0 - seed, 5.0) * 0.5 + 0.5);
   let smear = fbm(uv.x * 5.0 + seed * 2.0, uv.y * 1.2, 4.0) * 0.5 + 0.5;
-  var neon = mix(vec3f(0.95, 0.12, 0.55), vec3f(0.10, 0.85, 0.92), smear);
+  var neon = mix(mat_pal(3, vec3f(0.95, 0.12, 0.55)), mat_pal(4, vec3f(0.10, 0.85, 0.92)), smear);
   if (variant > 0.5 && variant < 1.5) {
-    neon = mix(vec3f(0.10, 0.85, 0.92), vec3f(0.98, 0.62, 0.16), smear);
+    neon = mix(mat_pal(5, vec3f(0.10, 0.85, 0.92)), mat_pal(6, vec3f(0.98, 0.62, 0.16)), smear);
   } else if (variant >= 1.5) {
     let ang = fbm(uv.x * 7.0 + seed, uv.y * 7.0, 4.0);
     neon = vec3f(0.5 + 0.5 * sin(ang * 6.0), 0.5 + 0.5 * sin(ang * 6.0 + 2.0), 0.5 + 0.5 * sin(ang * 6.0 + 4.0));
   }
   let vstreak = 0.4 + 0.6 * (sin(uv.y * 30.0 + smear * 8.0) * 0.5 + 0.5);
   col = mix(col, neon, puddle * 0.55 * vstreak);
-  col = col + vec3f(0.18, 0.18, 0.18) * puddle * smoothstep(0.7, 0.95, smear);
+  col = col + mat_pal(7, vec3f(0.18, 0.18, 0.18)) * puddle * smoothstep(0.7, 0.95, smear);
   return sat3(col);
 }
 
@@ -1272,21 +1281,21 @@ fn car_paint(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Glossy vehicle body: environment reflection band + metal flake + edge
   // highlight. The vehicle AssetKind has no surface yet. 0 candy-red, 1 chrome,
   // 2 matte-black.
-  let env_top = vec3f(0.34, 0.18, 0.46);
-  let env_bot = vec3f(0.03, 0.03, 0.05);
+  let env_top = mat_pal(0, vec3f(0.34, 0.18, 0.46));
+  let env_bot = mat_pal(1, vec3f(0.03, 0.03, 0.05));
   let env = mix(env_top, env_bot, smoothstep(0.0, 1.0, uv.y));
   let s = (uv.y - 0.40) * 7.0;
   let streak = exp(-s * s);
   let flake = speckle(px, 1.6, seed, 0.86) * 0.10;
   var col = vec3f(0.0, 0.0, 0.0);
   if (variant < 0.5) {
-    col = vec3f(0.72, 0.06, 0.12) + env * 0.30 + vec3f(1.0, 0.7, 0.7) * streak * 0.7 + vec3f(flake, flake, flake);
+    col = mat_pal(2, vec3f(0.72, 0.06, 0.12)) + env * 0.30 + mat_pal(3, vec3f(1.0, 0.7, 0.7)) * streak * 0.7 + vec3f(flake, flake, flake);
   } else if (variant < 1.5) {
     col = env * 1.3 + vec3f(1.0, 1.0, 1.0) * streak * 0.9 + vec3f(flake, flake, flake);
   } else {
-    col = vec3f(0.04, 0.04, 0.05) + env * 0.10 + vec3f(0.4, 0.4, 0.4) * streak * 0.25 + vec3f(flake, flake, flake) * 0.4;
+    col = mat_pal(4, vec3f(0.04, 0.04, 0.05)) + env * 0.10 + mat_pal(5, vec3f(0.4, 0.4, 0.4)) * streak * 0.25 + vec3f(flake, flake, flake) * 0.4;
   }
-  col = col + vec3f(0.5, 0.5, 0.5) * (1.0 - smoothstep(0.0, 0.04, uv.y)) * 0.6;
+  col = col + mat_pal(6, vec3f(0.5, 0.5, 0.5)) * (1.0 - smoothstep(0.0, 0.04, uv.y)) * 0.6;
   return sat3(col);
 }
 
@@ -1303,10 +1312,10 @@ fn crt_screen(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // rows, triad mask, rolling refresh. The dead-internet surfaces rendered as a
   // texture. 0 terminal-green, 1 web-blue, 2 dead-static.
   let roll = U.time * 0.15;
-  var phos = vec3f(0.10, 0.95, 0.30);
-  var bg = vec3f(0.01, 0.04, 0.02);
-  if (variant > 0.5 && variant < 1.5) { phos = vec3f(0.30, 0.70, 1.0); bg = vec3f(0.01, 0.02, 0.05); }
-  else if (variant >= 1.5) { phos = vec3f(0.80, 0.80, 0.80); bg = vec3f(0.02, 0.02, 0.02); }
+  var phos = mat_pal(0, vec3f(0.10, 0.95, 0.30));
+  var bg = mat_pal(1, vec3f(0.01, 0.04, 0.02));
+  if (variant > 0.5 && variant < 1.5) { phos = mat_pal(2, vec3f(0.30, 0.70, 1.0)); bg = mat_pal(3, vec3f(0.01, 0.02, 0.05)); }
+  else if (variant >= 1.5) { phos = mat_pal(4, vec3f(0.80, 0.80, 0.80)); bg = mat_pal(5, vec3f(0.02, 0.02, 0.02)); }
   let cols = 28.0;
   let rows = 18.0;
   let cell = floor(vec2f(uv.x * cols, uv.y * rows));
@@ -1338,16 +1347,16 @@ fn crt_screen(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn palm_canopy(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Frond fan against dusk — the PalmTree thingymajiger's canopy face. 0 lush,
   // 1 dry, 2 silhouette (against a hotter sky).
-  var sky = mix(vec3f(0.86, 0.34, 0.42), vec3f(0.18, 0.10, 0.34), uv.y);
-  var frond_lo = vec3f(0.04, 0.22, 0.10);
-  var frond_hi = vec3f(0.20, 0.62, 0.24);
+  var sky = mix(mat_pal(0, vec3f(0.86, 0.34, 0.42)), mat_pal(1, vec3f(0.18, 0.10, 0.34)), uv.y);
+  var frond_lo = mat_pal(2, vec3f(0.04, 0.22, 0.10));
+  var frond_hi = mat_pal(3, vec3f(0.20, 0.62, 0.24));
   if (variant > 0.5 && variant < 1.5) {
-    frond_lo = vec3f(0.24, 0.18, 0.06);
-    frond_hi = vec3f(0.58, 0.46, 0.16);
+    frond_lo = mat_pal(4, vec3f(0.24, 0.18, 0.06));
+    frond_hi = mat_pal(5, vec3f(0.58, 0.46, 0.16));
   } else if (variant >= 1.5) {
-    frond_lo = vec3f(0.02, 0.02, 0.04);
-    frond_hi = vec3f(0.06, 0.07, 0.10);
-    sky = mix(vec3f(0.98, 0.56, 0.30), vec3f(0.30, 0.14, 0.40), uv.y);
+    frond_lo = mat_pal(6, vec3f(0.02, 0.02, 0.04));
+    frond_hi = mat_pal(7, vec3f(0.06, 0.07, 0.10));
+    sky = mix(mat_pal(8, vec3f(0.98, 0.56, 0.30)), mat_pal(9, vec3f(0.30, 0.14, 0.40)), uv.y);
   }
   let center = vec2f(0.5, 0.92);
   let rel = uv - center;
@@ -1359,7 +1368,7 @@ fn palm_canopy(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let f = mix(frond_lo, frond_hi, smoothstep(0.0, 0.6, rad) * serr);
   var col = mix(sky, f, blade_mask);
   let trunk = (1.0 - smoothstep(0.02, 0.05, abs(rel.x))) * step(0.55, uv.y);
-  col = mix(col, vec3f(0.22, 0.15, 0.08), trunk * 0.8);
+  col = mix(col, mat_pal(10, vec3f(0.22, 0.15, 0.08)), trunk * 0.8);
   return sat3(col);
 }
 
@@ -1376,18 +1385,18 @@ fn cash_stack(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // 0 clean, 1 worn/dirty, 2 blood-spattered.
   let bills = 14.0;
   let edge = line_near(fract(uv.y * bills) - 0.5, 0.10);
-  let paper = mix(vec3f(0.30, 0.42, 0.30), vec3f(0.52, 0.66, 0.50), fbm(uv.x * 10.0 + seed, uv.y * 40.0, 4.0) * 0.5 + 0.5);
+  let paper = mix(mat_pal(0, vec3f(0.30, 0.42, 0.30)), mat_pal(1, vec3f(0.52, 0.66, 0.50)), fbm(uv.x * 10.0 + seed, uv.y * 40.0, 4.0) * 0.5 + 0.5);
   let face_zone = smoothstep(0.30, 0.45, uv.y);
   let guilloche = line_near(sin(uv.x * 60.0) * sin(uv.y * 55.0 + seed), 0.20);
   let portrait = 1.0 - smoothstep(0.10, 0.13, length((uv - vec2f(0.5, 0.72)) * vec2f(1.4, 1.0)));
-  var face = mix(vec3f(0.20, 0.36, 0.24), vec3f(0.42, 0.60, 0.42), guilloche * 0.5 + 0.4);
-  face = mix(face, vec3f(0.55, 0.68, 0.54), portrait * 0.5);
+  var face = mix(mat_pal(2, vec3f(0.20, 0.36, 0.24)), mat_pal(3, vec3f(0.42, 0.60, 0.42)), guilloche * 0.5 + 0.4);
+  face = mix(face, mat_pal(4, vec3f(0.55, 0.68, 0.54)), portrait * 0.5);
   var col = mix(paper, face, face_zone);
-  col = col - vec3f(0.10, 0.10, 0.10) * edge;
+  col = col - mat_pal(5, vec3f(0.10, 0.10, 0.10)) * edge;
   if (variant > 0.5 && variant < 1.5) {
-    col = col * 0.7 + vec3f(0.05, 0.04, 0.0) * (fbm(uv.x * 8.0, uv.y * 8.0 + seed, 4.0) * 0.5 + 0.5);
+    col = col * 0.7 + mat_pal(6, vec3f(0.05, 0.04, 0.0)) * (fbm(uv.x * 8.0, uv.y * 8.0 + seed, 4.0) * 0.5 + 0.5);
   } else if (variant >= 1.5) {
-    col = mix(col, vec3f(0.40, 0.02, 0.02), blotch(uv, vec2f(0.62, 0.40), 0.18, vec2f(1.0, 1.2), seed) * 0.7);
+    col = mix(col, mat_pal(7, vec3f(0.40, 0.02, 0.02)), blotch(uv, vec2f(0.62, 0.40), 0.18, vec2f(1.0, 1.2), seed) * 0.7);
   }
   return sat3(col - vec3f(speckle(px, 3.0, seed, 0.95) * 0.05));
 }
@@ -1403,27 +1412,27 @@ fn cash_stack(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn product_baggie(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Plastic baggie sheen over product — the dealing loop's quality grade made
   // visible. 0 crystal (glass), 1 fine powder, 2 pressed brick.
-  var content = vec3f(0.82, 0.86, 0.92);
+  var content = mat_pal(0, vec3f(0.82, 0.86, 0.92));
   if (variant < 0.5) {
     let g = uv * 9.0;
     let cidx = floor(g);
     let fl = fract(g);
     let facet = rand(cidx + vec2f(seed, seed * 2.0));
     let cedge = max(1.0 - smoothstep(0.0, 0.10, fl.x), 1.0 - smoothstep(0.0, 0.10, fl.y));
-    content = mix(vec3f(0.60, 0.70, 0.82), vec3f(0.92, 0.98, 1.0), facet);
-    content = content + vec3f(0.6, 0.6, 0.6) * cedge * step(0.6, facet);
+    content = mix(mat_pal(1, vec3f(0.60, 0.70, 0.82)), mat_pal(2, vec3f(0.92, 0.98, 1.0)), facet);
+    content = content + mat_pal(3, vec3f(0.6, 0.6, 0.6)) * cedge * step(0.6, facet);
   } else if (variant < 1.5) {
-    content = mix(vec3f(0.80, 0.80, 0.84), vec3f(0.98, 0.97, 0.99), fbm(uv.x * 30.0 + seed, uv.y * 30.0, 5.0) * 0.5 + 0.5);
-    content = content - vec3f(0.08, 0.08, 0.08) * speckle(px, 1.6, seed, 0.6);
+    content = mix(mat_pal(4, vec3f(0.80, 0.80, 0.84)), mat_pal(5, vec3f(0.98, 0.97, 0.99)), fbm(uv.x * 30.0 + seed, uv.y * 30.0, 5.0) * 0.5 + 0.5);
+    content = content - mat_pal(6, vec3f(0.08, 0.08, 0.08)) * speckle(px, 1.6, seed, 0.6);
   } else {
-    content = mix(vec3f(0.46, 0.34, 0.22), vec3f(0.66, 0.50, 0.32), fbm(uv.x * 7.0 + seed, uv.y * 7.0, 4.0) * 0.5 + 0.5);
+    content = mix(mat_pal(7, vec3f(0.46, 0.34, 0.22)), mat_pal(8, vec3f(0.66, 0.50, 0.32)), fbm(uv.x * 7.0 + seed, uv.y * 7.0, 4.0) * 0.5 + 0.5);
     let wrap = line_near(uv.x - 0.5, 0.02) + line_near(uv.y - 0.5, 0.02);
-    content = content - vec3f(0.12, 0.12, 0.12) * sat(wrap);
+    content = content - mat_pal(9, vec3f(0.12, 0.12, 0.12)) * sat(wrap);
   }
   let wrinkle = line_near(snoise(uv.x * 6.0 + seed, uv.y * 9.0 - seed), 0.02);
   let sheen = smoothstep(0.45, 0.5, abs(fract((uv.x + uv.y) * 1.5 + 0.2) - 0.5));
-  var col = content + vec3f(0.10, 0.10, 0.10) * wrinkle;
-  col = col + vec3f(0.22, 0.22, 0.22) * (1.0 - sheen) * 0.5;
+  var col = content + mat_pal(10, vec3f(0.10, 0.10, 0.10)) * wrinkle;
+  col = col + mat_pal(11, vec3f(0.22, 0.22, 0.22)) * (1.0 - sheen) * 0.5;
   return sat3(col);
 }
 
@@ -1438,8 +1447,8 @@ fn product_baggie(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn blood_pool(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Crime-scene spatter on a floor — what a MurderEvent leaves. 0 fresh (wet
   // specular), 1 dried (brown matte), 2 smear (directional drag).
-  let floor_c = mix(vec3f(0.10, 0.10, 0.11), vec3f(0.16, 0.16, 0.17), fbm(uv.x * 14.0 + seed, uv.y * 14.0, 4.0) * 0.5 + 0.5);
-  let blood = vec3f(0.34, 0.02, 0.02);
+  let floor_c = mix(mat_pal(0, vec3f(0.10, 0.10, 0.11)), mat_pal(1, vec3f(0.16, 0.16, 0.17)), fbm(uv.x * 14.0 + seed, uv.y * 14.0, 4.0) * 0.5 + 0.5);
+  let blood = mat_pal(2, vec3f(0.34, 0.02, 0.02));
   var col = floor_c;
   let pool = blotch(uv, vec2f(0.5, 0.5), 0.26, vec2f(1.0, 0.85), seed);
   col = mix(col, blood, pool);
@@ -1447,13 +1456,13 @@ fn blood_pool(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   col = mix(col, blood, drops);
   if (variant < 0.5) {
     let spec = 1.0 - smoothstep(0.0, 0.08, length((uv - vec2f(0.44, 0.44)) * vec2f(1.0, 1.0)));
-    col = col + vec3f(0.5, 0.3, 0.3) * spec * pool;
-    col = mix(col, vec3f(0.55, 0.03, 0.03), pool * 0.4);
+    col = col + mat_pal(3, vec3f(0.5, 0.3, 0.3)) * spec * pool;
+    col = mix(col, mat_pal(4, vec3f(0.55, 0.03, 0.03)), pool * 0.4);
   } else if (variant > 0.5 && variant < 1.5) {
-    col = mix(col, vec3f(0.20, 0.05, 0.03), (pool + drops) * 0.6);
+    col = mix(col, mat_pal(5, vec3f(0.20, 0.05, 0.03)), (pool + drops) * 0.6);
   } else {
     let smear = blotch(uv, vec2f(0.5, 0.5), 0.30, vec2f(0.5, 1.6), seed) * smoothstep(0.5, 0.9, uv.y);
-    col = mix(col, vec3f(0.28, 0.03, 0.03), smear * 0.7);
+    col = mix(col, mat_pal(6, vec3f(0.28, 0.03, 0.03)), smear * 0.7);
   }
   return sat3(col);
 }
@@ -1470,24 +1479,24 @@ fn evidence_tape(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // The investigation made physical. 0 hazard tape, 1 chalk outline on asphalt,
   // 2 numbered evidence marker (folded tent).
   if (variant < 0.5) {
-    var col = mix(vec3f(0.05, 0.05, 0.06), vec3f(0.09, 0.09, 0.10), fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5);
+    var col = mix(mat_pal(0, vec3f(0.05, 0.05, 0.06)), mat_pal(1, vec3f(0.09, 0.09, 0.10)), fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5);
     let band = smoothstep(0.38, 0.40, uv.y) * smoothstep(0.62, 0.60, uv.y);
     let stripe = step(0.5, fract((uv.x - uv.y) * 9.0));
-    col = mix(col, mix(vec3f(0.96, 0.82, 0.05), vec3f(0.04, 0.04, 0.04), stripe), band);
+    col = mix(col, mix(mat_pal(2, vec3f(0.96, 0.82, 0.05)), mat_pal(3, vec3f(0.04, 0.04, 0.04)), stripe), band);
     return sat3(col);
   } else if (variant < 1.5) {
-    var col = mix(vec3f(0.06, 0.06, 0.07), vec3f(0.11, 0.11, 0.12), fbm(uv.x * 18.0 + seed, uv.y * 18.0, 5.0) * 0.5 + 0.5);
+    var col = mix(mat_pal(4, vec3f(0.06, 0.06, 0.07)), mat_pal(5, vec3f(0.11, 0.11, 0.12)), fbm(uv.x * 18.0 + seed, uv.y * 18.0, 5.0) * 0.5 + 0.5);
     let head = line_near(length((uv - vec2f(0.5, 0.28)) * vec2f(1.0, 1.0)) - 0.10, 0.012);
     let body = line_near(length((uv - vec2f(0.5, 0.62)) * vec2f(0.7, 1.4)) - 0.22, 0.012);
     let chalk = sat(head + body) * (0.6 + 0.4 * speckle(px, 2.0, seed, 0.4));
-    col = mix(col, vec3f(0.86, 0.88, 0.84), chalk);
+    col = mix(col, mat_pal(6, vec3f(0.86, 0.88, 0.84)), chalk);
     return sat3(col);
   }
-  var col = mix(vec3f(0.07, 0.07, 0.08), vec3f(0.12, 0.12, 0.13), fbm(uv.x * 16.0 + seed, uv.y * 16.0, 4.0) * 0.5 + 0.5);
+  var col = mix(mat_pal(7, vec3f(0.07, 0.07, 0.08)), mat_pal(8, vec3f(0.12, 0.12, 0.13)), fbm(uv.x * 16.0 + seed, uv.y * 16.0, 4.0) * 0.5 + 0.5);
   let tent = (1.0 - smoothstep(0.0, 0.02, abs(uv.x - 0.5) - (uv.y - 0.30) * 0.6)) * smoothstep(0.30, 0.32, uv.y) * smoothstep(0.82, 0.80, uv.y);
-  col = mix(col, vec3f(0.96, 0.80, 0.06), tent);
+  col = mix(col, mat_pal(9, vec3f(0.96, 0.80, 0.06)), tent);
   let num = (1.0 - smoothstep(0.0, 0.015, abs(uv.x - 0.5) - 0.04)) * smoothstep(0.55, 0.57, uv.y) * smoothstep(0.72, 0.70, uv.y);
-  col = mix(col, vec3f(0.1, 0.05, 0.0), num);
+  col = mix(col, mat_pal(10, vec3f(0.1, 0.05, 0.0)), num);
   return sat3(col);
 }
 
@@ -1504,26 +1513,26 @@ fn refuse(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // glints, 2 crushed can.
   if (variant < 0.5) {
     let corr = sin(uv.x * 70.0) * 0.5 + 0.5;
-    var col = mix(vec3f(0.40, 0.28, 0.16), vec3f(0.66, 0.48, 0.28), fbm(uv.x * 6.0 + seed, uv.y * 6.0, 4.0) * 0.5 + 0.5);
+    var col = mix(mat_pal(0, vec3f(0.40, 0.28, 0.16)), mat_pal(1, vec3f(0.66, 0.48, 0.28)), fbm(uv.x * 6.0 + seed, uv.y * 6.0, 4.0) * 0.5 + 0.5);
     col = col * (0.85 + 0.15 * corr);
     let tape = smoothstep(0.44, 0.46, uv.y) * smoothstep(0.58, 0.56, uv.y);
-    col = mix(col, vec3f(0.63, 0.58, 0.45), tape * 0.6);
-    col = mix(col, vec3f(0.30, 0.22, 0.12), blotch(uv, vec2f(0.7, 0.7), 0.18, vec2f(1.1, 0.9), seed) * 0.5);
-    return sat3(col - vec3f(0.08, 0.08, 0.08) * speckle(px, 3.0, seed, 0.92));
+    col = mix(col, mat_pal(2, vec3f(0.63, 0.58, 0.45)), tape * 0.6);
+    col = mix(col, mat_pal(3, vec3f(0.30, 0.22, 0.12)), blotch(uv, vec2f(0.7, 0.7), 0.18, vec2f(1.1, 0.9), seed) * 0.5);
+    return sat3(col - mat_pal(4, vec3f(0.08, 0.08, 0.08)) * speckle(px, 3.0, seed, 0.92));
   } else if (variant < 1.5) {
-    var col = mix(vec3f(0.04, 0.05, 0.04), vec3f(0.12, 0.14, 0.10), fbm(uv.x * 10.0 + seed, uv.y * 10.0, 5.0) * 0.5 + 0.5);
+    var col = mix(mat_pal(5, vec3f(0.04, 0.05, 0.04)), mat_pal(6, vec3f(0.12, 0.14, 0.10)), fbm(uv.x * 10.0 + seed, uv.y * 10.0, 5.0) * 0.5 + 0.5);
     let glint = speckle(px, 4.0, seed, 0.93);
     let wrap = rand(floor(px / 5.0) + vec2f(seed, seed * 2.0));
     let wcol = vec3f(0.5 + 0.5 * sin(wrap * 30.0), 0.5 + 0.5 * sin(wrap * 30.0 + 2.0), 0.5 + 0.5 * sin(wrap * 30.0 + 4.0));
     col = mix(col, wcol, glint * 0.5);
-    col = col + vec3f(0.2, 0.2, 0.2) * speckle(px, 2.0, seed + 3.0, 0.96);
+    col = col + mat_pal(7, vec3f(0.2, 0.2, 0.2)) * speckle(px, 2.0, seed + 3.0, 0.96);
     return sat3(col);
   }
-  var col = mix(vec3f(0.30, 0.32, 0.34), vec3f(0.62, 0.64, 0.66), fbm(uv.x * 8.0 + seed, uv.y * 14.0, 4.0) * 0.5 + 0.5);
-  col = col - vec3f(0.2, 0.2, 0.2) * line_near(snoise(uv.x * 6.0 + seed, uv.y * 4.0 - seed), 0.05);
+  var col = mix(mat_pal(8, vec3f(0.30, 0.32, 0.34)), mat_pal(9, vec3f(0.62, 0.64, 0.66)), fbm(uv.x * 8.0 + seed, uv.y * 14.0, 4.0) * 0.5 + 0.5);
+  col = col - mat_pal(10, vec3f(0.2, 0.2, 0.2)) * line_near(snoise(uv.x * 6.0 + seed, uv.y * 4.0 - seed), 0.05);
   let label = smoothstep(0.40, 0.42, uv.y) * smoothstep(0.60, 0.58, uv.y);
-  col = mix(col, vec3f(0.85, 0.15, 0.18), label * 0.7);
-  return sat3(col + vec3f(0.15, 0.15, 0.15) * line_near(sin(uv.x * 40.0), 0.1));
+  col = mix(col, mat_pal(11, vec3f(0.85, 0.15, 0.18)), label * 0.7);
+  return sat3(col + mat_pal(12, vec3f(0.15, 0.15, 0.15)) * line_near(sin(uv.x * 40.0), 0.1));
 }
 
 // @material corkboard
@@ -1537,22 +1546,22 @@ fn refuse(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn corkboard(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // The "AI playing Clue" investigation board. 0 bare cork, 1 taped photos,
   // 2 photos + red string + pins (the Case visualised).
-  var col = mix(vec3f(0.52, 0.38, 0.20), vec3f(0.72, 0.56, 0.34), fbm(uv.x * 20.0 + seed, uv.y * 20.0, 5.0) * 0.5 + 0.5);
-  col = col - vec3f(0.10, 0.10, 0.10) * speckle(px, 1.8, seed, 0.55);
+  var col = mix(mat_pal(0, vec3f(0.52, 0.38, 0.20)), mat_pal(1, vec3f(0.72, 0.56, 0.34)), fbm(uv.x * 20.0 + seed, uv.y * 20.0, 5.0) * 0.5 + 0.5);
+  col = col - mat_pal(2, vec3f(0.10, 0.10, 0.10)) * speckle(px, 1.8, seed, 0.55);
   if (variant < 0.5) { return sat3(col); }
   let p1 = step(0.10, uv.x) * step(uv.x, 0.34) * step(0.18, uv.y) * step(uv.y, 0.46);
   let p2 = step(0.60, uv.x) * step(uv.x, 0.86) * step(0.30, uv.y) * step(uv.y, 0.60);
   let p3 = step(0.34, uv.x) * step(uv.x, 0.58) * step(0.58, uv.y) * step(uv.y, 0.84);
   let photo = sat(p1 + p2 + p3);
   let pimg = fbm(uv.x * 12.0 + seed, uv.y * 12.0, 4.0) * 0.5 + 0.5;
-  col = mix(col, mix(vec3f(0.20, 0.22, 0.26), vec3f(0.62, 0.64, 0.68), pimg), photo * 0.92);
+  col = mix(col, mix(mat_pal(3, vec3f(0.20, 0.22, 0.26)), mat_pal(4, vec3f(0.62, 0.64, 0.68)), pimg), photo * 0.92);
   if (variant >= 1.5) {
     let s1 = segment_mark(uv, vec2f(0.22, 0.32), vec2f(0.73, 0.45), 0.006);
     let s2 = segment_mark(uv, vec2f(0.73, 0.45), vec2f(0.46, 0.71), 0.006);
     let s3 = segment_mark(uv, vec2f(0.46, 0.71), vec2f(0.22, 0.32), 0.006);
-    col = mix(col, vec3f(0.86, 0.06, 0.10), sat(s1 + s2 + s3) * 0.85);
+    col = mix(col, mat_pal(5, vec3f(0.86, 0.06, 0.10)), sat(s1 + s2 + s3) * 0.85);
     let pins = sat(dot_mark(uv, vec2f(0.22, 0.32), 0.02) + dot_mark(uv, vec2f(0.73, 0.45), 0.02) + dot_mark(uv, vec2f(0.46, 0.71), 0.02));
-    col = mix(col, vec3f(0.95, 0.2, 0.2), pins);
+    col = mix(col, mat_pal(6, vec3f(0.95, 0.2, 0.2)), pins);
   }
   return sat3(col);
 }
@@ -1569,33 +1578,33 @@ fn substance_spill(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // The high system's substance, the most-Spun prop. 0 scattered pills,
   // 1 chopped lines on a mirror + razor, 2 residue smear.
   if (variant < 0.5) {
-    var col = mix(vec3f(0.10, 0.10, 0.12), vec3f(0.16, 0.16, 0.18), fbm(uv.x * 12.0 + seed, uv.y * 12.0, 4.0) * 0.5 + 0.5);
+    var col = mix(mat_pal(0, vec3f(0.10, 0.10, 0.12)), mat_pal(1, vec3f(0.16, 0.16, 0.18)), fbm(uv.x * 12.0 + seed, uv.y * 12.0, 4.0) * 0.5 + 0.5);
     for (var i = 0; i < 7; i = i + 1) {
       let fi = f32(i);
       let c = vec2f(rand(vec2f(fi, seed)), rand(vec2f(fi + 9.0, seed)));
       let pill = 1.0 - smoothstep(0.04, 0.05, length((uv - c) * vec2f(1.0, 1.8)));
       let cap_half = step(uv.x, c.x);
-      let pc = mix(vec3f(0.9, 0.2, 0.2), vec3f(0.95, 0.95, 0.98), cap_half);
+      let pc = mix(mat_pal(2, vec3f(0.9, 0.2, 0.2)), mat_pal(3, vec3f(0.95, 0.95, 0.98)), cap_half);
       col = mix(col, pc, pill);
-      col = col + vec3f(0.4, 0.4, 0.4) * (1.0 - smoothstep(0.0, 0.02, length((uv - c + vec2f(0.0, 0.01)) * vec2f(1.0, 1.8)))) * pill;
+      col = col + mat_pal(4, vec3f(0.4, 0.4, 0.4)) * (1.0 - smoothstep(0.0, 0.02, length((uv - c + vec2f(0.0, 0.01)) * vec2f(1.0, 1.8)))) * pill;
     }
     return sat3(col);
   } else if (variant < 1.5) {
-    var col = mix(vec3f(0.06, 0.07, 0.10), vec3f(0.14, 0.16, 0.22), uv.y);
-    col = col + vec3f(0.10, 0.10, 0.10) * line_near(uv.x - 0.5, 0.3);
+    var col = mix(mat_pal(5, vec3f(0.06, 0.07, 0.10)), mat_pal(6, vec3f(0.14, 0.16, 0.22)), uv.y);
+    col = col + mat_pal(7, vec3f(0.10, 0.10, 0.10)) * line_near(uv.x - 0.5, 0.3);
     let l1 = segment_mark(uv, vec2f(0.20, 0.40), vec2f(0.62, 0.40), 0.018);
     let l2 = segment_mark(uv, vec2f(0.24, 0.55), vec2f(0.70, 0.55), 0.016);
     let l3 = segment_mark(uv, vec2f(0.30, 0.70), vec2f(0.66, 0.70), 0.014);
     let lines = sat(l1 + l2 + l3);
-    col = mix(col, vec3f(0.96, 0.97, 0.99), lines * (0.7 + 0.3 * speckle(px, 1.4, seed, 0.4)));
+    col = mix(col, mat_pal(8, vec3f(0.96, 0.97, 0.99)), lines * (0.7 + 0.3 * speckle(px, 1.4, seed, 0.4)));
     let blade = step(0.72, uv.x) * step(uv.x, 0.90) * step(0.30, uv.y) * step(uv.y, 0.78);
-    col = mix(col, vec3f(0.75, 0.78, 0.82), blade * 0.8);
+    col = mix(col, mat_pal(9, vec3f(0.75, 0.78, 0.82)), blade * 0.8);
     return sat3(col);
   }
-  var col = mix(vec3f(0.08, 0.08, 0.10), vec3f(0.14, 0.14, 0.16), fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5);
+  var col = mix(mat_pal(10, vec3f(0.08, 0.08, 0.10)), mat_pal(11, vec3f(0.14, 0.14, 0.16)), fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5);
   let smear = blotch(uv, vec2f(0.5, 0.5), 0.28, vec2f(1.6, 0.6), seed) * (fbm(uv.x * 8.0 + seed, uv.y * 4.0, 4.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.80, 0.80, 0.84), smear * 0.6);
-  col = col + vec3f(0.06, 0.06, 0.06) * speckle(px, 1.6, seed, 0.7);
+  col = mix(col, mat_pal(12, vec3f(0.80, 0.80, 0.84)), smear * 0.6);
+  col = col + mat_pal(13, vec3f(0.06, 0.06, 0.06)) * speckle(px, 1.6, seed, 0.7);
   return sat3(col);
 }
 
@@ -1609,7 +1618,7 @@ fn substance_spill(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @author legacy
 fn fogged_mirror(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Reflection gradient that implies a bathroom or cloakroom mirror.
-  let refl = mix(vec3f(0.10, 0.12, 0.16), vec3f(0.68, 0.72, 0.78), smoothstep(0.0, 1.0, uv.y));
+  let refl = mix(mat_pal(0, vec3f(0.10, 0.12, 0.16)), mat_pal(1, vec3f(0.68, 0.72, 0.78)), smoothstep(0.0, 1.0, uv.y));
   // Mist layer: settled condensation + fresh droplets.
   let mist = fbm(uv.x * 7.0 + seed, uv.y * 7.0 - seed, 5.0) * 0.5 + 0.5;
   let drops = speckle(px, 3.2, seed, 0.86);
@@ -1618,11 +1627,11 @@ fn fogged_mirror(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let trail2 = line_near(uv.y - 0.58 - sin(uv.x * 2.2 + seed + 1.3) * 0.07, 0.018);
   let trail3 = line_near(uv.y - 0.78 - sin(uv.x * 3.5 + seed + 2.7) * 0.05, 0.014);
   let trails = sat(trail1 + trail2 + trail3);
-  var col = mix(refl, vec3f(0.80, 0.82, 0.84), mist * 0.40);
+  var col = mix(refl, mat_pal(2, vec3f(0.80, 0.82, 0.84)), mist * 0.40);
   col = mix(col, refl, trails * 0.60);   // clearer where wiped
-  col = mix(col, vec3f(0.88, 0.90, 0.92), drops * 0.28);
+  col = mix(col, mat_pal(3, vec3f(0.88, 0.90, 0.92)), drops * 0.28);
   // Cold-edge bleed at bottom — mirror frame chill.
-  col = mix(col, vec3f(0.55, 0.60, 0.65), (1.0 - smoothstep(0.82, 1.0, uv.y)) * 0.18);
+  col = mix(col, mat_pal(4, vec3f(0.55, 0.60, 0.65)), (1.0 - smoothstep(0.82, 1.0, uv.y)) * 0.18);
   return sat3(col);
 }
 
@@ -1639,19 +1648,19 @@ fn salt_flat(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let ridge_noise = fbm(uv.x * 4.5 + seed, uv.y * 4.5 - seed, 5.0);
   let ridge = line_near(ridge_noise, 0.030 + variant * 0.008);
   let salt = fbm(uv.x * 24.0 + seed, uv.y * 24.0, 4.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.76, 0.74, 0.66), vec3f(0.94, 0.92, 0.84), salt);
+  var col = mix(mat_pal(0, vec3f(0.76, 0.74, 0.66)), mat_pal(1, vec3f(0.94, 0.92, 0.84)), salt);
   // Concentric mineral deposit rings — evaporation history.
   let rings = line_near(fract(length((uv - vec2f(0.48, 0.52)) * vec2f(1.3, 0.85)) * 5.5) - 0.5, 0.045);
-  col = mix(col, vec3f(0.58, 0.54, 0.42), rings * 0.32);
+  col = mix(col, mat_pal(2, vec3f(0.58, 0.54, 0.42)), rings * 0.32);
   // Deep pressure cracks with shadow.
-  col = mix(col, vec3f(0.14, 0.12, 0.10), ridge * 0.58);
+  col = mix(col, mat_pal(3, vec3f(0.14, 0.12, 0.10)), ridge * 0.58);
   // Sun-bleached top, damp shadow bottom.
-  col = col + vec3f(0.05, 0.04, 0.03) * (1.0 - smoothstep(0.25, 0.65, uv.y));
+  col = col + mat_pal(4, vec3f(0.05, 0.04, 0.03)) * (1.0 - smoothstep(0.25, 0.65, uv.y));
   // Variant colour shifts: 1 pink-lake, 2 borax-white.
   if (variant > 0.5 && variant < 1.5) {
-    col = mix(col, vec3f(0.82, 0.62, 0.64), 0.22);
+    col = mix(col, mat_pal(5, vec3f(0.82, 0.62, 0.64)), 0.22);
   } else if (variant >= 1.5) {
-    col = mix(col, vec3f(0.88, 0.88, 0.90), 0.18);
+    col = mix(col, mat_pal(6, vec3f(0.88, 0.88, 0.90)), 0.18);
   }
   return sat3(col - vec3f(speckle(px, 2.8, seed, 0.93) * 0.05));
 }
@@ -1668,25 +1677,25 @@ fn moss_carpet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Dense cushion moss with spore capsules and damp sheen.
   let tuft = fbm(uv.x * 14.0 + seed, uv.y * 14.0 - seed, 5.0) * 0.5 + 0.5;
   let grain = fbm(uv.x * 42.0 + seed, uv.y * 38.0, 4.0) * 0.5 + 0.5;
-  var low = vec3f(0.030, 0.085, 0.045);
-  var high = vec3f(0.12, 0.34, 0.16);
+  var low = mat_pal(0, vec3f(0.030, 0.085, 0.045));
+  var high = mat_pal(1, vec3f(0.12, 0.34, 0.16));
   if (variant > 0.5 && variant < 1.5) {
-    low = vec3f(0.065, 0.20, 0.10);
-    high = vec3f(0.24, 0.48, 0.28);
+    low = mat_pal(2, vec3f(0.065, 0.20, 0.10));
+    high = mat_pal(3, vec3f(0.24, 0.48, 0.28));
   } else if (variant >= 1.5) {
-    low = vec3f(0.16, 0.12, 0.06);
-    high = vec3f(0.38, 0.32, 0.18);
+    low = mat_pal(4, vec3f(0.16, 0.12, 0.06));
+    high = mat_pal(5, vec3f(0.38, 0.32, 0.18));
   }
   var col = mix(low, high, tuft * 0.55 + grain * 0.22 + 0.15);
   // Spore pods — tiny pale capsules on stalks.
   let spore = speckle(px + vec2f(7.0, 13.0), 5.0, seed, 0.93);
-  col = mix(col, vec3f(0.48, 0.44, 0.30), spore * 0.32);
+  col = mix(col, mat_pal(6, vec3f(0.48, 0.44, 0.30)), spore * 0.32);
   // Moisture sheen — darker, glossier patches.
   let damp = smoothstep(0.42, 0.80, fbm(uv.x * 6.0 - seed, uv.y * 6.0 + seed, 4.0) * 0.5 + 0.5);
-  col = col + vec3f(0.06, 0.09, 0.05) * damp;
+  col = col + mat_pal(7, vec3f(0.06, 0.09, 0.05)) * damp;
   // Micro-fronds at high frequency.
   let frond = line_near(sin((uv.x + fbm(uv.x * 3.0, uv.y * 3.0 + seed, 3.0) * 0.04) * 68.0), 0.14);
-  col = col + vec3f(0.04, 0.08, 0.03) * frond * (0.5 + variant * 0.15);
+  col = col + mat_pal(8, vec3f(0.04, 0.08, 0.03)) * frond * (0.5 + variant * 0.15);
   return sat3(col);
 }
 
@@ -1701,7 +1710,7 @@ fn moss_carpet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn tarnished_silver(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Polished metal with sulphide patina and directional buff marks.
   let scratch = fbm(uv.x * 32.0 + seed, uv.y * 32.0 - seed, 4.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.42, 0.44, 0.45), vec3f(0.80, 0.82, 0.83), scratch * 0.48 + 0.28);
+  var col = mix(mat_pal(0, vec3f(0.42, 0.44, 0.45)), mat_pal(1, vec3f(0.80, 0.82, 0.83)), scratch * 0.48 + 0.28);
   // Buffing streaks — diagonal on variant 0, circular on 1, crosshatch on 2.
   var streak = 0.0;
   if (variant < 0.5) {
@@ -1713,16 +1722,16 @@ fn tarnished_silver(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   } else {
     streak = line_near(sin((uv.x + uv.y * 0.35) * 75.0 + seed), 0.06) + line_near(sin((uv.x - uv.y * 0.35) * 75.0 + seed), 0.06);
   }
-  col = col + vec3f(0.07, 0.07, 0.07) * streak;
+  col = col + mat_pal(2, vec3f(0.07, 0.07, 0.07)) * streak;
   // Chemical tarnish — sulphide blues and browns.
   let patina = smoothstep(0.46, 0.76, fbm(uv.x * 6.5 + seed, uv.y * 6.5 - seed, 5.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.20, 0.26, 0.22), patina * 0.50);
+  col = mix(col, mat_pal(3, vec3f(0.20, 0.26, 0.22)), patina * 0.50);
   // Engraved monogram or scrollwork.
   let engrave = line_near(sin(uv.x * 55.0) * sin(uv.y * 48.0 + seed), 0.10) * smoothstep(0.25, 0.75, uv.y);
-  col = col - vec3f(0.10, 0.10, 0.10) * engrave;
+  col = col - mat_pal(4, vec3f(0.10, 0.10, 0.10)) * engrave;
   // Edge wear — brighter on raised rims.
   let rim = (1.0 - smoothstep(0.0, 0.04, uv.x)) + (1.0 - smoothstep(0.0, 0.04, 1.0 - uv.x));
-  col = col + vec3f(0.10, 0.10, 0.10) * rim * 0.35;
+  col = col + mat_pal(5, vec3f(0.10, 0.10, 0.10)) * rim * 0.35;
   return sat3(col);
 }
 
@@ -1741,19 +1750,19 @@ fn ice_sheet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let fractures = sat(frac1 + frac2);
   // Bubble inclusions.
   let bubble = speckle(px, 4.2, seed, 0.80);
-  var col = mix(vec3f(0.50, 0.66, 0.76), vec3f(0.74, 0.86, 0.92), fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.84, 0.92, 0.96), bubble * 0.22);
+  var col = mix(mat_pal(0, vec3f(0.50, 0.66, 0.76)), mat_pal(1, vec3f(0.74, 0.86, 0.92)), fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5);
+  col = mix(col, mat_pal(2, vec3f(0.84, 0.92, 0.96)), bubble * 0.22);
   // Caustic refraction — light focused through thickness variations.
   let caustic = line_near(sin(uv.x * 26.0 + uv.y * 16.0 + seed) * sin(uv.x * 16.0 - uv.y * 20.0), 0.09);
-  col = col + vec3f(0.10, 0.14, 0.16) * caustic * smoothstep(0.35, 0.85, uv.y);
+  col = col + mat_pal(3, vec3f(0.10, 0.14, 0.16)) * caustic * smoothstep(0.35, 0.85, uv.y);
   // Fracture depth — darkens lines, then adds internal frost glow.
-  col = mix(col, vec3f(0.16, 0.30, 0.36), fractures * 0.45);
-  col = col + vec3f(0.06, 0.09, 0.11) * fractures;
+  col = mix(col, mat_pal(4, vec3f(0.16, 0.30, 0.36)), fractures * 0.45);
+  col = col + mat_pal(5, vec3f(0.06, 0.09, 0.11)) * fractures;
   // Variant tint: 0 clear arctic, 1 glacial blue, 2 sunset melt (pink).
   if (variant > 0.5 && variant < 1.5) {
-    col = mix(col, vec3f(0.35, 0.55, 0.72), 0.18);
+    col = mix(col, mat_pal(6, vec3f(0.35, 0.55, 0.72)), 0.18);
   } else if (variant >= 1.5) {
-    col = mix(col, vec3f(0.72, 0.55, 0.58), 0.14);
+    col = mix(col, mat_pal(7, vec3f(0.72, 0.55, 0.58)), 0.14);
   }
   return sat3(col);
 }
@@ -1769,24 +1778,24 @@ fn ice_sheet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn charcoal_bed(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Ember bed: porous char, crack-glow, ash dust, heat shimmer.
   let porous = fbm(uv.x * 16.0 + seed, uv.y * 16.0 - seed, 5.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.03, 0.03, 0.03), vec3f(0.14, 0.12, 0.10), porous);
+  var col = mix(mat_pal(0, vec3f(0.03, 0.03, 0.03)), mat_pal(1, vec3f(0.14, 0.12, 0.10)), porous);
   // Glowing crack field — ember veins.
   let ember = crack_field(uv, seed + 3.0, 4.5) * smoothstep(0.25, 0.75, fbm(uv.x * 2.5, uv.y * 2.5 + seed, 3.0) * 0.5 + 0.5);
-  var glow = vec3f(0.95, 0.32, 0.06);
+  var glow = mat_pal(2, vec3f(0.95, 0.32, 0.06));
   if (variant > 0.5 && variant < 1.5) {
-    glow = vec3f(0.88, 0.52, 0.10);
+    glow = mat_pal(3, vec3f(0.88, 0.52, 0.10));
   } else if (variant >= 1.5) {
-    glow = vec3f(0.78, 0.22, 0.16);
+    glow = mat_pal(4, vec3f(0.78, 0.22, 0.16));
   }
   col = mix(col, glow, ember * 0.72);
   // Ash powder — light grey settling on cooler regions.
   let ash = speckle(px, 2.4, seed, 0.76);
-  col = mix(col, vec3f(0.68, 0.66, 0.62), ash * 0.28);
+  col = mix(col, mat_pal(5, vec3f(0.68, 0.66, 0.62)), ash * 0.28);
   // Heat shimmer tint in the highs.
-  col = col + vec3f(0.05, 0.012, 0.0) * smoothstep(0.45, 0.88, ember);
+  col = col + mat_pal(6, vec3f(0.05, 0.012, 0.0)) * smoothstep(0.45, 0.88, ember);
   // Char ring marks — concentric burn circles.
   let ring = line_near(fract(length((uv - vec2f(0.5, 0.5)) * vec2f(1.1, 0.9)) * 3.5) - 0.5, 0.035);
-  col = mix(col, vec3f(0.06, 0.05, 0.05), ring * 0.25);
+  col = mix(col, mat_pal(7, vec3f(0.06, 0.05, 0.05)), ring * 0.25);
   return sat3(col);
 }
 
@@ -1810,17 +1819,17 @@ fn stained_glass(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let came = sat(came_x + came_y);
   // Cell palette — three-colour rotation per variant.
   let cell_rand = rand(cell + vec2f(seed, seed * 2.0));
-  var p0 = vec3f(0.72, 0.10, 0.16);
-  var p1 = vec3f(0.08, 0.42, 0.68);
-  var p2 = vec3f(0.85, 0.68, 0.10);
+  var p0 = mat_pal(0, vec3f(0.72, 0.10, 0.16));
+  var p1 = mat_pal(1, vec3f(0.08, 0.42, 0.68));
+  var p2 = mat_pal(2, vec3f(0.85, 0.68, 0.10));
   if (variant > 0.5 && variant < 1.5) {
-    p0 = vec3f(0.10, 0.58, 0.34);
-    p1 = vec3f(0.68, 0.16, 0.50);
-    p2 = vec3f(0.14, 0.22, 0.62);
+    p0 = mat_pal(3, vec3f(0.10, 0.58, 0.34));
+    p1 = mat_pal(4, vec3f(0.68, 0.16, 0.50));
+    p2 = mat_pal(5, vec3f(0.14, 0.22, 0.62));
   } else if (variant >= 1.5) {
-    p0 = vec3f(0.78, 0.38, 0.10);
-    p1 = vec3f(0.10, 0.52, 0.56);
-    p2 = vec3f(0.88, 0.84, 0.72);
+    p0 = mat_pal(6, vec3f(0.78, 0.38, 0.10));
+    p1 = mat_pal(7, vec3f(0.10, 0.52, 0.56));
+    p2 = mat_pal(8, vec3f(0.88, 0.84, 0.72));
   }
   var pane = p0;
   if (cell_rand > 0.66) { pane = p2; }
@@ -1831,9 +1840,9 @@ fn stained_glass(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Slight handmade glass texture (ripples).
   let tex = fbm(uv.x * 28.0 + seed, uv.y * 28.0, 4.0) * 0.5 + 0.5;
   pane = pane + vec3f((tex - 0.5) * 0.05);
-  var col = mix(pane, vec3f(0.07, 0.07, 0.08), came);
+  var col = mix(pane, mat_pal(9, vec3f(0.07, 0.07, 0.08)), came);
   // Lead bloom — light catches the raised came edges.
-  col = col + vec3f(0.35, 0.35, 0.28) * came * light * 0.14;
+  col = col + mat_pal(10, vec3f(0.35, 0.35, 0.28)) * came * light * 0.14;
   return sat3(col);
 }
 
@@ -1849,8 +1858,8 @@ fn asphalt(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Aggregate base + iridescent oil + manhole + tire skids. The road re-do.
   let agg = fbm(uv.x * 35.0 + seed, uv.y * 35.0 - seed, 4.0) * 0.5 + 0.5;
   let stone = speckle(px, 1.4, seed, 0.78);
-  var col = mix(vec3f(0.06, 0.065, 0.06), vec3f(0.18, 0.19, 0.17), agg);
-  col = col + vec3f(0.08, 0.08, 0.07) * stone;
+  var col = mix(mat_pal(0, vec3f(0.06, 0.065, 0.06)), mat_pal(1, vec3f(0.18, 0.19, 0.17)), agg);
+  col = col + mat_pal(2, vec3f(0.08, 0.08, 0.07)) * stone;
 
   // Oil slick — iridescent SDF ellipse.
   let oil_uv = uv - vec2f(0.35, 0.62);
@@ -1867,25 +1876,25 @@ fn asphalt(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let mh_ang = atan2(mh_uv.y, mh_uv.x);
   let mh_bolts = line_near(sin(mh_ang * 6.0), 0.08) * step(0.04, mh_r) * (1.0 - step(0.07, mh_r));
   let mh = sat(mh_ring + mh_bolts) * step(mh_r, 0.10);
-  col = mix(col, vec3f(0.22, 0.20, 0.18), mh * 0.85);
+  col = mix(col, mat_pal(3, vec3f(0.22, 0.20, 0.18)), mh * 0.85);
 
   // Tire skid marks — directional streaks.
   let skid = line_near(sin((uv.x + fbm(uv.x * 2.0, uv.y * 2.0 + seed, 3.0) * 0.03) * 45.0), 0.06) * smoothstep(0.65, 0.95, uv.y);
-  col = mix(col, vec3f(0.03, 0.03, 0.03), skid * 0.42);
+  col = mix(col, mat_pal(4, vec3f(0.03, 0.03, 0.03)), skid * 0.42);
 
   if (variant < 0.5) {
     let dline = line_near(uv.x - 0.50, 0.018);
     let dash = step(0.4, fract(uv.y * 6.0));
-    col = mix(col, vec3f(0.92, 0.78, 0.22), dline * dash * 0.9);
+    col = mix(col, mat_pal(5, vec3f(0.92, 0.78, 0.22)), dline * dash * 0.9);
   } else if (variant < 1.5) {
     let cross = line_near(sin(uv.x * 18.0), 0.10) * smoothstep(0.35, 0.45, uv.y) * smoothstep(0.55, 0.45, uv.y);
-    col = mix(col, vec3f(0.88, 0.88, 0.82), cross * 0.8);
-    col = mix(col, vec3f(0.28, 0.26, 0.24), mh * 0.9);
+    col = mix(col, mat_pal(6, vec3f(0.88, 0.88, 0.82)), cross * 0.8);
+    col = mix(col, mat_pal(7, vec3f(0.28, 0.26, 0.24)), mh * 0.9);
   } else {
     let oil2 = 1.0 - smoothstep(0.06, 0.12, length((uv - vec2f(0.72, 0.55)) * vec2f(1.2, 0.9)));
     col = mix(col, irid * 0.45 + col * 0.55, oil2 * 0.38);
     let skid2 = line_near(sin((uv.x + 0.1) * 55.0 + seed), 0.04) * smoothstep(0.40, 0.80, uv.y);
-    col = mix(col, vec3f(0.025, 0.025, 0.025), skid2 * 0.32);
+    col = mix(col, mat_pal(8, vec3f(0.025, 0.025, 0.025)), skid2 * 0.32);
   }
   return sat3(col);
 }
@@ -1910,23 +1919,23 @@ fn sidewalk(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let joint_x = 1.0 - smoothstep(0.010, 0.028, min(slab_x, 1.0 - slab_x));
   let joints = sat(joint_x + joint_y);
 
-  var col = mix(vec3f(0.55, 0.53, 0.50), vec3f(0.72, 0.70, 0.66), fbm(uv.x * 12.0 + seed, uv.y * 12.0, 5.0) * 0.5 + 0.5);
+  var col = mix(mat_pal(0, vec3f(0.55, 0.53, 0.50)), mat_pal(1, vec3f(0.72, 0.70, 0.66)), fbm(uv.x * 12.0 + seed, uv.y * 12.0, 5.0) * 0.5 + 0.5);
 
   let rust_drip = vertical_drips(uv + vec2f(0.05, 0.0), seed + 7.0, 0.6) * joint_x;
-  col = mix(col, vec3f(0.42, 0.22, 0.10), rust_drip * 0.55);
+  col = mix(col, mat_pal(2, vec3f(0.42, 0.22, 0.10)), rust_drip * 0.55);
 
   let gum = speckle(px, 5.0, seed + 3.0, 0.96) * smoothstep(0.2, 0.8, fbm(uv.x * 4.0, uv.y * 4.0 + seed, 3.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.75, 0.20, 0.35), gum * 0.62);
+  col = mix(col, mat_pal(3, vec3f(0.75, 0.20, 0.35)), gum * 0.62);
 
   let leaf = blotch(uv, vec2f(0.24, 0.72), 0.14, vec2f(1.3, 0.7), seed + 2.0) + blotch(uv, vec2f(0.68, 0.38), 0.12, vec2f(0.8, 1.2), seed + 5.0);
-  col = mix(col, vec3f(0.42, 0.35, 0.18), sat(leaf) * 0.32);
+  col = mix(col, mat_pal(4, vec3f(0.42, 0.35, 0.18)), sat(leaf) * 0.32);
 
-  col = mix(col, vec3f(0.35, 0.33, 0.30), joints * 0.78);
+  col = mix(col, mat_pal(5, vec3f(0.35, 0.33, 0.30)), joints * 0.78);
 
   if (variant > 0.5 && variant < 1.5) {
-    col = mix(col, vec3f(0.68, 0.42, 0.32), 0.18);
+    col = mix(col, mat_pal(6, vec3f(0.68, 0.42, 0.32)), 0.18);
   } else if (variant >= 1.5) {
-    col = mix(col, vec3f(0.78, 0.72, 0.58), 0.15);
+    col = mix(col, mat_pal(7, vec3f(0.78, 0.72, 0.58)), 0.15);
   }
   return sat3(col - vec3f(speckle(px, 3.0, seed, 0.92) * 0.06));
 }
@@ -1951,22 +1960,22 @@ fn stone_wall(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let in_stone = step(0.05, stone_local.x) * step(stone_local.x, 0.95) * step(0.05, stone_local.y) * step(stone_local.y, 0.95);
   let mortar = 1.0 - in_stone;
 
-  var lo = vec3f(0.38, 0.38, 0.40);
-  var hi = vec3f(0.62, 0.62, 0.64);
+  var lo = mat_pal(0, vec3f(0.38, 0.38, 0.40));
+  var hi = mat_pal(1, vec3f(0.62, 0.62, 0.64));
   if (variant > 0.5 && variant < 1.5) {
-    lo = vec3f(0.52, 0.38, 0.24);
-    hi = vec3f(0.82, 0.62, 0.38);
+    lo = mat_pal(2, vec3f(0.52, 0.38, 0.24));
+    hi = mat_pal(3, vec3f(0.82, 0.62, 0.38));
   } else if (variant >= 1.5) {
-    lo = vec3f(0.18, 0.18, 0.20);
-    hi = vec3f(0.32, 0.32, 0.34);
+    lo = mat_pal(4, vec3f(0.18, 0.18, 0.20));
+    hi = mat_pal(5, vec3f(0.32, 0.32, 0.34));
   }
   let stone_tex = fbm(uv.x * 14.0 + seed, uv.y * 14.0 - seed, 5.0) * 0.5 + 0.5;
   var col = mix(lo, hi, stone_tex);
 
   let lichen = smoothstep(0.55, 0.82, fbm(uv.x * 8.0 + seed, uv.y * 8.0 - seed, 4.0) * 0.5 + 0.5) * smoothstep(0.0, 0.5, local.y);
-  col = mix(col, vec3f(0.35, 0.42, 0.28), lichen * 0.42);
-  col = mix(col, vec3f(0.55, 0.53, 0.50), smoothstep(0.0, 0.35, uv.y) * 0.22);
-  col = mix(col, vec3f(0.45, 0.43, 0.38), mortar * 0.88);
+  col = mix(col, mat_pal(6, vec3f(0.35, 0.42, 0.28)), lichen * 0.42);
+  col = mix(col, mat_pal(7, vec3f(0.55, 0.53, 0.50)), smoothstep(0.0, 0.35, uv.y) * 0.22);
+  col = mix(col, mat_pal(8, vec3f(0.45, 0.43, 0.38)), mortar * 0.88);
   return sat3(col - vec3f(speckle(px, 4.0, seed, 0.94) * 0.06));
 }
 
@@ -1992,23 +2001,23 @@ fn dune(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
              + smoothstep(0.0, 0.08, ridge2) * (1.0 - smoothstep(0.0, 0.20, ridge2)) * 0.5
              + smoothstep(0.0, 0.08, ridge3) * (1.0 - smoothstep(0.0, 0.20, ridge3)) * 0.5;
 
-  var lo = vec3f(0.62, 0.44, 0.18);
-  var hi = vec3f(0.90, 0.74, 0.38);
+  var lo = mat_pal(0, vec3f(0.62, 0.44, 0.18));
+  var hi = mat_pal(1, vec3f(0.90, 0.74, 0.38));
   if (variant > 0.5 && variant < 1.5) {
-    lo = vec3f(0.78, 0.76, 0.72);
-    hi = vec3f(0.94, 0.92, 0.88);
+    lo = mat_pal(2, vec3f(0.78, 0.76, 0.72));
+    hi = mat_pal(3, vec3f(0.94, 0.92, 0.88));
   } else if (variant >= 1.5) {
-    lo = vec3f(0.42, 0.14, 0.08);
-    hi = vec3f(0.78, 0.28, 0.14);
+    lo = mat_pal(4, vec3f(0.42, 0.14, 0.08));
+    hi = mat_pal(5, vec3f(0.78, 0.28, 0.14));
   }
   let tex = fbm(uv.x * 8.0 + seed, uv.y * 8.0 - seed, 5.0) * 0.5 + 0.5;
   var col = mix(lo, hi, tex);
-  col = col + vec3f(0.10, 0.08, 0.04) * ripple;
-  col = col - vec3f(0.12, 0.08, 0.04) * shadow;
-  col = col + vec3f(0.14, 0.10, 0.04) * ridge_mask;
+  col = col + mat_pal(6, vec3f(0.10, 0.08, 0.04)) * ripple;
+  col = col - mat_pal(7, vec3f(0.12, 0.08, 0.04)) * shadow;
+  col = col + mat_pal(8, vec3f(0.14, 0.10, 0.04)) * ridge_mask;
 
   let veg = speckle(px + vec2f(11.0, 7.0), 7.0, seed, 0.96) * smoothstep(0.3, 0.7, uv.y);
-  col = mix(col, vec3f(0.25, 0.35, 0.10), veg * 0.32);
+  col = mix(col, mat_pal(9, vec3f(0.25, 0.35, 0.10)), veg * 0.32);
   return sat3(col);
 }
 
@@ -2022,14 +2031,14 @@ fn dune(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @author legacy
 fn deep_water(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Deep ocean with sharp whitecaps, caustic light, and foam patches.
-  var deep = vec3f(0.015, 0.045, 0.12);
-  var shallow = vec3f(0.06, 0.32, 0.55);
+  var deep = mat_pal(0, vec3f(0.015, 0.045, 0.12));
+  var shallow = mat_pal(1, vec3f(0.06, 0.32, 0.55));
   if (variant > 0.5 && variant < 1.5) {
-    deep = vec3f(0.02, 0.18, 0.22);
-    shallow = vec3f(0.14, 0.68, 0.62);
+    deep = mat_pal(2, vec3f(0.02, 0.18, 0.22));
+    shallow = mat_pal(3, vec3f(0.14, 0.68, 0.62));
   } else if (variant >= 1.5) {
-    deep = vec3f(0.03, 0.04, 0.06);
-    shallow = vec3f(0.18, 0.20, 0.24);
+    deep = mat_pal(4, vec3f(0.03, 0.04, 0.06));
+    shallow = mat_pal(5, vec3f(0.18, 0.20, 0.24));
   }
   let depth_grad = smoothstep(0.0, 1.0, uv.y);
   var col = mix(deep, shallow, depth_grad);
@@ -2038,13 +2047,13 @@ fn deep_water(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let wave_b = sin(uv.x * -18.0 + uv.y * 22.0 - seed);
   let wave_c = sin(uv.x * 12.0 + uv.y * 35.0 + seed * 0.5);
   let crest = smoothstep(1.4, 1.9, wave_a + wave_b + wave_c);
-  col = mix(col, vec3f(0.82, 0.88, 0.92), crest * 0.65);
+  col = mix(col, mat_pal(6, vec3f(0.82, 0.88, 0.92)), crest * 0.65);
 
   let caustic = line_near(sin(uv.x * 20.0 + seed) * sin(uv.y * 16.0 - seed), 0.08);
-  col = col + vec3f(0.08, 0.14, 0.16) * caustic * (1.0 - depth_grad * 0.5);
+  col = col + mat_pal(7, vec3f(0.08, 0.14, 0.16)) * caustic * (1.0 - depth_grad * 0.5);
 
   let foam = speckle(px, 5.5, seed + 4.0, 0.90) * smoothstep(0.6, 0.9, fbm(uv.x * 5.0 + seed, uv.y * 5.0, 4.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.88, 0.92, 0.90), foam * 0.30);
+  col = mix(col, mat_pal(8, vec3f(0.88, 0.92, 0.90)), foam * 0.30);
   return sat3(col);
 }
 
@@ -2061,27 +2070,27 @@ fn turf(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let stripe = step(0.5, fract(uv.y * 7.0 + seed * 0.1));
   let stripe_blend = mix(1.0, 0.88, stripe);
 
-  var lo = vec3f(0.10, 0.28, 0.08);
-  var hi = vec3f(0.28, 0.52, 0.16);
+  var lo = mat_pal(0, vec3f(0.10, 0.28, 0.08));
+  var hi = mat_pal(1, vec3f(0.28, 0.52, 0.16));
   if (variant > 0.5 && variant < 1.5) {
-    lo = vec3f(0.14, 0.38, 0.18);
-    hi = vec3f(0.38, 0.62, 0.28);
+    lo = mat_pal(2, vec3f(0.14, 0.38, 0.18));
+    hi = mat_pal(3, vec3f(0.38, 0.62, 0.28));
   } else if (variant >= 1.5) {
-    lo = vec3f(0.28, 0.24, 0.08);
-    hi = vec3f(0.52, 0.44, 0.16);
+    lo = mat_pal(4, vec3f(0.28, 0.24, 0.08));
+    hi = mat_pal(5, vec3f(0.52, 0.44, 0.16));
   }
   let tex = fbm(uv.x * 16.0 + seed, uv.y * 16.0 - seed, 5.0) * 0.5 + 0.5;
   var col = mix(lo, hi, tex) * stripe_blend;
 
   let clover = speckle(px + vec2f(3.0, 9.0), 4.5, seed, 0.92);
-  col = mix(col, vec3f(0.18, 0.42, 0.14), clover * 0.32);
+  col = mix(col, mat_pal(6, vec3f(0.18, 0.42, 0.14)), clover * 0.32);
 
   let bare = smoothstep(0.48, 0.68, fbm(uv.x * 5.0 - seed, uv.y * 5.0 + seed, 4.0) * 0.5 + 0.5);
-  let dirt = mix(vec3f(0.38, 0.28, 0.16), vec3f(0.52, 0.40, 0.24), fbm(uv.x * 10.0, uv.y * 10.0, 4.0) * 0.5 + 0.5);
+  let dirt = mix(mat_pal(7, vec3f(0.38, 0.28, 0.16)), mat_pal(8, vec3f(0.52, 0.40, 0.24)), fbm(uv.x * 10.0, uv.y * 10.0, 4.0) * 0.5 + 0.5);
   col = mix(col, dirt, bare * 0.52);
 
   let dandelion = speckle(px + vec2f(19.0, 5.0), 8.0, seed, 0.96) * (1.0 - bare);
-  col = mix(col, vec3f(0.92, 0.86, 0.14), dandelion * 0.50);
+  col = mix(col, mat_pal(9, vec3f(0.92, 0.86, 0.14)), dandelion * 0.50);
   return sat3(col);
 }
 
@@ -2103,30 +2112,30 @@ fn plank_deck(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let grain = sin((uv.x + fbm(uv.x * 4.0, uv.y * 1.0 + seed, 3.0) * 0.03) * 65.0 + row) * 0.5 + 0.5;
   let knot = 1.0 - smoothstep(0.04, 0.07, length((uv - vec2f(0.35 + rand(vec2f(row, seed + 1.0)) * 0.3, (row + 0.5) / 5.0)) * vec2f(1.0, 4.0)));
 
-  var lo = vec3f(0.58, 0.38, 0.18);
-  var hi = vec3f(0.86, 0.62, 0.32);
+  var lo = mat_pal(0, vec3f(0.58, 0.38, 0.18));
+  var hi = mat_pal(1, vec3f(0.86, 0.62, 0.32));
   if (variant > 0.5 && variant < 1.5) {
-    lo = vec3f(0.42, 0.42, 0.40);
-    hi = vec3f(0.68, 0.68, 0.64);
+    lo = mat_pal(2, vec3f(0.42, 0.42, 0.40));
+    hi = mat_pal(3, vec3f(0.68, 0.68, 0.64));
   } else if (variant >= 1.5) {
-    lo = vec3f(0.32, 0.26, 0.18);
-    hi = vec3f(0.52, 0.44, 0.30);
+    lo = mat_pal(4, vec3f(0.32, 0.26, 0.18));
+    hi = mat_pal(5, vec3f(0.52, 0.44, 0.30));
   }
   var col = mix(lo, hi, grain * 0.6 + 0.25);
-  col = mix(col, vec3f(0.48, 0.30, 0.14), knot * 0.42);
+  col = mix(col, mat_pal(6, vec3f(0.48, 0.30, 0.14)), knot * 0.42);
 
   let end_crack = line_near(uv.x - 0.5, 0.006) * (smoothstep(0.0, 0.12, local_y) + smoothstep(1.0, 0.88, local_y));
-  col = mix(col, vec3f(0.22, 0.16, 0.10), end_crack * 0.52);
+  col = mix(col, mat_pal(7, vec3f(0.22, 0.16, 0.10)), end_crack * 0.52);
 
   let nail_x = step(0.5, fract(uv.x * 6.0 + row * 0.3));
   let nail_y = step(0.35, local_y) * step(local_y, 0.65);
   let nail = nail_x * nail_y * speckle(px, 2.2, seed, 0.88);
-  col = col + vec3f(0.12, 0.10, 0.06) * nail;
+  col = col + mat_pal(8, vec3f(0.12, 0.10, 0.06)) * nail;
 
   let water = smoothstep(0.55, 0.92, uv.y) * smoothstep(0.45, 0.75, fbm(uv.x * 3.0 + row, uv.y * 2.0 + seed, 3.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.24, 0.18, 0.10), water * 0.32);
+  col = mix(col, mat_pal(9, vec3f(0.24, 0.18, 0.10)), water * 0.32);
 
-  col = mix(col, vec3f(0.08, 0.07, 0.06), gap * 0.88);
+  col = mix(col, mat_pal(10, vec3f(0.08, 0.07, 0.06)), gap * 0.88);
   return sat3(col);
 }
 
@@ -2141,17 +2150,17 @@ fn plank_deck(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn brick_facade(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Apartment brick wall + a 2x2 grid of painted windows. variant 0 red brick,
   // 1 buff/sandstone brick, 2 sooted grey-brown brick.
-  var lo = vec3f(0.42, 0.13, 0.085);
-  var hi = vec3f(0.78, 0.30, 0.17);
-  var mortar_c = vec3f(0.56, 0.54, 0.49);
+  var lo = mat_pal(0, vec3f(0.42, 0.13, 0.085));
+  var hi = mat_pal(1, vec3f(0.78, 0.30, 0.17));
+  var mortar_c = mat_pal(2, vec3f(0.56, 0.54, 0.49));
   if (variant > 0.5 && variant < 1.5) {
-    lo = vec3f(0.52, 0.43, 0.33);
-    hi = vec3f(0.84, 0.72, 0.56);
-    mortar_c = vec3f(0.62, 0.60, 0.55);
+    lo = mat_pal(3, vec3f(0.52, 0.43, 0.33));
+    hi = mat_pal(4, vec3f(0.84, 0.72, 0.56));
+    mortar_c = mat_pal(5, vec3f(0.62, 0.60, 0.55));
   } else if (variant >= 1.5) {
-    lo = vec3f(0.30, 0.20, 0.18);
-    hi = vec3f(0.52, 0.40, 0.36);
-    mortar_c = vec3f(0.46, 0.44, 0.42);
+    lo = mat_pal(6, vec3f(0.30, 0.20, 0.18));
+    hi = mat_pal(7, vec3f(0.52, 0.40, 0.36));
+    mortar_c = mat_pal(8, vec3f(0.46, 0.44, 0.42));
   }
   var col = brick_wall(uv, px, lo, hi, mortar_c, seed);
   let g = uv * vec2f(2.0, 2.0);
@@ -2176,11 +2185,11 @@ fn brick_fire_escape(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // a landing platform at each floor, rail pickets, and a drop ladder. variant
   // 0 black iron, 1 rust, 2 worn grey.
   var col = brick_facade(uv, px, 0.0, seed);
-  var iron = vec3f(0.09, 0.09, 0.10);
+  var iron = mat_pal(0, vec3f(0.09, 0.09, 0.10));
   if (variant > 0.5 && variant < 1.5) {
-    iron = vec3f(0.34, 0.15, 0.075);
+    iron = mat_pal(1, vec3f(0.34, 0.15, 0.075));
   } else if (variant >= 1.5) {
-    iron = vec3f(0.20, 0.21, 0.20);
+    iron = mat_pal(2, vec3f(0.20, 0.21, 0.20));
   }
   let band = step(0.18, uv.x) * step(uv.x, 0.82); // structure spans the middle
   // Vertical stringers.
@@ -2217,12 +2226,12 @@ fn brick_shopfront(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Mixed-use ground floor: brick piers either side, a striped awning across the
   // top, a sign band, and a big plate-glass shop window over a bulkhead. Apply to
   // the bottom row of faces; brick_facade above it. variant 0 green, 1 red, 2 blue.
-  var col = brick_wall(uv, px, vec3f(0.40, 0.13, 0.085), vec3f(0.74, 0.29, 0.17), vec3f(0.55, 0.53, 0.48), seed);
-  var awn = vec3f(0.10, 0.42, 0.22);
+  var col = brick_wall(uv, px, mat_pal(0, vec3f(0.40, 0.13, 0.085)), mat_pal(1, vec3f(0.74, 0.29, 0.17)), mat_pal(2, vec3f(0.55, 0.53, 0.48)), seed);
+  var awn = mat_pal(3, vec3f(0.10, 0.42, 0.22));
   if (variant > 0.5 && variant < 1.5) {
-    awn = vec3f(0.62, 0.12, 0.12);
+    awn = mat_pal(4, vec3f(0.62, 0.12, 0.12));
   } else if (variant >= 1.5) {
-    awn = vec3f(0.10, 0.22, 0.50);
+    awn = mat_pal(5, vec3f(0.10, 0.22, 0.50));
   }
   // Storefront opening: central bay, brick piers on the outer 14%.
   let px0 = 0.14; let px1 = 0.86;
@@ -2230,26 +2239,26 @@ fn brick_shopfront(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let gy0 = 0.10; let gy1 = 0.66;
   let glass = rect_mask(uv, px0 + 0.03, px1 - 0.03, gy0, gy1, 0.008);
   let refl = smoothstep(0.0, 1.0, (uv.y - gy0) / (gy1 - gy0));
-  var pane = mix(vec3f(0.07, 0.10, 0.13), vec3f(0.16, 0.22, 0.27), refl);
+  var pane = mix(mat_pal(6, vec3f(0.07, 0.10, 0.13)), mat_pal(7, vec3f(0.16, 0.22, 0.27)), refl);
   // Warm interior glow low in the window, diagonal highlight streak across it.
-  pane = mix(pane, vec3f(0.85, 0.66, 0.34), (1.0 - refl) * 0.45);
-  pane = pane + vec3f(0.18, 0.18, 0.16) * (1.0 - smoothstep(0.02, 0.06, abs((uv.x - 0.5) + (uv.y - 0.4) * 0.6)));
-  let frame = vec3f(0.14, 0.13, 0.12);
+  pane = mix(pane, mat_pal(8, vec3f(0.85, 0.66, 0.34)), (1.0 - refl) * 0.45);
+  pane = pane + mat_pal(9, vec3f(0.18, 0.18, 0.16)) * (1.0 - smoothstep(0.02, 0.06, abs((uv.x - 0.5) + (uv.y - 0.4) * 0.6)));
+  let frame = mat_pal(10, vec3f(0.14, 0.13, 0.12));
   let frame_mask = rect_mask(uv, px0, px1, gy0 - 0.02, gy1 + 0.02, 0.006) * (1.0 - rect_mask(uv, px0 + 0.03, px1 - 0.03, gy0, gy1, 0.006));
   // Bulkhead panel below the glass.
   let bulk = rect_mask(uv, px0, px1, 0.0, gy0, 0.006);
-  col = mix(col, vec3f(0.16, 0.15, 0.14), bulk);
+  col = mix(col, mat_pal(11, vec3f(0.16, 0.15, 0.14)), bulk);
   col = mix(col, pane, glass);
   col = mix(col, frame, frame_mask);
   // Sign band across the top of the opening.
   let sign = rect_mask(uv, px0, px1, 0.78, 0.90, 0.006);
-  col = mix(col, vec3f(0.10, 0.10, 0.11), sign);
+  col = mix(col, mat_pal(12, vec3f(0.10, 0.10, 0.11)), sign);
   // Striped awning slung above the sign band, scalloped lower edge.
   let aw_y0 = 0.66; let aw_y1 = 0.80;
   let scallop = 0.012 * (sin(uv.x * 40.0) * 0.5 + 0.5);
   let awn_mask = rect_mask(uv, px0 - 0.02, px1 + 0.02, aw_y0, aw_y1 - scallop, 0.006);
   let stripe = step(0.5, fract(uv.x * 10.0));
-  var awn_col = mix(awn, vec3f(0.90, 0.88, 0.82), stripe * 0.85);
+  var awn_col = mix(awn, mat_pal(13, vec3f(0.90, 0.88, 0.82)), stripe * 0.85);
   awn_col = awn_col * (0.78 + 0.22 * smoothstep(aw_y0, aw_y1, uv.y)); // top-shade
   col = mix(col, awn_col, awn_mask);
   return sat3(col);
@@ -2267,19 +2276,19 @@ fn brick_entrance(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Residential building entryway: a stone-surround door with a transom light,
   // an upper-floor window above, a coach lamp beside the door. variant 0 stoop
   // (stone steps), 1 recessed dark reveal, 2 glazed double door.
-  var col = brick_wall(uv, px, vec3f(0.42, 0.13, 0.085), vec3f(0.78, 0.30, 0.17), vec3f(0.56, 0.54, 0.49), seed);
+  var col = brick_wall(uv, px, mat_pal(0, vec3f(0.42, 0.13, 0.085)), mat_pal(1, vec3f(0.78, 0.30, 0.17)), mat_pal(2, vec3f(0.56, 0.54, 0.49)), seed);
   let aa = 0.007;
   // Stone surround around the entrance, then the recessed reveal inside it.
   let surround = rect_mask(uv, 0.28, 0.72, 0.0, 0.50, aa);
-  col = mix(col, vec3f(0.66, 0.63, 0.57), surround);
+  col = mix(col, mat_pal(3, vec3f(0.66, 0.63, 0.57)), surround);
   let reveal = rect_mask(uv, 0.34, 0.66, 0.0, 0.46, aa);
-  var reveal_c = vec3f(0.22, 0.18, 0.16);
-  if (variant > 0.5 && variant < 1.5) { reveal_c = vec3f(0.07, 0.06, 0.07); }
+  var reveal_c = mat_pal(4, vec3f(0.22, 0.18, 0.16));
+  if (variant > 0.5 && variant < 1.5) { reveal_c = mat_pal(5, vec3f(0.07, 0.06, 0.07)); }
   col = mix(col, reveal_c, reveal);
   // Door leaf with two recessed panels.
-  var door = vec3f(0.34, 0.16, 0.10);
-  if (variant > 0.5 && variant < 1.5) { door = vec3f(0.12, 0.11, 0.12); }
-  else if (variant >= 1.5) { door = vec3f(0.16, 0.18, 0.22); }
+  var door = mat_pal(6, vec3f(0.34, 0.16, 0.10));
+  if (variant > 0.5 && variant < 1.5) { door = mat_pal(7, vec3f(0.12, 0.11, 0.12)); }
+  else if (variant >= 1.5) { door = mat_pal(8, vec3f(0.16, 0.18, 0.22)); }
   let door_mask = rect_mask(uv, 0.37, 0.63, 0.02, 0.40, aa);
   let dx = (uv.x - 0.37) / 0.26;
   let dy = (uv.y - 0.02) / 0.38;
@@ -2287,25 +2296,25 @@ fn brick_entrance(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   var doorcol = mix(door, door * 0.6, panel_line);
   if (variant >= 1.5) {
     // Glazed double door: warm interior behind the glass, central mullion.
-    doorcol = mix(doorcol, vec3f(0.86, 0.69, 0.40), 0.5);
-    doorcol = mix(doorcol, vec3f(0.14, 0.13, 0.12), 1.0 - smoothstep(0.010, 0.020, abs(dx - 0.5)));
+    doorcol = mix(doorcol, mat_pal(9, vec3f(0.86, 0.69, 0.40)), 0.5);
+    doorcol = mix(doorcol, mat_pal(10, vec3f(0.14, 0.13, 0.12)), 1.0 - smoothstep(0.010, 0.020, abs(dx - 0.5)));
   }
   col = mix(col, doorcol, door_mask);
   // Brass knob.
   let knob = 1.0 - smoothstep(0.008, 0.014, length(uv - vec2f(0.60, 0.20)));
-  col = mix(col, vec3f(0.85, 0.74, 0.35), knob * (1.0 - step(1.5, variant)));
+  col = mix(col, mat_pal(11, vec3f(0.85, 0.74, 0.35)), knob * (1.0 - step(1.5, variant)));
   // Transom light above the door.
   let transom = rect_mask(uv, 0.37, 0.63, 0.41, 0.455, aa);
-  col = mix(col, vec3f(0.92, 0.76, 0.42), transom);
+  col = mix(col, mat_pal(12, vec3f(0.92, 0.76, 0.42)), transom);
   // Stone steps (stoop variant).
   if (variant < 0.5) {
     let step1 = rect_mask(uv, 0.26, 0.74, 0.0, 0.022, aa);
     let step2 = rect_mask(uv, 0.29, 0.71, 0.022, 0.045, aa);
-    col = mix(col, vec3f(0.60, 0.57, 0.52), max(step1, step2));
+    col = mix(col, mat_pal(13, vec3f(0.60, 0.57, 0.52)), max(step1, step2));
   }
   // Coach lamp glow beside the door.
   let lamp = 1.0 - smoothstep(0.0, 0.03, length((uv - vec2f(0.30, 0.42)) * vec2f(1.0, 1.2)));
-  col = col + vec3f(0.55, 0.42, 0.20) * lamp;
+  col = col + mat_pal(14, vec3f(0.55, 0.42, 0.20)) * lamp;
   // Upper-floor window, mapped into the band above the entrance.
   let g = vec2f((uv.x - 0.30) / 0.40, (uv.y - 0.60) / 0.34);
   let w = paint_window(g, 1.0, seed);
@@ -2324,27 +2333,27 @@ fn brick_entrance(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn brick_rollshutter(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Closed storefront: a corrugated roll-down shutter in the ground-floor bay,
   // side rails, a lintel above. variant 0 plain, 1 tagged, 2 heavily graffitied.
-  var col = brick_wall(uv, px, vec3f(0.40, 0.13, 0.085), vec3f(0.74, 0.29, 0.17), vec3f(0.55, 0.53, 0.48), seed);
+  var col = brick_wall(uv, px, mat_pal(0, vec3f(0.40, 0.13, 0.085)), mat_pal(1, vec3f(0.74, 0.29, 0.17)), mat_pal(2, vec3f(0.55, 0.53, 0.48)), seed);
   let sh = rect_mask(uv, 0.10, 0.90, 0.0, 0.70, 0.006);
   let rib = 0.5 + 0.5 * sin(uv.y * 90.0);
-  var shutter = mix(vec3f(0.30, 0.31, 0.33), vec3f(0.50, 0.51, 0.53), rib);
+  var shutter = mix(mat_pal(3, vec3f(0.30, 0.31, 0.33)), mat_pal(4, vec3f(0.50, 0.51, 0.53)), rib);
   if (variant >= 0.5) {
     let tag1 = blotch(uv, vec2f(0.40, 0.40), 0.13, vec2f(1.2, 1.6), seed);
     let tag2 = blotch(uv, vec2f(0.62, 0.34), 0.10, vec2f(1.4, 1.0), seed + 5.0);
-    shutter = mix(shutter, vec3f(0.90, 0.18, 0.44), tag1 * 0.7);
-    shutter = mix(shutter, vec3f(0.20, 0.82, 0.55), tag2 * 0.6);
+    shutter = mix(shutter, mat_pal(5, vec3f(0.90, 0.18, 0.44)), tag1 * 0.7);
+    shutter = mix(shutter, mat_pal(6, vec3f(0.20, 0.82, 0.55)), tag2 * 0.6);
   }
   if (variant >= 1.5) {
     let tag3 = blotch(uv, vec2f(0.30, 0.30), 0.11, vec2f(1.0, 1.3), seed + 9.0);
     let scrawl = line_near(snoise(uv.x * 9.0 + seed, uv.y * 9.0 - seed), 0.020);
-    shutter = mix(shutter, vec3f(0.96, 0.82, 0.16), tag3 * 0.7);
-    shutter = mix(shutter, vec3f(0.05, 0.05, 0.06), scrawl * 0.5);
+    shutter = mix(shutter, mat_pal(7, vec3f(0.96, 0.82, 0.16)), tag3 * 0.7);
+    shutter = mix(shutter, mat_pal(8, vec3f(0.05, 0.05, 0.06)), scrawl * 0.5);
   }
   let rail = max(1.0 - smoothstep(0.0, 0.018, abs(uv.x - 0.10)), 1.0 - smoothstep(0.0, 0.018, abs(uv.x - 0.90)));
-  shutter = mix(shutter, vec3f(0.16, 0.16, 0.18), sat(rail));
+  shutter = mix(shutter, mat_pal(9, vec3f(0.16, 0.16, 0.18)), sat(rail));
   col = mix(col, shutter, sh);
   let lintel = rect_mask(uv, 0.08, 0.92, 0.70, 0.76, 0.006);
-  col = mix(col, vec3f(0.50, 0.48, 0.44), lintel);
+  col = mix(col, mat_pal(10, vec3f(0.50, 0.48, 0.44)), lintel);
   return sat3(col);
 }
 
@@ -2360,32 +2369,32 @@ fn brick_bodega(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Open corner-store front: barred plate glass, a side entry door, a striped
   // awning, and a neon sign bar above. variant 0 bodega (red), 1 laundromat
   // (blue), 2 diner (yellow/green).
-  var col = brick_wall(uv, px, vec3f(0.40, 0.13, 0.085), vec3f(0.74, 0.29, 0.17), vec3f(0.55, 0.53, 0.48), seed);
-  var awn = vec3f(0.70, 0.16, 0.16);
-  var neon = vec3f(0.98, 0.22, 0.30);
-  if (variant > 0.5 && variant < 1.5) { awn = vec3f(0.12, 0.36, 0.66); neon = vec3f(0.30, 0.70, 0.98); }
-  else if (variant >= 1.5) { awn = vec3f(0.80, 0.72, 0.18); neon = vec3f(0.24, 0.95, 0.55); }
+  var col = brick_wall(uv, px, mat_pal(0, vec3f(0.40, 0.13, 0.085)), mat_pal(1, vec3f(0.74, 0.29, 0.17)), mat_pal(2, vec3f(0.55, 0.53, 0.48)), seed);
+  var awn = mat_pal(3, vec3f(0.70, 0.16, 0.16));
+  var neon = mat_pal(4, vec3f(0.98, 0.22, 0.30));
+  if (variant > 0.5 && variant < 1.5) { awn = mat_pal(5, vec3f(0.12, 0.36, 0.66)); neon = mat_pal(6, vec3f(0.30, 0.70, 0.98)); }
+  else if (variant >= 1.5) { awn = mat_pal(7, vec3f(0.80, 0.72, 0.18)); neon = mat_pal(8, vec3f(0.24, 0.95, 0.55)); }
   // Shop window glass with a warm interior.
   let glass = rect_mask(uv, 0.12, 0.64, 0.08, 0.60, 0.006);
   let refl = smoothstep(0.0, 1.0, (uv.y - 0.08) / 0.52);
-  var pane = mix(vec3f(0.06, 0.09, 0.12), vec3f(0.14, 0.20, 0.25), refl);
-  pane = mix(pane, vec3f(0.85, 0.70, 0.38), (1.0 - refl) * 0.40);
+  var pane = mix(mat_pal(9, vec3f(0.06, 0.09, 0.12)), mat_pal(10, vec3f(0.14, 0.20, 0.25)), refl);
+  pane = mix(pane, mat_pal(11, vec3f(0.85, 0.70, 0.38)), (1.0 - refl) * 0.40);
   col = mix(col, pane, glass);
   // Security bars over the glass.
   let bars = (1.0 - smoothstep(0.004, 0.009, abs(fract(uv.x * 18.0) - 0.5))) * glass;
-  col = mix(col, vec3f(0.10, 0.10, 0.11), bars * 0.8);
+  col = mix(col, mat_pal(12, vec3f(0.10, 0.10, 0.11)), bars * 0.8);
   // Side entry door with its own glass light.
   let door = rect_mask(uv, 0.68, 0.88, 0.0, 0.62, 0.006);
-  col = mix(col, vec3f(0.16, 0.15, 0.16), door);
+  col = mix(col, mat_pal(13, vec3f(0.16, 0.15, 0.16)), door);
   let doorglass = rect_mask(uv, 0.70, 0.86, 0.30, 0.58, 0.006);
-  col = mix(col, mix(vec3f(0.10, 0.13, 0.16), vec3f(0.80, 0.66, 0.36), 0.4), doorglass);
+  col = mix(col, mix(mat_pal(14, vec3f(0.10, 0.13, 0.16)), mat_pal(15, vec3f(0.80, 0.66, 0.36)), 0.4), doorglass);
   // Striped awning across the storefront.
   let aw = rect_mask(uv, 0.08, 0.92, 0.64, 0.78, 0.006);
   let stripe = step(0.5, fract(uv.x * 12.0));
-  col = mix(col, mix(awn, vec3f(0.92, 0.90, 0.85), stripe * 0.8), aw);
+  col = mix(col, mix(awn, mat_pal(16, vec3f(0.92, 0.90, 0.85)), stripe * 0.8), aw);
   // Dark sign board + a buzzing neon bar (stand-in for the shop name).
   let signbg = rect_mask(uv, 0.28, 0.72, 0.80, 0.92, 0.006);
-  col = mix(col, vec3f(0.05, 0.05, 0.06), signbg);
+  col = mix(col, mat_pal(17, vec3f(0.05, 0.05, 0.06)), signbg);
   let buzz = 0.8 + 0.2 * sin(U.time * 30.0 + seed);
   let neonline = (1.0 - smoothstep(0.006, 0.014, abs(uv.y - 0.86))) * step(0.32, uv.x) * step(uv.x, 0.68);
   col = col + neon * neonline * buzz;
@@ -2406,15 +2415,15 @@ fn wall_flag(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   var col = brick_facade(uv, px, 0.0, seed);
   // Bracket arm.
   let arm = (1.0 - smoothstep(0.0, 0.012, abs(uv.y - 0.88))) * step(0.18, uv.x) * step(uv.x, 0.42);
-  col = mix(col, vec3f(0.10, 0.10, 0.11), arm);
+  col = mix(col, mat_pal(0, vec3f(0.10, 0.10, 0.11)), arm);
   // Banner cloth: a vertical sway shifts the x-sample with height.
   let sway = sin(uv.y * 5.0 + U.time * 1.5 + seed) * 0.015 * smoothstep(0.88, 0.30, uv.y);
   let bx = uv.x + sway;
   let banner = step(0.20, bx) * step(bx, 0.40) * step(0.30, uv.y) * step(uv.y, 0.86);
-  var c1 = vec3f(0.80, 0.16, 0.18);
-  var c2 = vec3f(0.92, 0.90, 0.86);
-  if (variant > 0.5 && variant < 1.5) { c1 = vec3f(0.10, 0.28, 0.62); c2 = vec3f(0.95, 0.82, 0.25); }
-  else if (variant >= 1.5) { c1 = vec3f(0.10, 0.45, 0.25); c2 = vec3f(0.88, 0.84, 0.30); }
+  var c1 = mat_pal(1, vec3f(0.80, 0.16, 0.18));
+  var c2 = mat_pal(2, vec3f(0.92, 0.90, 0.86));
+  if (variant > 0.5 && variant < 1.5) { c1 = mat_pal(3, vec3f(0.10, 0.28, 0.62)); c2 = mat_pal(4, vec3f(0.95, 0.82, 0.25)); }
+  else if (variant >= 1.5) { c1 = mat_pal(5, vec3f(0.10, 0.45, 0.25)); c2 = mat_pal(6, vec3f(0.88, 0.84, 0.30)); }
   let stripe = step(0.5, fract(uv.y * 9.0));
   var bcol = mix(c1, c2, stripe * 0.5);
   let midx = (bx - 0.20) / 0.20;
@@ -2445,10 +2454,10 @@ fn wall_plants(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
     let canopy = max(rect_mask(uv, 0.28, 0.72, 0.345, 0.47, 0.02), rect_mask(uv, 0.28, 0.72, 0.845, 0.97, 0.02));
     let drape = max(rect_mask(uv, 0.30, 0.70, 0.24, 0.345, 0.02), rect_mask(uv, 0.30, 0.70, 0.74, 0.845, 0.02));
     let fol = leaf_cover(uv, 0.45, seed) * max(canopy, drape);
-    col = mix(col, vec3f(0.26, 0.18, 0.11), box);
+    col = mix(col, mat_pal(0, vec3f(0.26, 0.18, 0.11)), box);
     col = mix(col, leaf_color(uv, seed), fol);
     let flower = speckle(px, 6.0, seed, 0.93) * fol;
-    col = mix(col, vec3f(0.95, 0.55, 0.65), flower * 0.8);
+    col = mix(col, mat_pal(1, vec3f(0.95, 0.55, 0.65)), flower * 0.8);
   } else if (variant < 1.5) {
     let vine = leaf_cover(vec2f(uv.x, uv.y * 0.6), 0.50 - smoothstep(0.30, 1.0, uv.y) * 0.18, seed) * smoothstep(0.30, 1.0, uv.y);
     col = mix(col, leaf_color(uv, seed + 3.0), vine);
@@ -2471,24 +2480,24 @@ fn wall_plants(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn wall_billboard(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   // Big framed billboard bolted to the brick, lit by a top light bar. variant 0
   // fresh poster, 1 sun-faded, 2 torn (peeling to brick).
-  let brick_lo = vec3f(0.40, 0.13, 0.085);
-  let brick_hi = vec3f(0.70, 0.28, 0.16);
-  let brick_m = vec3f(0.52, 0.50, 0.46);
+  let brick_lo = mat_pal(0, vec3f(0.40, 0.13, 0.085));
+  let brick_hi = mat_pal(1, vec3f(0.70, 0.28, 0.16));
+  let brick_m = mat_pal(2, vec3f(0.52, 0.50, 0.46));
   var col = brick_wall(uv, px, brick_lo, brick_hi, brick_m, seed);
   let frame = rect_mask(uv, 0.06, 0.94, 0.16, 0.88, 0.006);
   let panel = rect_mask(uv, 0.08, 0.92, 0.18, 0.86, 0.006);
-  col = mix(col, vec3f(0.12, 0.12, 0.13), frame);
+  col = mix(col, mat_pal(3, vec3f(0.12, 0.12, 0.13)), frame);
   // Poster: a bold geometric ad — diagonal split, a sun disc, a headline band.
   let u = uv - vec2f(0.5, 0.52);
-  var poster = mix(vec3f(0.95, 0.30, 0.20), vec3f(0.15, 0.20, 0.55), smoothstep(-0.3, 0.3, u.x + u.y));
+  var poster = mix(mat_pal(4, vec3f(0.95, 0.30, 0.20)), mat_pal(5, vec3f(0.15, 0.20, 0.55)), smoothstep(-0.3, 0.3, u.x + u.y));
   let disc = 1.0 - smoothstep(0.12, 0.16, length(u * vec2f(1.2, 1.0)));
-  poster = mix(poster, vec3f(0.98, 0.85, 0.20), disc);
+  poster = mix(poster, mat_pal(6, vec3f(0.98, 0.85, 0.20)), disc);
   let head = rect_mask(uv, 0.14, 0.86, 0.30, 0.40, 0.006);
-  poster = mix(poster, vec3f(0.05, 0.05, 0.07), head);
+  poster = mix(poster, mat_pal(7, vec3f(0.05, 0.05, 0.07)), head);
   let headtext = rect_mask(uv, 0.18, 0.82, 0.33, 0.37, 0.004) * step(0.5, fract(uv.x * 26.0));
-  poster = mix(poster, vec3f(0.95, 0.92, 0.85), headtext);
+  poster = mix(poster, mat_pal(8, vec3f(0.95, 0.92, 0.85)), headtext);
   if (variant > 0.5 && variant < 1.5) {
-    let l = dot(poster, vec3f(0.333, 0.333, 0.333));
+    let l = dot(poster, mat_pal(9, vec3f(0.333, 0.333, 0.333)));
     poster = mix(poster, vec3f(l * 1.1 + 0.10), 0.55);
   }
   col = mix(col, poster, panel);
@@ -2498,10 +2507,10 @@ fn wall_billboard(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   }
   // Top flood-light bar.
   let lights = (1.0 - smoothstep(0.0, 0.010, abs(uv.y - 0.90))) * step(0.12, uv.x) * step(uv.x, 0.88) * step(0.5, fract(uv.x * 12.0));
-  col = col + vec3f(0.70, 0.65, 0.50) * lights;
+  col = col + mat_pal(10, vec3f(0.70, 0.65, 0.50)) * lights;
   // Support struts below.
   let strut = max(1.0 - smoothstep(0.0, 0.012, abs(uv.x - 0.30)), 1.0 - smoothstep(0.0, 0.012, abs(uv.x - 0.70))) * (1.0 - step(0.16, uv.y));
-  col = mix(col, vec3f(0.14, 0.14, 0.15), strut);
+  col = mix(col, mat_pal(11, vec3f(0.14, 0.14, 0.15)), strut);
   return sat3(col);
 }
 
@@ -2519,8 +2528,8 @@ fn wall_sign(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   var col = brick_facade(uv, px, 0.0, seed);
   if (variant > 0.5 && variant < 1.5) {
     let box = rect_mask(uv, 0.16, 0.34, 0.10, 0.82, 0.006);
-    col = mix(col, vec3f(0.05, 0.05, 0.07), box);
-    let neon = vec3f(0.98, 0.24, 0.52);
+    col = mix(col, mat_pal(0, vec3f(0.05, 0.05, 0.07)), box);
+    let neon = mat_pal(1, vec3f(0.98, 0.24, 0.52));
     let row = fract(uv.y * 7.0);
     let letter = (1.0 - smoothstep(0.18, 0.30, abs(row - 0.5))) * step(0.20, uv.x) * step(uv.x, 0.30) * box;
     let cx = 1.0 - smoothstep(0.0, 0.06, abs(uv.x - 0.25));
@@ -2528,20 +2537,20 @@ fn wall_sign(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
     col = col + neon * letter * cx * buzz;
     col = col + neon * box * exp(-abs(uv.x - 0.25) * 16.0) * 0.22;
     let bracket = (1.0 - smoothstep(0.0, 0.010, abs(uv.y - 0.78))) * step(0.34, uv.x) * step(uv.x, 0.42);
-    col = mix(col, vec3f(0.10, 0.10, 0.11), bracket);
+    col = mix(col, mat_pal(2, vec3f(0.10, 0.10, 0.11)), bracket);
   } else {
-    var board = vec3f(0.16, 0.30, 0.42);
-    if (variant >= 1.5) { board = vec3f(0.34, 0.20, 0.10); }
+    var board = mat_pal(3, vec3f(0.16, 0.30, 0.42));
+    if (variant >= 1.5) { board = mat_pal(4, vec3f(0.34, 0.20, 0.10)); }
     let arm = (1.0 - smoothstep(0.0, 0.012, abs(uv.y - 0.84))) * step(0.20, uv.x) * step(uv.x, 0.40);
-    col = mix(col, vec3f(0.10, 0.10, 0.11), arm);
+    col = mix(col, mat_pal(5, vec3f(0.10, 0.10, 0.11)), arm);
     let link = max(1.0 - smoothstep(0.0, 0.006, abs(uv.x - 0.26)), 1.0 - smoothstep(0.0, 0.006, abs(uv.x - 0.40))) * step(0.74, uv.y) * step(uv.y, 0.84);
-    col = mix(col, vec3f(0.12, 0.12, 0.13), link);
+    col = mix(col, mat_pal(6, vec3f(0.12, 0.12, 0.13)), link);
     let sign = rect_mask(uv, 0.18, 0.48, 0.52, 0.74, 0.006);
     col = mix(col, board, sign);
     let border = sign * (1.0 - rect_mask(uv, 0.20, 0.46, 0.54, 0.72, 0.006));
-    col = mix(col, vec3f(0.86, 0.80, 0.55), border * 0.8);
+    col = mix(col, mat_pal(7, vec3f(0.86, 0.80, 0.55)), border * 0.8);
     let txt = rect_mask(uv, 0.23, 0.43, 0.60, 0.66, 0.006) * step(0.5, fract(uv.x * 22.0));
-    col = mix(col, vec3f(0.90, 0.86, 0.62), txt * 0.9);
+    col = mix(col, mat_pal(8, vec3f(0.90, 0.86, 0.62)), txt * 0.9);
   }
   return sat3(col);
 }
@@ -2560,27 +2569,27 @@ fn wall_ac(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   var col = brick_facade(uv, px, 0.0, seed);
   if (variant < 0.5) {
     let ac = max(rect_mask(uv, 0.36, 0.64, 0.22, 0.34, 0.006), rect_mask(uv, 0.36, 0.64, 0.72, 0.84, 0.006));
-    col = mix(col, vec3f(0.78, 0.78, 0.74), ac);
+    col = mix(col, mat_pal(0, vec3f(0.78, 0.78, 0.74)), ac);
     let grille = (1.0 - smoothstep(0.004, 0.009, abs(fract(uv.y * 60.0) - 0.5))) * ac;
-    col = mix(col, vec3f(0.55, 0.55, 0.52), grille * 0.6);
+    col = mix(col, mat_pal(1, vec3f(0.55, 0.55, 0.52)), grille * 0.6);
     let drip = vertical_drips(uv, seed, 1.0) * smoothstep(0.0, 0.20, uv.y) * (1.0 - smoothstep(0.34, 0.40, uv.y));
-    col = mix(col, vec3f(0.30, 0.22, 0.14), drip * 0.4);
+    col = mix(col, mat_pal(2, vec3f(0.30, 0.22, 0.14)), drip * 0.4);
   } else if (variant < 1.5) {
     let vent = rect_mask(uv, 0.38, 0.62, 0.42, 0.64, 0.006);
-    col = mix(col, vec3f(0.30, 0.30, 0.32), vent);
+    col = mix(col, mat_pal(3, vec3f(0.30, 0.30, 0.32)), vent);
     let louver = (1.0 - smoothstep(0.010, 0.020, abs(fract(uv.y * 22.0) - 0.5))) * vent;
-    col = mix(col, vec3f(0.12, 0.12, 0.13), louver * 0.7);
+    col = mix(col, mat_pal(4, vec3f(0.12, 0.12, 0.13)), louver * 0.7);
     let soot = smoothstep(0.64, 0.95, uv.y) * (1.0 - smoothstep(0.0, 0.18, abs(uv.x - 0.5))) * (fbm(uv.x * 8.0, uv.y * 8.0 + seed, 4.0) * 0.5 + 0.5);
-    col = mix(col, vec3f(0.05, 0.05, 0.05), soot * 0.5);
+    col = mix(col, mat_pal(5, vec3f(0.05, 0.05, 0.05)), soot * 0.5);
   } else {
     let pipe = max(1.0 - smoothstep(0.006, 0.012, abs(uv.x - 0.30)), 1.0 - smoothstep(0.006, 0.012, abs(uv.x - 0.345)));
-    col = mix(col, vec3f(0.30, 0.30, 0.33), pipe);
+    col = mix(col, mat_pal(6, vec3f(0.30, 0.30, 0.33)), pipe);
     let mbox = rect_mask(uv, 0.50, 0.66, 0.40, 0.62, 0.006);
-    col = mix(col, vec3f(0.55, 0.55, 0.50), mbox);
+    col = mix(col, mat_pal(7, vec3f(0.55, 0.55, 0.50)), mbox);
     let dial = (1.0 - smoothstep(0.0, 0.04, length(uv - vec2f(0.58, 0.51)))) * mbox;
-    col = mix(col, vec3f(0.85, 0.85, 0.80), dial);
+    col = mix(col, mat_pal(8, vec3f(0.85, 0.85, 0.80)), dial);
     let run = (1.0 - smoothstep(0.006, 0.012, abs(uv.y - 0.62))) * step(0.30, uv.x) * step(uv.x, 0.58);
-    col = mix(col, vec3f(0.28, 0.28, 0.30), run);
+    col = mix(col, mat_pal(9, vec3f(0.28, 0.28, 0.30)), run);
   }
   return sat3(col);
 }
@@ -2599,15 +2608,15 @@ fn sidewalk_grid(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let cell = floor(g);
   let l = fract(g + vec2f(rand(cell + vec2f(seed, seed)) * 0.035, rand(cell + vec2f(seed + 4.0, seed - 4.0)) * 0.030));
   let joint = max(1.0 - smoothstep(0.014, 0.035, min(l.x, 1.0 - l.x)), 1.0 - smoothstep(0.012, 0.033, min(l.y, 1.0 - l.y)));
-  var lo = vec3f(0.48, 0.47, 0.44);
-  var hi = vec3f(0.74, 0.72, 0.68);
-  if (variant > 0.5 && variant < 1.5) { lo = vec3f(0.54, 0.46, 0.36); hi = vec3f(0.80, 0.69, 0.55); }
-  else if (variant >= 1.5) { lo = vec3f(0.42, 0.46, 0.50); hi = vec3f(0.66, 0.70, 0.72); }
+  var lo = mat_pal(0, vec3f(0.48, 0.47, 0.44));
+  var hi = mat_pal(1, vec3f(0.74, 0.72, 0.68));
+  if (variant > 0.5 && variant < 1.5) { lo = mat_pal(2, vec3f(0.54, 0.46, 0.36)); hi = mat_pal(3, vec3f(0.80, 0.69, 0.55)); }
+  else if (variant >= 1.5) { lo = mat_pal(4, vec3f(0.42, 0.46, 0.50)); hi = mat_pal(5, vec3f(0.66, 0.70, 0.72)); }
   var col = mix(lo, hi, fbm(uv.x * 12.0 + seed, uv.y * 12.0, 5.0) * 0.5 + 0.5);
   let gum = speckle(px, 4.0, seed, 0.965);
   let crack = crack_field(uv, seed, 8.0);
-  col = mix(col, vec3f(0.34, 0.33, 0.31), joint * 0.85);
-  col = mix(col, vec3f(0.80, 0.24, 0.38), gum * 0.45);
+  col = mix(col, mat_pal(6, vec3f(0.34, 0.33, 0.31)), joint * 0.85);
+  col = mix(col, mat_pal(7, vec3f(0.80, 0.24, 0.38)), gum * 0.45);
   return sat3(col - vec3f(crack * 0.12));
 }
 
@@ -2621,9 +2630,9 @@ fn sidewalk_grid(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @author legacy
 fn sidewalk_utility(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   var col = sidewalk_grid(uv, px, 0.0, seed);
-  var metal = vec3f(0.24, 0.24, 0.23);
-  if (variant > 0.5 && variant < 1.5) { metal = vec3f(0.18, 0.21, 0.23); }
-  else if (variant >= 1.5) { metal = vec3f(0.38, 0.28, 0.18); }
+  var metal = mat_pal(0, vec3f(0.24, 0.24, 0.23));
+  if (variant > 0.5 && variant < 1.5) { metal = mat_pal(1, vec3f(0.18, 0.21, 0.23)); }
+  else if (variant >= 1.5) { metal = mat_pal(2, vec3f(0.38, 0.28, 0.18)); }
   let box = rect_mask(uv, 0.22, 0.78, 0.28, 0.62, 0.006);
   let lid = rect_mask(uv, 0.26, 0.74, 0.32, 0.58, 0.006);
   let round = 1.0 - smoothstep(0.17, 0.19, length((uv - vec2f(0.50, 0.45)) * vec2f(1.0, 1.0)));
@@ -2632,7 +2641,7 @@ fn sidewalk_utility(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let ribs = line_near(sin((uv.x + uv.y * 0.1) * 80.0), 0.08) * plate;
   pcol = mix(pcol, metal * 0.45, ribs * 0.45);
   let bolts = speckle(px, 10.0, seed, 0.94) * plate;
-  pcol = mix(pcol, vec3f(0.08, 0.08, 0.075), bolts * 0.6);
+  pcol = mix(pcol, mat_pal(3, vec3f(0.08, 0.08, 0.075)), bolts * 0.6);
   col = mix(col, pcol, plate);
   return sat3(col);
 }
@@ -2652,13 +2661,13 @@ fn sidewalk_pavers(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let l = fract(g);
   let edge = max(1.0 - smoothstep(0.018, 0.045, min(l.x, 1.0 - l.x)), 1.0 - smoothstep(0.018, 0.045, min(l.y, 1.0 - l.y)));
   let tone = rand(cell + vec2f(seed, seed * 2.0));
-  var lo = vec3f(0.48, 0.13, 0.08);
-  var hi = vec3f(0.78, 0.28, 0.14);
-  if (variant > 0.5 && variant < 1.5) { lo = vec3f(0.45, 0.43, 0.39); hi = vec3f(0.72, 0.70, 0.64); }
-  else if (variant >= 1.5) { lo = vec3f(0.12, 0.12, 0.13); hi = vec3f(0.34, 0.34, 0.36); }
+  var lo = mat_pal(0, vec3f(0.48, 0.13, 0.08));
+  var hi = mat_pal(1, vec3f(0.78, 0.28, 0.14));
+  if (variant > 0.5 && variant < 1.5) { lo = mat_pal(2, vec3f(0.45, 0.43, 0.39)); hi = mat_pal(3, vec3f(0.72, 0.70, 0.64)); }
+  else if (variant >= 1.5) { lo = mat_pal(4, vec3f(0.12, 0.12, 0.13)); hi = mat_pal(5, vec3f(0.34, 0.34, 0.36)); }
   var col = mix(lo, hi, tone * 0.65 + fbm(uv.x * 16.0, uv.y * 16.0 + seed, 4.0) * 0.25);
-  col = mix(col, vec3f(0.30, 0.29, 0.26), edge * 0.84);
-  col = mix(col, vec3f(0.18, 0.24, 0.10), speckle(px, 7.0, seed, 0.965) * 0.42);
+  col = mix(col, mat_pal(6, vec3f(0.30, 0.29, 0.26)), edge * 0.84);
+  col = mix(col, mat_pal(7, vec3f(0.18, 0.24, 0.10)), speckle(px, 7.0, seed, 0.965) * 0.42);
   return sat3(col);
 }
 
@@ -2675,14 +2684,14 @@ fn curb_crosswalk(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let curb = rect_mask(uv, 0.0, 1.0, 0.72, 1.0, 0.005);
   col = mix(col, sidewalk_grid(uv * vec2f(1.0, 1.8), px, 0.0, seed), curb);
   let ramp = rect_mask(uv, 0.34, 0.66, 0.68, 1.0, 0.015);
-  if (variant >= 1.5) { col = mix(col, vec3f(0.62, 0.58, 0.50), ramp); }
+  if (variant >= 1.5) { col = mix(col, mat_pal(0, vec3f(0.62, 0.58, 0.50)), ramp); }
   let stripe_base = step(0.18, uv.y) * step(uv.y, 0.68);
   let stripe = (1.0 - smoothstep(0.020, 0.050, abs(fract(uv.x * 6.0) - 0.5))) * stripe_base;
   let wear = fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5;
   let paint = stripe * mix(0.84, 0.44, step(0.5, variant)) * smoothstep(0.20, 0.75, wear);
-  col = mix(col, vec3f(0.92, 0.90, 0.82), paint);
+  col = mix(col, mat_pal(1, vec3f(0.92, 0.90, 0.82)), paint);
   let tactile = speckle(px, 5.0, seed, 0.78) * ramp * step(1.5, variant);
-  col = mix(col, vec3f(0.80, 0.66, 0.18), tactile * 0.70);
+  col = mix(col, mat_pal(2, vec3f(0.80, 0.66, 0.18)), tactile * 0.70);
   return sat3(col);
 }
 
@@ -2699,9 +2708,9 @@ fn alley_concrete(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let oil = blotch(uv, vec2f(0.32, 0.42), 0.18, vec2f(1.5, 0.8), seed) + blotch(uv, vec2f(0.70, 0.28), 0.12, vec2f(0.8, 1.4), seed + 5.0);
   let trash = speckle(px, 5.0, seed + 8.0, 0.93);
   let repair_area = rect_mask(uv, 0.08, 0.46, 0.62, 0.90, 0.010) * step(1.5, variant);
-  col = mix(col, vec3f(0.035, 0.032, 0.028), sat(oil) * (0.35 + step(0.5, variant) * 0.20));
-  col = mix(col, vec3f(0.40, 0.22, 0.10), vertical_drips(uv, seed, 1.0) * step(0.5, variant) * 0.50);
-  col = mix(col, vec3f(0.70, 0.62, 0.44), trash * 0.30);
+  col = mix(col, mat_pal(0, vec3f(0.035, 0.032, 0.028)), sat(oil) * (0.35 + step(0.5, variant) * 0.20));
+  col = mix(col, mat_pal(1, vec3f(0.40, 0.22, 0.10)), vertical_drips(uv, seed, 1.0) * step(0.5, variant) * 0.50);
+  col = mix(col, mat_pal(2, vec3f(0.70, 0.62, 0.44)), trash * 0.30);
   col = mix(col, concrete(uv * vec2f(1.2, 1.0), px, 1.0, seed + 11.0), repair_area);
   return sat3(col);
 }
@@ -2715,14 +2724,14 @@ fn alley_concrete(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags street_ground, plaza, terrazzo
 // @author legacy
 fn plaza_terrazzo(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var base = mix(vec3f(0.56, 0.54, 0.50), vec3f(0.82, 0.80, 0.72), fbm(uv.x * 8.0, uv.y * 8.0 + seed, 4.0) * 0.5 + 0.5);
+  var base = mix(mat_pal(0, vec3f(0.56, 0.54, 0.50)), mat_pal(1, vec3f(0.82, 0.80, 0.72)), fbm(uv.x * 8.0, uv.y * 8.0 + seed, 4.0) * 0.5 + 0.5);
   let chip1 = speckle(px, 2.0, seed, 0.72);
   let chip2 = speckle(px + vec2f(8.0, 3.0), 3.0, seed, 0.82);
-  base = mix(base, vec3f(0.20, 0.20, 0.22), chip1 * 0.35);
-  base = mix(base, vec3f(0.74, 0.50, 0.34), chip2 * 0.35);
+  base = mix(base, mat_pal(2, vec3f(0.20, 0.20, 0.22)), chip1 * 0.35);
+  base = mix(base, mat_pal(3, vec3f(0.74, 0.50, 0.34)), chip2 * 0.35);
   if (variant > 0.5 && variant < 1.5) {
     let inlay = max(line_near(uv.x - 0.5, 0.006), line_near(uv.y - 0.5, 0.006));
-    base = mix(base, vec3f(0.82, 0.62, 0.24), inlay);
+    base = mix(base, mat_pal(4, vec3f(0.82, 0.62, 0.24)), inlay);
   } else if (variant >= 1.5) {
     base = base - vec3f(crack_field(uv, seed, 10.0) * 0.25);
   }
@@ -2744,11 +2753,11 @@ fn storm_drain(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let trench = rect_mask(uv, 0.10, 0.90, 0.38, 0.56, 0.006);
   let grate = select(grate_rect, round_grate, variant > 0.5 && variant < 1.5);
   let grate2 = select(grate, trench, variant >= 1.5);
-  var metal = mix(vec3f(0.12, 0.12, 0.12), vec3f(0.36, 0.34, 0.30), fbm(uv.x * 18.0, uv.y * 18.0 + seed, 4.0) * 0.5 + 0.5);
+  var metal = mix(mat_pal(0, vec3f(0.12, 0.12, 0.12)), mat_pal(1, vec3f(0.36, 0.34, 0.30)), fbm(uv.x * 18.0, uv.y * 18.0 + seed, 4.0) * 0.5 + 0.5);
   let bars = max(line_near(sin(uv.x * 80.0), 0.08), line_near(sin(uv.y * 55.0), 0.06)) * grate2;
-  metal = mix(vec3f(0.02, 0.022, 0.020), metal, bars);
+  metal = mix(mat_pal(2, vec3f(0.02, 0.022, 0.020)), metal, bars);
   col = mix(col, metal, grate2);
-  col = mix(col, vec3f(0.08, 0.09, 0.07), vertical_drips(uv, seed, 1.0) * 0.28);
+  col = mix(col, mat_pal(3, vec3f(0.08, 0.09, 0.07)), vertical_drips(uv, seed, 1.0) * 0.28);
   return sat3(col);
 }
 
@@ -2763,14 +2772,14 @@ fn storm_drain(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn plywood_sheet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   var col = wood(uv, px, select(0.0, 2.0, variant < 0.5), seed);
   let sheet = max(line_near(uv.x - 0.5, 0.006), line_near(uv.y - 0.5, 0.006));
-  col = mix(col, vec3f(0.18, 0.12, 0.07), sheet * 0.45);
+  col = mix(col, mat_pal(0, vec3f(0.18, 0.12, 0.07)), sheet * 0.45);
   if (variant > 0.5 && variant < 1.5) {
     let planks = (1.0 - smoothstep(0.010, 0.025, abs(fract(uv.y * 5.0) - 0.5)));
-    col = mix(col, vec3f(0.10, 0.08, 0.055), planks * 0.55);
-    col = mix(col, vec3f(0.05, 0.05, 0.05), speckle(px, 8.0, seed, 0.94) * 0.5);
+    col = mix(col, mat_pal(1, vec3f(0.10, 0.08, 0.055)), planks * 0.55);
+    col = mix(col, mat_pal(2, vec3f(0.05, 0.05, 0.05)), speckle(px, 8.0, seed, 0.94) * 0.5);
   } else if (variant >= 1.5) {
-    col = mix(col, vec3f(0.44, 0.20, 0.12), 0.42);
-    col = mix(col, vec3f(0.94, 0.90, 0.78), crack_field(uv, seed, 9.0) * 0.35);
+    col = mix(col, mat_pal(3, vec3f(0.44, 0.20, 0.12)), 0.42);
+    col = mix(col, mat_pal(4, vec3f(0.94, 0.90, 0.78)), crack_field(uv, seed, 9.0) * 0.35);
   }
   return sat3(col);
 }
@@ -2786,15 +2795,15 @@ fn plywood_sheet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn clapboard_siding(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let row = floor(uv.y * 9.0);
   let l = fract(uv.y * 9.0);
-  var paint = vec3f(0.82, 0.82, 0.76);
-  if (variant > 0.5 && variant < 1.5) { paint = vec3f(0.38, 0.62, 0.58); }
-  else if (variant >= 1.5) { paint = vec3f(0.62, 0.48, 0.34); }
+  var paint = mat_pal(0, vec3f(0.82, 0.82, 0.76));
+  if (variant > 0.5 && variant < 1.5) { paint = mat_pal(1, vec3f(0.38, 0.62, 0.58)); }
+  else if (variant >= 1.5) { paint = mat_pal(2, vec3f(0.62, 0.48, 0.34)); }
   var col = paint * (0.80 + 0.20 * smoothstep(0.0, 1.0, l));
   col = col + vec3f((fbm(uv.x * 16.0 + seed, row + seed, 4.0) - 0.5) * 0.08);
   let shadow = 1.0 - smoothstep(0.020, 0.055, l);
   col = mix(col, col * 0.55, shadow);
   let peel = smoothstep(0.60, 0.82, fbm(uv.x * 6.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5) * step(1.5, variant);
-  col = mix(col, vec3f(0.28, 0.19, 0.12), peel);
+  col = mix(col, mat_pal(3, vec3f(0.28, 0.19, 0.12)), peel);
   return sat3(col);
 }
 
@@ -2815,7 +2824,7 @@ fn parquet_floor(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   if (variant >= 1.5) { grain_uv = vec2f(fract((l.x + l.y) * 0.5), l.y); }
   var col = wood(grain_uv, px, 0.0, seed + tile.x + tile.y);
   let seam = max(1.0 - smoothstep(0.015, 0.035, min(l.x, 1.0 - l.x)), 1.0 - smoothstep(0.015, 0.035, min(l.y, 1.0 - l.y)));
-  col = mix(col, vec3f(0.10, 0.06, 0.03), seam * 0.70);
+  col = mix(col, mat_pal(0, vec3f(0.10, 0.06, 0.03)), seam * 0.70);
   return sat3(col);
 }
 
@@ -2835,7 +2844,7 @@ fn brick_herringbone(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let groove = select(min(l.x, 1.0 - l.x), min(l.y, 1.0 - l.y), flip > 0.5);
   let mortar = 1.0 - smoothstep(0.025, 0.055, groove);
   var col = brick(uv * vec2f(1.4, 1.4), px, variant, seed);
-  col = mix(col, vec3f(0.50, 0.47, 0.40), mortar * 0.82);
+  col = mix(col, mat_pal(0, vec3f(0.50, 0.47, 0.40)), mortar * 0.82);
   return sat3(col);
 }
 
@@ -2853,13 +2862,13 @@ fn cinder_block(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let off = (row - floor(row * 0.5) * 2.0) * 0.5;
   let l = fract(vec2f(g.x + off, g.y));
   let mortar = max(1.0 - smoothstep(0.025, 0.060, min(l.x, 1.0 - l.x)), 1.0 - smoothstep(0.025, 0.060, min(l.y, 1.0 - l.y)));
-  var col = mix(vec3f(0.38, 0.38, 0.36), vec3f(0.68, 0.68, 0.64), fbm(uv.x * 18.0, uv.y * 18.0 + seed, 4.0) * 0.5 + 0.5);
-  if (variant > 0.5 && variant < 1.5) { col = mix(col, vec3f(0.78, 0.72, 0.60), 0.45); }
+  var col = mix(mat_pal(0, vec3f(0.38, 0.38, 0.36)), mat_pal(1, vec3f(0.68, 0.68, 0.64)), fbm(uv.x * 18.0, uv.y * 18.0 + seed, 4.0) * 0.5 + 0.5);
+  if (variant > 0.5 && variant < 1.5) { col = mix(col, mat_pal(2, vec3f(0.78, 0.72, 0.60)), 0.45); }
   else if (variant >= 1.5) {
-    col = mix(col, vec3f(0.18, 0.30, 0.55), 0.35);
-    col = mix(col, vec3f(0.95, 0.18, 0.36), blotch(uv, vec2f(0.45, 0.38), 0.15, vec2f(1.5, 0.8), seed) * 0.5);
+    col = mix(col, mat_pal(3, vec3f(0.18, 0.30, 0.55)), 0.35);
+    col = mix(col, mat_pal(4, vec3f(0.95, 0.18, 0.36)), blotch(uv, vec2f(0.45, 0.38), 0.15, vec2f(1.5, 0.8), seed) * 0.5);
   }
-  col = mix(col, vec3f(0.25, 0.25, 0.23), mortar * 0.85);
+  col = mix(col, mat_pal(5, vec3f(0.25, 0.25, 0.23)), mortar * 0.85);
   return sat3(col);
 }
 
@@ -2877,12 +2886,12 @@ fn fieldstone(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let l = fract(g) - vec2f(0.5, 0.5);
   let r = length(l * vec2f(1.0 + rand(cell + vec2f(seed, seed)) * 0.5, 0.8 + rand(cell + vec2f(seed + 4.0, seed - 4.0)) * 0.7));
   let mortar = smoothstep(0.34, 0.42, r);
-  var lo = vec3f(0.28, 0.28, 0.25);
-  var hi = vec3f(0.58, 0.56, 0.48);
-  if (variant > 0.5 && variant < 1.5) { lo = vec3f(0.18, 0.26, 0.16); hi = vec3f(0.46, 0.52, 0.34); }
-  else if (variant >= 1.5) { lo = vec3f(0.42, 0.34, 0.25); hi = vec3f(0.72, 0.62, 0.46); }
+  var lo = mat_pal(0, vec3f(0.28, 0.28, 0.25));
+  var hi = mat_pal(1, vec3f(0.58, 0.56, 0.48));
+  if (variant > 0.5 && variant < 1.5) { lo = mat_pal(2, vec3f(0.18, 0.26, 0.16)); hi = mat_pal(3, vec3f(0.46, 0.52, 0.34)); }
+  else if (variant >= 1.5) { lo = mat_pal(4, vec3f(0.42, 0.34, 0.25)); hi = mat_pal(5, vec3f(0.72, 0.62, 0.46)); }
   var col = mix(lo, hi, rand(cell + vec2f(seed, seed)) * 0.6 + fbm(uv.x * 18.0, uv.y * 18.0, 4.0) * 0.2);
-  col = mix(col, vec3f(0.42, 0.40, 0.34), mortar * 0.90);
+  col = mix(col, mat_pal(6, vec3f(0.42, 0.40, 0.34)), mortar * 0.90);
   return sat3(col);
 }
 
@@ -2895,16 +2904,16 @@ fn fieldstone(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wood_brick_stone, marble, slab
 // @author legacy
 fn marble_slab(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var base = vec3f(0.86, 0.84, 0.78);
-  var vein = vec3f(0.28, 0.28, 0.30);
-  if (variant > 0.5 && variant < 1.5) { base = vec3f(0.20, 0.42, 0.34); vein = vec3f(0.76, 0.82, 0.70); }
-  else if (variant >= 1.5) { base = vec3f(0.06, 0.06, 0.07); vein = vec3f(0.72, 0.68, 0.60); }
+  var base = mat_pal(0, vec3f(0.86, 0.84, 0.78));
+  var vein = mat_pal(1, vec3f(0.28, 0.28, 0.30));
+  if (variant > 0.5 && variant < 1.5) { base = mat_pal(2, vec3f(0.20, 0.42, 0.34)); vein = mat_pal(3, vec3f(0.76, 0.82, 0.70)); }
+  else if (variant >= 1.5) { base = mat_pal(4, vec3f(0.06, 0.06, 0.07)); vein = mat_pal(5, vec3f(0.72, 0.68, 0.60)); }
   let warp = fbm(uv.x * 4.0 + seed, uv.y * 4.0, 5.0);
   let v = line_near(sin((uv.x + uv.y * 0.55 + warp * 0.15) * 22.0), 0.040);
   var col = mix(base * 0.85, base * 1.18, fbm(uv.x * 10.0, uv.y * 10.0 + seed, 4.0) * 0.5 + 0.5);
   col = mix(col, vein, v * 0.55);
   let seam = max(line_near(uv.x - 0.5, 0.004), line_near(uv.y - 0.5, 0.004));
-  col = mix(col, vec3f(0.02, 0.02, 0.02), seam * 0.35);
+  col = mix(col, mat_pal(6, vec3f(0.02, 0.02, 0.02)), seam * 0.35);
   return sat3(col);
 }
 
@@ -2918,10 +2927,10 @@ fn marble_slab(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @author legacy
 fn corrugated_metal(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   let rib = sin(uv.x * 90.0);
-  var col = mix(vec3f(0.36, 0.38, 0.38), vec3f(0.72, 0.74, 0.72), rib * 0.5 + 0.5);
+  var col = mix(mat_pal(0, vec3f(0.36, 0.38, 0.38)), mat_pal(1, vec3f(0.72, 0.74, 0.72)), rib * 0.5 + 0.5);
   col = col + vec3f((fbm(uv.x * 18.0, uv.y * 18.0 + seed, 4.0) - 0.5) * 0.08);
-  if (variant > 0.5 && variant < 1.5) { col = mix(col, vec3f(0.54, 0.20, 0.08), smoothstep(0.60, 1.0, uv.y) * 0.55); }
-  else if (variant >= 1.5) { col = mix(col, vec3f(0.12, 0.28, 0.56), 0.50); col = mix(col, vec3f(0.85, 0.85, 0.78), crack_field(uv, seed, 8.0) * 0.35); }
+  if (variant > 0.5 && variant < 1.5) { col = mix(col, mat_pal(2, vec3f(0.54, 0.20, 0.08)), smoothstep(0.60, 1.0, uv.y) * 0.55); }
+  else if (variant >= 1.5) { col = mix(col, mat_pal(3, vec3f(0.12, 0.28, 0.56)), 0.50); col = mix(col, mat_pal(4, vec3f(0.85, 0.85, 0.78)), crack_field(uv, seed, 8.0) * 0.35); }
   return sat3(col);
 }
 
@@ -2934,13 +2943,13 @@ fn corrugated_metal(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags metal_yard, diamond, plate
 // @author legacy
 fn diamond_plate(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var base = mix(vec3f(0.32, 0.32, 0.31), vec3f(0.72, 0.72, 0.68), fbm(uv.x * 18.0, uv.y * 18.0, 4.0) * 0.5 + 0.5);
+  var base = mix(mat_pal(0, vec3f(0.32, 0.32, 0.31)), mat_pal(1, vec3f(0.72, 0.72, 0.68)), fbm(uv.x * 18.0, uv.y * 18.0, 4.0) * 0.5 + 0.5);
   let a = line_near(sin((uv.x + uv.y) * 52.0), 0.10);
   let b = line_near(sin((uv.x - uv.y) * 52.0), 0.10);
   let raised = a * b;
   base = base + vec3f(0.20) * raised;
-  if (variant > 0.5 && variant < 1.5) { base = mix(base, vec3f(0.05, 0.045, 0.04), blotch(uv, vec2f(0.55, 0.36), 0.22, vec2f(1.5, 0.7), seed) * 0.42); }
-  else if (variant >= 1.5) { base = mix(base, vec3f(0.80, 0.72, 0.56), smoothstep(0.0, 0.20, uv.x) * 0.35); }
+  if (variant > 0.5 && variant < 1.5) { base = mix(base, mat_pal(2, vec3f(0.05, 0.045, 0.04)), blotch(uv, vec2f(0.55, 0.36), 0.22, vec2f(1.5, 0.7), seed) * 0.42); }
+  else if (variant >= 1.5) { base = mix(base, mat_pal(3, vec3f(0.80, 0.72, 0.56)), smoothstep(0.0, 0.20, uv.x) * 0.35); }
   return sat3(base);
 }
 
@@ -2959,7 +2968,7 @@ fn brushed_steel(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
     let p = uv - vec2f(0.5, 0.5);
     grain = line_near(sin(length(p) * 220.0 + atan2(p.y, p.x) * 5.0), 0.16);
   }
-  var col = mix(vec3f(0.34, 0.35, 0.35), vec3f(0.82, 0.84, 0.82), fbm(uv.x * 9.0, uv.y * 9.0, 4.0) * 0.5 + 0.5);
+  var col = mix(mat_pal(0, vec3f(0.34, 0.35, 0.35)), mat_pal(1, vec3f(0.82, 0.84, 0.82)), fbm(uv.x * 9.0, uv.y * 9.0, 4.0) * 0.5 + 0.5);
   col = col + vec3f(grain * 0.16);
   return sat3(col);
 }
@@ -2975,9 +2984,9 @@ fn brushed_steel(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn rusted_panel(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   var col = corrugated_metal(uv, px, 0.0, seed) * 0.7;
   let rust = smoothstep(0.45, 0.78, fbm(uv.x * 6.0 + seed, uv.y * 6.0, 5.0) * 0.5 + 0.5);
-  col = mix(col, vec3f(0.74, 0.28, 0.08), rust * 0.70);
-  if (variant > 0.5 && variant < 1.5) { col = mix(col, vec3f(0.06, 0.05, 0.04), rust * 0.40); }
-  else if (variant >= 1.5) { col = mix(col, vec3f(0.12, 0.32, 0.48), 0.34); col = mix(col, vec3f(0.90, 0.86, 0.72), crack_field(uv, seed, 9.0) * 0.45); }
+  col = mix(col, mat_pal(0, vec3f(0.74, 0.28, 0.08)), rust * 0.70);
+  if (variant > 0.5 && variant < 1.5) { col = mix(col, mat_pal(1, vec3f(0.06, 0.05, 0.04)), rust * 0.40); }
+  else if (variant >= 1.5) { col = mix(col, mat_pal(2, vec3f(0.12, 0.32, 0.48)), 0.34); col = mix(col, mat_pal(3, vec3f(0.90, 0.86, 0.72)), crack_field(uv, seed, 9.0) * 0.45); }
   return sat3(col);
 }
 
@@ -2990,17 +2999,17 @@ fn rusted_panel(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags metal_yard, chainlink, panel
 // @author legacy
 fn chainlink_panel(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var col = mix(vec3f(0.09, 0.11, 0.10), vec3f(0.18, 0.21, 0.17), uv.y);
+  var col = mix(mat_pal(0, vec3f(0.09, 0.11, 0.10)), mat_pal(1, vec3f(0.18, 0.21, 0.17)), uv.y);
   let a = line_near(sin((uv.x + uv.y) * 44.0), 0.06);
   let b = line_near(sin((uv.x - uv.y) * 44.0), 0.06);
   let wire = max(a, b);
-  col = mix(col, vec3f(0.58, 0.60, 0.56), wire * 0.90);
+  col = mix(col, mat_pal(2, vec3f(0.58, 0.60, 0.56)), wire * 0.90);
   if (variant > 0.5 && variant < 1.5) {
     let razor = line_near(sin(uv.x * 70.0), 0.10) * smoothstep(0.82, 1.0, uv.y);
-    col = mix(col, vec3f(0.82, 0.82, 0.76), razor);
+    col = mix(col, mat_pal(3, vec3f(0.82, 0.82, 0.76)), razor);
   } else if (variant >= 1.5) {
     let slat = step(0.5, fract(uv.x * 12.0));
-    col = mix(col, vec3f(0.18, 0.35, 0.20), slat * 0.65);
+    col = mix(col, mat_pal(4, vec3f(0.18, 0.35, 0.20)), slat * 0.65);
   }
   return sat3(col);
 }
@@ -3014,9 +3023,9 @@ fn chainlink_panel(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags metal_yard, painted, metal
 // @author legacy
 fn painted_metal_door(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var paint = vec3f(0.12, 0.42, 0.24);
-  if (variant > 0.5 && variant < 1.5) { paint = vec3f(0.62, 0.12, 0.10); }
-  else if (variant >= 1.5) { paint = vec3f(0.44, 0.46, 0.46); }
+  var paint = mat_pal(0, vec3f(0.12, 0.42, 0.24));
+  if (variant > 0.5 && variant < 1.5) { paint = mat_pal(1, vec3f(0.62, 0.12, 0.10)); }
+  else if (variant >= 1.5) { paint = mat_pal(2, vec3f(0.44, 0.46, 0.46)); }
   var col = paint * (0.75 + 0.25 * fbm(uv.x * 12.0, uv.y * 12.0 + seed, 4.0));
   let panel = rect_mask(uv, 0.18, 0.82, 0.14, 0.84, 0.006);
   let inset = rect_mask(uv, 0.24, 0.76, 0.24, 0.74, 0.006);
@@ -3024,9 +3033,9 @@ fn painted_metal_door(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   col = mix(col, col * 0.58, inset * 0.35);
   let push = rect_mask(uv, 0.58, 0.74, 0.42, 0.50, 0.004);
   let vent = rect_mask(uv, 0.28, 0.48, 0.62, 0.76, 0.004);
-  col = mix(col, vec3f(0.18, 0.18, 0.18), max(push, vent));
+  col = mix(col, mat_pal(3, vec3f(0.18, 0.18, 0.18)), max(push, vent));
   let louvers = line_near(sin(uv.y * 90.0), 0.08) * vent;
-  col = mix(col, vec3f(0.05, 0.05, 0.05), louvers);
+  col = mix(col, mat_pal(4, vec3f(0.05, 0.05, 0.05)), louvers);
   return sat3(col);
 }
 
@@ -3039,10 +3048,10 @@ fn painted_metal_door(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags metal_yard, copper, patina
 // @author legacy
 fn copper_patina(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var col = mix(vec3f(0.62, 0.28, 0.10), vec3f(0.96, 0.56, 0.22), fbm(uv.x * 10.0, uv.y * 10.0 + seed, 4.0) * 0.5 + 0.5);
+  var col = mix(mat_pal(0, vec3f(0.62, 0.28, 0.10)), mat_pal(1, vec3f(0.96, 0.56, 0.22)), fbm(uv.x * 10.0, uv.y * 10.0 + seed, 4.0) * 0.5 + 0.5);
   let pat = smoothstep(0.50, 0.80, fbm(uv.x * 7.0 + seed, uv.y * 7.0, 5.0) * 0.5 + 0.5);
-  if (variant > 0.5) { col = mix(col, vec3f(0.10, 0.58, 0.48), pat * (0.55 + step(1.5, variant) * 0.25)); }
-  if (variant >= 1.5) { col = mix(col, vec3f(0.04, 0.16, 0.14), vertical_drips(uv, seed, 1.0) * 0.55); }
+  if (variant > 0.5) { col = mix(col, mat_pal(2, vec3f(0.10, 0.58, 0.48)), pat * (0.55 + step(1.5, variant) * 0.25)); }
+  if (variant >= 1.5) { col = mix(col, mat_pal(3, vec3f(0.04, 0.16, 0.14)), vertical_drips(uv, seed, 1.0) * 0.55); }
   return sat3(col);
 }
 
@@ -3055,9 +3064,9 @@ fn copper_patina(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, floral, wallpaper
 // @author legacy
 fn floral_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.72, 0.60, 0.52); var ink = vec3f(0.72, 0.20, 0.30); var acc = vec3f(0.25, 0.42, 0.18);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.48, 0.56, 0.34); ink = vec3f(0.85, 0.68, 0.36); acc = vec3f(0.18, 0.30, 0.12); }
-  else if (variant >= 1.5) { bg = vec3f(0.72, 0.78, 0.82); ink = vec3f(0.10, 0.30, 0.64); acc = vec3f(0.80, 0.70, 0.36); }
+  var bg = mat_pal(0, vec3f(0.72, 0.60, 0.52)); var ink = mat_pal(1, vec3f(0.72, 0.20, 0.30)); var acc = mat_pal(2, vec3f(0.25, 0.42, 0.18));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(3, vec3f(0.48, 0.56, 0.34)); ink = mat_pal(4, vec3f(0.85, 0.68, 0.36)); acc = mat_pal(5, vec3f(0.18, 0.30, 0.12)); }
+  else if (variant >= 1.5) { bg = mat_pal(6, vec3f(0.72, 0.78, 0.82)); ink = mat_pal(7, vec3f(0.10, 0.30, 0.64)); acc = mat_pal(8, vec3f(0.80, 0.70, 0.36)); }
   return wallpaper_base(uv, px, seed, bg, ink, acc, 0.0);
 }
 
@@ -3070,9 +3079,9 @@ fn floral_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, stripe, wallpaper
 // @author legacy
 fn stripe_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.54, 0.12, 0.16); var ink = vec3f(0.88, 0.76, 0.52); var acc = vec3f(0.18, 0.08, 0.06);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.62, 0.78, 0.68); ink = vec3f(0.88, 0.92, 0.84); acc = vec3f(0.26, 0.44, 0.36); }
-  else if (variant >= 1.5) { bg = vec3f(0.08, 0.16, 0.34); ink = vec3f(0.84, 0.68, 0.24); acc = vec3f(0.04, 0.05, 0.08); }
+  var bg = mat_pal(0, vec3f(0.54, 0.12, 0.16)); var ink = mat_pal(1, vec3f(0.88, 0.76, 0.52)); var acc = mat_pal(2, vec3f(0.18, 0.08, 0.06));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(3, vec3f(0.62, 0.78, 0.68)); ink = mat_pal(4, vec3f(0.88, 0.92, 0.84)); acc = mat_pal(5, vec3f(0.26, 0.44, 0.36)); }
+  else if (variant >= 1.5) { bg = mat_pal(6, vec3f(0.08, 0.16, 0.34)); ink = mat_pal(7, vec3f(0.84, 0.68, 0.24)); acc = mat_pal(8, vec3f(0.04, 0.05, 0.08)); }
   return wallpaper_base(uv, px, seed, bg, ink, acc, 1.0);
 }
 
@@ -3085,10 +3094,10 @@ fn stripe_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, motel, wallpaper
 // @author legacy
 fn motel_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var col = wallpaper_base(uv, px, seed, vec3f(0.68, 0.48, 0.32), vec3f(0.12, 0.34, 0.28), vec3f(0.88, 0.54, 0.18), 0.0);
-  if (variant > 0.5 && variant < 1.5) { col = wallpaper_base(uv, px, seed, vec3f(0.40, 0.18, 0.28), vec3f(0.96, 0.58, 0.16), vec3f(0.86, 0.24, 0.34), 2.0); }
-  else if (variant >= 1.5) { col = wallpaper_base(uv, px, seed, vec3f(0.58, 0.46, 0.34), vec3f(0.38, 0.28, 0.18), vec3f(0.92, 0.72, 0.42), 1.0); }
-  return sat3(mix(col, vec3f(0.18, 0.13, 0.09), smoothstep(0.70, 1.0, uv.y) * 0.25));
+  var col = wallpaper_base(uv, px, seed, mat_pal(0, vec3f(0.68, 0.48, 0.32)), mat_pal(1, vec3f(0.12, 0.34, 0.28)), mat_pal(2, vec3f(0.88, 0.54, 0.18)), 0.0);
+  if (variant > 0.5 && variant < 1.5) { col = wallpaper_base(uv, px, seed, mat_pal(3, vec3f(0.40, 0.18, 0.28)), mat_pal(4, vec3f(0.96, 0.58, 0.16)), mat_pal(5, vec3f(0.86, 0.24, 0.34)), 2.0); }
+  else if (variant >= 1.5) { col = wallpaper_base(uv, px, seed, mat_pal(6, vec3f(0.58, 0.46, 0.34)), mat_pal(7, vec3f(0.38, 0.28, 0.18)), mat_pal(8, vec3f(0.92, 0.72, 0.42)), 1.0); }
+  return sat3(mix(col, mat_pal(9, vec3f(0.18, 0.13, 0.09)), smoothstep(0.70, 1.0, uv.y) * 0.25));
 }
 
 // @material kids_wallpaper
@@ -3100,9 +3109,9 @@ fn motel_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, kids, wallpaper
 // @author legacy
 fn kids_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.20, 0.28, 0.58); var ink = vec3f(0.96, 0.90, 0.40); var acc = vec3f(0.95, 0.55, 0.70);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.62, 0.78, 0.92); ink = vec3f(0.98, 0.98, 0.96); acc = vec3f(0.36, 0.56, 0.86); }
-  else if (variant >= 1.5) { bg = vec3f(0.82, 0.78, 0.58); ink = vec3f(0.18, 0.32, 0.54); acc = vec3f(0.86, 0.24, 0.22); }
+  var bg = mat_pal(0, vec3f(0.20, 0.28, 0.58)); var ink = mat_pal(1, vec3f(0.96, 0.90, 0.40)); var acc = mat_pal(2, vec3f(0.95, 0.55, 0.70));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(3, vec3f(0.62, 0.78, 0.92)); ink = mat_pal(4, vec3f(0.98, 0.98, 0.96)); acc = mat_pal(5, vec3f(0.36, 0.56, 0.86)); }
+  else if (variant >= 1.5) { bg = mat_pal(6, vec3f(0.82, 0.78, 0.58)); ink = mat_pal(7, vec3f(0.18, 0.32, 0.54)); acc = mat_pal(8, vec3f(0.86, 0.24, 0.22)); }
   return wallpaper_base(uv, px, seed, bg, ink, acc, 3.0);
 }
 
@@ -3115,9 +3124,9 @@ fn kids_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, damask, wallpaper
 // @author legacy
 fn damask_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.46, 0.34, 0.14); var ink = vec3f(0.84, 0.66, 0.24); var acc = vec3f(0.14, 0.10, 0.05);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.34, 0.05, 0.10); ink = vec3f(0.78, 0.46, 0.42); acc = vec3f(0.10, 0.03, 0.04); }
-  else if (variant >= 1.5) { bg = vec3f(0.06, 0.06, 0.07); ink = vec3f(0.34, 0.32, 0.30); acc = vec3f(0.62, 0.48, 0.24); }
+  var bg = mat_pal(0, vec3f(0.46, 0.34, 0.14)); var ink = mat_pal(1, vec3f(0.84, 0.66, 0.24)); var acc = mat_pal(2, vec3f(0.14, 0.10, 0.05));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(3, vec3f(0.34, 0.05, 0.10)); ink = mat_pal(4, vec3f(0.78, 0.46, 0.42)); acc = mat_pal(5, vec3f(0.10, 0.03, 0.04)); }
+  else if (variant >= 1.5) { bg = mat_pal(6, vec3f(0.06, 0.06, 0.07)); ink = mat_pal(7, vec3f(0.34, 0.32, 0.30)); acc = mat_pal(8, vec3f(0.62, 0.48, 0.24)); }
   return wallpaper_base(uv, px, seed, bg, ink, acc, 2.0);
 }
 
@@ -3130,13 +3139,13 @@ fn damask_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, smoke, stained
 // @author legacy
 fn smoke_stained_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var col = wallpaper_base(uv, px, seed, vec3f(0.68, 0.62, 0.48), vec3f(0.46, 0.38, 0.26), vec3f(0.28, 0.20, 0.12), 1.0);
+  var col = wallpaper_base(uv, px, seed, mat_pal(0, vec3f(0.68, 0.62, 0.48)), mat_pal(1, vec3f(0.46, 0.38, 0.26)), mat_pal(2, vec3f(0.28, 0.20, 0.12)), 1.0);
   let soot = smoothstep(0.42, 1.0, uv.y) * (fbm(uv.x * 5.0 + seed, uv.y * 5.0, 4.0) * 0.5 + 0.5);
   let leak = vertical_drips(uv, seed, 1.0);
   let nic = smoothstep(0.0, 1.0, uv.y);
-  if (variant < 0.5) { col = mix(col, vec3f(0.08, 0.07, 0.05), soot * 0.55); }
-  else if (variant < 1.5) { col = mix(col, vec3f(0.24, 0.15, 0.08), leak * 0.65); }
-  else { col = mix(col, vec3f(0.50, 0.34, 0.16), nic * 0.45); }
+  if (variant < 0.5) { col = mix(col, mat_pal(3, vec3f(0.08, 0.07, 0.05)), soot * 0.55); }
+  else if (variant < 1.5) { col = mix(col, mat_pal(4, vec3f(0.24, 0.15, 0.08)), leak * 0.65); }
+  else { col = mix(col, mat_pal(5, vec3f(0.50, 0.34, 0.16)), nic * 0.45); }
   return sat3(col);
 }
 
@@ -3149,9 +3158,9 @@ fn smoke_stained_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec
 // @tags wallpapers, office, wallcover
 // @author legacy
 fn office_wallcover(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.46, 0.48, 0.48);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.66, 0.60, 0.50); }
-  else if (variant >= 1.5) { bg = vec3f(0.24, 0.34, 0.54); }
+  var bg = mat_pal(0, vec3f(0.46, 0.48, 0.48));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(1, vec3f(0.66, 0.60, 0.50)); }
+  else if (variant >= 1.5) { bg = mat_pal(2, vec3f(0.24, 0.34, 0.54)); }
   var col = bg + vec3f((fbm(uv.x * 26.0, uv.y * 26.0 + seed, 5.0) - 0.5) * 0.06);
   let weave = max(line_near(sin(uv.x * 160.0), 0.10), line_near(sin(uv.y * 120.0), 0.10));
   col = mix(col, bg * 0.72, weave * 0.20);
@@ -3167,11 +3176,11 @@ fn office_wallcover(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, rose, trellis
 // @author legacy
 fn rose_trellis_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.76, 0.62, 0.58);
-  var rose = vec3f(0.78, 0.18, 0.30);
-  var leaf = vec3f(0.20, 0.36, 0.18);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.58, 0.68, 0.48); rose = vec3f(0.94, 0.72, 0.48); leaf = vec3f(0.12, 0.30, 0.12); }
-  else if (variant >= 1.5) { bg = vec3f(0.62, 0.70, 0.78); rose = vec3f(0.12, 0.30, 0.64); leaf = vec3f(0.72, 0.64, 0.32); }
+  var bg = mat_pal(0, vec3f(0.76, 0.62, 0.58));
+  var rose = mat_pal(1, vec3f(0.78, 0.18, 0.30));
+  var leaf = mat_pal(2, vec3f(0.20, 0.36, 0.18));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(3, vec3f(0.58, 0.68, 0.48)); rose = mat_pal(4, vec3f(0.94, 0.72, 0.48)); leaf = mat_pal(5, vec3f(0.12, 0.30, 0.12)); }
+  else if (variant >= 1.5) { bg = mat_pal(6, vec3f(0.62, 0.70, 0.78)); rose = mat_pal(7, vec3f(0.12, 0.30, 0.64)); leaf = mat_pal(8, vec3f(0.72, 0.64, 0.32)); }
   var col = bg + vec3f((fbm(uv.x * 18.0 + seed, uv.y * 18.0, 4.0) - 0.5) * 0.045);
   let trellis_a = line_near(fract((uv.x + uv.y) * 5.0) - 0.5, 0.035);
   let trellis_b = line_near(fract((uv.x - uv.y) * 5.0) - 0.5, 0.035);
@@ -3196,11 +3205,11 @@ fn rose_trellis_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3
 // @tags wallpapers, vine, wallpaper
 // @author legacy
 fn vine_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.78, 0.74, 0.62);
-  var vine = vec3f(0.18, 0.36, 0.16);
-  var flower = vec3f(0.84, 0.72, 0.42);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.50, 0.42, 0.62); vine = vec3f(0.28, 0.18, 0.40); flower = vec3f(0.76, 0.58, 0.96); }
-  else if (variant >= 1.5) { bg = vec3f(0.06, 0.07, 0.08); vine = vec3f(0.28, 0.38, 0.22); flower = vec3f(0.72, 0.70, 0.56); }
+  var bg = mat_pal(0, vec3f(0.78, 0.74, 0.62));
+  var vine = mat_pal(1, vec3f(0.18, 0.36, 0.16));
+  var flower = mat_pal(2, vec3f(0.84, 0.72, 0.42));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(3, vec3f(0.50, 0.42, 0.62)); vine = mat_pal(4, vec3f(0.28, 0.18, 0.40)); flower = mat_pal(5, vec3f(0.76, 0.58, 0.96)); }
+  else if (variant >= 1.5) { bg = mat_pal(6, vec3f(0.06, 0.07, 0.08)); vine = mat_pal(7, vec3f(0.28, 0.38, 0.22)); flower = mat_pal(8, vec3f(0.72, 0.70, 0.56)); }
   var col = bg + vec3f((fbm(uv.x * 20.0, uv.y * 20.0 + seed, 4.0) - 0.5) * 0.04);
   let wave = sin(uv.y * 18.0 + sin(uv.x * 11.0 + seed) * 2.0);
   let stem = line_near(fract(uv.x * 4.0 + wave * 0.12) - 0.5, 0.030);
@@ -3220,11 +3229,11 @@ fn vine_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, chinoiserie, paper
 // @author legacy
 fn chinoiserie_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.82, 0.84, 0.78);
-  var ink = vec3f(0.08, 0.25, 0.58);
-  var accent = vec3f(0.72, 0.36, 0.18);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.72, 0.78, 0.58); ink = vec3f(0.08, 0.36, 0.24); accent = vec3f(0.82, 0.56, 0.24); }
-  else if (variant >= 1.5) { bg = vec3f(0.78, 0.62, 0.36); ink = vec3f(0.36, 0.18, 0.08); accent = vec3f(0.08, 0.20, 0.28); }
+  var bg = mat_pal(0, vec3f(0.82, 0.84, 0.78));
+  var ink = mat_pal(1, vec3f(0.08, 0.25, 0.58));
+  var accent = mat_pal(2, vec3f(0.72, 0.36, 0.18));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(3, vec3f(0.72, 0.78, 0.58)); ink = mat_pal(4, vec3f(0.08, 0.36, 0.24)); accent = mat_pal(5, vec3f(0.82, 0.56, 0.24)); }
+  else if (variant >= 1.5) { bg = mat_pal(6, vec3f(0.78, 0.62, 0.36)); ink = mat_pal(7, vec3f(0.36, 0.18, 0.08)); accent = mat_pal(8, vec3f(0.08, 0.20, 0.28)); }
   var col = bg + vec3f((fbm(uv.x * 16.0 + seed, uv.y * 16.0, 4.0) - 0.5) * 0.035);
   let branch = line_near(sin(uv.y * 11.0 + uv.x * 18.0 + seed), 0.06);
   let leaf = line_near(abs(fract((uv.x + uv.y * 0.5) * 8.0) - 0.5), 0.055) * smoothstep(0.15, 0.85, branch);
@@ -3245,10 +3254,10 @@ fn chinoiserie_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f
 // @tags wallpapers, art, deco
 // @author legacy
 fn art_deco_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.12, 0.10, 0.08);
-  var line_col = vec3f(0.86, 0.64, 0.24);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.04, 0.26, 0.28); line_col = vec3f(0.86, 0.78, 0.48); }
-  else if (variant >= 1.5) { bg = vec3f(0.03, 0.03, 0.04); line_col = vec3f(0.54, 0.50, 0.42); }
+  var bg = mat_pal(0, vec3f(0.12, 0.10, 0.08));
+  var line_col = mat_pal(1, vec3f(0.86, 0.64, 0.24));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(2, vec3f(0.04, 0.26, 0.28)); line_col = mat_pal(3, vec3f(0.86, 0.78, 0.48)); }
+  else if (variant >= 1.5) { bg = mat_pal(4, vec3f(0.03, 0.03, 0.04)); line_col = mat_pal(5, vec3f(0.54, 0.50, 0.42)); }
   var col = bg + vec3f((fbm(uv.x * 22.0, uv.y * 22.0 + seed, 4.0) - 0.5) * 0.035);
   let repeat = fract(uv * vec2f(4.0, 4.0)) - vec2f(0.5, 0.0);
   let r = length(repeat * vec2f(1.0, 1.6));
@@ -3269,10 +3278,10 @@ fn art_deco_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, toile, wallpaper
 // @author legacy
 fn toile_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.80, 0.80, 0.72);
-  var ink = vec3f(0.08, 0.22, 0.52);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.76, 0.66, 0.50); ink = vec3f(0.36, 0.20, 0.10); }
-  else if (variant >= 1.5) { bg = vec3f(0.78, 0.62, 0.58); ink = vec3f(0.58, 0.10, 0.12); }
+  var bg = mat_pal(0, vec3f(0.80, 0.80, 0.72));
+  var ink = mat_pal(1, vec3f(0.08, 0.22, 0.52));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(2, vec3f(0.76, 0.66, 0.50)); ink = mat_pal(3, vec3f(0.36, 0.20, 0.10)); }
+  else if (variant >= 1.5) { bg = mat_pal(4, vec3f(0.78, 0.62, 0.58)); ink = mat_pal(5, vec3f(0.58, 0.10, 0.12)); }
   var col = bg + vec3f((fbm(uv.x * 18.0, uv.y * 18.0 + seed, 4.0) - 0.5) * 0.035);
   let hill = line_near(uv.y - (0.28 + sin(uv.x * 8.0 + seed) * 0.035), 0.020);
   let tree_trunk = line_near(fract(uv.x * 5.0) - 0.5, 0.018) * smoothstep(0.20, 0.65, uv.y) * (1.0 - smoothstep(0.65, 0.78, uv.y));
@@ -3292,11 +3301,11 @@ fn toile_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, tropical, wallpaper
 // @author legacy
 fn tropical_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.14, 0.38, 0.24);
-  var leaf = vec3f(0.42, 0.72, 0.22);
-  var accent = vec3f(0.94, 0.50, 0.58);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.72, 0.42, 0.50); leaf = vec3f(0.16, 0.46, 0.24); accent = vec3f(0.98, 0.72, 0.80); }
-  else if (variant >= 1.5) { bg = vec3f(0.02, 0.04, 0.03); leaf = vec3f(0.08, 0.32, 0.12); accent = vec3f(0.78, 0.18, 0.38); }
+  var bg = mat_pal(0, vec3f(0.14, 0.38, 0.24));
+  var leaf = mat_pal(1, vec3f(0.42, 0.72, 0.22));
+  var accent = mat_pal(2, vec3f(0.94, 0.50, 0.58));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(3, vec3f(0.72, 0.42, 0.50)); leaf = mat_pal(4, vec3f(0.16, 0.46, 0.24)); accent = mat_pal(5, vec3f(0.98, 0.72, 0.80)); }
+  else if (variant >= 1.5) { bg = mat_pal(6, vec3f(0.02, 0.04, 0.03)); leaf = mat_pal(7, vec3f(0.08, 0.32, 0.12)); accent = mat_pal(8, vec3f(0.78, 0.18, 0.38)); }
   var col = bg + vec3f((fbm(uv.x * 15.0 + seed, uv.y * 15.0, 5.0) - 0.5) * 0.05);
   let repeat = fract(uv * vec2f(4.0, 5.0)) - vec2f(0.5, 0.5);
   let frond = line_near(abs(repeat.x) - (0.08 + abs(repeat.y) * 0.34), 0.045) * smoothstep(0.48, 0.05, abs(repeat.y));
@@ -3317,11 +3326,11 @@ fn tropical_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, kitchen, wallpaper
 // @author legacy
 fn kitchen_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.86, 0.82, 0.62);
-  var ink = vec3f(0.90, 0.66, 0.10);
-  var accent = vec3f(0.18, 0.38, 0.20);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.88, 0.78, 0.42); ink = vec3f(0.98, 0.92, 0.64); accent = vec3f(0.36, 0.50, 0.20); }
-  else if (variant >= 1.5) { bg = vec3f(0.86, 0.78, 0.66); ink = vec3f(0.72, 0.06, 0.08); accent = vec3f(0.20, 0.42, 0.18); }
+  var bg = mat_pal(0, vec3f(0.86, 0.82, 0.62));
+  var ink = mat_pal(1, vec3f(0.90, 0.66, 0.10));
+  var accent = mat_pal(2, vec3f(0.18, 0.38, 0.20));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(3, vec3f(0.88, 0.78, 0.42)); ink = mat_pal(4, vec3f(0.98, 0.92, 0.64)); accent = mat_pal(5, vec3f(0.36, 0.50, 0.20)); }
+  else if (variant >= 1.5) { bg = mat_pal(6, vec3f(0.86, 0.78, 0.66)); ink = mat_pal(7, vec3f(0.72, 0.06, 0.08)); accent = mat_pal(8, vec3f(0.20, 0.42, 0.18)); }
   var col = bg;
   let grid = max(line_near(fract(uv.x * 6.0) - 0.5, 0.025), line_near(fract(uv.y * 6.0) - 0.5, 0.025));
   col = mix(col, bg * 0.72, grid * 0.35);
@@ -3342,11 +3351,11 @@ fn kitchen_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags wallpapers, nursery, wallpaper
 // @author legacy
 fn nursery_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var bg = vec3f(0.58, 0.72, 0.88);
-  var ink = vec3f(0.94, 0.90, 0.70);
-  var accent = vec3f(0.18, 0.28, 0.52);
-  if (variant > 0.5 && variant < 1.5) { bg = vec3f(0.92, 0.66, 0.58); ink = vec3f(0.96, 0.78, 0.82); accent = vec3f(0.70, 0.22, 0.32); }
-  else if (variant >= 1.5) { bg = vec3f(0.62, 0.82, 0.70); ink = vec3f(0.98, 0.92, 0.38); accent = vec3f(0.18, 0.44, 0.30); }
+  var bg = mat_pal(0, vec3f(0.58, 0.72, 0.88));
+  var ink = mat_pal(1, vec3f(0.94, 0.90, 0.70));
+  var accent = mat_pal(2, vec3f(0.18, 0.28, 0.52));
+  if (variant > 0.5 && variant < 1.5) { bg = mat_pal(3, vec3f(0.92, 0.66, 0.58)); ink = mat_pal(4, vec3f(0.96, 0.78, 0.82)); accent = mat_pal(5, vec3f(0.70, 0.22, 0.32)); }
+  else if (variant >= 1.5) { bg = mat_pal(6, vec3f(0.62, 0.82, 0.70)); ink = mat_pal(7, vec3f(0.98, 0.92, 0.38)); accent = mat_pal(8, vec3f(0.18, 0.44, 0.30)); }
   var col = bg + vec3f((fbm(uv.x * 14.0 + seed, uv.y * 14.0, 4.0) - 0.5) * 0.035);
   let cell = fract(uv * vec2f(5.0, 5.0)) - vec2f(0.5, 0.5);
   let moon = (1.0 - smoothstep(0.12, 0.16, length(cell))) * (1.0 - (1.0 - smoothstep(0.09, 0.14, length(cell - vec2f(0.06, 0.03)))));
@@ -3370,20 +3379,20 @@ fn nursery_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 fn torn_layered_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   var top_paper = floral_wallpaper(uv, px, 0.0, seed);
   var under_paper = stripe_wallpaper(uv + vec2f(0.08, 0.03), px, 1.0, seed + 5.0);
-  var plaster = vec3f(0.56, 0.50, 0.42) + vec3f((fbm(uv.x * 16.0, uv.y * 16.0 + seed, 4.0) - 0.5) * 0.08);
+  var plaster = mat_pal(0, vec3f(0.56, 0.50, 0.42)) + vec3f((fbm(uv.x * 16.0, uv.y * 16.0 + seed, 4.0) - 0.5) * 0.08);
   if (variant > 0.5 && variant < 1.5) {
     top_paper = damask_wallpaper(uv, px, 1.0, seed);
-    under_paper = wallpaper_base(uv, px, seed, vec3f(0.64, 0.56, 0.44), vec3f(0.22, 0.18, 0.12), vec3f(0.42, 0.28, 0.18), 0.0);
+    under_paper = wallpaper_base(uv, px, seed, mat_pal(1, vec3f(0.64, 0.56, 0.44)), mat_pal(2, vec3f(0.22, 0.18, 0.12)), mat_pal(3, vec3f(0.42, 0.28, 0.18)), 0.0);
   } else if (variant >= 1.5) {
     top_paper = rose_trellis_wallpaper(uv, px, 2.0, seed);
     under_paper = motel_wallpaper(uv, px, 2.0, seed + 9.0);
-    plaster = vec3f(0.44, 0.38, 0.30) + vec3f((fbm(uv.x * 18.0, uv.y * 18.0 + seed, 4.0) - 0.5) * 0.08);
+    plaster = mat_pal(4, vec3f(0.44, 0.38, 0.30)) + vec3f((fbm(uv.x * 18.0, uv.y * 18.0 + seed, 4.0) - 0.5) * 0.08);
   }
   let tear_a = smoothstep(0.46, 0.62, fbm(uv.x * 4.0 + seed, uv.y * 5.0, 5.0) * 0.5 + 0.5);
   let tear_b = smoothstep(0.52, 0.70, fbm(uv.x * 7.0 - seed, uv.y * 6.0 + seed, 4.0) * 0.5 + 0.5);
   var col = mix(top_paper, under_paper, tear_a * 0.72);
   col = mix(col, plaster, tear_b * 0.45);
-  col = mix(col, vec3f(0.20, 0.14, 0.08), vertical_drips(uv, seed, 1.0) * 0.26);
+  col = mix(col, mat_pal(5, vec3f(0.20, 0.14, 0.08)), vertical_drips(uv, seed, 1.0) * 0.26);
   return sat3(col);
 }
 
@@ -3396,9 +3405,9 @@ fn torn_layered_wallpaper(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3
 // @tags gradients, sunset, gradient
 // @author legacy
 fn sunset_gradient(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var top = vec3f(0.08, 0.04, 0.20); var mid = vec3f(0.92, 0.28, 0.48); var bot = vec3f(1.00, 0.58, 0.18);
-  if (variant > 0.5 && variant < 1.5) { top = vec3f(0.20, 0.06, 0.02); mid = vec3f(0.90, 0.42, 0.10); bot = vec3f(0.98, 0.74, 0.22); }
-  else if (variant >= 1.5) { top = vec3f(0.04, 0.02, 0.12); mid = vec3f(0.30, 0.08, 0.42); bot = vec3f(0.70, 0.18, 0.72); }
+  var top = mat_pal(0, vec3f(0.08, 0.04, 0.20)); var mid = mat_pal(1, vec3f(0.92, 0.28, 0.48)); var bot = mat_pal(2, vec3f(1.00, 0.58, 0.18));
+  if (variant > 0.5 && variant < 1.5) { top = mat_pal(3, vec3f(0.20, 0.06, 0.02)); mid = mat_pal(4, vec3f(0.90, 0.42, 0.10)); bot = mat_pal(5, vec3f(0.98, 0.74, 0.22)); }
+  else if (variant >= 1.5) { top = mat_pal(6, vec3f(0.04, 0.02, 0.12)); mid = mat_pal(7, vec3f(0.30, 0.08, 0.42)); bot = mat_pal(8, vec3f(0.70, 0.18, 0.72)); }
   let t = smoothstep(0.0, 1.0, uv.y);
   let col = mix(mix(bot, mid, smoothstep(0.0, 0.55, t)), top, smoothstep(0.45, 1.0, t));
   return sat3(col + vec3f((fbm(uv.x * 5.0, uv.y * 5.0 + seed, 4.0) - 0.5) * 0.04));
@@ -3413,13 +3422,13 @@ fn sunset_gradient(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags gradients, vapor, gradient
 // @author legacy
 fn vapor_gradient(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var a = vec3f(0.00, 0.86, 1.00); var b = vec3f(1.00, 0.10, 0.72);
-  if (variant > 0.5 && variant < 1.5) { a = vec3f(0.70, 1.00, 0.05); b = vec3f(0.10, 0.04, 0.20); }
-  else if (variant >= 1.5) { a = vec3f(0.16, 0.04, 0.44); b = vec3f(0.94, 0.30, 0.96); }
+  var a = mat_pal(0, vec3f(0.00, 0.86, 1.00)); var b = mat_pal(1, vec3f(1.00, 0.10, 0.72));
+  if (variant > 0.5 && variant < 1.5) { a = mat_pal(2, vec3f(0.70, 1.00, 0.05)); b = mat_pal(3, vec3f(0.10, 0.04, 0.20)); }
+  else if (variant >= 1.5) { a = mat_pal(4, vec3f(0.16, 0.04, 0.44)); b = mat_pal(5, vec3f(0.94, 0.30, 0.96)); }
   let w = 0.5 + 0.5 * sin((uv.x + uv.y) * 5.0 + fbm(uv.x * 4.0, uv.y * 4.0 + seed, 4.0) * 3.0);
   var col = mix(a, b, w);
   let grid = max(line_near(fract(uv.x * 10.0) - 0.5, 0.020), line_near(fract(uv.y * 10.0) - 0.5, 0.020));
-  col = mix(col, vec3f(0.02, 0.02, 0.04), grid * 0.18);
+  col = mix(col, mat_pal(6, vec3f(0.02, 0.02, 0.04)), grid * 0.18);
   return sat3(col);
 }
 
@@ -3432,13 +3441,13 @@ fn vapor_gradient(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags gradients, sodium, fog
 // @author legacy
 fn sodium_fog(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var lamp = vec3f(1.00, 0.56, 0.18);
-  if (variant > 0.5 && variant < 1.5) { lamp = vec3f(0.95, 0.74, 0.36); }
-  else if (variant >= 1.5) { lamp = vec3f(0.60, 0.62, 0.70); }
+  var lamp = mat_pal(0, vec3f(1.00, 0.56, 0.18));
+  if (variant > 0.5 && variant < 1.5) { lamp = mat_pal(1, vec3f(0.95, 0.74, 0.36)); }
+  else if (variant >= 1.5) { lamp = mat_pal(2, vec3f(0.60, 0.62, 0.70)); }
   let glow = exp(-length((uv - vec2f(0.5, 0.85)) * vec2f(1.0, 1.6)) * 3.2);
   let haze = fbm(uv.x * 5.0 + seed, uv.y * 5.0, 5.0) * 0.5 + 0.5;
-  var col = mix(vec3f(0.05, 0.045, 0.035), lamp, glow * 0.85 + haze * 0.18);
-  col = mix(col, vec3f(0.02, 0.02, 0.025), smoothstep(0.0, 0.25, uv.y) * 0.45);
+  var col = mix(mat_pal(3, vec3f(0.05, 0.045, 0.035)), lamp, glow * 0.85 + haze * 0.18);
+  col = mix(col, mat_pal(4, vec3f(0.02, 0.02, 0.025)), smoothstep(0.0, 0.25, uv.y) * 0.45);
   return sat3(col);
 }
 
@@ -3451,14 +3460,14 @@ fn sodium_fog(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags gradients, fluorescent, panel
 // @author legacy
 fn fluorescent_panel(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var col = vec3f(0.90, 0.94, 0.88);
-  if (variant > 0.5 && variant < 1.5) { col = vec3f(0.62, 0.90, 0.62); }
-  else if (variant >= 1.5) { col = vec3f(0.98, 0.58, 0.78); }
+  var col = mat_pal(0, vec3f(0.90, 0.94, 0.88));
+  if (variant > 0.5 && variant < 1.5) { col = mat_pal(1, vec3f(0.62, 0.90, 0.62)); }
+  else if (variant >= 1.5) { col = mat_pal(2, vec3f(0.98, 0.58, 0.78)); }
   let frame = max(line_near(uv.x - 0.08, 0.008), line_near(uv.x - 0.92, 0.008)) + max(line_near(uv.y - 0.10, 0.008), line_near(uv.y - 0.90, 0.008));
   let tubes = max(line_near(uv.x - 0.36, 0.030), line_near(uv.x - 0.64, 0.030));
   let flicker = 0.85 + 0.15 * sin(U.time * 24.0 + seed) * step(1.5, variant);
   col = col * flicker + vec3f(tubes * 0.18);
-  col = mix(col, vec3f(0.24, 0.24, 0.22), sat(frame));
+  col = mix(col, mat_pal(3, vec3f(0.24, 0.24, 0.22)), sat(frame));
   return sat3(col);
 }
 
@@ -3471,9 +3480,9 @@ fn fluorescent_panel(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags gradients, hazard, gradient
 // @author legacy
 fn hazard_gradient(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var base = mix(vec3f(0.96, 0.72, 0.10), vec3f(0.04, 0.04, 0.04), step(0.5, fract((uv.x + uv.y) * 8.0)));
-  if (variant > 0.5 && variant < 1.5) { base = mix(vec3f(0.12, 0.90, 0.42), vec3f(0.06, 0.12, 0.08), smoothstep(0.0, 1.0, uv.y)); }
-  else if (variant >= 1.5) { base = mix(vec3f(0.10, 0.18, 0.80), vec3f(0.98, 0.86, 0.16), step(0.5, fract(uv.x * 5.0))); }
+  var base = mix(mat_pal(0, vec3f(0.96, 0.72, 0.10)), mat_pal(1, vec3f(0.04, 0.04, 0.04)), step(0.5, fract((uv.x + uv.y) * 8.0)));
+  if (variant > 0.5 && variant < 1.5) { base = mix(mat_pal(2, vec3f(0.12, 0.90, 0.42)), mat_pal(3, vec3f(0.06, 0.12, 0.08)), smoothstep(0.0, 1.0, uv.y)); }
+  else if (variant >= 1.5) { base = mix(mat_pal(4, vec3f(0.10, 0.18, 0.80)), mat_pal(5, vec3f(0.98, 0.86, 0.16)), step(0.5, fract(uv.x * 5.0))); }
   return sat3(base - vec3f(speckle(px, 3.0, seed, 0.94) * 0.10));
 }
 
@@ -3486,13 +3495,13 @@ fn hazard_gradient(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags gradients, wet, neon
 // @author legacy
 fn wet_neon_fade(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var neon = vec3f(1.00, 0.12, 0.62);
-  if (variant > 0.5 && variant < 1.5) { neon = vec3f(0.10, 0.52, 1.00); }
-  else if (variant >= 1.5) { neon = vec3f(0.80, 0.96, 0.22); }
-  var col = mix(vec3f(0.015, 0.016, 0.018), neon * 0.65, smoothstep(0.0, 1.0, uv.y));
+  var neon = mat_pal(0, vec3f(1.00, 0.12, 0.62));
+  if (variant > 0.5 && variant < 1.5) { neon = mat_pal(1, vec3f(0.10, 0.52, 1.00)); }
+  else if (variant >= 1.5) { neon = mat_pal(2, vec3f(0.80, 0.96, 0.22)); }
+  var col = mix(mat_pal(3, vec3f(0.015, 0.016, 0.018)), neon * 0.65, smoothstep(0.0, 1.0, uv.y));
   let streak = vertical_drips(uv, seed, 1.0);
   let ripple = line_near(sin(uv.y * 80.0 + fbm(uv.x * 6.0, uv.y * 6.0 + seed, 4.0) * 5.0), 0.08);
-  col = col + neon * streak * 0.35 + vec3f(0.08, 0.08, 0.10) * ripple;
+  col = col + neon * streak * 0.35 + mat_pal(4, vec3f(0.08, 0.08, 0.10)) * ripple;
   return sat3(col);
 }
 
@@ -3505,15 +3514,15 @@ fn wet_neon_fade(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
 // @tags gradients, grime, gradient
 // @author legacy
 fn grime_gradient(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
-  var clean = vec3f(0.64, 0.62, 0.54);
-  var dirty = vec3f(0.08, 0.07, 0.05);
+  var clean = mat_pal(0, vec3f(0.64, 0.62, 0.54));
+  var dirty = mat_pal(1, vec3f(0.08, 0.07, 0.05));
   let top = smoothstep(0.45, 1.0, uv.y);
   let bottom = 1.0 - smoothstep(0.0, 0.55, uv.y);
   let corner = smoothstep(0.55, 1.0, 1.0 - length(uv - vec2f(0.0, 0.0)));
   let mask = select(top, bottom, variant > 0.5 && variant < 1.5);
   let mask2 = select(mask, corner, variant >= 1.5);
-  if (variant > 0.5 && variant < 1.5) { dirty = vec3f(0.05, 0.16, 0.06); }
-  else if (variant >= 1.5) { dirty = vec3f(0.15, 0.10, 0.06); }
+  if (variant > 0.5 && variant < 1.5) { dirty = mat_pal(2, vec3f(0.05, 0.16, 0.06)); }
+  else if (variant >= 1.5) { dirty = mat_pal(3, vec3f(0.15, 0.10, 0.06)); }
   var col = mix(clean, dirty, mask2 * (0.55 + fbm(uv.x * 6.0 + seed, uv.y * 6.0, 4.0) * 0.25));
   col = mix(col, dirty, vertical_drips(uv, seed, 1.0) * 0.30);
   return sat3(col);

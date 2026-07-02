@@ -166,6 +166,111 @@ function assignIds(materials, existingIds) {
   return { resolved, table: out };
 }
 
+// ── palette-slot extraction (the editor's addition) ─────────────────────────
+// Every color-looking vec3f LITERAL in a material body becomes a palette slot:
+// recorded in the registry (name + baked RGB) and rewritten in the emitted
+// dispatch to mat_pal(slot, vec3f(baked)) so a D[]-carried palette can override
+// it. "Color-looking" = three numeric components all in [0,1], excluding pure
+// all-0/all-1 triples (those are clamp bounds / axis vectors, not paint).
+// Variant-specific literals simply become separate slots — only the selected
+// variant's code path reads them, so per-variant palettes fall out for free.
+const VEC3_LIT_RE = /vec3f\(\s*(-?\d*\.?\d+)\s*,\s*(-?\d*\.?\d+)\s*,\s*(-?\d*\.?\d+)\s*\)/g;
+
+function isColorTriple(r, g, b) {
+  const inRange = (v) => v >= 0 && v <= 1;
+  if (!inRange(r) || !inRange(g) || !inRange(b)) return false;
+  const all = (v) => r === v && g === v && b === v;
+  return !all(0) && !all(1);
+}
+
+function prettifyIdent(ident) {
+  return ident.replace(/_/g, ' ').replace(/\bcol\b/g, 'color').trim() || 'color';
+}
+
+// Human name for one slot from its line context. These names are what a
+// non-coder reads in the palette panel, so spend effort here:
+//   1. Accumulation mix — `x = mix(x, LIT, rot * 0.78)` — the FACTOR carries
+//      the layer's meaning: name it "rot".
+//   2. Otherwise the nearest assignment target left of the literal
+//      ("let paint =", "paint =", including inside an if-block).
+//   3. Fallback "color".
+function slotNameAt(code, litPos, litText) {
+  const acc = /(\w+)\s*=\s*mix\(\s*\1\b/.exec(code);
+  if (acc) {
+    const tail = code.slice(litPos + litText.length);
+    const tm = /^\s*,\s*([A-Za-z_]\w*)/.exec(tail);
+    if (tm) return prettifyIdent(tm[1]);
+  }
+  let best = null;
+  const assignRe = /(?:let\s+|var\s+)?([A-Za-z_]\w*)\s*=(?!=)/g;
+  let am;
+  while ((am = assignRe.exec(code))) {
+    if (am.index >= litPos) break;
+    best = am[1];
+  }
+  return best ? prettifyIdent(best) : 'color';
+}
+
+function dedupSlotName(name, taken) {
+  let candidate = name;
+  let n = 2;
+  while (taken.has(candidate)) candidate = name + ' ' + n++;
+  taken.add(candidate);
+  return candidate;
+}
+
+// Rewrite one material's raw source; returns { rewritten, slots }.
+function extractSlots(raw) {
+  const slots = [];
+  const taken = new Set();
+  const outLines = raw.split('\n').map((line) => {
+    const commentAt = line.indexOf('//');
+    const code = commentAt === -1 ? line : line.slice(0, commentAt);
+    const comment = commentAt === -1 ? '' : line.slice(commentAt);
+    // Collect this line's color literals first so a dual-literal mix() can name low/high.
+    const found = [];
+    let m;
+    VEC3_LIT_RE.lastIndex = 0;
+    while ((m = VEC3_LIT_RE.exec(code))) {
+      const rgb = [Number(m[1]), Number(m[2]), Number(m[3])];
+      if (isColorTriple(rgb[0], rgb[1], rgb[2])) found.push({ text: m[0], rgb, pos: m.index });
+    }
+    if (found.length === 0) return line;
+    // Two literals inside one mix() = the shade/lift pair idiom → low/high.
+    const isMixPair = found.length === 2 && code.includes('mix(');
+    let newCode = code;
+    let drift = 0; // literal positions shift as mat_pal( wrappers land ahead of them
+    found.forEach((lit, i) => {
+      const base = slotNameAt(code, lit.pos, lit.text);
+      const name = dedupSlotName(isMixPair ? base + (i === 0 ? ' low' : ' high') : base, taken);
+      const slotIndex = slots.length;
+      slots.push({ name, rgb: lit.rgb });
+      const at = lit.pos + drift;
+      newCode = newCode.slice(0, at) + 'mat_pal(' + slotIndex + ', ' + lit.text + ')' + newCode.slice(at + lit.text.length);
+      drift += ('mat_pal(' + slotIndex + ', ' + ')').length;
+    });
+    return newCode + comment;
+  });
+  return { rewritten: outLines.join('\n'), slots };
+}
+
+// The generated palette reader — lives in the emitted dispatch (not the
+// hand-owned helpers.wgsl): the D[] palette section is this generator's
+// contract. D[0..4] stay [materialId, variant, seed, quality, board];
+// D[5] = provided slot count; D[6 + i*3 ..] = slot i RGB. With no palette
+// (5-float data, count 0, or i beyond count) the baked constant returns —
+// pixel-identical to pre-slot output.
+const MAT_PAL_WGSL = `
+fn mat_pal(i: i32, baked: vec3f) -> vec3f {
+  if (arrayLength(&D) < 7u) { return baked; }
+  let n = i32(D[5] + 0.5);
+  if (i >= n) { return baked; }
+  let base = u32(6 + i * 3);
+  if (arrayLength(&D) < base + 3u) { return baked; }
+  return vec3f(D[base], D[base + 1u], D[base + 2u]);
+}
+`;
+
 // ── main ─────────────────────────────────────────────────────────────────
 const boards = loadBoards();
 const boardBySlug = new Map(boards.map((b) => [b.slug, b]));
@@ -177,7 +282,8 @@ const materials = files.map((fileName) => {
   const m = parseMaterial(MATERIALS_DIR + '/' + fileName, fileName);
   const board = boardBySlug.get(m.boardSlug);
   if (!board) die(fileName + ': unknown @board "' + m.boardSlug + '" — not in boards.ts BOARD_SLUGS. Propose a new board there first, or fix the typo.');
-  return { ...m, boardIndex: board.index };
+  const ex = extractSlots(m.raw);
+  return { ...m, boardIndex: board.index, rewritten: ex.rewritten, slots: ex.slots };
 });
 
 const existingIds = loadIds();
@@ -202,15 +308,21 @@ let registryOut = '';
 registryOut += '// _generated/registry.ts — GENERATED by build-shaders.ts. Do not hand-edit.\n';
 registryOut += '// Run: tools/v8cli cart/editor/render3d/shaders/build-shaders.ts\n';
 registryOut += "export type MaterialKind = 'surface' | 'composition' | 'gradient';\n\n";
+registryOut += 'export type MaterialSlot = { name: string; rgb: [number, number, number] };\n\n';
 registryOut += 'export type RegistryMaterial = {\n';
-registryOut += '  fn: string;\n  slug: string;\n  name: string;\n  board: string;\n  boardIndex: number;\n  materialId: number;\n  variantLabels: string[];\n  kind: MaterialKind;\n  tags: string[];\n  author: string;\n};\n\n';
+registryOut += '  fn: string;\n  slug: string;\n  name: string;\n  board: string;\n  boardIndex: number;\n  materialId: number;\n  variantLabels: string[];\n  kind: MaterialKind;\n  tags: string[];\n  author: string;\n';
+registryOut += '  // Palette slots: the baked vec3f constants extracted from the material fn,\n';
+registryOut += '  // in mat_pal() index order. D[5]=count, D[6+i*3..]=RGB overrides them.\n';
+registryOut += '  slots: MaterialSlot[];\n};\n\n';
 registryOut += 'export const MATERIALS: RegistryMaterial[] = [\n';
 for (const boardIdx of [...byBoard.keys()].sort((a, b) => a - b)) {
   for (const m of byBoard.get(boardIdx)) {
+    const slotsTs = '[' + m.slots.map((s) => '{ name: ' + JSON.stringify(s.name) + ', rgb: [' + s.rgb.join(', ') + '] }').join(', ') + ']';
     registryOut += '  { fn: ' + JSON.stringify(m.fn) + ', slug: ' + JSON.stringify(m.slug) + ', name: ' + JSON.stringify(m.name)
       + ', board: ' + JSON.stringify(m.boardSlug) + ', boardIndex: ' + m.boardIndex + ', materialId: ' + m.materialId
       + ', variantLabels: ' + tsStringArray(m.variantLabels) + ', kind: ' + JSON.stringify(m.kind)
-      + ', tags: ' + tsStringArray(m.tags) + ', author: ' + JSON.stringify(m.author) + ' },\n';
+      + ', tags: ' + tsStringArray(m.tags) + ', author: ' + JSON.stringify(m.author)
+      + ',\n    slots: ' + slotsTs + ' },\n';
   }
 }
 registryOut += '];\n\n';
@@ -254,13 +366,17 @@ boardIdxs.forEach((boardIdx, bi) => {
 });
 dispatchFn += '  }\n  return col;\n}\n';
 
-const materialBodies = boardIdxs.map((boardIdx) => byBoard.get(boardIdx).map((m) => m.raw).join('\n\n')).join('\n\n');
+// Emit the slot-rewritten bodies — the .wgsl SOURCES stay pristine; mat_pal
+// injection is a generation-time transform only.
+const materialBodies = boardIdxs.map((boardIdx) => byBoard.get(boardIdx).map((m) => m.rewritten).join('\n\n')).join('\n\n');
 
 let dispatchOut = '// _generated/dispatch.ts — GENERATED by build-shaders.ts. Do not hand-edit.\n';
 dispatchOut += '// Run: tools/v8cli cart/editor/render3d/shaders/build-shaders.ts\n';
 dispatchOut += 'export const FILL_FUNCS = `\n';
 dispatchOut += helpersSrc.replace(/\n+$/, '');
-dispatchOut += '\n\n';
+dispatchOut += '\n';
+dispatchOut += MAT_PAL_WGSL;
+dispatchOut += '\n';
 dispatchOut += materialBodies;
 dispatchOut += '\n\n';
 dispatchOut += dispatchFn;
