@@ -531,6 +531,32 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       fail(o.w, o.h, o.detail, 'atlas pixel decode failed');
       return;
     }
+    // Draw the layout ONTO the preview: solid-painted patches sit edge to edge, so the
+    // raw atlas reads as one flat color wall. Darken patch boundaries (the grid) and
+    // each patch's anti-diagonal (the two triangle-corner layout: a patch holds ONE
+    // triangle rasterized across the (0,0)/(1,0)/(0,1) corner). Patches under 8px have
+    // no legible room for lines — the caption carries the structure instead.
+    if (o.detail >= 8) {
+      const px = o.detail;
+      const tris = model ? Math.floor(model.count / 3) : 0;
+      const cols = Math.max(1, Math.floor(o.w / px));
+      for (let y = 0; y < o.h; y++) {
+        for (let x = 0; x < o.w; x++) {
+          const lx = x % px;
+          const ly = y % px;
+          const onGrid = lx === 0 || ly === 0;
+          const onDiagonal = lx + ly === px - 1;
+          if (!onGrid && !onDiagonal) continue;
+          // Leave the unused tail (past the last triangle's patch) unmarked.
+          if (tris > 0 && Math.floor(y / px) * cols + Math.floor(x / px) >= tris) continue;
+          const i = (y * o.w + x) * 4;
+          const k = onGrid ? 0.35 : 0.7;
+          rgba[i + 0] = Math.round(rgba[i + 0]! * k);
+          rgba[i + 1] = Math.round(rgba[i + 1]! * k);
+          rgba[i + 2] = Math.round(rgba[i + 2]! * k);
+        }
+      }
+    }
     const png = host.__imageops_encode_raw?.(rgba, o.w, o.h, '{"format":"png"}');
     if (!(png instanceof Uint8Array)) {
       fail(o.w, o.h, o.detail, 'PNG encode failed (host codec)');
@@ -1402,7 +1428,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             <Text style={{ color: '#ffb38f', fontSize: 11, marginTop: 8 }}>{uvPanel.note ?? 'no atlas'}</Text>
           )}
           <Text style={{ color: '#5d6878', fontSize: 10, marginTop: 6 }}>
-            per-triangle patches — authored UVs are not used by paint
+            {uvPanel.detail >= 8
+              ? 'each grid cell = one triangle (diagonal = its hypotenuse) — machine layout, not your authored UVs'
+              : 'one texel per triangle at this detail (no grid to draw) — machine layout, not your authored UVs'}
           </Text>
         </Col>
       )}
