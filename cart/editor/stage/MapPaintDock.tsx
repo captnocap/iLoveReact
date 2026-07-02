@@ -108,6 +108,7 @@ export default function MapPaintDock(props: {
   onAddZone: () => void;
   onRoadCommit: () => void;
   onRoadCancel: () => void;
+  onSave: () => void;
 }) {
   const s = props.state;
   const Toggle = s.active ? C.HW_PillOn : C.HW_Pill;
@@ -119,6 +120,9 @@ export default function MapPaintDock(props: {
       </Toggle>
       {s.active ? (
         <Fragment>
+          <C.HW_Pill tooltip="Save the painted map to the map file" onPress={props.onSave}>
+            <C.HW_PillText>SAVE</C.HW_PillText>
+          </C.HW_Pill>
           <C.HW_OptionDivider />
           <PillRow items={CHANNELS} value={s.channel} onPick={(channel) => props.onPatch({ channel })} />
           <C.HW_OptionDivider />

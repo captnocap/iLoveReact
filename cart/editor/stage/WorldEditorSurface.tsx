@@ -6,7 +6,7 @@ import type { Armed } from '../../hmsc-int/buildArmed';
 import type { BuildEditEvent } from '../../hmsc-int/game';
 import {
   mapChunkCount, mapGrowChunk, mapHostLive, mapSetGroundLook, mapSetTool, mapSetZonePalette,
-  mapRoadCancel, mapRoadCommit, mapRoadSetKinds, mapRoadSetProfile,
+  mapRoadCancel, mapRoadCommit, mapRoadSetKinds, mapRoadSetProfile, mapLoadFile, mapSaveFile,
 } from '../../../runtime/game/map';
 import MapPaintDock, { DEFAULT_MAP_PAINT, type MapPaintState, type MapZoneDef } from './MapPaintDock';
 import { EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf } from '../render3d/groundFormula';
@@ -15,6 +15,9 @@ import { TILE_KINDS } from '../world/tileKinds';
 
 const EDITOR_GAME_FILE = 'zig-out/game/editor/main.gamefile';
 const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
+// The painted map's save file (MAPPAINT req_2473) — beside the gamefile it
+// will compile into. RLE blob written/read host-side (__map_save_file).
+const EDITOR_MAP_FILE = 'zig-out/game/editor/painted-map.rmap';
 
 // RoadCellKind → this cart's TILE_KINDS indices, in the host enum order
 // (laneNorth, laneSouth, laneEast, laneWest, median, sidewalk, junction,
@@ -111,12 +114,19 @@ export default function WorldEditorSurface() {
     onPaintPatch({});
   }, [onPaintPatch]);
 
-  // First arm seeds the world's chunk (0,0) so strokes have canvas — the grown
-  // chunk grid gets its own chrome with the multi-chunk workspace — and pushes
-  // the cell channels' ground look (formula + palettes) + road kind mapping once.
+  // SAVE writes the whole painting to the map file host-side (RLE blob; roads
+  // as recipes). The editor map lives beside its gamefile.
+  const onSave = useCallback(() => {
+    const ok = mapSaveFile(EDITOR_MAP_FILE);
+    if (!ok) console.error(`[map-paint] SAVE FAILED: ${EDITOR_MAP_FILE}`);
+  }, []);
+
+  // First arm: load the saved painting if one exists, else seed chunk (0,0) so
+  // strokes have canvas — then push the cell channels' ground look (formula +
+  // palettes) + the road kind mapping once.
   useEffect(() => {
     if (!paint.active || !mapHostLive()) return;
-    if (mapChunkCount() === 0) mapGrowChunk(0, 0);
+    if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0);
     mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(paint.zones));
     mapRoadSetKinds(ROAD_KIND_INDICES);
     pushMapTool(paint);
@@ -136,7 +146,7 @@ export default function WorldEditorSurface() {
         baselineReady
         paintMode={paint.active}
       />
-      <MapPaintDock state={paint} onPatch={onPaintPatch} onAddZone={onAddZone} onRoadCommit={onRoadCommit} onRoadCancel={onRoadCancel} />
+      <MapPaintDock state={paint} onPatch={onPaintPatch} onAddZone={onAddZone} onRoadCommit={onRoadCommit} onRoadCancel={onRoadCancel} onSave={onSave} />
     </C.HW_WorldEditorSurface>
   );
 }

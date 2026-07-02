@@ -871,6 +871,28 @@ pub fn roadDelete(id: u32) bool {
     return ok;
 }
 
+// ── persistence (store.zig: RLE blob of every channel + road recipes) ─────────
+
+pub const store = @import("store.zig");
+
+pub fn saveSizeUpperBound() usize {
+    return store.saveSizeUpperBound();
+}
+
+/// Serialize the painting (roads resolved back to their undercoat base).
+pub fn saveMap(dst: []u8) usize {
+    return store.save(dst, &g_road_under);
+}
+
+/// Rebuild the painting from a save blob, then re-derive the road stamps
+/// (grid = base + roads, req_0795). False on a malformed blob (world cleared).
+pub fn loadMap(bytes: []const u8) bool {
+    g_road_under.clearRetainingCapacity();
+    const ok = store.load(bytes);
+    if (ok) roadsRestamp();
+    return ok;
+}
+
 // ── dirty bookkeeping ─────────────────────────────────────────────────────────
 
 pub fn dirtyChunkCount() u32 {

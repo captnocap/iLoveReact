@@ -323,6 +323,57 @@ fn hostStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnF32Buffer(info, stats_out[0..]);
 }
 
+// ── persistence doors: the blob never crosses the bridge — the host writes/
+// reads the file directly (RLE per store.zig; roads persist as recipes and
+// restamp on load).
+
+// __map_save_file(path) -> 0|1
+fn hostSaveFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path = argStringAlloc(alloc, info, 0) orelse {
+        setReturnF64(info, 0);
+        return;
+    };
+    defer alloc.free(path);
+    const buf = alloc.alloc(u8, engine.saveSizeUpperBound()) catch {
+        setReturnF64(info, 0);
+        return;
+    };
+    defer alloc.free(buf);
+    const n = engine.saveMap(buf);
+    if (n == 0) {
+        setReturnF64(info, 0);
+        return;
+    }
+    if (std.fs.path.dirname(path)) |dir| std.fs.cwd().makePath(dir) catch {};
+    std.fs.cwd().writeFile(.{ .sub_path = path, .data = buf[0..n] }) catch {
+        setReturnF64(info, 0);
+        return;
+    };
+    setReturnF64(info, 1);
+}
+
+const MAX_MAP_FILE_BYTES: usize = 512 * 1024 * 1024;
+
+// __map_load_file(path) -> 0|1 (0 = missing/malformed; the world is untouched
+// on a missing file, cleared on a malformed one — store.load's LOUD contract)
+fn hostLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path = argStringAlloc(alloc, info, 0) orelse {
+        setReturnF64(info, 0);
+        return;
+    };
+    defer alloc.free(path);
+    const bytes = std.fs.cwd().readFileAlloc(alloc, path, MAX_MAP_FILE_BYTES) catch {
+        setReturnF64(info, 0);
+        return;
+    };
+    defer alloc.free(bytes);
+    setReturnF64(info, if (engine.loadMap(bytes)) 1 else 0);
+}
+
 // ── readback doors (verification / chrome, UI-rate only) ──────────────────────
 
 var sample_scratch: [chunks.SAMPLE_CELLS]f32 = undefined;
@@ -391,6 +442,8 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_road_cancel", hostRoadCancel);
     v8_runtime.registerHostFn("__map_road_delete", hostRoadDelete);
     v8_runtime.registerHostFn("__map_road_stats", hostRoadStats);
+    v8_runtime.registerHostFn("__map_save_file", hostSaveFile);
+    v8_runtime.registerHostFn("__map_load_file", hostLoadFile);
     v8_runtime.registerHostFn("__map_stroke_begin", hostStrokeBegin);
     v8_runtime.registerHostFn("__map_stroke_move", hostStrokeMove);
     v8_runtime.registerHostFn("__map_stroke_end", hostStrokeEnd);

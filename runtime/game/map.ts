@@ -166,6 +166,18 @@ export function mapRoadDelete(id: number): boolean {
   return callHost<number>('__map_road_delete', 0, id) === 1;
 }
 
+/** Save the whole painting to a file — the blob never crosses the bridge (the
+ *  host RLE-serializes and writes directly). Roads persist as recipes. */
+export function mapSaveFile(path: string): boolean {
+  return callHost<number>('__map_save_file', 0, path) === 1;
+}
+
+/** Load a painting from a file; the host rebuilds every channel and re-derives
+ *  the road stamps. False = missing or malformed file. */
+export function mapLoadFile(path: string): boolean {
+  return callHost<number>('__map_load_file', 0, path) === 1;
+}
+
 export function mapRoadStats(): { strokes: number; draftPoints: number; planTruncated: boolean } {
   const ab = callHost<ArrayBuffer | null>('__map_road_stats', null);
   if (!ab) return { strokes: 0, draftPoints: 0, planTruncated: false };
