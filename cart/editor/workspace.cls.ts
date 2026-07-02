@@ -258,6 +258,10 @@ classifier({
   HW_ColorPreviewHead: { type: 'Box', style: { height: 43, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 11, paddingRight: 11, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_ColorPreviewGrid: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'row', flexWrap: 'wrap', gap: 3, padding: 12, backgroundColor: 'theme:stageBg' } },
   HW_ColorPreviewCell: { type: 'Box', style: { width: 35, height: 40, borderRadius: 'theme:radiusSm', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
+  // The live WGSL preview well — centers the real <Effect> render.
+  HW_ColorPreviewLive: { type: 'Box', style: { flexGrow: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', padding: 12, backgroundColor: 'theme:stageBg' } },
+  // "use current color" — pours the spine's current color into the active slot.
+  HW_ColorSpineFill: { type: 'Pressable', style: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 12, marginRight: 12, paddingLeft: 8, paddingRight: 10, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_ColorControlRow: { type: 'Box', style: { height: 61, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 12, paddingRight: 12, borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border' } },
   HW_ColorControlGroup: { type: 'Box', style: { width: 132, flexDirection: 'column', gap: 5 } },
   HW_ColorControlGroupWide: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 5 } },

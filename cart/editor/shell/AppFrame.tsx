@@ -25,7 +25,7 @@ import RenderProbe from '../../../runtime/render_tracker';
 import PlayRoute from '../PlayRoute';
 import { useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
-import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot } from '../data/types';
+import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { applyMapPaintEffects } from '../stage/mapPaint';
@@ -35,7 +35,8 @@ import { primitivePartMesh, composeModelParts, storedModelParts, fileModelPackag
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
-import { SHADER_MATERIALS, colorStudioMaterial, colorStudioOverrideKey, QUALITY_LABELS } from '../data/colorStudio';
+import { colorStudioSpec, colorStudioOverrideKey, rgbToCss } from '../data/colorStudio';
+import { FILL_GRADES, FILL_SEED_MAX, shaderSpec } from '../textures/shaders';
 import { oklchName, type ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import { useBuildJournal } from '../data/journal';
@@ -519,34 +520,35 @@ export default function AppFrame() {
     }));
   };
 
-  const selectColorStudioMaterial = (materialKey: ColorStudioMaterialKey) => {
+  const selectColorStudioMaterial = (specId: string) => {
     setState((prev) => {
-      const material = SHADER_MATERIALS[materialKey];
+      const spec = shaderSpec(specId);
+      if (!spec) return { ...prev, status: `Color Studio: unknown material '${specId}'` };
       return {
         ...prev,
-        colorStudioMaterial: materialKey,
+        colorStudioMaterial: specId,
         colorStudioVariant: 0,
-        colorStudioActiveSlot: material.heroSlot,
-        status: `Color Studio material: ${material.name} - hero slot selected`,
+        colorStudioActiveSlot: 0,
+        status: `Color Studio material: ${spec.label} (${spec.slots?.length ?? 0} slots)`,
       };
     });
   };
 
   const setColorStudioVariant = (variant: number) => {
     setState((prev) => {
-      const material = colorStudioMaterial(prev);
+      const spec = colorStudioSpec(prev);
       return {
         ...prev,
         colorStudioVariant: variant,
-        colorStudioActiveSlot: Math.min(prev.colorStudioActiveSlot, material.slots.length - 1),
-        status: `Color Studio variant v${variant}: ${material.name}`,
+        colorStudioActiveSlot: Math.min(prev.colorStudioActiveSlot, Math.max(0, (spec.slots?.length ?? 1) - 1)),
+        status: `Color Studio variant ${spec.variants[variant]?.label ?? variant}: ${spec.label}`,
       };
     });
   };
 
   const rollColorStudioSeed = () => {
     setState((prev) => {
-      const nextSeed = ((prev.colorStudioSeed * 37 + 19) % 97) + 1;
+      const nextSeed = ((prev.colorStudioSeed * 37 + 19) % FILL_SEED_MAX) + 1;
       return {
         ...prev,
         colorStudioSeed: nextSeed,
@@ -559,40 +561,40 @@ export default function AppFrame() {
     setState((prev) => ({
       ...prev,
       colorStudioQuality: quality,
-      status: `Color Studio quality D[${quality}]: ${QUALITY_LABELS[quality] ?? quality}`,
+      status: `Color Studio quality D[3]=${quality}: ${FILL_GRADES[quality] ?? quality}`,
     }));
   };
 
   const activateColorStudioSlot = (slot: number) => {
     setState((prev) => {
-      const material = colorStudioMaterial(prev);
-      const slotName = material.slots[slot]?.name ?? 'slot';
+      const spec = colorStudioSpec(prev);
+      const slotName = spec.slots?.[slot]?.name ?? 'slot';
       return {
         ...prev,
         colorStudioActiveSlot: slot,
-        status: `Color Studio active slot: ${material.name} / ${slotName}`,
+        status: `Color Studio active slot: ${spec.label} / ${slotName}`,
       };
     });
   };
 
-  const fillColorStudioSlot = (color: string, source: string) => {
+  const fillColorStudioSlot = (rgb: Rgb, source: string) => {
     setState((prev) => {
       const t0 = Date.now();
-      const material = colorStudioMaterial(prev);
-      const slot = Math.min(prev.colorStudioActiveSlot, material.slots.length - 1);
-      const slotName = material.slots[slot]?.name ?? 'slot';
-      const key = colorStudioOverrideKey(material.key, prev.colorStudioVariant, slot);
+      const spec = colorStudioSpec(prev);
+      const slot = Math.min(prev.colorStudioActiveSlot, Math.max(0, (spec.slots?.length ?? 1) - 1));
+      const slotName = spec.slots?.[slot]?.name ?? 'slot';
+      const key = colorStudioOverrideKey(spec.id, prev.colorStudioVariant, slot);
       const editMs = Date.now() - t0;
       return {
         ...prev,
-        colorStudioOverrides: { ...prev.colorStudioOverrides, [key]: color },
+        colorStudioOverrides: { ...prev.colorStudioOverrides, [key]: rgb },
         history: [
-          { id: `h-${prev.seq}`, verb: 'slot', target: `${material.name} ${slotName}`, meta: `${source} -> ${color}`, undoable: true, editMs, emptyMs: editMs, richMs: editMs },
+          { id: `h-${prev.seq}`, verb: 'slot', target: `${spec.label} ${slotName}`, meta: `${source} -> ${rgbToCss(rgb)}`, undoable: true, editMs, emptyMs: editMs, richMs: editMs },
           ...prev.history,
         ].slice(0, 8),
         redo: [],
         seq: prev.seq + 1,
-        status: `filled ${material.name} ${slotName} from ${source}`,
+        status: `filled ${spec.label} ${slotName} from ${source}`,
       };
     });
   };
@@ -600,20 +602,20 @@ export default function AppFrame() {
   const resetColorStudioSlots = () => {
     setState((prev) => {
       const t0 = Date.now();
-      const material = colorStudioMaterial(prev);
+      const spec = colorStudioSpec(prev);
       const nextOverrides = { ...prev.colorStudioOverrides };
-      material.slots.forEach((_, slot) => delete nextOverrides[colorStudioOverrideKey(material.key, prev.colorStudioVariant, slot)]);
+      (spec.slots ?? []).forEach((_, slot) => delete nextOverrides[colorStudioOverrideKey(spec.id, prev.colorStudioVariant, slot)]);
       const editMs = Date.now() - t0;
       return {
         ...prev,
         colorStudioOverrides: nextOverrides,
         history: [
-          { id: `h-${prev.seq}`, verb: 'reset', target: `${material.name} v${prev.colorStudioVariant}`, meta: 'Color Studio reset to baked vec3f defaults', undoable: true, editMs, emptyMs: editMs, richMs: editMs },
+          { id: `h-${prev.seq}`, verb: 'reset', target: `${spec.label} v${prev.colorStudioVariant}`, meta: 'Color Studio reset to baked vec3f defaults', undoable: true, editMs, emptyMs: editMs, richMs: editMs },
           ...prev.history,
         ].slice(0, 8),
         redo: [],
         seq: prev.seq + 1,
-        status: `reset ${material.name} v${prev.colorStudioVariant} to baked defaults`,
+        status: `reset ${spec.label} v${prev.colorStudioVariant} to baked defaults`,
       };
     });
   };

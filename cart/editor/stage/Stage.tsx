@@ -1,5 +1,5 @@
 import { C } from '../workspace.cls';
-import type { Asset, ColorStudioMaterialKey, EditorState, ModelToolApi, ModelToolSnapshot } from '../data/types';
+import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import { modelPackageById } from '../data/content';
@@ -24,12 +24,12 @@ export default function Stage(props: {
   onContext: () => void;
   onObject: (id: string) => void;
   onExitMaterialFocus: () => void;
-  onSelectColorStudioMaterial: (material: ColorStudioMaterialKey) => void;
+  onSelectColorStudioMaterial: (specId: string) => void;
   onColorStudioVariant: (variant: number) => void;
   onColorStudioSeed: () => void;
   onColorStudioQuality: (quality: number) => void;
   onColorStudioSlot: (slot: number) => void;
-  onColorStudioFill: (color: string, source: string) => void;
+  onColorStudioFill: (rgb: Rgb, source: string) => void;
   onColorStudioReset: () => void;
   onColorStudioView: (view: EditorState['colorStudioView']) => void;
   onColorSpineCurrent: (color: OklchColor) => void;

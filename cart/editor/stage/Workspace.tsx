@@ -1,5 +1,5 @@
 import { C } from '../workspace.cls';
-import type { Asset, ColorStudioMaterialKey, Command, EditorState, ModelToolApi, ModelToolSnapshot, ViewMode } from '../data/types';
+import type { Asset, Command, EditorState, ModelToolApi, ModelToolSnapshot, Rgb, ViewMode } from '../data/types';
 import type { OutlinerHandlers } from './ModelDocumentSurface';
 import type { ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
@@ -26,12 +26,12 @@ export default function Workspace(props: {
   onContext: () => void;
   onObject: (id: string) => void;
   onExitMaterialFocus: () => void;
-  onSelectColorStudioMaterial: (material: ColorStudioMaterialKey) => void;
+  onSelectColorStudioMaterial: (specId: string) => void;
   onColorStudioVariant: (variant: number) => void;
   onColorStudioSeed: () => void;
   onColorStudioQuality: (quality: number) => void;
   onColorStudioSlot: (slot: number) => void;
-  onColorStudioFill: (color: string, source: string) => void;
+  onColorStudioFill: (rgb: Rgb, source: string) => void;
   onColorStudioReset: () => void;
   onColorStudioView: (view: EditorState['colorStudioView']) => void;
   onColorSpineCurrent: (color: OklchColor) => void;

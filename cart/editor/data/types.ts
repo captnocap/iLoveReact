@@ -288,29 +288,6 @@ export type ModelPackage = {
 };
 
 export type Rgb = [number, number, number];
-export type ColorStudioMaterialKey = 'rot' | 'stucco' | 'pool';
-
-export type ShaderSlot = {
-  name: string;
-  role: string;
-};
-
-export type ShaderMaterial = {
-  key: ColorStudioMaterialKey;
-  name: string;
-  shaderFn: string;
-  board: string;
-  materialId: number;
-  heroSlot: number;
-  slots: ShaderSlot[];
-  variants: Rgb[][];
-};
-
-export type PaletteSet = {
-  name: string;
-  tag: string;
-  colors: Rgb[];
-};
 
 export type ContentNode = {
   id: ContentFolderId;
@@ -357,12 +334,14 @@ export type EditorState = {
   activeAssetId: string;
   assetPage: number;
   materialFocused: boolean;
-  colorStudioMaterial: ColorStudioMaterialKey;
+  colorStudioMaterial: string; // ShaderSpec id (textures/shaders.ts catalog)
   colorStudioVariant: number;
   colorStudioSeed: number;
-  colorStudioQuality: number;
+  colorStudioQuality: number; // detail grade, D[3] (FILL_GRADES index)
   colorStudioActiveSlot: number;
-  colorStudioOverrides: Record<string, string>;
+  // Slot overrides keyed `${specId}:${variant}:${slot}` → RGB 0..1. Resolution:
+  // override ?? the slot's baked constant from the registry.
+  colorStudioOverrides: Record<string, Rgb>;
   colorStudioView: 'materialPalette' | 'workbench' | 'orbit';
   colorSpineCurrent: OklchColor;
   colorSpinePalette: OklchColor[];

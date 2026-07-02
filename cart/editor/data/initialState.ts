@@ -28,7 +28,7 @@ export function initialState(): EditorState {
     activeAssetId: DEFAULT_ASSET_ID,
     assetPage: 0,
     materialFocused: false,
-    colorStudioMaterial: 'rot',
+    colorStudioMaterial: 'b-rot-siding',
     colorStudioVariant: 1,
     colorStudioSeed: 4,
     colorStudioQuality: 3,
