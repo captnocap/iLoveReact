@@ -120,7 +120,7 @@ export default function ModelShaderBucket(props: {
       <Slider
         value={val} min={p.min} max={p.max} step={p.step || (p.integer ? 1 : 0.01)}
         onCommit={onCommit}
-        style={{ backgroundColor: '#0f1012', color: '#6ea8fe' }}
+        style={{ height: 24, backgroundColor: '#0f1012', color: '#6ea8fe' }}
       />
     </Col>
   );
@@ -226,7 +226,7 @@ export default function ModelShaderBucket(props: {
         <Slider
           value={editing.tiles} min={0.25} max={8} step={0.25}
           onCommit={setTiles}
-          style={{ backgroundColor: '#0f1012', color: '#6ee7a8' }}
+          style={{ height: 24, backgroundColor: '#0f1012', color: '#6ee7a8' }}
         />
       </Col>
     </Col>

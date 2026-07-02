@@ -113,13 +113,13 @@ export default function PaintToolbar(props: Ink & {
 
       <Row style={{ alignItems: 'center', gap: 7 }}>
         <Icon name="Circle" size={13} color={DIM} />
-        <Slider value={brush.size} min={1} max={128} step={1} onCommit={(v: number) => patch({ size: Math.round(v) })} style={{ width: 92, backgroundColor: TRACK, color: ACCENT }} />
+        <Slider value={brush.size} min={1} max={128} step={1} onCommit={(v: number) => patch({ size: Math.round(v) })} style={{ width: 92, height: 30, backgroundColor: TRACK, color: ACCENT }} />
         <Text style={{ color: TEXT, fontSize: 11, fontFamily: 'ui-monospace', width: 26 }}>{brush.size}</Text>
       </Row>
 
       <Row style={{ alignItems: 'center', gap: 7 }}>
         <Icon name="Waves" size={13} color={DIM} />
-        <Slider value={brush.flow} min={0.02} max={1} step={0.01} onCommit={(v: number) => patch({ flow: v })} style={{ width: 80, backgroundColor: TRACK, color: ACCENT }} />
+        <Slider value={brush.flow} min={0.02} max={1} step={0.01} onCommit={(v: number) => patch({ flow: v })} style={{ width: 80, height: 30, backgroundColor: TRACK, color: ACCENT }} />
         <Text style={{ color: TEXT, fontSize: 11, fontFamily: 'ui-monospace', width: 34 }}>{Math.round(brush.flow * 100)}%</Text>
       </Row>
 
@@ -289,7 +289,7 @@ function ScalarRow({ label, value, min, max, step, pct, onCommit }: { label: str
         <Text style={{ color: TEXT, fontSize: 10 }}>{label}</Text>
         <Text style={{ color: DIM, fontSize: 10, fontFamily: 'ui-monospace' }}>{pct ? `${Math.round(value * 100)}%` : value.toFixed(2)}</Text>
       </Row>
-      <Slider value={value} min={min} max={max} step={step} onCommit={onCommit} style={{ backgroundColor: TRACK, color: ACCENT }} />
+      <Slider value={value} min={min} max={max} step={step} onCommit={onCommit} style={{ height: 24, backgroundColor: TRACK, color: ACCENT }} />
     </Col>
   );
 }
