@@ -32,6 +32,11 @@ export type ModelPart = {
   // geometry is identified by its authored-group range [lo, hi) instead. The host mesh is the
   // source of truth once editing starts; parts are metadata + a group range.
   mesh?: EditMesh;
+  // A file-backed part (imported .glb/.obj): the HOST parses this path into the mesh on
+  // mount (__mesh_load_file) — its geometry never exists in JS. The whole import is ONE
+  // part; its [lo, hi) range is stamped from the viewer's load and every part op
+  // (scope/hide/delete/append-next-to-it) works over that range like any other part.
+  sourcePath?: string;
   visible: boolean;
   color: string;
   // Vertical offset applied on compose (Studio parts carry one); 0/absent for primitives.

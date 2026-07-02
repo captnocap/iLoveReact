@@ -1203,7 +1203,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       {!model && (
         <Col style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
           <Text style={{ color: '#9aa6ba', fontSize: 22, fontWeight: 600 }}>
-            {error ? 'Model could not load' : initialPath || initialMesh ? `Loading ${initialTitle ?? initialMesh?.name ?? 'model'}` : 'Open a model to view'}
+            {error ? 'Model could not load' : initialPath || initialMesh || initialFileParts ? `Loading ${initialTitle ?? initialMesh?.name ?? 'model'}` : 'Open a model to view'}
           </Text>
           <Text style={{ color: '#5d6878', fontSize: 14, marginTop: 8 }}>.glb · .obj — parsed and rendered entirely in the host</Text>
           {allowFilePicker ? (

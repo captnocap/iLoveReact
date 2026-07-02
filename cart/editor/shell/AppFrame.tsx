@@ -494,10 +494,27 @@ export default function AppFrame() {
   };
 
   // Open a .glb/.obj through the REAL import path: a `file:<path>` model document whose
-  // viewer loads the file via the native host mesh importer (__mesh_load_file).
+  // viewer loads the file via the native host mesh importer (__mesh_load_file). The import
+  // is seeded as ONE outliner part in the SAME state update the doc opens in, so the
+  // surface mounts straight into parts mode (outliner live, part ops working) — never as
+  // a view-only model. Its [lo, hi) range is stamped after the host parses the file.
   const openModelFileDocument = (path: string) => {
-    openModelDocument(fileModelPackage(path));
-    setState((prev) => ({ ...prev, fileExplorerOpen: false }));
+    const pkg = fileModelPackage(path);
+    const doc = modelDocument(pkg);
+    setState((prev) => {
+      const seeded = prev.modelParts[pkg.id] ?? [filePartSeed(path, pkg.name)];
+      return {
+        ...prev,
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
+        activeWorkspaceDocumentId: doc.id,
+        materialFocused: false,
+        contextOpen: false,
+        fileExplorerOpen: false,
+        modelParts: { ...prev.modelParts, [pkg.id]: seeded },
+        modelActivePartId: prev.modelParts[pkg.id] ? prev.modelActivePartId : (seeded[0]?.id ?? prev.modelActivePartId),
+        status: `imported ${pkg.name}`,
+      };
+    });
   };
 
   const openExplorerFile = (fileId: string, action: string) => {
@@ -804,6 +821,10 @@ export default function AppFrame() {
     const n = existing.filter((p) => p.kind === kind).length + 1;
     return { id: `part:${kind}:${seq}`, name: `${meta.name} ${n}`, kind, mesh: primitivePartMesh(kind, params), visible: true, color: PART_TINTS[existing.length % PART_TINTS.length]! };
   };
+  // The single seed for an imported file's base part — used by both the open handler (atomic
+  // with the doc open) and the activate effect (restored/persisted docs missing their parts).
+  const filePartSeed = (path: string, name: string): ModelPart =>
+    ({ id: 'part:file:1', name, sourcePath: path, visible: true, color: PART_TINTS[0]! });
   // Adding a mesh (menu or outliner) opens the size/resolution dialog instead of dropping a
   // fixed unit primitive — you author the dimensions upfront, like the old studio mesh editor.
   const addPart = (kind: PrimitiveKind) => setState((prev) => ({ ...prev, newMeshPrompt: kind }));
@@ -959,10 +980,11 @@ export default function AppFrame() {
   };
 
   // On a model doc activating: seed its parts (Studio models bring stored parts; primitive
-  // models seed themselves on create) AND stamp each part's [lo, hi] group range from the
-  // compose that the viewer loads on THIS mount. Refreshing on every activate keeps the ranges
-  // matched to the freshly-composed host mesh after a doc switch (the host is authoritative
-  // only within a session; a remount rebuilds the seed). Fires once per activate.
+  // models seed themselves on create; an imported file doc seeds ONE file-backed part) AND
+  // stamp each part's [lo, hi] group range from the compose that the viewer loads on THIS
+  // mount. Refreshing on every activate keeps the ranges matched to the freshly-composed
+  // host mesh after a doc switch (the host is authoritative only within a session; a
+  // remount rebuilds the seed). Fires once per activate.
   useEffect(() => {
     const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
     const mid = doc?.kind === 'model' ? doc.sourceId : undefined;
@@ -970,9 +992,29 @@ export default function AppFrame() {
     const existing = state.modelParts[mid];
     let parts = existing;
     if (!parts) {
-      const bareId = mid.startsWith('studio:') ? mid.slice('studio:'.length) : mid;
-      parts = storedModelParts(bareId) ?? undefined;
+      if (mid.startsWith('file:')) {
+        // An imported .glb/.obj is a model OF ONE PART (the whole file) — outliner-first,
+        // like everything else. Its range is stamped by the viewer after the host parses it.
+        const path = mid.slice('file:'.length);
+        parts = [filePartSeed(path, fileModelPackage(path).name)];
+      } else {
+        const bareId = mid.startsWith('studio:') ? mid.slice('studio:'.length) : mid;
+        parts = storedModelParts(bareId) ?? undefined;
+      }
       if (!parts) return;
+    }
+    if (parts.some((p) => p.sourcePath)) {
+      // File-backed docs get their TRUE ranges from the viewer's onStampRanges after the
+      // host load — a JS compose can't know where the file's triangles land. Seed only.
+      if (!existing) {
+        const seeded = parts;
+        setState((prev) => ({
+          ...prev,
+          modelParts: { ...prev.modelParts, [mid]: seeded },
+          modelActivePartId: seeded[0]?.id ?? prev.modelActivePartId,
+        }));
+      }
+      return;
     }
     const rangeById = new Map(composeModelParts(parts).ranges.map((r) => [r.id, r]));
     const withRanges = parts.map((p) => { const r = rangeById.get(p.id); return { ...p, lo: r?.lo, hi: r?.hi }; });
@@ -982,6 +1024,21 @@ export default function AppFrame() {
       modelActivePartId: existing ? prev.modelActivePartId : (withRanges[0]?.id ?? prev.modelActivePartId),
     }));
   }, [state.activeWorkspaceDocumentId]);
+
+  // A file-backed mount reports where each part landed in the host mesh (base import =
+  // [0, tris); replayed appends get host-assigned ranges) — stamp them onto the outliner.
+  const stampModelPartRanges = (modelId: string, ranges: { partId: string; lo: number; hi: number }[]) => {
+    setState((prev) => ({
+      ...prev,
+      modelParts: {
+        ...prev.modelParts,
+        [modelId]: (prev.modelParts[modelId] ?? []).map((p) => {
+          const r = ranges.find((x) => x.partId === p.id);
+          return r ? { ...p, lo: r.lo, hi: r.hi } : p;
+        }),
+      },
+    }));
+  };
 
   const selectWorkspaceDocument = (activeWorkspaceDocumentId: string) => {
     setState((prev) => {
@@ -1138,7 +1195,7 @@ export default function AppFrame() {
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
             onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => ({ ...prev, modelTool }))}
             modelContextTrigger={modelMenu.triggerProps}
-            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart }}
+            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart, onStampRanges: stampModelPartRanges }}
             onTool={(id) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` }))}
             onSnap={() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` }))}
             onFloor={(delta) => setState((prev) => {
@@ -1178,7 +1235,7 @@ export default function AppFrame() {
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
             onModelBrush={(brush) => modelToolApiRef.current?.setBrush(brush)}
-            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart }}
+            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart, onStampRanges: stampModelPartRanges }}
             colorSpine={{
               onSetCurrent: setColorSpineCurrent,
               onAddToTray: addColorSpineToTray,

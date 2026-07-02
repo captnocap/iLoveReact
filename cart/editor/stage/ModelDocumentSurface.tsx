@@ -1,15 +1,8 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
-import type { ModelPackage, ModelPart, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
-import ModelView from './ModelView';
+import type { ModelPackage, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
+import ModelView, { type PartRange } from './ModelView';
 import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData, primitiveMeshData, composeModelParts } from '../data/hmscAssetCatalog';
-
-// The composed geometry changes (add/delete/hide/reorder a part) → the host mesh must
-// reload. Renaming doesn't touch geometry, so it isn't in the signature (the outliner row
-// updates without a viewer reload).
-function partsSignature(parts: ModelPart[]): string {
-  return parts.map((p) => `${p.id}:${p.visible ? 1 : 0}:${p.mesh.faces.length}`).join(',');
-}
 
 // The outliner's part handlers, threaded from AppFrame (which owns state). Split from the
 // live parts/active so Workspace + Stage can carry the stable handlers and Stage supplies
@@ -19,6 +12,9 @@ export type OutlinerHandlers = {
   onToggleVisiblePart: (id: string) => void;
   onDeletePart: (id: string) => void;
   onAddPart: (kind: PrimitiveKind) => void;
+  // A file-backed mount reports where each part landed in the host mesh (the import's
+  // range is only known after the host parses the file) — AppFrame stamps lo/hi.
+  onStampRanges: (modelId: string, ranges: PartRange[]) => void;
 };
 export type OutlinerApi = OutlinerHandlers & {
   parts: ModelPart[];
@@ -58,6 +54,31 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
           <Icon name="SearchX" size={18} color={accentFor('textFaint')} />
           <C.HW_StageSocketTitle>MODEL NOT FOUND</C.HW_StageSocketTitle>
         </C.HW_ModelDocEmpty>
+      </C.HW_ModelDocument>
+    );
+  }
+
+  // FILE-BACKED multi-part model: the base part is an imported .glb/.obj the host parses
+  // on mount; the doc's other (primitive) parts replay as appends. The viewer reports each
+  // part's landed range up through onStampRanges so the outliner's lo/hi stay host-true.
+  const fileBase = outliner?.parts.find((p) => p.sourcePath);
+  if (outliner && fileBase?.sourcePath) {
+    const appends = outliner.parts
+      .filter((p) => p !== fileBase && p.mesh && p.visible)
+      .map((p) => {
+        const geo = composeModelParts([{ ...p, visible: true }]);
+        return { partId: p.id, color: p.color, positions: geo.positions, faceGroups: geo.faceGroups };
+      })
+      .filter((a) => a.positions.length > 0);
+    return (
+      <C.HW_ModelDocument {...triggerProps}>
+        <ModelView
+          key={`${model.id}:parts`}
+          initialTitle={model.name}
+          initialFileParts={{ path: fileBase.sourcePath, basePartId: fileBase.id, baseColor: fileBase.color, baseHidden: !fileBase.visible, appends }}
+          allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState}
+          onPartRanges={(ranges) => outliner.onStampRanges(model.id, ranges)}
+        />
       </C.HW_ModelDocument>
     );
   }
