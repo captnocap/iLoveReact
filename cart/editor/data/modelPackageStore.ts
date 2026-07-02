@@ -86,5 +86,20 @@ export function loadMaterializedPackages(): ModelPackage[] {
   return out;
 }
 
+// One file inside a package subdir, as the browser shows it. `path` is the full
+// on-disk path (openable), `name` the leaf, `sub` which subdir it came from.
+export type PackageFile = { name: string; path: string; sub: (typeof MODEL_PACKAGE_SUBDIRS)[number] };
+
+// List the real files in one of a package's subdirs (mesh/atlases/paints/shaders).
+// Empty until the Save writer populates them — the browser shows an honest empty
+// state, not a phantom "no models". Skips nested dirs; leaves only.
+export function listPackageFiles(pkg: ModelPackage, sub: (typeof MODEL_PACKAGE_SUBDIRS)[number]): PackageFile[] {
+  const dir = `${packageDir(pkg.kind, pkg.id)}/${sub}`;
+  if (!exists(dir)) return [];
+  return listDir(dir)
+    .filter((name) => name && !name.startsWith('.'))
+    .map((name) => ({ name, path: `${dir}/${name}`, sub }));
+}
+
 // Re-exported so callers get the category mapping without reaching past the store.
 export { categoryDir };

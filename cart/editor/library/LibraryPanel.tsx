@@ -9,6 +9,8 @@ import {
   countAssetsForFolder,
   isMaterialFolder,
   isModelFolder,
+  isModelSubfolder,
+  subfolderFilesForFolder,
   tabForContentFolder,
 } from '../data/content';
 import ContentTree from './ContentTree';
@@ -65,7 +67,11 @@ export default function LibraryPanel(props: {
       ? contentFolderLabel(props.contentFolder).toUpperCase()
       : contentFolderLabel(props.contentFolder).toUpperCase();
   const folderTab = tabForContentFolder(props.contentFolder);
-  const showModelPackages = isModelFolder(props.contentFolder);
+  // A model subdir (…/mesh|atlases|paints|shaders) lists FILES, not model
+  // thumbnails, so it gets its own branch and is excluded from the gallery.
+  const showModelSubfolder = isModelSubfolder(props.contentFolder);
+  const subfolderView = showModelSubfolder ? subfolderFilesForFolder(props.contentFolder, props.models) : null;
+  const showModelPackages = isModelFolder(props.contentFolder) && !showModelSubfolder;
   const showMaterialCatalog = isMaterialFolder(props.contentFolder);
   const canBrowseAssets = showMaterialCatalog || Boolean(folderTab);
   const selectedFolderCount = countAssetsForFolder(props.catalogAssets, props.contentFolder, props.models);
@@ -114,7 +120,22 @@ export default function LibraryPanel(props: {
           <C.HW_Pill onPress={() => props.onPage(1)}><Icon name="ChevronRight" size={11} color={accentFor('textDim')} /></C.HW_Pill>
         </C.HW_PageBar>
       ) : null}
-      {showModelPackages ? (
+      {showModelSubfolder ? (
+        <C.HW_AssetGrid>
+          {(subfolderView?.files.length ?? 0) === 0 ? (
+            <C.HW_EmptyState>
+              <Icon name="Inbox" size={16} color={accentFor('textFaint')} />
+              <C.HW_StatusText>{`empty — Save the model to populate ${subfolderView?.sub ?? 'this'}`}</C.HW_StatusText>
+            </C.HW_EmptyState>
+          ) : subfolderView!.files.map((file) => (
+            <C.HW_AssetCard key={file.path}>
+              <C.HW_AssetSwatch style={{ backgroundColor: '#1b2130' }} />
+              <C.HW_AssetLabel numberOfLines={1} noWrap>{file.name}</C.HW_AssetLabel>
+              <C.HW_AssetMeta numberOfLines={1} noWrap>{file.sub}</C.HW_AssetMeta>
+            </C.HW_AssetCard>
+          ))}
+        </C.HW_AssetGrid>
+      ) : showModelPackages ? (
         <ModelPackageBrowser
           folder={props.contentFolder}
           search={props.state.search}
