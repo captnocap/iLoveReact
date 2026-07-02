@@ -224,6 +224,14 @@ fn hostDropZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     chunks.dropZoneIndex(@intFromFloat(idx));
 }
 
+// __map_set_flora_specs(f32 triples) — per flora kind [spec, count, chance]
+// in legend order (req_2497): the population contract the loader's LIVE
+// foliage preview grows painted cells with. Content, pushed with the look.
+fn hostSetFloraSpecs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    engine.setFloraSpecs(argF32Slice(info, 0));
+}
+
 // ── road doors (ROADSTROKE-0610: click-authored recipes, host-compiled) ───────
 // Clicks land through the stroke doors / native input while channel=road; these
 // manage the draft lifecycle + the content mapping.
@@ -436,6 +444,7 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_set_ground_look", hostSetGroundLook);
     v8_runtime.registerHostFn("__map_set_zone_palette", hostSetZonePalette);
     v8_runtime.registerHostFn("__map_drop_zone", hostDropZone);
+    v8_runtime.registerHostFn("__map_set_flora_specs", hostSetFloraSpecs);
     v8_runtime.registerHostFn("__map_road_set_profile", hostRoadSetProfile);
     v8_runtime.registerHostFn("__map_road_set_kinds", hostRoadSetKinds);
     v8_runtime.registerHostFn("__map_road_commit", hostRoadCommit);

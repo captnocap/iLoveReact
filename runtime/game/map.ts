@@ -135,6 +135,14 @@ export function mapDropZone(index: number): void {
   callHost('__map_drop_zone', undefined, index);
 }
 
+/** Push the flora population contract: per kind [spec, count, chance] triples
+ *  in legend order (spec 0 grass · 1 bush · 2 flowers · 3 palm; count = rows
+ *  per painted cell; chance = per-cell spawn gate). The loader's LIVE foliage
+ *  preview grows painted cells with this — content, pushed with the look. */
+export function mapSetFloraSpecs(specs: Float32Array): void {
+  callHost('__map_set_flora_specs', undefined, specs);
+}
+
 // ── roads (ROADSTROKE-0610: click-authored recipes, host-compiled) ────────────
 // While channel='road', viewport clicks lay draft centerline points host-side;
 // these doors manage the draft lifecycle + the content mapping.

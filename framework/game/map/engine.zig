@@ -881,6 +881,46 @@ pub fn roadDelete(id: u32) bool {
     return ok;
 }
 
+// ── flora specs (the population contract — req_2497) ─────────────────────────
+// Flora KINDS are cart content; what the loader's live preview needs per kind is
+// its population FAMILY + density: spec 0 grass blades, 1 bush clumps, 2 flower
+// heads, 3 palms (trunk + frond crown). `count` = rows per painted cell (grass/
+// bush/flowers); `chance` = per-cell spawn gate (palms — most cells stay bare,
+// the palmPopulation.ts density rule). Pushed once at UI rate with the look.
+
+pub const FloraSpec = struct {
+    /// 0 grass · 1 bush · 2 flowers · 3 palm
+    spec: u8,
+    /// rows per painted cell (unused for palms — the crown sizes itself)
+    count: u16,
+    /// per-cell spawn chance 0..1 (1 = every painted cell grows)
+    chance: f32,
+};
+
+var g_flora_specs: [MAX_PALETTE]FloraSpec = @splat(FloraSpec{ .spec = 0, .count = 0, .chance = 0 });
+var g_flora_spec_count: usize = 0;
+
+/// vals = per kind [spec, count, chance] triples, in flora legend order.
+pub fn setFloraSpecs(vals: []const f32) void {
+    g_flora_spec_count = @min(MAX_PALETTE, vals.len / 3);
+    for (0..g_flora_spec_count) |i| {
+        g_flora_specs[i] = .{
+            .spec = @intFromFloat(@max(0, @min(3, vals[i * 3]))),
+            .count = @intFromFloat(@max(0, @min(65535, vals[i * 3 + 1]))),
+            .chance = @max(0, @min(1, vals[i * 3 + 2])),
+        };
+    }
+}
+
+/// The population spec for a painted flora kind; null = unknown kind or a spec
+/// that never spawns (the live preview skips it).
+pub fn floraSpec(kind: i16) ?FloraSpec {
+    if (kind < 0 or kind >= g_flora_spec_count) return null;
+    const s = g_flora_specs[@intCast(kind)];
+    if (s.chance <= 0) return null;
+    return s;
+}
+
 // ── persistence (store.zig: RLE blob of every channel + road recipes) ─────────
 
 pub const store = @import("store.zig");

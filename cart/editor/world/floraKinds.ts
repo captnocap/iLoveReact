@@ -46,3 +46,25 @@ export const FLORA_KIND_DEFINITIONS: readonly FloraKindDefinition[] = [
 
 /** The zone authoring swatch palette (zoneData.ts ZONE_COLORS clone). */
 export const ZONE_COLORS = ['#a78bfa', '#f472b6', '#fb923c', '#34d399', '#60a5fa', '#facc15', '#f87171', '#22d3ee'];
+
+// The flora POPULATION CONTRACT (req_2497) — per kind [spec, count, chance]
+// triples in FLORA_KIND_DEFINITIONS order, pushed to the host so painting a
+// kind grows LITERAL blades/bushes/flowers/palms live in the viewport.
+// spec: 0 grass · 1 bush · 2 flowers · 3 palm. Values verbatim from the hmsc
+// population configs: grass blades/cell sparse 3 / med 7 / lush 16
+// (grassPopulation GRASS_CONFIG.density; dry rides med), bush clumps med 14
+// (BUSH_CONFIG.density), palm per-cell spawn chance sparse 0.08 / med 0.22 /
+// dense 0.7 (PALM_CONFIG.density — most palm cells stay bare, that's the
+// grove look). grassFlowers previews as flower heads; its lush grass bed
+// joins at Compile.
+export const FLORA_SPECS: Float32Array = new Float32Array([
+  0, 3, 1, //  grassSparse
+  0, 7, 1, //  grassMed
+  0, 16, 1, // grassLush
+  0, 7, 1, //  grassDry
+  3, 0, 0.08, // palmSparse
+  3, 0, 0.22, // palmMed
+  3, 0, 0.7, //  palmDense
+  1, 14, 1, // bush
+  2, 6, 1, //  grassFlowers
+]);

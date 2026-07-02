@@ -73,6 +73,21 @@ const PAINT_COLLIDER_BASE: usize = game_physics.MAX_HEIGHTFIELDS - MAX_PAINT_SLO
 /// The THPS-style brush beam: a translucent column over the brush footprint.
 const PAINT_BEAM_HEIGHT_METERS: f32 = 42;
 const PAINT_BEAM_ALPHA: f32 = 0.32;
+// Live-foliage preview row caps (req_2497: painting flora grows LITERAL
+// blades/bushes/flowers/palms live). Truncation is LOUD — the Compile bake
+// grows the full population; this is the authoring preview's budget.
+const PAINT_GRASS_ROW_CAP: u32 = 65536;
+const PAINT_BUSH_ROW_CAP: u32 = 16384;
+const PAINT_FLOWER_ROW_CAP: u32 = 16384;
+const PAINT_FROND_ROW_CAP: u32 = 24576;
+const PAINT_TRUNK_ROW_CAP: u32 = 2048;
+// Verbatim palm trunk constants (render3d/palmPopulation.ts PALM_CONFIG +
+// PALM_TRUNK_UNIT_RADIUS) — the live trunk must roll the SAME hash chain the
+// crown does so bark and fronds agree per cell.
+const PALM_TRUNK_UNIT_RADIUS: f64 = 0.13;
+const PALM_TRUNK_RADIUS_MIN: f64 = 0.14;
+const PALM_TRUNK_RADIUS_MAX: f64 = 0.2;
+const PALM_TRUNK_COLOR = [3]f32{ 0.48, 0.38, 0.26 };
 const SHAPE_CYLINDER16: f32 = 3;
 const SHAPE_SPHERE: f32 = 4;
 const SHAPE_GABLE: f32 = 5; // req_0930: the triangular gable-end wall prism
@@ -3126,6 +3141,18 @@ pub const Runtime = struct {
     paint_slot_ground: [MAX_PAINT_SLOTS]?[]f32 = @splat(null),
     /// the water channel's mirror (chunkFloor.ts floorToWaterBody port): per-slot
     /// shore-culled depths + surface heights feeding a second "~water~" node
+    /// live-foliage preview (req_2497): five family nodes (grass blades,
+    /// flower heads, bush clumps, palm fronds, palm trunks) regenerated from
+    /// the painted flora lanes whenever flora or terrain height changes —
+    /// painting a tree paints a TREE, live. Buffers are cap-sized once (the
+    /// static instance region is reserved at first upload and reused).
+    paint_foliage_kids_first: ?usize = null,
+    paint_grass_rows: ?[]f32 = null,
+    paint_flower_rows: ?[]f32 = null,
+    paint_bush_rows: ?[]f32 = null,
+    paint_frond_rows: ?[]f32 = null,
+    paint_trunk_rows: ?[]f32 = null,
+    paint_foliage_ver: u32 = 0,
     paint_water_kids_first: ?usize = null,
     paint_slot_water_ver: [MAX_PAINT_SLOTS]u32 = @splat(0),
     paint_slot_water_key: [MAX_PAINT_SLOTS]?[]u8 = @splat(null),
@@ -3298,6 +3325,11 @@ pub const Runtime = struct {
         for (self.paint_slot_surface) |maybe_buf| {
             if (maybe_buf) |buf| self.allocator.free(buf);
         }
+        if (self.paint_grass_rows) |buf| self.allocator.free(buf);
+        if (self.paint_flower_rows) |buf| self.allocator.free(buf);
+        if (self.paint_bush_rows) |buf| self.allocator.free(buf);
+        if (self.paint_frond_rows) |buf| self.allocator.free(buf);
+        if (self.paint_trunk_rows) |buf| self.allocator.free(buf);
         {
             var it = self.live_slot_keys.valueIterator();
             while (it.next()) |key| self.allocator.free(key.*);
@@ -4673,6 +4705,58 @@ pub const Runtime = struct {
         while (paint_slot < MAX_PAINT_SLOTS) : (paint_slot += 1) {
             try self.kid_list.append(self.allocator, .{ .scene3d_mesh = false });
         }
+        // Live-foliage preview nodes (req_2497): the SAME five family draws the
+        // baked flora recipe expands into — grass blades / flower heads / bush
+        // clumps on the ~grass~ wind pipeline, palm fronds on ~frond~, and lit
+        // palm trunks. Inert until regenPaintFoliage points them at rows grown
+        // from the painted lanes. Foliage rows are the plain 12-float transform
+        // (the shaders read exactly those; the baked 13th shape float is stream
+        // bucketing this dedicated-node path doesn't need).
+        self.paint_foliage_kids_first = self.kid_list.items.len;
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = false,
+            .scene3d_geom_key = "grass-blade",
+            .scene3d_tex_key = "~grass~",
+            .scene3d_vertices = self.grass_blade[0..],
+            .scene3d_vert_count = 36,
+            .scene3d_instance_stride = @intCast(foliage.STRIDE),
+            .scene3d_instance_static = true,
+        });
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = false,
+            .scene3d_geom_key = "flower-head",
+            .scene3d_tex_key = "~grass~",
+            .scene3d_vertices = self.flower_head[0..],
+            .scene3d_vert_count = 36,
+            .scene3d_instance_stride = @intCast(foliage.STRIDE),
+            .scene3d_instance_static = true,
+        });
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = false,
+            .scene3d_geom_key = "bush-clump",
+            .scene3d_tex_key = "~grass~",
+            .scene3d_vertices = self.bush_clump[0..],
+            .scene3d_vert_count = 60,
+            .scene3d_instance_stride = @intCast(foliage.STRIDE),
+            .scene3d_instance_static = true,
+        });
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = false,
+            .scene3d_geom_key = "frond-card",
+            .scene3d_tex_key = "~frond~",
+            .scene3d_vertices = self.frond_card[0..],
+            .scene3d_vert_count = 144,
+            .scene3d_instance_stride = @intCast(foliage.STRIDE),
+            .scene3d_instance_static = true,
+        });
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = false,
+            .scene3d_geom_key = "palm-trunk",
+            .scene3d_vertices = self.palm_trunk[0..],
+            .scene3d_vert_count = 1680,
+            .scene3d_instance_stride = @intCast(foliage.STRIDE),
+            .scene3d_instance_static = true,
+        });
         // The world batches are STATIC (built once at construct, never mutated) —
         // flag them so the host uploads each ONCE and redraws from the retained
         // instance buffer with no per-frame restage/upload. This is what makes a
@@ -6792,6 +6876,7 @@ fn applyPaintLayer(runtime: *Runtime) void {
     }
 
     // painted-chunk mirror: assign slots, re-bake dirty heights, refresh colliders
+    var foliage_stale = false;
     for (map_chunks.slots()) |maybe| {
         const chunk = maybe orelse continue;
         var slot: ?usize = null;
@@ -6834,6 +6919,9 @@ fn applyPaintLayer(runtime: *Runtime) void {
         const tiles_dirty = fresh or chunk.dirty.tiles or chunk.dirty.flora or chunk.dirty.zones or (runtime.paint_slot_used[i] and formula_stale);
         // the water surface is bed + depth, so a re-dug bed moves the water too
         const water_dirty = height_dirty or chunk.dirty.water;
+        // painted flora grows LITERAL foliage (req_2497): regrow when the lanes
+        // change AND when terrain height moves (blades sit on the relief)
+        if (fresh or chunk.dirty.flora or height_dirty) foliage_stale = true;
         if (!height_dirty and !tiles_dirty and !water_dirty) continue;
 
         const half_span = map_chunks.CHUNK_METERS / 2;
@@ -6980,6 +7068,8 @@ fn applyPaintLayer(runtime: *Runtime) void {
         }
     }
 
+    if (foliage_stale) regenPaintFoliage(runtime);
+
     // the brush beam: a translucent column over the footprint at the hover point
     if (runtime.paint_beam_kid) |beam_kid| {
         const node = &runtime.kid_list.items[beam_kid];
@@ -7013,6 +7103,143 @@ fn applyPaintLayer(runtime: *Runtime) void {
         } else {
             node.scene3d_mesh = false;
         }
+    }
+}
+
+// ── the live-foliage preview (req_2497) ───────────────────────────────────────
+// Painting flora grows LITERAL foliage: the SAME foliage.zig generators the
+// baked FLORA recipe expands through, driven straight off the painted lanes.
+// Regenerated whole (all painted chunks) on any flora/height change —
+// authoring-rate work; the nodes are static instance batches re-uploaded once
+// per regen via the version bump, zero per-frame cost.
+
+fn lerpF64(a: f64, b: f64, t: f64) f64 {
+    return a + (b - a) * t;
+}
+
+/// Append one 12-float foliage row; false = family budget full.
+fn pushFoliageRow(buf: []f32, count: *u32, cap: u32, row: [foliage.STRIDE]f32) bool {
+    if (count.* >= cap) return false;
+    const at = @as(usize, count.*) * foliage.STRIDE;
+    @memcpy(buf[at .. at + foliage.STRIDE], row[0..]);
+    count.* += 1;
+    return true;
+}
+
+fn ensureFoliageBuf(runtime: *Runtime, slot: *?[]f32, cap: u32) ?[]f32 {
+    if (slot.*) |buf| return buf;
+    const buf = runtime.allocator.alloc(f32, @as(usize, cap) * foliage.STRIDE) catch return null;
+    slot.* = buf;
+    return buf;
+}
+
+fn regenPaintFoliage(runtime: *Runtime) void {
+    const first = runtime.paint_foliage_kids_first orelse return;
+    const grass = ensureFoliageBuf(runtime, &runtime.paint_grass_rows, PAINT_GRASS_ROW_CAP) orelse return;
+    const flowers = ensureFoliageBuf(runtime, &runtime.paint_flower_rows, PAINT_FLOWER_ROW_CAP) orelse return;
+    const bush = ensureFoliageBuf(runtime, &runtime.paint_bush_rows, PAINT_BUSH_ROW_CAP) orelse return;
+    const frond = ensureFoliageBuf(runtime, &runtime.paint_frond_rows, PAINT_FROND_ROW_CAP) orelse return;
+    const trunk = ensureFoliageBuf(runtime, &runtime.paint_trunk_rows, PAINT_TRUNK_ROW_CAP) orelse return;
+
+    var grass_n: u32 = 0;
+    var flower_n: u32 = 0;
+    var bush_n: u32 = 0;
+    var frond_n: u32 = 0;
+    var trunk_n: u32 = 0;
+    var full = false;
+
+    for (map_chunks.slots()) |maybe| {
+        const chunk = maybe orelse continue;
+        var lz: i32 = 0;
+        while (lz < map_chunks.CHUNK_TILES) : (lz += 1) {
+            var lx: i32 = 0;
+            while (lx < map_chunks.CHUNK_TILES) : (lx += 1) {
+                const idx = @as(usize, @intCast(lz)) * map_chunks.TILE_COLS + @as(usize, @intCast(lx));
+                var lane: usize = 0;
+                while (lane < map_chunks.FLORA_LAYER_COUNT) : (lane += 1) {
+                    const kind = chunk.flora[lane][idx];
+                    if (kind < 0) continue;
+                    const spec = map_paint.floraSpec(kind) orelse continue;
+                    const wx = chunk.minX() + @as(f32, @floatFromInt(lx)) + 0.5;
+                    const wz = chunk.minZ() + @as(f32, @floatFromInt(lz)) + 0.5;
+                    const top: f64 = map_paint.heightAt(wx, wz);
+                    const gx = chunk.cx * map_chunks.CHUNK_TILES + lx;
+                    const gz = chunk.cz * map_chunks.CHUNK_TILES + lz;
+                    const cell_key: u32 = (@as(u32, @bitCast(gx)) *% 0x9E3779B1) ^
+                        (@as(u32, @bitCast(gz)) *% 0x85EBCA77) ^
+                        (@as(u32, @intCast(lane + 1)) *% 0xC2B2AE3D);
+
+                    switch (spec.spec) {
+                        3 => {
+                            // Palms are density-GATED per cell (most stay bare — the
+                            // grove look) and roll trunk + crown off the SAME hash
+                            // chain palmPopulation.ts uses, so bark and fronds agree.
+                            const seed = foliage.mix(cell_key ^ 0x9d2c5680);
+                            if (foliage.unit(seed) > spec.chance) continue;
+                            const h0 = foliage.mix(seed ^ 0x1b56c4e9);
+                            const h1 = foliage.mix(h0 ^ 0x68bc21eb);
+                            const h2 = foliage.mix(h1 ^ 0x7feb352d);
+                            const trunk_h = lerpF64(foliage.PALM.trunk_h_min, foliage.PALM.trunk_h_max, foliage.unit(h0));
+                            const radius = lerpF64(PALM_TRUNK_RADIUS_MIN, PALM_TRUNK_RADIUS_MAX, foliage.unit(h1));
+                            const lean = (foliage.unit(foliage.mix(h2 ^ 0x51)) - 0.5) * 0.8 * 140.0;
+                            const px = @as(f64, wx) + (foliage.unit(foliage.mix(h0 ^ 0xa5)) - 0.5) * 0.7;
+                            const pz = @as(f64, wz) + (foliage.unit(foliage.mix(h1 ^ 0xa5)) - 0.5) * 0.7;
+                            const span: f32 = @floatCast(radius / PALM_TRUNK_UNIT_RADIUS);
+                            if (!pushFoliageRow(trunk, &trunk_n, PAINT_TRUNK_ROW_CAP, .{
+                                @floatCast(px),        @as(f32, @floatCast(top)), @floatCast(pz),
+                                0,                     @floatCast(lean),          0,
+                                span,                  @floatCast(trunk_h),       span,
+                                PALM_TRUNK_COLOR[0],   PALM_TRUNK_COLOR[1],       PALM_TRUNK_COLOR[2],
+                            })) full = true;
+                            const crown = foliage.palmCrown(&foliage.PALM, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key);
+                            const fc = crown.total();
+                            var k: u32 = 0;
+                            while (k < fc) : (k += 1) {
+                                if (!pushFoliageRow(frond, &frond_n, PAINT_FROND_ROW_CAP, foliage.palmFrondRow(&crown, k))) full = true;
+                            }
+                        },
+                        2 => {
+                            var k: u32 = 0;
+                            while (k < spec.count) : (k += 1) {
+                                if (!pushFoliageRow(flowers, &flower_n, PAINT_FLOWER_ROW_CAP, foliage.flowerRow(&foliage.FLOWER, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) full = true;
+                            }
+                        },
+                        1 => {
+                            var k: u32 = 0;
+                            while (k < spec.count) : (k += 1) {
+                                if (!pushFoliageRow(bush, &bush_n, PAINT_BUSH_ROW_CAP, foliage.bladeRow(&foliage.BUSH, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) full = true;
+                            }
+                        },
+                        else => {
+                            var k: u32 = 0;
+                            while (k < spec.count) : (k += 1) {
+                                if (!pushFoliageRow(grass, &grass_n, PAINT_GRASS_ROW_CAP, foliage.bladeRow(&foliage.GRASS, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) full = true;
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+    if (full) {
+        log.print("[paint] LIVE FOLIAGE PREVIEW FULL (grass {d}/{d} flowers {d}/{d} bush {d}/{d} fronds {d}/{d} trunks {d}/{d}) — the Compile bake grows the full population\n", .{
+            grass_n, PAINT_GRASS_ROW_CAP, flower_n, PAINT_FLOWER_ROW_CAP, bush_n, PAINT_BUSH_ROW_CAP, frond_n, PAINT_FROND_ROW_CAP, trunk_n, PAINT_TRUNK_ROW_CAP,
+        });
+    }
+
+    runtime.paint_foliage_ver += 1;
+    const bufs = [_][]f32{ grass, flowers, bush, frond, trunk };
+    const counts = [_]u32{ grass_n, flower_n, bush_n, frond_n, trunk_n };
+    for (bufs, counts, 0..) |buf, n, fi| {
+        const node = &runtime.kid_list.items[first + fi];
+        // the FULL cap-sized slice every time: the static instance region is
+        // reserved at first upload and re-uploaded in place on version bumps —
+        // a constant slice keeps the retained offset valid forever
+        node.scene3d_instance_data = buf;
+        node.scene3d_instance_count = n;
+        node.scene3d_instance_version = runtime.paint_foliage_ver;
+        node.scene3d_mesh = n > 0;
     }
 }
 

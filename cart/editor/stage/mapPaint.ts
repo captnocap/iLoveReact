@@ -6,11 +6,11 @@
 // tracks the chrome.
 import {
   mapChunkCount, mapGrowChunk, mapHostLive, mapLoadFile, mapSaveFile, mapSetGroundLook,
-  mapSetTool, mapSetZonePalette, mapRoadSetKinds, mapRoadSetProfile,
+  mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds, mapRoadSetProfile,
   type MapBrushProfile, type MapBrushShape, type MapTerrainTool,
 } from '../../../runtime/game/map';
 import { editorGroundFormula, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf, type TileMaterialOverrides } from '../render3d/groundFormula';
-import { FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, ZONE_COLORS } from '../world/floraKinds';
+import { FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, FLORA_SPECS, ZONE_COLORS } from '../world/floraKinds';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 
 export type MapZoneDef = { id: string; name: string; color: string };
@@ -138,6 +138,7 @@ export function applyMapPaintEffects(prev: MapPaintState, next: MapPaintState): 
     if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0);
     mapSetGroundLook(editorGroundFormula(next.tileMaterialOverrides), TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(next.zones));
     mapRoadSetKinds(ROAD_KIND_INDICES);
+    mapSetFloraSpecs(FLORA_SPECS); // req_2497: painting flora grows LITERAL foliage live
   } else if (prev.tileMaterialOverrides !== next.tileMaterialOverrides) {
     // A rebind regenerates the formula (the kind→material tables are baked
     // into the WGSL) — one shader rebuild per pick, authoring-rate.
