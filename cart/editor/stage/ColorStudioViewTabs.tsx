@@ -1,10 +1,12 @@
+// editor/stage/ColorStudioViewTabs.tsx — the studio's two views (req_2501:
+// the five-lens workbench + the broken No-Modes orbit consolidated into ONE
+// Library surface; Material Palette stays the shader-slot editing page).
 import { C } from '../workspace.cls';
 import type { EditorState } from '../data/types';
 
 const VIEW_OPTIONS: Array<{ id: EditorState['colorStudioView']; label: string }> = [
   { id: 'materialPalette', label: 'Material Palette' },
-  { id: 'workbench', label: 'Workbench' },
-  { id: 'orbit', label: 'No-Modes' },
+  { id: 'library', label: 'Library' },
 ];
 
 export default function ColorStudioViewTabs(props: { view: EditorState['colorStudioView']; onSelect: (view: EditorState['colorStudioView']) => void }) {

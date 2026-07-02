@@ -1,9 +1,9 @@
-// editor/data/colorSpine.ts — the unified Color Studio spine: one current
-// color + one palette tray, with pure derivations for each lens (Field, Mix,
-// Scene, Ramp, Library) and the No-Modes orbit. Mirrors turn 3a of
-// design_handoff_color_studio/Color Pickers.dc.html — see DESIGN_INTAKE.md
-// "Color Studio: Material/Shader-Aware Color Tool". Pure data + pure helpers,
-// same shape as colorStudio.ts (which owns the Material Palette / turn 4a).
+// editor/data/colorSpine.ts — the Color Library's spine: one current color +
+// one saved palette, with pure derivations (fits/ramp/pigments/scene/sets)
+// that ColorLibraryPanel shows ALL AT ONCE (req_2501 — the five lens tabs and
+// the No-Modes orbit are gone; they were five faces of the same derivations).
+// Pure data + pure helpers, same shape as colorStudio.ts (which owns the
+// Material Palette / shader slots).
 import { hueDistance, oklchToHex, rotateHue, type OklchColor } from '../../../runtime/paint/colors';
 
 export const SPINE_DEFAULT_CURRENT: OklchColor = { l: 0.68, c: 0.15, h: 55 };
@@ -13,17 +13,6 @@ export const SPINE_DEFAULT_PALETTE: OklchColor[] = [
   { l: 0.60, c: 0.12, h: 230 },
   { l: 0.70, c: 0.13, h: 155 },
 ];
-
-export const LENS_ORDER = ['field', 'mix', 'scene', 'ramp', 'library'] as const;
-export type ColorLens = typeof LENS_ORDER[number];
-
-export const LENS_LABELS: Record<ColorLens, string> = {
-  field: 'Field',
-  mix: 'Mix',
-  scene: 'Scene',
-  ramp: 'Ramp',
-  library: 'Library',
-};
 
 const NAME_BANDS: Array<[number, string]> = [
   [15, 'red'], [45, 'amber'], [80, 'citron'], [140, 'green'], [195, 'teal'],
@@ -55,24 +44,11 @@ const FIT_OFFSETS: Array<{ dH: number; label: string }> = [
   { dH: -150, label: 'split' },
 ];
 
-/** "Fits well right now" — re-derives live from the current color. Shared by Workbench and No-Modes. */
+/** "Fits well right now" — harmony derivations, re-derived live from the current color. */
 export function fitsWellNow(current: OklchColor): FitEntry[] {
   return FIT_OFFSETS.map((f) => {
     const color = f.dH === 0 ? current : rotateHue(current, f.dH);
     return { label: f.label, color, css: oklchToHex(color) };
-  });
-}
-
-export type FieldNode = { color: OklchColor; css: string; isCurrent: boolean; xPct: number; yPct: number };
-
-const FIELD_OFFSETS = [0, -30, 30, 180];
-
-/** Flat hue/lightness field for the Field lens — no wheel. */
-export function fieldNodes(current: OklchColor): FieldNode[] {
-  return FIELD_OFFSETS.map((dH, index) => {
-    const color = dH === 0 ? current : rotateHue(current, dH);
-    const hue = ((color.h % 360) + 360) % 360;
-    return { color, css: oklchToHex(color), isCurrent: index === 0, xPct: (hue / 360) * 100, yPct: (1 - color.l) * 100 };
   });
 }
 
@@ -112,26 +88,21 @@ export function sceneSwatches(pickedCss: string | null): SceneSwatch[] {
 
 export type RampStep = { color: OklchColor; css: string };
 
-/** Ramp Forge — perceptually even OKLCH ramp with cool-shadow/warm-highlight hue drift. */
+/** Ramp — perceptually even OKLCH shadow→light steps with cool-shadow /
+ *  warm-highlight hue drift. Spans near-black to near-white so the ramp is
+ *  also a fast road to the extremes (req_2500). */
 export function rampForge(current: OklchColor, steps: number): RampStep[] {
   const out: RampStep[] = [];
   const n = Math.max(2, steps);
   for (let i = 0; i < n; i++) {
     const t = i / (n - 1);
-    const l = 0.30 + (0.95 - 0.30) * t;
+    const l = 0.08 + (0.97 - 0.08) * t;
     const c = current.c * (1 + 0.22 * Math.sin(Math.PI * t));
     const h = current.h + (t - 0.5) * -42;
     const color: OklchColor = { l, c, h };
     out.push({ color, css: oklchToHex(color) });
   }
   return out;
-}
-
-export function rampBarCss(current: OklchColor): string {
-  const a = oklchToHex({ l: 0.30, c: current.c, h: current.h + 21 });
-  const b = oklchToHex({ l: 0.62, c: current.c * 1.2, h: current.h });
-  const c = oklchToHex({ l: 0.95, c: current.c, h: current.h - 21 });
-  return `linear-gradient(90deg, ${a}, ${b}, ${c})`;
 }
 
 export type SpinePaletteSet = { name: string; colors: OklchColor[] };

@@ -1,6 +1,5 @@
 import { C } from '../workspace.cls';
 import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
-import type { ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import { modelPackageById } from '../data/content';
 import { modelDocument } from '../data/documents';
@@ -35,9 +34,6 @@ export default function Stage(props: {
   onColorSpineCurrent: (color: OklchColor) => void;
   onColorSpineAddToTray: () => void;
   onColorSpineTrayPick: (color: OklchColor) => void;
-  onColorSpineLens: (lens: ColorLens) => void;
-  onColorSpineLibraryFilter: (filter: 'match' | 'all') => void;
-  onColorSpineRampSteps: (steps: number) => void;
   onColorSpineScenePick: (color: OklchColor, css: string) => void;
   onColorSpineLoadLibrarySet: (colors: OklchColor[]) => void;
 }) {
@@ -90,9 +86,6 @@ export default function Stage(props: {
             onSpineCurrent={props.onColorSpineCurrent}
             onSpineAddToTray={props.onColorSpineAddToTray}
             onSpineTrayPick={props.onColorSpineTrayPick}
-            onSpineLens={props.onColorSpineLens}
-            onSpineLibraryFilter={props.onColorSpineLibraryFilter}
-            onSpineRampSteps={props.onColorSpineRampSteps}
             onSpineScenePick={props.onColorSpineScenePick}
             onSpineLoadLibrarySet={props.onColorSpineLoadLibrarySet}
           />

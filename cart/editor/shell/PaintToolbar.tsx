@@ -16,8 +16,7 @@ import { Icon } from '../../../runtime/icons/Icon';
 import { type Brush, type BrushTool } from '@reactjit/runtime/paint';
 import { brushFromPreset, BRUSH_PRESETS } from '../../../runtime/paint/model';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
-import ColorStudioWorkbench from '../stage/ColorStudioWorkbench';
-import type { ColorLens } from '../data/colorSpine';
+import ColorLibraryPanel from '../stage/ColorLibraryPanel';
 import type { ColorSpineHandlers } from '../inspector/ModelBrushDock';
 import { shaderGroups, defaultShaderData, shaderSpec, withPalette, type ShaderSpec } from '../textures/shaders';
 import type { Rgb } from '../data/types';
@@ -32,9 +31,6 @@ type Ink = {
   onBrush: (b: Brush) => void;
   current: OklchColor;
   palette: OklchColor[];
-  lens: ColorLens;
-  libraryFilter: 'match' | 'all';
-  rampSteps: number;
   scenePick: string | null;
   spine: ColorSpineHandlers;
   // Color Studio slot overrides for (specId, variant) — folded into a picked
@@ -193,12 +189,11 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; pickColor:
         <Text style={{ color: DIM, fontSize: 10 }}>{tab === 'color' ? 'a color swatch' : 'a live shader'}</Text>
       </Row>
       {tab === 'color' ? (
-        <ColorStudioWorkbench
-          current={props.current} palette={props.palette} lens={props.lens}
-          libraryFilter={props.libraryFilter} rampSteps={props.rampSteps} scenePick={props.scenePick}
+        <ColorLibraryPanel
+          current={props.current} palette={props.palette} scenePick={props.scenePick}
           onSetCurrent={props.pickColor} onAddToTray={props.spine.onAddToTray} onPickTray={props.pickColor}
-          onSetLens={props.spine.onSetLens} onSetLibraryFilter={props.spine.onSetLibraryFilter} onSetRampSteps={props.spine.onSetRampSteps}
-          onScenePick={props.spine.onScenePick} onLoadLibrarySet={props.spine.onLoadLibrarySet}
+          onScenePick={(c, css) => { props.spine.onScenePick(c, css); props.pickColor(c); }}
+          onLoadLibrarySet={props.spine.onLoadLibrarySet}
         />
       ) : (
         (() => {

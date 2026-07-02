@@ -43,7 +43,7 @@ import { encodeRows, parseQuantizeProbe } from '../textures/pixelTexture';
 import { loadTexturePackages, textureSpec, savePixelTexture, saveExactImage } from '../data/texturePackage';
 import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageDialog';
 import { readFileBase64 } from '../../../runtime/hooks/fs';
-import { oklchName, type ColorLens } from '../data/colorSpine';
+import { oklchName } from '../data/colorSpine';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import { useBuildJournal } from '../data/journal';
 import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
@@ -727,18 +727,6 @@ export default function AppFrame() {
     setState((prev) => ({ ...prev, colorSpineCurrent: color, status: `Color Studio current: ${oklchName(color)}` }));
   };
 
-  const setColorSpineLens = (lens: ColorLens) => {
-    setState((prev) => ({ ...prev, colorSpineLens: lens, status: `Color Studio lens: ${lens}` }));
-  };
-
-  const setColorSpineLibraryFilter = (filter: 'match' | 'all') => {
-    setState((prev) => ({ ...prev, colorSpineLibraryFilter: filter }));
-  };
-
-  const setColorSpineRampSteps = (steps: number) => {
-    setState((prev) => ({ ...prev, colorSpineRampSteps: steps }));
-  };
-
   const pickColorSpineScene = (color: OklchColor, css: string) => {
     setState((prev) => ({ ...prev, colorSpineCurrent: color, colorSpineScenePick: css, status: `Color Studio current: ${oklchName(color)} (from scene)` }));
   };
@@ -1176,9 +1164,6 @@ export default function AppFrame() {
             onColorSpineCurrent={setColorSpineCurrent}
             onColorSpineAddToTray={addColorSpineToTray}
             onColorSpineTrayPick={pickColorSpineTray}
-            onColorSpineLens={setColorSpineLens}
-            onColorSpineLibraryFilter={setColorSpineLibraryFilter}
-            onColorSpineRampSteps={setColorSpineRampSteps}
             onColorSpineScenePick={pickColorSpineScene}
             onColorSpineLoadLibrarySet={loadColorSpineLibrarySet}
           />
@@ -1198,9 +1183,6 @@ export default function AppFrame() {
               onSetCurrent: setColorSpineCurrent,
               onAddToTray: addColorSpineToTray,
               onPickTray: pickColorSpineTray,
-              onSetLens: setColorSpineLens,
-              onSetLibraryFilter: setColorSpineLibraryFilter,
-              onSetRampSteps: setColorSpineRampSteps,
               onScenePick: pickColorSpineScene,
               onLoadLibrarySet: loadColorSpineLibrarySet,
             }}
@@ -1295,18 +1277,12 @@ export default function AppFrame() {
               onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
               current={state.colorSpineCurrent}
               palette={state.colorSpinePalette}
-              lens={state.colorSpineLens}
-              libraryFilter={state.colorSpineLibraryFilter}
-              rampSteps={state.colorSpineRampSteps}
               scenePick={state.colorSpineScenePick}
               paletteFor={paintPaletteFor}
               spine={{
                 onSetCurrent: setColorSpineCurrent,
                 onAddToTray: addColorSpineToTray,
                 onPickTray: pickColorSpineTray,
-                onSetLens: setColorSpineLens,
-                onSetLibraryFilter: setColorSpineLibraryFilter,
-                onSetRampSteps: setColorSpineRampSteps,
                 onScenePick: pickColorSpineScene,
                 onLoadLibrarySet: loadColorSpineLibrarySet,
               }}
@@ -1323,9 +1299,6 @@ export default function AppFrame() {
             onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
             current={state.colorSpineCurrent}
             palette={state.colorSpinePalette}
-            lens={state.colorSpineLens}
-            libraryFilter={state.colorSpineLibraryFilter}
-            rampSteps={state.colorSpineRampSteps}
             scenePick={state.colorSpineScenePick}
             paletteFor={paintPaletteFor}
             onEditMaterial={openColorStudioForSpec}
@@ -1333,9 +1306,6 @@ export default function AppFrame() {
               onSetCurrent: setColorSpineCurrent,
               onAddToTray: addColorSpineToTray,
               onPickTray: pickColorSpineTray,
-              onSetLens: setColorSpineLens,
-              onSetLibraryFilter: setColorSpineLibraryFilter,
-              onSetRampSteps: setColorSpineRampSteps,
               onScenePick: pickColorSpineScene,
               onLoadLibrarySet: loadColorSpineLibrarySet,
             }}

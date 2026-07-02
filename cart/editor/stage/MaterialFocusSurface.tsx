@@ -27,16 +27,13 @@ import { FILL_GRADES } from '../textures/shaders';
 import { oklchToHex, oklchToRgb01 } from '../../../runtime/paint/colors';
 import { C, accentFor } from '../workspace.cls';
 import type { Asset, EditorState, Rgb } from '../data/types';
-import type { ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import ColorStudioViewTabs from './ColorStudioViewTabs';
-import ColorStudioWorkbench from './ColorStudioWorkbench';
-import ColorStudioOrbit from './ColorStudioOrbit';
+import ColorLibraryPanel from './ColorLibraryPanel';
 
 const VIEW_LABELS: Record<EditorState['colorStudioView'], string> = {
   materialPalette: 'Material Palette',
-  workbench: 'Workbench',
-  orbit: 'No-Modes',
+  library: 'Library',
 };
 
 const MATERIAL_STRIP_PAGE = 6;
@@ -56,9 +53,6 @@ export default function MaterialFocusSurface(props: {
   onSpineCurrent: (color: OklchColor) => void;
   onSpineAddToTray: () => void;
   onSpineTrayPick: (color: OklchColor) => void;
-  onSpineLens: (lens: ColorLens) => void;
-  onSpineLibraryFilter: (filter: 'match' | 'all') => void;
-  onSpineRampSteps: (steps: number) => void;
   onSpineScenePick: (color: OklchColor, css: string) => void;
   onSpineLoadLibrarySet: (colors: OklchColor[]) => void;
 }) {
@@ -112,33 +106,21 @@ export default function MaterialFocusSurface(props: {
       </C.HW_FocusHeader>
       <C.HW_ColorStudioShell>
         <ColorStudioViewTabs view={props.state.colorStudioView} onSelect={props.onView} />
-        {props.state.colorStudioView === 'workbench' ? (
-          <ColorStudioWorkbench
-            current={props.state.colorSpineCurrent}
-            palette={props.state.colorSpinePalette}
-            lens={props.state.colorSpineLens}
-            libraryFilter={props.state.colorSpineLibraryFilter}
-            rampSteps={props.state.colorSpineRampSteps}
-            scenePick={props.state.colorSpineScenePick}
-            onSetCurrent={props.onSpineCurrent}
-            onAddToTray={props.onSpineAddToTray}
-            onPickTray={props.onSpineTrayPick}
-            onSetLens={props.onSpineLens}
-            onSetLibraryFilter={props.onSpineLibraryFilter}
-            onSetRampSteps={props.onSpineRampSteps}
-            onScenePick={props.onSpineScenePick}
-            onLoadLibrarySet={props.onSpineLoadLibrarySet}
-          />
-        ) : props.state.colorStudioView === 'orbit' ? (
-          <ColorStudioOrbit
-            current={props.state.colorSpineCurrent}
-            palette={props.state.colorSpinePalette}
-            scenePick={props.state.colorSpineScenePick}
-            onSetCurrent={props.onSpineCurrent}
-            onAddToTray={props.onSpineAddToTray}
-            onPickTray={props.onSpineTrayPick}
-            onScenePick={props.onSpineScenePick}
-          />
+        {props.state.colorStudioView === 'library' ? (
+          <C.HW_ColorPreviewPanel>
+            <C.HW_ColorStudioBody style={{ flexDirection: 'column', padding: 14 }}>
+              <ColorLibraryPanel
+                current={props.state.colorSpineCurrent}
+                palette={props.state.colorSpinePalette}
+                scenePick={props.state.colorSpineScenePick}
+                onSetCurrent={props.onSpineCurrent}
+                onAddToTray={props.onSpineAddToTray}
+                onPickTray={props.onSpineTrayPick}
+                onScenePick={props.onSpineScenePick}
+                onLoadLibrarySet={props.onSpineLoadLibrarySet}
+              />
+            </C.HW_ColorStudioBody>
+          </C.HW_ColorPreviewPanel>
         ) : (
         <>
         <C.HW_ColorMaterialStrip>

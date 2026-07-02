@@ -1,7 +1,6 @@
 import { C } from '../workspace.cls';
 import type { Asset, Command, EditorState, ModelToolApi, ModelToolSnapshot, Rgb, ViewMode } from '../data/types';
 import type { OutlinerHandlers } from './ModelDocumentSurface';
-import type { ColorLens } from '../data/colorSpine';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import ToolOptions from './ToolOptions';
 import Stage from './Stage';
@@ -37,9 +36,6 @@ export default function Workspace(props: {
   onColorSpineCurrent: (color: OklchColor) => void;
   onColorSpineAddToTray: () => void;
   onColorSpineTrayPick: (color: OklchColor) => void;
-  onColorSpineLens: (lens: ColorLens) => void;
-  onColorSpineLibraryFilter: (filter: 'match' | 'all') => void;
-  onColorSpineRampSteps: (steps: number) => void;
   onColorSpineScenePick: (color: OklchColor, css: string) => void;
   onColorSpineLoadLibrarySet: (colors: OklchColor[]) => void;
 }) {

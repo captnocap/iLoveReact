@@ -10,7 +10,6 @@ import type {
 import type { DecalDoc } from '../textures/decal';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import type { Brush, BrushTool, Palette } from '../../../runtime/paint/model';
-import type { ColorLens } from './colorSpine';
 import type { EditMesh } from '../model/editMesh';
 import type { MapPaintState } from '../stage/mapPaint';
 
@@ -342,12 +341,11 @@ export type EditorState = {
   // Slot overrides keyed `${specId}:${variant}:${slot}` → RGB 0..1. Resolution:
   // override ?? the slot's baked constant from the registry.
   colorStudioOverrides: Record<string, Rgb>;
-  colorStudioView: 'materialPalette' | 'workbench' | 'orbit';
+  // req_2501: the five lens tabs + the No-Modes orbit consolidated into ONE
+  // 'library' surface (ColorLibraryPanel) — lens/filter/step state died with them.
+  colorStudioView: 'materialPalette' | 'library';
   colorSpineCurrent: OklchColor;
   colorSpinePalette: OklchColor[];
-  colorSpineLens: ColorLens;
-  colorSpineLibraryFilter: 'match' | 'all';
-  colorSpineRampSteps: number;
   colorSpineScenePick: string | null;
   buildDialogOpen: boolean;
   eventbusPopoverOpen: boolean;

@@ -1,5 +1,5 @@
 // editor/inspector/ModelBrushDock.tsx — the model-paint brush's authoring dock. ONE color
-// system: the brush picks colour through the SAME Color Studio (ColorStudioWorkbench) the
+// system: the brush picks colour through the SAME Color Library (ColorLibraryPanel) the
 // material surface uses, bound to the SAME persistent colorSpine state — not BrushKit's generic
 // hue-wheel, which is exactly the "conventional colour picker" the Color Studio handoff replaces
 // (req_2313/2314). BrushKit stays only for the non-colour brush controls (shape / size /
@@ -15,17 +15,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Col, Text } from '../../../runtime/primitives';
 import { BrushKit, DARK_THEME, type Brush, type BrushTool } from '@reactjit/runtime/paint';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
-import type { ColorLens } from '../data/colorSpine';
-import ColorStudioWorkbench from '../stage/ColorStudioWorkbench';
+import ColorLibraryPanel from '../stage/ColorLibraryPanel';
 import ModelShaderBucket from './ModelShaderBucket';
 
 export type ColorSpineHandlers = {
   onSetCurrent: (color: OklchColor) => void;
   onAddToTray: () => void;
   onPickTray: (color: OklchColor) => void;
-  onSetLens: (lens: ColorLens) => void;
-  onSetLibraryFilter: (filter: 'match' | 'all') => void;
-  onSetRampSteps: (steps: number) => void;
   onScenePick: (color: OklchColor, css: string) => void;
   onLoadLibrarySet: (colors: OklchColor[]) => void;
 };
@@ -73,9 +69,6 @@ export default function ModelBrushDock(props: {
   onBrush: (b: Brush) => void;
   current: OklchColor;
   palette: OklchColor[];
-  lens: ColorLens;
-  libraryFilter: 'match' | 'all';
-  rampSteps: number;
   scenePick: string | null;
   spine: ColorSpineHandlers;
   paletteFor?: (specId: string, variant: number) => [number, number, number][] | null;
@@ -83,19 +76,13 @@ export default function ModelBrushDock(props: {
   return (
     <Col style={{ gap: 8, paddingTop: 10, marginTop: 10, borderTopWidth: 1, borderColor: DARK_THEME.frame }}>
       <Text style={{ color: DARK_THEME.dim, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>BRUSH COLOR</Text>
-      <ColorStudioWorkbench
+      <ColorLibraryPanel
         current={props.current}
         palette={props.palette}
-        lens={props.lens}
-        libraryFilter={props.libraryFilter}
-        rampSteps={props.rampSteps}
         scenePick={props.scenePick}
         onSetCurrent={props.spine.onSetCurrent}
         onAddToTray={props.spine.onAddToTray}
         onPickTray={props.spine.onPickTray}
-        onSetLens={props.spine.onSetLens}
-        onSetLibraryFilter={props.spine.onSetLibraryFilter}
-        onSetRampSteps={props.spine.onSetRampSteps}
         onScenePick={props.spine.onScenePick}
         onLoadLibrarySet={props.spine.onLoadLibrarySet}
       />
