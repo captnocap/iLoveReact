@@ -106,10 +106,24 @@ export type ModelToolApi = {
   // Light-rig switches — flip a light on/off (Flat is the even paint-true master).
   toggleLight: (which: LightId) => void;
 };
+// A FILE-BACKED multi-part model: the base part is an imported .glb/.obj the HOST parses
+// (geometry never crosses the bridge), and `appends` replay the doc's other parts
+// (primitives added next to the import) into the live mesh on mount. The base import
+// becomes ONE outliner part: per-triangle face groups + a part range over the whole file,
+// so scope/hide/delete/weld treat it like any composed part.
+export type ModelViewFileParts = {
+  path: string;
+  basePartId: string;
+  baseColor: string;
+  baseHidden?: boolean;
+  appends: { partId: string; color: string; positions: Float32Array; faceGroups: Uint32Array }[];
+};
+export type PartRange = { partId: string; lo: number; hi: number };
 export type ModelViewProps = {
   initialPath?: string;
   initialTitle?: string;
   initialMesh?: ModelViewInitialMesh;
+  initialFileParts?: ModelViewFileParts;
   allowFilePicker?: boolean;
   trackAttribution?: boolean;
   // When the editor hosts the viewer, its toolbar + context menu own the tool
@@ -118,6 +132,9 @@ export type ModelViewProps = {
   hostChrome?: boolean;
   onToolApi?: (api: ModelToolApi) => void;
   onToolState?: (state: ModelToolSnapshot) => void;
+  // Fired after a file-parts mount with each part's authored-group range in the freshly
+  // loaded host mesh — the shell stamps these onto its outliner parts (lo/hi).
+  onPartRanges?: (ranges: PartRange[]) => void;
 };
 
 /** sha256 of the file bytes (host door) — keys attribution to the content. */
@@ -304,7 +321,7 @@ const DETAIL_LEVELS = [16, 32, 64, 128, 256] as const;
 // paints finer there — exactly what you want when the strokes need to get small.
 const brushRadius = (size: number) => Math.max(0.5, size / 2);
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges }: ModelViewProps = {}) {
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(false);
@@ -552,6 +569,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
         setInkWarn(`Shader ink '${spec.label}' failed to bake — the brush will paint flat color. Host log has details.`);
       } else {
         setInkWarn(null);
+        // A material ink can't READ at fill-only detail: the face patch is a
+        // single texel, so the host degrades a fill to ONE mid-image sample —
+        // the whole face becomes one flat color from the shader (req_2503,
+        // stampInner's g_patch<=1 path). Dipping a shader auto-raises the
+        // paint resolution so the material's look actually deposits — the
+        // same auto-pick entering the brush tool uses.
+        if (detail === 1) {
+          const applied = changeDetail(autoDetailForTris(model ? model.count / 3 : 0));
+          if (applied <= 1) {
+            setInkWarn('The paint atlas could not leave fill-only detail — the shader will paint as one flat color. Lower the mesh density or paint resolution budget.');
+          }
+        }
       }
       return;
     }
@@ -617,6 +646,45 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     }
   };
 
+  // Mount a FILE-BACKED multi-part model: host-parse the imported file as the base part,
+  // give it per-triangle face groups + a part range over the whole import (so the outliner
+  // can scope/hide/delete it and the weld keeps it separate), then replay the doc's other
+  // parts as appends. Reports every part's landed range up so the shell stamps its outliner.
+  const applyFileParts = (spec: ModelViewFileParts) => {
+    const loaded = loadModelFile(spec.path);
+    if (!loaded) {
+      setError(`Could not load ${spec.path.split('/').pop()}`);
+      return;
+    }
+    const tris = Math.floor(loaded.count / 3);
+    // One authored group per triangle: imports have no n-gon grouping, so every edge stays
+    // a real (boundary) edge, and the group ids give the part machinery a range to own.
+    const groups = new Uint32Array(tris);
+    for (let i = 0; i < tris; i++) groups[i] = i;
+    host.__mesh_set_face_groups?.(groups);
+    const [br, bg, bb] = hexToRgb01(spec.baseColor);
+    host.__model_paint_group_range?.(0, tris, Math.round(br * 255), Math.round(bg * 255), Math.round(bb * 255));
+    const ranges: PartRange[] = [{ partId: spec.basePartId, lo: 0, hi: tris }];
+    partRangesRef.current = [{ lo: 0, hi: tris }];
+    let current = loaded;
+    for (const ap of spec.appends) {
+      const r = meshAppendGroup(ap.positions, ap.faceGroups);
+      if (!r?.ok || r.lo == null || r.hi == null) continue;
+      const [ar, ag, ab] = hexToRgb01(ap.color);
+      host.__model_paint_group_range?.(r.lo, r.hi, Math.round(ar * 255), Math.round(ag * 255), Math.round(ab * 255));
+      ranges.push({ partId: ap.partId, lo: r.lo, hi: r.hi });
+      partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
+      if (typeof r.key === 'string' && typeof r.count === 'number') current = { ...current, key: r.key, count: r.count };
+    }
+    meshSetPartRanges(partRangesRef.current);
+    if (spec.baseHidden) meshSetGroupHidden(0, tris, true);
+    setModel(current);
+    setError(null);
+    setQuality(1);
+    setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 });
+    onPartRanges?.(ranges);
+  };
+
   // Open the native OS file picker (zenity, via the shared runtime pickFile). Async —
   // the dialog runs in a subprocess and resolves with the chosen path, or null on
   // cancel. This is the primary way in; drag-drop below is a bonus.
@@ -641,7 +709,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     // NOT per drag-move) so the count HUD refreshes without any JS in the interaction loop.
     (globalThis as any).__meshEditSelChanged = () => setSelInfo(readSelInfo() ?? { mode: 0, verts: 0, edges: 0, sel: 0 });
     (globalThis as any).__meshEditGuardChanged = () => setGuard(readGuard());
-    if (initialMesh) {
+    if (initialFileParts) {
+      applyFileParts(initialFileParts);
+    } else if (initialMesh) {
       applyMesh(initialMesh);
     } else {
       const path = initialPath ?? callHost<string | null>('__env_get', null, 'RJIT_MODEL');
