@@ -23,7 +23,7 @@
 // model under `./tools/rjit dev modelview`, or `RJIT_MODEL=path ./tools/rjit shot
 // modelview` to render one headlessly.
 import { useState, useRef, useEffect } from 'react';
-import { Box, Col, Row, Text, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Text, Image, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
@@ -467,12 +467,54 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // groups when it carries authored grouping; null for plain/per-triangle imports. The
   // prompt reads faces to the user and triangles to the byte math, never conflating them.
   const [authoredFaces, setAuthoredFaces] = useState<number | null>(null);
+  // ── UV / atlas inspector ─────────────────────────────────────────────────────
+  // Paint mode shows the LIVE atlas as an image panel — the actual UV layout the paint
+  // system built (per-triangle patches), so it can be compared against a hand-authored
+  // unwrap instead of guessed at. Read back via __model_atlas_read, PNG-encoded by the
+  // host codec (__imageops_encode_raw); refreshed on entry/detail change/manual refresh,
+  // not per stroke (a read+encode per dab would drag the brush).
+  type UvPanel = { src: string | null; w: number; h: number; detail: number; note: string | null };
+  const [uvPanel, setUvPanel] = useState<UvPanel | null>(null);
+  const [showUv, setShowUv] = useState(true);
+  const UV_PREVIEW_BYTE_CAP = 32 * 1024 * 1024; // reading a 100MB atlas into JS would stall the app
+  const b64FromBytes = (bytes: Uint8Array): string => {
+    const CHUNK = 8192;
+    let s = '';
+    for (let i = 0; i < bytes.length; i += CHUNK) s += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    return btoa(s);
+  };
+  const buildUvPanel = () => {
+    const j = host.__model_atlas_read?.();
+    if (typeof j !== 'string' || !j) {
+      setUvPanel(null);
+      return;
+    }
+    try {
+      const o = JSON.parse(j) as { w: number; h: number; detail: number; data: string };
+      if (o.w * o.h * 4 > UV_PREVIEW_BYTE_CAP) {
+        setUvPanel({ src: null, w: o.w, h: o.h, detail: o.detail, note: `atlas is ${o.w}×${o.h} — too large to preview live` });
+        return;
+      }
+      const rgba = Uint8Array.from(atob(o.data), (c) => c.charCodeAt(0));
+      const png = host.__imageops_encode_raw?.(rgba, o.w, o.h, '{"format":"png"}');
+      if (!(png instanceof Uint8Array)) {
+        setUvPanel({ src: null, w: o.w, h: o.h, detail: o.detail, note: 'atlas preview failed to encode' });
+        return;
+      }
+      setUvPanel({ src: `data:image/png;base64,${b64FromBytes(png)}`, w: o.w, h: o.h, detail: o.detail, note: null });
+    } catch {
+      setUvPanel(null);
+    }
+  };
+
   const enterPaint = () => {
     setFocusMode(false);
     meshFocusTool(false);
     setSelMode(0);
     meshSetMode(0);
     setPaintMode(true);
+    setShowUv(true);
+    buildUvPanel();
   };
   const togglePaint = () => {
     if (paintMode) {
@@ -501,6 +543,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const changeDetail = (px: number): number => {
     const applied = applyPaintDetail(px);
     setDetail(applied);
+    // The atlas was re-tessellated — the UV panel is showing the OLD layout; refresh it.
+    if (paintMode) buildUvPanel();
     return applied;
   };
   const cycleDetail = () => {
@@ -1287,6 +1331,49 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             </Row>
           </Col>
         </Col>
+      )}
+
+      {/* UV / atlas inspector — the LIVE paint atlas image (the actual UV layout the
+          paint system rasterizes into: one patch per triangle). Refresh re-reads it after
+          strokes; painted faces + selection tint show exactly where each face lands. */}
+      {paintMode && showUv && uvPanel && (
+        <Col
+          style={{
+            position: 'absolute', right: 12, top: 56, width: 264,
+            paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 10,
+            backgroundColor: 'rgba(17,20,29,0.94)', borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 8,
+          }}
+        >
+          <Row style={{ alignItems: 'center', gap: 8 }}>
+            <Text style={{ color: '#dbe7ff', fontSize: 12, fontWeight: 700 }}>UV ATLAS</Text>
+            <Text style={{ color: '#8b97ab', fontSize: 11 }}>{`${uvPanel.w}×${uvPanel.h} · ${uvPanel.detail}px/tri`}</Text>
+            <Box style={{ flexGrow: 1 }} />
+            <Pressable onPress={buildUvPanel} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#244164', borderWidth: 1, borderColor: '#4e75a4' }}>
+              <Text style={{ color: '#e6f1ff', fontSize: 10, fontWeight: 700 }}>refresh</Text>
+            </Pressable>
+            <Pressable onPress={() => setShowUv(false)} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}>
+              <Text style={{ color: '#e1e7f1', fontSize: 10, fontWeight: 700 }}>×</Text>
+            </Pressable>
+          </Row>
+          {uvPanel.src ? (
+            <Box style={{ marginTop: 8, width: 244, height: Math.max(24, Math.round(244 * (uvPanel.h / Math.max(1, uvPanel.w)))), borderWidth: 1, borderColor: '#3a4356' }}>
+              <Image src={uvPanel.src} style={{ width: '100%', height: '100%' }} />
+            </Box>
+          ) : (
+            <Text style={{ color: '#ffb38f', fontSize: 11, marginTop: 8 }}>{uvPanel.note ?? 'no atlas'}</Text>
+          )}
+          <Text style={{ color: '#5d6878', fontSize: 10, marginTop: 6 }}>
+            per-triangle patches — authored UVs are not used by paint
+          </Text>
+        </Col>
+      )}
+      {paintMode && !showUv && (
+        <Pressable
+          onPress={() => { setShowUv(true); buildUvPanel(); }}
+          style={{ position: 'absolute', right: 12, top: 56, paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+        >
+          <Text style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 700 }}>UV</Text>
+        </Pressable>
       )}
 
       {/* Quality strip — commit-only decimation. Drag to trade detail for triangles; the
