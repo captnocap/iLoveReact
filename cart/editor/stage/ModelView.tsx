@@ -477,34 +477,73 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [uvPanel, setUvPanel] = useState<UvPanel | null>(null);
   const [showUv, setShowUv] = useState(true);
   const UV_PREVIEW_BYTE_CAP = 32 * 1024 * 1024; // reading a 100MB atlas into JS would stall the app
-  const b64FromBytes = (bytes: Uint8Array): string => {
-    const CHUNK = 8192;
-    let s = '';
-    for (let i = 0; i < bytes.length; i += CHUNK) s += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-    return btoa(s);
+  // No atob/btoa in this runtime (they're Web APIs, not V8 builtins) — decode the atlas
+  // door's base64 by hand. ~1MB for a 512² atlas; one-shot per refresh, not per frame.
+  const B64_REV = (() => {
+    const rev = new Int8Array(128).fill(-1);
+    const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    for (let i = 0; i < alpha.length; i++) rev[alpha.charCodeAt(i)] = i;
+    return rev;
+  })();
+  const bytesFromB64 = (s: string): Uint8Array | null => {
+    let n = s.length;
+    while (n > 0 && s.charCodeAt(n - 1) === 61) n--; // trailing '='
+    const out = new Uint8Array(Math.floor((n * 3) / 4));
+    let acc = 0;
+    let bits = 0;
+    let w = 0;
+    for (let i = 0; i < n; i++) {
+      const v = B64_REV[s.charCodeAt(i) & 127] ?? -1;
+      if (v < 0) return null;
+      acc = (acc << 6) | v;
+      bits += 6;
+      if (bits >= 8) {
+        bits -= 8;
+        out[w++] = (acc >> bits) & 0xff;
+      }
+    }
+    return out;
   };
+  // The preview PNG goes to a rotating temp FILE and <Image src={path}> shows it —
+  // the texture cache keys on the path, so each refresh gets a fresh name and the
+  // previous file is removed. No data URLs, no pixel base64 in JS on the way out.
+  const uvFileRef = useRef<string | null>(null);
   const buildUvPanel = () => {
+    const fail = (w: number, h: number, d: number, note: string) => setUvPanel({ src: null, w, h, detail: d, note });
     const j = host.__model_atlas_read?.();
     if (typeof j !== 'string' || !j) {
-      setUvPanel(null);
+      fail(0, 0, 0, 'the host returned no atlas (is a mesh loaded?)');
       return;
     }
+    let o: { w: number; h: number; detail: number; data: string };
     try {
-      const o = JSON.parse(j) as { w: number; h: number; detail: number; data: string };
-      if (o.w * o.h * 4 > UV_PREVIEW_BYTE_CAP) {
-        setUvPanel({ src: null, w: o.w, h: o.h, detail: o.detail, note: `atlas is ${o.w}×${o.h} — too large to preview live` });
-        return;
-      }
-      const rgba = Uint8Array.from(atob(o.data), (c) => c.charCodeAt(0));
-      const png = host.__imageops_encode_raw?.(rgba, o.w, o.h, '{"format":"png"}');
-      if (!(png instanceof Uint8Array)) {
-        setUvPanel({ src: null, w: o.w, h: o.h, detail: o.detail, note: 'atlas preview failed to encode' });
-        return;
-      }
-      setUvPanel({ src: `data:image/png;base64,${b64FromBytes(png)}`, w: o.w, h: o.h, detail: o.detail, note: null });
+      o = JSON.parse(j);
     } catch {
-      setUvPanel(null);
+      fail(0, 0, 0, 'atlas read returned malformed JSON');
+      return;
     }
+    if (o.w * o.h * 4 > UV_PREVIEW_BYTE_CAP) {
+      fail(o.w, o.h, o.detail, `atlas is ${o.w}×${o.h} — too large to preview live`);
+      return;
+    }
+    const rgba = bytesFromB64(o.data);
+    if (!rgba || rgba.length < o.w * o.h * 4) {
+      fail(o.w, o.h, o.detail, 'atlas pixel decode failed');
+      return;
+    }
+    const png = host.__imageops_encode_raw?.(rgba, o.w, o.h, '{"format":"png"}');
+    if (!(png instanceof Uint8Array)) {
+      fail(o.w, o.h, o.detail, 'PNG encode failed (host codec)');
+      return;
+    }
+    const path = `/tmp/reactjit-uv-atlas-${Date.now()}.png`;
+    if (host.__imageops_write_file?.(path, png) !== true) {
+      fail(o.w, o.h, o.detail, `could not write ${path}`);
+      return;
+    }
+    if (uvFileRef.current && uvFileRef.current !== path) host.__fs_remove?.(uvFileRef.current);
+    uvFileRef.current = path;
+    setUvPanel({ src: path, w: o.w, h: o.h, detail: o.detail, note: null });
   };
 
   const enterPaint = () => {
