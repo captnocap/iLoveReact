@@ -29,6 +29,7 @@ import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ModelOv
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
+import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
 import { primitivePartMesh, composeModelParts, storedModelParts, fileModelPackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
@@ -1344,6 +1345,11 @@ export default function AppFrame() {
       {importPlan ? (
         <RenderProbe id="Import Image Dialog">
           <ImportImageDialog plan={importPlan} onPick={commitImageImport} onCancel={() => setImportPlan(null)} />
+        </RenderProbe>
+      ) : null}
+      {!playing && state.mapPaint.active && state.mapPaint.channel === 'tile' && state.mapPaint.texturePickerOpen ? (
+        <RenderProbe id="Map Texture Picker">
+          <MapTexturePicker state={state.mapPaint} onPatch={patchMapPaint} />
         </RenderProbe>
       ) : null}
       {/* Model context menu — rendered LAST at the root so it lands at the cursor

@@ -53,8 +53,9 @@ const TOOLS: Tool[] = [
 
 // A live shader preview: the actual WGSL recipe rendered into a small quad — so you pick a
 // material by SEEING it, not by reading its name. (Most fill materials share one pipeline, so
-// a grid of these is cheap — same shader, different data[].)
-function ShaderThumb({ shader, data, size = 40 }: { shader: string; data: number[]; size?: number }) {
+// a grid of these is cheap — same shader, different data[].) Exported: the map-paint texture
+// picker uses the same thumbs.
+export function ShaderThumb({ shader, data, size = 40 }: { shader: string; data: number[]; size?: number }) {
   return (
     <Box style={{ width: size, height: size, borderRadius: 6, overflow: 'hidden' }}>
       <Effect shader={shader} data={data} style={{ width: size, height: size }} />

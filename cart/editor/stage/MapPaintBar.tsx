@@ -12,6 +12,7 @@ import { mapRoadCancel, mapRoadCommit, mapRoadStats, type MapBrushProfile, type 
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { addZonePatch, PAINTABLE_TILE_KINDS, type MapPaintChannel, type MapPaintState, saveMapFile } from './mapPaint';
+import { tileBindingFor } from '../render3d/groundFormula';
 
 const CHANNELS: MapPaintChannel[] = ['terrain', 'tile', 'water', 'flora', 'zone', 'road'];
 const TERRAIN_TOOLS: MapTerrainTool[] = ['brush', 'ramp', 'slope', 'smooth'];
@@ -95,6 +96,20 @@ export default function MapPaintBar(props: {
                   </Swatch>
                 );
               })}
+              {/* Bind the armed kind's LOOK to any catalog material — the picker
+                  popover (MapTexturePicker, rendered late by AppFrame). */}
+              {(() => {
+                const kind = TILE_KINDS[s.tileKindIdx] ?? 'sidewalk';
+                const binding = tileBindingFor(kind, s.tileMaterialOverrides);
+                const Pill = s.texturePickerOpen ? C.HW_PillOn : C.HW_Pill;
+                const Label = s.texturePickerOpen ? C.HW_PillTextOn : C.HW_PillText;
+                return (
+                  <Pill tooltip="Pick which material this kind paints" onPress={() => props.onPatch({ texturePickerOpen: !s.texturePickerOpen })}>
+                    <C.HW_OptionLabel>TEXTURE</C.HW_OptionLabel>
+                    <Label>{binding.fn.replace(/_/g, ' ').toUpperCase()}</Label>
+                  </Pill>
+                );
+              })()}
             </Fragment>
           ) : null}
 

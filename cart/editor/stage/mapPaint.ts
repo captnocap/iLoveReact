@@ -9,7 +9,7 @@ import {
   mapSetTool, mapSetZonePalette, mapRoadSetKinds, mapRoadSetProfile,
   type MapBrushProfile, type MapBrushShape, type MapTerrainTool,
 } from '../../../runtime/game/map';
-import { EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf } from '../render3d/groundFormula';
+import { editorGroundFormula, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf, type TileMaterialOverrides } from '../render3d/groundFormula';
 import { FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, ZONE_COLORS } from '../world/floraKinds';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 
@@ -33,6 +33,11 @@ export type MapPaintState = {
   smoothStrength: number;
   /** armed ground tile kind — index into TILE_KINDS (the engine legend order) */
   tileKindIdx: number;
+  /** per-kind material rebinds (kind → catalog material fn + variant) — the
+   *  "paint THIS texture" control (req_2494). Empty = the curated defaults. */
+  tileMaterialOverrides: TileMaterialOverrides;
+  /** the tile-texture picker popover (rendered late by AppFrame) */
+  texturePickerOpen: boolean;
   /** armed flora kind — index into FLORA_KIND_DEFINITIONS */
   floraKindIdx: number;
   /** the zone list (names/colors are cart content; cells live host-side) */
@@ -61,6 +66,8 @@ export function defaultMapPaint(): MapPaintState {
     rampWide: 3,
     smoothStrength: 0.5,
     tileKindIdx: Math.max(0, TILE_KINDS.indexOf('sidewalk')),
+    tileMaterialOverrides: {},
+    texturePickerOpen: false,
     floraKindIdx: 1, // 'Grass'
     zones: [],
     zoneIdx: 0,
@@ -129,8 +136,12 @@ export function applyMapPaintEffects(prev: MapPaintState, next: MapPaintState): 
   if (!mapHostLive() || !next.active) return;
   if (!prev.active) {
     if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0);
-    mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(next.zones));
+    mapSetGroundLook(editorGroundFormula(next.tileMaterialOverrides), TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(next.zones));
     mapRoadSetKinds(ROAD_KIND_INDICES);
+  } else if (prev.tileMaterialOverrides !== next.tileMaterialOverrides) {
+    // A rebind regenerates the formula (the kind→material tables are baked
+    // into the WGSL) — one shader rebuild per pick, authoring-rate.
+    mapSetGroundLook(editorGroundFormula(next.tileMaterialOverrides), TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(next.zones));
   } else if (prev.zones !== next.zones) {
     mapSetZonePalette(zonePaletteOf(next.zones));
   }

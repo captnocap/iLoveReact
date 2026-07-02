@@ -35,6 +35,8 @@ export const MATERIALS: RegistryMaterial[] = [
     slots: [{ name: "low", rgb: [0.035, 0.18, 0.07] }, { name: "high", rgb: [0.24, 0.58, 0.16] }, { name: "low 2", rgb: [0.02, 0.12, 0.065] }, { name: "high 2", rgb: [0.18, 0.46, 0.25] }, { name: "low 3", rgb: [0.22, 0.19, 0.075] }, { name: "high 3", rgb: [0.62, 0.52, 0.2] }, { name: "color", rgb: [0.1, 0.18, 0.06] }, { name: "color 2", rgb: [0.8, 0.72, 0.42] }] },
   { fn: "wood", slug: "wood", name: "Wood", board: "environment", boardIndex: 0, materialId: 6, variantLabels: ["Take 1", "Take 2", "Take 3"], kind: "surface", tags: ["environment", "wood"], author: "legacy",
     slots: [{ name: "low", rgb: [0.38, 0.18, 0.07] }, { name: "high", rgb: [0.8, 0.47, 0.2] }, { name: "low 2", rgb: [0.18, 0.095, 0.055] }, { name: "high 2", rgb: [0.52, 0.3, 0.15] }, { name: "low 3", rgb: [0.52, 0.34, 0.16] }, { name: "high 3", rgb: [0.92, 0.72, 0.4] }, { name: "color", rgb: [0.1, 0.07, 0.035] }] },
+  { fn: "mud", slug: "mud", name: "Mud", board: "environment", boardIndex: 0, materialId: 7, variantLabels: ["Wet", "Cracked", "Trampled"], kind: "surface", tags: ["environment", "mud", "earth", "wet"], author: "editor",
+    slots: [{ name: "color low", rgb: [0.13, 0.09, 0.06] }, { name: "color high", rgb: [0.27, 0.2, 0.13] }, { name: "color low 2", rgb: [0.2, 0.19, 0.17] }, { name: "color high 2", rgb: [0.1, 0.11, 0.12] }, { name: "color", rgb: [0.38, 0.3, 0.2] }, { name: "color 2", rgb: [0.05, 0.04, 0.03] }, { name: "color 3", rgb: [0.05, 0.045, 0.035] }, { name: "color 4", rgb: [0.06, 0.05, 0.035] }, { name: "color 5", rgb: [0.045, 0.04, 0.03] }] },
   { fn: "mold_wall", slug: "mold-wall", name: "Mold Wall", board: "condemned", boardIndex: 1, materialId: 0, variantLabels: ["Take 1", "Take 2", "Take 3"], kind: "surface", tags: ["condemned", "mold", "wall"], author: "legacy",
     slots: [{ name: "color low", rgb: [0.35, 0.32, 0.25] }, { name: "color high", rgb: [0.7, 0.65, 0.52] }, { name: "color", rgb: [0.54, 0.42, 0.27] }, { name: "mold", rgb: [0.045, 0.09, 0.045] }, { name: "line near", rgb: [0.23, 0.19, 0.13] }] },
   { fn: "peel_paint", slug: "peel-paint", name: "Peel Paint", board: "condemned", boardIndex: 1, materialId: 1, variantLabels: ["Take 1", "Take 2", "Take 3"], kind: "surface", tags: ["condemned", "peel", "paint"], author: "legacy",
@@ -259,6 +261,7 @@ export const FILL_BOARDS: FillBoard[] = [
     { slug: "water", name: "Water", variants: ["Take 1", "Take 2", "Take 3"] },
     { slug: "grass", name: "Grass", variants: ["Take 1", "Take 2", "Take 3"] },
     { slug: "wood", name: "Wood", variants: ["Take 1", "Take 2", "Take 3"] },
+    { slug: "mud", name: "Mud", variants: ["Wet", "Cracked", "Trampled"] },
   ] },
   { board: 1, letter: "B", title: "Condemned", seedCoef: [23, 11, 41], materials: [
     { slug: "mold-wall", name: "Mold Wall", variants: ["Take 1", "Take 2", "Take 3"] },

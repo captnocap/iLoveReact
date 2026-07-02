@@ -35,6 +35,11 @@
     "index": 6
   },
   {
+    "fn": "mud",
+    "board": 0,
+    "index": 7
+  },
+  {
     "fn": "mold_wall",
     "board": 1,
     "index": 0
