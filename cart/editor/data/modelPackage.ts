@@ -76,6 +76,14 @@ export function modelSlug(id: string): string {
   return id.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
+// The canonical content-tree folder id for a model. Derived from the model's
+// unique id (like path/source), so every model gets its OWN home node. Seeding
+// folderId per source/kind instead (the old bug) made imported props share one
+// id, so clicking one model opened another's menu (req_2523). One id, one model.
+export function modelFolderIdFor(id: string): `model-${string}` {
+  return `model-${modelSlug(id)}`;
+}
+
 export function packageDir(kind: ModelPackageKind, id: string): string {
   return `${MODELS_HOME}/${categoryDir(kind)}/${modelSlug(id)}`;
 }
@@ -119,7 +127,9 @@ export function packageToManifest(pkg: ModelPackage): ModelManifest {
 export function manifestToPackage(manifest: ModelManifest): ModelPackage {
   return {
     id: manifest.id,
-    folderId: manifest.folderId,
+    // Derived from the id (not the stored folderId) so every model has its own
+    // home node even if an older manifest wrote a shared per-kind folderId.
+    folderId: modelFolderIdFor(manifest.id),
     name: manifest.name,
     path: displayPath(manifest.kind, manifest.id),
     kind: manifest.kind,

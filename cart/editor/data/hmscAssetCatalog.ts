@@ -8,7 +8,7 @@ import {
 import { validateDecalDoc } from '../textures/decal';
 import { cuboid, cylinder, cone, pyramid, plane, sphere, icosphere, editMeshToGeometry, type EditMesh } from '../model/editMesh';
 import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, ModelPart, PrimitiveKind } from './types';
-import { MODEL_PACKAGE_SUBDIRS, displayPath, modelSlug, subDir } from './modelPackage';
+import { MODEL_PACKAGE_SUBDIRS, displayPath, modelFolderIdFor, modelSlug, subDir } from './modelPackage';
 import { loadMaterializedPackages, materializeModelPackage } from './modelPackageStore';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
@@ -360,7 +360,12 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
     ...looseModelFilePackages(looseViewerSources),
     ...cookedModelPackages(cooked),
     ...storedModelPackages(models),
-  ]).sort((a, b) => modelRank(a) - modelRank(b) || a.name.localeCompare(b.name));
+  ])
+    // Canonical per-model folder id (SSOT): every model gets its OWN home node.
+    // Sources used to seed folderId per kind, so imported props shared one id and
+    // clicking one opened another's context menu (req_2523). Derive from the id here.
+    .map((model) => ({ ...model, folderId: modelFolderIdFor(model.id) }))
+    .sort((a, b) => modelRank(a) - modelRank(b) || a.name.localeCompare(b.name));
   const assets = [...materialAssets, ...cookedAssets].sort((a, b) => sourceRank(a) - sourceRank(b) || a.name.localeCompare(b.name));
   const defaultAsset = assets.find((asset) => asset.tab === 'Skins') ?? assets[0];
   const defaultContentFolder = materialAssets.length > 0
