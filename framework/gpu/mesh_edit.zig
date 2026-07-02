@@ -108,6 +108,21 @@ pub fn edgeSelectedPub(e: u32) bool {
     const s = g_sel_edge orelse return false;
     return e < s.len and s[e];
 }
+/// A selected (tinted) face's TRUE base colour, read from its saved pre-tint patch —
+/// null when the face carries no tint (read the live atlas instead). Colour snapshots
+/// (the mesh-edit journal, quality carry) use this so the selection orange never bakes.
+pub fn savedFaceBaseColor(face: u32) ?[4]u8 {
+    const patch = g_face_base.get(face) orelse return null;
+    return model_paint.faceColorFromPatch(face, patch);
+}
+/// The logical (welded) vertex a face corner maps to — solidify walks the welded
+/// topology to find selection-boundary edges and per-vertex offset normals.
+pub fn cornerVertPub(f: u32, k: u32) u32 {
+    const corners = g_corner_vert orelse return 0;
+    const idx = @as(usize, f) * 3 + k;
+    if (idx >= corners.len) return 0;
+    return corners[idx];
+}
 pub fn selectedEdgeCountPub() u32 {
     return countTrue(g_sel_edge);
 }

@@ -628,12 +628,20 @@ fn appendQuadSplit(list: *std.ArrayListUnmanaged(f32), a: [3]f32, b: [3]f32, c: 
     return appendTri(list, a, b, c) and appendTri(list, a, c, d);
 }
 
+/// A face's TRUE colour: the saved pre-tint base when the face is selection-tinted,
+/// else the live atlas centroid texel. Every colour snapshot/carry reads through this
+/// so the selection orange never bakes into carried or journaled colours.
+fn trueFaceColor(f: u32) [4]u8 {
+    if (mesh_edit.savedFaceBaseColor(f)) |c| return c;
+    return model_paint.faceColor(f) orelse model_paint.DEFAULT_FACE;
+}
+
 fn collectCurrentFaceColors() ?[]u8 {
     const fc = model_paint.faceCount();
     const colors = std.heap.c_allocator.alloc(u8, @as(usize, fc) * 4) catch return null;
     var f: u32 = 0;
     while (f < fc) : (f += 1) {
-        const c = model_paint.faceColor(f) orelse model_paint.DEFAULT_FACE;
+        const c = trueFaceColor(f);
         colors[f * 4 + 0] = c[0];
         colors[f * 4 + 1] = c[1];
         colors[f * 4 + 2] = c[2];
@@ -725,8 +733,12 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
         return false;
     };
     defer std.heap.c_allocator.free(owned);
+    var snap = journalSnapshotCurrent("extrude edge");
     const ok = replaceActiveEditMesh(owned, g_edit_count + 6);
-    if (ok) mesh_edit.setMode(.edge);
+    if (ok) {
+        mesh_edit.setMode(.edge);
+        journalCommit(&snap);
+    } else journalDiscard(&snap);
     return ok;
 }
 
@@ -834,8 +846,12 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     };
     defer std.heap.c_allocator.free(owned);
     const added: u32 = @intCast((owned.len / 8) - @as(usize, g_edit_count));
+    var snap = journalSnapshotCurrent("create face");
     const replaced = replaceActiveEditMesh(owned, g_edit_count + added);
-    if (replaced) mesh_edit.setMode(.edge);
+    if (replaced) {
+        mesh_edit.setMode(.edge);
+        journalCommit(&snap);
+    } else journalDiscard(&snap);
     return replaced;
 }
 
@@ -917,6 +933,7 @@ pub fn meshTopoLoopCut() bool {
     };
     defer std.heap.c_allocator.free(owned);
 
+    var snap = journalSnapshotCurrent("loop cut");
     const ok = replaceActiveEditMesh(owned, cut.tri_count * 3);
     if (ok) {
         if (cut.groups) |g| {
@@ -924,7 +941,8 @@ pub fn meshTopoLoopCut() bool {
             _ = refreshPaintLayout(); // re-island by the fresh grouping (groups land after adopt)
         }
         mesh_edit.setMode(.edge);
-    }
+        journalCommit(&snap);
+    } else journalDiscard(&snap);
     return ok;
 }
 
@@ -969,11 +987,15 @@ pub fn meshDeleteSelection() bool {
     };
     defer std.heap.c_allocator.free(owned);
 
+    var snap = journalSnapshotCurrent("delete selection");
     const ok = replaceActiveEditMesh(owned, kept);
-    if (ok and has_groups) {
-        model_source.setFaceGroups(groups.items);
-        _ = refreshPaintLayout();
-    }
+    if (ok) {
+        if (has_groups) {
+            model_source.setFaceGroups(groups.items);
+            _ = refreshPaintLayout();
+        }
+        journalCommit(&snap);
+    } else journalDiscard(&snap);
     return ok;
 }
 
@@ -1000,8 +1022,19 @@ pub const AppendResult = struct { ok: bool, lo: u32, hi: u32, count: u32 };
 /// deletes/edits), giving them a new authored-group range above every existing group. This is
 /// how "add a part" preserves prior edits — it grows the host mesh instead of recomposing from
 /// JS. `new_verts` is interleaved 8 f32/vert; `new_groups` is one authored id per new triangle
-/// (part-local, 0-based). Returns the new group range [lo, hi).
+/// (part-local, 0-based). Returns the new group range [lo, hi). Journaled as "add part";
+/// duplicate/mirror capture their own label and call the inner op directly.
 pub fn meshAppendGroup(new_verts: []const f32, new_count: u32, new_groups: []const u32) AppendResult {
+    var snap = journalSnapshotCurrent("add part");
+    const r = appendGroupInner(new_verts, new_count, new_groups);
+    if (r.ok) {
+        journalCommit(&snap);
+        ensureGlassTrailing();
+    } else journalDiscard(&snap);
+    return r;
+}
+
+fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const u32) AppendResult {
     const fail = AppendResult{ .ok = false, .lo = 0, .hi = 0, .count = 0 };
     if (!model_paint.hasTarget()) return fail;
     const cur_verts = g_edit_verts orelse return fail;
@@ -1061,7 +1094,10 @@ var g_hidden_groups: std.ArrayListUnmanaged(HiddenGroup) = .{};
 /// re-appends them with their original groups. Returns whether the mesh changed.
 pub fn meshSetGroupHidden(lo: u32, hi: u32, hidden: bool) bool {
     if (!model_paint.hasTarget()) return false;
-    if (hidden) return hideGroup(lo, hi) else return showGroup(lo, hi);
+    var snap = journalSnapshotCurrent(if (hidden) "hide part" else "show part");
+    const ok = if (hidden) hideGroup(lo, hi) else showGroup(lo, hi);
+    if (ok) journalCommit(&snap) else journalDiscard(&snap);
+    return ok;
 }
 
 fn hideGroup(lo: u32, hi: u32) bool {
@@ -1182,6 +1218,718 @@ pub fn meshSurvivingGroups(lo: u32, hi: u32, out: []u32) u32 {
     return n;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// Mesh-edit journal (undo/redo) + the part-level ops that ride it
+// ══════════════════════════════════════════════════════════════════════════
+// Every committed mutation of the resident edit mesh (gizmo release, topology op,
+// delete, part append/duplicate/detach/merge, hide/show, glass, solidify) snapshots
+// the FULL pre-op state: verts, authored face groups, part ranges, per-face colours,
+// the hidden-part stash, and an opaque JS note (the cart's parts metadata, set via
+// __mesh_journal_note) so the outliner resyncs after a restore. Undo/redo swap the
+// live state with the top snapshot. Bounded by count AND bytes, oldest-first.
+
+const jalloc = std.heap.c_allocator;
+
+const JournalHidden = struct { lo: u32, hi: u32, verts: []f32, groups: []u32 };
+const JournalEntry = struct {
+    verts: []f32,
+    count: u32,
+    groups: ?[]u32,
+    part_ranges: ?[]u32,
+    colors: ?[]u8,
+    hidden: []JournalHidden,
+    note: ?[]u8,
+    label: []const u8, // static string — the op that FOLLOWED this snapshot
+};
+const JOURNAL_CAP = 32;
+const JOURNAL_BYTE_BUDGET: usize = 192 * 1024 * 1024;
+var g_journal_undo: std.ArrayListUnmanaged(JournalEntry) = .{};
+var g_journal_redo: std.ArrayListUnmanaged(JournalEntry) = .{};
+var g_journal_note: ?[]u8 = null; // the cart's CURRENT parts metadata (rides each snapshot)
+var g_gizmo_snap: ?JournalEntry = null; // taken at gizmo-begin; committed only if the drag moved something
+
+fn journalEntryBytes(e: *const JournalEntry) usize {
+    var n: usize = e.verts.len * @sizeOf(f32);
+    if (e.groups) |g| n += g.len * @sizeOf(u32);
+    if (e.colors) |c| n += c.len;
+    for (e.hidden) |h| n += h.verts.len * @sizeOf(f32) + h.groups.len * @sizeOf(u32);
+    return n;
+}
+
+fn journalFreeEntry(e: *JournalEntry) void {
+    jalloc.free(e.verts);
+    if (e.groups) |g| jalloc.free(g);
+    if (e.part_ranges) |p| jalloc.free(p);
+    if (e.colors) |c| jalloc.free(c);
+    for (e.hidden) |h| {
+        jalloc.free(h.verts);
+        jalloc.free(h.groups);
+    }
+    if (e.hidden.len > 0) jalloc.free(e.hidden);
+    if (e.note) |n| jalloc.free(n);
+}
+
+fn journalFreeStack(stack: *std.ArrayListUnmanaged(JournalEntry)) void {
+    for (stack.items) |*e| journalFreeEntry(e);
+    stack.clearRetainingCapacity();
+}
+
+fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
+    const verts = g_edit_verts orelse return null;
+    if (g_edit_count == 0) return null;
+    const need = @as(usize, g_edit_count) * 8;
+    if (verts.len < need) return null;
+    const v = jalloc.dupe(f32, verts[0..need]) catch return null;
+    var entry = JournalEntry{
+        .verts = v,
+        .count = g_edit_count,
+        .groups = null,
+        .part_ranges = null,
+        .colors = null,
+        .hidden = &.{},
+        .note = null,
+        .label = label,
+    };
+    if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) entry.groups = captureFaceGroups();
+    if (model_source.partRanges()) |pr| entry.part_ranges = jalloc.dupe(u32, pr) catch null;
+    entry.colors = collectCurrentFaceColors();
+    if (g_hidden_groups.items.len > 0) {
+        var hs = std.ArrayListUnmanaged(JournalHidden){};
+        for (g_hidden_groups.items) |h| {
+            const hv = jalloc.dupe(f32, h.verts) catch continue;
+            const hg = jalloc.dupe(u32, h.groups) catch {
+                jalloc.free(hv);
+                continue;
+            };
+            hs.append(jalloc, .{ .lo = h.lo, .hi = h.hi, .verts = hv, .groups = hg }) catch {
+                jalloc.free(hv);
+                jalloc.free(hg);
+            };
+        }
+        entry.hidden = hs.toOwnedSlice(jalloc) catch &.{};
+    }
+    if (g_journal_note) |n| entry.note = jalloc.dupe(u8, n) catch null;
+    return entry;
+}
+
+/// Adopt a pre-op snapshot as an undo step (the op SUCCEEDED). Clears redo and
+/// bounds the stack. Sets *snap to null so the op's discard defer no-ops.
+fn journalCommit(snap: *?JournalEntry) void {
+    const e = snap.* orelse return;
+    snap.* = null;
+    journalFreeStack(&g_journal_redo);
+    g_journal_undo.append(jalloc, e) catch {
+        var x = e;
+        journalFreeEntry(&x);
+        return;
+    };
+    var total: usize = 0;
+    for (g_journal_undo.items) |*it| total += journalEntryBytes(it);
+    while (g_journal_undo.items.len > JOURNAL_CAP or (total > JOURNAL_BYTE_BUDGET and g_journal_undo.items.len > 1)) {
+        var old = g_journal_undo.orderedRemove(0);
+        total -= journalEntryBytes(&old);
+        journalFreeEntry(&old);
+    }
+}
+
+/// Free an untaken snapshot (the op failed or changed nothing).
+fn journalDiscard(snap: *?JournalEntry) void {
+    if (snap.*) |e| {
+        var x = e;
+        journalFreeEntry(&x);
+    }
+    snap.* = null;
+}
+
+/// Drop the newest undo entry — used when a guard REVERT returns the mesh to the
+/// exact state the entry snapshots (undoing to it would be a visible no-op).
+fn journalDropLast() void {
+    if (g_journal_undo.items.len == 0) return;
+    var e = g_journal_undo.items[g_journal_undo.items.len - 1];
+    g_journal_undo.items.len -= 1;
+    journalFreeEntry(&e);
+}
+
+/// Forget all history — a fresh model load is a new document.
+pub fn meshJournalClear() void {
+    journalFreeStack(&g_journal_undo);
+    journalFreeStack(&g_journal_redo);
+    journalDiscard(&g_gizmo_snap);
+    if (g_journal_note) |n| jalloc.free(n);
+    g_journal_note = null;
+}
+
+pub fn meshJournalNoteSet(note: []const u8) void {
+    if (g_journal_note) |n| jalloc.free(n);
+    g_journal_note = jalloc.dupe(u8, note) catch null;
+}
+
+pub fn meshJournalNoteGet() ?[]const u8 {
+    return g_journal_note;
+}
+
+pub fn meshJournalCounts() [2]u32 {
+    return .{ @intCast(g_journal_undo.items.len), @intCast(g_journal_redo.items.len) };
+}
+
+pub fn meshUndoLabel() []const u8 {
+    if (g_journal_undo.items.len == 0) return "";
+    return g_journal_undo.items[g_journal_undo.items.len - 1].label;
+}
+pub fn meshRedoLabel() []const u8 {
+    if (g_journal_redo.items.len == 0) return "";
+    return g_journal_redo.items[g_journal_redo.items.len - 1].label;
+}
+
+/// Install a snapshot as the live mesh (the undo/redo restore path). The entry's
+/// buffers stay owned by the caller — every adopt below copies.
+fn journalInstall(e: *const JournalEntry) bool {
+    const vcopy = jalloc.dupe(f32, e.verts) catch return false;
+    defer jalloc.free(vcopy);
+    if (!replaceActiveEditMesh(vcopy, e.count)) return false;
+    // Hidden-part stash: restore AFTER the install succeeded (independent of the mesh).
+    for (g_hidden_groups.items) |h| {
+        std.heap.c_allocator.free(h.verts);
+        std.heap.c_allocator.free(h.groups);
+    }
+    g_hidden_groups.clearRetainingCapacity();
+    for (e.hidden) |h| {
+        const hv = std.heap.c_allocator.dupe(f32, h.verts) catch continue;
+        const hg = std.heap.c_allocator.dupe(u32, h.groups) catch {
+            std.heap.c_allocator.free(hv);
+            continue;
+        };
+        g_hidden_groups.append(std.heap.c_allocator, .{ .lo = h.lo, .hi = h.hi, .verts = hv, .groups = hg }) catch {
+            std.heap.c_allocator.free(hv);
+            std.heap.c_allocator.free(hg);
+        };
+    }
+    if (e.groups) |g| model_source.setFaceGroups(g);
+    model_source.setPartRanges(e.part_ranges orelse &.{});
+    if (e.colors) |c| {
+        model_paint.applyColors(c);
+        if (model_source.colors()) |src| {
+            const n = @min(src.len, c.len);
+            if (n > 0) @memcpy(src[0..n], c[0..n]);
+        }
+    }
+    if (g_journal_note) |n| jalloc.free(n);
+    g_journal_note = if (e.note) |n| (jalloc.dupe(u8, n) catch null) else null;
+    _ = refreshPaintLayout();
+    return true;
+}
+
+fn journalStep(from_undo: bool) bool {
+    const src = if (from_undo) &g_journal_undo else &g_journal_redo;
+    const dst = if (from_undo) &g_journal_redo else &g_journal_undo;
+    if (src.items.len == 0) return false;
+    const top_label = src.items[src.items.len - 1].label;
+    const cur = journalSnapshotCurrent(top_label) orelse return false;
+    var entry = src.items[src.items.len - 1];
+    src.items.len -= 1;
+    if (!journalInstall(&entry)) {
+        src.append(jalloc, entry) catch journalFreeEntry(&entry);
+        var c = cur;
+        journalFreeEntry(&c);
+        return false;
+    }
+    journalFreeEntry(&entry);
+    dst.append(jalloc, cur) catch {
+        var c = cur;
+        journalFreeEntry(&c);
+    };
+    return true;
+}
+
+pub fn meshUndo() bool {
+    return journalStep(true);
+}
+pub fn meshRedo() bool {
+    return journalStep(false);
+}
+
+// ── Part-level ops: duplicate / mirror / detach / merge / glass / solidify ────────
+
+const GLASS_ALPHA: u8 = 87; // ~0.34 of 255 — the old studio's glassOpacity
+
+/// Duplicate the part occupying authored-group range [lo, hi) — optionally REFLECTED
+/// across the origin plane of `mirror_axis` (0=X 1=Y 2=Z; -1 = plain copy). The copy
+/// appends as a fresh part (new group range) carrying the source's per-face paint;
+/// mirrored copies reverse their winding so normals stay outward. The mirror workflow
+/// matches the old studio: center the source, mirror across the plane, get the twin.
+pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult {
+    const fail = AppendResult{ .ok = false, .lo = 0, .hi = 0, .count = 0 };
+    if (!model_paint.hasTarget() or hi <= lo) return fail;
+    const cur_verts = g_edit_verts orelse return fail;
+    if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return fail;
+    const cur_faces = g_edit_count / 3;
+
+    var out = std.ArrayListUnmanaged(f32){};
+    defer out.deinit(jalloc);
+    var groups = std.ArrayListUnmanaged(u32){};
+    defer groups.deinit(jalloc);
+    var colors = std.ArrayListUnmanaged(u8){};
+    defer colors.deinit(jalloc);
+    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    defer remap.deinit(jalloc);
+    var next_local: u32 = 0;
+
+    var f: u32 = 0;
+    while (f < cur_faces) : (f += 1) {
+        const g = model_source.faceGroupOf(f);
+        if (g == model_source.NO_FACE_GROUP or g < lo or g >= hi) continue;
+        const base = @as(usize, f) * 24;
+        if (base + 24 > cur_verts.len) break;
+        if (mirror_axis >= 0 and mirror_axis <= 2) {
+            const ax: usize = @intCast(mirror_axis);
+            var p: [3][3]f32 = undefined;
+            var k: usize = 0;
+            while (k < 3) : (k += 1) {
+                p[k] = .{ cur_verts[base + k * 8], cur_verts[base + k * 8 + 1], cur_verts[base + k * 8 + 2] };
+                p[k][ax] = -p[k][ax];
+            }
+            // A reflection flips handedness — swap two corners so winding stays outward.
+            if (!appendTri(&out, p[0], p[2], p[1])) return fail;
+        } else {
+            if (!appendFloats(&out, cur_verts[base .. base + 24])) return fail;
+        }
+        const gop = remap.getOrPut(jalloc, g) catch return fail;
+        if (!gop.found_existing) {
+            gop.value_ptr.* = next_local;
+            next_local += 1;
+        }
+        groups.append(jalloc, gop.value_ptr.*) catch return fail;
+        const c = trueFaceColor(f);
+        colors.appendSlice(jalloc, c[0..]) catch return fail;
+    }
+    if (groups.items.len == 0) return fail;
+
+    var snap = journalSnapshotCurrent(if (mirror_axis >= 0) "mirror part" else "duplicate part");
+    const first_new_face = model_paint.faceCount();
+    const r = appendGroupInner(out.items, @intCast(out.items.len / 8), groups.items);
+    if (!r.ok) {
+        journalDiscard(&snap);
+        return r;
+    }
+    // The copy keeps the source's per-face paint — a duplicate reads as a twin.
+    var i: u32 = 0;
+    while (i < groups.items.len) : (i += 1) {
+        const c: [4]u8 = .{ colors.items[i * 4], colors.items[i * 4 + 1], colors.items[i * 4 + 2], colors.items[i * 4 + 3] };
+        model_paint.paintFace(first_new_face + i, c);
+        model_source.writeColor(@intCast(first_new_face + i), c[0], c[1], c[2]);
+    }
+    journalCommit(&snap);
+    ensureGlassTrailing();
+    return r;
+}
+
+/// Detach the selected faces (face mode) into a NEW part: their authored groups are
+/// re-numbered into a fresh contiguous range past every existing group. Pure group
+/// remap — no geometry moves, so paint and topology are untouched; the outliner gains
+/// a part whose range is the returned [lo, hi). The old studio's "peel a panel off
+/// the body" — here the panel keeps its exact triangles.
+pub fn meshDetachSelection() AppendResult {
+    const fail = AppendResult{ .ok = false, .lo = 0, .hi = 0, .count = 0 };
+    if (!model_paint.hasTarget()) return fail;
+    if (mesh_edit.mode() != .face) return fail;
+    if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return fail;
+    // Group ids are per SOURCE face — require the displayed mesh to BE the source
+    // (any edit at decimated quality already retains the displayed mesh as source).
+    if (g_edit_count != model_source.count()) return fail;
+    const tri_count = g_edit_count / 3;
+    const mask = jalloc.alloc(bool, tri_count) catch return fail;
+    defer jalloc.free(mask);
+    const del = mesh_edit.buildDeleteMask(mask);
+    if (del == 0 or del >= tri_count) return fail;
+
+    const groups = captureFaceGroups() orelse return fail;
+    defer jalloc.free(groups);
+    var snap = journalSnapshotCurrent("detach faces");
+    // Drop the selection FIRST — its saved-patch tint must restore before the
+    // paint layout re-islands under the new grouping.
+    mesh_edit.clearSelection();
+
+    const offset: u32 = @intCast(maxGroupId(groups) + 1);
+    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    defer remap.deinit(jalloc);
+    var next: u32 = offset;
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!mask[f]) continue;
+        const gop = remap.getOrPut(jalloc, groups[f]) catch {
+            journalDiscard(&snap);
+            return fail;
+        };
+        if (!gop.found_existing) {
+            gop.value_ptr.* = next;
+            next += 1;
+        }
+        groups[f] = gop.value_ptr.*;
+    }
+    model_source.setFaceGroups(groups);
+    _ = refreshPaintLayout();
+    journalCommit(&snap);
+    return .{ .ok = true, .lo = offset, .hi = next, .count = g_edit_count };
+}
+
+/// Merge two parts into ONE: every face in either range gets re-numbered into a fresh
+/// contiguous group range (n-gon grouping preserved across both). Pure group remap.
+/// The outliner replaces both parts with one over the returned range — the old
+/// studio's "merge down" (the durable re-attach path after a detach).
+pub fn meshMergeGroupRanges(a_lo: u32, a_hi: u32, b_lo: u32, b_hi: u32) AppendResult {
+    const fail = AppendResult{ .ok = false, .lo = 0, .hi = 0, .count = 0 };
+    if (!model_paint.hasTarget()) return fail;
+    if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return fail;
+    if (g_edit_count != model_source.count()) return fail;
+    const tri_count = g_edit_count / 3;
+    const groups = captureFaceGroups() orelse return fail;
+    defer jalloc.free(groups);
+
+    var snap = journalSnapshotCurrent("merge parts");
+    mesh_edit.clearSelection();
+    const offset: u32 = @intCast(maxGroupId(groups) + 1);
+    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    defer remap.deinit(jalloc);
+    var next: u32 = offset;
+    var touched = false;
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        const g = groups[f];
+        if (g == model_source.NO_FACE_GROUP) continue;
+        const in_a = g >= a_lo and g < a_hi;
+        const in_b = g >= b_lo and g < b_hi;
+        if (!in_a and !in_b) continue;
+        const gop = remap.getOrPut(jalloc, g) catch {
+            journalDiscard(&snap);
+            return fail;
+        };
+        if (!gop.found_existing) {
+            gop.value_ptr.* = next;
+            next += 1;
+        }
+        groups[f] = gop.value_ptr.*;
+        touched = true;
+    }
+    if (!touched) {
+        journalDiscard(&snap);
+        return fail;
+    }
+    model_source.setFaceGroups(groups);
+    _ = refreshPaintLayout();
+    journalCommit(&snap);
+    return .{ .ok = true, .lo = offset, .hi = next, .count = g_edit_count };
+}
+
+/// Fuse the selected faces (face mode, spanning 2+ authored groups) into ONE authored
+/// face: they share a group id afterwards, so picking/painting treats them as one and
+/// their shared edges stop being boundary edges — the old studio's "merge faces"
+/// (the inverse of a loop cut) expressed as pure grouping.
+pub fn meshMergeSelectedFaces() bool {
+    if (!model_paint.hasTarget()) return false;
+    if (mesh_edit.mode() != .face) return false;
+    if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return false;
+    if (g_edit_count != model_source.count()) return false;
+    const tri_count = g_edit_count / 3;
+    const mask = jalloc.alloc(bool, tri_count) catch return false;
+    defer jalloc.free(mask);
+    const selected = mesh_edit.buildDeleteMask(mask);
+    if (selected == 0) return false;
+
+    const groups = captureFaceGroups() orelse return false;
+    defer jalloc.free(groups);
+    var target: ?u32 = null;
+    var distinct: u32 = 0;
+    {
+        var seen = std.AutoHashMapUnmanaged(u32, void){};
+        defer seen.deinit(jalloc);
+        var f: u32 = 0;
+        while (f < tri_count) : (f += 1) {
+            if (!mask[f]) continue;
+            if (target == null) target = groups[f];
+            const gop = seen.getOrPut(jalloc, groups[f]) catch return false;
+            if (!gop.found_existing) distinct += 1;
+        }
+    }
+    if (distinct < 2) return false;
+
+    var snap = journalSnapshotCurrent("merge faces");
+    mesh_edit.clearSelection();
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (mask[f]) groups[f] = target.?;
+    }
+    model_source.setFaceGroups(groups);
+    _ = refreshPaintLayout();
+    journalCommit(&snap);
+    return true;
+}
+
+/// Toggle the selected faces (face mode) as GLASS: their atlas texels get a translucent
+/// alpha and the mesh re-partitions so every glass face sits in one trailing run the
+/// draw routes through the transparent pipeline (per-face glass on ONE resident mesh).
+/// Toggling faces that are already glass makes them opaque again.
+pub fn meshSetSelectionGlass() bool {
+    if (!model_paint.hasTarget()) return false;
+    if (mesh_edit.mode() != .face) return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
+    const mask = jalloc.alloc(bool, tri_count) catch return false;
+    defer jalloc.free(mask);
+    const selected = mesh_edit.buildDeleteMask(mask);
+    if (selected == 0) return false;
+
+    var snap = journalSnapshotCurrent("glass faces");
+    mesh_edit.clearSelection(); // restore the tinted patches before colours are read
+
+    const colors = collectCurrentFaceColors() orelse {
+        journalDiscard(&snap);
+        return false;
+    };
+    defer jalloc.free(colors);
+    // Toggle by the first selected face: already glass → un-glass the selection.
+    var first: u32 = 0;
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (mask[f]) {
+            first = f;
+            break;
+        }
+    }
+    const make_glass = colors[@as(usize, first) * 4 + 3] >= 250;
+    f = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!mask[f]) continue;
+        colors[@as(usize, f) * 4 + 3] = if (make_glass) GLASS_ALPHA else 255;
+    }
+    if (!partitionGlassFaces(colors)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    journalCommit(&snap);
+    return true;
+}
+
+/// Rebuild the mesh with a STABLE opaque-then-glass partition (face order otherwise
+/// preserved), applying `colors` (per PRE-partition face, alpha authoritative)
+/// permuted to the new order. Group ids ride along, so part identity is untouched.
+fn partitionGlassFaces(colors: []const u8) bool {
+    const cur_verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (colors.len < @as(usize, tri_count) * 4) return false;
+    const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+    const cur_groups: ?[]u32 = if (has_groups) captureFaceGroups() else null;
+    defer if (cur_groups) |g| jalloc.free(g);
+
+    var out = std.ArrayListUnmanaged(f32){};
+    defer out.deinit(jalloc);
+    var new_groups = std.ArrayListUnmanaged(u32){};
+    defer new_groups.deinit(jalloc);
+    var new_colors = std.ArrayListUnmanaged(u8){};
+    defer new_colors.deinit(jalloc);
+
+    inline for (.{ true, false }) |want_opaque| {
+        var f: u32 = 0;
+        while (f < tri_count) : (f += 1) {
+            const is_opaque = colors[@as(usize, f) * 4 + 3] >= 250;
+            if (is_opaque != want_opaque) continue;
+            const base = @as(usize, f) * 24;
+            if (base + 24 > cur_verts.len) break;
+            if (!appendFloats(&out, cur_verts[base .. base + 24])) return false;
+            if (cur_groups) |g| new_groups.append(jalloc, g[f]) catch return false;
+            new_colors.appendSlice(jalloc, colors[@as(usize, f) * 4 .. @as(usize, f) * 4 + 4]) catch return false;
+        }
+    }
+    const count: u32 = @intCast(out.items.len / 8);
+    if (count != g_edit_count) return false;
+    if (!replaceActiveEditMesh(out.items, count)) return false;
+    if (cur_groups != null) model_source.setFaceGroups(new_groups.items);
+    model_paint.applyColors(new_colors.items);
+    if (model_source.colors()) |src| {
+        const n = @min(src.len, new_colors.items.len);
+        if (n > 0) @memcpy(src[0..n], new_colors.items[0..n]);
+    }
+    _ = refreshPaintLayout();
+    return true;
+}
+
+/// Glass faces must occupy ONE trailing run (the draw splits the mesh there). Anything
+/// that appends opaque faces after them (add part, duplicate, solidify) re-partitions.
+fn ensureGlassTrailing() void {
+    const fc = model_paint.faceCount();
+    if (fc == 0) return;
+    var first_glass: ?u32 = null;
+    var needs = false;
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        const c = model_paint.faceColor(f) orelse continue;
+        const is_glass = c[3] < 250;
+        if (is_glass and first_glass == null) first_glass = f;
+        if (!is_glass and first_glass != null) needs = true;
+    }
+    if (!needs) return;
+    const colors = collectCurrentFaceColors() orelse return;
+    defer jalloc.free(colors);
+    _ = partitionGlassFaces(colors);
+}
+
+/// First vertex of the trailing GLASS run (== displayed vert count when no glass).
+/// Derived live from the per-face alphas, so it's correct after any op or restore.
+fn editGlassFirstVert() u32 {
+    const fc = model_paint.faceCount();
+    var k = fc;
+    while (k > 0) : (k -= 1) {
+        const c = model_paint.faceColor(k - 1) orelse break;
+        if (c[3] >= 250) break;
+    }
+    return k * 3;
+}
+
+/// Solidify the selected faces (face mode) IN PLACE: an inner skin offset along the
+/// per-vertex normals plus wall quads around the selection's boundary edges — the old
+/// studio's solidifyFaces on the resident soup. New triangles inherit their source
+/// face's authored group (inner skin picks/paints with its outer face) and colour, so
+/// part ranges are untouched. Thickness in meters; <= 0 uses the studio default 2/16.
+pub fn meshSolidifySelection(thickness_raw: f32) bool {
+    if (!model_paint.hasTarget()) return false;
+    if (mesh_edit.mode() != .face) return false;
+    if (!mesh_edit.ensureTopologyPub()) return false;
+    const cur_verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
+    const mask = jalloc.alloc(bool, tri_count) catch return false;
+    defer jalloc.free(mask);
+    const selected = mesh_edit.buildDeleteMask(mask);
+    if (selected == 0) return false;
+    const t: f32 = if (thickness_raw > 1e-5) thickness_raw else 0.125;
+
+    const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+
+    // Per-WELDED-vertex offset normal, accumulated from the selected faces touching it.
+    var vert_normals = std.AutoHashMapUnmanaged(u32, [3]f32){};
+    defer vert_normals.deinit(jalloc);
+    // Selection-boundary edges: welded-vert pair → incident selected-face count, plus
+    // the (face, corner) that owns the edge in winding order (for the wall's winding).
+    const EdgeUse = struct { count: u32, face: u32, corner: u32 };
+    var euse = std.AutoHashMapUnmanaged(u64, EdgeUse){};
+    defer euse.deinit(jalloc);
+
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!mask[f]) continue;
+        const base = @as(usize, f) * 24;
+        if (base + 24 > cur_verts.len) break;
+        const p0: [3]f32 = .{ cur_verts[base + 0], cur_verts[base + 1], cur_verts[base + 2] };
+        const p1: [3]f32 = .{ cur_verts[base + 8], cur_verts[base + 9], cur_verts[base + 10] };
+        const p2: [3]f32 = .{ cur_verts[base + 16], cur_verts[base + 17], cur_verts[base + 18] };
+        const n = normalOf(p0, p1, p2);
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const cv = mesh_edit.cornerVertPub(f, k);
+            const gop = vert_normals.getOrPut(jalloc, cv) catch return false;
+            if (!gop.found_existing) gop.value_ptr.* = .{ 0, 0, 0 };
+            gop.value_ptr.*[0] += n[0];
+            gop.value_ptr.*[1] += n[1];
+            gop.value_ptr.*[2] += n[2];
+            const a = mesh_edit.cornerVertPub(f, k);
+            const b = mesh_edit.cornerVertPub(f, (k + 1) % 3);
+            if (a == b) continue;
+            const key = (@as(u64, @min(a, b)) << 32) | @as(u64, @max(a, b));
+            const egop = euse.getOrPut(jalloc, key) catch return false;
+            if (!egop.found_existing) {
+                egop.value_ptr.* = .{ .count = 1, .face = f, .corner = k };
+            } else {
+                egop.value_ptr.count += 1;
+            }
+        }
+    }
+
+    const offsetOf = struct {
+        fn call(map: *std.AutoHashMapUnmanaged(u32, [3]f32), cv: u32, shell: f32) [3]f32 {
+            const acc = map.get(cv) orelse return .{ 0, 0, 0 };
+            const n = vnorm(acc);
+            return .{ -n[0] * shell, -n[1] * shell, -n[2] * shell };
+        }
+    }.call;
+
+    var out = std.ArrayListUnmanaged(f32){};
+    defer out.deinit(jalloc);
+    if (!appendCurrentDisplayed(&out)) return false;
+    var add_groups = std.ArrayListUnmanaged(u32){};
+    defer add_groups.deinit(jalloc);
+    var add_colors = std.ArrayListUnmanaged(u8){};
+    defer add_colors.deinit(jalloc);
+
+    // Inner skin: one reversed, offset triangle per selected face (group + colour inherit).
+    f = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!mask[f]) continue;
+        const base = @as(usize, f) * 24;
+        if (base + 24 > cur_verts.len) break;
+        var p: [3][3]f32 = undefined;
+        var k: usize = 0;
+        while (k < 3) : (k += 1) {
+            p[k] = .{ cur_verts[base + k * 8], cur_verts[base + k * 8 + 1], cur_verts[base + k * 8 + 2] };
+            const off = offsetOf(&vert_normals, mesh_edit.cornerVertPub(f, @intCast(k)), t);
+            p[k] = .{ p[k][0] + off[0], p[k][1] + off[1], p[k][2] + off[2] };
+        }
+        if (!appendTri(&out, p[0], p[2], p[1])) return false;
+        if (has_groups) add_groups.append(jalloc, model_source.faceGroupOf(f)) catch return false;
+        const c = trueFaceColor(f);
+        add_colors.appendSlice(jalloc, c[0..]) catch return false;
+    }
+    // Rim walls on the selection's boundary edges (incident to exactly ONE selected face).
+    var it = euse.iterator();
+    while (it.next()) |entry| {
+        const use = entry.value_ptr.*;
+        if (use.count != 1) continue;
+        const fa = use.face;
+        const a = mesh_edit.vertPosPub(mesh_edit.cornerVertPub(fa, use.corner));
+        const b = mesh_edit.vertPosPub(mesh_edit.cornerVertPub(fa, (use.corner + 1) % 3));
+        const oa = offsetOf(&vert_normals, mesh_edit.cornerVertPub(fa, use.corner), t);
+        const ob = offsetOf(&vert_normals, mesh_edit.cornerVertPub(fa, (use.corner + 1) % 3), t);
+        const ai: [3]f32 = .{ a[0] + oa[0], a[1] + oa[1], a[2] + oa[2] };
+        const bi: [3]f32 = .{ b[0] + ob[0], b[1] + ob[1], b[2] + ob[2] };
+        // Edge a→b runs in the face's winding, so (a, ai, bi, b) faces outward.
+        if (!appendQuadSplit(&out, a, ai, bi, b)) return false;
+        if (has_groups) {
+            add_groups.append(jalloc, model_source.faceGroupOf(fa)) catch return false;
+            add_groups.append(jalloc, model_source.faceGroupOf(fa)) catch return false;
+        }
+        const c = trueFaceColor(fa);
+        add_colors.appendSlice(jalloc, c[0..]) catch return false;
+        add_colors.appendSlice(jalloc, c[0..]) catch return false;
+    }
+
+    var snap = journalSnapshotCurrent("solidify faces");
+    mesh_edit.clearSelection();
+    const cur_groups: ?[]u32 = if (has_groups) captureFaceGroups() else null;
+    defer if (cur_groups) |g| jalloc.free(g);
+    const first_new_face = tri_count;
+    const new_count: u32 = @intCast(out.items.len / 8);
+    if (!replaceActiveEditMesh(out.items, new_count)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    if (has_groups) {
+        var all_groups = std.ArrayListUnmanaged(u32){};
+        defer all_groups.deinit(jalloc);
+        for (cur_groups.?) |g| all_groups.append(jalloc, g) catch {};
+        for (add_groups.items) |g| all_groups.append(jalloc, g) catch {};
+        model_source.setFaceGroups(all_groups.items);
+    }
+    // The added skin/walls take their source face's colour.
+    var i: u32 = 0;
+    while (i * 4 < add_colors.items.len) : (i += 1) {
+        const c: [4]u8 = .{ add_colors.items[i * 4], add_colors.items[i * 4 + 1], add_colors.items[i * 4 + 2], add_colors.items[i * 4 + 3] };
+        model_paint.paintFace(first_new_face + i, c);
+        model_source.writeColor(@intCast(first_new_face + i), c[0], c[1], c[2]);
+    }
+    _ = refreshPaintLayout();
+    journalCommit(&snap);
+    ensureGlassTrailing();
+    return true;
+}
+
 fn faceCrossFromPositions(pos: []const f32, face: u32) [3]f32 {
     const b = @as(usize, face) * 9;
     if (b + 8 >= pos.len) return .{ 0, 0, 0 };
@@ -1210,21 +1958,31 @@ fn countUnsafeFaceEdits(before: []const f32, after: []const f32, face_count: u32
 
 pub fn meshGizmoBegin() void {
     clearMeshGuardSnapshot();
+    // Pre-drag journal snapshot — committed at release only if the drag moved something.
+    journalDiscard(&g_gizmo_snap);
+    g_gizmo_snap = journalSnapshotCurrent("transform");
     const pos = model_paint.positions() orelse return;
     g_guard_before = std.heap.c_allocator.dupe(f32, pos) catch null;
     g_guard_face_count = model_paint.faceCount();
 }
 
 pub fn meshGizmoFinish() bool {
-    const before = g_guard_before orelse return false;
+    const before = g_guard_before orelse {
+        journalDiscard(&g_gizmo_snap);
+        return false;
+    };
     const after = model_paint.positions() orelse {
+        journalDiscard(&g_gizmo_snap);
         clearMeshGuardSnapshot();
         return false;
     };
     if (after.len != before.len) {
+        journalDiscard(&g_gizmo_snap);
         clearMeshGuardSnapshot();
         return false;
     }
+    // A press that moved nothing leaves no undo step.
+    if (std.mem.eql(f32, before, after)) journalDiscard(&g_gizmo_snap) else journalCommit(&g_gizmo_snap);
     const fc: u32 = @intCast(@min(before.len / 9, after.len / 9));
     const bad = countUnsafeFaceEdits(before, after, fc);
     if (bad == 0) {
@@ -1262,6 +2020,9 @@ pub fn meshEditGuardResolve(action: u8) bool {
                 _ = patchActiveEditMesh(0, fc - 1);
             }
             changed = true;
+            // The revert returned the mesh to the exact state the newest journal entry
+            // snapshots — undoing to it would be a visible no-op, so drop the entry.
+            journalDropLast();
         }
     }
     clearMeshGuardSnapshot();
@@ -1542,8 +2303,11 @@ pub fn meshGizmoDrag(axis: i32, dx: f32, dy: f32) bool {
 
 pub fn meshGizmoNudge(axis: u8, amount: f32) bool {
     if (axis > 2 or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
+    var snap = journalSnapshotCurrent("nudge");
     const m = mesh_edit.translateSelection(vmul(axisVec(axis), amount));
-    return applyMeshMutation(m);
+    const ok = applyMeshMutation(m);
+    if (ok) journalCommit(&snap) else journalDiscard(&snap);
+    return ok;
 }
 
 /// Draw the editor overlay (vertex dots / edge highlights / marquee box) as screen-space
@@ -4660,6 +5424,28 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
         }
         if (child.scene3d_tex_key) |tk| {
             if (images.staticSurfaceBindGroup3D(tk)) |bg| tex_bg = bg;
+        }
+
+        // Per-face GLASS on the resident edit mesh: glass faces live in ONE trailing
+        // run (partitionGlassFaces keeps that invariant), so the opaque pass draws the
+        // prefix and the trailing run rides the transparent pass (depth-write off,
+        // far→near) — per-face translucency on a single resident model.
+        if (child.scene3d_instance_count == 0 and model_paint.isTarget(hashKey(key))) {
+            const gv = editGlassFirstVert();
+            const slot0 = maybe_slot.?;
+            if (gv < slot0.count) {
+                if (tcount < MAX_SCENE_MESHES) {
+                    const gc = math.Vec3{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
+                    tidx[tcount] = ci;
+                    tslot[tcount] = .{ .offset = slot0.offset + @as(u64, gv) * @sizeOf(Vertex), .count = slot0.count - gv };
+                    ttex[tcount] = tex_bg;
+                    tdist[tcount] = math.v3distance(gc, cam_pos);
+                    tcount += 1;
+                    collected_logical += 1;
+                }
+                if (gv == 0) continue; // the whole mesh is glass
+                maybe_slot.?.count = gv; // opaque pass draws only the opaque prefix
+            }
         }
 
         // Route alpha<1 single meshes to the transparent list; everything else

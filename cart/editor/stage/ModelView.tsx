@@ -96,6 +96,17 @@ export type ModelToolApi = {
   // shell reports it loudly; null = the door itself failed.
   setPartHidden: (lo: number, hi: number, hidden: boolean) => { ok: boolean; count: number } | null;
   deletePartRange: (lo: number, hi: number) => { ok: boolean; count: number } | null;
+  // ── Studio-parity part ops (host-native, journaled for undo/redo) ─────────────
+  duplicatePart: (lo: number, hi: number, mirrorAxis: number) => { lo: number; hi: number } | null;
+  detachSelection: () => { lo: number; hi: number } | null;
+  mergeParts: (aLo: number, aHi: number, bLo: number, bHi: number) => { lo: number; hi: number } | null;
+  mergeFaces: () => boolean;
+  glassSelection: () => boolean;
+  solidifySelection: () => boolean;
+  appendModelFile: (path: string, color: string) => { lo: number; hi: number } | null;
+  undoMesh: () => { ok: boolean; label: string; note: string | null } | null;
+  redoMesh: () => { ok: boolean; label: string; note: string | null } | null;
+  setPartRangesMirror: (ranges: { lo: number; hi: number }[]) => void;
   setQuality: (q: number) => void;
   // Brush controls — the editor toolbar drives tool/safety/detail, the BrushKit dock drives
   // the brush + palette. The viewer stays the single owner of the live brush state.
@@ -203,7 +214,7 @@ const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
 // the host's: welded topology, selection sets, AND the input loop (engine.zig). The cart
 // only sets mode/tool/capture and reads counts for the HUD — never a per-event handler.
 type SelInfo = { mode: number; verts: number; edges: number; sel: number };
-type TopoResult = { ok: number; key?: string; count?: number; lo?: number; hi?: number };
+type TopoResult = { ok: number; key?: string; count?: number; lo?: number; hi?: number; label?: string; undo?: number; redo?: number };
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 const meshClearSel = () => host.__mesh_edit_clear?.();
@@ -242,6 +253,24 @@ const meshAppendGroup = (positions: Float32Array, faceGroups: Uint32Array) =>
   readTopoResult(host.__mesh_append_group?.(positions, Math.floor(positions.length / 8), faceGroups));
 const meshSetGroupHidden = (lo: number, hi: number, hidden: boolean) =>
   readTopoResult(host.__mesh_set_group_hidden?.(lo, hi, hidden ? 1 : 0));
+// ── Studio-parity part ops (all journaled host-side for undo/redo) ────────────────
+const meshDuplicateRange = (lo: number, hi: number, mirrorAxis: number) =>
+  readTopoResult(host.__mesh_duplicate_range?.(lo, hi, mirrorAxis));
+const meshDetach = () => readTopoResult(host.__mesh_topo_detach?.());
+const meshMergePartsDoor = (aLo: number, aHi: number, bLo: number, bHi: number) =>
+  readTopoResult(host.__mesh_merge_parts?.(aLo, aHi, bLo, bHi));
+const meshMergeFaces = () => readTopoResult(host.__mesh_topo_merge_faces?.());
+const meshGlass = () => readTopoResult(host.__mesh_topo_glass?.());
+const meshSolidify = () => readTopoResult(host.__mesh_topo_solidify?.(0));
+const meshAppendFile = (path: string) => readTopoResult(host.__mesh_append_file?.(path));
+const meshUndoDoor = () => readTopoResult(host.__mesh_undo?.());
+const meshRedoDoor = () => readTopoResult(host.__mesh_redo?.());
+// The parts-metadata note the restored snapshot carried (the shell sets it after every
+// part-structure change; read back after an undo/redo to resync the outliner).
+const meshJournalNote = (): string | null => {
+  const s = host.__mesh_journal_note?.();
+  return typeof s === 'string' && s.length > 0 ? s : null;
+};
 // Tell the weld which group ranges are PARTS: coincident verts in different parts stay
 // separate logical verts, so editing a focused part can't drag a stacked twin with it.
 // Sent (full list) after every load and part op; empty clears to position-only welding.
@@ -688,6 +717,61 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       partRangesRef.current = partRangesRef.current.filter((pr) => pr.lo !== lo || pr.hi !== hi);
       meshSetPartRanges(partRangesRef.current);
       return r ? { ok, count: Math.floor((r.count ?? 0) / 3) } : null;
+    },
+    // ── Studio-parity part ops. Each adopts the host's new mesh key and keeps the
+    // part-range mirror true so the weld never bleeds edits across parts. ─────────
+    duplicatePart: (lo, hi, mirrorAxis) => {
+      const r = meshDuplicateRange(lo, hi, mirrorAxis);
+      if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
+      // No tint here — the host copied the source part's per-face paint onto the twin.
+      partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
+      meshSetPartRanges(partRangesRef.current);
+      return { lo: r.lo, hi: r.hi };
+    },
+    detachSelection: () => {
+      const r = meshDetach();
+      if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
+      partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
+      meshSetPartRanges(partRangesRef.current);
+      return { lo: r.lo, hi: r.hi };
+    },
+    mergeParts: (aLo, aHi, bLo, bHi) => {
+      const r = meshMergePartsDoor(aLo, aHi, bLo, bHi);
+      if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
+      partRangesRef.current = [
+        ...partRangesRef.current.filter((pr) => !(pr.lo === aLo && pr.hi === aHi) && !(pr.lo === bLo && pr.hi === bHi)),
+        { lo: r.lo, hi: r.hi },
+      ];
+      meshSetPartRanges(partRangesRef.current);
+      return { lo: r.lo, hi: r.hi };
+    },
+    mergeFaces: () => adoptMesh(meshMergeFaces()),
+    glassSelection: () => adoptMesh(meshGlass()),
+    solidifySelection: () => adoptMesh(meshSolidify()),
+    appendModelFile: (path, color) => {
+      const r = meshAppendFile(path);
+      if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
+      const [rr, gg, bb] = hexToRgb01(color);
+      host.__model_paint_group_range?.(r.lo, r.hi, Math.round(rr * 255), Math.round(gg * 255), Math.round(bb * 255));
+      partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
+      meshSetPartRanges(partRangesRef.current);
+      return { lo: r.lo, hi: r.hi };
+    },
+    undoMesh: () => {
+      const r = meshUndoDoor();
+      if (!r?.ok) return { ok: false, label: '', note: null };
+      adoptMesh(r);
+      return { ok: true, label: r.label ?? 'mesh edit', note: meshJournalNote() };
+    },
+    redoMesh: () => {
+      const r = meshRedoDoor();
+      if (!r?.ok) return { ok: false, label: '', note: null };
+      adoptMesh(r);
+      return { ok: true, label: r.label ?? 'mesh edit', note: meshJournalNote() };
+    },
+    setPartRangesMirror: (ranges) => {
+      partRangesRef.current = ranges.slice();
+      meshSetPartRanges(partRangesRef.current);
     },
     setQuality: (q) => applyQuality(q),
     brushTool: chooseBrushTool,

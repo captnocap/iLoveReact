@@ -263,6 +263,7 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     // Adopt this mesh as the paint target FIRST — it rewrites the verts' UVs to the
     // per-face paint atlas in place, so the stash (next) ships the paint-ready UVs.
     scene3d.setPaintTarget(path, mesh.verts, mesh.vert_count);
+    scene3d.meshJournalClear(); // a fresh model is a new document — no inherited history
     if (!scene3d.stashHostMesh(path, mesh.verts, mesh.vert_count)) {
         setReturnString(info, "");
         return;
@@ -330,6 +331,7 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     // paint-ready working copy into the resident host stash.
     model_source.retain(key, mesh.verts, mesh.vert_count);
     scene3d.setPaintTarget(key, mesh.verts, mesh.vert_count);
+    scene3d.meshJournalClear(); // a fresh model is a new document — no inherited history
     if (!scene3d.stashHostMesh(key, mesh.verts, mesh.vert_count)) {
         setReturnString(info, "");
         return;
@@ -636,6 +638,177 @@ fn hostMeshSurvivingGroups(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
         pos += s.len;
     }
     setReturnString(info, buf[0..pos]);
+}
+
+fn setMeshAppendReturn(info: v8.FunctionCallbackInfo, r: anytype) void {
+    if (!r.ok) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf: [320]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"lo\":{d},\"hi\":{d}}}", .{ key, r.count, r.lo, r.hi }) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+
+/// __mesh_undo() / __mesh_redo() → JSON {"ok","key","count","label","undo","redo"}.
+/// Swap the live edit mesh with the top journal snapshot (full pre-op state: verts,
+/// groups, part ranges, colours, hidden stash, and the cart's parts-metadata note —
+/// read the restored note back with __mesh_journal_note()).
+fn hostMeshUndoRedo(info: v8.FunctionCallbackInfo, redo: bool) void {
+    const label = if (redo) scene3d.meshRedoLabel() else scene3d.meshUndoLabel();
+    const ok = if (redo) scene3d.meshRedo() else scene3d.meshUndo();
+    if (!ok) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    state.markDirty();
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    const depths = scene3d.meshJournalCounts();
+    var buf: [420]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"label\":\"{s}\",\"undo\":{d},\"redo\":{d}}}", .{ key, scene3d.meshEditActiveCount(), label, depths[0], depths[1] }) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+fn hostMeshUndo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    hostMeshUndoRedo(v8.FunctionCallbackInfo.initFromV8(info_c), false);
+}
+fn hostMeshRedo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    hostMeshUndoRedo(v8.FunctionCallbackInfo.initFromV8(info_c), true);
+}
+
+/// __mesh_history() → JSON {"undo":n,"redo":n} — the journal depths (menu enable state).
+fn hostMeshHistory(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const depths = scene3d.meshJournalCounts();
+    var buf: [64]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"undo\":{d},\"redo\":{d}}}", .{ depths[0], depths[1] }) catch "{\"undo\":0,\"redo\":0}";
+    setReturnString(info, json);
+}
+
+/// __mesh_journal_note(json?) — with an argument: SET the cart's opaque parts-metadata
+/// note (rides every subsequent journal snapshot). Without: GET the current note (the
+/// one an undo/redo just restored) — "" when none. The note lets the outliner resync
+/// its part rows after a restore without geometry crossing the bridge.
+fn hostMeshJournalNote(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (argToStringAlloc(info, 0)) |note| {
+        defer std.heap.c_allocator.free(note);
+        scene3d.meshJournalNoteSet(note);
+        setReturnNumber(info, 1);
+        return;
+    }
+    const note = scene3d.meshJournalNoteGet() orelse {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, note);
+}
+
+/// __mesh_duplicate_range(lo, hi, mirrorAxis) → JSON {"ok","key","count","lo","hi"}.
+/// Duplicate the part in the group range as a NEW part — mirrorAxis 0/1/2 reflects the
+/// copy across that origin plane (winding fixed); -1 is a plain copy. Paint carries.
+fn hostMeshDuplicateRange(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
+    const mirror: i32 = argToI32(info, 2) orelse -1;
+    const r = scene3d.meshDuplicateGroupRange(lo, hi, mirror);
+    if (r.ok) state.markDirty();
+    setMeshAppendReturn(info, r);
+}
+
+/// __mesh_topo_detach() → JSON {"ok","key","count","lo","hi"}. Peel the selected faces
+/// (face mode) into a NEW part — a pure authored-group remap; geometry and paint stay.
+fn hostMeshTopoDetach(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const r = scene3d.meshDetachSelection();
+    if (r.ok) state.markDirty();
+    setMeshAppendReturn(info, r);
+}
+
+/// __mesh_merge_parts(aLo, aHi, bLo, bHi) → JSON {"ok","key","count","lo","hi"}. Merge
+/// two parts' faces into ONE fresh group range (the old studio's "merge down").
+fn hostMeshMergeParts(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const a_lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const a_hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
+    const b_lo: u32 = @intCast(@max(0, argToI32(info, 2) orelse 0));
+    const b_hi: u32 = @intCast(@max(0, argToI32(info, 3) orelse 0));
+    const r = scene3d.meshMergeGroupRanges(a_lo, a_hi, b_lo, b_hi);
+    if (r.ok) state.markDirty();
+    setMeshAppendReturn(info, r);
+}
+
+/// __mesh_topo_merge_faces() → JSON {"ok","key","count"}. Fuse the selected faces
+/// (2+ authored groups, face mode) into one authored face (shared group id).
+fn hostMeshTopoMergeFaces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = scene3d.meshMergeSelectedFaces();
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_topo_glass() → JSON {"ok","key","count"}. Toggle the selected faces as GLASS
+/// (translucent alpha, drawn through the transparent pass). Re-toggling un-glasses.
+fn hostMeshTopoGlass(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = scene3d.meshSetSelectionGlass();
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_topo_solidify(thickness) → JSON {"ok","key","count"}. Give the selected faces
+/// thickness in place (inner skin + rim walls). thickness <= 0 uses 0.125 m (2/16).
+fn hostMeshTopoSolidify(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const thickness: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const ok = scene3d.meshSolidifySelection(thickness);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_append_file(path) → JSON {"ok","key","count","lo","hi"}. Parse a .glb/.obj in
+/// the host and APPEND it to the live edit mesh as a new part (per-triangle groups) —
+/// cross-model reuse without the file's geometry ever crossing the bridge.
+fn hostMeshAppendFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const path = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    defer std.heap.c_allocator.free(path);
+    var mesh = mesh_import.loadFile(std.heap.c_allocator, path) catch |e| {
+        std.log.warn("[mesh-append] {s}: {}", .{ path, e });
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    defer mesh.deinit(std.heap.c_allocator);
+    const tris = mesh.vert_count / 3;
+    if (tris == 0) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    const groups = std.heap.c_allocator.alloc(u32, tris) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    defer std.heap.c_allocator.free(groups);
+    for (groups, 0..) |*g, i| g.* = @intCast(i);
+    const r = scene3d.meshAppendGroup(mesh.verts[0 .. @as(usize, mesh.vert_count) * 8], mesh.vert_count, groups);
+    if (r.ok) state.markDirty();
+    setMeshAppendReturn(info, r);
 }
 
 /// __mesh_edit_snapshot() — save the selection before an instant mousedown pick.
@@ -1882,6 +2055,17 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_group_face_count", hostMeshGroupFaceCount);
     v8_runtime.registerHostFn("__mesh_append_group", hostMeshAppendGroup);
     v8_runtime.registerHostFn("__mesh_set_group_hidden", hostMeshSetGroupHidden);
+    v8_runtime.registerHostFn("__mesh_undo", hostMeshUndo);
+    v8_runtime.registerHostFn("__mesh_redo", hostMeshRedo);
+    v8_runtime.registerHostFn("__mesh_history", hostMeshHistory);
+    v8_runtime.registerHostFn("__mesh_journal_note", hostMeshJournalNote);
+    v8_runtime.registerHostFn("__mesh_duplicate_range", hostMeshDuplicateRange);
+    v8_runtime.registerHostFn("__mesh_topo_detach", hostMeshTopoDetach);
+    v8_runtime.registerHostFn("__mesh_merge_parts", hostMeshMergeParts);
+    v8_runtime.registerHostFn("__mesh_topo_merge_faces", hostMeshTopoMergeFaces);
+    v8_runtime.registerHostFn("__mesh_topo_glass", hostMeshTopoGlass);
+    v8_runtime.registerHostFn("__mesh_topo_solidify", hostMeshTopoSolidify);
+    v8_runtime.registerHostFn("__mesh_append_file", hostMeshAppendFile);
     v8_runtime.registerHostFn("__mesh_surviving_groups", hostMeshSurvivingGroups);
     v8_runtime.registerHostFn("__mesh_edit_snapshot", hostMeshEditSnapshot);
     v8_runtime.registerHostFn("__mesh_edit_revert", hostMeshEditRevert);

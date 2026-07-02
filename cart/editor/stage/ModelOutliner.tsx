@@ -5,16 +5,19 @@ import type { ModelPart, PrimitiveKind } from '../data/types';
 
 // The model OUTLINER — the Studio concept ported to the new editor: a model is a list of
 // PARTS (each its own mesh), and this panel lists them with the row verbs (select /
-// visibility / delete) plus an add-bar to drop another primitive as a new part. Selection
-// highlights the whole part in the host (via its face-group range) so the gizmo moves it.
+// visibility / duplicate / delete) plus an add-bar to drop another primitive as a new
+// part or append a saved library model (cross-model reuse). Selection highlights the
+// whole part in the host (via its face-group range) so the gizmo moves it.
 // Housed in the Model Focus panel (Inspector) — an inline block, not a viewport overlay.
-export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisible, onDelete, onAdd }: {
+export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisible, onDuplicate, onDelete, onAdd, onImportModel }: {
   parts: ModelPart[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onToggleVisible: (id: string) => void;
+  onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
   onAdd: (kind: PrimitiveKind) => void;
+  onImportModel: () => void;
 }) {
   return (
     <Col
@@ -52,6 +55,9 @@ export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisib
                 <Box style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: part.color }} />
                 <Text numberOfLines={1} noWrap style={{ color: active ? '#eaf2ff' : (part.visible ? '#cfe0f5' : '#6b7686'), fontSize: 12, fontWeight: active ? 700 : 500 }}>{part.name}</Text>
               </Pressable>
+              <Pressable onPress={() => onDuplicate(part.id)} tooltip="Duplicate part (paint carries; Mirror lives in the right-click menu)">
+                <Icon name="CopyPlus" size={12} color="#6f8296" />
+              </Pressable>
               <Pressable onPress={() => onDelete(part.id)} tooltip="Delete part">
                 <Icon name="Trash2" size={12} color="#7d5a5a" />
               </Pressable>
@@ -71,6 +77,14 @@ export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisib
             <Icon name={p.icon} size={13} color="#cfe0f5" />
           </Pressable>
         ))}
+        <Box style={{ flexGrow: 1 }} />
+        <Pressable
+          onPress={onImportModel}
+          tooltip="Add from library — append a saved model as part(s); pick it again to reuse it"
+          style={{ width: 26, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: 5, backgroundColor: '#1a2c1fee', borderWidth: 1, borderColor: '#2f5a3a' }}
+        >
+          <Icon name="PackagePlus" size={13} color="#bfe0c8" />
+        </Pressable>
       </Row>
     </Col>
   );

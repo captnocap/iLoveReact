@@ -106,6 +106,12 @@ pub fn hasPartRanges() bool {
     return g_part_ranges != null;
 }
 
+/// The live flattened [lo,hi) part-range pairs (null when none set) — the mesh-edit
+/// journal snapshots these so an undo restores part identity along with the geometry.
+pub fn partRanges() ?[]const u32 {
+    return g_part_ranges;
+}
+
 /// The PART index an authored group id falls in (binary search over the [lo,hi) pairs).
 /// NO_PART when no ranges are set, the group is ungrouped, or it falls in a gap — all
 /// such faces weld together, which is exactly the pre-part behaviour.

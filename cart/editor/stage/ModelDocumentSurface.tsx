@@ -12,6 +12,10 @@ export type OutlinerHandlers = {
   onToggleVisiblePart: (id: string) => void;
   onDeletePart: (id: string) => void;
   onAddPart: (kind: PrimitiveKind) => void;
+  // Duplicate a part in place (host copies geometry + paint; the row gains a twin).
+  onDuplicatePart: (id: string) => void;
+  // Open the library picker — append a saved model into this model as new part(s).
+  onImportModel: () => void;
   // A file-backed mount reports where each part landed in the host mesh (the import's
   // range is only known after the host parses the file) — AppFrame stamps lo/hi.
   onStampRanges: (modelId: string, ranges: PartRange[]) => void;

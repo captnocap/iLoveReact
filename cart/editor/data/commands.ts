@@ -99,6 +99,21 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-create-face', menu: 'Edit', surface: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
   // Loop cut: slice the ring perpendicular to the ONE selected edge (host-native op).
   { id: 'mesh-loopcut', menu: 'Edit', surface: 'model', name: 'Loop Cut', icon: 'Scissors', key: 'L', context: true, native: true, undoable: true, tool: true },
+  // Face-selection ops (the old studio's face-mode toolset, host-native + journaled):
+  // detach peels the selection into a NEW part; glass toggles translucency; solidify
+  // thickens in place; merge fuses 2+ authored faces into one.
+  { id: 'mesh-detach', menu: 'Edit', surface: 'model', name: 'Detach Faces', icon: 'Ungroup', key: 'D', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-glass', menu: 'Edit', surface: 'model', name: 'Glass Faces', icon: 'GlassWater', key: 'B', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-solidify', menu: 'Edit', surface: 'model', name: 'Solidify', icon: 'Boxes', key: 'O', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-merge-faces', menu: 'Edit', surface: 'model', name: 'Merge Faces', icon: 'Combine', key: 'M', context: true, native: true, undoable: true, tool: true },
+  // Part ops (the focused outliner part): duplicate / mirrored duplicate / merge down.
+  { id: 'mesh-duplicate-part', menu: 'Edit', surface: 'model', name: 'Duplicate Part', icon: 'CopyPlus', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-mirror-x', menu: 'Edit', surface: 'model', name: 'Mirror Part X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-mirror-y', menu: 'Edit', surface: 'model', name: 'Mirror Part Y', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-mirror-z', menu: 'Edit', surface: 'model', name: 'Mirror Part Z', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-merge-down', menu: 'Edit', surface: 'model', name: 'Merge Part Down', icon: 'Merge', key: '', context: true, native: true, undoable: true, tool: true },
+  // Cross-model reuse: append a saved library model into the OPEN model as new part(s).
+  { id: 'mesh-import-part', menu: 'Edit', surface: 'model', name: 'Add From Library...', icon: 'PackagePlus', key: '', context: true, native: true, undoable: true, tool: true },
   // Paint sub-tools — the two brush behaviours plus the free-form face-safety and detail
   // toggles. Surface only while paint mode is active (see meshPaintCommands); the brush's
   // colour/size/flow live in the Model Focus dock's BrushKit, not the toolbar.
@@ -116,15 +131,35 @@ export function meshToolCommands(): Command[] {
   return MESH_TOOL_IDS.map(commandById);
 }
 
-// The contextual topology ops that apply to the current selection: extrude on a
-// single edge, create-face on two or more. Empty when nothing applies. Surfaces
-// the same way in the toolbar and the context menu.
+// The contextual topology ops that apply to the current selection: extrude/loop-cut
+// on a single edge, create-face on two or more, and the face-selection toolset
+// (detach / glass / solidify / merge) in face mode. Empty when nothing applies.
+// Surfaces the same way in the toolbar and the context menu.
 export function meshTopoCommands(tool: { selMode: number; sel: number }): Command[] {
-  if (tool.selMode !== 2 || tool.sel < 1) return [];
-  // One edge → extrude OR loop-cut across its ring; two+ edges → bridge into a face.
-  return tool.sel === 1
-    ? [commandById('mesh-extrude'), commandById('mesh-loopcut')]
-    : [commandById('mesh-create-face')];
+  if (tool.sel < 1) return [];
+  if (tool.selMode === 2) {
+    // One edge → extrude OR loop-cut across its ring; two+ edges → bridge into a face.
+    return tool.sel === 1
+      ? [commandById('mesh-extrude'), commandById('mesh-loopcut')]
+      : [commandById('mesh-create-face')];
+  }
+  if (tool.selMode === 3) {
+    return [commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'), commandById('mesh-merge-faces')];
+  }
+  return [];
+}
+
+// The part-level verbs for the FOCUSED outliner part (duplicate / mirrored duplicate /
+// merge down) plus the always-available library import. Rendered in the model context
+// menu; the outliner rows carry quick duplicate/delete icons.
+export function meshPartCommands(hasActivePart: boolean, partCount: number): Command[] {
+  const out: Command[] = [];
+  if (hasActivePart) {
+    out.push(commandById('mesh-duplicate-part'), commandById('mesh-mirror-x'), commandById('mesh-mirror-y'), commandById('mesh-mirror-z'));
+    if (partCount >= 2) out.push(commandById('mesh-merge-down'));
+  }
+  out.push(commandById('mesh-import-part'));
+  return out;
 }
 
 // The two brush behaviours (fill · free-form), surfaced as toolbar icon buttons only while

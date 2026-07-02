@@ -459,6 +459,23 @@ pub fn faceColor(face: u32) ?[4]u8 {
     return .{ buf[d], buf[d + 1], buf[d + 2], buf[d + 3] };
 }
 
+/// A face's representative colour read from a SAVED patch (saveFacePatch bytes) instead
+/// of the live atlas — the face's TRUE colour while a selection tint sits over it.
+/// The mesh-edit journal and colour-carry paths use this so a snapshot taken mid-selection
+/// never bakes the highlight orange into the model.
+pub fn faceColorFromPatch(face: u32, patch: []const u8) ?[4]u8 {
+    const r = faceRect(face) orelse return null;
+    const lay = &(g_layout orelse return null);
+    const ct = faceCentroidTexel(lay, face);
+    if (ct[0] < r[0] or ct[1] < r[1]) return null;
+    const px = ct[0] - r[0];
+    const py = ct[1] - r[1];
+    if (px >= r[2] or py >= r[3]) return null;
+    const d = (@as(usize, py) * r[2] + px) * 4;
+    if (d + 3 >= patch.len) return null;
+    return .{ patch[d], patch[d + 1], patch[d + 2], patch[d + 3] };
+}
+
 // ── Per-face rect save/restore/tint (the selection highlight rides this) ──────────
 // The unit is the face triangle's island-space bounding rect. Save copies the whole
 // rect; tint and restore touch ONLY texels strictly inside the triangle (TINT_EPS), so

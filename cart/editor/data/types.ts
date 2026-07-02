@@ -125,6 +125,28 @@ export type ModelToolApi = {
   // shell can report it LOUDLY — a part op that silently no-ops reads as "it all vanished".
   setPartHidden: (lo: number, hi: number, hidden: boolean) => { ok: boolean; count: number } | null;
   deletePartRange: (lo: number, hi: number) => { ok: boolean; count: number } | null;
+  // ── Studio-parity part ops (host-native; all journaled for undo/redo) ─────────
+  // Duplicate a part's range; mirrorAxis 0/1/2 reflects the copy across that origin
+  // plane (-1 = plain copy). Returns the new part's group range.
+  duplicatePart: (lo: number, hi: number, mirrorAxis: number) => { lo: number; hi: number } | null;
+  // Peel the selected faces (face mode) into a NEW part (pure group remap).
+  detachSelection: () => { lo: number; hi: number } | null;
+  // Merge two parts' faces into ONE fresh range (the old studio's "merge down").
+  mergeParts: (aLo: number, aHi: number, bLo: number, bHi: number) => { lo: number; hi: number } | null;
+  // Fuse the selected faces (2+ authored faces) into one authored face.
+  mergeFaces: () => boolean;
+  // Toggle the selected faces as translucent glass (re-toggle to un-glass).
+  glassSelection: () => boolean;
+  // Thicken the selected faces in place (inner skin + rim walls).
+  solidifySelection: () => boolean;
+  // Parse a .glb/.obj in the host and append it as a new part (cross-model reuse).
+  appendModelFile: (path: string, color: string) => { lo: number; hi: number } | null;
+  // Undo/redo the host mesh journal. note = the parts-metadata JSON the restored
+  // snapshot carried (set via the journal-note door), for outliner resync.
+  undoMesh: () => { ok: boolean; label: string; note: string | null } | null;
+  redoMesh: () => { ok: boolean; label: string; note: string | null } | null;
+  // Overwrite the viewer's part-range mirror after an undo/redo restored host ranges.
+  setPartRangesMirror: (ranges: { lo: number; hi: number }[]) => void;
   setQuality: (q: number) => void;
   brushTool: (t: BrushTool) => void;
   cycleSafety: () => void;

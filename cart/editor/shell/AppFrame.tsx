@@ -32,7 +32,10 @@ import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
-import { primitivePartMesh, composeModelParts, storedModelParts, fileModelPackage, importModelFilePackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
+import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
+import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
+import ImportPartDialog from '../dialogs/ImportPartDialog';
+import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
@@ -69,6 +72,8 @@ export default function AppFrame() {
   const [paintPopover, setPaintPopover] = useState<PaintPopover>(null);
   // A pending image import awaiting the pixel-vs-exact decision. Transient.
   const [importPlan, setImportPlan] = useState<ImportImagePlan | null>(null);
+  // The Add From Library picker (append a saved model into the OPEN model as parts).
+  const [importPartOpen, setImportPartOpen] = useState(false);
 
   // Imported textures register as dynamic ShaderSpecs at boot (and after every
   // import), so they are first-class materials everywhere a catalog material is.
@@ -174,6 +179,23 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, openMenu: null, status }));
       return;
     }
+    // Studio-parity mesh ops — these change PART structure (or journaled mesh state),
+    // so they route through dedicated handlers that keep the outliner metadata true.
+    // Must run BEFORE the generic model-tool router below (same 'model' surface).
+    if (commandId === 'mesh-detach') { runDetachSelection(); return; }
+    if (commandId === 'mesh-glass') { runFaceOp('glass'); return; }
+    if (commandId === 'mesh-solidify') { runFaceOp('solidify'); return; }
+    if (commandId === 'mesh-merge-faces') { runFaceOp('merge-faces'); return; }
+    if (commandId === 'mesh-duplicate-part') { duplicatePartById(state.modelActivePartId, -1); return; }
+    if (commandId === 'mesh-mirror-x') { duplicatePartById(state.modelActivePartId, 0); return; }
+    if (commandId === 'mesh-mirror-y') { duplicatePartById(state.modelActivePartId, 1); return; }
+    if (commandId === 'mesh-mirror-z') { duplicatePartById(state.modelActivePartId, 2); return; }
+    if (commandId === 'mesh-merge-down') { mergeActivePartDown(); return; }
+    if (commandId === 'mesh-import-part') {
+      setImportPartOpen(true);
+      setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: 'pick a library model to append as part(s)' }));
+      return;
+    }
     // Model-surface tools route to the viewer's host-native tool api; the viewer
     // owns the state and reports it back, so we don't mutate world state here.
     if (isMeshToolCommand(commandId)) {
@@ -209,10 +231,16 @@ export default function AppFrame() {
       }
     }
     if (command.id === 'undo-local') {
+      // On a model document Ctrl+Z drives the HOST mesh journal (geometry, parts,
+      // paint colours all restore); the world surface keeps its local history list.
+      const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+      if (doc?.kind === 'model') { meshUndoRedo(false); return; }
       undoLocal();
       return;
     }
     if (command.id === 'redo-local') {
+      const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+      if (doc?.kind === 'model') { meshUndoRedo(true); return; }
       redoLocal();
       return;
     }
@@ -965,6 +993,255 @@ export default function AppFrame() {
     prevTrisRef.current = tris;
   }, [state.modelTool.tris]);
 
+  // ── Studio-parity part ops (req_2520) ────────────────────────────────────────
+  // Duplicate a part (mirrorAxis 0/1/2 = mirrored twin across that origin plane;
+  // -1 = plain copy). The host copies geometry + paint and returns the new range;
+  // the outliner gains a row. A mirrored/cloned SEED mesh rides along when the
+  // source part has one, so the copy survives a document remount.
+  const duplicatePartById = (id: string | null, mirrorAxis: number) => {
+    const mid = activePartsModelId(state);
+    const api = modelToolApiRef.current;
+    const part = mid && id ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
+    const range = part ? partRange(part) : null;
+    if (!mid || !api || !part || !range) {
+      setState((prev) => ({ ...prev, status: 'duplicate needs a focused part with a stamped range' }));
+      return;
+    }
+    if (!part.visible) {
+      setState((prev) => ({ ...prev, status: `cannot duplicate ${part.name} while it is hidden — show it first` }));
+      return;
+    }
+    const r = api.duplicatePart(range.lo, range.hi, mirrorAxis);
+    if (!r) {
+      setState((prev) => ({ ...prev, status: `could not duplicate ${part.name} [${range.lo},${range.hi}) — host op failed` }));
+      return;
+    }
+    const axisName = mirrorAxis >= 0 ? ` mirror ${'XYZ'[mirrorAxis]}` : ' copy';
+    const seed = part.mesh ? (mirrorAxis >= 0 ? mirrorMesh(part.mesh, mirrorAxis as 0 | 1 | 2) : cloneMesh(part.mesh)) : undefined;
+    const placed: ModelPart = { id: `part:dup:${state.seq}`, name: `${part.name}${axisName}`, kind: part.kind, ...(seed ? { mesh: seed } : {}), visible: true, color: part.color, lift: part.lift, lo: r.lo, hi: r.hi };
+    setState((prev) => ({
+      ...prev,
+      seq: prev.seq + 1,
+      modelParts: { ...prev.modelParts, [mid]: [...(prev.modelParts[mid] ?? []), placed] },
+      modelActivePartId: placed.id,
+      status: `${mirrorAxis >= 0 ? 'mirrored' : 'duplicated'} ${part.name} → ${placed.name} [${r.lo},${r.hi})`,
+    }));
+  };
+
+  // Detach the face-mode selection into a NEW part (host group remap — geometry and
+  // paint stay put). The panel becomes the focused part, ready to grab with the gizmo.
+  const runDetachSelection = () => {
+    const mid = activePartsModelId(state);
+    const api = modelToolApiRef.current;
+    if (!mid || !api) {
+      setState((prev) => ({ ...prev, status: 'detach needs an open multi-part model document' }));
+      return;
+    }
+    const r = api.detachSelection();
+    if (!r) {
+      setState((prev) => ({ ...prev, status: 'detach: select faces first (face mode) — and the whole mesh cannot detach from itself' }));
+      return;
+    }
+    const parts = state.modelParts[mid] ?? [];
+    const n = parts.filter((p) => p.id.startsWith('part:detach:')).length + 1;
+    const placed: ModelPart = { id: `part:detach:${state.seq}`, name: `Detached ${n}`, visible: true, color: PART_TINTS[parts.length % PART_TINTS.length]!, lo: r.lo, hi: r.hi };
+    setState((prev) => ({
+      ...prev,
+      seq: prev.seq + 1,
+      modelParts: { ...prev.modelParts, [mid]: [...(prev.modelParts[mid] ?? []), placed] },
+      modelActivePartId: placed.id,
+      status: `detached selection → ${placed.name} [${r.lo},${r.hi})`,
+    }));
+  };
+
+  // Merge the focused part DOWN into the part above it in the outliner (the old
+  // studio's durable re-attach path). Host fuses the ranges; seeds merge when both
+  // parts carry one so the union survives a remount.
+  const mergeActivePartDown = () => {
+    const mid = activePartsModelId(state);
+    const api = modelToolApiRef.current;
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const idx = parts.findIndex((p) => p.id === state.modelActivePartId);
+    if (!mid || !api || idx < 1) {
+      setState((prev) => ({ ...prev, status: 'merge down needs a focused part with another part above it' }));
+      return;
+    }
+    const above = parts[idx - 1]!;
+    const active = parts[idx]!;
+    const ra = partRange(above);
+    const rb = partRange(active);
+    if (!ra || !rb) {
+      setState((prev) => ({ ...prev, status: 'merge down: both parts need stamped host ranges' }));
+      return;
+    }
+    const r = api.mergeParts(ra.lo, ra.hi, rb.lo, rb.hi);
+    if (!r) {
+      setState((prev) => ({ ...prev, status: `could not merge ${active.name} into ${above.name} — host op failed` }));
+      return;
+    }
+    const seed = above.mesh && active.mesh
+      ? mergeMesh(above.mesh, active.mesh, [0, (active.lift ?? 0) - (above.lift ?? 0), 0])
+      : undefined;
+    const merged: ModelPart = { ...above, ...(seed ? { mesh: seed } : { mesh: undefined, kind: undefined }), lo: r.lo, hi: r.hi };
+    setState((prev) => {
+      const list = (prev.modelParts[mid] ?? []).filter((p) => p.id !== active.id).map((p) => (p.id === above.id ? merged : p));
+      return {
+        ...prev,
+        modelParts: { ...prev.modelParts, [mid]: list },
+        modelActivePartId: merged.id,
+        status: `merged ${active.name} into ${above.name} [${r.lo},${r.hi})`,
+      };
+    });
+  };
+
+  // Face-selection ops that don't change part structure: glass / solidify / merge-faces.
+  const runFaceOp = (kind: 'glass' | 'solidify' | 'merge-faces') => {
+    const api = modelToolApiRef.current;
+    const ok = kind === 'glass' ? api?.glassSelection() : kind === 'solidify' ? api?.solidifySelection() : api?.mergeFaces();
+    const okMsg = kind === 'glass' ? 'toggled glass on the selected faces' : kind === 'solidify' ? 'solidified the selected faces (inner skin + rim walls)' : 'merged the selection into one face';
+    const failMsg = kind === 'merge-faces'
+      ? 'merge faces: select 2+ faces (face mode) first'
+      : `${kind}: select faces first (face mode)`;
+    setState((prev) => ({ ...prev, status: ok ? okMsg : failMsg }));
+  };
+
+  // Cross-model reuse: append a saved library model into the OPEN model as new part(s).
+  // Studio models import per authored part (seeds ride along); cooked assets append
+  // their triangle blob; file-backed models host-parse via __mesh_append_file. Pick the
+  // same model again to reuse it any number of times.
+  const importModelAsParts = (pkg: ModelPackage) => {
+    setImportPartOpen(false);
+    const mid = activePartsModelId(state);
+    const api = modelToolApiRef.current;
+    if (!mid || !api) {
+      setState((prev) => ({ ...prev, status: 'open a model document first — library imports land as parts of the open model' }));
+      return;
+    }
+    const existing = state.modelParts[mid] ?? [];
+    let tint = existing.length;
+    const nextColor = () => PART_TINTS[tint++ % PART_TINTS.length]!;
+    const added: ModelPart[] = [];
+    const bareId = pkg.id.startsWith('studio:') ? pkg.id.slice('studio:'.length) : pkg.id;
+    const sparts = pkg.sourceKind === 'studio-model' ? storedModelParts(bareId) : null;
+    if (sparts && sparts.length > 0) {
+      for (const sp of sparts) {
+        if (!sp.mesh) continue;
+        const geo = composeModelParts([{ ...sp, visible: true }]);
+        if (geo.positions.length === 0) continue;
+        const color = sp.color ?? nextColor();
+        const r = api.appendPart(geo.positions, geo.faceGroups, color);
+        if (!r) continue;
+        added.push({ id: `part:imp:${state.seq}:${added.length}`, name: `${pkg.name} · ${sp.name}`, mesh: cloneMesh(sp.mesh), visible: true, color, lift: sp.lift, lo: r.lo, hi: r.hi });
+      }
+    } else if (pkg.primitive) {
+      const built = primitiveMeshData(pkg.primitive);
+      const color = nextColor();
+      const r = built.positions.length > 0 ? api.appendPart(built.positions, built.faceGroups, color) : null;
+      if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, kind: pkg.primitive, mesh: primitivePartMesh(pkg.primitive), visible: true, color, lo: r.lo, hi: r.hi });
+    } else {
+      const cookedId = pkg.id.startsWith('cooked:') ? pkg.id.slice('cooked:'.length) : pkg.id;
+      const meshRef = pkg.viewerMeshRef ?? (pkg.sourceKind === 'cooked-asset' ? cookedMeshRefForAsset(cookedId) : null);
+      const blob = meshRef ? cookedMeshBlobData(meshRef) : (pkg.sourceKind === 'studio-model' ? storedModelMeshData(bareId) : null);
+      if (blob && blob.length >= 24) {
+        const tris = Math.floor(blob.length / 24);
+        const stored = pkg.sourceKind === 'studio-model' ? storedModelFaceGroupData(bareId) : null;
+        let groups: Uint32Array;
+        if (stored && stored.length === tris) {
+          groups = stored;
+        } else {
+          groups = new Uint32Array(tris);
+          for (let i = 0; i < tris; i++) groups[i] = i;
+        }
+        const color = nextColor();
+        const r = api.appendPart(blob, groups, color);
+        if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, visible: true, color, lo: r.lo, hi: r.hi });
+      } else if (pkg.viewerPath && isViewerFile(pkg.viewerPath)) {
+        const color = nextColor();
+        const r = api.appendModelFile(pkg.viewerPath, color);
+        if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, visible: true, color, lo: r.lo, hi: r.hi });
+      }
+    }
+    if (added.length === 0) {
+      setState((prev) => ({ ...prev, status: `could not import ${pkg.name} — no usable geometry (studio parts, cooked mesh blob, or a .glb/.obj file)` }));
+      return;
+    }
+    setState((prev) => ({
+      ...prev,
+      seq: prev.seq + 1,
+      modelParts: { ...prev.modelParts, [mid]: [...(prev.modelParts[mid] ?? []), ...added] },
+      modelActivePartId: added[added.length - 1]!.id,
+      status: `imported ${pkg.name} as ${added.length} part(s) — pick it again to reuse it`,
+    }));
+  };
+
+  // ── Mesh undo/redo (host journal; req_2520) ──────────────────────────────────
+  // Seed meshes by part id, kept for the session so a restored part row regains its
+  // seed (the journal note carries part METADATA only — meshes never ride the note).
+  const partMeshSeedsRef = useRef<Record<string, EditMesh>>({});
+  const meshUndoRedo = (redo: boolean) => {
+    const api = modelToolApiRef.current;
+    const mid = activePartsModelId(state);
+    const r = redo ? api?.redoMesh() : api?.undoMesh();
+    const verb = redo ? 'redo' : 'undo';
+    if (!r?.ok) {
+      setState((prev) => ({ ...prev, status: `nothing to ${verb} on this model` }));
+      return;
+    }
+    let restored: ModelPart[] | null = null;
+    if (r.note && mid) {
+      try {
+        const o = JSON.parse(r.note);
+        if (o?.modelId === mid && Array.isArray(o.parts)) {
+          restored = (o.parts as ModelPart[]).map((p) => {
+            const seed = partMeshSeedsRef.current[p.id];
+            return seed ? { ...p, mesh: seed } : p;
+          });
+        }
+      } catch { /* stale/foreign note — the geometry restored; part rows stay as-is */ }
+    }
+    if (restored && mid) {
+      api!.setPartRangesMirror(restored.filter((p) => p.lo != null && p.hi != null).map((p) => ({ lo: p.lo!, hi: p.hi! })));
+      setState((prev) => {
+        const keep = restored!;
+        return {
+          ...prev,
+          modelParts: { ...prev.modelParts, [mid]: keep },
+          modelActivePartId: keep.some((p) => p.id === prev.modelActivePartId) ? prev.modelActivePartId : (keep[0]?.id ?? null),
+          status: `${verb} ${r.label}`,
+        };
+      });
+    } else {
+      setState((prev) => ({ ...prev, status: `${verb} ${r.label}` }));
+    }
+  };
+
+  // Mirror the outliner's parts metadata into the host journal note after EVERY parts
+  // change, so the snapshot taken by the NEXT op carries the pre-op outliner state.
+  // Meshes stay out of the note (session seed cache above); only metadata crosses.
+  useEffect(() => {
+    const mid = activePartsModelId(state);
+    if (!mid) return;
+    const parts = state.modelParts[mid] ?? [];
+    for (const p of parts) {
+      if (p.mesh) partMeshSeedsRef.current[p.id] = p.mesh;
+    }
+    const lite = parts.map(({ mesh: _mesh, ...rest }) => rest);
+    (globalThis as any).__mesh_journal_note?.(JSON.stringify({ modelId: mid, parts: lite }));
+  }, [state.modelParts, state.activeWorkspaceDocumentId]);
+
+  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y — routed through the same command path as the Edit
+  // menu rows, so a model document steps the host mesh journal and the world surface
+  // steps its local history.
+  useModifiers({
+    z: (mods) => {
+      if (!mods.ctrl && !mods.meta) return;
+      runCommand(mods.shift ? 'redo-local' : 'undo-local', 'hotkey');
+    },
+    y: (mods) => {
+      if (mods.ctrl || mods.meta) runCommand('redo-local', 'hotkey');
+    },
+  });
+
   // Studio colour → brush ink. The viewer owns the live brush; this is the ONE
   // sync point pouring the spine's current colour into a colour-kind ink.
   // (ModelBrushDock used to do this, but the paint toolbar replaced it and the
@@ -1219,7 +1496,7 @@ export default function AppFrame() {
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
             onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => ({ ...prev, modelTool }))}
             modelContextTrigger={modelMenu.triggerProps}
-            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart, onStampRanges: stampModelPartRanges }}
+            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart, onDuplicatePart: (id: string) => duplicatePartById(id, -1), onImportModel: () => setImportPartOpen(true), onStampRanges: stampModelPartRanges }}
             onTool={(id) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` }))}
             onSnap={() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` }))}
             onFloor={(delta) => setState((prev) => {
@@ -1259,7 +1536,7 @@ export default function AppFrame() {
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
             onModelBrush={(brush) => modelToolApiRef.current?.setBrush(brush)}
-            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart, onStampRanges: stampModelPartRanges }}
+            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart, onDuplicatePart: (id: string) => duplicatePartById(id, -1), onImportModel: () => setImportPartOpen(true), onStampRanges: stampModelPartRanges }}
             colorSpine={{
               onSetCurrent: setColorSpineCurrent,
               onAddToTray: addColorSpineToTray,
@@ -1398,6 +1675,15 @@ export default function AppFrame() {
           <ImportImageDialog plan={importPlan} onPick={commitImageImport} onCancel={() => setImportPlan(null)} />
         </RenderProbe>
       ) : null}
+      {importPartOpen ? (
+        <RenderProbe id="Import Part Dialog">
+          <ImportPartDialog
+            models={visibleModels}
+            onPick={importModelAsParts}
+            onCancel={() => setImportPartOpen(false)}
+          />
+        </RenderProbe>
+      ) : null}
       {!playing && state.mapPaint.active && state.mapPaint.channel === 'tile' && state.mapPaint.texturePickerOpen ? (
         <RenderProbe id="Map Texture Picker">
           <MapTexturePicker state={state.mapPaint} onPatch={patchMapPaint} />
@@ -1410,6 +1696,8 @@ export default function AppFrame() {
         <modelMenu.ContextMenu>
           <ModelContextMenu
             modelTool={state.modelTool}
+            hasActivePart={Boolean(activePartsModelId(state) && state.modelActivePartId && (state.modelParts[activePartsModelId(state)!] ?? []).some((p) => p.id === state.modelActivePartId))}
+            partCount={(state.modelParts[activePartsModelId(state) ?? ''] ?? []).length}
             onCommand={runCommand}
             onQuality={(quality: number) => modelToolApiRef.current?.setQuality(quality)}
             onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)}

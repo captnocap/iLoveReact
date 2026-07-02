@@ -79,8 +79,10 @@ export default function Inspector(props: {
                 activeId={props.state.modelActivePartId}
                 onSelect={props.outlinerHandlers.onSelectPart}
                 onToggleVisible={props.outlinerHandlers.onToggleVisiblePart}
+                onDuplicate={props.outlinerHandlers.onDuplicatePart}
                 onDelete={props.outlinerHandlers.onDeletePart}
                 onAdd={props.outlinerHandlers.onAddPart}
+                onImportModel={props.outlinerHandlers.onImportModel}
               />
             ) : null}
             {/* Brush controls moved OUT of this corner dock to the top PaintToolbar (req_2466):

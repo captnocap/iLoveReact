@@ -196,6 +196,29 @@ export function cloneMesh(m: EditMesh): EditMesh {
   return out;
 }
 
+/** A deep copy REFLECTED across the origin plane of `axis` (0=X 1=Y 2=Z): verts negate
+ *  that component, face loops reverse so winding stays outward, mounts/pivot/lights
+ *  reflect along. The seed-mesh twin of the host's mirror-duplicate — kept so a mirrored
+ *  part survives a document remount (the recompose rebuilds from part seeds). */
+export function mirrorMesh(m: EditMesh, axis: 0 | 1 | 2): EditMesh {
+  const out = cloneMesh(m);
+  for (const v of out.verts) v[axis] = -v[axis];
+  for (const f of out.faces) {
+    f.loop.reverse();
+    if (f.uv) f.uv.reverse();
+  }
+  if (out.mounts) for (const mt of out.mounts) {
+    mt.position[axis] = -mt.position[axis];
+    if (mt.axis) mt.axis[axis] = -mt.axis[axis];
+  }
+  if (out.pivot) out.pivot[axis] = -out.pivot[axis];
+  if (out.lights) for (const l of out.lights) {
+    l.position[axis] = -l.position[axis];
+    if (l.dir) l.dir[axis] = -l.dir[axis];
+  }
+  return out;
+}
+
 /** Default name for the Nth light (req_2062). */
 export function nextLightName(m: EditMesh): string {
   return `light ${(m.lights?.length ?? 0) + 1}`;

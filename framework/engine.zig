@@ -428,6 +428,17 @@ const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("../world_loader
     pub fn isExternalCamera(_: u32) bool {
         return false;
     }
+    // MAPPAINT req_2473 stubs — the input loop's paint claim compiles unconditionally;
+    // without the compiled world there is never an armed painter. (req_2520 caught the
+    // gap: a cart without -Dhas-compiled-world failed at the paintArmed call site.)
+    pub const PaintPhase = enum { down, move, up };
+    pub fn paintArmed(_: u32) bool {
+        return false;
+    }
+    pub fn anyPaintArmed() bool {
+        return false;
+    }
+    pub fn paintPointer(_: u32, _: PaintPhase, _: f32, _: f32) void {}
 };
 // WORLDWIN-0611: the compiled-world pop-out window — same gate as the loader
 // it hosts. The stub keeps the loop call-sites unconditional.
