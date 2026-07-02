@@ -456,7 +456,38 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Paint and Focus are tools too — turning one on drops the mesh-select mode back to view
   // so only one tool owns the drag at a time. The Focus tool flag also goes to the host
   // (it owns the left-drag = pan-pivot gesture natively).
-  const togglePaint = () => setPaintMode((v) => { const nv = !v; if (nv) { setFocusMode(false); meshFocusTool(false); setSelMode(0); meshSetMode(0); } return nv; });
+  //
+  // Paint is GATED on atlas creation: the first entry per loaded model opens the
+  // Create Paint Atlas prompt (pick a resolution, see the real texture cost) instead of
+  // silently painting on whatever detail carried over — the step every paint tool makes
+  // explicit. atlasReadyRef survives edit-op key changes and resets on a fresh load.
+  const atlasReadyRef = useRef(false);
+  const [atlasPrompt, setAtlasPrompt] = useState(false);
+  const enterPaint = () => {
+    setFocusMode(false);
+    meshFocusTool(false);
+    setSelMode(0);
+    meshSetMode(0);
+    setPaintMode(true);
+  };
+  const togglePaint = () => {
+    if (paintMode) {
+      setPaintMode(false);
+      return;
+    }
+    if (!model) return;
+    if (!atlasReadyRef.current) {
+      setAtlasPrompt(true);
+      return;
+    }
+    enterPaint();
+  };
+  const createAtlasAndPaint = (px: number) => {
+    changeDetail(px); // host clamps to what actually fits; changeDetail mirrors the applied level
+    atlasReadyRef.current = true;
+    setAtlasPrompt(false);
+    enterPaint();
+  };
   const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setSelMode(0); meshSetMode(0); } return nv; });
 
   // ── Brush behaviour handlers ─────────────────────────────────────────────────
@@ -615,6 +646,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     Escape: () => { if (selMode !== 0) { meshClearSel(); setSelInfo(readSelInfo() ?? selInfo); } },
   });
 
+  // A fresh model NEVER inherits paint state: paint mode drops (the live atlas belonged
+  // to the PREVIOUS mesh — painting straight onto a new one is how the oversized-atlas
+  // crash was triggered) and the atlas gate re-arms so the next paint entry prompts.
+  const freshModelPaintReset = () => {
+    setPaintMode(false);
+    setAtlasPrompt(false);
+    atlasReadyRef.current = false;
+  };
+
   // One load path for every source (picker, drop, CLI): validate the extension, hand
   // the path to the host parser, and surface a clean error if it can't be read.
   const applyPath = (path: string) => {
@@ -631,6 +671,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setError(null);
       setQuality(1); // a fresh model loads full-res
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 }); // new mesh → selection cleared
+      freshModelPaintReset();
       partRangesRef.current = []; // a plain file import is one unstructured mesh, no parts
       recordAttribution(path); // account for where this asset came from
     } else {
@@ -645,6 +686,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setError(null);
       setQuality(1);
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 });
+      freshModelPaintReset();
       // Seed the weld's part ranges from the composed parts (partColors carries every
       // part's [lo,hi)) so stacked parts stay independently editable from the first frame.
       partRangesRef.current = (mesh.partColors ?? []).map((pc) => ({ lo: pc.lo, hi: pc.hi }));
@@ -690,6 +732,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setError(null);
     setQuality(1);
     setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 });
+    freshModelPaintReset();
     onPartRanges?.(ranges);
   };
 
@@ -1165,6 +1208,73 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           </Row>
         </Col>
       ) : null}
+
+      {/* Create Paint Atlas — the explicit step between modeling and painting (every paint
+          tool has it). Entering paint the first time on a loaded model picks the atlas
+          resolution HERE, with the real texture cost shown; options the GPU can't take are
+          disabled (the host clamps regardless — this is the honest preview of that). */}
+      {atlasPrompt && model && (
+        <Col style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+          <Col
+            style={{
+              width: 420, paddingLeft: 16, paddingRight: 16, paddingTop: 14, paddingBottom: 14,
+              backgroundColor: 'rgba(17,20,29,0.97)', borderWidth: 1, borderColor: '#3c5a80', borderRadius: 8,
+            }}
+          >
+            <Text style={{ color: '#dbe7ff', fontSize: 14, fontWeight: 700 }}>Create Paint Atlas</Text>
+            <Text style={{ color: '#b9c4d4', fontSize: 12, marginTop: 6 }}>
+              {`${Math.floor(model.count / 3)} faces — each face gets its own patch of texels. Higher = finer strokes, bigger texture.`}
+            </Text>
+            {(() => {
+              const fc = Math.max(1, Math.floor(model.count / 3));
+              const cols = Math.ceil(Math.sqrt(fc));
+              const rows = Math.ceil(fc / cols);
+              // Mirrors the host's clamp (MAX_ATLAS_DIM / ATLAS_BUDGET in model_paint.zig)
+              // for honest labels; the host still clamps whatever is asked.
+              const fits = (px: number) => cols * px <= 8192 && rows * px <= 8192 && cols * px * rows * px * 4 <= 256 * 1024 * 1024;
+              const recommended = Math.min(autoDetailForTris(fc), ...[512, 256, 128, 64, 32, 16, 8].filter(fits));
+              const mbLabel = (px: number) => {
+                const mb = (cols * px * rows * px * 4) / (1024 * 1024);
+                return mb >= 1 ? `${Math.round(mb)} MB` : `${Math.max(1, Math.round(mb * 1024))} KB`;
+              };
+              return [1, 16, 32, 64, 128, 256, 512].map((px) => {
+                const ok = px === 1 || fits(px);
+                const rec = px === recommended;
+                return (
+                  <Pressable
+                    key={px}
+                    onPress={() => { if (ok) createAtlasAndPaint(px); }}
+                    style={{
+                      marginTop: 6, paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6,
+                      backgroundColor: ok ? (rec ? '#244164' : '#252b3a') : '#1b1f2a',
+                      borderWidth: 1, borderColor: ok ? (rec ? '#4e75a4' : '#3a4356') : '#2a303e',
+                    }}
+                  >
+                    <Row style={{ alignItems: 'center', gap: 8 }}>
+                      <Text style={{ color: ok ? '#e6f1ff' : '#5d6878', fontSize: 12, fontWeight: 700 }}>
+                        {px === 1 ? 'Fill only — one color per face' : `${px}×${px} texels / face`}
+                      </Text>
+                      {rec ? <Text style={{ color: '#8fc9bb', fontSize: 11, fontWeight: 700 }}>recommended</Text> : null}
+                      <Box style={{ flexGrow: 1 }} />
+                      <Text style={{ color: ok ? '#8b97ab' : '#5d6878', fontSize: 11 }}>
+                        {px === 1 ? `${cols}×${rows} (${mbLabel(1)})` : ok ? `${cols * px}×${rows * px} (${mbLabel(px)})` : 'exceeds GPU limit'}
+                      </Text>
+                    </Row>
+                  </Pressable>
+                );
+              });
+            })()}
+            <Row style={{ marginTop: 12, gap: 8, justifyContent: 'flex-end' }}>
+              <Pressable
+                onPress={() => setAtlasPrompt(false)}
+                style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
+              >
+                <Text style={{ color: '#e1e7f1', fontSize: 12, fontWeight: 700 }}>Cancel</Text>
+              </Pressable>
+            </Row>
+          </Col>
+        </Col>
+      )}
 
       {/* Quality strip — commit-only decimation. Drag to trade detail for triangles; the
           host owns the thumb mid-drag and re-meshes from the retained full-res source ONCE
