@@ -763,9 +763,10 @@ fn hostMeshEditCounts(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 }
 
 /// __model_paint_at(x, y, r, g, b) → bool. Raycast the viewport pixel (x,y) against the
-/// resident model and paint the face it hits with (r,g,b). One call covers both
-/// gestures: a click fills one face, a drag fires this per move. Returns 1 on a hit
-/// (and repaints), 0 on a miss. r/g/b are 0–255.
+/// resident model and fill the LOGICAL face it hits (the whole authored group — a quad,
+/// not one triangle; req_2506) with (r,g,b). One call covers both gestures: a click fills
+/// one face, a drag fires this per move. Returns 1 on a hit (and repaints), 0 on a miss.
+/// r/g/b are 0–255. scene3d.paintAt owns the per-member atlas + source-store writes.
 fn hostModelPaintAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
@@ -774,12 +775,7 @@ fn hostModelPaintAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     const g: u8 = @intCast(std.math.clamp(argToI32(info, 3) orelse 0, 0, 255));
     const b: u8 = @intCast(std.math.clamp(argToI32(info, 4) orelse 0, 0, 255));
     const face = scene3d.paintAt(x, y, r, g, b);
-    if (face >= 0) {
-        // A material-ink fill has no single face colour (it samples a shader), so — like the
-        // free-form stamp — it lives on the atlas only and skips the authoritative source store.
-        if (!scene3d.hasPaintMaterial()) model_source.writeColor(face, r, g, b);
-        state.markDirty();
-    }
+    if (face >= 0) state.markDirty();
     setReturnNumber(info, if (face >= 0) 1 else 0);
 }
 

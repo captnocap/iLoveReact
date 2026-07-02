@@ -16,6 +16,7 @@
 //! and drives this module; the math + paint buffer live here so they stay testable.
 
 const std = @import("std");
+const model_source = @import("model_source.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -677,6 +678,186 @@ fn sampleMat(u: f32, v: f32) [4]u8 {
     return .{ src[si], src[si + 1], src[si + 2], src[si + 3] };
 }
 
+// ── Logical faces (authored face-groups) — req_2506 ─────────────────────────────────
+// The user paints FACES, not triangles: a cube face is one quad, not two tris with a
+// diagonal seam. The mesh's authored face-GROUP (model_source) already encodes this —
+// the two halves of a quad share one group (the same signal the edge overlay uses to
+// hide diagonals, req_2367). Painting treats the group as the unit: fills flood every
+// triangle in it, dabs stamp every triangle it spans, and a material ink samples ONE
+// planar basis across the whole group so the look runs continuously over the diagonal
+// instead of restarting (rotated) per triangle. Ungrouped soups (imported scans, per-
+// triangle groups) fall back to the per-triangle behaviour everywhere.
+
+pub const MAX_GROUP_FACES = 16; // an authored face is a quad or a small planar fan
+
+/// Every face sharing `face`'s authored group — `face` itself first. A mesh with no
+/// grouping (or a lone triangle) returns just {face}.
+pub fn groupFaces(face: u32, buf: *[MAX_GROUP_FACES]u32) []u32 {
+    buf[0] = face;
+    var n: usize = 1;
+    const grp = model_source.faceGroupOf(face);
+    if (grp == model_source.NO_FACE_GROUP) return buf[0..1];
+    var f: u32 = 0;
+    while (f < g_facecount and n < MAX_GROUP_FACES) : (f += 1) {
+        if (f == face) continue;
+        if (model_source.faceGroupOf(f) == grp) {
+            buf[n] = f;
+            n += 1;
+        }
+    }
+    return buf[0..n];
+}
+
+fn faceNormal(pos: []const f32, f: u32) [3]f32 {
+    const tri = triVerts(pos, f);
+    return cross(sub(tri[1], tri[0]), sub(tri[2], tri[0]));
+}
+
+/// A shared planar uv basis across one authored group: uv (0..1, 0..1) spans the
+/// group's in-plane bounding box along its principal axes — for a rectangle quad that
+/// is exactly the quad's own uv, so a material tiles it like one face.
+const GroupBasis = struct {
+    u_dir: [3]f32,
+    v_dir: [3]f32,
+    u0: f32,
+    v0: f32,
+    inv_u: f32,
+    inv_v: f32,
+
+    fn uv(self: GroupBasis, p: [3]f32) [2]f32 {
+        return .{ (dot(p, self.u_dir) - self.u0) * self.inv_u, (dot(p, self.v_dir) - self.v0) * self.inv_v };
+    }
+};
+
+fn eqPos(a: [3]f32, b: [3]f32) bool {
+    const e = 1e-5;
+    return @abs(a[0] - b[0]) < e and @abs(a[1] - b[1]) < e and @abs(a[2] - b[2]) < e;
+}
+
+/// Build the group basis for `face`'s group, or null when the group is a lone triangle
+/// or not coplanar (curved fans keep per-triangle sampling — never smear a bent surface).
+///
+/// The texture's U axis is the group's longest BOUNDARY edge: an edge shared by two
+/// member triangles (a quad's diagonal, a fan's spokes) is internal and never chosen,
+/// so the look aligns with a real face side, not the triangulation. Members are scanned
+/// in ascending face order, so BOTH halves of a quad derive the IDENTICAL basis —
+/// that's what makes the sampled material continuous across the diagonal. (An earlier
+/// PCA-over-vertices draft failed exactly there: the duplicated diagonal verts biased
+/// the axis onto the diagonal, and the tangent seed differed per asking triangle.)
+/// (pub for the unit tests; product callers stay inside this module.)
+pub fn groupBasisFor(face: u32) ?GroupBasis {
+    const pos = g_positions orelse return null;
+    var buf: [MAX_GROUP_FACES]u32 = undefined;
+    const members = groupFaces(face, &buf);
+    if (members.len < 2) return null;
+    // Ascending face order — determinism must not depend on WHICH member asked.
+    var sorted: [MAX_GROUP_FACES]u32 = undefined;
+    @memcpy(sorted[0..members.len], members);
+    std.mem.sort(u32, sorted[0..members.len], {}, std.sort.asc(u32));
+    const ordered = sorted[0..members.len];
+
+    const n0 = norm(faceNormal(pos, ordered[0]));
+    if (dot(n0, n0) < 0.5) return null; // degenerate triangle
+    for (ordered[1..]) |f| {
+        const nf = norm(faceNormal(pos, f));
+        if (@abs(dot(n0, nf)) < 0.995) return null; // group is not one flat face
+    }
+    // Longest boundary edge (ascending scan order gives stable tie-breaks).
+    var best_dir: [3]f32 = .{ 0, 0, 0 };
+    var best_len2: f32 = 0;
+    for (ordered) |f| {
+        const tri = triVerts(pos, f);
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const ea = tri[k];
+            const eb = tri[(k + 1) % 3];
+            // Internal if any OTHER member also carries this edge (either direction).
+            var internal = false;
+            for (ordered) |g| {
+                if (g == f) continue;
+                const trig = triVerts(pos, g);
+                var j: u32 = 0;
+                while (j < 3) : (j += 1) {
+                    const ga = trig[j];
+                    const gb = trig[(j + 1) % 3];
+                    if ((eqPos(ea, ga) and eqPos(eb, gb)) or (eqPos(ea, gb) and eqPos(eb, ga))) {
+                        internal = true;
+                        break;
+                    }
+                }
+                if (internal) break;
+            }
+            if (internal) continue;
+            const d = sub(eb, ea);
+            const l2 = dot(d, d);
+            if (l2 > best_len2 + 1e-9) {
+                best_len2 = l2;
+                best_dir = d;
+            }
+        }
+    }
+    if (best_len2 < 1e-9) return null; // no boundary edge at all — patch-local fallback
+    // Project the edge into the plane and orthonormalize.
+    var u_dir = best_dir;
+    const un = dot(u_dir, n0);
+    u_dir = norm(.{ u_dir[0] - n0[0] * un, u_dir[1] - n0[1] * un, u_dir[2] - n0[2] * un });
+    if (dot(u_dir, u_dir) < 0.5) return null;
+    const v_dir = cross(n0, u_dir);
+    var min_u: f32 = std.math.floatMax(f32);
+    var max_u: f32 = -std.math.floatMax(f32);
+    var min_v: f32 = std.math.floatMax(f32);
+    var max_v: f32 = -std.math.floatMax(f32);
+    for (members) |f| {
+        const tri = triVerts(pos, f);
+        for (tri) |p| {
+            const pu = dot(p, u_dir);
+            const pv = dot(p, v_dir);
+            min_u = @min(min_u, pu);
+            max_u = @max(max_u, pu);
+            min_v = @min(min_v, pv);
+            max_v = @max(max_v, pv);
+        }
+    }
+    const ext_u = max_u - min_u;
+    const ext_v = max_v - min_v;
+    if (ext_u < 1e-6 or ext_v < 1e-6) return null;
+    return .{ .u_dir = u_dir, .v_dir = v_dir, .u0 = min_u, .v0 = min_v, .inv_u = 1.0 / ext_u, .inv_v = 1.0 / ext_v };
+}
+
+/// World point of a face's barycentric (u along v0→v1, v along v0→v2).
+pub fn pointFromBary(face: u32, u: f32, v: f32) [3]f32 {
+    const pos = g_positions orelse return .{ 0, 0, 0 };
+    if (face >= g_facecount) return .{ 0, 0, 0 };
+    const tri = triVerts(pos, face);
+    const e1 = sub(tri[1], tri[0]);
+    const e2 = sub(tri[2], tri[0]);
+    return .{
+        tri[0][0] + u * e1[0] + v * e2[0],
+        tri[0][1] + u * e1[1] + v * e2[1],
+        tri[0][2] + u * e1[2] + v * e2[2],
+    };
+}
+
+/// Barycentric of world point `p` in `face`'s plane (Gram solve). May land outside
+/// [0,1] — a dab centred on a neighbouring triangle still covers this face's texels
+/// near the shared edge (stampInner clips to the triangle regardless).
+pub fn baryOfPointOnFace(face: u32, p: [3]f32) [2]f32 {
+    const pos = g_positions orelse return .{ 0, 0 };
+    if (face >= g_facecount) return .{ 0, 0 };
+    const tri = triVerts(pos, face);
+    const e1 = sub(tri[1], tri[0]);
+    const e2 = sub(tri[2], tri[0]);
+    const dp = sub(p, tri[0]);
+    const d11 = dot(e1, e1);
+    const d12 = dot(e1, e2);
+    const d22 = dot(e2, e2);
+    const det = d11 * d22 - d12 * d12;
+    if (@abs(det) < 1e-12) return .{ 0, 0 };
+    const dp1 = dot(dp, e1);
+    const dp2 = dot(dp, e2);
+    return .{ (d22 * dp1 - d12 * dp2) / det, (d11 * dp2 - d12 * dp1) / det };
+}
+
 /// Stamp a brush dab onto a face's patch: a disc of `radius` texels around the hit's
 /// barycentric, CLIPPED to the face's triangle (so overhang never touches a neighbour —
 /// each face owns its texels). `flow` (0..1) is the blend toward the ink. When `mat` is
@@ -686,8 +867,22 @@ fn sampleMat(u: f32, v: f32) [4]u8 {
 fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, fill: bool) void {
     const buf = g_rgba orelse return;
     if (face >= g_facecount) return;
+    // Material sampling basis: the GROUP plane when the face is half of a flat
+    // authored face (quad/fan), so the look continues across the diagonal; the
+    // patch-local uv otherwise (lone triangles, curved groups).
+    const gb: ?GroupBasis = if (mat) groupBasisFor(face) else null;
     if (g_patch <= 1) {
-        return paintFace(face, if (mat) sampleMat(0.5 * g_mat_scale, 0.5 * g_mat_scale) else rgba);
+        // No sub-face room. Best single sample: the face centroid's spot in the
+        // group plane (adjacent faces at least read different parts of the look).
+        const ink: [4]u8 = if (mat) blk: {
+            if (gb) |basis| {
+                const c = pointFromBary(face, 1.0 / 3.0, 1.0 / 3.0);
+                const uv = basis.uv(c);
+                break :blk sampleMat(uv[0] * g_mat_scale, uv[1] * g_mat_scale);
+            }
+            break :blk sampleMat(0.5 * g_mat_scale, 0.5 * g_mat_scale);
+        } else rgba;
+        return paintFace(face, ink);
     }
     const o = patchOrigin(face);
     const span = patchSpan();
@@ -716,12 +911,18 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
             }
             const amt = flow_amt * cov;
             if (amt <= 0.0) continue;
-            // Sample the material at this texel's patch-local uv (0..1 across the face,
-            // tiled by scale), or use the flat colour when no material ink is dipped.
-            const ink: [4]u8 = if (mat)
-                sampleMat((fx - PATCH_GUTTER) * inv_span * g_mat_scale, (fy - PATCH_GUTTER) * inv_span * g_mat_scale)
-            else
-                rgba;
+            // Sample the material at this texel's uv — in the GROUP plane when the
+            // face belongs to one (seamless across the quad diagonal), else in the
+            // patch-local 0..1 — tiled by scale. Flat colour when no material ink.
+            const ink: [4]u8 = if (mat) blk: {
+                const bu = (fx - PATCH_GUTTER) * inv_span;
+                const bv = (fy - PATCH_GUTTER) * inv_span;
+                if (gb) |basis| {
+                    const uv = basis.uv(pointFromBary(face, bu, bv));
+                    break :blk sampleMat(uv[0] * g_mat_scale, uv[1] * g_mat_scale);
+                }
+                break :blk sampleMat(bu * g_mat_scale, bv * g_mat_scale);
+            } else rgba;
             const d = (@as(usize, o[1] + py) * g_atlas_w + o[0] + px) * 4;
             inline for (0..3) |c| {
                 const base: f32 = @floatFromInt(buf[d + c]);
@@ -755,6 +956,11 @@ pub fn paintFaceTex(face: u32) void {
 // is the only real limit (it clamps dense meshes down), so pick anything; the host returns
 // the detail that actually took.
 const ATLAS_BUDGET: usize = 256 * 1024 * 1024; // paint-atlas ceiling (bytes)
+// Hard ceiling on either atlas texel DIMENSION — wgpu's default max_texture_dimension_2d.
+// Exceeding it doesn't degrade, it PANICS the process inside wgpuDeviceCreateTexture (the
+// "imported a bus while in paint mode" crash: ~26k faces × a carried 256px patch asked
+// for a 41216-wide texture). Every atlas layout must pass through clampPatchFor.
+const MAX_ATLAS_DIM: u32 = 8192;
 pub fn detail() u32 {
     return g_patch;
 }
@@ -946,4 +1152,93 @@ test "patch grid covers every face" {
     const d = patchGrid(4612);
     try std.testing.expect(d[0] * d[1] >= 4612);
     try std.testing.expect(d[0] >= 68 and d[0] <= 80);
+}
+
+// A unit quad in z=0 as two triangles sharing the diagonal (0,0)-(1,1), both in one
+// authored group — the exact shape a cube face composes to.
+fn setupQuadTarget() void {
+    var verts = [_]f32{
+        // tri A: (0,0) (1,0) (1,1)
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        // tri B: (0,0) (1,1) (0,1)
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 1, 0, 0, 0, 1, 0, 0,
+    };
+    setTarget(77, &verts, 6);
+    model_source.setFaceGroups(&.{ 0, 0 });
+}
+
+test "a quad's two triangles are one logical face" {
+    setupQuadTarget();
+    defer {
+        clear();
+        model_source.clear();
+    }
+    var buf: [MAX_GROUP_FACES]u32 = undefined;
+    const a = groupFaces(0, &buf);
+    try std.testing.expectEqual(@as(usize, 2), a.len);
+    try std.testing.expectEqual(@as(u32, 0), a[0]);
+    try std.testing.expectEqual(@as(u32, 1), a[1]);
+}
+
+test "group basis is identical from both halves and spans the quad, not the diagonal" {
+    setupQuadTarget();
+    defer {
+        clear();
+        model_source.clear();
+    }
+    const ba = groupBasisFor(0) orelse return error.TestUnexpectedResult;
+    const bb = groupBasisFor(1) orelse return error.TestUnexpectedResult;
+    // Same basis regardless of which triangle asked — that IS the seamlessness.
+    const probe: [3]f32 = .{ 0.25, 0.75, 0 };
+    const ua = ba.uv(probe);
+    const ub = bb.uv(probe);
+    try std.testing.expectApproxEqAbs(ua[0], ub[0], 1e-5);
+    try std.testing.expectApproxEqAbs(ua[1], ub[1], 1e-5);
+    // The U axis is a SIDE (axis-aligned), never the diagonal: every corner of the
+    // unit quad must land on uv extremes {0,1}, which a diagonal basis cannot do.
+    const corners = [4][3]f32{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 } };
+    for (corners) |c| {
+        const uv = ba.uv(c);
+        for (uv) |x| {
+            try std.testing.expect(@abs(x) < 1e-4 or @abs(x - 1.0) < 1e-4);
+        }
+    }
+}
+
+test "bary point round trip crosses the diagonal consistently" {
+    setupQuadTarget();
+    defer {
+        clear();
+        model_source.clear();
+    }
+    // A point inside tri A, expressed on tri B's plane, maps back to the same 3D spot.
+    const p = pointFromBary(0, 0.4, 0.3);
+    const uvb = baryOfPointOnFace(1, p);
+    const p2 = pointFromBary(1, uvb[0], uvb[1]);
+    try std.testing.expectApproxEqAbs(p[0], p2[0], 1e-5);
+    try std.testing.expectApproxEqAbs(p[1], p2[1], 1e-5);
+    try std.testing.expectApproxEqAbs(p[2], p2[2], 1e-5);
+}
+
+test "a bent group refuses a shared basis" {
+    // Two triangles sharing an edge but folded 90° — same group, NOT one flat face.
+    var verts = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 1, 0, 0, 0, 1, 0, 0,
+        0, 0, 1, 0, 0, 1, 0, 0,
+    };
+    setTarget(78, &verts, 6);
+    defer {
+        clear();
+        model_source.clear();
+    }
+    model_source.setFaceGroups(&.{ 0, 0 });
+    try std.testing.expectEqual(@as(?GroupBasis, null), groupBasisFor(0));
 }

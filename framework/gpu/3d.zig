@@ -1674,14 +1674,23 @@ pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const face = model_paint.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my));
     if (face < 0) return -1;
-    // With a material ink dipped, fill the face with the shader's LOOK; else the flat colour.
+    // The fill unit is the LOGICAL face — the whole authored group (a quad's two
+    // triangles, a cap fan), not the one picked triangle (req_2506). With a material
+    // ink dipped each member samples the shared group plane (seamless across the
+    // diagonal); else the flat colour. The per-face source store mirrors flat fills
+    // (a material fill has no single face colour — it lives on the atlas only).
     const mat = model_paint.hasMaterialInk();
-    if (mat) {
-        model_paint.paintFaceTex(@intCast(face));
-    } else {
-        model_paint.paintFace(@intCast(face), .{ r, g, b, 255 });
+    var gbuf: [model_paint.MAX_GROUP_FACES]u32 = undefined;
+    const members = model_paint.groupFaces(@intCast(face), &gbuf);
+    for (members) |f| {
+        if (mat) {
+            model_paint.paintFaceTex(f);
+        } else {
+            model_paint.paintFace(f, .{ r, g, b, 255 });
+            model_source.writeColor(@intCast(f), r, g, b);
+        }
+        paint_program.recordFill(f, mat, .{ r, g, b }); // the stroke program is the durable form, not the atlas
     }
-    paint_program.recordFill(@intCast(face), mat, .{ r, g, b }); // the stroke program is the durable form, not the atlas
     return face;
 }
 
@@ -1765,11 +1774,27 @@ pub fn paintStrokeBegin(mx: f32, my: f32) i32 {
     return @intCast(hit.face);
 }
 
-/// One free-form brush dab. CLIP: paint whichever face the ray hits, clipped to its triangle.
-/// LOCK: paint g_locked_face (from paintStrokeBegin) where the ray meets that face's plane,
-/// even if the cursor drifted onto a neighbour. `radius`/`flow` are the brush disc (patch-texel
-/// units) and its blend. Reuses vpLocalX/Y so the embedded-editor viewport offset is honoured
-/// (req_2248) exactly like paintAt. Returns the painted face, or -1 on a miss.
+/// Stamp one dab onto every triangle of `face`'s authored group (req_2506): the dab's
+/// centre is re-expressed in each member's barycentric (possibly outside its triangle —
+/// stampInner clips), so a dab near a quad's diagonal covers BOTH halves instead of a
+/// half-disc dying at the seam. Records each member dab for replay.
+fn stampGroup(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, rgb: [3]u8) void {
+    const p = model_paint.pointFromBary(face, u, v);
+    var gbuf: [model_paint.MAX_GROUP_FACES]u32 = undefined;
+    const members = model_paint.groupFaces(face, &gbuf);
+    for (members) |f| {
+        const uv: [2]f32 = if (f == face) .{ u, v } else model_paint.baryOfPointOnFace(f, p);
+        if (mat) model_paint.paintStampTex(f, uv[0], uv[1], radius, flow) else model_paint.paintStamp(f, uv[0], uv[1], radius, rgba, flow);
+        paint_program.recordDab(f, uv[0], uv[1], radius, flow, mat, rgb);
+    }
+}
+
+/// One free-form brush dab. CLIP: paint whichever face the ray hits, clipped to its
+/// LOGICAL face (the authored group — a dab spans a quad's diagonal seamlessly). LOCK:
+/// paint g_locked_face's group (from paintStrokeBegin) where the ray meets that face's
+/// plane, even if the cursor drifted onto a neighbour. `radius`/`flow` are the brush disc
+/// (patch-texel units) and its blend. Reuses vpLocalX/Y so the embedded-editor viewport
+/// offset is honoured (req_2248) exactly like paintAt. Returns the painted face, or -1.
 pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f32) i32 {
     if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
@@ -1779,13 +1804,11 @@ pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f3
     const mat = model_paint.hasMaterialInk(); // dip into a shader bucket → sample it per dab
     if (g_paint_mode == 1) {
         const uv = model_paint.baryOnFace(cam, g_paint_vp_w, g_paint_vp_h, lx, ly, g_locked_face) orelse return -1;
-        if (mat) model_paint.paintStampTex(g_locked_face, uv[0], uv[1], radius, flow) else model_paint.paintStamp(g_locked_face, uv[0], uv[1], radius, rgba, flow);
-        paint_program.recordDab(g_locked_face, uv[0], uv[1], radius, flow, mat, .{ r, g, b });
+        stampGroup(g_locked_face, uv[0], uv[1], radius, rgba, mat, flow, .{ r, g, b });
         return @intCast(g_locked_face);
     }
     const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, lx, ly) orelse return -1;
-    if (mat) model_paint.paintStampTex(hit.face, hit.u, hit.v, radius, flow) else model_paint.paintStamp(hit.face, hit.u, hit.v, radius, rgba, flow);
-    paint_program.recordDab(hit.face, hit.u, hit.v, radius, flow, mat, .{ r, g, b });
+    stampGroup(hit.face, hit.u, hit.v, radius, rgba, mat, flow, .{ r, g, b });
     return @intCast(hit.face);
 }
 
