@@ -149,18 +149,18 @@ export default function MaterialFocusSurface(props: {
             const Card = option.id === spec.id ? C.HW_ColorMaterialCardOn : C.HW_ColorMaterialCard;
             const bands = (option.slots ?? []).slice(0, 4);
             return (
-              <Card key={option.id} onPress={() => props.onSelectMaterial(option.id)}>
+              <Card key={option.id} tooltip={`${option.label} - ${option.group}`} onPress={() => props.onSelectMaterial(option.id)}>
                 <C.HW_ColorMaterialMini>
                   {bands.map((slot, index) => (
                     <C.HW_ColorMiniBand key={index} style={{ backgroundColor: rgbToCss(slot.rgb as Rgb) }} />
                   ))}
                 </C.HW_ColorMaterialMini>
+                {/* Single-line, ellipsized — card width is a SHARE of the strip,
+                    so long names truncate instead of wrapping out of the card. */}
                 <C.HW_ColorMaterialText>
-                  <C.HW_FormValue>{option.label}</C.HW_FormValue>
-                  <C.HW_KeyText>{option.group}</C.HW_KeyText>
+                  <C.HW_FormValue numberOfLines={1} noWrap>{option.label}</C.HW_FormValue>
+                  <C.HW_KeyText numberOfLines={1} noWrap>{option.group} - {option.slots?.length ?? 0} slots</C.HW_KeyText>
                 </C.HW_ColorMaterialText>
-                <C.HW_Spacer />
-                <C.HW_PillText>{option.slots?.length ?? 0} slots</C.HW_PillText>
               </Card>
             );
           })}
@@ -184,16 +184,19 @@ export default function MaterialFocusSurface(props: {
               <Effect shader={spec.shader} data={previewData} style={{ width: 280, height: 280 }} />
             </C.HW_ColorPreviewLive>
             <C.HW_ColorControlRow>
-              <C.HW_ColorControlGroup>
+              {/* WIDE, not the 132px fixed group — take labels are real words
+                  ('Trash Stains'), so the segment shares the row and each label
+                  clamps to one line instead of wrapping out of the track. */}
+              <C.HW_ColorControlGroupWide>
                 <C.HW_KeyText>VARIANT</C.HW_KeyText>
                 <C.HW_ColorSegmentTrack>
                   {spec.variants.map((variant, index) => {
                     const Btn = index === props.state.colorStudioVariant ? C.HW_ColorSegmentOn : C.HW_ColorSegment;
                     const Label = index === props.state.colorStudioVariant ? C.HW_ColorSegmentLabelOn : C.HW_ColorSegmentLabel;
-                    return <Btn key={variant.id} onPress={() => props.onVariant(index)}><Label>{variant.label}</Label></Btn>;
+                    return <Btn key={variant.id} onPress={() => props.onVariant(index)}><Label numberOfLines={1} noWrap>{variant.label}</Label></Btn>;
                   })}
                 </C.HW_ColorSegmentTrack>
-              </C.HW_ColorControlGroup>
+              </C.HW_ColorControlGroupWide>
               <C.HW_ColorControlGroup>
                 <C.HW_KeyText>SEED</C.HW_KeyText>
                 <C.HW_ColorSeedButton onPress={props.onSeed}>
@@ -207,7 +210,7 @@ export default function MaterialFocusSurface(props: {
                   {FILL_GRADES.map((label, quality) => {
                     const Btn = quality === props.state.colorStudioQuality ? C.HW_ColorSegmentOn : C.HW_ColorSegment;
                     const Label = quality === props.state.colorStudioQuality ? C.HW_ColorSegmentLabelOn : C.HW_ColorSegmentLabel;
-                    return <Btn key={label} onPress={() => props.onQuality(quality)}><Label>{label}</Label></Btn>;
+                    return <Btn key={label} onPress={() => props.onQuality(quality)}><Label numberOfLines={1} noWrap>{label}</Label></Btn>;
                   })}
                 </C.HW_ColorSegmentTrack>
               </C.HW_ColorControlGroupWide>
@@ -228,8 +231,8 @@ export default function MaterialFocusSurface(props: {
                   <Slot key={`${entry.index}-${entry.slot.name}`} onPress={() => props.onSlot(entry.index)}>
                     <C.HW_ColorSlotSwatch style={{ backgroundColor: rgbToCss(entry.rgb) }} />
                     <C.HW_ColorSlotText>
-                      <C.HW_FormValue>{entry.slot.name}</C.HW_FormValue>
-                      <C.HW_KeyText>slot {entry.index}</C.HW_KeyText>
+                      <C.HW_FormValue numberOfLines={1} noWrap>{entry.slot.name}</C.HW_FormValue>
+                      <C.HW_KeyText numberOfLines={1} noWrap>slot {entry.index}</C.HW_KeyText>
                     </C.HW_ColorSlotText>
                     <C.HW_Spacer />
                     <C.HW_KeyText>{props.state.colorStudioOverrides[overrideKey] ? 'owned' : 'baked'}</C.HW_KeyText>
@@ -282,7 +285,7 @@ export default function MaterialFocusSurface(props: {
               {SPINE_LIBRARY.map((set) => (
                 <C.HW_ColorLibraryRow key={set.name}>
                   <C.HW_ColorLibraryName>
-                    <C.HW_FormValue>{set.name}</C.HW_FormValue>
+                    <C.HW_FormValue numberOfLines={1} noWrap>{set.name}</C.HW_FormValue>
                   </C.HW_ColorLibraryName>
                   <C.HW_ColorLibrarySwatches>
                     {set.colors.map((color, index) => {

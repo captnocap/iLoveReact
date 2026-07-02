@@ -53,8 +53,8 @@ export default function MapTexturePicker(props: {
       <Col style={{ position: 'absolute', left: 410, top: 0, width: 320, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12, gap: 8 }}>
         <Row style={{ alignItems: 'center', gap: 7 }}>
           <Icon name="SwatchBook" size={13} color={ACCENT} />
-          <Text style={{ color: TEXT, fontSize: 12, fontWeight: '700' }}>{def.label} paints:</Text>
-          <Text style={{ color: ACCENT, fontSize: 12, fontWeight: '700' }}>{bound?.name ?? binding.fn}</Text>
+          <Text numberOfLines={1} noWrap style={{ color: TEXT, fontSize: 12, fontWeight: '700' }}>{def.label} paints:</Text>
+          <Text numberOfLines={1} noWrap style={{ color: ACCENT, fontSize: 12, fontWeight: '700' }}>{bound?.name ?? binding.fn}</Text>
           <Box style={{ flexGrow: 1 }} />
           <Text style={{ color: DIM, fontSize: 10, fontFamily: 'ui-monospace' }}>{p + 1}/{maxPage + 1}</Text>
         </Row>
