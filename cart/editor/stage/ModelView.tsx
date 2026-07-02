@@ -305,9 +305,15 @@ const setPaintSafety = (mode: number) => host.__model_paint_mode?.(mode);
 // Set the paint DENSITY (texels per meter, Blockbench 16x semantics); returns the ACTUAL
 // density after the host's budget guard (an over-budget pick halves until it fits).
 const applyPaintDetail = (px: number): number => host.__model_set_paint_detail?.(px) ?? px;
-// Dry-run a density: the atlas dims the island layout would build, without adopting it.
-const estimatePaintAtlas = (px: number): { w: number; h: number; density: number } | null => {
-  const j = host.__model_paint_atlas_estimate?.(px);
+// Set the paint fidelity by ATLAS BUDGET — the proven painter's law (req_2518): the whole
+// model's islands fit a texels² atlas and the density falls out of the model's own size
+// (a lone cube ≈330 texels/m from 1024²; a car divides the same budget). Returns the
+// derived density so the UI can show it.
+const applyPaintFit = (texels: number): number => host.__model_set_paint_fit?.(texels) ?? 1;
+type AtlasEstimate = { w: number; h: number; density: number };
+// Dry-run an atlas-budget fit: the dims + derived density, without adopting it.
+const estimatePaintFit = (texels: number): AtlasEstimate | null => {
+  const j = host.__model_paint_fit_estimate?.(texels);
   if (typeof j !== 'string' || !j) return null;
   try { return JSON.parse(j); } catch { return null; }
 };
@@ -319,10 +325,11 @@ const brushRgb = (b: Brush): RGB => {
   return [Math.round(r * 255), Math.round(g * 255), Math.round(bl * 255)];
 };
 
-// Paint densities: texels per METER (the reference painter's PIXEL_DENSITIES, Blockbench
-// semantics — 16x = 16 texels to the meter). Higher = crisper strokes; the host halves an
-// over-budget pick. (1 = fill-only look.)
-const DETAIL_LEVELS = [16, 32, 64, 128, 256] as const;
+// Paint-atlas budgets (texels per side). The fidelity dial is the atlas SIZE — the model's
+// faces split it by physical size, so a lone cube gets writing-grade texels and a many-face
+// model divides the same budget (the reference's paintAtlasTexels law, req_1299/req_2518).
+const FIT_LEVELS = [512, 1024, 2048, 4096] as const;
+const DEFAULT_FIT = 1024; // the proven painter shipped at 1024²
 // BrushKit size is a DIRECT texel diameter: size N → an N-texel-wide dab (radius N/2), so the
 // slider gives real fine-motor control — size 1 is a single texel (for writing text on a face),
 // and 1 vs 9 are visibly different. The disc clips to the face's island silhouette; the host
@@ -351,6 +358,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [palette, setPalette] = useState<Palette>(() => defaultPalette());
   const [safety, setSafety] = useState(0); // 0 clip · 1 lock
   const [detail, setDetail] = useState(1); // paint density, texels/meter (1 = fill-only look)
+  const [fit, setFit] = useState<number | null>(null); // the active atlas budget (null = explicit density)
   // Light rig — flip via the View menu / right-click Lighting flyout. Flat = even paint-true
   // light (no shading); otherwise a neutral ambient + a single Key directional, and Fill raises
   // ambient so the orbited-away side isn't black. (The shader supports one directional + ambient.)
@@ -592,8 +600,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     enterPaint();
   };
-  const createAtlasAndPaint = (px: number) => {
-    changeDetail(px); // host clamps to what actually fits; changeDetail mirrors the applied level
+  // Fill only (density 1) vs an atlas-budget fit — the prompt's two shapes of pick.
+  const createAtlasAndPaint = (fillOnly: boolean, fitTexels: number) => {
+    if (fillOnly) changeDetail(1);
+    else changeFit(fitTexels);
     atlasReadyRef.current = true;
     setAtlasPrompt(false);
     enterPaint();
@@ -601,27 +611,35 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setSelMode(0); meshSetMode(0); } return nv; });
 
   // ── Brush behaviour handlers ─────────────────────────────────────────────────
-  // Apply a free-form detail level through the host (it re-tessellates the paint atlas and
-  // re-uploads the mesh); the door returns the ACTUAL level after its memory-budget guard.
-  // Returns that applied level — < px when the budget clamps it — so callers can shout the clamp.
+  // Apply an exact density through the host (it rebuilds the paint atlas and re-uploads
+  // the mesh); the door returns the ACTUAL density after its memory-budget guard.
   const changeDetail = (px: number): number => {
     const applied = applyPaintDetail(px);
     setDetail(applied);
-    // The atlas was re-tessellated — the UV panel is showing the OLD layout; refresh it.
+    setFit(null); // an explicit density leaves fit mode
+    // The atlas was rebuilt — the UV panel is showing the OLD layout; refresh it.
     if (paintMode) buildUvPanel();
     return applied;
   };
-  const cycleDetail = () => {
-    const i = DETAIL_LEVELS.indexOf(detail as (typeof DETAIL_LEVELS)[number]);
-    changeDetail(DETAIL_LEVELS[(i + 1) % DETAIL_LEVELS.length]!);
+  // Apply an atlas-budget fit; the returned DERIVED density becomes the live readout.
+  const changeFit = (texels: number): number => {
+    const applied = applyPaintFit(texels);
+    setDetail(applied);
+    setFit(texels);
+    if (paintMode) buildUvPanel();
+    return applied;
   };
-  // Entering the brush with the fill-only density auto-bumps to 16x — the Blockbench
-  // default and the reference painter's baseline; density is physical (texels/meter),
-  // so it needs no tri-count guessing. The host still clamps to the atlas budget.
-  const DEFAULT_DENSITY = 16;
+  // The Density button cycles the atlas budgets (512² → 1024² → 2048² → 4096²); the
+  // label shows the density each budget derives for THIS model.
+  const cycleDetail = () => {
+    const i = FIT_LEVELS.indexOf((fit ?? DEFAULT_FIT) as (typeof FIT_LEVELS)[number]);
+    changeFit(FIT_LEVELS[(i + 1) % FIT_LEVELS.length]!);
+  };
+  // Entering the brush from fill-only auto-raises to the standard atlas budget — the
+  // proven painter's baseline; the density falls out of the model's own size.
   const chooseBrushTool = (t: BrushTool) => {
     setBrushTool(t);
-    if (t !== 'fill' && detail < DEFAULT_DENSITY) changeDetail(DEFAULT_DENSITY);
+    if (t !== 'fill' && detail <= 1) changeFit(DEFAULT_FIT);
   };
   const cycleSafety = () => setSafety((v) => (v === 0 ? 1 : 0));
 
@@ -718,16 +736,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         setInkWarn(`Shader ink '${spec.label}' failed to bake — the brush will paint flat color. Host log has details.`);
       } else {
         setInkWarn(null);
-        // A material ink can't READ at fill-only detail: the face patch is a
-        // single texel, so the host degrades a fill to ONE mid-image sample —
-        // the whole face becomes one flat color from the shader (req_2503,
-        // stampInner's g_patch<=1 path). Dipping a shader auto-raises the
-        // paint resolution so the material's look actually deposits — the
-        // same auto-pick entering the brush tool uses.
+        // A material ink can't READ at fill-only density: a face's island is a
+        // couple of texels, so a fill degrades to a near-flat sample (req_2503).
+        // Dipping a shader auto-raises the paint fidelity to the standard atlas
+        // budget — the same auto-pick entering the brush tool uses.
         if (detail === 1) {
-          const applied = changeDetail(autoDetailForTris(model ? model.count / 3 : 0));
+          const applied = changeFit(DEFAULT_FIT);
           if (applied <= 1) {
-            setInkWarn('The paint atlas could not leave fill-only detail — the shader will paint as one flat color. Lower the mesh density or paint resolution budget.');
+            setInkWarn('The paint atlas could not leave fill-only density — the shader will paint as one flat color. Lower the mesh density or paint resolution budget.');
           }
         }
       }
@@ -1145,10 +1161,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             </Pressable>
             <Pressable
               onPress={cycleDetail}
-              tooltip="Paint density — texels per meter (Blockbench 16x semantics; higher = crisper strokes)"
+              tooltip="Paint atlas budget — cycles 512²/1024²/2048²/4096²; the model derives its texels-per-meter from the budget (bigger atlas = finer strokes)"
               style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
             >
-              <Text style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 700 }}>{detail <= 1 ? 'Density —' : `Density ${detail}x`}</Text>
+              <Text style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 700 }}>
+                {detail <= 1 ? 'Atlas —' : fit ? `Atlas ${fit}² · ${detail}x` : `Density ${detail}x`}
+              </Text>
             </Pressable>
           </Row>
           <BrushKit
@@ -1342,15 +1360,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             <Text style={{ color: '#b9c4d4', fontSize: 12, marginTop: 6 }}>
               {`${authoredFaces && authoredFaces !== Math.floor(model.count / 3)
                 ? `${authoredFaces} faces (${Math.floor(model.count / 3)} triangles)`
-                : `${Math.floor(model.count / 3)} triangles`} — each FACE becomes a UV island sized by its real-world size × the density (16x = 16 texels to the meter). Higher = finer strokes, bigger texture.`}
+                : `${Math.floor(model.count / 3)} triangles`} — the whole model shares ONE paint atlas; its faces split it by real-world size. Bigger atlas = finer strokes on this model.`}
             </Text>
             {(() => {
-              // The HOST's island layout is the truth: each option asks it what the
-              // atlas would actually be (dims + the density that survives the clamp).
-              return [1, 16, 32, 64, 128, 256].map((px) => {
-                const est = estimatePaintAtlas(px);
-                const clamped = est != null && px > 1 && est.density < px;
-                const rec = px === DEFAULT_DENSITY;
+              // The HOST's island layout is the truth: each budget asks it what the
+              // atlas would actually be and what density this model derives from it.
+              const options: (number | null)[] = [null, ...FIT_LEVELS];
+              return options.map((ft) => {
+                const est = ft ? estimatePaintFit(ft) : null;
+                const rec = ft === DEFAULT_FIT;
                 const mbLabel = est
                   ? (() => {
                       const mb = (est.w * est.h * 4) / (1024 * 1024);
@@ -1359,8 +1377,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   : null;
                 return (
                   <Pressable
-                    key={px}
-                    onPress={() => createAtlasAndPaint(px)}
+                    key={ft ?? 'fill'}
+                    onPress={() => createAtlasAndPaint(ft == null, ft ?? DEFAULT_FIT)}
                     style={{
                       marginTop: 6, paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6,
                       backgroundColor: rec ? '#244164' : '#252b3a',
@@ -1369,13 +1387,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   >
                     <Row style={{ alignItems: 'center', gap: 8 }}>
                       <Text style={{ color: '#e6f1ff', fontSize: 12, fontWeight: 700 }}>
-                        {px === 1 ? 'Fill only — one color per face' : `${px}x — ${px} texels / meter`}
+                        {ft == null ? 'Fill only — one color per face' : `${ft}² atlas`}
                       </Text>
+                      {ft != null && est ? (
+                        <Text style={{ color: '#9fb4cf', fontSize: 11 }}>{`≈ ${est.density} texels/m on this model`}</Text>
+                      ) : null}
                       {rec ? <Text style={{ color: '#8fc9bb', fontSize: 11, fontWeight: 700 }}>recommended</Text> : null}
-                      {clamped ? <Text style={{ color: '#ffb38f', fontSize: 11, fontWeight: 700 }}>{`clamps to ${est!.density}x`}</Text> : null}
                       <Box style={{ flexGrow: 1 }} />
                       <Text style={{ color: '#8b97ab', fontSize: 11 }}>
-                        {est ? `${est.w}×${est.h} (${mbLabel})` : '—'}
+                        {ft == null ? 'tiny' : est ? `${est.w}×${est.h} (${mbLabel})` : '—'}
                       </Text>
                     </Row>
                   </Pressable>

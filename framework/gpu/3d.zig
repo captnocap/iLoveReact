@@ -1851,12 +1851,30 @@ pub fn refreshPaintLayout() bool {
     return true;
 }
 
+/// Set the paint fidelity by ATLAS BUDGET (the proven painter's law, req_2518): the
+/// whole model's islands fit a fit_texels² atlas and the density falls out of the
+/// model's own size. Returns the DERIVED density (texels/meter) so the UI can show it.
+pub fn setPaintFit(fit_texels: i32) i32 {
+    const verts = g_edit_verts orelse return -1;
+    if (g_edit_count == 0) return -1;
+    const want: u32 = if (fit_texels < 64) 64 else @intCast(fit_texels);
+    model_paint.setFit(want, verts, g_edit_count);
+    const face_count = g_edit_count / 3;
+    if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
+    return @intCast(model_paint.detail());
+}
+
 /// Dry-run a density against the current paint target — the atlas dims + applied
 /// density the island layout would produce, without adopting it. The atlas-creation
 /// prompt shows these as the honest per-option cost.
 pub const PaintEstimate = model_paint.AtlasEstimate;
 pub fn estimatePaintAtlas(density: f32) ?PaintEstimate {
     return model_paint.estimateAtlas(density);
+}
+
+/// Dry-run an atlas-budget FIT (see setPaintFit) — dims + the derived density.
+pub fn estimatePaintAtlasFit(fit_texels: u32) ?PaintEstimate {
+    return model_paint.estimateAtlasFit(fit_texels);
 }
 
 /// The live island rects (for the UV inspector's structure overlay), or null.

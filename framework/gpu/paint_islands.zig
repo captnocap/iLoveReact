@@ -114,6 +114,35 @@ pub fn build(
     max_dim: u32,
     budget_bytes: usize,
 ) ?Layout {
+    return buildImpl(alloc, positions, groups, density_req, null, max_dim, budget_bytes);
+}
+
+/// Build FIT to an atlas budget — the proven painter's fidelity law (reference
+/// textureize.ts fitTexels, req_1207/1209/1299): the density is DERIVED so the packed
+/// atlas ≈ fit_texels² REGARDLESS of model size. A lone cube spreads a whole 1024²
+/// across six faces (~330 texels/face — cursive-writing fidelity); a car divides the
+/// same budget among its many faces. The paint fidelity dial is the atlas SIZE, not a
+/// fixed texels-per-meter. The derived density still halves if it blows the hard caps.
+pub fn buildFit(
+    alloc: std.mem.Allocator,
+    positions: []const f32,
+    groups: ?[]const u32,
+    fit_texels: u32,
+    max_dim: u32,
+    budget_bytes: usize,
+) ?Layout {
+    return buildImpl(alloc, positions, groups, 1, fit_texels, max_dim, budget_bytes);
+}
+
+fn buildImpl(
+    alloc: std.mem.Allocator,
+    positions: []const f32,
+    groups: ?[]const u32,
+    density_req: f32,
+    fit_texels: ?u32,
+    max_dim: u32,
+    budget_bytes: usize,
+) ?Layout {
     const fc: u32 = @intCast(positions.len / 9);
     if (fc == 0) return null;
 
@@ -195,9 +224,25 @@ pub fn build(
         r.h_m = @max(0, r.h_m - r.min_v);
     }
 
+    // ── FIT mode: derive the density from the model's own extent so the packed atlas
+    //    ≈ fit_texels². The reference law verbatim (textureize.ts): naturalExtent =
+    //    max(widest island edge, √(total island area)/0.85 shelf-pack occupancy), then
+    //    t = fit×0.92 headroom / naturalExtent. Density is meters-based here; the
+    //    reference was units-based — same formula, different ruler.
+    var density = density_req;
+    if (fit_texels) |ft| {
+        var area: f64 = 0;
+        var widest_m: f32 = 0;
+        for (raws.items) |r| {
+            area += @as(f64, @max(0.001, r.w_m)) * @as(f64, @max(0.001, r.h_m));
+            widest_m = @max(widest_m, @max(r.w_m, r.h_m));
+        }
+        const natural: f32 = @max(@max(widest_m, @as(f32, @floatCast(@sqrt(area) / 0.85))), 1e-6);
+        density = @as(f32, @floatFromInt(ft)) * 0.92 / natural;
+    }
+
     // ── Size + shelf-pack at the requested density, HALVING until both hard limits
     //    fit (the import-while-painting lesson: never hand the GPU an illegal atlas).
-    var density = density_req;
     var atlas_w: u32 = 0;
     var atlas_h: u32 = 0;
     var attempts: u32 = 0;
@@ -395,4 +440,43 @@ test "ungrouped triangles each get their own area-proportional island" {
     defer l.deinit(testing.allocator);
     try testing.expectEqual(@as(usize, 12), l.islands.len);
     for (l.islands) |isl| try testing.expectEqual(NO_GROUP, isl.group);
+}
+
+test "buildFit: a lone cube spreads the whole atlas budget — writing-grade texels per face" {
+    // The proven painter's law (req_1299): fidelity comes from the atlas SIZE, not a
+    // fixed texels/meter. A 1m cube at fit-1024: naturalExtent = √6/0.85 ≈ 2.88m →
+    // density ≈ 1024×0.92/2.88 ≈ 327 texels/m → each face island ≈ 327², and the
+    // packed atlas stays around (under) the requested budget.
+    var soup: [12 * 9]f32 = undefined;
+    cubeSoup(&soup);
+    const groups = [12]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    var l = buildFit(testing.allocator, soup[0..], groups[0..], 1024, 8192, 256 << 20).?;
+    defer l.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 6), l.islands.len);
+    try testing.expect(l.density > 300 and l.density < 340);
+    for (l.islands) |isl| {
+        try testing.expect(isl.w >= 300 and isl.w <= 340);
+        try testing.expect(isl.h >= 300 and isl.h <= 340);
+    }
+    try testing.expect(l.atlas_w <= 1100 and l.atlas_h <= 1100); // ≈ the fit, never wildly over
+}
+
+test "buildFit: a big model derives a LOW density — same budget, spread thin" {
+    // A 100m×100m ground face at fit-1024 must land near 1024 texels across — i.e.
+    // density ≈ 9 texels/m — instead of exploding the atlas.
+    var soup: [2 * 9]f32 = undefined;
+    const q = [4][3]f32{ .{ 0, 0, 0 }, .{ 100, 0, 0 }, .{ 100, 0, 100 }, .{ 0, 0, 100 } };
+    const tri = [6]u32{ 0, 1, 2, 0, 2, 3 };
+    var w: usize = 0;
+    for (tri) |vi| {
+        soup[w + 0] = q[vi][0];
+        soup[w + 1] = q[vi][1];
+        soup[w + 2] = q[vi][2];
+        w += 3;
+    }
+    const groups = [2]u32{ 0, 0 };
+    var l = buildFit(testing.allocator, soup[0..], groups[0..], 1024, 8192, 256 << 20).?;
+    defer l.deinit(testing.allocator);
+    try testing.expect(l.atlas_w <= 1100 and l.atlas_h <= 1100);
+    try testing.expect(l.density > 5 and l.density < 12);
 }

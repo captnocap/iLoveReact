@@ -45,6 +45,11 @@ var g_isl_tris: ?[]u32 = null;
 // Requested texels-per-METER (Blockbench 16x semantics). Carries across meshes (edits
 // keep their density); paint_islands.build self-clamps it per mesh to the GPU limits.
 var g_density_req: f32 = 1.0;
+// FIT mode (the proven painter's fidelity law, req_1299/req_2518): when set, the
+// density is DERIVED so the whole model's islands fill a g_fit_req² atlas — a lone
+// cube gets writing-grade texels, a whole car divides the same budget. Wins over
+// g_density_req while set; an explicit setDetail clears it.
+var g_fit_req: ?u32 = null;
 // Dab/fill coverage claims edge texels slightly OUTSIDE the triangle (covers the
 // half-texel corner inset + softens island borders under linear filtering)…
 const PAINT_EPS: f32 = 0.75;
@@ -291,7 +296,13 @@ fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
     defer if (groups) |g| alloc.free(g);
 
     freeLayoutState();
-    const lay = paint_islands.build(alloc, pos[0 .. @as(usize, fc) * 9], groups, g_density_req, MAX_ATLAS_DIM, ATLAS_BUDGET) orelse {
+    // FIT mode derives the density from the model's own extent (the proven painter's
+    // fidelity law); plain mode uses the carried texels/meter as-is.
+    const built = if (g_fit_req) |ft|
+        paint_islands.buildFit(alloc, pos[0 .. @as(usize, fc) * 9], groups, ft, MAX_ATLAS_DIM, ATLAS_BUDGET)
+    else
+        paint_islands.build(alloc, pos[0 .. @as(usize, fc) * 9], groups, g_density_req, MAX_ATLAS_DIM, ATLAS_BUDGET);
+    const lay = built orelse {
         // Absurd mesh (even 1-texel islands blow the budget) — refuse LOUDLY. The
         // target stays valid for picking/editing; painting is disabled until a sane
         // density/mesh (every paint op no-ops on the missing atlas).
@@ -1069,38 +1080,50 @@ pub fn detail() u32 {
     return @max(1, @as(u32, @intFromFloat(@round(g_density_req))));
 }
 
-fn snapDensity(d: u32) u32 {
-    if (d >= 512) return 512;
-    if (d >= 256) return 256;
-    if (d >= 128) return 128;
-    if (d >= 64) return 64;
-    if (d >= 32) return 32;
-    if (d >= 16) return 16;
-    return 1;
-}
-
-/// Set the paint density (texels/meter), rebuilding the island layout and carrying each
+/// Set the paint density (texels/meter, any value ≥1 — no snapping: the FIT path and
+/// program replay need exact densities), rebuilding the island layout and carrying each
 /// face's current colour as a flat fill (sub-face strokes come back via stroke-program
 /// replay). Rewrites the caller's vertex UVs in place — 3d.zig re-uploads the mesh
 /// after. An over-budget density HALVES inside paint_islands.build (logged) — detail()
 /// reports what actually took, so the UI shows the clamp.
 pub fn setDetail(new_density: u32, verts: []f32, vert_count: u32) void {
-    const nd = snapDensity(new_density);
+    const nd = @max(1, new_density);
     const req: f32 = @floatFromInt(nd);
     if (g_positions == null) {
         g_density_req = req; // no target yet — carry the intent to the next adopt
+        g_fit_req = null;
         return;
     }
     const fc = g_facecount;
     if (fc == 0 or vert_count / 3 != fc) return;
-    if (req == g_density_req and g_layout != null) return;
+    if (g_fit_req == null and req == g_density_req and g_layout != null) return;
     g_density_req = req;
+    g_fit_req = null; // an explicit density leaves fit mode
     rebuildLayoutInner(verts, vert_count, true);
     if (g_layout) |lay| {
         if (lay.density < req) {
             std.debug.print("[model_paint] density {d} texels/m exceeds the atlas limits ({d}px dim / {d}MB) — clamped to {d}.\n", .{ nd, MAX_ATLAS_DIM, ATLAS_BUDGET / (1024 * 1024), detail() });
         }
     }
+}
+
+/// Set the paint fidelity by ATLAS BUDGET — the proven painter's law (req_1299 in the
+/// reference; USER req_2518): the whole model's islands FIT a fit_texels² atlas and the
+/// density falls out of the model's own size. A lone cube gets ~330 texels/m from a
+/// 1024² budget; a whole car divides the same budget. Carries like density; a later
+/// explicit setDetail leaves fit mode.
+pub fn setFit(fit_texels: u32, verts: []f32, vert_count: u32) void {
+    const ft = @max(64, fit_texels);
+    if (g_positions == null) {
+        g_fit_req = ft; // carry the intent to the next adopt
+        return;
+    }
+    const fc = g_facecount;
+    if (fc == 0 or vert_count / 3 != fc) return;
+    if (g_fit_req == ft and g_layout != null) return;
+    g_fit_req = ft;
+    rebuildLayoutInner(verts, vert_count, true);
+    if (g_layout) |lay| g_density_req = lay.density; // the derived density becomes the carried one
 }
 
 /// Dry-run a density against the CURRENT target: the atlas dims + applied density that
@@ -1113,6 +1136,18 @@ pub fn estimateAtlas(density_req: f32) ?AtlasEstimate {
     const groups = collectFaceGroups(g_facecount);
     defer if (groups) |g| alloc.free(g);
     var lay = paint_islands.build(alloc, pos[0 .. @as(usize, g_facecount) * 9], groups, density_req, MAX_ATLAS_DIM, ATLAS_BUDGET) orelse return null;
+    defer lay.deinit(alloc);
+    return .{ .w = lay.atlas_w, .h = lay.atlas_h, .density = lay.density };
+}
+
+/// Dry-run an atlas-budget FIT (see setFit) — what dims + derived density would a
+/// fit_texels² budget give this model? The prompt's per-option truth.
+pub fn estimateAtlasFit(fit_texels: u32) ?AtlasEstimate {
+    const pos = g_positions orelse return null;
+    if (g_facecount == 0) return null;
+    const groups = collectFaceGroups(g_facecount);
+    defer if (groups) |g| alloc.free(g);
+    var lay = paint_islands.buildFit(alloc, pos[0 .. @as(usize, g_facecount) * 9], groups, @max(64, fit_texels), MAX_ATLAS_DIM, ATLAS_BUDGET) orelse return null;
     defer lay.deinit(alloc);
     return .{ .w = lay.atlas_w, .h = lay.atlas_h, .density = lay.density };
 }
@@ -1299,6 +1334,26 @@ test "a dab straddling the quad diagonal paints CONTIGUOUS texels (anti-shreddin
         }
     }
     try std.testing.expect(checked >= 20); // a real disc, not a sliver
+}
+
+test "setFit gives a lone 1m quad writing-grade texels (the proven painter's fidelity)" {
+    var verts = setupQuadAtDensity(16);
+    defer {
+        setDetail(1, &verts, 6);
+        clear();
+        model_source.clear();
+    }
+    // A 1m quad alone at fit-512: naturalExtent = max(1, 1/0.85) ≈ 1.176m →
+    // density ≈ 512×0.92/1.176 ≈ 400 texels/m. At the old flat 16x this face got 16
+    // texels across — a 25× fidelity jump from the SAME model, which is exactly what
+    // the fixed-atlas-budget law is for (req_2518).
+    setFit(512, &verts, 6);
+    try std.testing.expect(detail() >= 380 and detail() <= 420);
+    const isls = layoutIslands().?;
+    try std.testing.expectEqual(@as(usize, 1), isls.len);
+    try std.testing.expect(isls[0].w >= 380 and isls[0].w <= 420);
+    const a = atlas().?;
+    try std.testing.expect(a.w <= 520 and a.h <= 520); // ≈ the requested budget
 }
 
 test "fill paints exactly the face's triangle, not its island rect" {

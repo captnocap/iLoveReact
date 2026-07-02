@@ -911,6 +911,15 @@ fn hostModelSetPaintDetail(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setReturnNumber(info, @floatFromInt(applied));
 }
 
+fn returnEstimateJson(info: v8.FunctionCallbackInfo, est: scene3d.PaintEstimate) void {
+    var buf: [96]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"w\":{d},\"h\":{d},\"density\":{d}}}", .{ est.w, est.h, @max(1, @as(u32, @intFromFloat(@round(est.density)))) }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, json);
+}
+
 /// __model_paint_atlas_estimate(density) → JSON {"w":W,"h":H,"density":D} — the atlas
 /// the island layout WOULD build for the current model at that texels-per-meter
 /// density (D = the applied density after any clamp), without adopting it. "" if no
@@ -922,12 +931,32 @@ fn hostModelPaintAtlasEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callco
         setReturnString(info, "");
         return;
     };
-    var buf: [96]u8 = undefined;
-    const json = std.fmt.bufPrint(&buf, "{{\"w\":{d},\"h\":{d},\"density\":{d}}}", .{ est.w, est.h, @max(1, @as(u32, @intFromFloat(@round(est.density)))) }) catch {
+    returnEstimateJson(info, est);
+}
+
+/// __model_set_paint_fit(texels) → the DERIVED density (texels/meter). The proven
+/// painter's fidelity law (req_2518): the whole model's islands FIT a texels² atlas —
+/// a lone cube gets writing-grade texels, a many-face model divides the same budget.
+/// The paint fidelity dial is the atlas SIZE, not a fixed density.
+fn hostModelSetPaintFit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const texels = argToI32(info, 0) orelse 1024;
+    const applied = scene3d.setPaintFit(texels);
+    state.markDirty();
+    setReturnNumber(info, @floatFromInt(applied));
+}
+
+/// __model_paint_fit_estimate(texels) → JSON {"w":W,"h":H,"density":D} — what a
+/// texels² atlas-budget fit would give this model (D = the derived density), without
+/// adopting it. "" if no target.
+fn hostModelPaintFitEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const texels = argToI32(info, 0) orelse 1024;
+    const est = scene3d.estimatePaintAtlasFit(if (texels < 64) 64 else @intCast(texels)) orelse {
         setReturnString(info, "");
         return;
     };
-    setReturnString(info, json);
+    returnEstimateJson(info, est);
 }
 
 /// __model_atlas_read() → JSON {"w":W,"h":H,"detail":D,"islands":[x,y,w,h,...],"data":
@@ -1873,7 +1902,9 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_paint_material", hostModelPaintMaterial);
     v8_runtime.registerHostFn("__model_paint_material_clear", hostModelPaintMaterialClear);
     v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
+    v8_runtime.registerHostFn("__model_set_paint_fit", hostModelSetPaintFit);
     v8_runtime.registerHostFn("__model_paint_atlas_estimate", hostModelPaintAtlasEstimate);
+    v8_runtime.registerHostFn("__model_paint_fit_estimate", hostModelPaintFitEstimate);
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
     v8_runtime.registerHostFn("__model_paint_program_read", hostModelPaintProgramRead);
