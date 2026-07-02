@@ -112,11 +112,27 @@ export function mapSetTool(tool: MapTool): void {
   callHost('__map_set_tool', undefined, buf);
 }
 
-/** Push the tile channel's shader contract: a WGSL body defining
- *  `fn hf_ground_rgb(uv) -> vec3f` over the engine's D stream, plus the kind
- *  palette (rgb triples in legend order). Content — push once at UI rate. */
-export function mapSetGroundLook(formulaWgsl: string, paletteRgb: Float32Array): void {
-  callHost('__map_set_ground_look', undefined, formulaWgsl, paletteRgb);
+/** Push the cell channels' shader contract: a WGSL body defining
+ *  `fn hf_ground_rgb(uv) -> vec3f` over the engine's D stream (layout v2:
+ *  packed tile+flora+zone cells), plus the three palettes (rgb triples in
+ *  legend order). Content — push once at UI rate. */
+export function mapSetGroundLook(
+  formulaWgsl: string,
+  tilePaletteRgb: Float32Array,
+  floraPaletteRgb: Float32Array,
+  zonePaletteRgb: Float32Array,
+): void {
+  callHost('__map_set_ground_look', undefined, formulaWgsl, tilePaletteRgb, floraPaletteRgb, zonePaletteRgb);
+}
+
+/** Re-push just the zone palette (zones are user-authored and change mid-map). */
+export function mapSetZonePalette(zonePaletteRgb: Float32Array): void {
+  callHost('__map_set_zone_palette', undefined, zonePaletteRgb);
+}
+
+/** Delete zone list entry `index`: unzones its cells, shifts higher indices down. */
+export function mapDropZone(index: number): void {
+  callHost('__map_drop_zone', undefined, index);
 }
 
 /** Begin a stroke at a world-meter point (chrome-driven path). */

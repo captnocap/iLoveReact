@@ -3,16 +3,19 @@
 // dock floats INSIDE the world viewport (the paint-bar convention, req_2469) and
 // only ever calls the __map_* doors at UI rate.
 //
-// Channels surfaced here grow with the migration: TERRAIN + TILE + WATER now;
-// FLORA and ZONE arrive with their legend palettes.
+// Channels: TERRAIN + TILE + WATER + FLORA + ZONE; ROAD arrives with the
+// stroke tools.
 import { Fragment } from 'react';
 import { C } from '../workspace.cls';
 import type { MapBrushProfile, MapBrushShape, MapTerrainTool } from '../../../runtime/game/map';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
+import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
+
+export type MapZoneDef = { id: string; name: string; color: string };
 
 export type MapPaintState = {
   active: boolean;
-  channel: 'terrain' | 'tile' | 'water';
+  channel: 'terrain' | 'tile' | 'water' | 'flora' | 'zone';
   mode: 'paint' | 'erase';
   terrainTool: MapTerrainTool;
   shape: MapBrushShape;
@@ -27,6 +30,12 @@ export type MapPaintState = {
   smoothStrength: number;
   /** armed ground tile kind — index into TILE_KINDS (the engine legend order) */
   tileKindIdx: number;
+  /** armed flora kind — index into FLORA_KIND_DEFINITIONS */
+  floraKindIdx: number;
+  /** the zone list (names/colors are cart content; cells live host-side) */
+  zones: MapZoneDef[];
+  /** armed zone — index into zones */
+  zoneIdx: number;
 };
 
 export const DEFAULT_MAP_PAINT: MapPaintState = {
@@ -44,6 +53,9 @@ export const DEFAULT_MAP_PAINT: MapPaintState = {
   rampWide: 3,
   smoothStrength: 0.5,
   tileKindIdx: Math.max(0, TILE_KINDS.indexOf('sidewalk')),
+  floraKindIdx: 1, // 'Grass'
+  zones: [],
+  zoneIdx: 0,
 };
 
 // The paintable GROUND kinds for the dock's palette — kinds whose placement is
@@ -54,7 +66,7 @@ export const PAINTABLE_TILE_KINDS: readonly number[] = TILE_KINDS
   .filter(([k]) => !['laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'junction', 'crosswalk', 'median'].includes(k))
   .map(([, i]) => i);
 
-const CHANNELS: MapPaintState['channel'][] = ['terrain', 'tile', 'water'];
+const CHANNELS: MapPaintState['channel'][] = ['terrain', 'tile', 'water', 'flora', 'zone'];
 const TERRAIN_TOOLS: MapTerrainTool[] = ['brush', 'ramp', 'slope', 'smooth'];
 const SHAPES: MapBrushShape[] = ['circle', 'square', 'diamond'];
 const PROFILES: MapBrushProfile[] = ['cone', 'flat', 'dome'];
@@ -85,6 +97,7 @@ function PillRow<T extends string>(props: { items: readonly T[]; value: T; onPic
 export default function MapPaintDock(props: {
   state: MapPaintState;
   onPatch: (patch: Partial<MapPaintState>) => void;
+  onAddZone: () => void;
 }) {
   const s = props.state;
   const Toggle = s.active ? C.HW_PillOn : C.HW_Pill;
@@ -125,6 +138,39 @@ export default function MapPaintDock(props: {
                   </Pill>
                 );
               })}
+            </Fragment>
+          ) : null}
+          {s.channel === 'flora' ? (
+            <Fragment>
+              <C.HW_OptionDivider />
+              {FLORA_KIND_DEFINITIONS.map((def, idx) => {
+                const Pill = idx === s.floraKindIdx ? C.HW_PillOn : C.HW_Pill;
+                const Label = idx === s.floraKindIdx ? C.HW_PillTextOn : C.HW_PillText;
+                return (
+                  <Pill key={def.kind} tooltip={`${def.label} (${def.lane} lane)`} onPress={() => props.onPatch({ floraKindIdx: idx, mode: 'paint' })}>
+                    <C.HW_TileSwatch style={{ backgroundColor: def.color }} />
+                    <Label>{def.label.toUpperCase()}</Label>
+                  </Pill>
+                );
+              })}
+            </Fragment>
+          ) : null}
+          {s.channel === 'zone' ? (
+            <Fragment>
+              <C.HW_OptionDivider />
+              {s.zones.map((zone, idx) => {
+                const Pill = idx === s.zoneIdx ? C.HW_PillOn : C.HW_Pill;
+                const Label = idx === s.zoneIdx ? C.HW_PillTextOn : C.HW_PillText;
+                return (
+                  <Pill key={zone.id} tooltip={zone.name} onPress={() => props.onPatch({ zoneIdx: idx, mode: 'paint' })}>
+                    <C.HW_TileSwatch style={{ backgroundColor: zone.color }} />
+                    <Label>{zone.name.toUpperCase()}</Label>
+                  </Pill>
+                );
+              })}
+              <C.HW_Pill tooltip="Add a zone" onPress={props.onAddZone}>
+                <C.HW_PillText>+ ZONE</C.HW_PillText>
+              </C.HW_Pill>
             </Fragment>
           ) : null}
           <C.HW_OptionDivider />

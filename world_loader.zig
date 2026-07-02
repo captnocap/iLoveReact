@@ -6802,7 +6802,9 @@ fn applyPaintLayer(runtime: *Runtime) void {
         }
         const i = slot.?;
         const height_dirty = fresh or chunk.dirty.height;
-        const tiles_dirty = fresh or chunk.dirty.tiles;
+        // flora + zones ride the same packed D stream as the tiles (layout v2),
+        // so any cell-channel edit re-encodes it
+        const tiles_dirty = fresh or chunk.dirty.tiles or chunk.dirty.flora or chunk.dirty.zones;
         // the water surface is bed + depth, so a re-dug bed moves the water too
         const water_dirty = height_dirty or chunk.dirty.water;
         if (!height_dirty and !tiles_dirty and !water_dirty) continue;
@@ -6865,6 +6867,8 @@ fn applyPaintLayer(runtime: *Runtime) void {
         // cart pushes a formula (__map_set_ground_look).
         if (tiles_dirty) {
             chunk.dirty.tiles = false;
+            chunk.dirty.flora = false;
+            chunk.dirty.zones = false;
             if (map_paint.groundFormula()) |formula| {
                 const need = map_paint.groundDataFloats();
                 var ground = runtime.paint_slot_ground[i];

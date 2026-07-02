@@ -667,23 +667,45 @@ pub fn downsampleFloorHeights(src: *const [chunks.SAMPLE_CELLS]f32, dst: []f32) 
     }
 }
 
-// ── the ground look (the tile channel's shader contract) ─────────────────────
-// The tile channel renders through the per-fragment ground FORMULA (the
+// ── the ground look (the tile/flora/zone channels' shader contract) ───────────
+// The cell channels render through the per-fragment ground FORMULA (the
 // data-shape ground): the cart supplies a WGSL body defining
 // `fn hf_ground_rgb(uv) -> vec3f` that reads the D reference stream, and the
-// engine encodes each chunk's D stream from its cell grid. Layout matches the
-// hmsc encodeTileMap contract (heightfieldSurface.tsx:20): [0]cols [1]rows
-// [2]paletteCount, paletteCount×3 rgb floats, rows×cols cell indices (−1 empty).
-// Formula + palette are CONTENT — pushed once at UI rate, kept across map reset.
+// engine encodes each chunk's D stream from its cell grids. Formula + palettes
+// are CONTENT — pushed at UI rate, kept across map reset.
+//
+// D layout v2 (one PACKED cell array keeps three channels inside the ground
+// pipeline's per-chunk float budget):
+//   [0]cols [1]rows [2]tilePaletteCount [3]floraPaletteCount [4]zonePaletteCount
+//   tilePal×3 rgb, floraPal×3 rgb, zonePal×3 rgb, then rows×cols packed cells.
+// Packed cell (exact in f32 — 24 bits): (tile+1) + (flora+1)·1024 + (zone+1)·262144
+//   tile+1 in [0,1024) · flora+1 in [0,256) · zone+1 in [0,64); 0 = empty slot.
+// Flora is the COMPOSITE authoring tint of the three lanes (tree over bush over
+// grass); the real populations materialize at Compile from the full lanes.
 
 pub const MAX_PALETTE: usize = 256;
+pub const PACK_TILE_LIMIT: i16 = 1022;
+pub const PACK_FLORA_LIMIT: i16 = 254;
+pub const PACK_ZONE_LIMIT: i16 = 62;
 
 var g_ground_formula: ?[]u8 = null;
 var g_palette: [MAX_PALETTE][3]f32 = undefined;
 var g_palette_count: usize = 0;
+var g_flora_palette: [MAX_PALETTE][3]f32 = undefined;
+var g_flora_palette_count: usize = 0;
+var g_zone_palette: [MAX_PALETTE][3]f32 = undefined;
+var g_zone_palette_count: usize = 0;
 const look_alloc = std.heap.page_allocator;
 
-pub fn setGroundLook(formula: []const u8, palette_rgb: []const f32) void {
+fn copyPalette(dst: *[MAX_PALETTE][3]f32, rgb: []const f32) usize {
+    const count = @min(MAX_PALETTE, rgb.len / 3);
+    for (0..count) |i| {
+        dst[i] = .{ rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2] };
+    }
+    return count;
+}
+
+pub fn setGroundLook(formula: []const u8, tile_rgb: []const f32, flora_rgb: []const f32, zone_rgb: []const f32) void {
     if (g_ground_formula) |old| look_alloc.free(old);
     g_ground_formula = null;
     if (formula.len > 0) {
@@ -691,36 +713,64 @@ pub fn setGroundLook(formula: []const u8, palette_rgb: []const f32) void {
         @memcpy(copy, formula);
         g_ground_formula = copy;
     }
-    g_palette_count = @min(MAX_PALETTE, palette_rgb.len / 3);
-    for (0..g_palette_count) |i| {
-        g_palette[i] = .{ palette_rgb[i * 3], palette_rgb[i * 3 + 1], palette_rgb[i * 3 + 2] };
-    }
+    g_palette_count = copyPalette(&g_palette, tile_rgb);
+    g_flora_palette_count = copyPalette(&g_flora_palette, flora_rgb);
+    g_zone_palette_count = copyPalette(&g_zone_palette, zone_rgb);
+}
+
+/// Re-push just the zone palette (zones are user-authored and change mid-map).
+pub fn setZonePalette(zone_rgb: []const f32) void {
+    g_zone_palette_count = copyPalette(&g_zone_palette, zone_rgb);
 }
 
 pub fn groundFormula() ?[]const u8 {
     return g_ground_formula;
 }
 
-/// Floats one chunk's D stream needs at the current palette.
+/// Floats one chunk's D stream needs at the current palettes.
 pub fn groundDataFloats() usize {
-    return 3 + g_palette_count * 3 + chunks.TILE_CELLS;
+    return 5 + (g_palette_count + g_flora_palette_count + g_zone_palette_count) * 3 + chunks.TILE_CELLS;
 }
 
-/// Encode a chunk's tile grid as the ground formula's D stream. dst.len must be
-/// ≥ groundDataFloats(). Returns the floats written.
+/// Composite flora lane tint for one cell: tree over bush over grass.
+fn floraCompositeAt(chunk: *const chunks.Chunk, idx: usize) i16 {
+    if (chunk.flora[1][idx] >= 0) return chunk.flora[1][idx]; // tree
+    if (chunk.flora[2][idx] >= 0) return chunk.flora[2][idx]; // bush
+    return chunk.flora[0][idx]; // grass (or empty)
+}
+
+/// Encode a chunk's cell channels as the ground formula's D stream (layout v2).
+/// dst.len must be ≥ groundDataFloats(). Returns the floats written.
 pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
     dst[0] = @floatFromInt(chunks.TILE_COLS);
     dst[1] = @floatFromInt(chunks.TILE_COLS);
     dst[2] = @floatFromInt(g_palette_count);
-    var n: usize = 3;
+    dst[3] = @floatFromInt(g_flora_palette_count);
+    dst[4] = @floatFromInt(g_zone_palette_count);
+    var n: usize = 5;
     for (g_palette[0..g_palette_count]) |rgb| {
         dst[n] = rgb[0];
         dst[n + 1] = rgb[1];
         dst[n + 2] = rgb[2];
         n += 3;
     }
-    for (chunk.tiles) |cell| {
-        dst[n] = @floatFromInt(cell);
+    for (g_flora_palette[0..g_flora_palette_count]) |rgb| {
+        dst[n] = rgb[0];
+        dst[n + 1] = rgb[1];
+        dst[n + 2] = rgb[2];
+        n += 3;
+    }
+    for (g_zone_palette[0..g_zone_palette_count]) |rgb| {
+        dst[n] = rgb[0];
+        dst[n + 1] = rgb[1];
+        dst[n + 2] = rgb[2];
+        n += 3;
+    }
+    for (chunk.tiles, 0..) |tile, i| {
+        const t: u32 = @intCast(@min(PACK_TILE_LIMIT, tile) + 1);
+        const f: u32 = @intCast(@min(PACK_FLORA_LIMIT, floraCompositeAt(chunk, i)) + 1);
+        const z: u32 = @intCast(@min(PACK_ZONE_LIMIT, chunk.zones[i]) + 1);
+        dst[n] = @floatFromInt(t + f * 1024 + z * 262144);
         n += 1;
     }
     return n;

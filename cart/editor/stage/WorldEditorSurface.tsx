@@ -4,9 +4,10 @@ import { LoaderIsoView } from '../../hmsc-int/LoaderIsoView';
 import type { PlacedBuildPiece } from '../../hmsc-int/game/build/placed';
 import type { Armed } from '../../hmsc-int/buildArmed';
 import type { BuildEditEvent } from '../../hmsc-int/game';
-import { mapChunkCount, mapGrowChunk, mapHostLive, mapSetGroundLook, mapSetTool } from '../../../runtime/game/map';
-import MapPaintDock, { DEFAULT_MAP_PAINT, type MapPaintState } from './MapPaintDock';
-import { EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE } from '../render3d/groundFormula';
+import { mapChunkCount, mapGrowChunk, mapHostLive, mapSetGroundLook, mapSetTool, mapSetZonePalette } from '../../../runtime/game/map';
+import MapPaintDock, { DEFAULT_MAP_PAINT, type MapPaintState, type MapZoneDef } from './MapPaintDock';
+import { EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf } from '../render3d/groundFormula';
+import { FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, ZONE_COLORS } from '../world/floraKinds';
 
 const EDITOR_GAME_FILE = 'zig-out/game/editor/main.gamefile';
 const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
@@ -27,6 +28,7 @@ const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
 // (MAPPAINT req_2473). The dock's height dial + RAISE/DIG toggle collapse into
 // the engine's signed centerZ; rampMin/rampMax feed both the ramp and the slope.
 function pushMapTool(s: MapPaintState): void {
+  const flora = FLORA_KIND_DEFINITIONS[s.floraKindIdx];
   mapSetTool({
     channel: s.channel,
     mode: s.mode,
@@ -40,6 +42,9 @@ function pushMapTool(s: MapPaintState): void {
     rampWide: s.rampWide,
     smoothStrength: s.smoothStrength,
     kindIdx: s.tileKindIdx,
+    floraKindIdx: s.floraKindIdx,
+    floraLane: flora ? FLORA_LANE_INDEX[flora.lane] : 0,
+    zoneIdx: s.zones.length ? Math.min(s.zoneIdx, s.zones.length - 1) : -1,
   });
 }
 
@@ -66,13 +71,30 @@ export default function WorldEditorSurface() {
     });
   }, []);
 
+  // Adding a zone: cart owns the def list (names/colors); the host stores only
+  // per-cell indices. Every list change re-pushes the zone palette so the
+  // overlay tints track it.
+  const onAddZone = useCallback(() => {
+    setPaint((prev) => {
+      const zone: MapZoneDef = {
+        id: `z_${prev.zones.length + 1}`,
+        name: `Zone ${prev.zones.length + 1}`,
+        color: ZONE_COLORS[prev.zones.length % ZONE_COLORS.length]!,
+      };
+      const next = { ...prev, zones: [...prev.zones, zone], zoneIdx: prev.zones.length, mode: 'paint' as const };
+      mapSetZonePalette(zonePaletteOf(next.zones));
+      pushMapTool(next);
+      return next;
+    });
+  }, []);
+
   // First arm seeds the world's chunk (0,0) so strokes have canvas — the grown
   // chunk grid gets its own chrome with the multi-chunk workspace — and pushes
-  // the tile channel's ground look (formula + kind palette) once.
+  // the cell channels' ground look (formula + palettes) once.
   useEffect(() => {
     if (!paint.active || !mapHostLive()) return;
     if (mapChunkCount() === 0) mapGrowChunk(0, 0);
-    mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE);
+    mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(paint.zones));
     pushMapTool(paint);
   }, [paint.active]);
 
@@ -90,7 +112,7 @@ export default function WorldEditorSurface() {
         baselineReady
         paintMode={paint.active}
       />
-      <MapPaintDock state={paint} onPatch={onPaintPatch} />
+      <MapPaintDock state={paint} onPatch={onPaintPatch} onAddZone={onAddZone} />
     </C.HW_WorldEditorSurface>
   );
 }

@@ -193,17 +193,35 @@ fn hostSetTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 // shader contract: a WGSL body defining hf_ground_rgb(uv) reading the D stream,
 // plus the kind palette (rgb triples in legend order). Content, pushed once at
 // UI rate; the engine copies both.
+fn argF32Slice(info: v8.FunctionCallbackInfo, idx: u32) []const f32 {
+    const bytes = argBytes(info, idx) orelse return &[_]f32{};
+    if (bytes.len < @sizeOf(f32)) return &[_]f32{};
+    const ptr: [*]const f32 = @ptrCast(@alignCast(bytes.ptr));
+    return ptr[0 .. bytes.len / @sizeOf(f32)];
+}
+
 fn hostSetGroundLook(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const alloc = std.heap.page_allocator;
     const formula = argStringAlloc(alloc, info, 0) orelse &[_]u8{};
     defer if (formula.len > 0) alloc.free(formula);
-    const bytes = argBytes(info, 1) orelse &[_]u8{};
-    const palette: []const f32 = if (bytes.len >= @sizeOf(f32)) blk: {
-        const ptr: [*]const f32 = @ptrCast(@alignCast(bytes.ptr));
-        break :blk ptr[0 .. bytes.len / @sizeOf(f32)];
-    } else &[_]f32{};
-    engine.setGroundLook(formula, palette);
+    engine.setGroundLook(formula, argF32Slice(info, 1), argF32Slice(info, 2), argF32Slice(info, 3));
+}
+
+// __map_set_zone_palette(rgbFloat32Array) — zones are user-authored mid-map;
+// re-pushing just their palette keeps the overlay tints in step with the list.
+fn hostSetZonePalette(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    engine.setZonePalette(argF32Slice(info, 0));
+}
+
+// __map_drop_zone(index) — deleting zone list entry `index`: unzone its cells
+// and shift higher indices down so the grids track the shorter list.
+fn hostDropZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const idx = argToF64(info, 0) orelse return;
+    if (idx < 0 or !std.math.isFinite(idx)) return;
+    chunks.dropZoneIndex(@intFromFloat(idx));
 }
 
 fn argWorldPoint(info: v8.FunctionCallbackInfo) ?[2]f32 {
@@ -306,6 +324,8 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_open_neighbors", hostOpenNeighbors);
     v8_runtime.registerHostFn("__map_set_tool", hostSetTool);
     v8_runtime.registerHostFn("__map_set_ground_look", hostSetGroundLook);
+    v8_runtime.registerHostFn("__map_set_zone_palette", hostSetZonePalette);
+    v8_runtime.registerHostFn("__map_drop_zone", hostDropZone);
     v8_runtime.registerHostFn("__map_stroke_begin", hostStrokeBegin);
     v8_runtime.registerHostFn("__map_stroke_move", hostStrokeMove);
     v8_runtime.registerHostFn("__map_stroke_end", hostStrokeEnd);
