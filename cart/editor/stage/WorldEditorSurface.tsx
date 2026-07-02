@@ -3,7 +3,12 @@ import { C } from '../workspace.cls';
 import WorldViewport from '../world/WorldViewport';
 import type { ArmedPiece, PlacedPiece } from '../world/pieces';
 
-const EDITOR_GAME_FILE = 'zig-out/game/editor/main.gamefile';
+// BLANKBOOT req_2490: the editor's world file is ITS OWN, fresh path — the old
+// main.gamefile is the condemned hmsc sandbox bake ("farts and dicks", ruled
+// irrelevant) and mounting it clashed with the painted canvas. No file here yet
+// ⇒ the loader boots a BLANK world (paint-first); the new compile lane writes
+// this path when it lands.
+const EDITOR_GAME_FILE = 'zig-out/game/editor/world.gamefile';
 const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
 
 // The world document's surface: the editor's OWN thin viewport over host doors

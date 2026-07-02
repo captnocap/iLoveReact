@@ -2078,6 +2078,46 @@ fn readInstalledAsset(allocator: std.mem.Allocator, file: gamefile.GameFile, sto
     return store_dir.readFileAlloc(allocator, hex[0..], 64 << 20) catch return Error.MissingAsset;
 }
 
+/// A BLANK scene — the paint-first editor's empty canvas (BLANKBOOT req_2490).
+/// Boots when no game file exists yet, so the world is exactly the live layers
+/// (painted map, placed pieces) over nothing. Every slice is empty, every
+/// optional null, the environment its defaults; deinit is a no-op on all of it
+/// (empty frees return immediately, PlayerAnimationSet guards len 0).
+pub fn blankScene() Scene {
+    return .{
+        .width = 0,
+        .height = 0,
+        .tiles = &.{},
+        .instances = &.{},
+        .instance_count = 0,
+        .instance_stride = 9,
+        .has_instance_lump = false,
+        .materials = &.{},
+        .material_refs = &.{},
+        .wall_flags = &.{},
+        .piece_count = 0,
+        .env = .{},
+        .player_model = &.{},
+        .player_animation = .{ .node_count = 0, .content_hash = @splat(0), .clips = &.{} },
+        .npc_models = &.{},
+        .npc_spawns = &.{},
+        .heightfields = &.{},
+        .baked_colliders = null,
+        .physics_config = null,
+        .stats_config = null,
+        .decal_assets = &.{},
+        .interactables = null,
+        .dynamic_props = null,
+        .elevators = null,
+        .doors = null,
+        .mesh_props = null,
+        .water = null,
+        .tickers = null,
+        .traffic = null,
+        .flora = null,
+    };
+}
+
 /// Construct a Scene from a game-file's bytes: validate the dependency gate
 /// against `store_dir`, then decode the map stream's tile grid. The asset
 /// vocabulary is installed/verified as a side effect (the gate must pass before

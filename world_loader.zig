@@ -3154,6 +3154,22 @@ pub const Runtime = struct {
 
     pub fn initInPlace(self: *Runtime, allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !void {
         const bytes = loadGameFile(allocator, path) catch |err| {
+            // BLANKBOOT req_2490: no game file at this path yet — the paint-first
+            // editor opens an EMPTY canvas instead of failing the mount. The world
+            // is exactly the live layers (painted map, placed pieces, brush beam)
+            // over nothing; the first Compile writes the file and a reload swaps
+            // the real bake in. Only file-absence blanks; a corrupt file still
+            // fails LOUDLY below.
+            if (err == error.FileNotFound) {
+                self.* = Runtime{
+                    .allocator = allocator,
+                    .node_id = node_id,
+                    .scene = constructor.blankScene(),
+                };
+                log.print("[loader] no game file at {s} — BLANK world (paint-first canvas)\n", .{path});
+                try self.build();
+                return;
+            }
             log.print("[loader] failed to read game-file {s}: {any}\n", .{ path, err });
             return err;
         };
