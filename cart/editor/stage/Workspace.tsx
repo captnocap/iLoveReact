@@ -16,6 +16,7 @@ export default function Workspace(props: {
   modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
   outlinerHandlers: OutlinerHandlers;
   onTool: (id: string) => void;
+  onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onSnap: () => void;
   onFloor: () => void;
   onViewMode: (mode: ViewMode) => void;

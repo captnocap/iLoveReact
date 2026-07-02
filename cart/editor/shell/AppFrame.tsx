@@ -28,6 +28,7 @@ import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ColorStudioMaterialKey, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { loadPersistedState, persistState } from '../data/persistView';
+import { applyMapPaintEffects } from '../stage/mapPaint';
 import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
 import { primitivePartMesh, composeModelParts, storedModelParts, fileModelPackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
@@ -859,6 +860,18 @@ export default function AppFrame() {
     });
   };
 
+  // MAPPAINT req_2484: one patch door for the Map Paint bar. The controller
+  // (stage/mapPaint.ts) mirrors every change into the host tool — arming loads
+  // the saved painting + pushes the ground look; a zone-list change re-pushes
+  // the zone palette; the armed tool always re-pushes.
+  const patchMapPaint = (patch: Partial<EditorState['mapPaint']>) => {
+    setState((prev) => {
+      const mapPaint = { ...prev.mapPaint, ...patch };
+      applyMapPaintEffects(prev.mapPaint, mapPaint);
+      return { ...prev, mapPaint };
+    });
+  };
+
   const closeWorkspaceDocument = (documentId: string) => {
     if (documentId === WORLD_DOCUMENT_ID) return;
     setState((prev) => {
@@ -992,6 +1005,7 @@ export default function AppFrame() {
             onSnap={() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` }))}
             onFloor={() => runCommand('cycle-floor', 'toolbar')}
             onViewMode={(viewMode) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` }))}
+            onMapPaint={patchMapPaint}
             onWorkspaceDocument={selectWorkspaceDocument}
             onCloseWorkspaceDocument={closeWorkspaceDocument}
             onStage={() => runCommand(state.activeCommandId, 'stage')}

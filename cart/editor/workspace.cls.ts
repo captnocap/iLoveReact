@@ -196,11 +196,12 @@ classifier({
   HW_StagePanel: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
   HW_StageViewport: { type: 'Box', style: { flexGrow: 1, minHeight: 0, position: 'relative', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
   HW_WorldEditorSurface: { type: 'Box', style: { width: '100%', height: '100%', minHeight: 0, position: 'relative', backgroundColor: '#0d141f', overflow: 'hidden' } },
-  // MAPPAINT req_2473: the Map Paint bar floats INSIDE the world viewport (the
-  // paint-bar convention, req_2469) — rendered after the loader so it wins hits.
-  HW_MapPaintDock: { type: 'Box', style: { position: 'absolute', left: 10, top: 10, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, maxWidth: 760, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:surface', borderWidth: 'theme:borderThin', borderColor: 'theme:border', opacity: 0.96 } },
-  // a tile-kind swatch dot in the paint dock's palette (color set inline per kind)
-  HW_TileSwatch: { type: 'Box', style: { width: 10, height: 10, borderRadius: 3, borderWidth: 'theme:borderThin', borderColor: 'theme:border' } },
+  // MAPPAINT req_2484: the Map Paint controls live in the workspace ACTION BAR
+  // (ToolOptions), not floating in the viewport. Swatch buttons are the bar's
+  // icon-button footprint wrapping a color dot (tooltip carries the label).
+  HW_TileSwatch: { type: 'Box', style: { width: 12, height: 12, borderRadius: 3, borderWidth: 'theme:borderThin', borderColor: 'theme:border' } },
+  HW_SwatchButton: { type: 'Pressable', style: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft', backgroundColor: 'theme:controlBg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover', borderColor: 'theme:textDim' } },
+  HW_SwatchButtonOn: { type: 'Pressable', style: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
   HW_StageTabStrip: { type: 'Box', style: { height: 31, flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 8, paddingRight: 8, backgroundColor: 'theme:surface', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', overflow: 'hidden' } },
   HW_StageWorldTab: { type: 'Pressable', style: { width: 32, height: 25, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft', backgroundColor: 'theme:controlBg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover', borderColor: 'theme:textDim' } },
   HW_StageWorldTabOn: { type: 'Pressable', style: { width: 32, height: 25, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },

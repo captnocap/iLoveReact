@@ -1,29 +1,12 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { C } from '../workspace.cls';
 import { LoaderIsoView } from '../../hmsc-int/LoaderIsoView';
 import type { PlacedBuildPiece } from '../../hmsc-int/game/build/placed';
 import type { Armed } from '../../hmsc-int/buildArmed';
 import type { BuildEditEvent } from '../../hmsc-int/game';
-import {
-  mapChunkCount, mapGrowChunk, mapHostLive, mapSetGroundLook, mapSetTool, mapSetZonePalette,
-  mapRoadCancel, mapRoadCommit, mapRoadSetKinds, mapRoadSetProfile, mapLoadFile, mapSaveFile,
-} from '../../../runtime/game/map';
-import MapPaintDock, { DEFAULT_MAP_PAINT, type MapPaintState, type MapZoneDef } from './MapPaintDock';
-import { EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf } from '../render3d/groundFormula';
-import { FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, ZONE_COLORS } from '../world/floraKinds';
-import { TILE_KINDS } from '../world/tileKinds';
 
 const EDITOR_GAME_FILE = 'zig-out/game/editor/main.gamefile';
 const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
-// The painted map's save file (MAPPAINT req_2473) — beside the gamefile it
-// will compile into. RLE blob written/read host-side (__map_save_file).
-const EDITOR_MAP_FILE = 'zig-out/game/editor/painted-map.rmap';
-
-// RoadCellKind → this cart's TILE_KINDS indices, in the host enum order
-// (laneNorth, laneSouth, laneEast, laneWest, median, sidewalk, junction,
-// crosswalk). The grammar is content-free; this is where the content binds.
-const ROAD_KIND_INDICES = (['laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'median', 'sidewalk', 'junction', 'crosswalk'] as const)
-  .map((k) => TILE_KINDS.indexOf(k));
 
 // MINIMAL live authoring (req_2401 "put something on the map"): the new editor
 // mounted LoaderIsoView as a dead viewer (editable=false, no pieces, nothing
@@ -37,100 +20,23 @@ const ROAD_KIND_INDICES = (['laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'm
 // framework owning the piece list, build.zig doing the placement, the host
 // rendering + picking (req_2349 is the ported brain) — is the next step now that
 // there is finally something on the map for it to own.
-// Push the dock's state into the host map painter as the ONE armed tool
-// (MAPPAINT req_2473). The dock's height dial + RAISE/DIG toggle collapse into
-// the engine's signed centerZ; rampMin/rampMax feed both the ramp and the slope.
-function pushMapTool(s: MapPaintState): void {
-  const flora = FLORA_KIND_DEFINITIONS[s.floraKindIdx];
-  mapRoadSetProfile({ lanesF: s.roadLanesF, lanesB: s.roadLanesB, sidewalks: s.roadSidewalks });
-  mapSetTool({
-    channel: s.channel,
-    mode: s.mode,
-    terrainTool: s.terrainTool,
-    shape: s.shape,
-    profile: s.profile,
-    radiusM: s.radiusM,
-    centerZ: s.raise ? s.heightM : -s.heightM,
-    rampMin: s.rampMin,
-    rampMax: s.rampMax,
-    rampWide: s.rampWide,
-    smoothStrength: s.smoothStrength,
-    kindIdx: s.tileKindIdx,
-    floraKindIdx: s.floraKindIdx,
-    floraLane: flora ? FLORA_LANE_INDEX[flora.lane] : 0,
-    zoneIdx: s.zones.length ? Math.min(s.zoneIdx, s.zones.length - 1) : -1,
-  });
-}
-
-export default function WorldEditorSurface() {
+//
+// MAPPAINT req_2484: the viewport is CLEAN — the Map Paint chrome lives in the
+// workspace action bar (ToolOptions → MapPaintBar; state in AppFrame's
+// EditorState.mapPaint, host mirroring in stage/mapPaint.ts). This surface only
+// arms/disarms the native paint input via LoaderIsoView's paintMode door; the
+// brush beam is the only in-world chrome.
+export default function WorldEditorSurface(props: { paintActive: boolean }) {
   const [pieces, setPieces] = useState<PlacedBuildPiece[]>([]);
   // Armed with a floor for now (no palette yet) — every click drops one so the
   // place→live-render loop is visible. A build-piece palette arms this next.
   const [armed, setArmed] = useState<Armed>({ kind: 'piece', id: 'floor.concrete.common' });
-  // MAPPAINT req_2473: the Map Paint tool state — React owns only this chrome
-  // mirror; strokes/stamps/render/colliders are host-side (framework/game/map).
-  const [paint, setPaint] = useState<MapPaintState>(DEFAULT_MAP_PAINT);
 
   const onCommit = useCallback((event: BuildEditEvent, _label: string) => {
     if (event.kind === 'piecePlaced') {
       setPieces((prev) => [...prev, { ...event.placement, id: `bp_${prev.length}` } as PlacedBuildPiece]);
     }
   }, []);
-
-  const onPaintPatch = useCallback((patch: Partial<MapPaintState>) => {
-    setPaint((prev) => {
-      const next = { ...prev, ...patch };
-      pushMapTool(next);
-      return next;
-    });
-  }, []);
-
-  // Adding a zone: cart owns the def list (names/colors); the host stores only
-  // per-cell indices. Every list change re-pushes the zone palette so the
-  // overlay tints track it.
-  const onAddZone = useCallback(() => {
-    setPaint((prev) => {
-      const zone: MapZoneDef = {
-        id: `z_${prev.zones.length + 1}`,
-        name: `Zone ${prev.zones.length + 1}`,
-        color: ZONE_COLORS[prev.zones.length % ZONE_COLORS.length]!,
-      };
-      const next = { ...prev, zones: [...prev.zones, zone], zoneIdx: prev.zones.length, mode: 'paint' as const };
-      mapSetZonePalette(zonePaletteOf(next.zones));
-      pushMapTool(next);
-      return next;
-    });
-  }, []);
-
-  // Roads: clicks in the viewport lay draft points host-side; COMMIT compiles
-  // lanes/junctions/crosswalks into the tile grid (with the undercoat), CANCEL
-  // drops the draft. The onPatch({}) nudge re-renders the dock's stats readout.
-  const onRoadCommit = useCallback(() => {
-    mapRoadCommit();
-    onPaintPatch({});
-  }, [onPaintPatch]);
-  const onRoadCancel = useCallback(() => {
-    mapRoadCancel();
-    onPaintPatch({});
-  }, [onPaintPatch]);
-
-  // SAVE writes the whole painting to the map file host-side (RLE blob; roads
-  // as recipes). The editor map lives beside its gamefile.
-  const onSave = useCallback(() => {
-    const ok = mapSaveFile(EDITOR_MAP_FILE);
-    if (!ok) console.error(`[map-paint] SAVE FAILED: ${EDITOR_MAP_FILE}`);
-  }, []);
-
-  // First arm: load the saved painting if one exists, else seed chunk (0,0) so
-  // strokes have canvas — then push the cell channels' ground look (formula +
-  // palettes) + the road kind mapping once.
-  useEffect(() => {
-    if (!paint.active || !mapHostLive()) return;
-    if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0);
-    mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(paint.zones));
-    mapRoadSetKinds(ROAD_KIND_INDICES);
-    pushMapTool(paint);
-  }, [paint.active]);
 
   return (
     <C.HW_WorldEditorSurface>
@@ -144,9 +50,8 @@ export default function WorldEditorSurface() {
         onArm={setArmed}
         onCommit={onCommit}
         baselineReady
-        paintMode={paint.active}
+        paintMode={props.paintActive}
       />
-      <MapPaintDock state={paint} onPatch={onPaintPatch} onAddZone={onAddZone} onRoadCommit={onRoadCommit} onRoadCancel={onRoadCancel} onSave={onSave} />
     </C.HW_WorldEditorSurface>
   );
 }

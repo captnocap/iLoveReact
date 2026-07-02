@@ -4,6 +4,7 @@ import { WORLD_DOCUMENT, WORLD_DOCUMENT_ID } from './documents';
 import type { EditorState, ModelToolSnapshot, WorldObject } from './types';
 import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
 import { DEFAULT_BRUSH, defaultPalette } from '../../../runtime/paint/model';
+import { defaultMapPaint } from '../stage/mapPaint';
 
 export const INITIAL_OBJECTS: WorldObject[] = [
   { id: 'obj-tile', kind: 'TILE', name: 'Selected material', assetId: DEFAULT_ASSET_ID, left: 248, top: 116, width: 78, height: 70, metrics: [] },
@@ -78,5 +79,6 @@ export function initialState(): EditorState {
     modelRenamingId: null,
     modelParts: {},
     modelActivePartId: null,
+    mapPaint: defaultMapPaint(),
   };
 }

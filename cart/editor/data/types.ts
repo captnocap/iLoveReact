@@ -12,6 +12,7 @@ import type { OklchColor } from '../../../runtime/paint/colors';
 import type { Brush, BrushTool, Palette } from '../../../runtime/paint/model';
 import type { ColorLens } from './colorSpine';
 import type { EditMesh } from '../model/editMesh';
+import type { MapPaintState } from '../stage/mapPaint';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Window' | 'Help';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
@@ -410,4 +411,8 @@ export type EditorState = {
   // parts; imported single meshes have none (their outliner is a follow-up).
   modelParts: Record<string, ModelPart[]>;
   modelActivePartId: string | null;
+  // Map Paint (MAPPAINT req_2473/req_2484): the chrome mirror of the host map
+  // painter's armed tool — rendered by MapPaintBar in the workspace action bar;
+  // strokes/render/colliders are host-side (framework/game/map).
+  mapPaint: MapPaintState;
 };

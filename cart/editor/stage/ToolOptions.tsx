@@ -4,6 +4,7 @@ import { C, accentFor } from '../workspace.cls';
 import { COMMANDS, activeMenuFor, meshToolCommands, meshToolActive, meshTopoCommands, meshPaintCommands } from '../data/commands';
 import { FLOORS, SNAP_MODES } from '../data/content';
 import type { Command, EditorState, ViewMode } from '../data/types';
+import MapPaintBar from './MapPaintBar';
 
 // A model document owns the host-native mesh editor — the toolbar becomes the
 // home for its tools (icon-only), with select / gizmo / toggle groups divided.
@@ -14,6 +15,7 @@ export default function ToolOptions(props: {
   activeCommand: Command;
   onCommand: (id: string, source: string) => void;
   onTool: (id: string) => void;
+  onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onSnap: () => void;
   onFloor: () => void;
   onViewMode: (mode: ViewMode) => void;
@@ -77,10 +79,25 @@ export default function ToolOptions(props: {
     );
   }
 
+  // MAPPAINT req_2484: the Map Paint tool lives IN this action bar — the
+  // viewport stays clean (the brush beam is the only in-world chrome). While
+  // painting, its controls own the row (a modal bar, like the model branch);
+  // toggling PAINT off brings the build controls back.
+  const mapPaint = props.state.mapPaint;
+  if (mapPaint.active) {
+    return (
+      <C.HW_ToolOptions>
+        <MapPaintBar state={mapPaint} onPatch={props.onMapPaint} />
+      </C.HW_ToolOptions>
+    );
+  }
+
   const activeMenu = activeMenuFor(props.state);
   const actionCommands = COMMANDS.filter((command) => command.menu === activeMenu && command.surface !== 'model');
   return (
     <C.HW_ToolOptions>
+      <MapPaintBar state={mapPaint} onPatch={props.onMapPaint} />
+      <C.HW_OptionDivider />
       {actionCommands.map((command) => {
         const Btn = props.state.activeCommandId === command.id ? C.HW_IconButtonOn : C.HW_IconButton;
         return (
