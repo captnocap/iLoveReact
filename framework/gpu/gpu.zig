@@ -1156,10 +1156,19 @@ pub fn readbackStaticSurface(key: []const u8) ?[]u8 {
     const entry = &g_static_entries[idx];
     if (!entry.ready or entry.borrowed) return null;
     const tex = entry.texture orelse return null;
+    // Captured surfaces render in the swapchain format, which may be BGRA —
+    // swizzle so the stored payload has ONE channel order no matter the backend.
+    const swap_rb = g_format == .bgra8_unorm or g_format == .bgra8_unorm_srgb;
+    return readbackTexture(tex, entry.width, entry.height, swap_rb);
+}
+
+/// Read any COPY_SRC texture back to CPU bytes: one page_allocator allocation,
+/// [w: u32 LE][h: u32 LE][RGBA, tight w*4 rows]. Caller frees. Blocks on the
+/// copy + map — a save/bake-point door, not a per-frame one. `swap_rb` swizzles
+/// BGRA-format sources to RGBA; pass false for textures created as rgba8_unorm.
+pub fn readbackTexture(tex: *wgpu.Texture, w: u32, h: u32, swap_rb: bool) ?[]u8 {
     const device = g_device orelse return null;
     const queue = g_queue orelse return null;
-    const w = entry.width;
-    const h = entry.height;
     if (w == 0 or h == 0) return null;
 
     // wgpu requires 256-byte-aligned rows on texture→buffer copies.
@@ -1213,9 +1222,7 @@ pub fn readbackStaticSurface(key: []const u8) ?[]u8 {
     };
     std.mem.writeInt(u32, out[0..4], w, .little);
     std.mem.writeInt(u32, out[4..8], h, .little);
-    // Strip row padding; swizzle to RGBA when the surface format is BGRA so
-    // the stored payload has ONE channel order no matter the backend.
-    const swap_rb = g_format == .bgra8_unorm or g_format == .bgra8_unorm_srgb;
+    // Strip row padding (and swizzle BGRA→RGBA when asked).
     const mapped: [*]const u8 = @ptrCast(mapped_ptr);
     var row: u32 = 0;
     while (row < h) : (row += 1) {

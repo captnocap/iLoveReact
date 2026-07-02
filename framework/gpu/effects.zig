@@ -343,8 +343,10 @@ const Instance = struct {
             .sample_count = 1,
             .dimension = .@"2d",
             .format = .rgba8_unorm,
+            // copy_src on render targets: renderShaderToPixels (the paint-bucket
+            // bake) reads the rendered material back off this texture.
             .usage = if (render_attachment)
-                (wgpu.TextureUsages.texture_binding | wgpu.TextureUsages.render_attachment)
+                (wgpu.TextureUsages.texture_binding | wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.copy_src)
             else
                 (wgpu.TextureUsages.texture_binding | wgpu.TextureUsages.copy_dst),
         }) orelse return false;
@@ -1406,6 +1408,20 @@ pub fn renderShaderToTexture(key_hash: u64, wgsl: []const u8, data: ?[]const f32
     inst.shader_desc = null; // `full` is freed on return; the pipeline is already built
     if (!ok) return null;
     return inst.texture_view;
+}
+
+/// Materialize a shader and read the rendered pixels back to CPU RGBA — the
+/// paint-bucket half of the material door. Returns gpu.readbackTexture's
+/// layout ([w: u32 LE][h: u32 LE][tight RGBA]); caller frees. The static-
+/// surface registry canNOT do this readback: materialize installs a BORROWED
+/// view there, and readbackStaticSurface rejects borrowed entries — the
+/// instance's own texture is the only readable handle.
+pub fn renderShaderToPixels(key_hash: u64, wgsl: []const u8, data: ?[]const f32, size: u32) ?[]u8 {
+    if (renderShaderToTexture(key_hash, wgsl, data, size) == null) return null;
+    const inst = ensureMaterialInstance(key_hash) orelse return null;
+    const tex = inst.texture orelse return null;
+    // Effect targets are created rgba8_unorm (ensureTarget) — no BGRA swizzle.
+    return gpu_core.readbackTexture(tex, inst.width, inst.height, false);
 }
 
 fn findInstanceByName(effect_name: []const u8) ?*Instance {

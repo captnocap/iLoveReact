@@ -314,6 +314,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
   const [gizmoTool, setGizmoTool] = useState(0); // 0 move · 1 scale · 2 rotate
   const [selInfo, setSelInfo] = useState<SelInfo>({ mode: 0, verts: 0, edges: 0, sel: 0 });
   const [guard, setGuard] = useState<GuardInfo | null>(null);
+  // Shader-ink bake failure — surfaced LOUD. The old shape discarded the door's
+  // return code, so a failed bake silently painted flat white (req_2482).
+  const [inkWarn, setInkWarn] = useState<string | null>(null);
   // Brush state (the ONE brush system). `brush`/`palette` are the shared kit model; `brushTool`
   // picks the behaviour ('fill' = per-face flood · 'brush' = free-form disc); `safety` is the
   // free-form face-safety mode (0 clip · 1 lock); `detail` is the patch resolution.
@@ -530,17 +533,29 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
     const ink = brush.ink;
     if (ink.kind === 'shader') {
       const spec = shaderSpec(ink.surface);
-      if (spec) {
-        const data = ink.data && ink.data.length ? ink.data : defaultShaderData(spec);
-        const tiles = ink.tiles && ink.tiles > 0 ? ink.tiles : 1;
-        // Vary the bake key per param set — the host materialize() caches per key, so a
-        // fixed key would keep re-serving the first look after the user tunes the shader.
-        const key = `paint:${ink.surface}:${data.map((n) => Math.round(n * 1000)).join(',')}`;
-        const bytes = new Uint8Array(new Float32Array(data).buffer);
-        host.__model_paint_material?.(key, spec.shader, bytes, 256, tiles);
+      if (!spec) {
+        console.error(`[paint] shader ink '${ink.surface}' is not in the catalog — painting flat color instead`);
+        setInkWarn(`Shader '${ink.surface}' not found in the catalog — the brush will paint flat color.`);
+        host.__model_paint_material_clear?.();
         return;
       }
+      const data = ink.data && ink.data.length ? ink.data : defaultShaderData(spec);
+      const tiles = ink.tiles && ink.tiles > 0 ? ink.tiles : 1;
+      // Vary the bake key per param set — the host materialize() caches per key, so a
+      // fixed key would keep re-serving the first look after the user tunes the shader.
+      const key = `paint:${ink.surface}:${data.map((n) => Math.round(n * 1000)).join(',')}`;
+      const bytes = new Uint8Array(new Float32Array(data).buffer);
+      const ok = host.__model_paint_material?.(key, spec.shader, bytes, 256, tiles) === 1;
+      if (!ok) {
+        // Never fail into silent white: report it where the user paints.
+        console.error(`[paint] shader ink bake FAILED for '${ink.surface}' (door returned 0) — painting flat color instead`);
+        setInkWarn(`Shader ink '${spec.label}' failed to bake — the brush will paint flat color. Host log has details.`);
+      } else {
+        setInkWarn(null);
+      }
+      return;
     }
+    setInkWarn(null);
     host.__model_paint_material_clear?.();
   }, [brush.ink]);
   useEffect(() => {
@@ -1014,6 +1029,28 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, allo
           )}
         </Row>
       )}
+
+      {inkWarn ? (
+        <Col
+          style={{
+            position: 'absolute', left: 18, bottom: 62, width: 360,
+            paddingLeft: 14, paddingRight: 14, paddingTop: 12, paddingBottom: 12,
+            backgroundColor: 'rgba(29,17,17,0.96)', borderWidth: 1, borderColor: '#8d4b50',
+            borderRadius: 8,
+          }}
+        >
+          <Text style={{ color: '#ffd7d9', fontSize: 13, fontWeight: 700 }}>Shader ink failed</Text>
+          <Text style={{ color: '#b9c4d4', fontSize: 12, marginTop: 6 }}>{inkWarn}</Text>
+          <Row style={{ marginTop: 12 }}>
+            <Pressable
+              onPress={() => setInkWarn(null)}
+              style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
+            >
+              <Text style={{ color: '#e1e7f1', fontSize: 12, fontWeight: 700 }}>Dismiss</Text>
+            </Pressable>
+          </Row>
+        </Col>
+      ) : null}
 
       {guard?.pending ? (
         <Col

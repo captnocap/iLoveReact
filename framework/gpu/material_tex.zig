@@ -73,12 +73,18 @@ pub fn materializePixels(key: []const u8, rgba: []const u8, w: u32, h: u32) bool
 
 /// Render `wgsl`(+`data`) once into a `size`×`size` texture and read it back to CPU
 /// RGBA — the "paint bucket": a shader recipe turned into sampleable pixels a brush
-/// deposits (paint-with-a-shader). The returned buffer is `gpu.readbackStaticSurface`'s
-/// layout — an 8-byte header (u32 w, u32 h, little-endian) followed by tight w*h*4 RGBA —
-/// allocated with `std.heap.page_allocator`; the CALLER frees it. Null if the GPU isn't
-/// ready or the shader won't compile. NOTE: `materialize` caches per `key`, so callers
+/// deposits (paint-with-a-shader). The returned buffer is an 8-byte header (u32 w,
+/// u32 h, little-endian) followed by tight w*h*4 RGBA — allocated with
+/// `std.heap.page_allocator`; the CALLER frees it. Null if the GPU isn't ready or
+/// the shader won't compile. NOTE: the effect instance caches per `key`, so callers
 /// that re-bake the SAME shader with different `data` must vary `key` per param set.
+///
+/// Reads back the effect instance's OWN texture — it must NOT round-trip the
+/// static-surface registry (the original shape): materialize() installs only a
+/// BORROWED view there, readbackStaticSurface rejects borrowed entries, so that
+/// path returned null on every call. It also leaked one registry entry per
+/// brush-param tweak. (The white-fill paint bug, req_2482.)
 pub fn bakePixels(key: []const u8, wgsl: []const u8, data: ?[]const f32, size: u32) ?[]u8 {
-    if (!materialize(key, wgsl, data, size)) return null;
-    return gpu.readbackStaticSurface(key);
+    const hash = std.hash.Wyhash.hash(0, key);
+    return effects.renderShaderToPixels(hash, wgsl, data, size);
 }
