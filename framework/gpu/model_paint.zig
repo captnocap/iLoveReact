@@ -149,6 +149,10 @@ pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
     if (vert_count < 3) return;
     const fc = vert_count / 3;
     if (g_patch < 1) g_patch = 1;
+    // g_patch carries over from the previous mesh (edits keep their detail), but THIS mesh
+    // may be far denser — clamp so the atlas can never exceed the GPU texture limits (the
+    // import-while-painting crash: a carried 256px patch × a 26k-face bus = 41216 texels).
+    g_patch = clampPatchFor(fc, g_patch);
     const pg = patchGrid(fc);
     g_key_hash = key_hash;
     g_facecount = fc;
@@ -764,25 +768,45 @@ fn snapPatch(p: u32) u32 {
     if (p >= 8) return 8;
     return 1;
 }
+/// The largest snap level ≤ `want` whose atlas for `fc` faces fits BOTH limits: texel
+/// dimensions within MAX_ATLAS_DIM and bytes within ATLAS_BUDGET. Never returns 0 —
+/// patch 1 (fill-only) always fits (√facecount of any real mesh is far below either).
+fn clampPatchFor(fc: u32, want: u32) u32 {
+    const pg = patchGrid(fc);
+    const grid_max: u32 = @max(pg[0], pg[1]);
+    var p = snapPatch(want);
+    while (p > 1) : (p = snapPatch(p / 2)) {
+        const dim_ok = grid_max <= MAX_ATLAS_DIM / p;
+        const bytes = @as(usize, pg[0]) * p * @as(usize, pg[1]) * p * 4;
+        if (dim_ok and bytes <= ATLAS_BUDGET) return p;
+    }
+    return 1;
+}
+/// The best detail level `fc` faces can afford — the atlas-creation prompt asks this to
+/// present only options the GPU can actually take.
+pub fn maxDetailFor(fc: u32) u32 {
+    if (fc == 0) return 512;
+    return clampPatchFor(fc, 512);
+}
 /// Re-tessellate the atlas to a new per-face detail (patch size), carrying each face's
 /// current colour as a flat fill (sub-face strokes can't survive a resolution change).
-/// Rewrites the caller's vertex UVs in place — 3d.zig re-uploads the mesh after. Rejected
-/// (and logged) if the new atlas would blow the memory budget; the old layout stays.
+/// Rewrites the caller's vertex UVs in place — 3d.zig re-uploads the mesh after. A level
+/// beyond the dimension/memory limits CLAMPS to the best fitting one (logged) — the door
+/// reports the applied level back, so the UI shows what actually took.
 pub fn setDetail(new_patch: u32, verts: []f32, vert_count: u32) void {
     if (g_positions == null or g_rgba == null) return;
     const fc = g_facecount;
     if (fc == 0 or vert_count / 3 != fc) return;
-    const np = snapPatch(new_patch);
+    const np = clampPatchFor(fc, new_patch);
+    if (np != snapPatch(new_patch)) {
+        std.debug.print("[model_paint] detail {d}px on {d} faces exceeds the atlas limits ({d}px dim / {d}MB) — clamped to {d}px.\n", .{ snapPatch(new_patch), fc, MAX_ATLAS_DIM, ATLAS_BUDGET / (1024 * 1024), np });
+    }
     if (np == g_patch) return;
 
     const pg = patchGrid(fc);
     const new_w = pg[0] * np;
     const new_h = pg[1] * np;
     const need = @as(usize, new_w) * @as(usize, new_h) * 4;
-    if (need > ATLAS_BUDGET) {
-        std.debug.print("[model_paint] detail {d}px on {d} faces needs {d}MB > {d}MB budget — staying at patch {d} (fill-only where detail is off). Lower detail or decimate.\n", .{ np, fc, need / (1024 * 1024), ATLAS_BUDGET / (1024 * 1024), g_patch });
-        return;
-    }
 
     // Snapshot per-face base colours (centroid texel) before the atlas is reshaped.
     const snap = alloc.alloc(u8, @as(usize, fc) * 4) catch return;
@@ -823,6 +847,39 @@ pub fn setDetail(new_patch: u32, verts: []f32, vert_count: u32) void {
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────────
+test "atlas never exceeds the GPU texture dimension limit (import-while-painting crash)" {
+    // The bus numbers: ~26k faces at a carried 256px patch asked wgpu for a 41216-wide
+    // texture and PANICKED the process. clampPatchFor must fit both hard limits.
+    try std.testing.expectEqual(@as(u32, 32), clampPatchFor(26_000, 256));
+    try std.testing.expectEqual(@as(u32, 512), clampPatchFor(12, 512)); // low-poly keeps max
+    try std.testing.expectEqual(@as(u32, 1), clampPatchFor(60_000_000, 512)); // absurd → fill-only
+
+    // End to end: a dense-enough mesh adopted while a high detail is carried gets its
+    // patch clamped so the atlas stays within MAX_ATLAS_DIM on both axes.
+    var small = [_]f32{
+        -1, -1, 0, 0, 0, 1, 0, 0,
+        1,  -1, 0, 0, 0, 1, 0, 0,
+        0,  1,  0, 0, 0, 1, 0, 0,
+    };
+    setTarget(901, &small, 3);
+    defer clear();
+    setDetail(512, &small, 3); // fits a 1-face mesh; g_patch now 512
+    try std.testing.expectEqual(@as(u32, 512), detail());
+
+    const fc: u32 = 300; // grid 18×17 → 18×512 = 9216 > 8192 → must clamp to 256
+    const dense = alloc.alloc(f32, @as(usize, fc) * 3 * 8) catch unreachable;
+    defer alloc.free(dense);
+    @memset(dense, 0);
+    setTarget(902, dense, fc * 3);
+    try std.testing.expectEqual(@as(u32, 256), detail());
+    const a = atlas().?;
+    try std.testing.expect(a.w <= MAX_ATLAS_DIM and a.h <= MAX_ATLAS_DIM);
+    // g_patch deliberately survives clear() (edits keep their detail) — put it back to
+    // the default so later tests see the classic 1-texel-per-face layout.
+    setDetail(1, dense, fc * 3);
+    try std.testing.expectEqual(@as(u32, 1), detail());
+}
+
 test "pick hits the face straddling the ray and paints it" {
     // One triangle in the z=0 plane, camera on +Z looking at origin down -Z.
     var verts = [_]f32{
