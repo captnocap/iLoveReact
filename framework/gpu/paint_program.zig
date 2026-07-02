@@ -251,9 +251,10 @@ fn bakeBorrowed(m: BorrowedMat) bool {
     return model_paint.setMaterialInk(raw[8..], w, h, m.tiles);
 }
 
-/// Peek the detail (patch size) a program was recorded at, without replaying. The caller sets
-/// this detail FIRST (it re-tessellates + re-uploads the mesh, which this module can't) before
-/// calling apply(). Null on a malformed/incompatible blob.
+/// Peek the detail (paint density, texels/meter — patch size in pre-island blobs) a program
+/// was recorded at, without replaying. The caller sets this detail FIRST (it rebuilds the
+/// atlas + re-uploads the mesh, which this module can't) before calling apply(). Null on a
+/// malformed/incompatible blob.
 pub fn programDetail(blob: []const u8) ?u16 {
     if (blob.len < 8) return null;
     if (!std.mem.eql(u8, blob[0..4], &MAGIC)) return null;

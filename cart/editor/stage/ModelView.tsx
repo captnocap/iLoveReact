@@ -68,7 +68,7 @@ export type ModelViewInitialMesh = {
 // sel: count of selected elements in the current mode. quality: live decimation
 // slider (0..1). tris: the resident triangle count (for the quality readout).
 // brushTool: 'fill' (per-face flood) · 'brush' (free-form disc). safety: 0 clip · 1 lock.
-// detail: 1 fill-only · 8/16/32 free-form texels/face. brush/palette: the shared kit model,
+// detail: the paint density in texels/meter (1 = fill-only look). brush/palette: the shared kit model,
 // mirrored out so the editor's BrushKit dock is a controlled view of the viewer's brush.
 // litFlat/Key/Fill: the viewer light-rig switches, mirrored out so the editor's View menu +
 // right-click flyout can host + highlight them.
@@ -291,9 +291,10 @@ const qualityToGrid = (q: number) => {
 type RGB = [number, number, number];
 
 // The two brush behaviours, both host-backed (model_paint.zig). FILL raycasts the resident
-// mesh and floods the whole face hit (__model_paint_at). BRUSH lays a sub-face disc clipped to
-// the face triangle (__model_paint_stamp) — face-safe, so a scribble never bleeds onto the
-// neighbour face. No verts or UVs cross the bridge; only the pixel + colour do.
+// mesh and floods the whole face hit (__model_paint_at). BRUSH lays a disc in the face's UV
+// ISLAND (__model_paint_stamp) — one continuous space per authored face, so strokes cross a
+// quad's diagonal cleanly but never bleed onto a neighbour face. No verts or UVs cross the
+// bridge; only the pixel + colour do.
 const fillFaceAt = (x: number, y: number, rgb: RGB) => host.__model_paint_at?.(x, y, rgb[0], rgb[1], rgb[2]) === 1;
 const stampAt = (x: number, y: number, rgb: RGB, radius: number, flow: number) =>
   host.__model_paint_stamp?.(x, y, rgb[0], rgb[1], rgb[2], radius, flow) === 1;
@@ -301,8 +302,15 @@ const strokeBeginAt = (x: number, y: number) => host.__model_paint_stroke_begin?
 // Face-safety mode for free-form: 0 = clip (paint whatever face the dab is over), 1 = lock
 // (mask the whole stroke to the face pressed at stroke-begin).
 const setPaintSafety = (mode: number) => host.__model_paint_mode?.(mode);
-// Set the free-form patch detail; returns the ACTUAL detail after the budget guard.
+// Set the paint DENSITY (texels per meter, Blockbench 16x semantics); returns the ACTUAL
+// density after the host's budget guard (an over-budget pick halves until it fits).
 const applyPaintDetail = (px: number): number => host.__model_set_paint_detail?.(px) ?? px;
+// Dry-run a density: the atlas dims the island layout would build, without adopting it.
+const estimatePaintAtlas = (px: number): { w: number; h: number; density: number } | null => {
+  const j = host.__model_paint_atlas_estimate?.(px);
+  if (typeof j !== 'string' || !j) return null;
+  try { return JSON.parse(j); } catch { return null; }
+};
 
 // The RGB (0..255) a colour-ink brush deposits — texture/shader inks fall back to white until
 // the host dest-sampling pass lands. Mirrors runtime/paint's brushDabRgb, scaled to bytes.
@@ -311,16 +319,15 @@ const brushRgb = (b: Brush): RGB => {
   return [Math.round(r * 255), Math.round(g * 255), Math.round(bl * 255)];
 };
 
-// Free-form detail levels: 8/16/32 texels per face. Higher = crisper strokes on low-poly
-// models; lower keeps dense meshes inside the paint-atlas memory budget. (1 = fill-only.)
+// Paint densities: texels per METER (the reference painter's PIXEL_DENSITIES, Blockbench
+// semantics — 16x = 16 texels to the meter). Higher = crisper strokes; the host halves an
+// over-budget pick. (1 = fill-only look.)
 const DETAIL_LEVELS = [16, 32, 64, 128, 256] as const;
 // BrushKit size is a DIRECT texel diameter: size N → an N-texel-wide dab (radius N/2), so the
 // slider gives real fine-motor control — size 1 is a single texel (for writing text on a face),
-// and 1 vs 9 are visibly different. The old detail-relative (size/96)*detail treated size as a
-// fraction of the whole face, which crushed the entire small end onto the 0.6 floor (every size
-// below ~40 painted the same 1px dot). The disc still clips to the face triangle; the host floors
-// the radius at ~0.6 (one texel). Higher detail = more texels per face, so the SAME size brush
-// paints finer there — exactly what you want when the strokes need to get small.
+// and 1 vs 9 are visibly different. The disc clips to the face's island silhouette; the host
+// floors the radius at ~0.6 (one texel). Higher density = more texels to the meter, so the
+// SAME size brush paints finer there — exactly what you want when the strokes need to get small.
 const brushRadius = (size: number) => Math.max(0.5, size / 2);
 
 export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges }: ModelViewProps = {}) {
@@ -343,7 +350,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [brushTool, setBrushTool] = useState<BrushTool>('fill');
   const [palette, setPalette] = useState<Palette>(() => defaultPalette());
   const [safety, setSafety] = useState(0); // 0 clip · 1 lock
-  const [detail, setDetail] = useState(1); // 1 fill-only · 8/16/32 free-form texels/face
+  const [detail, setDetail] = useState(1); // paint density, texels/meter (1 = fill-only look)
   // Light rig — flip via the View menu / right-click Lighting flyout. Flat = even paint-true
   // light (no shading); otherwise a neutral ambient + a single Key directional, and Fill raises
   // ambient so the orbited-away side isn't black. (The shader supports one directional + ambient.)
@@ -515,7 +522,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       fail(0, 0, 0, 'the host returned no atlas (is a mesh loaded?)');
       return;
     }
-    let o: { w: number; h: number; detail: number; data: string };
+    let o: { w: number; h: number; detail: number; islands?: number[]; data: string };
     try {
       o = JSON.parse(j);
     } catch {
@@ -531,30 +538,22 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       fail(o.w, o.h, o.detail, 'atlas pixel decode failed');
       return;
     }
-    // Draw the layout ONTO the preview: solid-painted patches sit edge to edge, so the
-    // raw atlas reads as one flat color wall. Darken patch boundaries (the grid) and
-    // each patch's anti-diagonal (the two triangle-corner layout: a patch holds ONE
-    // triangle rasterized across the (0,0)/(1,0)/(0,1) corner). Patches under 8px have
-    // no legible room for lines — the caption carries the structure instead.
-    if (o.detail >= 8) {
-      const px = o.detail;
-      const tris = model ? Math.floor(model.count / 3) : 0;
-      const cols = Math.max(1, Math.floor(o.w / px));
-      for (let y = 0; y < o.h; y++) {
-        for (let x = 0; x < o.w; x++) {
-          const lx = x % px;
-          const ly = y % px;
-          const onGrid = lx === 0 || ly === 0;
-          const onDiagonal = lx + ly === px - 1;
-          if (!onGrid && !onDiagonal) continue;
-          // Leave the unused tail (past the last triangle's patch) unmarked.
-          if (tris > 0 && Math.floor(y / px) * cols + Math.floor(x / px) >= tris) continue;
-          const i = (y * o.w + x) * 4;
-          const k = onGrid ? 0.35 : 0.7;
-          rgba[i + 0] = Math.round(rgba[i + 0]! * k);
-          rgba[i + 1] = Math.round(rgba[i + 1]! * k);
-          rgba[i + 2] = Math.round(rgba[i + 2]! * k);
-        }
+    // Draw the layout ONTO the preview: darken each ISLAND's rect border — the real
+    // face-shaped layout the paint system built (one island per authored face, sized by
+    // its physical footprint × density), comparable to a hand unwrap. The host omits
+    // `islands` when there are too many to outline; the caption carries the structure.
+    if (o.islands && o.islands.length >= 4) {
+      const darken = (x: number, y: number) => {
+        if (x < 0 || y < 0 || x >= o.w || y >= o.h) return;
+        const i = (y * o.w + x) * 4;
+        rgba[i + 0] = Math.round(rgba[i + 0]! * 0.45);
+        rgba[i + 1] = Math.round(rgba[i + 1]! * 0.45);
+        rgba[i + 2] = Math.round(rgba[i + 2]! * 0.45);
+      };
+      for (let k = 0; k + 3 < o.islands.length; k += 4) {
+        const [ix, iy, iw, ih] = [o.islands[k]!, o.islands[k + 1]!, o.islands[k + 2]!, o.islands[k + 3]!];
+        for (let x = ix; x < ix + iw; x++) { darken(x, iy); darken(x, iy + ih - 1); }
+        for (let y = iy; y < iy + ih; y++) { darken(ix, y); darken(ix + iw - 1, y); }
       }
     }
     const png = host.__imageops_encode_raw?.(rgba, o.w, o.h, '{"format":"png"}');
@@ -616,23 +615,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const i = DETAIL_LEVELS.indexOf(detail as (typeof DETAIL_LEVELS)[number]);
     changeDetail(DETAIL_LEVELS[(i + 1) % DETAIL_LEVELS.length]!);
   };
-  // Auto-pick a paint resolution when entering the brush so painting is usable without touching
-  // the menu: low-poly gets FINE per-face detail (big faces need sub-face room to draw a line),
-  // dense meshes stay coarse (tiny faces are already fine, and the atlas can't afford more). A
-  // cube lands at 256 → crisp text; the host clamps to the atlas budget regardless. This is the
-  // stopgap for the real density knob (texels-per-area) — it approximates it off the tri count.
-  const autoDetailForTris = (tris: number): number =>
-    tris <= 100 ? 256 : tris <= 1000 ? 128 : tris <= 10000 ? 32 : 8;
+  // Entering the brush with the fill-only density auto-bumps to 16x — the Blockbench
+  // default and the reference painter's baseline; density is physical (texels/meter),
+  // so it needs no tri-count guessing. The host still clamps to the atlas budget.
+  const DEFAULT_DENSITY = 16;
   const chooseBrushTool = (t: BrushTool) => {
     setBrushTool(t);
-    if (t !== 'fill' && detail < 16) changeDetail(autoDetailForTris(model ? model.count / 3 : 0));
+    if (t !== 'fill' && detail < DEFAULT_DENSITY) changeDetail(DEFAULT_DENSITY);
   };
   const cycleSafety = () => setSafety((v) => (v === 0 ? 1 : 0));
 
   // Push the free-form face-safety mode to the host whenever it (or paint mode) changes.
   useEffect(() => { if (paintMode) setPaintSafety(safety); }, [safety, paintMode]);
-  // A fresh model resets the host paint atlas to fill-only (patch=1) — mirror that in state.
-  useEffect(() => { setDetail(1); }, [model?.key]);
+  // NOTE: the host CARRIES the paint density across mesh adopts (edits and fresh loads
+  // rebuild the island atlas at the last-chosen density), so the JS mirror deliberately
+  // survives model key changes too — no reset-to-1 here.
 
   // ── Editor bridge ──────────────────────────────────────────────────────────
   // Hand the tool handlers out (once) and mirror the live tool state back, so an
@@ -1148,10 +1145,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             </Pressable>
             <Pressable
               onPress={cycleDetail}
-              tooltip="Free-form detail — texels per triangle patch (higher = crisper strokes on low-poly)"
+              tooltip="Paint density — texels per meter (Blockbench 16x semantics; higher = crisper strokes)"
               style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
             >
-              <Text style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 700 }}>{detail <= 1 ? 'Detail —' : `Detail ${detail}`}</Text>
+              <Text style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 700 }}>{detail <= 1 ? 'Density —' : `Density ${detail}x`}</Text>
             </Pressable>
           </Row>
           <BrushKit
@@ -1345,41 +1342,40 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             <Text style={{ color: '#b9c4d4', fontSize: 12, marginTop: 6 }}>
               {`${authoredFaces && authoredFaces !== Math.floor(model.count / 3)
                 ? `${authoredFaces} faces (${Math.floor(model.count / 3)} triangles)`
-                : `${Math.floor(model.count / 3)} triangles`} — the atlas gives each TRIANGLE its own texel patch (a quad face is two). Higher = finer strokes, bigger texture.`}
+                : `${Math.floor(model.count / 3)} triangles`} — each FACE becomes a UV island sized by its real-world size × the density (16x = 16 texels to the meter). Higher = finer strokes, bigger texture.`}
             </Text>
             {(() => {
-              const fc = Math.max(1, Math.floor(model.count / 3));
-              const cols = Math.ceil(Math.sqrt(fc));
-              const rows = Math.ceil(fc / cols);
-              // Mirrors the host's clamp (MAX_ATLAS_DIM / ATLAS_BUDGET in model_paint.zig)
-              // for honest labels; the host still clamps whatever is asked.
-              const fits = (px: number) => cols * px <= 8192 && rows * px <= 8192 && cols * px * rows * px * 4 <= 256 * 1024 * 1024;
-              const recommended = Math.min(autoDetailForTris(fc), ...[512, 256, 128, 64, 32, 16, 8].filter(fits));
-              const mbLabel = (px: number) => {
-                const mb = (cols * px * rows * px * 4) / (1024 * 1024);
-                return mb >= 1 ? `${Math.round(mb)} MB` : `${Math.max(1, Math.round(mb * 1024))} KB`;
-              };
-              return [1, 16, 32, 64, 128, 256, 512].map((px) => {
-                const ok = px === 1 || fits(px);
-                const rec = px === recommended;
+              // The HOST's island layout is the truth: each option asks it what the
+              // atlas would actually be (dims + the density that survives the clamp).
+              return [1, 16, 32, 64, 128, 256].map((px) => {
+                const est = estimatePaintAtlas(px);
+                const clamped = est != null && px > 1 && est.density < px;
+                const rec = px === DEFAULT_DENSITY;
+                const mbLabel = est
+                  ? (() => {
+                      const mb = (est.w * est.h * 4) / (1024 * 1024);
+                      return mb >= 1 ? `${Math.round(mb)} MB` : `${Math.max(1, Math.round(mb * 1024))} KB`;
+                    })()
+                  : null;
                 return (
                   <Pressable
                     key={px}
-                    onPress={() => { if (ok) createAtlasAndPaint(px); }}
+                    onPress={() => createAtlasAndPaint(px)}
                     style={{
                       marginTop: 6, paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6,
-                      backgroundColor: ok ? (rec ? '#244164' : '#252b3a') : '#1b1f2a',
-                      borderWidth: 1, borderColor: ok ? (rec ? '#4e75a4' : '#3a4356') : '#2a303e',
+                      backgroundColor: rec ? '#244164' : '#252b3a',
+                      borderWidth: 1, borderColor: rec ? '#4e75a4' : '#3a4356',
                     }}
                   >
                     <Row style={{ alignItems: 'center', gap: 8 }}>
-                      <Text style={{ color: ok ? '#e6f1ff' : '#5d6878', fontSize: 12, fontWeight: 700 }}>
-                        {px === 1 ? 'Fill only — one color per face' : `${px}×${px} texels / triangle`}
+                      <Text style={{ color: '#e6f1ff', fontSize: 12, fontWeight: 700 }}>
+                        {px === 1 ? 'Fill only — one color per face' : `${px}x — ${px} texels / meter`}
                       </Text>
                       {rec ? <Text style={{ color: '#8fc9bb', fontSize: 11, fontWeight: 700 }}>recommended</Text> : null}
+                      {clamped ? <Text style={{ color: '#ffb38f', fontSize: 11, fontWeight: 700 }}>{`clamps to ${est!.density}x`}</Text> : null}
                       <Box style={{ flexGrow: 1 }} />
-                      <Text style={{ color: ok ? '#8b97ab' : '#5d6878', fontSize: 11 }}>
-                        {px === 1 ? `${cols}×${rows} (${mbLabel(1)})` : ok ? `${cols * px}×${rows * px} (${mbLabel(px)})` : 'exceeds GPU limit'}
+                      <Text style={{ color: '#8b97ab', fontSize: 11 }}>
+                        {est ? `${est.w}×${est.h} (${mbLabel})` : '—'}
                       </Text>
                     </Row>
                   </Pressable>
@@ -1398,9 +1394,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         </Col>
       )}
 
-      {/* UV / atlas inspector — the LIVE paint atlas image (the actual UV layout the
-          paint system rasterizes into: one patch per triangle). Refresh re-reads it after
-          strokes; painted faces + selection tint show exactly where each face lands. */}
+      {/* UV / atlas inspector — the LIVE paint atlas image (the actual island layout the
+          paint system rasterizes into: one island per authored face, sized by physical
+          footprint × density). Refresh re-reads it after strokes; painted faces +
+          selection tint show exactly where each face lands. */}
       {paintMode && showUv && uvPanel && (
         <Col
           style={{
@@ -1411,7 +1408,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         >
           <Row style={{ alignItems: 'center', gap: 8 }}>
             <Text style={{ color: '#dbe7ff', fontSize: 12, fontWeight: 700 }}>UV ATLAS</Text>
-            <Text style={{ color: '#8b97ab', fontSize: 11 }}>{`${uvPanel.w}×${uvPanel.h} · ${uvPanel.detail}px/tri`}</Text>
+            <Text style={{ color: '#8b97ab', fontSize: 11 }}>{`${uvPanel.w}×${uvPanel.h} · ${uvPanel.detail}x/m`}</Text>
             <Box style={{ flexGrow: 1 }} />
             <Pressable onPress={buildUvPanel} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#244164', borderWidth: 1, borderColor: '#4e75a4' }}>
               <Text style={{ color: '#e6f1ff', fontSize: 10, fontWeight: 700 }}>refresh</Text>
@@ -1428,9 +1425,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             <Text style={{ color: '#ffb38f', fontSize: 11, marginTop: 8 }}>{uvPanel.note ?? 'no atlas'}</Text>
           )}
           <Text style={{ color: '#5d6878', fontSize: 10, marginTop: 6 }}>
-            {uvPanel.detail >= 8
-              ? 'each grid cell = one triangle (diagonal = its hypotenuse) — machine layout, not your authored UVs'
-              : 'one texel per triangle at this detail (no grid to draw) — machine layout, not your authored UVs'}
+            {uvPanel.detail > 1
+              ? 'each outlined rect = one face’s UV island, sized by its real-world size × density — big faces get more texels'
+              : 'fill-only density (1x) — each face is a tiny island; pick a density to paint strokes'}
           </Text>
         </Col>
       )}

@@ -1,15 +1,22 @@
-//! Host-side per-face painting for the model viewer (the Studio mesh-editor path).
+//! Host-side painting for the model viewer (the Studio mesh-editor path).
 //!
-//! WHY this exists: the Studio's paint pipeline maps congruent faces onto ONE shared
-//! UV-atlas island (uvDedup.ts), so painting one panel repaints every identical panel,
-//! and degenerate unwrap islands leave faces unpaintable. This module throws that whole
-//! class of bug away. The model is the resident GPU mesh from mesh_import (non-indexed,
-//! 3 verts/triangle — every face has its OWN vertices). We give each face its OWN texel
-//! in a small host-owned paint atlas and map that face's three verts to it, so:
-//!   • painting is per-face and independent — no congruent-face fusion, ever;
-//!   • it rides the EXISTING scene3d diffuse-texture path — zero shader change;
+//! The paint MODEL is the proven studio painter's, ported host-native (USER RULING
+//! req_2515/req_2516): each AUTHORED FACE (face-group) is one UV ISLAND sized by its
+//! physical footprint × a texels-per-METER density (Blockbench 16x semantics), laid
+//! out by paint_islands.zig. So a big sign face gets the texels to write a word on,
+//! and a stroke travels ONE continuous texture space across the whole face — no
+//! per-triangle patches, no shredding at the diagonal. Ungrouped triangles (raw
+//! imports) each get their own area-proportional island through the same path.
+//!
+//! What stays from the host-native design:
+//!   • the atlas rides the EXISTING scene3d diffuse-texture path — zero shader change;
 //!   • picking is a real raycast against the visible triangle, so you paint exactly
-//!     the face under the cursor (no projection mismatch).
+//!     the face under the cursor (no projection mismatch);
+//!   • paint mutates the atlas in place; the GPU re-uploads only the dirty row band.
+//!
+//! Dabs land by BARYCENTRIC interpolation of the face's island-space corner texels
+//! (Layout.corner_uv) — position-independent, so paint keeps working after a gizmo
+//! move, and both halves of a quad share one continuous island space by construction.
 //!
 //! The viewer paints ONE model at a time, so the state here is a single active target
 //! keyed by the mesh's intern-key hash. 3d.zig owns the camera + viewport + GPU upload
@@ -17,6 +24,7 @@
 
 const std = @import("std");
 const model_source = @import("model_source.zig");
+const paint_islands = @import("paint_islands.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -26,20 +34,26 @@ var g_positions: ?[]f32 = null; // facecount*9 floats: 3 verts (xyz) per face, m
 var g_facecount: u32 = 0;
 var g_atlas_w: u32 = 0;
 var g_atlas_h: u32 = 0;
-// Free-form detail: texels per face EDGE. 1 = the classic one-texel-per-face atlas
-// (flat per-face fill, byte-identical to the original — the safe default). >1 gives
-// each face its own PATCH (g_patch × g_patch texels) so a brush can lay sub-face
-// strokes clipped to the face's triangle — no neighbour bleed, because each face
-// owns its texels. Set live via setDetail(); fill + selection work at any size.
-var g_patch: u32 = 1;
-var g_patches_w: u32 = 0; // patches per atlas row (atlas_w == patches_w * g_patch)
-// Gutter inset (texels) so a face's triangle sits off its patch edge — keeps linear
-// filtering from sampling across the patch boundary. Zero at patch==1 (nothing to inset).
-const PATCH_GUTTER: f32 = 0.5;
-// The atlas IS the source of truth — face f's colour lives at its texel (f%W, f/W), so
-// a paint writes straight here (no separate per-face array, no full rebuild). The GPU
-// re-uploads only the DIRTY ROW BAND since the last frame, so painting a 400k-tri model
-// uploads one row, not the whole 1.6 MB texture every stroke.
+// The island layout (paint_islands.zig): one island per authored face, sized by its
+// physical footprint × density. corner_uv is the face→atlas map every paint op uses.
+var g_layout: ?paint_islands.Layout = null;
+// island → its triangles, CSR-packed: island i's triangles are
+// g_isl_tris[g_isl_start[i] .. g_isl_start[i+1]]. Stamp clipping walks these — a dab
+// is clipped to the island's whole silhouette, so strokes cross a quad's diagonal.
+var g_isl_start: ?[]u32 = null;
+var g_isl_tris: ?[]u32 = null;
+// Requested texels-per-METER (Blockbench 16x semantics). Carries across meshes (edits
+// keep their density); paint_islands.build self-clamps it per mesh to the GPU limits.
+var g_density_req: f32 = 1.0;
+// Dab/fill coverage claims edge texels slightly OUTSIDE the triangle (covers the
+// half-texel corner inset + softens island borders under linear filtering)…
+const PAINT_EPS: f32 = 0.75;
+// …but the selection tint stays strictly inside its triangle, so tinting face A never
+// touches texels face B's save/restore owns — deselect order can't leave residue.
+const TINT_EPS: f32 = 0.0;
+// The atlas IS the source of truth — a paint writes straight here (no separate per-face
+// array, no full rebuild). The GPU re-uploads only the DIRTY ROW BAND since the last
+// frame, so painting a 400k-tri model uploads one row band, not the whole texture.
 var g_rgba: ?[]u8 = null; // atlas_w*atlas_h*4 — the diffuse texture, mutated in place
 var g_dirty_lo: u32 = 0; // inclusive dirty-row range; lo > hi ⇒ nothing to upload
 var g_dirty_hi: u32 = 0;
@@ -94,72 +108,112 @@ pub fn faceCount() u32 {
     return g_facecount;
 }
 
-// ── Atlas layout: face → patch ──────────────────────────────────────────────────
-// The atlas is a grid of per-face patches. patchGrid gives the patch count per axis;
-// the texel dims are that times g_patch. At g_patch==1 a "patch" is one texel and this
-// is exactly the original √facecount layout.
-fn patchGrid(fc: u32) [2]u32 {
-    if (fc == 0) return .{ 1, 1 };
-    var pw: u32 = @intFromFloat(@ceil(@sqrt(@as(f32, @floatFromInt(fc)))));
-    if (pw < 1) pw = 1;
-    const ph = (fc + pw - 1) / pw;
-    return .{ pw, ph };
-}
-
-/// Top-left texel of a face's patch in the atlas.
-fn patchOrigin(face: u32) [2]u32 {
-    return .{ (face % g_patches_w) * g_patch, (face / g_patches_w) * g_patch };
-}
-
-/// The usable span (texels) inside a patch — the triangle lives in [GUTTER, span+GUTTER].
-fn patchSpan() f32 {
-    const p: f32 = @floatFromInt(g_patch);
-    return if (g_patch > 1) p - 2.0 * PATCH_GUTTER else 0.0;
-}
-
-/// Barycentric (bu along v0→v1, bv along v0→v2) → patch-local texel (x,y). At g_patch==1
-/// every point collapses to the patch centre (0.5,0.5) — the classic constant-UV texel.
-fn baryToPatchTexel(bu: f32, bv: f32) [2]f32 {
-    if (g_patch <= 1) return .{ 0.5, 0.5 };
-    const span = patchSpan();
-    return .{ PATCH_GUTTER + bu * span, PATCH_GUTTER + bv * span };
-}
-
-/// UV for vertex k (0,1,2) of a face — its patch-triangle corner. k maps to barycentric
-/// (0,0)/(1,0)/(0,1), so the face's triangle rasterises across its whole patch.
-fn vertUv(face: u32, k: u32) [2]f32 {
-    const o = patchOrigin(face);
-    const bary: [2]f32 = switch (k) {
-        1 => .{ 1.0, 0.0 },
-        2 => .{ 0.0, 1.0 },
-        else => .{ 0.0, 0.0 },
-    };
-    const t = baryToPatchTexel(bary[0], bary[1]);
+// ── Atlas geometry: face → island texels ─────────────────────────────────────────
+/// A face's three corners in ABSOLUTE atlas-texel coordinates (Layout.corner_uv).
+fn triTexelCorners(lay: *const paint_islands.Layout, face: u32) [3][2]f32 {
+    const base = @as(usize, face) * 6;
     return .{
-        (@as(f32, @floatFromInt(o[0])) + t[0]) / @as(f32, @floatFromInt(g_atlas_w)),
-        (@as(f32, @floatFromInt(o[1])) + t[1]) / @as(f32, @floatFromInt(g_atlas_h)),
+        .{ lay.corner_uv[base + 0], lay.corner_uv[base + 1] },
+        .{ lay.corner_uv[base + 2], lay.corner_uv[base + 3] },
+        .{ lay.corner_uv[base + 4], lay.corner_uv[base + 5] },
     };
 }
 
-/// Adopt a freshly-parsed mesh as the paint target. REWRITES each vertex's uv (in the
-/// caller's interleaved buffer, 8 f32/vert) to its face's atlas texel, captures CPU
-/// positions for raycasting, and resets every face to the default grey. Call BEFORE
-/// the verts are uploaded to the GPU so the per-face UVs ship with the mesh.
+/// A face's island-space centroid texel, clamped into the atlas — the face's
+/// representative texel (faceColor reads it; paintFace always writes it).
+fn faceCentroidTexel(lay: *const paint_islands.Layout, face: u32) [2]u32 {
+    const c = triTexelCorners(lay, face);
+    const gx = (c[0][0] + c[1][0] + c[2][0]) / 3.0;
+    const gy = (c[0][1] + c[1][1] + c[2][1]) / 3.0;
+    const tx: u32 = @intFromFloat(std.math.clamp(@floor(gx), 0, @as(f32, @floatFromInt(g_atlas_w - 1))));
+    const ty: u32 = @intFromFloat(std.math.clamp(@floor(gy), 0, @as(f32, @floatFromInt(g_atlas_h - 1))));
+    return .{ tx, ty };
+}
+
+/// Is the point (px,py) inside the triangle, expanded outward by `eps` texels of
+/// SIGNED DISTANCE per edge? A triangle degenerate in texel space (a sliver, or a
+/// ≤1-texel island at low density) falls back to "near the centroid" so the face
+/// still owns its representative texel.
+fn pointInTri(c: [3][2]f32, px: f32, py: f32, eps: f32) bool {
+    const area2 = (c[1][0] - c[0][0]) * (c[2][1] - c[0][1]) - (c[1][1] - c[0][1]) * (c[2][0] - c[0][0]);
+    if (@abs(area2) < 0.1) {
+        const gx = (c[0][0] + c[1][0] + c[2][0]) / 3.0;
+        const gy = (c[0][1] + c[1][1] + c[2][1]) / 3.0;
+        const dx = px - gx;
+        const dy = py - gy;
+        const r = 0.75 + eps;
+        return dx * dx + dy * dy <= r * r;
+    }
+    const s: f32 = if (area2 > 0) 1.0 else -1.0;
+    var k: u32 = 0;
+    while (k < 3) : (k += 1) {
+        const a = c[k];
+        const b = c[(k + 1) % 3];
+        const ex = b[0] - a[0];
+        const ey = b[1] - a[1];
+        const e = (ex * (py - a[1]) - ey * (px - a[0])) * s;
+        const len = @sqrt(ex * ex + ey * ey);
+        if (e < -eps * len) return false;
+    }
+    return true;
+}
+
+/// Is the point inside ANY triangle of the island — the island's silhouette. A dab is
+/// clipped to this (not to one triangle), so a stroke crosses the diagonal seamlessly
+/// but still never bleeds past the authored face's boundary.
+fn pointInIsland(lay: *const paint_islands.Layout, isl_idx: u32, px: f32, py: f32, eps: f32) bool {
+    const starts = g_isl_start orelse return false;
+    const tris = g_isl_tris orelse return false;
+    var i = starts[isl_idx];
+    const end_ = starts[isl_idx + 1];
+    while (i < end_) : (i += 1) {
+        if (pointInTri(triTexelCorners(lay, tris[i]), px, py, eps)) return true;
+    }
+    return false;
+}
+
+/// The face triangle's integer texel bounds (inclusive), expanded by `expand` texels and
+/// clamped to its island rect — the iteration window for fills/tints/saves. The island
+/// clamp means edge bleed can reach the pad gutter but never a NEIGHBOUR island.
+fn faceTexelBounds(lay: *const paint_islands.Layout, face: u32, expand: f32) [4]u32 {
+    const c = triTexelCorners(lay, face);
+    const isl = lay.islands[lay.tri_island[face]];
+    var min_x = @min(c[0][0], @min(c[1][0], c[2][0])) - expand;
+    var min_y = @min(c[0][1], @min(c[1][1], c[2][1])) - expand;
+    var max_x = @max(c[0][0], @max(c[1][0], c[2][0])) + expand;
+    var max_y = @max(c[0][1], @max(c[1][1], c[2][1])) + expand;
+    min_x = @max(min_x, @as(f32, @floatFromInt(isl.x)));
+    min_y = @max(min_y, @as(f32, @floatFromInt(isl.y)));
+    max_x = @min(max_x, @as(f32, @floatFromInt(isl.x + isl.w)) - 1.0);
+    max_y = @min(max_y, @as(f32, @floatFromInt(isl.y + isl.h)) - 1.0);
+    if (max_x < min_x or max_y < min_y) {
+        const ct = faceCentroidTexel(lay, face);
+        return .{ ct[0], ct[1], ct[0], ct[1] };
+    }
+    return .{
+        @intFromFloat(@max(0, @floor(min_x))),
+        @intFromFloat(@max(0, @floor(min_y))),
+        @intFromFloat(@max(0, @floor(max_x))),
+        @intFromFloat(@max(0, @floor(max_y))),
+    };
+}
+
+/// Adopt a freshly-parsed mesh as the paint target. Builds the ISLAND layout at the
+/// carried density, REWRITES each vertex's uv (in the caller's interleaved buffer,
+/// 8 f32/vert) to its island texel, captures CPU positions for raycasting, and resets
+/// every face to the default grey. Call BEFORE the verts are uploaded to the GPU so
+/// the island UVs ship with the mesh.
+///
+/// NOTE the load order: model_source face groups usually arrive AFTER this (the
+/// __mesh_set_face_groups door / a topo op's re-grouping), so this first layout may be
+/// all-loose. The groups setter triggers scene3d.refreshPaintLayout → rebuildLayout,
+/// which re-islands by authored face.
 pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
     clear();
     if (vert_count < 3) return;
     const fc = vert_count / 3;
-    if (g_patch < 1) g_patch = 1;
-    // g_patch carries over from the previous mesh (edits keep their detail), but THIS mesh
-    // may be far denser — clamp so the atlas can never exceed the GPU texture limits (the
-    // import-while-painting crash: a carried 256px patch × a 26k-face bus = 41216 texels).
-    g_patch = clampPatchFor(fc, g_patch);
-    const pg = patchGrid(fc);
     g_key_hash = key_hash;
     g_facecount = fc;
-    g_patches_w = pg[0];
-    g_atlas_w = pg[0] * g_patch;
-    g_atlas_h = pg[1] * g_patch;
 
     // CPU positions for raycasting (9 floats/face).
     const pos = alloc.alloc(f32, @as(usize, fc) * 9) catch return;
@@ -175,65 +229,185 @@ pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
     }
     g_positions = pos;
 
-    // Atlas: every texel starts at the default grey (this also covers gutter/tail texels
-    // that no face triangle maps to).
-    const need = @as(usize, g_atlas_w) * @as(usize, g_atlas_h) * 4;
-    const rgba = alloc.alloc(u8, need) catch {
-        clear();
+    rebuildLayoutInner(verts, vert_count, false);
+}
+
+/// Rebuild the island layout for the CURRENT target at the current density — the entry
+/// 3d.zig calls when the authored face groups land (they arrive after setTarget) or the
+/// density changes. Carries each face's base colour as a flat fill (sub-face strokes
+/// come back via stroke-program replay, the durable form). Rewrites the caller's vertex
+/// UVs in place; the caller re-uploads the mesh.
+pub fn rebuildLayout(verts: []f32, vert_count: u32) void {
+    if (g_positions == null) return;
+    if (vert_count / 3 != g_facecount or g_facecount == 0) return;
+    rebuildLayoutInner(verts, vert_count, true);
+}
+
+fn freeLayoutState() void {
+    if (g_layout) |*l| l.deinit(alloc);
+    g_layout = null;
+    if (g_isl_start) |s| alloc.free(s);
+    g_isl_start = null;
+    if (g_isl_tris) |t| alloc.free(t);
+    g_isl_tris = null;
+    if (g_rgba) |r| alloc.free(r);
+    g_rgba = null;
+    g_atlas_w = 0;
+    g_atlas_h = 0;
+    g_has_dirty = false;
+}
+
+/// One authored-group id per displayed triangle, from model_source (NO_FACE_GROUP and
+/// paint_islands.NO_GROUP are both maxInt(u32), so loose triangles pass through).
+fn collectFaceGroups(fc: u32) ?[]u32 {
+    const groups = alloc.alloc(u32, fc) catch return null;
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) groups[f] = model_source.faceGroupOf(f);
+    return groups;
+}
+
+fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
+    const fc = g_facecount;
+    const pos = g_positions orelse return;
+
+    // Snapshot per-face base colours before the old layout goes away.
+    var snap: ?[]u8 = null;
+    if (carry and g_rgba != null) {
+        if (alloc.alloc(u8, @as(usize, fc) * 4)) |s| {
+            var f: u32 = 0;
+            while (f < fc) : (f += 1) {
+                const col = faceColor(f) orelse DEFAULT_FACE;
+                s[f * 4 + 0] = col[0];
+                s[f * 4 + 1] = col[1];
+                s[f * 4 + 2] = col[2];
+                s[f * 4 + 3] = col[3];
+            }
+            snap = s;
+        } else |_| {}
+    }
+    defer if (snap) |s| alloc.free(s);
+
+    const groups = collectFaceGroups(fc);
+    defer if (groups) |g| alloc.free(g);
+
+    freeLayoutState();
+    const lay = paint_islands.build(alloc, pos[0 .. @as(usize, fc) * 9], groups, g_density_req, MAX_ATLAS_DIM, ATLAS_BUDGET) orelse {
+        // Absurd mesh (even 1-texel islands blow the budget) — refuse LOUDLY. The
+        // target stays valid for picking/editing; painting is disabled until a sane
+        // density/mesh (every paint op no-ops on the missing atlas).
+        std.debug.print("[model_paint] island layout failed for {d} faces at {d} texels/m — painting disabled for this mesh.\n", .{ fc, g_density_req });
         return;
     };
-    var i: usize = 0;
-    while (i < need) : (i += 4) {
-        rgba[i + 0] = DEFAULT_FACE[0];
-        rgba[i + 1] = DEFAULT_FACE[1];
-        rgba[i + 2] = DEFAULT_FACE[2];
-        rgba[i + 3] = DEFAULT_FACE[3];
+    g_layout = lay;
+    g_atlas_w = lay.atlas_w;
+    g_atlas_h = lay.atlas_h;
+
+    // island → triangles CSR (stamp clipping walks the island silhouette).
+    const n_islands = lay.islands.len;
+    const starts = alloc.alloc(u32, n_islands + 1) catch {
+        freeLayoutState();
+        return;
+    };
+    @memset(starts, 0);
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) starts[lay.tri_island[f] + 1] += 1;
+    var i: usize = 1;
+    while (i <= n_islands) : (i += 1) starts[i] += starts[i - 1];
+    const tris = alloc.alloc(u32, fc) catch {
+        alloc.free(starts);
+        freeLayoutState();
+        return;
+    };
+    const cursor = alloc.alloc(u32, n_islands) catch {
+        alloc.free(starts);
+        alloc.free(tris);
+        freeLayoutState();
+        return;
+    };
+    defer alloc.free(cursor);
+    @memcpy(cursor, starts[0..n_islands]);
+    f = 0;
+    while (f < fc) : (f += 1) {
+        const isl = lay.tri_island[f];
+        tris[cursor[isl]] = f;
+        cursor[isl] += 1;
+    }
+    g_isl_start = starts;
+    g_isl_tris = tris;
+
+    // Atlas: every texel starts at the default grey (this also covers pad gutters).
+    const need = @as(usize, g_atlas_w) * @as(usize, g_atlas_h) * 4;
+    const rgba = alloc.alloc(u8, need) catch {
+        alloc.free(starts);
+        alloc.free(tris);
+        g_isl_start = null;
+        g_isl_tris = null;
+        freeLayoutState();
+        return;
+    };
+    var b: usize = 0;
+    while (b < need) : (b += 4) {
+        rgba[b + 0] = DEFAULT_FACE[0];
+        rgba[b + 1] = DEFAULT_FACE[1];
+        rgba[b + 2] = DEFAULT_FACE[2];
+        rgba[b + 3] = DEFAULT_FACE[3];
     }
     g_rgba = rgba;
 
-    // Overwrite the mesh's UVs — each vertex to its patch-triangle corner.
+    // Overwrite the mesh's UVs — each vertex to its island-texel corner, normalized.
+    const aw: f32 = @floatFromInt(g_atlas_w);
+    const ah: f32 = @floatFromInt(g_atlas_h);
     var vi: u32 = 0;
     while (vi < vert_count) : (vi += 1) {
-        const uv = vertUv(vi / 3, vi % 3);
-        verts[vi * 8 + 6] = uv[0];
-        verts[vi * 8 + 7] = uv[1];
+        verts[vi * 8 + 6] = lay.corner_uv[@as(usize, vi) * 2 + 0] / aw;
+        verts[vi * 8 + 7] = lay.corner_uv[@as(usize, vi) * 2 + 1] / ah;
     }
+
+    if (snap) |s| applyColors(s); // flood each face with its carried base colour
     g_has_dirty = false;
     markRows(0, g_atlas_h - 1); // the whole fresh atlas needs its first upload
 }
 
 pub fn clear() void {
+    freeLayoutState();
     if (g_positions) |p| alloc.free(p);
-    if (g_rgba) |r| alloc.free(r);
     g_positions = null;
-    g_rgba = null;
     g_facecount = 0;
-    g_atlas_w = 0;
-    g_atlas_h = 0;
     g_key_hash = 0;
-    g_has_dirty = false;
+    // g_density_req deliberately survives — edits/reloads keep their chosen density.
 }
 
-/// Paint one face — FLOODS its whole patch (the per-face fill behaviour) and marks the
-/// patch rows dirty. At g_patch==1 this is the classic single-texel write. `face` out of
-/// range is ignored (a raycast miss passes -1 up the stack, never here).
+/// Paint one face — rasterizes its TRIANGLE in island space (the per-face fill
+/// behaviour). The centroid texel is always written, so a sliver face still takes the
+/// colour (and faceColor reads it back). `face` out of range is ignored (a raycast
+/// miss passes -1 up the stack, never here).
 pub fn paintFace(face: u32, rgba: [4]u8) void {
     const buf = g_rgba orelse return;
+    const lay = &(g_layout orelse return);
     if (face >= g_facecount) return;
-    const o = patchOrigin(face);
-    var py: u32 = 0;
-    while (py < g_patch) : (py += 1) {
-        const row = o[1] + py;
-        var px: u32 = 0;
-        while (px < g_patch) : (px += 1) {
-            const dst = (@as(usize, row) * g_atlas_w + o[0] + px) * 4;
+    const c = triTexelCorners(lay, face);
+    const bb = faceTexelBounds(lay, face, PAINT_EPS + 0.5);
+    var ty = bb[1];
+    while (ty <= bb[3]) : (ty += 1) {
+        var tx = bb[0];
+        while (tx <= bb[2]) : (tx += 1) {
+            const fx: f32 = @floatFromInt(tx);
+            const fy: f32 = @floatFromInt(ty);
+            if (!pointInTri(c, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
+            const dst = (@as(usize, ty) * g_atlas_w + tx) * 4;
             buf[dst + 0] = rgba[0];
             buf[dst + 1] = rgba[1];
             buf[dst + 2] = rgba[2];
             buf[dst + 3] = rgba[3];
         }
     }
-    markRows(o[1], o[1] + g_patch - 1);
+    const ct = faceCentroidTexel(lay, face);
+    const dc = (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4;
+    buf[dc + 0] = rgba[0];
+    buf[dc + 1] = rgba[1];
+    buf[dc + 2] = rgba[2];
+    buf[dc + 3] = rgba[3];
+    markRows(@min(bb[1], ct[1]), @max(bb[3], ct[1]));
 }
 
 /// Bulk-set every face's colour from a per-face RGBA array (length ≥ facecount*4) —
@@ -261,76 +435,99 @@ pub fn setAtlas(rgba: []const u8) bool {
     return true;
 }
 
-/// A face's representative colour — the texel at its triangle centroid. Lets callers read
-/// a face's base tone (quality carry-over, the headless proof). Selection uses the whole-
-/// patch save/restore below so it never flattens sub-face paint.
+/// A face's representative colour — the texel at its island-space triangle centroid.
+/// Lets callers read a face's base tone (quality carry-over, the layout-rebuild carry,
+/// the headless proof). Selection uses the rect save/restore below so it never
+/// flattens sub-face paint.
 pub fn faceColor(face: u32) ?[4]u8 {
     const buf = g_rgba orelse return null;
+    const lay = &(g_layout orelse return null);
     if (face >= g_facecount) return null;
-    const o = patchOrigin(face);
-    const t = baryToPatchTexel(1.0 / 3.0, 1.0 / 3.0);
-    const tx = o[0] + @as(u32, @intFromFloat(t[0]));
-    const ty = o[1] + @as(u32, @intFromFloat(t[1]));
-    const d = (@as(usize, ty) * g_atlas_w + tx) * 4;
+    const ct = faceCentroidTexel(lay, face);
+    const d = (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4;
     return .{ buf[d], buf[d + 1], buf[d + 2], buf[d + 3] };
 }
 
-// ── Per-face patch save/restore/tint (selection rides this, patch-safe) ───────────
-/// Bytes in one face's patch (g_patch² texels × RGBA). The selection layer allocates
-/// this per tinted face so it can restore EXACT sub-face paint on deselect.
-pub fn facePatchLen() usize {
-    return @as(usize, g_patch) * @as(usize, g_patch) * 4;
+// ── Per-face rect save/restore/tint (the selection highlight rides this) ──────────
+// The unit is the face triangle's island-space bounding rect. Save copies the whole
+// rect; tint and restore touch ONLY texels strictly inside the triangle (TINT_EPS), so
+// two faces sharing a diagonal in one island can tint/deselect in any order without
+// residue — their strict texel sets are disjoint.
+fn faceRect(face: u32) ?[4]u32 { // x, y, w, h
+    const lay = &(g_layout orelse return null);
+    if (face >= g_facecount) return null;
+    const bb = faceTexelBounds(lay, face, 0.5);
+    return .{ bb[0], bb[1], bb[2] - bb[0] + 1, bb[3] - bb[1] + 1 };
 }
 
-/// Copy a face's whole patch into `out` (len ≥ facePatchLen()). Returns false if no target.
+/// Bytes in one face's save rect (its island-triangle bbox × RGBA). Sized PER FACE now —
+/// islands give big faces big rects. 0 when there's no target/layout.
+pub fn facePatchLen(face: u32) usize {
+    const r = faceRect(face) orelse return 0;
+    return @as(usize, r[2]) * @as(usize, r[3]) * 4;
+}
+
+/// Copy a face's whole save rect into `out` (len ≥ facePatchLen(face)). False if no target.
 pub fn saveFacePatch(face: u32, out: []u8) bool {
     const buf = g_rgba orelse return false;
-    if (face >= g_facecount or out.len < facePatchLen()) return false;
-    const o = patchOrigin(face);
+    const r = faceRect(face) orelse return false;
+    if (out.len < @as(usize, r[2]) * @as(usize, r[3]) * 4) return false;
     var py: u32 = 0;
-    while (py < g_patch) : (py += 1) {
-        const src = (@as(usize, o[1] + py) * g_atlas_w + o[0]) * 4;
-        const dst = @as(usize, py) * g_patch * 4;
-        @memcpy(out[dst .. dst + g_patch * 4], buf[src .. src + g_patch * 4]);
+    while (py < r[3]) : (py += 1) {
+        const src = (@as(usize, r[1] + py) * g_atlas_w + r[0]) * 4;
+        const dst = @as(usize, py) * r[2] * 4;
+        @memcpy(out[dst .. dst + r[2] * 4], buf[src .. src + r[2] * 4]);
     }
     return true;
 }
 
-/// Write a saved patch back onto a face (exact restore of sub-face paint).
+/// Write a saved rect back onto a face — only texels strictly inside the face triangle
+/// (exact undo of tintFacePatch; a neighbour's texels are never touched).
 pub fn restoreFacePatch(face: u32, in: []const u8) void {
     const buf = g_rgba orelse return;
-    if (face >= g_facecount or in.len < facePatchLen()) return;
-    const o = patchOrigin(face);
+    const lay = &(g_layout orelse return);
+    const r = faceRect(face) orelse return;
+    if (in.len < @as(usize, r[2]) * @as(usize, r[3]) * 4) return;
+    const c = triTexelCorners(lay, face);
     var py: u32 = 0;
-    while (py < g_patch) : (py += 1) {
-        const dst = (@as(usize, o[1] + py) * g_atlas_w + o[0]) * 4;
-        const src = @as(usize, py) * g_patch * 4;
-        @memcpy(buf[dst .. dst + g_patch * 4], in[src .. src + g_patch * 4]);
+    while (py < r[3]) : (py += 1) {
+        var px: u32 = 0;
+        while (px < r[2]) : (px += 1) {
+            const fx: f32 = @floatFromInt(r[0] + px);
+            const fy: f32 = @floatFromInt(r[1] + py);
+            if (!pointInTri(c, fx + 0.5, fy + 0.5, TINT_EPS)) continue;
+            const dst = (@as(usize, r[1] + py) * g_atlas_w + r[0] + px) * 4;
+            const src = (@as(usize, py) * r[2] + px) * 4;
+            @memcpy(buf[dst .. dst + 4], in[src .. src + 4]);
+        }
     }
-    markRows(o[1], o[1] + g_patch - 1);
+    markRows(r[1], r[1] + r[3] - 1);
 }
 
-/// Blend every texel in a face's patch toward `tint` by `amt` (0..1). The selection
-/// highlight — reversible via the saved patch, so it never destroys the paint underneath.
+/// Blend the face triangle's texels toward `tint` by `amt` (0..1). The selection
+/// highlight — reversible via the saved rect, so it never destroys the paint underneath.
 pub fn tintFacePatch(face: u32, tint: [4]u8, amt: f32) void {
     const buf = g_rgba orelse return;
-    if (face >= g_facecount) return;
+    const lay = &(g_layout orelse return);
+    const r = faceRect(face) orelse return;
     const a = std.math.clamp(amt, 0.0, 1.0);
-    const o = patchOrigin(face);
+    const c = triTexelCorners(lay, face);
     var py: u32 = 0;
-    while (py < g_patch) : (py += 1) {
-        const row = o[1] + py;
+    while (py < r[3]) : (py += 1) {
         var px: u32 = 0;
-        while (px < g_patch) : (px += 1) {
-            const d = (@as(usize, row) * g_atlas_w + o[0] + px) * 4;
-            inline for (0..3) |c| {
-                const base: f32 = @floatFromInt(buf[d + c]);
-                const tc: f32 = @floatFromInt(tint[c]);
-                buf[d + c] = @intFromFloat(std.math.clamp(base + (tc - base) * a, 0.0, 255.0));
+        while (px < r[2]) : (px += 1) {
+            const fx: f32 = @floatFromInt(r[0] + px);
+            const fy: f32 = @floatFromInt(r[1] + py);
+            if (!pointInTri(c, fx + 0.5, fy + 0.5, TINT_EPS)) continue;
+            const d = (@as(usize, r[1] + py) * g_atlas_w + r[0] + px) * 4;
+            inline for (0..3) |ch| {
+                const base: f32 = @floatFromInt(buf[d + ch]);
+                const tc: f32 = @floatFromInt(tint[ch]);
+                buf[d + ch] = @intFromFloat(std.math.clamp(base + (tc - base) * a, 0.0, 255.0));
             }
         }
     }
-    markRows(o[1], o[1] + g_patch - 1);
+    markRows(r[1], r[1] + r[3] - 1);
 }
 
 /// The CPU triangle positions (facecount*9 f32: 3 verts xyz per face), or null. The
@@ -592,9 +789,11 @@ pub fn pickBary(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) ?StampHit {
     return null;
 }
 
-/// LOCK mode: the barycentric where the ray meets ONE fixed face's plane, clamped into the
-/// triangle — so a stroke locked to its start face keeps painting that face's nearest edge
-/// even as the cursor drifts onto a neighbour. null only if the ray is parallel/behind.
+/// LOCK mode: the barycentric where the ray meets ONE fixed face's plane — UNCLAMPED,
+/// deliberately. The dab is clipped to the face's island silhouette downstream, so a
+/// locked stroke crosses the quad diagonal onto the sibling half (the bary just
+/// extrapolates in the shared plane) and simply STOPS at the authored face's boundary
+/// instead of smearing along the nearest edge. null only if the ray is parallel/behind.
 pub fn baryOnFace(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, face: u32) ?[2]f32 {
     const pos = g_positions orelse return null;
     if (face >= g_facecount or vp_w <= 0 or vp_h <= 0) return null;
@@ -617,15 +816,8 @@ pub fn baryOnFace(cam: Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32, face: u32
     const d21 = dot(v2, v1);
     const det = d00 * d11 - d01 * d01;
     if (@abs(det) < 1e-12) return null;
-    var u = (d11 * d20 - d01 * d21) / det;
-    var v = (d00 * d21 - d01 * d20) / det;
-    u = std.math.clamp(u, 0.0, 1.0);
-    v = std.math.clamp(v, 0.0, 1.0);
-    if (u + v > 1.0) {
-        const s = u + v;
-        u /= s;
-        v /= s;
-    }
+    const u = (d11 * d20 - d01 * d21) / det;
+    const v = (d00 * d21 - d01 * d20) / det;
     return .{ u, v };
 }
 
@@ -682,11 +874,10 @@ fn sampleMat(u: f32, v: f32) [4]u8 {
 // The user paints FACES, not triangles: a cube face is one quad, not two tris with a
 // diagonal seam. The mesh's authored face-GROUP (model_source) already encodes this —
 // the two halves of a quad share one group (the same signal the edge overlay uses to
-// hide diagonals, req_2367). Painting treats the group as the unit: fills flood every
-// triangle in it, dabs stamp every triangle it spans, and a material ink samples ONE
-// planar basis across the whole group so the look runs continuously over the diagonal
-// instead of restarting (rotated) per triangle. Ungrouped soups (imported scans, per-
-// triangle groups) fall back to the per-triangle behaviour everywhere.
+// hide diagonals, req_2367). The island layout makes the group ONE continuous texture
+// space, so a single dab covers both halves and a material ink samples one planar
+// window (the island) across the whole face. Fills still flood every member triangle
+// (3d.zig walks groupFaces). Ungrouped soups (imported scans) are per-triangle islands.
 
 pub const MAX_GROUP_FACES = 16; // an authored face is a quad or a small planar fan
 
@@ -706,122 +897,6 @@ pub fn groupFaces(face: u32, buf: *[MAX_GROUP_FACES]u32) []u32 {
         }
     }
     return buf[0..n];
-}
-
-fn faceNormal(pos: []const f32, f: u32) [3]f32 {
-    const tri = triVerts(pos, f);
-    return cross(sub(tri[1], tri[0]), sub(tri[2], tri[0]));
-}
-
-/// A shared planar uv basis across one authored group: uv (0..1, 0..1) spans the
-/// group's in-plane bounding box along its principal axes — for a rectangle quad that
-/// is exactly the quad's own uv, so a material tiles it like one face.
-const GroupBasis = struct {
-    u_dir: [3]f32,
-    v_dir: [3]f32,
-    u0: f32,
-    v0: f32,
-    inv_u: f32,
-    inv_v: f32,
-
-    fn uv(self: GroupBasis, p: [3]f32) [2]f32 {
-        return .{ (dot(p, self.u_dir) - self.u0) * self.inv_u, (dot(p, self.v_dir) - self.v0) * self.inv_v };
-    }
-};
-
-fn eqPos(a: [3]f32, b: [3]f32) bool {
-    const e = 1e-5;
-    return @abs(a[0] - b[0]) < e and @abs(a[1] - b[1]) < e and @abs(a[2] - b[2]) < e;
-}
-
-/// Build the group basis for `face`'s group, or null when the group is a lone triangle
-/// or not coplanar (curved fans keep per-triangle sampling — never smear a bent surface).
-///
-/// The texture's U axis is the group's longest BOUNDARY edge: an edge shared by two
-/// member triangles (a quad's diagonal, a fan's spokes) is internal and never chosen,
-/// so the look aligns with a real face side, not the triangulation. Members are scanned
-/// in ascending face order, so BOTH halves of a quad derive the IDENTICAL basis —
-/// that's what makes the sampled material continuous across the diagonal. (An earlier
-/// PCA-over-vertices draft failed exactly there: the duplicated diagonal verts biased
-/// the axis onto the diagonal, and the tangent seed differed per asking triangle.)
-/// (pub for the unit tests; product callers stay inside this module.)
-pub fn groupBasisFor(face: u32) ?GroupBasis {
-    const pos = g_positions orelse return null;
-    var buf: [MAX_GROUP_FACES]u32 = undefined;
-    const members = groupFaces(face, &buf);
-    if (members.len < 2) return null;
-    // Ascending face order — determinism must not depend on WHICH member asked.
-    var sorted: [MAX_GROUP_FACES]u32 = undefined;
-    @memcpy(sorted[0..members.len], members);
-    std.mem.sort(u32, sorted[0..members.len], {}, std.sort.asc(u32));
-    const ordered = sorted[0..members.len];
-
-    const n0 = norm(faceNormal(pos, ordered[0]));
-    if (dot(n0, n0) < 0.5) return null; // degenerate triangle
-    for (ordered[1..]) |f| {
-        const nf = norm(faceNormal(pos, f));
-        if (@abs(dot(n0, nf)) < 0.995) return null; // group is not one flat face
-    }
-    // Longest boundary edge (ascending scan order gives stable tie-breaks).
-    var best_dir: [3]f32 = .{ 0, 0, 0 };
-    var best_len2: f32 = 0;
-    for (ordered) |f| {
-        const tri = triVerts(pos, f);
-        var k: u32 = 0;
-        while (k < 3) : (k += 1) {
-            const ea = tri[k];
-            const eb = tri[(k + 1) % 3];
-            // Internal if any OTHER member also carries this edge (either direction).
-            var internal = false;
-            for (ordered) |g| {
-                if (g == f) continue;
-                const trig = triVerts(pos, g);
-                var j: u32 = 0;
-                while (j < 3) : (j += 1) {
-                    const ga = trig[j];
-                    const gb = trig[(j + 1) % 3];
-                    if ((eqPos(ea, ga) and eqPos(eb, gb)) or (eqPos(ea, gb) and eqPos(eb, ga))) {
-                        internal = true;
-                        break;
-                    }
-                }
-                if (internal) break;
-            }
-            if (internal) continue;
-            const d = sub(eb, ea);
-            const l2 = dot(d, d);
-            if (l2 > best_len2 + 1e-9) {
-                best_len2 = l2;
-                best_dir = d;
-            }
-        }
-    }
-    if (best_len2 < 1e-9) return null; // no boundary edge at all — patch-local fallback
-    // Project the edge into the plane and orthonormalize.
-    var u_dir = best_dir;
-    const un = dot(u_dir, n0);
-    u_dir = norm(.{ u_dir[0] - n0[0] * un, u_dir[1] - n0[1] * un, u_dir[2] - n0[2] * un });
-    if (dot(u_dir, u_dir) < 0.5) return null;
-    const v_dir = cross(n0, u_dir);
-    var min_u: f32 = std.math.floatMax(f32);
-    var max_u: f32 = -std.math.floatMax(f32);
-    var min_v: f32 = std.math.floatMax(f32);
-    var max_v: f32 = -std.math.floatMax(f32);
-    for (members) |f| {
-        const tri = triVerts(pos, f);
-        for (tri) |p| {
-            const pu = dot(p, u_dir);
-            const pv = dot(p, v_dir);
-            min_u = @min(min_u, pu);
-            max_u = @max(max_u, pu);
-            min_v = @min(min_v, pv);
-            max_v = @max(max_v, pv);
-        }
-    }
-    const ext_u = max_u - min_u;
-    const ext_v = max_v - min_v;
-    if (ext_u < 1e-6 or ext_v < 1e-6) return null;
-    return .{ .u_dir = u_dir, .v_dir = v_dir, .u0 = min_u, .v0 = min_v, .inv_u = 1.0 / ext_u, .inv_v = 1.0 / ext_v };
 }
 
 /// World point of a face's barycentric (u along v0→v1, v along v0→v2).
@@ -858,81 +933,108 @@ pub fn baryOfPointOnFace(face: u32, p: [3]f32) [2]f32 {
     return .{ (d22 * dp1 - d12 * dp2) / det, (d11 * dp2 - d12 * dp1) / det };
 }
 
-/// Stamp a brush dab onto a face's patch: a disc of `radius` texels around the hit's
-/// barycentric, CLIPPED to the face's triangle (so overhang never touches a neighbour —
-/// each face owns its texels). `flow` (0..1) is the blend toward the ink. When `mat` is
-/// set the ink is SAMPLED from the material image (paint-with-a-shader) rather than the
-/// flat `rgba`; `fill` skips the disc test to flood the whole triangle (bucket fill). At
-/// g_patch==1 there's no sub-face room, so it degrades to a per-face fill.
+/// Sample the material ink at an atlas texel, in ISLAND space: uv (0..1) spans the
+/// island's rect — one continuous window across the whole authored face, so the look
+/// runs over the diagonal without restarting. Tiled by g_mat_scale.
+fn sampleMatAtTexel(isl: paint_islands.Island, fx: f32, fy: f32) [4]u8 {
+    const u = (fx + 0.5 - @as(f32, @floatFromInt(isl.x))) / @as(f32, @floatFromInt(@max(1, isl.w)));
+    const v = (fy + 0.5 - @as(f32, @floatFromInt(isl.y))) / @as(f32, @floatFromInt(@max(1, isl.h)));
+    return sampleMat(u * g_mat_scale, v * g_mat_scale);
+}
+
+/// Blend one texel toward `ink` by `amt` (alpha snaps opaque — paint is paint).
+fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32) void {
+    inline for (0..3) |c| {
+        const base: f32 = @floatFromInt(buf[d + c]);
+        const tc: f32 = @floatFromInt(ink[c]);
+        buf[d + c] = @intFromFloat(std.math.clamp(base + (tc - base) * amt, 0.0, 255.0));
+    }
+    buf[d + 3] = 255;
+}
+
+/// Stamp a brush dab: a disc of `radius` texels around the hit, in the face's ISLAND
+/// space. The dab centre is the barycentric interpolation of the face's island-texel
+/// corners, and clipping is the island's whole SILHOUETTE (every member triangle) —
+/// so a stroke crosses the quad diagonal in one continuous space (the point of the
+/// island port) but never bleeds past the authored face's boundary. `flow` (0..1) is
+/// the blend toward the ink. When `mat` is set the ink is SAMPLED from the material
+/// image (paint-with-a-shader) in island space; `fill` floods the face triangle
+/// instead of a disc (bucket fill, material mode).
 fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, fill: bool) void {
     const buf = g_rgba orelse return;
+    const lay = &(g_layout orelse return);
     if (face >= g_facecount) return;
-    // Material sampling basis: the GROUP plane when the face is half of a flat
-    // authored face (quad/fan), so the look continues across the diagonal; the
-    // patch-local uv otherwise (lone triangles, curved groups).
-    const gb: ?GroupBasis = if (mat) groupBasisFor(face) else null;
-    if (g_patch <= 1) {
-        // No sub-face room. Best single sample: the face centroid's spot in the
-        // group plane (adjacent faces at least read different parts of the look).
-        const ink: [4]u8 = if (mat) blk: {
-            if (gb) |basis| {
-                const c = pointFromBary(face, 1.0 / 3.0, 1.0 / 3.0);
-                const uv = basis.uv(c);
-                break :blk sampleMat(uv[0] * g_mat_scale, uv[1] * g_mat_scale);
-            }
-            break :blk sampleMat(0.5 * g_mat_scale, 0.5 * g_mat_scale);
-        } else rgba;
-        return paintFace(face, ink);
-    }
-    const o = patchOrigin(face);
-    const span = patchSpan();
-    const cx = PATCH_GUTTER + cu * span;
-    const cy = PATCH_GUTTER + cv * span;
-    const r = @max(radius, 0.6);
+    const isl_idx = lay.tri_island[face];
+    const isl = lay.islands[isl_idx];
     const flow_amt = std.math.clamp(flow, 0.0, 1.0);
-    const tri_max: f32 = span; // texels where px+py <= span are inside the triangle
-    const inv_span: f32 = if (span > 0.0) 1.0 / span else 1.0;
-    var py: u32 = 0;
-    while (py < g_patch) : (py += 1) {
-        var px: u32 = 0;
-        while (px < g_patch) : (px += 1) {
-            const fx: f32 = @floatFromInt(px);
-            const fy: f32 = @floatFromInt(py);
-            if (fx + fy > tri_max + 0.5) continue; // outside the face triangle → clipped
-            // Antialiased coverage: full inside the disc, ramping to 0 across the boundary texel,
-            // so a stroke reads as a smooth line instead of a staircase of hard-edged discs.
-            var cov: f32 = 1.0;
-            if (!fill) {
-                const dx = fx + 0.5 - cx;
-                const dy = fy + 0.5 - cy;
-                const dist = @sqrt(dx * dx + dy * dy);
-                if (dist > r + 0.5) continue; // outside the antialiased disc
-                cov = std.math.clamp(r + 0.5 - dist, 0.0, 1.0); // 1-texel soft edge
+    if (flow_amt <= 0.0) return;
+
+    if (fill) {
+        // Bucket fill: exactly the face triangle (same texel set as paintFace), with
+        // the ink sampled per texel. Centroid texel guaranteed for slivers.
+        const c = triTexelCorners(lay, face);
+        const bb = faceTexelBounds(lay, face, PAINT_EPS + 0.5);
+        var ty = bb[1];
+        while (ty <= bb[3]) : (ty += 1) {
+            var tx = bb[0];
+            while (tx <= bb[2]) : (tx += 1) {
+                const fx: f32 = @floatFromInt(tx);
+                const fy: f32 = @floatFromInt(ty);
+                if (!pointInTri(c, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
+                const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
+                blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, flow_amt);
             }
+        }
+        const ct = faceCentroidTexel(lay, face);
+        const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, @floatFromInt(ct[0]), @floatFromInt(ct[1])) else rgba;
+        blendTexel(buf, (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4, ink, flow_amt);
+        markRows(@min(bb[1], ct[1]), @max(bb[3], ct[1]));
+        return;
+    }
+
+    // Dab centre in absolute atlas texels — barycentric interpolation of the face's
+    // island-space corners. Affine, so a LOCK-mode hit outside [0,1] extrapolates
+    // correctly onto the sibling half of the face.
+    const c = triTexelCorners(lay, face);
+    const cx = c[0][0] + cu * (c[1][0] - c[0][0]) + cv * (c[2][0] - c[0][0]);
+    const cy = c[0][1] + cu * (c[1][1] - c[0][1]) + cv * (c[2][1] - c[0][1]);
+    const r = @max(radius, 0.6);
+
+    // Disc bounds ∩ island rect (a dab can bleed into the pad gutter via PAINT_EPS,
+    // never into a neighbour island).
+    const x0f = @max(@floor(cx - r - 0.5), @as(f32, @floatFromInt(isl.x)));
+    const y0f = @max(@floor(cy - r - 0.5), @as(f32, @floatFromInt(isl.y)));
+    const x1f = @min(@ceil(cx + r + 0.5), @as(f32, @floatFromInt(isl.x + isl.w)) - 1.0);
+    const y1f = @min(@ceil(cy + r + 0.5), @as(f32, @floatFromInt(isl.y + isl.h)) - 1.0);
+    if (x1f < x0f or y1f < y0f) return;
+    const x0: u32 = @intFromFloat(@max(0, x0f));
+    const y0: u32 = @intFromFloat(@max(0, y0f));
+    const x1: u32 = @intFromFloat(@max(0, x1f));
+    const y1: u32 = @intFromFloat(@max(0, y1f));
+
+    var ty = y0;
+    while (ty <= y1) : (ty += 1) {
+        var tx = x0;
+        while (tx <= x1) : (tx += 1) {
+            const fx: f32 = @floatFromInt(tx);
+            const fy: f32 = @floatFromInt(ty);
+            // Antialiased coverage: full inside the disc, ramping to 0 across the
+            // boundary texel, so a stroke reads as a smooth line, not a staircase.
+            const dx = fx + 0.5 - cx;
+            const dy = fy + 0.5 - cy;
+            const dist = @sqrt(dx * dx + dy * dy);
+            if (dist > r + 0.5) continue; // outside the antialiased disc
+            const cov = std.math.clamp(r + 0.5 - dist, 0.0, 1.0); // 1-texel soft edge
             const amt = flow_amt * cov;
             if (amt <= 0.0) continue;
-            // Sample the material at this texel's uv — in the GROUP plane when the
-            // face belongs to one (seamless across the quad diagonal), else in the
-            // patch-local 0..1 — tiled by scale. Flat colour when no material ink.
-            const ink: [4]u8 = if (mat) blk: {
-                const bu = (fx - PATCH_GUTTER) * inv_span;
-                const bv = (fy - PATCH_GUTTER) * inv_span;
-                if (gb) |basis| {
-                    const uv = basis.uv(pointFromBary(face, bu, bv));
-                    break :blk sampleMat(uv[0] * g_mat_scale, uv[1] * g_mat_scale);
-                }
-                break :blk sampleMat(bu * g_mat_scale, bv * g_mat_scale);
-            } else rgba;
-            const d = (@as(usize, o[1] + py) * g_atlas_w + o[0] + px) * 4;
-            inline for (0..3) |c| {
-                const base: f32 = @floatFromInt(buf[d + c]);
-                const tc: f32 = @floatFromInt(ink[c]);
-                buf[d + c] = @intFromFloat(std.math.clamp(base + (tc - base) * amt, 0.0, 255.0));
-            }
-            buf[d + 3] = 255;
+            // Clip to the island silhouette — the dab covers every member triangle it
+            // overlaps, so the diagonal is invisible to the stroke.
+            if (!pointInIsland(lay, isl_idx, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
+            const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
+            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, amt);
         }
     }
-    markRows(o[1], o[1] + g_patch - 1);
+    markRows(y0, y1);
 }
 
 pub fn paintStamp(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, flow: f32) void {
@@ -950,139 +1052,103 @@ pub fn paintFaceTex(face: u32) void {
     stampInner(face, 0.34, 0.33, 0.0, DEFAULT_FACE, true, 1.0, true);
 }
 
-// ── Detail (patch size) toggle ────────────────────────────────────────────────────
-// The ceiling is deliberately BLASTED wide: a low-poly cube has a dozen faces, so even
-// 512×512 texels/face is a few MB — plenty to paint fine text on a face. The atlas budget
-// is the only real limit (it clamps dense meshes down), so pick anything; the host returns
-// the detail that actually took.
+// ── Detail = DENSITY (texels per meter) ───────────────────────────────────────────
+// "Detail" through every door now means texels-per-METER — the reference painter's
+// PIXEL_DENSITIES (Blockbench semantics: 16x = 16 texels to the meter), with 256/512
+// kept as high-density options. 1 = the fill-only look (≈ one texel per meter-scale
+// face). paint_islands.build self-halves an over-budget request, so any pick is safe.
 const ATLAS_BUDGET: usize = 256 * 1024 * 1024; // paint-atlas ceiling (bytes)
 // Hard ceiling on either atlas texel DIMENSION — wgpu's default max_texture_dimension_2d.
 // Exceeding it doesn't degrade, it PANICS the process inside wgpuDeviceCreateTexture (the
-// "imported a bus while in paint mode" crash: ~26k faces × a carried 256px patch asked
-// for a 41216-wide texture). Every atlas layout must pass through clampPatchFor.
+// "imported a bus while in paint mode" crash). paint_islands.build clamps to this.
 const MAX_ATLAS_DIM: u32 = 8192;
+
+/// The APPLIED density (texels/meter) — ≤ the request when the limits clamped it.
 pub fn detail() u32 {
-    return g_patch;
+    if (g_layout) |lay| return @max(1, @as(u32, @intFromFloat(@round(lay.density))));
+    return @max(1, @as(u32, @intFromFloat(@round(g_density_req))));
 }
-fn snapPatch(p: u32) u32 {
-    if (p >= 512) return 512;
-    if (p >= 256) return 256;
-    if (p >= 128) return 128;
-    if (p >= 64) return 64;
-    if (p >= 32) return 32;
-    if (p >= 16) return 16;
-    if (p >= 8) return 8;
+
+fn snapDensity(d: u32) u32 {
+    if (d >= 512) return 512;
+    if (d >= 256) return 256;
+    if (d >= 128) return 128;
+    if (d >= 64) return 64;
+    if (d >= 32) return 32;
+    if (d >= 16) return 16;
     return 1;
 }
-/// The largest snap level ≤ `want` whose atlas for `fc` faces fits BOTH limits: texel
-/// dimensions within MAX_ATLAS_DIM and bytes within ATLAS_BUDGET. Never returns 0 —
-/// patch 1 (fill-only) always fits (√facecount of any real mesh is far below either).
-fn clampPatchFor(fc: u32, want: u32) u32 {
-    const pg = patchGrid(fc);
-    const grid_max: u32 = @max(pg[0], pg[1]);
-    var p = snapPatch(want);
-    while (p > 1) : (p = snapPatch(p / 2)) {
-        const dim_ok = grid_max <= MAX_ATLAS_DIM / p;
-        const bytes = @as(usize, pg[0]) * p * @as(usize, pg[1]) * p * 4;
-        if (dim_ok and bytes <= ATLAS_BUDGET) return p;
+
+/// Set the paint density (texels/meter), rebuilding the island layout and carrying each
+/// face's current colour as a flat fill (sub-face strokes come back via stroke-program
+/// replay). Rewrites the caller's vertex UVs in place — 3d.zig re-uploads the mesh
+/// after. An over-budget density HALVES inside paint_islands.build (logged) — detail()
+/// reports what actually took, so the UI shows the clamp.
+pub fn setDetail(new_density: u32, verts: []f32, vert_count: u32) void {
+    const nd = snapDensity(new_density);
+    const req: f32 = @floatFromInt(nd);
+    if (g_positions == null) {
+        g_density_req = req; // no target yet — carry the intent to the next adopt
+        return;
     }
-    return 1;
-}
-/// The best detail level `fc` faces can afford — the atlas-creation prompt asks this to
-/// present only options the GPU can actually take.
-pub fn maxDetailFor(fc: u32) u32 {
-    if (fc == 0) return 512;
-    return clampPatchFor(fc, 512);
-}
-/// Re-tessellate the atlas to a new per-face detail (patch size), carrying each face's
-/// current colour as a flat fill (sub-face strokes can't survive a resolution change).
-/// Rewrites the caller's vertex UVs in place — 3d.zig re-uploads the mesh after. A level
-/// beyond the dimension/memory limits CLAMPS to the best fitting one (logged) — the door
-/// reports the applied level back, so the UI shows what actually took.
-pub fn setDetail(new_patch: u32, verts: []f32, vert_count: u32) void {
-    if (g_positions == null or g_rgba == null) return;
     const fc = g_facecount;
     if (fc == 0 or vert_count / 3 != fc) return;
-    const np = clampPatchFor(fc, new_patch);
-    if (np != snapPatch(new_patch)) {
-        std.debug.print("[model_paint] detail {d}px on {d} faces exceeds the atlas limits ({d}px dim / {d}MB) — clamped to {d}px.\n", .{ snapPatch(new_patch), fc, MAX_ATLAS_DIM, ATLAS_BUDGET / (1024 * 1024), np });
+    if (req == g_density_req and g_layout != null) return;
+    g_density_req = req;
+    rebuildLayoutInner(verts, vert_count, true);
+    if (g_layout) |lay| {
+        if (lay.density < req) {
+            std.debug.print("[model_paint] density {d} texels/m exceeds the atlas limits ({d}px dim / {d}MB) — clamped to {d}.\n", .{ nd, MAX_ATLAS_DIM, ATLAS_BUDGET / (1024 * 1024), detail() });
+        }
     }
-    if (np == g_patch) return;
+}
 
-    const pg = patchGrid(fc);
-    const new_w = pg[0] * np;
-    const new_h = pg[1] * np;
-    const need = @as(usize, new_w) * @as(usize, new_h) * 4;
+/// Dry-run a density against the CURRENT target: the atlas dims + applied density that
+/// layout would produce, without adopting it. The atlas-creation prompt asks this per
+/// option so the labels show real costs (and real clamps). Null if no target/absurd.
+pub const AtlasEstimate = struct { w: u32, h: u32, density: f32 };
+pub fn estimateAtlas(density_req: f32) ?AtlasEstimate {
+    const pos = g_positions orelse return null;
+    if (g_facecount == 0) return null;
+    const groups = collectFaceGroups(g_facecount);
+    defer if (groups) |g| alloc.free(g);
+    var lay = paint_islands.build(alloc, pos[0 .. @as(usize, g_facecount) * 9], groups, density_req, MAX_ATLAS_DIM, ATLAS_BUDGET) orelse return null;
+    defer lay.deinit(alloc);
+    return .{ .w = lay.atlas_w, .h = lay.atlas_h, .density = lay.density };
+}
 
-    // Snapshot per-face base colours (centroid texel) before the atlas is reshaped.
-    const snap = alloc.alloc(u8, @as(usize, fc) * 4) catch return;
-    defer alloc.free(snap);
-    var f: u32 = 0;
-    while (f < fc) : (f += 1) {
-        const col = faceColor(f) orelse DEFAULT_FACE;
-        snap[f * 4 + 0] = col[0];
-        snap[f * 4 + 1] = col[1];
-        snap[f * 4 + 2] = col[2];
-        snap[f * 4 + 3] = col[3];
-    }
-
-    const rgba = alloc.alloc(u8, need) catch return;
-    var i: usize = 0;
-    while (i < need) : (i += 4) {
-        rgba[i + 0] = DEFAULT_FACE[0];
-        rgba[i + 1] = DEFAULT_FACE[1];
-        rgba[i + 2] = DEFAULT_FACE[2];
-        rgba[i + 3] = DEFAULT_FACE[3];
-    }
-    if (g_rgba) |old| alloc.free(old);
-    g_rgba = rgba;
-    g_patch = np;
-    g_patches_w = pg[0];
-    g_atlas_w = new_w;
-    g_atlas_h = new_h;
-
-    var vi: u32 = 0;
-    while (vi < vert_count) : (vi += 1) {
-        const uv = vertUv(vi / 3, vi % 3);
-        verts[vi * 8 + 6] = uv[0];
-        verts[vi * 8 + 7] = uv[1];
-    }
-    applyColors(snap); // flood each patch with its carried base colour
-    g_has_dirty = false;
-    markRows(0, g_atlas_h - 1);
+/// The live island rects (packed atlas layout) — the UV inspector draws these so the
+/// panel shows real face-shaped islands. Null when there's no layout.
+pub fn layoutIslands() ?[]const paint_islands.Island {
+    const lay = &(g_layout orelse return null);
+    return lay.islands;
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────────
-test "atlas never exceeds the GPU texture dimension limit (import-while-painting crash)" {
-    // The bus numbers: ~26k faces at a carried 256px patch asked wgpu for a 41216-wide
-    // texture and PANICKED the process. clampPatchFor must fit both hard limits.
-    try std.testing.expectEqual(@as(u32, 32), clampPatchFor(26_000, 256));
-    try std.testing.expectEqual(@as(u32, 512), clampPatchFor(12, 512)); // low-poly keeps max
-    try std.testing.expectEqual(@as(u32, 1), clampPatchFor(60_000_000, 512)); // absurd → fill-only
-
-    // End to end: a dense-enough mesh adopted while a high detail is carried gets its
-    // patch clamped so the atlas stays within MAX_ATLAS_DIM on both axes.
-    var small = [_]f32{
-        -1, -1, 0, 0, 0, 1, 0, 0,
-        1,  -1, 0, 0, 0, 1, 0, 0,
-        0,  1,  0, 0, 0, 1, 0, 0,
-    };
-    setTarget(901, &small, 3);
-    defer clear();
-    setDetail(512, &small, 3); // fits a 1-face mesh; g_patch now 512
-    try std.testing.expectEqual(@as(u32, 512), detail());
-
-    const fc: u32 = 300; // grid 18×17 → 18×512 = 9216 > 8192 → must clamp to 256
-    const dense = alloc.alloc(f32, @as(usize, fc) * 3 * 8) catch unreachable;
-    defer alloc.free(dense);
-    @memset(dense, 0);
-    setTarget(902, dense, fc * 3);
-    try std.testing.expectEqual(@as(u32, 256), detail());
+test "density clamps: a huge face at high density stays inside the GPU limits" {
+    // A 100m×100m face at 128 texels/m wants a 12800² atlas — build() must HALVE the
+    // density until it fits, never hand the GPU an illegal texture (the "imported a
+    // bus while in paint mode" panic class).
+    var verts: [6 * 8]f32 = std.mem.zeroes([6 * 8]f32);
+    const q = [4][3]f32{ .{ 0, 0, 0 }, .{ 100, 0, 0 }, .{ 100, 0, 100 }, .{ 0, 0, 100 } };
+    const tri = [6]u32{ 0, 1, 2, 0, 2, 3 };
+    for (tri, 0..) |vi, i| {
+        verts[i * 8 + 0] = q[vi][0];
+        verts[i * 8 + 1] = q[vi][1];
+        verts[i * 8 + 2] = q[vi][2];
+    }
+    setTarget(901, &verts, 6);
+    defer {
+        clear();
+        model_source.clear();
+    }
+    model_source.setFaceGroups(&.{ 0, 0 });
+    rebuildLayout(&verts, 6);
+    setDetail(128, &verts, 6);
     const a = atlas().?;
     try std.testing.expect(a.w <= MAX_ATLAS_DIM and a.h <= MAX_ATLAS_DIM);
-    // g_patch deliberately survives clear() (edits keep their detail) — put it back to
-    // the default so later tests see the classic 1-texel-per-face layout.
-    setDetail(1, dense, fc * 3);
+    try std.testing.expect(detail() < 128); // the clamp is visible through the door
+    setDetail(1, &verts, 6); // restore the default density for later tests
     try std.testing.expectEqual(@as(u32, 1), detail());
 }
 
@@ -1096,8 +1162,6 @@ test "pick hits the face straddling the ray and paints it" {
     setTarget(123, &verts, 3);
     defer clear();
     try std.testing.expectEqual(@as(u32, 1), faceCount());
-    // UVs were rewritten to the face's atlas texel (atlas is 1×1 → centre 0.5,0.5).
-    try std.testing.expectApproxEqAbs(@as(f32, 0.5), verts[6], 1e-6);
 
     const cam = Camera{ .eye = .{ 0, 0, 5 }, .target = .{ 0, 0, 0 }, .fov_deg = 50 };
     // Centre pixel → the triangle.
@@ -1106,9 +1170,9 @@ test "pick hits the face straddling the ray and paints it" {
     try std.testing.expectEqual(@as(i32, -1), pick(cam, 800, 600, 0, 0));
 
     paintFace(0, .{ 10, 20, 30, 255 });
-    const at = atlas().?;
-    try std.testing.expectEqual(@as(u8, 10), at.rgba[0]);
-    try std.testing.expectEqual(@as(u8, 30), at.rgba[2]);
+    const col = faceColor(0).?;
+    try std.testing.expectEqual(@as(u8, 10), col[0]);
+    try std.testing.expectEqual(@as(u8, 30), col[2]);
 }
 
 test "pickPoint returns the world hit on the surface, null on a miss" {
@@ -1148,27 +1212,142 @@ test "occluded: a point behind a front face is hidden; on/in front of it is not"
     try std.testing.expect(!occluded(cam, .{ 0, 1, 0 }));
 }
 
-test "patch grid covers every face" {
-    const d = patchGrid(4612);
-    try std.testing.expect(d[0] * d[1] >= 4612);
-    try std.testing.expect(d[0] >= 68 and d[0] <= 80);
-}
-
 // A unit quad in z=0 as two triangles sharing the diagonal (0,0)-(1,1), both in one
 // authored group — the exact shape a cube face composes to.
+const QUAD_VERTS = [_]f32{
+    // tri A: (0,0) (1,0) (1,1)
+    0, 0, 0, 0, 0, 1, 0, 0,
+    1, 0, 0, 0, 0, 1, 0, 0,
+    1, 1, 0, 0, 0, 1, 0, 0,
+    // tri B: (0,0) (1,1) (0,1)
+    0, 0, 0, 0, 0, 1, 0, 0,
+    1, 1, 0, 0, 0, 1, 0, 0,
+    0, 1, 0, 0, 0, 1, 0, 0,
+};
+
 fn setupQuadTarget() void {
-    var verts = [_]f32{
-        // tri A: (0,0) (1,0) (1,1)
-        0, 0, 0, 0, 0, 1, 0, 0,
-        1, 0, 0, 0, 0, 1, 0, 0,
-        1, 1, 0, 0, 0, 1, 0, 0,
-        // tri B: (0,0) (1,1) (0,1)
-        0, 0, 0, 0, 0, 1, 0, 0,
-        1, 1, 0, 0, 0, 1, 0, 0,
-        0, 1, 0, 0, 0, 1, 0, 0,
-    };
+    var verts = QUAD_VERTS;
     setTarget(77, &verts, 6);
     model_source.setFaceGroups(&.{ 0, 0 });
+}
+
+// The full product flow for a grouped quad at a chosen density: adopt → groups land →
+// layout refresh (the door path) → density. Returns the UV-rewritten verts.
+fn setupQuadAtDensity(density: u32) [6 * 8]f32 {
+    var verts = QUAD_VERTS;
+    setTarget(77, &verts, 6);
+    model_source.setFaceGroups(&.{ 0, 0 });
+    rebuildLayout(&verts, 6);
+    setDetail(density, &verts, 6);
+    return verts;
+}
+
+test "island UVs: a grouped quad is ONE island and every vertex UV lands inside it" {
+    var verts = setupQuadAtDensity(16);
+    defer {
+        setDetail(1, &verts, 6); // restore the default density for later tests
+        clear();
+        model_source.clear();
+    }
+    const isls = layoutIslands().?;
+    try std.testing.expectEqual(@as(usize, 1), isls.len);
+    try std.testing.expectEqual(@as(u32, 16), detail());
+    // A 1m quad at 16 texels/m → a 16×16 island.
+    try std.testing.expectEqual(@as(u32, 16), isls[0].w);
+    try std.testing.expectEqual(@as(u32, 16), isls[0].h);
+    const a = atlas().?;
+    var vi: u32 = 0;
+    while (vi < 6) : (vi += 1) {
+        const x = verts[vi * 8 + 6] * @as(f32, @floatFromInt(a.w));
+        const y = verts[vi * 8 + 7] * @as(f32, @floatFromInt(a.h));
+        try std.testing.expect(x >= @as(f32, @floatFromInt(isls[0].x)) and x <= @as(f32, @floatFromInt(isls[0].x + isls[0].w)));
+        try std.testing.expect(y >= @as(f32, @floatFromInt(isls[0].y)) and y <= @as(f32, @floatFromInt(isls[0].y + isls[0].h)));
+    }
+}
+
+test "a dab straddling the quad diagonal paints CONTIGUOUS texels (anti-shredding)" {
+    var verts = setupQuadAtDensity(16);
+    defer {
+        setDetail(1, &verts, 6);
+        clear();
+        model_source.clear();
+    }
+    // Dab centred ON the diagonal (world (0.5,0.5): tri A bary u=0, v=0.5), radius 4.
+    paintStamp(0, 0.0, 0.5, 4.0, .{ 255, 0, 0, 255 }, 1.0);
+    const a = atlas().?;
+    const isls = layoutIslands().?;
+    // The dab centre in island space, by the same corner interpolation the stamp uses.
+    const lay = &(g_layout.?);
+    const c = triTexelCorners(lay, 0);
+    const cx = c[0][0] + 0.0 * (c[1][0] - c[0][0]) + 0.5 * (c[2][0] - c[0][0]);
+    const cy = c[0][1] + 0.0 * (c[1][1] - c[0][1]) + 0.5 * (c[2][1] - c[0][1]);
+    // Every texel within radius-1 of the centre AND inside the island interior is
+    // fully red — on BOTH sides of the diagonal, no gap. The patch grid could never
+    // do this: each half lived in its own disconnected square.
+    var checked: u32 = 0;
+    var ty = isls[0].y;
+    while (ty < isls[0].y + isls[0].h) : (ty += 1) {
+        var tx = isls[0].x;
+        while (tx < isls[0].x + isls[0].w) : (tx += 1) {
+            const dx = @as(f32, @floatFromInt(tx)) + 0.5 - cx;
+            const dy = @as(f32, @floatFromInt(ty)) + 0.5 - cy;
+            if (@sqrt(dx * dx + dy * dy) > 3.0) continue;
+            const d = (@as(usize, ty) * a.w + tx) * 4;
+            try std.testing.expectEqual(@as(u8, 255), a.rgba[d + 0]);
+            try std.testing.expectEqual(@as(u8, 0), a.rgba[d + 1]);
+            checked += 1;
+        }
+    }
+    try std.testing.expect(checked >= 20); // a real disc, not a sliver
+}
+
+test "fill paints exactly the face's triangle, not its island rect" {
+    var verts = setupQuadAtDensity(16);
+    defer {
+        setDetail(1, &verts, 6);
+        clear();
+        model_source.clear();
+    }
+    paintFace(0, .{ 0, 200, 0, 255 }); // tri A only ((0,0)(1,0)(1,1) — below the diagonal)
+    const a = atlas().?;
+    const lay = &(g_layout.?);
+    // Tri A's centroid texel took the fill; tri B's did not (its silhouette is outside).
+    const ca = faceCentroidTexel(lay, 0);
+    const cb = faceCentroidTexel(lay, 1);
+    const da = (@as(usize, ca[1]) * a.w + ca[0]) * 4;
+    const db = (@as(usize, cb[1]) * a.w + cb[0]) * 4;
+    try std.testing.expectEqual(@as(u8, 200), a.rgba[da + 1]);
+    try std.testing.expectEqual(@as(u8, DEFAULT_FACE[1]), a.rgba[db + 1]);
+    // And texels well inside tri B (≥ 2 texels past the diagonal) stayed default.
+    const cB = triTexelCorners(lay, 1);
+    const bx: u32 = @intFromFloat((cB[0][0] + cB[1][0] + cB[2][0]) / 3.0);
+    const by: u32 = @intFromFloat((cB[0][1] + cB[1][1] + cB[2][1]) / 3.0);
+    const dbb = (@as(usize, by) * a.w + bx) * 4;
+    try std.testing.expectEqual(@as(u8, DEFAULT_FACE[0]), a.rgba[dbb + 0]);
+}
+
+test "selection tint + restore round-trips without touching the sibling triangle" {
+    var verts = setupQuadAtDensity(16);
+    defer {
+        setDetail(1, &verts, 6);
+        clear();
+        model_source.clear();
+    }
+    paintFace(0, .{ 200, 40, 40, 255 });
+    paintFace(1, .{ 40, 40, 200, 255 });
+    const before_a = faceColor(0).?;
+    const before_b = faceColor(1).?;
+    const len = facePatchLen(0);
+    try std.testing.expect(len > 0);
+    const saved = alloc.alloc(u8, len) catch unreachable;
+    defer alloc.free(saved);
+    try std.testing.expect(saveFacePatch(0, saved));
+    tintFacePatch(0, .{ 255, 255, 255, 255 }, 0.5);
+    try std.testing.expect(faceColor(0).?[0] != before_a[0]); // tint visibly landed
+    try std.testing.expectEqual(before_b, faceColor(1).?); // sibling untouched by the tint
+    restoreFacePatch(0, saved);
+    try std.testing.expectEqual(before_a, faceColor(0).?); // exact undo
+    try std.testing.expectEqual(before_b, faceColor(1).?);
 }
 
 test "a quad's two triangles are one logical face" {
@@ -1184,31 +1363,6 @@ test "a quad's two triangles are one logical face" {
     try std.testing.expectEqual(@as(u32, 1), a[1]);
 }
 
-test "group basis is identical from both halves and spans the quad, not the diagonal" {
-    setupQuadTarget();
-    defer {
-        clear();
-        model_source.clear();
-    }
-    const ba = groupBasisFor(0) orelse return error.TestUnexpectedResult;
-    const bb = groupBasisFor(1) orelse return error.TestUnexpectedResult;
-    // Same basis regardless of which triangle asked — that IS the seamlessness.
-    const probe: [3]f32 = .{ 0.25, 0.75, 0 };
-    const ua = ba.uv(probe);
-    const ub = bb.uv(probe);
-    try std.testing.expectApproxEqAbs(ua[0], ub[0], 1e-5);
-    try std.testing.expectApproxEqAbs(ua[1], ub[1], 1e-5);
-    // The U axis is a SIDE (axis-aligned), never the diagonal: every corner of the
-    // unit quad must land on uv extremes {0,1}, which a diagonal basis cannot do.
-    const corners = [4][3]f32{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 } };
-    for (corners) |c| {
-        const uv = ba.uv(c);
-        for (uv) |x| {
-            try std.testing.expect(@abs(x) < 1e-4 or @abs(x - 1.0) < 1e-4);
-        }
-    }
-}
-
 test "bary point round trip crosses the diagonal consistently" {
     setupQuadTarget();
     defer {
@@ -1222,23 +1376,4 @@ test "bary point round trip crosses the diagonal consistently" {
     try std.testing.expectApproxEqAbs(p[0], p2[0], 1e-5);
     try std.testing.expectApproxEqAbs(p[1], p2[1], 1e-5);
     try std.testing.expectApproxEqAbs(p[2], p2[2], 1e-5);
-}
-
-test "a bent group refuses a shared basis" {
-    // Two triangles sharing an edge but folded 90° — same group, NOT one flat face.
-    var verts = [_]f32{
-        0, 0, 0, 0, 0, 1, 0, 0,
-        1, 0, 0, 0, 0, 1, 0, 0,
-        1, 1, 0, 0, 0, 1, 0, 0,
-        0, 0, 0, 0, 0, 1, 0, 0,
-        1, 1, 0, 0, 0, 1, 0, 0,
-        0, 0, 1, 0, 0, 1, 0, 0,
-    };
-    setTarget(78, &verts, 6);
-    defer {
-        clear();
-        model_source.clear();
-    }
-    model_source.setFaceGroups(&.{ 0, 0 });
-    try std.testing.expectEqual(@as(?GroupBasis, null), groupBasisFor(0));
 }

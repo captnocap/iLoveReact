@@ -405,6 +405,8 @@ fn hostModelFocusAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 /// triangle so the mesh editor selects/outlines whole n-gons instead of the fan
 /// slivers a studio EditMesh triangulates into. Called once right after
 /// __mesh_load_vertices; cleared by the next load. File imports never call it.
+/// Groups arriving is what turns the paint atlas from all-loose triangle islands into
+/// real authored-face islands, so this refreshes the paint layout (req_2515/req_2516).
 fn hostMeshSetFaceGroups(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const bytes = argBytes(info, 0) orelse {
@@ -417,6 +419,7 @@ fn hostMeshSetFaceGroups(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     }
     const groups: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
     model_source.setFaceGroups(groups);
+    if (scene3d.refreshPaintLayout()) state.markDirty();
     setReturnNumber(info, 1);
 }
 
@@ -895,9 +898,11 @@ fn hostModelPaintMaterialClear(info_c: ?*const v8.c.FunctionCallbackInfo) callco
     setReturnNumber(info, 1);
 }
 
-/// __model_set_paint_detail(px) → the ACTUAL detail after the change (1/8/16/32). Re-tessellates
-/// the paint atlas to px texels per face and re-uploads the mesh (see scene3d.setPaintDetail).
-/// The budget guard may keep the old detail, so the return is the truth, not the request.
+/// __model_set_paint_detail(density) → the ACTUAL density after the change. `density`
+/// is texels-per-METER (Blockbench 16x semantics: 16/32/64/128, plus 256/512; 1 =
+/// fill-only look). Rebuilds the island atlas and re-uploads the mesh (see
+/// scene3d.setPaintDetail). An over-budget density halves inside the layout, so the
+/// return is the truth, not the request.
 fn hostModelSetPaintDetail(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const px = argToI32(info, 0) orelse 1;
@@ -906,8 +911,31 @@ fn hostModelSetPaintDetail(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setReturnNumber(info, @floatFromInt(applied));
 }
 
-/// __model_atlas_read() → JSON {"w":W,"h":H,"detail":D,"data":"<base64 rgba>"} for the current
-/// painting, or "" if there's no paint target. The editor persists this as a paint variant.
+/// __model_paint_atlas_estimate(density) → JSON {"w":W,"h":H,"density":D} — the atlas
+/// the island layout WOULD build for the current model at that texels-per-meter
+/// density (D = the applied density after any clamp), without adopting it. "" if no
+/// target. The Create Paint Atlas prompt shows these as the honest per-option cost.
+fn hostModelPaintAtlasEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const density: f32 = @floatCast(argToF64(info, 0) orelse 1);
+    const est = scene3d.estimatePaintAtlas(density) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    var buf: [96]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"w\":{d},\"h\":{d},\"density\":{d}}}", .{ est.w, est.h, @max(1, @as(u32, @intFromFloat(@round(est.density)))) }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, json);
+}
+
+/// __model_atlas_read() → JSON {"w":W,"h":H,"detail":D,"islands":[x,y,w,h,...],"data":
+/// "<base64 rgba>"} for the current painting, or "" if there's no paint target.
+/// `detail` is the applied density (texels/meter); `islands` is the packed island
+/// rects (flat quads) so the UV inspector can draw the real layout — omitted when the
+/// mesh has more islands than are worth outlining. The editor also persists this as a
+/// paint variant.
 fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const alloc = std.heap.c_allocator;
@@ -922,12 +950,29 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     };
     defer alloc.free(b64);
     _ = enc.encode(b64, pa.rgba);
-    const json = std.fmt.allocPrint(alloc, "{{\"w\":{d},\"h\":{d},\"detail\":{d},\"data\":\"{s}\"}}", .{ pa.w, pa.h, pa.detail, b64 }) catch {
+
+    var out: std.ArrayList(u8) = .{};
+    defer out.deinit(alloc);
+    const w = out.writer(alloc);
+    w.print("{{\"w\":{d},\"h\":{d},\"detail\":{d}", .{ pa.w, pa.h, pa.detail }) catch {
         setReturnString(info, "");
         return;
     };
-    defer alloc.free(json);
-    setReturnString(info, json);
+    const MAX_OUTLINED_ISLANDS = 4096; // a 26k-triangle soup's rects would drown the JSON
+    if (scene3d.paintIslands()) |isls| {
+        if (isls.len <= MAX_OUTLINED_ISLANDS) {
+            w.writeAll(",\"islands\":[") catch return setReturnString(info, "");
+            for (isls, 0..) |isl, i| {
+                w.print("{s}{d},{d},{d},{d}", .{ if (i == 0) "" else ",", isl.x, isl.y, isl.w, isl.h }) catch return setReturnString(info, "");
+            }
+            w.writeAll("]") catch return setReturnString(info, "");
+        }
+    }
+    w.print(",\"data\":\"{s}\"}}", .{b64}) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, out.items);
 }
 
 /// __model_atlas_apply(detail, base64) → 1 on success, 0 on failure. Restore a saved painting:
@@ -1828,6 +1873,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_paint_material", hostModelPaintMaterial);
     v8_runtime.registerHostFn("__model_paint_material_clear", hostModelPaintMaterialClear);
     v8_runtime.registerHostFn("__model_set_paint_detail", hostModelSetPaintDetail);
+    v8_runtime.registerHostFn("__model_paint_atlas_estimate", hostModelPaintAtlasEstimate);
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
     v8_runtime.registerHostFn("__model_paint_program_read", hostModelPaintProgramRead);

@@ -16,6 +16,7 @@ const layout = @import("../layout.zig");
 const effect_assemble = @import("effect_assemble.zig");
 const static_instance_policy = @import("static_instance_policy.zig");
 const model_paint = @import("model_paint.zig");
+const paint_islands_mod = @import("paint_islands.zig");
 const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
 const mesh_edit = @import("mesh_edit.zig");
@@ -918,7 +919,10 @@ pub fn meshTopoLoopCut() bool {
 
     const ok = replaceActiveEditMesh(owned, cut.tri_count * 3);
     if (ok) {
-        if (cut.groups) |g| model_source.setFaceGroups(g);
+        if (cut.groups) |g| {
+            model_source.setFaceGroups(g);
+            _ = refreshPaintLayout(); // re-island by the fresh grouping (groups land after adopt)
+        }
         mesh_edit.setMode(.edge);
     }
     return ok;
@@ -966,7 +970,10 @@ pub fn meshDeleteSelection() bool {
     defer std.heap.c_allocator.free(owned);
 
     const ok = replaceActiveEditMesh(owned, kept);
-    if (ok and has_groups) model_source.setFaceGroups(groups.items);
+    if (ok and has_groups) {
+        model_source.setFaceGroups(groups.items);
+        _ = refreshPaintLayout();
+    }
     return ok;
 }
 
@@ -1037,7 +1044,10 @@ pub fn meshAppendGroup(new_verts: []const f32, new_count: u32, new_groups: []con
     defer std.heap.c_allocator.free(owned);
 
     const ok = replaceActiveEditMesh(owned, cur_count + new_count);
-    if (ok) model_source.setFaceGroups(groups.items);
+    if (ok) {
+        model_source.setFaceGroups(groups.items);
+        _ = refreshPaintLayout();
+    }
     return .{ .ok = ok, .lo = offset, .hi = offset + new_group_span, .count = cur_count + new_count };
 }
 
@@ -1095,7 +1105,10 @@ fn hideGroup(lo: u32, hi: u32) bool {
     defer std.heap.c_allocator.free(owned);
     const kept: u32 = @intCast(owned.len / 8);
     const ok = replaceActiveEditMesh(owned, kept);
-    if (ok) model_source.setFaceGroups(keep_g.items);
+    if (ok) {
+        model_source.setFaceGroups(keep_g.items);
+        _ = refreshPaintLayout();
+    }
     return ok;
 }
 
@@ -1136,7 +1149,10 @@ fn showGroup(lo: u32, hi: u32) bool {
     };
     defer std.heap.c_allocator.free(owned);
     const ok = replaceActiveEditMesh(owned, cur_count + @as(u32, @intCast(entry.verts.len / 8)));
-    if (ok) model_source.setFaceGroups(groups.items);
+    if (ok) {
+        model_source.setFaceGroups(groups.items);
+        _ = refreshPaintLayout();
+    }
     return ok;
 }
 
@@ -1748,13 +1764,14 @@ pub fn paintFaceCount() u32 {
     return model_paint.faceCount();
 }
 
-// ── Free-form brush stroke (per-face-safe sub-face painting) ────────────────────────
+// ── Free-form brush stroke (face-safe sub-face painting) ────────────────────────────
 // The one brush system paints two ways: a per-face fill (paintAt/paintFaceByIndex above)
-// and a free-form stroke that lays sub-face dabs WITHOUT leaking onto neighbour faces
-// (req_2281). Two face-safety modes, user-toggleable (req_2283): CLIP paints whichever
-// face each dab lands on (overhang clipped to that triangle); LOCK masks the whole stroke
-// to the face pressed at stroke-begin. Sub-face room only exists once detail>1 (setPaintDetail);
-// at detail 1 a dab degrades to a fill, so the fill path never regresses.
+// and a free-form stroke of dabs in the face's ISLAND space (model_paint) — the dab is
+// clipped to the authored face's silhouette, so it crosses a quad's diagonal seamlessly
+// but never leaks onto a neighbour face (req_2281, req_2515/req_2516). Two face-safety
+// modes, user-toggleable (req_2283): CLIP paints whichever face each dab lands on; LOCK
+// masks the whole stroke to the face pressed at stroke-begin (it stops at that face's
+// boundary). Stroke fineness comes from the paint DENSITY (texels/meter, setPaintDetail).
 var g_paint_mode: u8 = 0; // 0 = clip, 1 = lock
 var g_locked_face: u32 = 0;
 
@@ -1774,19 +1791,13 @@ pub fn paintStrokeBegin(mx: f32, my: f32) i32 {
     return @intCast(hit.face);
 }
 
-/// Stamp one dab onto every triangle of `face`'s authored group (req_2506): the dab's
-/// centre is re-expressed in each member's barycentric (possibly outside its triangle —
-/// stampInner clips), so a dab near a quad's diagonal covers BOTH halves instead of a
-/// half-disc dying at the seam. Records each member dab for replay.
+/// Stamp ONE dab (and record it once). The island layout made the per-member fan-out
+/// obsolete: a single stamp covers every triangle of the authored face the disc
+/// overlaps (the island is one continuous space), and stamping each member separately
+/// would double-blend the texels near the diagonal.
 fn stampGroup(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, rgb: [3]u8) void {
-    const p = model_paint.pointFromBary(face, u, v);
-    var gbuf: [model_paint.MAX_GROUP_FACES]u32 = undefined;
-    const members = model_paint.groupFaces(face, &gbuf);
-    for (members) |f| {
-        const uv: [2]f32 = if (f == face) .{ u, v } else model_paint.baryOfPointOnFace(f, p);
-        if (mat) model_paint.paintStampTex(f, uv[0], uv[1], radius, flow) else model_paint.paintStamp(f, uv[0], uv[1], radius, rgba, flow);
-        paint_program.recordDab(f, uv[0], uv[1], radius, flow, mat, rgb);
-    }
+    if (mat) model_paint.paintStampTex(face, u, v, radius, flow) else model_paint.paintStamp(face, u, v, radius, rgba, flow);
+    paint_program.recordDab(face, u, v, radius, flow, mat, rgb);
 }
 
 /// One free-form brush dab. CLIP: paint whichever face the ray hits, clipped to its
@@ -1812,10 +1823,10 @@ pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f3
     return @intCast(hit.face);
 }
 
-/// Set the free-form detail (patch size 8/16/32; 1 = fill-only). Re-tessellates the paint
-/// atlas, rewrites the resident mesh UVs in place, then re-uploads the whole mesh so the new
-/// mapping draws. Returns the ACTUAL detail after the call (the budget guard may keep the old
-/// one), so the UI can reflect what really took.
+/// Set the paint DENSITY (texels per meter — Blockbench 16x semantics; 1 = fill-only
+/// look). Rebuilds the island atlas, rewrites the resident mesh UVs in place, then
+/// re-uploads the whole mesh so the new mapping draws. Returns the ACTUAL density after
+/// the call (paint_islands halves an over-budget request), so the UI shows what took.
 pub fn setPaintDetail(px: i32) i32 {
     const verts = g_edit_verts orelse return -1;
     if (g_edit_count == 0) return -1;
@@ -1824,6 +1835,33 @@ pub fn setPaintDetail(px: i32) i32 {
     const face_count = g_edit_count / 3;
     if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
     return @intCast(model_paint.detail());
+}
+
+/// Rebuild the paint-island layout from the CURRENT model_source face groups and
+/// re-upload the mesh. Face groups always land AFTER the paint target is adopted (the
+/// __mesh_set_face_groups door, a topo op's re-grouping), so every groups-setter calls
+/// this to turn the initial all-loose layout into real authored-face islands. Carries
+/// per-face base colours; sub-face strokes return via stroke-program replay.
+pub fn refreshPaintLayout() bool {
+    const verts = g_edit_verts orelse return false;
+    if (g_edit_count == 0 or !model_paint.hasTarget()) return false;
+    model_paint.rebuildLayout(verts, g_edit_count);
+    const face_count = g_edit_count / 3;
+    if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
+    return true;
+}
+
+/// Dry-run a density against the current paint target — the atlas dims + applied
+/// density the island layout would produce, without adopting it. The atlas-creation
+/// prompt shows these as the honest per-option cost.
+pub const PaintEstimate = model_paint.AtlasEstimate;
+pub fn estimatePaintAtlas(density: f32) ?PaintEstimate {
+    return model_paint.estimateAtlas(density);
+}
+
+/// The live island rects (for the UV inspector's structure overlay), or null.
+pub fn paintIslands() ?[]const paint_islands_mod.Island {
+    return model_paint.layoutIslands();
 }
 
 // ── Paint variants (save / load a whole painting) ───────────────────────────────────

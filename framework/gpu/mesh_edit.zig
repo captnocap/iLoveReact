@@ -1104,12 +1104,15 @@ fn applyFaceHighlight() void {
         }
         _ = g_face_base.remove(f);
     }
-    // Tint newly selected faces — save the WHOLE patch so free-form paint survives.
+    // Tint newly selected faces — save the face's whole island rect (sized PER FACE
+    // now: islands give big faces big rects) so free-form paint survives.
     var f: u32 = 0;
     while (f < sel.len) : (f += 1) {
         if (!sel[f]) continue;
         if (g_face_base.contains(f)) continue;
-        const patch = alloc.alloc(u8, model_paint.facePatchLen()) catch continue;
+        const plen = model_paint.facePatchLen(f);
+        if (plen == 0) continue;
+        const patch = alloc.alloc(u8, plen) catch continue;
         if (!model_paint.saveFacePatch(f, patch)) {
             alloc.free(patch);
             continue;
