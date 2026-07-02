@@ -66,17 +66,27 @@ export default function WorldViewport(props: {
 
   // Push the JS-solved iso pose to the native loader. Cheap (8 floats) — the only
   // per-interaction bridge traffic; the host re-applies it every embedded frame.
-  const pushCamera = useCallback(() => {
+  // Returns whether it landed (the node exists + the door is live).
+  const pushCamera = useCallback((): boolean => {
     const nodeId = Number(loaderRef.current?.id ?? 0);
-    if (!nodeId || typeof g.__compiled_world_set_camera !== 'function') return;
+    if (!nodeId || typeof g.__compiled_world_set_camera !== 'function') return false;
     const s: any = stage.solve();
     g.__compiled_world_set_camera(nodeId, s.pos[0], s.pos[1], s.pos[2], s.target[0], s.target[1], s.target[2], s.fov);
+    return true;
   }, [stage]);
 
-  // Boot: aim the camera once the loader node exists (next tick after mount).
+  // Boot: aim the camera as soon as the loader node exists. The node id lands a
+  // few frames after mount (host-side create), so retry until the push takes —
+  // a single delayed shot missed and left the loader's own default framing
+  // (the "zoomed out into nothing" boot, req_2492).
   useEffect(() => {
-    const t = setTimeout(pushCamera, 16);
-    return () => clearTimeout(t);
+    if (pushCamera()) return;
+    let tries = 0;
+    const t = setInterval(() => {
+      tries += 1;
+      if (pushCamera() || tries > 120) clearInterval(t);
+    }, 32);
+    return () => clearInterval(t);
   }, [pushCamera]);
 
   // The active floor lifts the camera target + the pick plane (Sims storeys).

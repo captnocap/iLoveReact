@@ -730,12 +730,22 @@ fn copyPalette(dst: *[MAX_PALETTE][3]f32, rgb: []const f32) usize {
 }
 
 pub fn setGroundLook(formula: []const u8, tile_rgb: []const f32, flora_rgb: []const f32, zone_rgb: []const f32) void {
-    if (g_ground_formula) |old| look_alloc.free(old);
-    g_ground_formula = null;
-    if (formula.len > 0) {
-        const copy = look_alloc.alloc(u8, formula.len) catch return;
-        @memcpy(copy, formula);
-        g_ground_formula = copy;
+    // Consumers (the loader's painted-chunk nodes) hold the formula SLICE and
+    // the GPU pipeline reads it every frame — so the allocation must stay put
+    // whenever the content is unchanged (the common re-arm push), and a real
+    // change must leave the old bytes to the loader's pointer-swap pass, never
+    // free them under a live node (SIGSEGV req_2492: freed page, unmapped).
+    const same = if (g_ground_formula) |old| std.mem.eql(u8, old, formula) else formula.len == 0;
+    if (!same) {
+        // Deliberately NOT freed: the loader re-points nodes on the next frame
+        // by pointer identity; the superseded copy leaks (formula pushes are
+        // rare content changes, not per-frame traffic).
+        g_ground_formula = null;
+        if (formula.len > 0) {
+            const copy = look_alloc.alloc(u8, formula.len) catch return;
+            @memcpy(copy, formula);
+            g_ground_formula = copy;
+        }
     }
     g_palette_count = copyPalette(&g_palette, tile_rgb);
     g_flora_palette_count = copyPalette(&g_flora_palette, flora_rgb);

@@ -6819,8 +6819,19 @@ fn applyPaintLayer(runtime: *Runtime) void {
         const i = slot.?;
         const height_dirty = fresh or chunk.dirty.height;
         // flora + zones ride the same packed D stream as the tiles (layout v2),
-        // so any cell-channel edit re-encodes it
-        const tiles_dirty = fresh or chunk.dirty.tiles or chunk.dirty.flora or chunk.dirty.zones;
+        // so any cell-channel edit re-encodes it. A formula IDENTITY change also
+        // re-encodes: setGroundLook keeps superseded formula bytes alive exactly
+        // so this pointer-swap pass can migrate live nodes without a frame ever
+        // reading freed memory (SIGSEGV req_2492).
+        const live_formula = map_paint.groundFormula();
+        const formula_stale = if (live_formula) |f|
+            (node_has_formula: {
+                const nf = runtime.kid_list.items[first + i].scene3d_ground_formula orelse break :node_has_formula true;
+                break :node_has_formula nf.ptr != f.ptr;
+            })
+        else
+            runtime.kid_list.items[first + i].scene3d_ground_formula != null;
+        const tiles_dirty = fresh or chunk.dirty.tiles or chunk.dirty.flora or chunk.dirty.zones or (runtime.paint_slot_used[i] and formula_stale);
         // the water surface is bed + depth, so a re-dug bed moves the water too
         const water_dirty = height_dirty or chunk.dirty.water;
         if (!height_dirty and !tiles_dirty and !water_dirty) continue;
@@ -6885,7 +6896,7 @@ fn applyPaintLayer(runtime: *Runtime) void {
             chunk.dirty.tiles = false;
             chunk.dirty.flora = false;
             chunk.dirty.zones = false;
-            if (map_paint.groundFormula()) |formula| {
+            if (live_formula) |formula| {
                 const need = map_paint.groundDataFloats();
                 var ground = runtime.paint_slot_ground[i];
                 if (ground == null or ground.?.len < need) {
@@ -6902,6 +6913,10 @@ fn applyPaintLayer(runtime: *Runtime) void {
                     node.scene3d_color_g = 1;
                     node.scene3d_color_b = 1;
                 }
+            } else {
+                // the look was cleared — drop the stale pointers, fall to tint
+                node.scene3d_ground_formula = null;
+                node.scene3d_ground_data = null;
             }
         }
         if (node.scene3d_ground_formula == null) {

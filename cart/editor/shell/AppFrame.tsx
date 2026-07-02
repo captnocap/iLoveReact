@@ -28,7 +28,7 @@ import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import { loadPersistedState, persistState } from '../data/persistView';
-import { applyMapPaintEffects } from '../stage/mapPaint';
+import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
 import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
 import { primitivePartMesh, composeModelParts, storedModelParts, fileModelPackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
@@ -98,6 +98,14 @@ export default function AppFrame() {
   // Mirror the active view into hot-state so a dev hot reload rehydrates exactly
   // what you were looking at instead of snapping back to defaults.
   useEffect(() => { persistState(state); }, [state]);
+
+  // MAPPAINT req_2492: a hot-restored ACTIVE paint tool must RE-ARM the host on
+  // boot — applyMapPaintEffects otherwise only fires on patches, so a reload
+  // that rehydrated active=true left the host with no ground look and a stale
+  // tool (paint strokes silently did nothing).
+  useEffect(() => {
+    if (state.mapPaint.active) applyMapPaintEffects(defaultMapPaint(), state.mapPaint);
+  }, []);
 
   // Board the bus: every recorded edit (state.seq bumps once per edit; undo/redo
   // don't) is dispatched onto the real editorbus door as it happens. history[0] is
