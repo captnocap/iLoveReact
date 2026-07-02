@@ -11,7 +11,7 @@ import {
 } from '../../../runtime/game/map';
 import { EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf } from '../render3d/groundFormula';
 import { FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, ZONE_COLORS } from '../world/floraKinds';
-import { TILE_KINDS } from '../world/tileKinds';
+import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 
 export type MapZoneDef = { id: string; name: string; color: string };
 export type MapPaintChannel = 'terrain' | 'tile' | 'water' | 'flora' | 'zone' | 'road';
@@ -70,11 +70,21 @@ export function defaultMapPaint(): MapPaintState {
   };
 }
 
-// The paintable GROUND kinds for the bar's palette — road-grammar kinds land
-// through the road channel's stroke compiler, not the hand brush.
+// The paintable GROUND kinds for the bar's palette — TERRAIN SURFACES only
+// (req_2496). The old 2D painter flattened everything into tiles; those
+// non-terrain kinds are dead here and never return:
+//   · placement 'embedded' (wall/door/bush) — building tools own walls/doors
+//     (the piece system), flora owns bushes (its own channel)
+//   · placement 'gameplay'/'dev' (spawn/save/vehicleSpawn/marker) — semantic
+//     overlay NODES per the V24 ruling, never ground paint
+//   · the road-grammar kinds (lanes/junction/crosswalk/median) — authored by
+//     the road channel's stroke compiler, not the hand brush
+//   · 'water' — its own channel (painted depth, not a surface swatch)
+const ROAD_GRAMMAR_KINDS = ['laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'junction', 'crosswalk', 'median'];
 export const PAINTABLE_TILE_KINDS: readonly number[] = TILE_KINDS
   .map((k, i) => [k, i] as const)
-  .filter(([k]) => !['laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'junction', 'crosswalk', 'median'].includes(k))
+  .filter(([k]) => tileKindDefinition(k).placement === 'surface')
+  .filter(([k]) => !ROAD_GRAMMAR_KINDS.includes(k) && k !== 'water')
   .map(([, i]) => i);
 
 // RoadCellKind → this cart's TILE_KINDS indices, in the host enum order
