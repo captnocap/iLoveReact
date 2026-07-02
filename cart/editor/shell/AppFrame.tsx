@@ -34,14 +34,19 @@ import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/comman
 import { primitivePartMesh, composeModelParts, storedModelParts, fileModelPackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES, FLOORS } from '../data/content';
-import { colorStudioSpec, colorStudioOverrideKey, rgbToCss } from '../data/colorStudio';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
+import { colorStudioSpec, colorStudioOverrideKey, paletteForSpecVariant, rgbToCss } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, shaderSpec } from '../textures/shaders';
 import { oklchName, type ColorLens } from '../data/colorSpine';
-import type { OklchColor } from '../../../runtime/paint/colors';
+import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import { useBuildJournal } from '../data/journal';
 import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
 import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } from '../data/documents';
+
+// FLOORCTL req_2485: floorIndex is the world viewport's REAL active storey
+// (0 = Ground) — the action bar's ▼/▲ is the one control. Storeys above this
+// are out of the build envelope for now.
+const MAX_FLOOR = 8;
 
 export default function AppFrame() {
   // The shell for BOTH routes. AppFrame stays mounted across the Editor/Play
@@ -234,7 +239,9 @@ export default function AppFrame() {
       if (command.id === 'toggle-view-mode') {
         next = { ...next, viewMode: prev.viewMode === '3D' ? '2D' : '3D' };
       } else if (command.id === 'cycle-floor') {
-        next = { ...next, floorIndex: (prev.floorIndex + 1) % FLOORS.length };
+        // FLOORCTL req_2485: floorIndex is the REAL active storey (0 = Ground);
+        // the command steps up and wraps back to the ground past the cap.
+        next = { ...next, floorIndex: prev.floorIndex >= MAX_FLOOR ? 0 : prev.floorIndex + 1 };
       } else if (command.id === 'toggle-minimap') {
         next = { ...next, rightPane: prev.rightPane === 'grid' ? 'inspector' : 'grid' };
       } else if (command.id === 'focus-selection') {
@@ -806,6 +813,26 @@ export default function AppFrame() {
     prevTrisRef.current = tris;
   }, [state.modelTool.tris]);
 
+  // Studio colour → brush ink. The viewer owns the live brush; this is the ONE
+  // sync point pouring the spine's current colour into a colour-kind ink.
+  // (ModelBrushDock used to do this, but the paint toolbar replaced it and the
+  // dock is no longer mounted — without this, the toolbar swatch showed the
+  // picked colour while the brush kept depositing its mount default.)
+  useEffect(() => {
+    const brush = state.modelTool.brush;
+    if (!brush || brush.ink.kind !== 'color') return;
+    const hex = oklchToHex(state.colorSpineCurrent);
+    if (brush.ink.hex.toLowerCase() === hex.toLowerCase()) return;
+    modelToolApiRef.current?.setBrush({ ...brush, ink: { kind: 'color', hex } });
+  }, [state.colorSpineCurrent]);
+
+  // Color Studio slot overrides for the PAINT path: the shader-ink pickers ask
+  // for (specId, variant) and fold the user's palette into the ink data[].
+  const paintPaletteFor = (specId: string, variant: number): Rgb[] | null => {
+    const spec = shaderSpec(specId);
+    return spec ? paletteForSpecVariant(state.colorStudioOverrides, spec, variant) : null;
+  };
+
   const openModelDocument = (model: ModelPackage) => {
     const doc = modelDocument(model);
     // Focus moves across the screen into the center/inspector document — the
@@ -1005,7 +1032,10 @@ export default function AppFrame() {
             outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart }}
             onTool={(id) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` }))}
             onSnap={() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` }))}
-            onFloor={() => runCommand('cycle-floor', 'toolbar')}
+            onFloor={(delta) => setState((prev) => {
+              const floorIndex = Math.max(0, Math.min(MAX_FLOOR, prev.floorIndex + delta));
+              return { ...prev, floorIndex, status: floorIndex === 0 ? 'floor: Ground' : `floor: Floor ${floorIndex}` };
+            })}
             onViewMode={(viewMode) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` }))}
             onMapPaint={patchMapPaint}
             onWorkspaceDocument={selectWorkspaceDocument}
@@ -1148,6 +1178,7 @@ export default function AppFrame() {
               libraryFilter={state.colorSpineLibraryFilter}
               rampSteps={state.colorSpineRampSteps}
               scenePick={state.colorSpineScenePick}
+              paletteFor={paintPaletteFor}
               spine={{
                 onSetCurrent: setColorSpineCurrent,
                 onAddToTray: addColorSpineToTray,
@@ -1175,6 +1206,7 @@ export default function AppFrame() {
             libraryFilter={state.colorSpineLibraryFilter}
             rampSteps={state.colorSpineRampSteps}
             scenePick={state.colorSpineScenePick}
+            paletteFor={paintPaletteFor}
             spine={{
               onSetCurrent: setColorSpineCurrent,
               onAddToTray: addColorSpineToTray,

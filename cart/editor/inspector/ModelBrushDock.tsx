@@ -78,6 +78,7 @@ export default function ModelBrushDock(props: {
   rampSteps: number;
   scenePick: string | null;
   spine: ColorSpineHandlers;
+  paletteFor?: (specId: string, variant: number) => [number, number, number][] | null;
 }) {
   return (
     <Col style={{ gap: 8, paddingTop: 10, marginTop: 10, borderTopWidth: 1, borderColor: DARK_THEME.frame }}>
@@ -103,7 +104,7 @@ export default function ModelBrushDock(props: {
       {/* Paint-with-a-shader: dip the brush into a shader bucket instead of the flat colour above.
           Selecting a bucket sets a shader ink (surface + tuned params); "colour" hands the brush
           back to the Color Studio's current colour. */}
-      <ModelShaderBucket brush={props.brush} onBrush={props.onBrush} colorHex={oklchToHex(props.current)} />
+      <ModelShaderBucket brush={props.brush} onBrush={props.onBrush} colorHex={oklchToHex(props.current)} paletteFor={props.paletteFor} />
     </Col>
   );
 }

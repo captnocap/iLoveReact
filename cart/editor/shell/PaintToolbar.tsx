@@ -19,7 +19,8 @@ import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import ColorStudioWorkbench from '../stage/ColorStudioWorkbench';
 import type { ColorLens } from '../data/colorSpine';
 import type { ColorSpineHandlers } from '../inspector/ModelBrushDock';
-import { shaderGroups, defaultShaderData, shaderSpec, type ShaderSpec } from '../textures/shaders';
+import { shaderGroups, defaultShaderData, shaderSpec, withPalette, type ShaderSpec } from '../textures/shaders';
+import type { Rgb } from '../data/types';
 
 const BAR = '#131519', LINE = '#242a33', TEXT = '#e8edf6', DIM = '#8b93a3', ACCENT = '#6ea8fe', TRACK = '#0d0f13', POP = '#17181b';
 
@@ -36,6 +37,9 @@ type Ink = {
   rampSteps: number;
   scenePick: string | null;
   spine: ColorSpineHandlers;
+  // Color Studio slot overrides for (specId, variant) — folded into a picked
+  // shader ink's data[] so the brush deposits the USER'S palette.
+  paletteFor?: (specId: string, variant: number) => Rgb[] | null;
 };
 
 type Tool = { id: BrushTool; icon: string; tip: string };
@@ -139,14 +143,23 @@ export function PaintPopovers(props: Ink & { popover: PaintPopover; onClose: () 
   const shaderInk = brush.ink.kind === 'shader' ? brush.ink : null;
 
   const pickShader = (spec: ShaderSpec) => {
-    props.onBrush({ ...brush, ink: { kind: 'shader', surface: spec.id, data: defaultShaderData(spec), tiles: shaderInk?.tiles ?? 1 } });
+    // Fold in the user's Color Studio slot overrides (variant 0 = the default take).
+    const data = withPalette(defaultShaderData(spec), props.paletteFor?.(spec.id, 0) ?? null);
+    props.onBrush({ ...brush, ink: { kind: 'shader', surface: spec.id, data, tiles: shaderInk?.tiles ?? 1 } });
+  };
+
+  // Picking a color while a shader is dipped hands the brush back to color
+  // paint — the pick means "paint with THIS", not "recolor the readout".
+  const pickColor = (c: OklchColor) => {
+    props.spine.onSetCurrent(c);
+    if (shaderInk) props.onBrush({ ...brush, ink: { kind: 'color', hex: oklchToHex(c) } });
   };
 
   return (
     // Click-away scrim starting just below the floating bar; the panel drops from the bar.
     <Box style={{ position: 'absolute', left: 0, top: 122, right: 0, bottom: 0 }}>
       <Pressable onPress={props.onClose} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }} />
-      {props.popover === 'ink' ? <InkPanel {...props} pickShader={pickShader} shaderInk={shaderInk} /> : null}
+      {props.popover === 'ink' ? <InkPanel {...props} pickShader={pickShader} pickColor={pickColor} shaderInk={shaderInk} /> : null}
       {props.popover === 'brush' ? <BrushPanel brush={brush} patch={patch} onBrush={props.onBrush} /> : null}
     </Box>
   );
@@ -157,7 +170,7 @@ export function PaintPopovers(props: Ink & { popover: PaintPopover; onClose: () 
 // 240fps → ~50fps. The library panel's pager is the proven answer — same move here.
 const SHADER_PAGE_SIZE = 15;
 
-function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; shaderInk: { surface: string } | null }) {
+function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; pickColor: (c: OklchColor) => void; shaderInk: { surface: string } | null }) {
   // Which section is showing — seeded from the current ink, but freely switchable so you can
   // browse shaders even while a color is active (and back).
   const [tab, setTab] = useState<'color' | 'shader'>(props.shaderInk ? 'shader' : 'color');
@@ -180,7 +193,7 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; shaderInk:
         <ColorStudioWorkbench
           current={props.current} palette={props.palette} lens={props.lens}
           libraryFilter={props.libraryFilter} rampSteps={props.rampSteps} scenePick={props.scenePick}
-          onSetCurrent={props.spine.onSetCurrent} onAddToTray={props.spine.onAddToTray} onPickTray={props.spine.onPickTray}
+          onSetCurrent={props.pickColor} onAddToTray={props.spine.onAddToTray} onPickTray={props.pickColor}
           onSetLens={props.spine.onSetLens} onSetLibraryFilter={props.spine.onSetLibraryFilter} onSetRampSteps={props.spine.onSetRampSteps}
           onScenePick={props.spine.onScenePick} onLoadLibrarySet={props.spine.onLoadLibrarySet}
         />

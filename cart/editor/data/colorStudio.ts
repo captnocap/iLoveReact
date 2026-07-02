@@ -57,10 +57,17 @@ export function hasAnyOverride(state: EditorState, spec: ShaderSpec): boolean {
 
 /** The palette to append to data[] for (spec, variant): full slot list with
  *  overrides applied, or null when nothing is overridden (keeps the 5-float
- *  baked form — mat_pal falls back, pixel-identical). */
+ *  baked form — mat_pal falls back, pixel-identical). Variant-parameterized so
+ *  the PAINT path (shader ink) can ask for any take, not just the studio's. */
+export function paletteForSpecVariant(overrides: Record<string, Rgb>, spec: ShaderSpec, variant: number): Rgb[] | null {
+  const slots = spec.slots ?? [];
+  const any = slots.some((_, slot) => overrides[colorStudioOverrideKey(spec.id, variant, slot)] !== undefined);
+  if (!any) return null;
+  return slots.map((_, slot) => overrides[colorStudioOverrideKey(spec.id, variant, slot)] ?? bakedSlotRgb(spec, slot));
+}
+
 export function paletteFor(state: EditorState, spec: ShaderSpec): Rgb[] | null {
-  if (!hasAnyOverride(state, spec)) return null;
-  return (spec.slots ?? []).map((_, slot) => resolvedSlotRgb(state, spec, slot));
+  return paletteForSpecVariant(state.colorStudioOverrides, spec, state.colorStudioVariant);
 }
 
 /** The complete data[] for the studio's live preview: the spec's own

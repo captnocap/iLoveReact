@@ -10,9 +10,10 @@ import { useState } from 'react';
 import { Col, Row, Text, Pressable, ScrollView, Slider } from '../../../runtime/primitives';
 import { DARK_THEME, type Brush } from '@reactjit/runtime/paint';
 import {
-  shaderSpec, shaderGroups, paramDefaults,
+  shaderSpec, shaderGroups, paramDefaults, withPalette,
   type ShaderSpec, type ShaderParam,
 } from '../textures/shaders';
+import type { Rgb } from '../data/types';
 
 // The live editing state for the active bucket: which spec, which variant (take), and every
 // base/overlay param value. data[] is derived from these via spec.buildData on each commit.
@@ -39,7 +40,14 @@ function fmt(p: ShaderParam, v: number): string {
   return p.unit ? `${s}${p.unit}` : s;
 }
 
-export default function ModelShaderBucket(props: { brush: Brush; onBrush: (b: Brush) => void; colorHex: string }) {
+export default function ModelShaderBucket(props: {
+  brush: Brush;
+  onBrush: (b: Brush) => void;
+  colorHex: string;
+  // Color Studio slot overrides for (specId, variant) — appended to the ink's
+  // data[] so the brush deposits the USER'S palette, not just the baked one.
+  paletteFor?: (specId: string, variant: number) => Rgb[] | null;
+}) {
   const ink = props.brush.ink;
   const activeSurface = ink.kind === 'shader' ? ink.surface : null;
   const [editing, setEditing] = useState<Editing | null>(() => {
@@ -53,7 +61,10 @@ export default function ModelShaderBucket(props: { brush: Brush; onBrush: (b: Br
   // effect bakes it. Called ONLY on release / discrete picks, never per slider move.
   const commit = (e: Editing) => {
     const variant = e.spec.variants[e.variant] ?? e.spec.variants[0];
-    const data = e.spec.buildData(variant.value, e.base, e.overlay);
+    const data = withPalette(
+      e.spec.buildData(variant.value, e.base, e.overlay),
+      props.paletteFor?.(e.spec.id, e.variant) ?? null,
+    );
     props.onBrush({ ...props.brush, ink: { kind: 'shader', surface: e.spec.id, data, tiles: e.tiles } });
   };
 
