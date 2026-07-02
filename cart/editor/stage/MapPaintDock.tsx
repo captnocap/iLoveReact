@@ -3,11 +3,12 @@
 // dock floats INSIDE the world viewport (the paint-bar convention, req_2469) and
 // only ever calls the __map_* doors at UI rate.
 //
-// Channels: TERRAIN + TILE + WATER + FLORA + ZONE; ROAD arrives with the
-// stroke tools.
+// All six channels: TERRAIN + TILE + WATER + FLORA + ZONE + ROAD (roads are
+// CLICK-authored recipes — each click lays a centerline point, COMMIT compiles
+// lanes/sidewalks/junctions/crosswalks host-side per the ruled grammar).
 import { Fragment } from 'react';
 import { C } from '../workspace.cls';
-import type { MapBrushProfile, MapBrushShape, MapTerrainTool } from '../../../runtime/game/map';
+import { mapRoadStats, type MapBrushProfile, type MapBrushShape, type MapTerrainTool } from '../../../runtime/game/map';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 
@@ -15,7 +16,7 @@ export type MapZoneDef = { id: string; name: string; color: string };
 
 export type MapPaintState = {
   active: boolean;
-  channel: 'terrain' | 'tile' | 'water' | 'flora' | 'zone';
+  channel: 'terrain' | 'tile' | 'water' | 'flora' | 'zone' | 'road';
   mode: 'paint' | 'erase';
   terrainTool: MapTerrainTool;
   shape: MapBrushShape;
@@ -36,6 +37,10 @@ export type MapPaintState = {
   zones: MapZoneDef[];
   /** armed zone — index into zones */
   zoneIdx: number;
+  // road draft profile (lanesB 0 = one-way)
+  roadLanesF: number;
+  roadLanesB: number;
+  roadSidewalks: boolean;
 };
 
 export const DEFAULT_MAP_PAINT: MapPaintState = {
@@ -56,6 +61,9 @@ export const DEFAULT_MAP_PAINT: MapPaintState = {
   floraKindIdx: 1, // 'Grass'
   zones: [],
   zoneIdx: 0,
+  roadLanesF: 1,
+  roadLanesB: 1,
+  roadSidewalks: true,
 };
 
 // The paintable GROUND kinds for the dock's palette — kinds whose placement is
@@ -66,7 +74,7 @@ export const PAINTABLE_TILE_KINDS: readonly number[] = TILE_KINDS
   .filter(([k]) => !['laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'junction', 'crosswalk', 'median'].includes(k))
   .map(([, i]) => i);
 
-const CHANNELS: MapPaintState['channel'][] = ['terrain', 'tile', 'water', 'flora', 'zone'];
+const CHANNELS: MapPaintState['channel'][] = ['terrain', 'tile', 'water', 'flora', 'zone', 'road'];
 const TERRAIN_TOOLS: MapTerrainTool[] = ['brush', 'ramp', 'slope', 'smooth'];
 const SHAPES: MapBrushShape[] = ['circle', 'square', 'diamond'];
 const PROFILES: MapBrushProfile[] = ['cone', 'flat', 'dome'];
@@ -98,6 +106,8 @@ export default function MapPaintDock(props: {
   state: MapPaintState;
   onPatch: (patch: Partial<MapPaintState>) => void;
   onAddZone: () => void;
+  onRoadCommit: () => void;
+  onRoadCancel: () => void;
 }) {
   const s = props.state;
   const Toggle = s.active ? C.HW_PillOn : C.HW_Pill;
@@ -173,16 +183,58 @@ export default function MapPaintDock(props: {
               </C.HW_Pill>
             </Fragment>
           ) : null}
-          <C.HW_OptionDivider />
-          <PillRow items={SHAPES} value={s.shape} onPick={(shape) => props.onPatch({ shape })} />
-          <PillRow items={PROFILES} value={s.profile} onPick={(profile) => props.onPatch({ profile })} />
-          <C.HW_OptionDivider />
-          <Stepper
-            label="SIZE"
-            value={`${s.radiusM}m`}
-            onDown={() => props.onPatch({ radiusM: Math.max(1, s.radiusM - 1) })}
-            onUp={() => props.onPatch({ radiusM: Math.min(40, s.radiusM + 1) })}
-          />
+          {s.channel === 'road' ? (
+            <Fragment>
+              <C.HW_OptionDivider />
+              <Stepper
+                label="LANES→"
+                value={String(s.roadLanesF)}
+                onDown={() => props.onPatch({ roadLanesF: Math.max(1, s.roadLanesF - 1) })}
+                onUp={() => props.onPatch({ roadLanesF: Math.min(3, s.roadLanesF + 1) })}
+              />
+              <Stepper
+                label="←LANES"
+                value={s.roadLanesB === 0 ? '1-WAY' : String(s.roadLanesB)}
+                onDown={() => props.onPatch({ roadLanesB: Math.max(0, s.roadLanesB - 1) })}
+                onUp={() => props.onPatch({ roadLanesB: Math.min(3, s.roadLanesB + 1) })}
+              />
+              {(() => {
+                const Walk = s.roadSidewalks ? C.HW_PillOn : C.HW_Pill;
+                const WalkText = s.roadSidewalks ? C.HW_PillTextOn : C.HW_PillText;
+                return (
+                  <Walk onPress={() => props.onPatch({ roadSidewalks: !s.roadSidewalks })}>
+                    <WalkText>SIDEWALKS</WalkText>
+                  </Walk>
+                );
+              })()}
+              <C.HW_OptionDivider />
+              {(() => {
+                const stats = mapRoadStats();
+                return (
+                  <Fragment>
+                    <C.HW_PillText>{`${stats.draftPoints} PTS · ${stats.strokes} ROADS`}</C.HW_PillText>
+                    {stats.planTruncated ? <C.HW_PillText>PLAN TRUNCATED — TOO MANY ROAD CELLS</C.HW_PillText> : null}
+                    <C.HW_PillOn onPress={props.onRoadCommit}><C.HW_PillTextOn>COMMIT</C.HW_PillTextOn></C.HW_PillOn>
+                    <C.HW_Pill onPress={props.onRoadCancel}><C.HW_PillText>CANCEL</C.HW_PillText></C.HW_Pill>
+                  </Fragment>
+                );
+              })()}
+            </Fragment>
+          ) : null}
+          {s.channel !== 'road' ? (
+            <Fragment>
+              <C.HW_OptionDivider />
+              <PillRow items={SHAPES} value={s.shape} onPick={(shape) => props.onPatch({ shape })} />
+              <PillRow items={PROFILES} value={s.profile} onPick={(profile) => props.onPatch({ profile })} />
+              <C.HW_OptionDivider />
+              <Stepper
+                label="SIZE"
+                value={`${s.radiusM}m`}
+                onDown={() => props.onPatch({ radiusM: Math.max(1, s.radiusM - 1) })}
+                onUp={() => props.onPatch({ radiusM: Math.min(40, s.radiusM + 1) })}
+              />
+            </Fragment>
+          ) : null}
           {s.channel === 'terrain' && s.terrainTool === 'brush' ? (
             <Fragment>
               <Stepper

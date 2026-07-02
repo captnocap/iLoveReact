@@ -23,13 +23,14 @@
 const std = @import("std");
 const chunks = @import("chunks.zig");
 const stamps = @import("stamps.zig");
+pub const roads = @import("roads.zig");
 
 const DOT_M = chunks.DOT_M;
 const CHUNK_TILES = chunks.CHUNK_TILES;
 
 // ── the armed tool ────────────────────────────────────────────────────────────
 
-pub const Channel = enum(u8) { terrain = 0, tile = 1, water = 2, flora = 3, zone = 4 };
+pub const Channel = enum(u8) { terrain = 0, tile = 1, water = 2, flora = 3, zone = 4, road = 5 };
 pub const Mode = enum(u8) { paint = 0, erase = 1 };
 /// Terrain sub-tools (the height card's modes: brush/ramp/slope/smooth).
 pub const TerrainTool = enum(u8) { brush = 0, ramp = 1, slope = 2, smooth = 3 };
@@ -114,12 +115,22 @@ fn claimStamp(key: u64) bool {
 
 pub fn reset() void {
     chunks.clearAll();
+    roads.clearAll();
+    g_road_under.clearRetainingCapacity();
+    road_plan_truncated = false;
     g_tool = .{};
     g_stroke_active = false;
     g_last = null;
     g_slope_count = 0;
     g_ramp_start = null;
     g_seen.clearRetainingCapacity();
+}
+
+/// The draft profile road clicks author with (set by chrome before drafting).
+var g_road_profile: roads.RoadProfile = .{ .lanesF = 1, .lanesB = 1, .sidewalks = true };
+
+pub fn setRoadProfile(p: roads.RoadProfile) void {
+    g_road_profile = roads.clampProfile(p);
 }
 
 // ── the stroke lifecycle ──────────────────────────────────────────────────────
@@ -144,6 +155,16 @@ pub fn strokeBegin(x: f32, z: f32) void {
         pushSlopePoint(x, z);
         return;
     }
+    if (g_tool.channel == .road) {
+        // roads are CLICK-authored strokes (painterBehavior 'click'): each
+        // press lays a draft centerline point at the cell center, in the
+        // global-tile frame the road compiler plans in. Commit stamps.
+        if (roads.draftPointCount() == 0) roads.beginDraft(g_road_profile);
+        const cell = cellCenter(x, z);
+        roads.addDraftPoint(cell[0] + chunks.CHUNK_METERS / 2, cell[1] + chunks.CHUNK_METERS / 2);
+        g_stats.stamps += 1;
+        return;
+    }
     // first sample of the stroke: just the point (PaintCanvas:1616)
     applySampleAt(x, z);
     g_last = .{ x, z };
@@ -152,6 +173,8 @@ pub fn strokeBegin(x: f32, z: f32) void {
 pub fn strokeMove(x: f32, z: f32) void {
     if (!g_stroke_active) return;
     g_stats.samples += 1;
+
+    if (g_tool.channel == .road) return; // click tool: points land on press only
 
     if (g_tool.channel == .terrain and g_tool.terrain_tool == .ramp) {
         g_ramp_current = .{ x, z };
@@ -230,6 +253,7 @@ fn applySampleAt(x: f32, z: f32) void {
         },
         .water => stampWaterAt(x, z),
         .tile, .flora, .zone => stampCellsAt(x, z),
+        .road => {}, // click-authored in strokeBegin; never a drag sample
     }
 }
 
@@ -776,6 +800,77 @@ pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
     return n;
 }
 
+// ── roads: strokes compile to tile stamps with an UNDERCOAT ──────────────────
+// ROADSTROKE-0610 semantics (PaintCanvas:1143): a road is a recipe (centerline
+// + profile, roads.zig); stamping is DESTRUCTIVE into the chunk tile grids —
+// the grid stays the single runtime truth — with an undercoat (cell → prior
+// tile index) so editing/deleting a stroke restores the paint beneath. Any
+// stroke change does a GLOBAL restamp (restore all, replan all, stamp all):
+// junctions depend on every stroke, and road footprints are tiny next to the
+// chunk grids.
+
+const MAX_PLAN_CELLS: usize = 65536;
+var g_plan_cells: [MAX_PLAN_CELLS]roads.PlanCell = undefined;
+var g_road_under: std.AutoHashMapUnmanaged(u64, i16) = .empty;
+var g_road_strokes_buf: [roads.MAX_STROKES]roads.RoadStroke = undefined;
+/// LOUD truncation flag from the last restamp (surface it in chrome, never drop silently).
+pub var road_plan_truncated: bool = false;
+
+fn roadCellKey(gx: i32, gz: i32) u64 {
+    return (@as(u64, @as(u32, @bitCast(gx))) << 32) | @as(u64, @as(u32, @bitCast(gz)));
+}
+
+fn tileAtGlobal(gx: i32, gz: i32) ?*i16 {
+    const cx = chunks.chunkOfGlobalTile(gx);
+    const cz = chunks.chunkOfGlobalTile(gz);
+    const ch = chunks.chunkAt(cx, cz) orelse return null;
+    const idx = chunks.cellIndex(gx - cx * CHUNK_TILES, gz - cz * CHUNK_TILES) orelse return null;
+    ch.dirty.tiles = true;
+    return &ch.tiles[idx];
+}
+
+/// Restore every undercoated cell, replan all strokes, stamp the plan, and
+/// capture the fresh undercoat. Call after any stroke commit/delete.
+pub fn roadsRestamp() void {
+    // 1. restore the paint beneath the previous plan
+    var it = g_road_under.iterator();
+    while (it.next()) |entry| {
+        const gx: i32 = @bitCast(@as(u32, @truncate(entry.key_ptr.* >> 32)));
+        const gz: i32 = @bitCast(@as(u32, @truncate(entry.key_ptr.*)));
+        if (tileAtGlobal(gx, gz)) |cell| cell.* = entry.value_ptr.*;
+    }
+    g_road_under.clearRetainingCapacity();
+
+    // 2. replan every stroke
+    const count = roads.collectStrokes(g_road_strokes_buf[0..]);
+    const plan = roads.planRoads(g_road_strokes_buf[0..count], g_plan_cells[0..]);
+    road_plan_truncated = plan.truncated;
+
+    // 3. stamp, capturing the undercoat
+    for (g_plan_cells[0..plan.count]) |pc| {
+        const cell = tileAtGlobal(pc.gx, pc.gz) orelse continue;
+        g_road_under.put(seen_alloc, roadCellKey(pc.gx, pc.gz), cell.*) catch continue;
+        cell.* = roads.kindIndex(pc.kind);
+    }
+}
+
+/// Commit the click-authored draft and restamp. Null = draft too short / table full.
+pub fn roadCommit() ?u32 {
+    const id = roads.commitDraft() orelse return null;
+    roadsRestamp();
+    return id;
+}
+
+pub fn roadCancel() void {
+    roads.cancelDraft();
+}
+
+pub fn roadDelete(id: u32) bool {
+    const ok = roads.deleteStroke(id);
+    if (ok) roadsRestamp();
+    return ok;
+}
+
 // ── dirty bookkeeping ─────────────────────────────────────────────────────────
 
 pub fn dirtyChunkCount() u32 {
@@ -1007,4 +1102,37 @@ test "stationary height brush deposits once per stroke (global dedup)" {
     strokeMove(0.02, 0.0);
     const stats = strokeEnd();
     try std.testing.expectEqual(@as(u32, 1), stats.stamps);
+}
+
+test "road clicks draft, commit stamps with undercoat, delete restores" {
+    reset();
+    defer reset();
+    const ch = chunks.growChunk(0, 0).?;
+    // pre-paint the ground so the undercoat has something to restore
+    setTool(.{ .channel = .tile, .radius_m = 40, .kind_idx = 7 });
+    strokeBegin(0, 0);
+    _ = strokeEnd();
+
+    // map road cell kinds to content indices (RoadCellKind order)
+    roads.setKindIndices(.{ 10, 11, 12, 13, 14, 15, 16, 17 });
+    setRoadProfile(.{ .lanesF = 1, .lanesB = 1, .sidewalks = true });
+    setTool(.{ .channel = .road });
+    // two clicks: a straight vertical road through the chunk center
+    strokeBegin(0, -20);
+    _ = strokeEnd();
+    strokeBegin(0, 20);
+    _ = strokeEnd();
+    const id = roadCommit().?;
+    try std.testing.expect(!road_plan_truncated);
+
+    // the centerline cell wears a road kind, not the pre-paint
+    const mid = chunks.cellIndex(60, 60).?;
+    const stamped = ch.tiles[mid];
+    try std.testing.expect(stamped >= 10 and stamped <= 17);
+    try std.testing.expect(ch.dirty.tiles);
+
+    // delete restores the paint beneath
+    try std.testing.expect(roadDelete(id));
+    try std.testing.expectEqual(@as(i16, 7), ch.tiles[mid]);
+    try std.testing.expectEqual(@as(usize, 0), roads.strokeCount());
 }

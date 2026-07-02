@@ -224,6 +224,65 @@ fn hostDropZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     chunks.dropZoneIndex(@intFromFloat(idx));
 }
 
+// ── road doors (ROADSTROKE-0610: click-authored recipes, host-compiled) ───────
+// Clicks land through the stroke doors / native input while channel=road; these
+// manage the draft lifecycle + the content mapping.
+
+// __map_road_set_profile(lanesF, lanesB, sidewalks) — the draft profile.
+fn hostRoadSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    engine.setRoadProfile(.{
+        .lanesF = @intFromFloat(@max(0, argToF64(info, 0) orelse 1)),
+        .lanesB = @intFromFloat(@max(0, argToF64(info, 1) orelse 1)),
+        .sidewalks = (argToF64(info, 2) orelse 1) != 0,
+    });
+}
+
+// __map_road_set_kinds(f32[8]) — RoadCellKind → content tile index, in enum
+// order (laneNorth, laneSouth, laneEast, laneWest, median, sidewalk, junction,
+// crosswalk).
+fn hostRoadSetKinds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const vals = argF32Slice(info, 0);
+    if (vals.len < engine.roads.ROAD_CELL_KIND_COUNT) return;
+    var indices: [engine.roads.ROAD_CELL_KIND_COUNT]i16 = undefined;
+    for (&indices, 0..) |*slot, i| slot.* = @intFromFloat(@max(-1, vals[i]));
+    engine.roads.setKindIndices(indices);
+}
+
+// __map_road_commit() -> stroke id (0 = draft too short / table full — LOUD).
+fn hostRoadCommit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnF64(info, @floatFromInt(engine.roadCommit() orelse 0));
+}
+
+fn hostRoadCancel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    _ = info_c;
+    engine.roadCancel();
+}
+
+// __map_road_delete(id) -> 0|1
+fn hostRoadDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const id = argToF64(info, 0) orelse 0;
+    if (id <= 0 or !std.math.isFinite(id)) {
+        setReturnF64(info, 0);
+        return;
+    }
+    setReturnF64(info, if (engine.roadDelete(@intFromFloat(id))) 1 else 0);
+}
+
+// __map_road_stats() -> [strokeCount, draftPoints, planTruncated]
+var road_stats_out: [3]f32 = undefined;
+
+fn hostRoadStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    road_stats_out[0] = @floatFromInt(engine.roads.strokeCount());
+    road_stats_out[1] = @floatFromInt(engine.roads.draftPointCount());
+    road_stats_out[2] = if (engine.road_plan_truncated) 1 else 0;
+    setReturnF32Buffer(info, road_stats_out[0..]);
+}
+
 fn argWorldPoint(info: v8.FunctionCallbackInfo) ?[2]f32 {
     const x = argToF64(info, 0) orelse return null;
     const z = argToF64(info, 1) orelse return null;
@@ -326,6 +385,12 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_set_ground_look", hostSetGroundLook);
     v8_runtime.registerHostFn("__map_set_zone_palette", hostSetZonePalette);
     v8_runtime.registerHostFn("__map_drop_zone", hostDropZone);
+    v8_runtime.registerHostFn("__map_road_set_profile", hostRoadSetProfile);
+    v8_runtime.registerHostFn("__map_road_set_kinds", hostRoadSetKinds);
+    v8_runtime.registerHostFn("__map_road_commit", hostRoadCommit);
+    v8_runtime.registerHostFn("__map_road_cancel", hostRoadCancel);
+    v8_runtime.registerHostFn("__map_road_delete", hostRoadDelete);
+    v8_runtime.registerHostFn("__map_road_stats", hostRoadStats);
     v8_runtime.registerHostFn("__map_stroke_begin", hostStrokeBegin);
     v8_runtime.registerHostFn("__map_stroke_move", hostStrokeMove);
     v8_runtime.registerHostFn("__map_stroke_end", hostStrokeEnd);

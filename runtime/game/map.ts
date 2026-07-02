@@ -14,13 +14,13 @@
 // Kind/zone/flora indices are opaque content indices — legends live cart-side.
 import { callHost, hasHost } from '../ffi';
 
-export type MapChannel = 'terrain' | 'tile' | 'water' | 'flora' | 'zone';
+export type MapChannel = 'terrain' | 'tile' | 'water' | 'flora' | 'zone' | 'road';
 export type MapMode = 'paint' | 'erase';
 export type MapTerrainTool = 'brush' | 'ramp' | 'slope' | 'smooth';
 export type MapBrushShape = 'circle' | 'square' | 'diamond';
 export type MapBrushProfile = 'cone' | 'flat' | 'dome';
 
-const CHANNEL_INDEX: Record<MapChannel, number> = { terrain: 0, tile: 1, water: 2, flora: 3, zone: 4 };
+const CHANNEL_INDEX: Record<MapChannel, number> = { terrain: 0, tile: 1, water: 2, flora: 3, zone: 4, road: 5 };
 const MODE_INDEX: Record<MapMode, number> = { paint: 0, erase: 1 };
 const TERRAIN_TOOL_INDEX: Record<MapTerrainTool, number> = { brush: 0, ramp: 1, slope: 2, smooth: 3 };
 const SHAPE_INDEX: Record<MapBrushShape, number> = { circle: 0, square: 1, diamond: 2 };
@@ -133,6 +133,44 @@ export function mapSetZonePalette(zonePaletteRgb: Float32Array): void {
 /** Delete zone list entry `index`: unzones its cells, shifts higher indices down. */
 export function mapDropZone(index: number): void {
   callHost('__map_drop_zone', undefined, index);
+}
+
+// ── roads (ROADSTROKE-0610: click-authored recipes, host-compiled) ────────────
+// While channel='road', viewport clicks lay draft centerline points host-side;
+// these doors manage the draft lifecycle + the content mapping.
+
+export type MapRoadProfile = { lanesF: number; lanesB: number; sidewalks: boolean };
+
+/** The draft profile road clicks author with. */
+export function mapRoadSetProfile(p: MapRoadProfile): void {
+  callHost('__map_road_set_profile', undefined, p.lanesF, p.lanesB, p.sidewalks ? 1 : 0);
+}
+
+/** RoadCellKind → content tile index, in the host enum order:
+ *  laneNorth, laneSouth, laneEast, laneWest, median, sidewalk, junction, crosswalk. */
+export function mapRoadSetKinds(indices: readonly number[]): void {
+  callHost('__map_road_set_kinds', undefined, new Float32Array(indices));
+}
+
+/** Commit the click-drafted road; the host replans + restamps every stroke.
+ *  Returns the stroke id, or 0 when the draft is too short / the table full. */
+export function mapRoadCommit(): number {
+  return callHost<number>('__map_road_commit', 0);
+}
+
+export function mapRoadCancel(): void {
+  callHost('__map_road_cancel', undefined);
+}
+
+export function mapRoadDelete(id: number): boolean {
+  return callHost<number>('__map_road_delete', 0, id) === 1;
+}
+
+export function mapRoadStats(): { strokes: number; draftPoints: number; planTruncated: boolean } {
+  const ab = callHost<ArrayBuffer | null>('__map_road_stats', null);
+  if (!ab) return { strokes: 0, draftPoints: 0, planTruncated: false };
+  const out = new Float32Array(ab);
+  return { strokes: out[0]!, draftPoints: out[1]!, planTruncated: out[2]! >= 0.5 };
 }
 
 /** Begin a stroke at a world-meter point (chrome-driven path). */
