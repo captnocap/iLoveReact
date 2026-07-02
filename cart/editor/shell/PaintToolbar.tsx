@@ -11,7 +11,7 @@
 // PaintPopovers are the floating menus, which AppFrame renders LATE (this layout paints in tree
 // order, so an overlay must be a late root child to sit over the body — same as DropdownMenu).
 import { useState } from 'react';
-import { Box, Row, Col, Text, Pressable, Slider, ScrollView, Effect } from '../../../runtime/primitives';
+import { Box, Row, Col, Text, Pressable, Slider, Effect } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { type Brush, type BrushTool } from '@reactjit/runtime/paint';
 import { brushFromPreset, BRUSH_PRESETS } from '../../../runtime/paint/model';
@@ -152,10 +152,16 @@ export function PaintPopovers(props: Ink & { popover: PaintPopover; onClose: () 
   );
 }
 
+// One page of shader thumbnails. Every thumb is a LIVE <Effect> quad, so the page size is
+// the live-shader budget: rendering the whole catalog at once (136 quads) dropped the editor
+// 240fps → ~50fps. The library panel's pager is the proven answer — same move here.
+const SHADER_PAGE_SIZE = 15;
+
 function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; shaderInk: { surface: string } | null }) {
   // Which section is showing — seeded from the current ink, but freely switchable so you can
   // browse shaders even while a color is active (and back).
   const [tab, setTab] = useState<'color' | 'shader'>(props.shaderInk ? 'shader' : 'color');
+  const [shaderPage, setShaderPage] = useState(0);
   return (
     <Box style={{ position: 'absolute', left: 410, top: 0, width: 300, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12 }}>
       <Row style={{ gap: 4, marginBottom: 10 }}>
@@ -179,26 +185,56 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; shaderInk:
           onScenePick={props.spine.onScenePick} onLoadLibrarySet={props.spine.onLoadLibrarySet}
         />
       ) : (
-        <ScrollView style={{ height: 320 }}>
-          <Col style={{ gap: 10 }}>
-            {shaderGroups().map((g) => (
-              <Col key={g.group} style={{ gap: 5 }}>
-                <Text style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{g.group.toUpperCase()}</Text>
-                <Row style={{ flexWrap: 'wrap', gap: 6 }}>
-                  {g.specs.map((spec) => {
-                    const on = spec.id === props.shaderInk?.surface;
-                    return (
-                      <Pressable key={spec.id} tooltip={spec.label} onPress={() => props.pickShader(spec)}
-                        style={{ padding: 2, borderRadius: 8, borderWidth: 2, borderColor: on ? ACCENT : 'transparent' }}>
-                        <ShaderThumb shader={spec.shader} data={defaultShaderData(spec)} size={44} />
-                      </Pressable>
-                    );
-                  })}
-                </Row>
+        (() => {
+          // Flatten in shelf order, page, then re-shelve the page: a group caption
+          // renders wherever the page crosses into a new group.
+          const flat = shaderGroups().flatMap((g) => g.specs.map((spec) => ({ group: g.group, spec })));
+          const maxPage = Math.max(0, Math.ceil(flat.length / SHADER_PAGE_SIZE) - 1);
+          const page = Math.min(shaderPage, maxPage);
+          const pageItems = flat.slice(page * SHADER_PAGE_SIZE, page * SHADER_PAGE_SIZE + SHADER_PAGE_SIZE);
+          const first = flat.length === 0 ? 0 : page * SHADER_PAGE_SIZE + 1;
+          const last = Math.min(flat.length, first + pageItems.length - 1);
+          return (
+            <Col style={{ gap: 8 }}>
+              <Row style={{ alignItems: 'center', gap: 8 }}>
+                <Pressable onPress={() => setShaderPage(Math.max(0, page - 1))}
+                  style={{ width: 24, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: LINE }}>
+                  <Icon name="ChevronLeft" size={11} color={DIM} />
+                </Pressable>
+                <Text style={{ color: DIM, fontSize: 10, fontFamily: 'ui-monospace' }}>{first}-{last} / {flat.length}</Text>
+                <Box style={{ flexGrow: 1 }} />
+                <Text style={{ color: DIM, fontSize: 10, fontFamily: 'ui-monospace' }}>{page + 1}/{maxPage + 1}</Text>
+                <Pressable onPress={() => setShaderPage(Math.min(maxPage, page + 1))}
+                  style={{ width: 24, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: LINE }}>
+                  <Icon name="ChevronRight" size={11} color={DIM} />
+                </Pressable>
+              </Row>
+              <Col style={{ gap: 8, minHeight: 290 }}>
+                {pageItems.reduce<Array<{ group: string; specs: ShaderSpec[] }>>((shelves, item) => {
+                  const tail = shelves[shelves.length - 1];
+                  if (tail && tail.group === item.group) tail.specs.push(item.spec);
+                  else shelves.push({ group: item.group, specs: [item.spec] });
+                  return shelves;
+                }, []).map((shelf) => (
+                  <Col key={shelf.group} style={{ gap: 5 }}>
+                    <Text style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{shelf.group.toUpperCase()}</Text>
+                    <Row style={{ flexWrap: 'wrap', gap: 6 }}>
+                      {shelf.specs.map((spec) => {
+                        const on = spec.id === props.shaderInk?.surface;
+                        return (
+                          <Pressable key={spec.id} tooltip={spec.label} onPress={() => props.pickShader(spec)}
+                            style={{ padding: 2, borderRadius: 8, borderWidth: 2, borderColor: on ? ACCENT : 'transparent' }}>
+                            <ShaderThumb shader={spec.shader} data={defaultShaderData(spec)} size={44} />
+                          </Pressable>
+                        );
+                      })}
+                    </Row>
+                  </Col>
+                ))}
               </Col>
-            ))}
-          </Col>
-        </ScrollView>
+            </Col>
+          );
+        })()
       )}
     </Box>
   );
