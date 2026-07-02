@@ -2,7 +2,7 @@ import { Fragment } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { COMMANDS, activeMenuFor, meshToolCommands, meshToolActive, meshTopoCommands, meshPaintCommands } from '../data/commands';
-import { FLOORS, SNAP_MODES } from '../data/content';
+import { SNAP_MODES } from '../data/content';
 import type { Command, EditorState, ViewMode } from '../data/types';
 import MapPaintBar from './MapPaintBar';
 
@@ -17,7 +17,7 @@ export default function ToolOptions(props: {
   onTool: (id: string) => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onSnap: () => void;
-  onFloor: () => void;
+  onFloor: (delta: number) => void;
   onViewMode: (mode: ViewMode) => void;
 }) {
   const activeDoc = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
@@ -115,10 +115,19 @@ export default function ToolOptions(props: {
         <C.HW_OptionLabel>TOOL</C.HW_OptionLabel>
         <C.HW_PillText>{props.activeCommand.key}</C.HW_PillText>
       </C.HW_Pill>
-      <C.HW_Pill onPress={props.onFloor}>
+      {/* FLOORCTL req_2485: the ONE floor control — drives the viewport's real
+          active storey (the floating Ground chip died with the old world pane).
+          Label matches the level vocabulary: Ground, Floor 1, Floor 2, … */}
+      <C.HW_IconButton tooltip="Down a floor" onPress={() => props.onFloor(-1)}>
+        <C.HW_PillText>▼</C.HW_PillText>
+      </C.HW_IconButton>
+      <C.HW_Pill tooltip="The active storey — placements land on this floor's slab">
         <Icon name="Layers" size={12} color={accentFor('textSecondary')} />
-        <C.HW_PillText>{FLOORS[props.state.floorIndex]}</C.HW_PillText>
+        <C.HW_PillText>{props.state.floorIndex === 0 ? 'Ground' : `Floor ${props.state.floorIndex}`}</C.HW_PillText>
       </C.HW_Pill>
+      <C.HW_IconButton tooltip="Up a floor" onPress={() => props.onFloor(1)}>
+        <C.HW_PillText>▲</C.HW_PillText>
+      </C.HW_IconButton>
       <C.HW_Spacer />
       {(['3D', '2D'] as ViewMode[]).map((mode) => {
         const Pill = props.state.viewMode === mode ? C.HW_PillOn : C.HW_Pill;

@@ -18,7 +18,7 @@ export default function Workspace(props: {
   onTool: (id: string) => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onSnap: () => void;
-  onFloor: () => void;
+  onFloor: (delta: number) => void;
   onViewMode: (mode: ViewMode) => void;
   onWorkspaceDocument: (id: string) => void;
   onCloseWorkspaceDocument: (id: string) => void;

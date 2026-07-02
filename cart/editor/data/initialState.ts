@@ -60,7 +60,9 @@ export function initialState(): EditorState {
     snapIndex: 0,
     snapGridMeters: 0,
     snapAngleDegrees: 0,
-    floorIndex: 1,
+    // FLOORCTL req_2485: the REAL active storey (0 = Ground) — boots aligned
+    // with the viewport instead of the old mock's "Floor 1" mismatch.
+    floorIndex: 0,
     viewMode: '3D',
     workspaceDocuments: [WORLD_DOCUMENT],
     activeWorkspaceDocumentId: WORLD_DOCUMENT_ID,
