@@ -3124,6 +3124,13 @@ pub const Runtime = struct {
     /// owned per-slot ground-formula D stream (tile channel), re-encoded on a
     /// dirty tiles channel — the 3d.zig ground pipeline re-reads it every frame
     paint_slot_ground: [MAX_PAINT_SLOTS]?[]f32 = @splat(null),
+    /// the water channel's mirror (chunkFloor.ts floorToWaterBody port): per-slot
+    /// shore-culled depths + surface heights feeding a second "~water~" node
+    paint_water_kids_first: ?usize = null,
+    paint_slot_water_ver: [MAX_PAINT_SLOTS]u32 = @splat(0),
+    paint_slot_water_key: [MAX_PAINT_SLOTS]?[]u8 = @splat(null),
+    paint_slot_depths: [MAX_PAINT_SLOTS]?[]f32 = @splat(null),
+    paint_slot_surface: [MAX_PAINT_SLOTS]?[]f32 = @splat(null),
     paint_drop_warned: bool = false,
     paint_hover: ?[3]f32 = null,
     paint_stroking: bool = false,
@@ -3265,6 +3272,15 @@ pub const Runtime = struct {
         }
         for (self.paint_slot_ground) |maybe_ground| {
             if (maybe_ground) |ground| self.allocator.free(ground);
+        }
+        for (self.paint_slot_water_key) |maybe_key| {
+            if (maybe_key) |key| self.allocator.free(key);
+        }
+        for (self.paint_slot_depths) |maybe_buf| {
+            if (maybe_buf) |buf| self.allocator.free(buf);
+        }
+        for (self.paint_slot_surface) |maybe_buf| {
+            if (maybe_buf) |buf| self.allocator.free(buf);
         }
         {
             var it = self.live_slot_keys.valueIterator();
@@ -4632,6 +4648,12 @@ pub const Runtime = struct {
         });
         self.paint_kids_first = self.kid_list.items.len;
         var paint_slot: usize = 0;
+        while (paint_slot < MAX_PAINT_SLOTS) : (paint_slot += 1) {
+            try self.kid_list.append(self.allocator, .{ .scene3d_mesh = false });
+        }
+        // one water-surface node per paint slot ("~water~" pipeline, inert until wet)
+        self.paint_water_kids_first = self.kid_list.items.len;
+        paint_slot = 0;
         while (paint_slot < MAX_PAINT_SLOTS) : (paint_slot += 1) {
             try self.kid_list.append(self.allocator, .{ .scene3d_mesh = false });
         }
@@ -6670,6 +6692,64 @@ fn paintGroundHitAt(runtime: *Runtime, mx: f32, my: f32) ?[3]f32 {
     return map_paint.groundHit(cam.ext_pos.x, cam.ext_pos.y, cam.ext_pos.z, dx, dy, dz, 2000);
 }
 
+// Painted-water surface derivation (chunkFloor.ts floorToWaterBody, req_1840
+// shore rule): a shallow cell (depth < SHORE_KEEP) only stays wet when a
+// GENUINELY deep cell (≥ SHORE_DEEP) sits within SHORE_R grid steps — the deep
+// body keeps its shoreline margin, isolated barely-negative film drops, and the
+// height-0 contour reads as clean beach. Wet surface = bed + depth; dry cells
+// drop to base (deepest wet bed − tuck) so the skirt closes under the basin.
+const PAINT_SHORE_DEEP_M: f32 = 0.5;
+const PAINT_SHORE_KEEP_M: f32 = 0.5;
+const PAINT_SHORE_R: i32 = 2;
+const PAINT_WATER_TUCK_M: f32 = 0.3; // WATER_LOOK.floorTuckMeters
+
+/// Shore-cull raw depths + build the water surface over the 121×121 floor grid.
+/// Returns whether any cell is wet (dry chunk ⇒ hide the water node).
+/// `depths` MAY alias `raw_depths` (the caller culls in place) — safe ONLY while
+/// SHORE_KEEP == SHORE_DEEP: the neighbour scan looks for cells ≥ DEEP, and a
+/// cell that gets zeroed is < KEEP, so an already-culled cell could never have
+/// satisfied the scan anyway. Lower SHORE_DEEP below SHORE_KEEP and this needs
+/// a scratch copy.
+fn paintWaterSurface(raw_depths: []const f32, beds: []const f32, depths: []f32, surface: []f32) bool {
+    const res: i32 = @intCast(map_paint.FLOOR_RES);
+    var wet = false;
+    for (raw_depths, 0..) |d, i| {
+        var keep = d > 0 and d >= PAINT_SHORE_KEEP_M;
+        if (!keep and d > 0) {
+            const x: i32 = @intCast(i % map_paint.FLOOR_RES);
+            const y: i32 = @intCast(i / map_paint.FLOOR_RES);
+            search: {
+                var dy: i32 = -PAINT_SHORE_R;
+                while (dy <= PAINT_SHORE_R) : (dy += 1) {
+                    const yy = y + dy;
+                    if (yy < 0 or yy >= res) continue;
+                    var dx: i32 = -PAINT_SHORE_R;
+                    while (dx <= PAINT_SHORE_R) : (dx += 1) {
+                        const xx = x + dx;
+                        if (xx < 0 or xx >= res) continue;
+                        if (raw_depths[@as(usize, @intCast(yy)) * map_paint.FLOOR_RES + @as(usize, @intCast(xx))] >= PAINT_SHORE_DEEP_M) {
+                            keep = true;
+                            break :search;
+                        }
+                    }
+                }
+            }
+        }
+        depths[i] = if (keep) d else 0;
+        if (keep) wet = true;
+    }
+    if (!wet) return false;
+    var deepest: f32 = 0;
+    for (depths, 0..) |d, i| {
+        if (d > 0) deepest = @min(deepest, beds[i]);
+    }
+    const base = deepest - PAINT_WATER_TUCK_M;
+    for (depths, 0..) |d, i| {
+        surface[i] = if (d > 0) beds[i] + d else base;
+    }
+    return true;
+}
+
 /// Per-frame paint pass (renderEmbedded): mirror every painted chunk into its
 /// reserved node + collider (dirty-coalesced), poll the hover beam, and dress
 /// the beam node. Runs unconditionally — with no painted chunks and paint
@@ -6723,7 +6803,9 @@ fn applyPaintLayer(runtime: *Runtime) void {
         const i = slot.?;
         const height_dirty = fresh or chunk.dirty.height;
         const tiles_dirty = fresh or chunk.dirty.tiles;
-        if (!height_dirty and !tiles_dirty) continue;
+        // the water surface is bed + depth, so a re-dug bed moves the water too
+        const water_dirty = height_dirty or chunk.dirty.water;
+        if (!height_dirty and !tiles_dirty and !water_dirty) continue;
 
         const half_span = map_chunks.CHUNK_METERS / 2;
         const node = &runtime.kid_list.items[first + i];
@@ -6807,6 +6889,59 @@ fn applyPaintLayer(runtime: *Runtime) void {
             node.scene3d_color_r = 0.42;
             node.scene3d_color_g = 0.52;
             node.scene3d_color_b = 0.34;
+        }
+
+        // the water channel: a second "~water~"-pipeline node over the same
+        // footprint — shore-culled depths + bed+depth surface, dry cells tucked
+        // under the basin floor (paintWaterSurface). Static bake; the water
+        // pipeline animates the surface on the GPU from the host clock.
+        if (water_dirty) {
+            chunk.dirty.water = false;
+            const wfirst = runtime.paint_water_kids_first orelse continue;
+            const wnode = &runtime.kid_list.items[wfirst + i];
+            const floor = runtime.paint_slot_floor[i] orelse continue; // beds (height ran first)
+            const depths = runtime.paint_slot_depths[i] orelse blk: {
+                const buf = runtime.allocator.alloc(f32, map_paint.FLOOR_CELLS) catch continue;
+                runtime.paint_slot_depths[i] = buf;
+                break :blk buf;
+            };
+            const surface = runtime.paint_slot_surface[i] orelse blk: {
+                const buf = runtime.allocator.alloc(f32, map_paint.FLOOR_CELLS) catch continue;
+                runtime.paint_slot_surface[i] = buf;
+                break :blk buf;
+            };
+            // raw depths ride the same abs-max downsample the beds use
+            map_paint.downsampleFloorHeights(&chunk.water, depths);
+            const wet = paintWaterSurface(depths, floor, depths, surface);
+            if (!wet) {
+                wnode.scene3d_mesh = false;
+            } else {
+                runtime.paint_slot_water_ver[i] += 1;
+                if (runtime.paint_slot_water_key[i]) |old| runtime.allocator.free(old);
+                const wkey = std.fmt.allocPrint(runtime.allocator, "~hf~paint-water-{d}-{d}~{d}", .{ chunk.cx, chunk.cz, runtime.paint_slot_water_ver[i] }) catch continue;
+                runtime.paint_slot_water_key[i] = wkey;
+                var wmax: f32 = 0;
+                for (surface) |v| wmax = @max(wmax, @abs(v));
+                wnode.* = .{
+                    .scene3d_mesh = true,
+                    .scene3d_geom_key = wkey,
+                    .scene3d_tex_key = "~water~",
+                    .scene3d_heights = surface,
+                    .scene3d_hf_depths = depths,
+                    .scene3d_hf_cols = @intCast(map_paint.FLOOR_RES),
+                    .scene3d_hf_rows = @intCast(map_paint.FLOOR_RES),
+                    .scene3d_hf_width = map_chunks.CHUNK_METERS,
+                    .scene3d_hf_depth = map_chunks.CHUNK_METERS,
+                    .scene3d_hf_base = 0,
+                    .scene3d_bounds_radius = @sqrt(half_span * half_span * 2 + wmax * wmax),
+                    .scene3d_pos_x = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS,
+                    .scene3d_pos_y = 0,
+                    .scene3d_pos_z = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS,
+                    // inst_color is ignored by the water shader; opaque keeps it
+                    // on the pipeline-swap path (color_a < 1 would divert it)
+                    .scene3d_color_a = 1,
+                };
+            }
         }
     }
 
