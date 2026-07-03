@@ -210,6 +210,14 @@ fn writeRegionPng(path: [*:0]const u8, pixels: [*]const u8, stride: u32, cx: u32
     }
 }
 
+/// Write already-RGBA pixels straight to a PNG (no framebuffer, no BGRA swizzle).
+/// The model-package writer uses this to persist a painted atlas as a real,
+/// copy-anywhere image file (req_2523). `rgba` must be w*h*4 bytes.
+pub fn writeRgbaPng(path: [*:0]const u8, rgba: []const u8, w: u32, h: u32) bool {
+    if (rgba.len < @as(usize, w) * @as(usize, h) * 4) return false;
+    return stbi_write_png(path, @intCast(w), @intCast(h), 4, @ptrCast(rgba.ptr), @intCast(w * 4)) != 0;
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Live one-shot — __capture_frame(path) (SELFSHOT-0606)
 //

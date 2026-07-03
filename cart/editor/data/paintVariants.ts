@@ -1,15 +1,24 @@
-// editor/data/paintVariants.ts — the editor-owned store of a model's PAINT VARIANTS: whole
-// saved paintings of the model (DESIGN_INTAKE: "a ball painted a million ways, every one lives
-// inside that single model's folder"). The editor reads hmsc-int's model store through a
-// read-only snapshot, so paint variants can't live there — they live in the editor's own
-// localstore, keyed by model id, and are read live (never baked into the snapshot package).
+// editor/data/paintVariants.ts — a model's PAINT VARIANTS, stored ON DISK inside the
+// model's own package directory (req_2523: "each model gets its own directory … paints
+// store variations of paint on the atlas … all those paintings live inside that one
+// model's folder"). This used to stash variants in the editor's localstore (a db); that
+// is exactly the storage the user does NOT want (git-bloat risk), so variants now live as
+// real files under paints/ and a copied model folder carries its paintings with it.
 //
-// A variant carries the painting's durable form. GUIDING_LIGHT ("store the strokes, not the
-// pixels"): `format: 'program'` variants store the base64 STROKE PROGRAM (from
-// __model_paint_program_read) — tiny, lossless, replayed once on load to rebuild the atlas.
-// Legacy `format: 'atlas'` (or absent) variants store base64 RGBA and load via __model_atlas_apply;
-// kept only so old saves still open. w/h/detail are display metadata.
-import { getJson, setJson } from '../../../runtime/hooks/localstore';
+// TWO FORMS PER VARIANT (the user's ruling):
+//   paints/paint_<id>.json  — the durable record + the STROKE PROGRAM (game export form;
+//                             GUIDING_LIGHT "store the strokes, not the pixels"), replayed
+//                             on load via __model_paint_program_apply.
+//   paints/paint_<id>.png   — the rasterized atlas, the EDITING SUBSTRATE / preview (what
+//                             you see). Written from the live atlas via __image_write_png.
+import { exists, listDir, mkdir, readFile, remove, writeFile } from '../../../runtime/hooks/fs';
+import { subDir } from './modelPackage';
+import type { ModelPackage } from './types';
+
+const host = globalThis as any;
+
+// Only the package identity is needed to locate the on-disk paints/ dir.
+export type PaintTarget = Pick<ModelPackage, 'kind' | 'id'>;
 
 export type PaintVariant = {
   id: string; // stable + unique within the model (a monotonic sequence)
@@ -19,34 +28,60 @@ export type PaintVariant = {
   detail: number; // patch resolution the painting was made at
   data: string; // 'program' → base64 stroke program; 'atlas'/absent → base64 RGBA atlas
   format?: 'atlas' | 'program'; // absent = legacy atlas
+  png?: string; // on-disk path of the rasterized substrate, when one was written
 };
 
-const keyFor = (modelId: string) => `editor:paintvar:${modelId}`;
+function paintsDir(pkg: PaintTarget): string { return subDir(pkg.kind, pkg.id, 'paints'); }
+function jsonPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.json`; }
+function pngPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.png`; }
 
-export function listPaintVariants(modelId: string): PaintVariant[] {
-  return getJson<PaintVariant[]>(keyFor(modelId), []);
+export function listPaintVariants(pkg: PaintTarget): PaintVariant[] {
+  const dir = paintsDir(pkg);
+  if (!exists(dir)) return [];
+  const out: PaintVariant[] = [];
+  for (const name of listDir(dir)) {
+    if (!name.endsWith('.json')) continue;
+    const text = readFile(`${dir}/${name}`);
+    if (!text) continue;
+    try {
+      const v = JSON.parse(text) as PaintVariant;
+      if (v && typeof v.id === 'string') out.push(v);
+    } catch { /* skip a malformed variant, keep the rest */ }
+  }
+  return out.sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
 }
 
-/** Append a new variant (auto-named "Painting N" when unnamed) and return it. */
+/** Append a new variant (auto-named "Painting N" when unnamed), writing its stroke-program
+ *  json and — when atlas pixels are supplied — its rasterized .png substrate. Returns it. */
 export function savePaintVariant(
-  modelId: string,
-  v: { name?: string; w: number; h: number; detail: number; data: string; format?: 'atlas' | 'program' },
+  pkg: PaintTarget,
+  v: { name?: string; w: number; h: number; detail: number; data: string; format?: 'atlas' | 'program'; atlasRgba?: string },
 ): PaintVariant {
-  const list = listPaintVariants(modelId);
+  const dir = paintsDir(pkg);
+  mkdir(dir); // recursive: creates the package + paints/ dir if this is the first save
+  const list = listPaintVariants(pkg);
   const seq = list.reduce((max, x) => Math.max(max, Number(x.id) || 0), 0) + 1;
+  const id = String(seq);
+  // The rasterized substrate (real PNG) — best-effort; the variant still works without it.
+  let png: string | undefined;
+  if (v.atlasRgba && v.w > 0 && v.h > 0 && host.__image_write_png?.(pngPath(pkg, id), v.atlasRgba, v.w, v.h) === 1) {
+    png = pngPath(pkg, id);
+  }
   const variant: PaintVariant = {
-    id: String(seq),
+    id,
     name: v.name?.trim() || `Painting ${seq}`,
     w: v.w,
     h: v.h,
     detail: v.detail,
     data: v.data,
-    format: v.format ?? 'atlas',
+    format: v.format ?? 'program',
+    png,
   };
-  setJson(keyFor(modelId), [...list, variant]);
+  writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
   return variant;
 }
 
-export function removePaintVariant(modelId: string, id: string): void {
-  setJson(keyFor(modelId), listPaintVariants(modelId).filter((v) => v.id !== id));
+export function removePaintVariant(pkg: PaintTarget, id: string): void {
+  remove(jsonPath(pkg, id));
+  remove(pngPath(pkg, id));
 }

@@ -9,13 +9,14 @@ import { useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { listPaintVariants, savePaintVariant, removePaintVariant } from '../data/paintVariants';
+import type { ModelPackage } from '../data/types';
 
 const host = globalThis as any;
 
-export default function ModelPaintVariants({ modelId }: { modelId: string }) {
+export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
   const [rev, setRev] = useState(0);
   const [note, setNote] = useState<string | null>(null);
-  const variants = listPaintVariants(modelId);
+  const variants = listPaintVariants(model);
   const refresh = () => setRev((r) => r + 1);
 
   const onSave = () => {
@@ -27,16 +28,17 @@ export default function ModelPaintVariants({ modelId }: { modelId: string }) {
       setNote('Open this model in the viewer and paint it before saving a variant.');
       return;
     }
-    // Display metadata (w/h/detail) only — the program itself is self-describing and loads on its own.
-    let meta = { w: 0, h: 0, detail: 1 };
-    try { meta = { ...meta, ...JSON.parse(host.__model_atlas_read?.() || '{}') }; } catch { /* metadata is optional */ }
-    const v = savePaintVariant(modelId, { w: meta.w, h: meta.h, detail: meta.detail, data: prog, format: 'program' });
-    setNote(`Saved ${v.name}.`);
+    // The atlas readback gives display metadata (w/h/detail) AND the rasterized RGBA pixels
+    // (base64 `data`) — the latter becomes the on-disk .png editing substrate/preview.
+    let atlas: { w: number; h: number; detail: number; data?: string } = { w: 0, h: 0, detail: 1 };
+    try { atlas = { ...atlas, ...JSON.parse(host.__model_atlas_read?.() || '{}') }; } catch { /* metadata is optional */ }
+    const v = savePaintVariant(model, { w: atlas.w, h: atlas.h, detail: atlas.detail, data: prog, format: 'program', atlasRgba: atlas.data });
+    setNote(`Saved ${v.name} to ${model.name}/paints/.`);
     refresh();
   };
 
   const onLoad = (id: string) => {
-    const v = listPaintVariants(modelId).find((x) => x.id === id);
+    const v = listPaintVariants(model).find((x) => x.id === id);
     if (!v) return;
     // Replay the stroke program; legacy atlas variants blit their pixels.
     const ok = v.format === 'program'
@@ -46,7 +48,7 @@ export default function ModelPaintVariants({ modelId }: { modelId: string }) {
   };
 
   const onDelete = (id: string) => {
-    removePaintVariant(modelId, id);
+    removePaintVariant(model, id);
     setNote(null);
     refresh();
   };

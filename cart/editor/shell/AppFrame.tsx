@@ -39,6 +39,7 @@ import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
+import { materializeModelPackage } from '../data/modelPackageStore';
 import { colorStudioSpec, colorStudioOverrideKey, paletteForSpecVariant, rgbToCss } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
 import { image as imageOps, quantize as quantizeImage } from '../../../runtime/image';
@@ -242,6 +243,26 @@ export default function AppFrame() {
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
       if (doc?.kind === 'model') { meshUndoRedo(true); return; }
       redoLocal();
+      return;
+    }
+    if (command.id === 'save-snapshot') {
+      // Save Model to Library: materialize the ACTIVE model's on-disk package (its own
+      // directory + manifest under cart/editor/data/models/…). Imports already do this on
+      // drop; this is the explicit "commit my model to the library" for anything not yet on
+      // disk. Paint variants save separately into paints/ (ModelPaintVariants). req_2523.
+      const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+      const pkg = doc?.kind === 'model' ? modelPackageById(doc.sourceId) : null;
+      if (!pkg) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Open a model first — Save writes the ACTIVE model to the library.' }));
+        return;
+      }
+      const res = materializeModelPackage(pkg);
+      setState((prev) => ({
+        ...prev,
+        openMenu: null,
+        actionMenu: 'File',
+        status: res.ok ? `Saved "${pkg.name}" to the library → ${res.dir}` : `Save failed: ${res.error ?? 'unknown error'}`,
+      }));
       return;
     }
     if (command.id.startsWith('new-mesh-')) {

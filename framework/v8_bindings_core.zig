@@ -24,6 +24,7 @@ const mesh_import = @import("world/mesh_import.zig");
 const model_source = @import("gpu/model_source.zig");
 const material_tex = @import("gpu/material_tex.zig");
 const paint_program = @import("gpu/paint_program.zig");
+const capture = @import("gpu/capture.zig");
 
 // Retained FULL-RES source mesh + its path, so the live quality slider can re-decimate
 // from the original at any level (model_set_quality) without re-reading the file.
@@ -956,6 +957,31 @@ fn hostModelPaintAt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 }
 
 /// __model_paint_face(face, r, g, b) → bool. Fill a face by index (no raycast) —
+/// __image_write_png(path, base64Rgba, w, h) → 1 on success. Writes RGBA pixels
+/// (base64, w*h*4 bytes) straight to a PNG on disk. The model-package writer uses
+/// it to persist a painted atlas as a real, copy-anywhere image (req_2523).
+fn hostImageWritePng(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
+    defer alloc.free(path);
+    const b64 = argToStringAlloc(info, 1) orelse return setReturnNumber(info, 0);
+    defer alloc.free(b64);
+    const w: u32 = @intCast(@max(0, argToI32(info, 2) orelse 0));
+    const h: u32 = @intCast(@max(0, argToI32(info, 3) orelse 0));
+    if (w == 0 or h == 0) return setReturnNumber(info, 0);
+
+    const dec = std.base64.standard.Decoder;
+    const dlen = dec.calcSizeForSlice(b64) catch return setReturnNumber(info, 0);
+    const rgba = alloc.alloc(u8, dlen) catch return setReturnNumber(info, 0);
+    defer alloc.free(rgba);
+    dec.decode(rgba, b64) catch return setReturnNumber(info, 0);
+
+    const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
+    defer alloc.free(pathz);
+    setReturnNumber(info, if (capture.writeRgbaPng(pathz.ptr, rgba, w, h)) 1 else 0);
+}
+
 /// programmatic colouring + the headless paint proof.
 fn hostModelPaintFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -2090,6 +2116,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_paint_atlas_estimate", hostModelPaintAtlasEstimate);
     v8_runtime.registerHostFn("__model_paint_fit_estimate", hostModelPaintFitEstimate);
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
+    v8_runtime.registerHostFn("__image_write_png", hostImageWritePng);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
     v8_runtime.registerHostFn("__model_paint_program_read", hostModelPaintProgramRead);
     v8_runtime.registerHostFn("__model_paint_program_apply", hostModelPaintProgramApply);

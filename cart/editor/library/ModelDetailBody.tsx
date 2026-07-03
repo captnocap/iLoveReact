@@ -86,7 +86,7 @@ export default function ModelDetailBody({ model }: { model: ModelPackage }) {
       {/* Real paint variants — whole saved paintings of the model, read live from the editor
           store (honest-empty until one is saved). Replaces the old palette-slot swatches that
           were fabricated here and mislabeled as variants. */}
-      <ModelPaintVariants modelId={model.id} />
+      <ModelPaintVariants model={model} />
 
     </>
   );
