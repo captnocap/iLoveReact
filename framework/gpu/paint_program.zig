@@ -335,6 +335,9 @@ pub fn apply(blob: []const u8) bool {
     g_ops.appendSlice(alloc, blob[ops_start..]) catch return false;
 
     // Prepare the canvas: the caller already set detail (a mesh re-upload); wipe to default.
+    // A replayed painting HAS a base (it was created with one), so activate it before the clear
+    // lays it back under the strokes (req_2551).
+    model_paint.activateBase();
     model_paint.clearAtlas();
 
     g_recording = false;

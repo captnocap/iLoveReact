@@ -219,6 +219,7 @@ fn faceTexelBounds(lay: *const paint_islands.Layout, face: u32, expand: f32) [4]
 /// which re-islands by authored face.
 pub fn setTarget(key_hash: u64, verts: []f32, vert_count: u32) void {
     clear();
+    g_base_active = false; // a freshly loaded model has no atlas yet — don't lay a template (req_2551)
     if (vert_count < 3) return;
     const fc = vert_count / 3;
     g_key_hash = key_hash;
@@ -473,16 +474,28 @@ pub fn fillTemplate() void {
 pub const BaseMode = enum(u8) { template = 0, solid = 1, blank = 2 };
 var g_base_mode: BaseMode = .template;
 var g_base_color: [4]u8 = .{ 220, 220, 225, 255 };
+// The base is laid ONLY after the user creates the atlas for this model (Create Paint Atlas)
+// or a saved painting is replayed onto it — NOT on the automatic layout build every model gets
+// on load. Without this gate a freshly opened, never-painted model showed a rainbow template it
+// never asked for (req_2551). Reset per model in setTarget.
+var g_base_active: bool = false;
 
-/// Choose the atlas base type + solid colour. The next atlas build/clear lays this base; call
-/// clearAtlas afterward to re-lay it on the current (unpainted) sheet.
+/// Choose the atlas base type + solid colour and mark the base ACTIVE (the user created it).
 pub fn setBase(mode: BaseMode, color: [4]u8) void {
     g_base_mode = mode;
     g_base_color = color;
+    g_base_active = true;
 }
 
-// Lay the chosen base onto the (already background-cleared) atlas.
+/// Mark the base active without changing type — a replayed painting sits on its base (req_2551).
+pub fn activateBase() void {
+    g_base_active = true;
+}
+
+// Lay the chosen base onto the (already background-cleared) atlas — only once the user has
+// actually created it for this model.
 fn applyBase() void {
+    if (!g_base_active) return;
     switch (g_base_mode) {
         .template => fillTemplate(),
         .solid => {

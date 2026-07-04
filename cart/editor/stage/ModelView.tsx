@@ -45,6 +45,7 @@ import {
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
+import { writeModelArtifacts } from '../data/modelPackageStore';
 
 const host = globalThis as any;
 
@@ -665,6 +666,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     const [sr, sg, sb] = baseType === 'solid' ? brushRgb(brush) : [220, 220, 225];
     host.__model_atlas_base?.(mode, sr, sg, sb);
     atlasReadyRef.current = true;
+    // The moment the atlas is made + coloured, persist it as the model's base atlas + mesh
+    // (req_2551) — the freshly laid base is exactly what atlases/base.png should hold.
+    if (paintTarget) writeModelArtifacts(paintTarget);
     setAtlasPrompt(false);
     enterPaint();
   };
@@ -871,17 +875,22 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill });
   }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill]);
 
-  // W = wireframe, P = paint, F = focus, 1/2/3 = vertex/edge/face, Esc = clear/back to view.
+  // Viewport hotkeys. In the editor embed (hostChrome) the shell's central keymap owns every tool
+  // key (W/P/F/G/S/R/1/2/3 and the topology/face/paint keys the shell adds), dispatching them
+  // through runCommand → this same tool api — so binding them here too would double-fire and cancel
+  // the toggles. Standalone (no shell) keeps the full local map. Delete/Backspace/Escape are
+  // viewport-native (not registry commands) and stay bound in both modes. They only fire when no
+  // text field is focused (the engine routes the key to inputs first), so they never fight editing.
   useModifiers({
-    w: () => setWire((v) => !v), W: () => setWire((v) => !v),
-    p: togglePaint, P: togglePaint,
-    f: toggleFocus, F: toggleFocus,
-    g: () => chooseGizmoTool(0), G: () => chooseGizmoTool(0),
-    s: () => chooseGizmoTool(1), S: () => chooseGizmoTool(1),
-    r: () => chooseGizmoTool(2), R: () => chooseGizmoTool(2),
-    '1': () => chooseSelMode(1), '2': () => chooseSelMode(2), '3': () => chooseSelMode(3),
-    // Delete/Backspace removes exactly the selected elements. Only fires when no text field is
-    // focused (the engine routes the key to inputs first), so it never fights text editing.
+    ...(hostChrome ? {} : {
+      w: () => setWire((v) => !v), W: () => setWire((v) => !v),
+      p: togglePaint, P: togglePaint,
+      f: toggleFocus, F: toggleFocus,
+      g: () => chooseGizmoTool(0), G: () => chooseGizmoTool(0),
+      s: () => chooseGizmoTool(1), S: () => chooseGizmoTool(1),
+      r: () => chooseGizmoTool(2), R: () => chooseGizmoTool(2),
+      '1': () => chooseSelMode(1), '2': () => chooseSelMode(2), '3': () => chooseSelMode(3),
+    }),
     delete: () => { if (selMode !== 0) applyTopo(meshDeleteSelection(), 'Nothing selected to delete'); },
     backspace: () => { if (selMode !== 0) applyTopo(meshDeleteSelection(), 'Nothing selected to delete'); },
     Escape: () => { if (selMode !== 0) { meshClearSel(); setSelInfo(readSelInfo() ?? selInfo); } },
