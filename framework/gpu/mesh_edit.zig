@@ -1014,6 +1014,26 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
                 };
                 if (inRect(model_paint.project(cam, vp_w, vp_h, c), minx, maxx, miny, maxy)) set[f] = true;
             }
+            // A face selection means the whole authored n-gon — the same rule the
+            // click path applies via setFaceGroup. Without this a marquee grabs
+            // whichever triangle CENTROIDS land in the rect (half a quad), and a
+            // delete then punches a triangular hole (req_2559).
+            var groups_hit = std.AutoHashMapUnmanaged(u32, void){};
+            defer groups_hit.deinit(alloc);
+            f = 0;
+            while (f < n) : (f += 1) {
+                if (!set[f]) continue;
+                const grp = model_source.faceGroupOf(f);
+                if (grp != model_source.NO_FACE_GROUP) groups_hit.put(alloc, grp, {}) catch {};
+            }
+            if (groups_hit.count() > 0) {
+                f = 0;
+                while (f < n) : (f += 1) {
+                    if (set[f]) continue;
+                    const grp = model_source.faceGroupOf(f);
+                    if (grp != model_source.NO_FACE_GROUP and groups_hit.contains(grp)) set[f] = true;
+                }
+            }
         },
         .vertex => {
             var i: u32 = 0;

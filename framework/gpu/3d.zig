@@ -961,6 +961,13 @@ pub fn meshDeleteSelection() bool {
     const del = mesh_edit.buildDeleteMask(mask);
     if (del == 0 or del >= tri_count) return false;
 
+    // Drop the selection FIRST (same rule as detach/glass): the orange tint is
+    // real atlas pixels with per-face saved patches, and both are keyed by the
+    // CURRENT face indices. Restoring after the survivors compact would paint
+    // the tint / patches onto whatever faces inherited those indices — the
+    // "selection moved to the other side of the model" residue (req_2559).
+    mesh_edit.clearSelection();
+
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
     var out = std.ArrayListUnmanaged(f32){};
     var groups = std.ArrayListUnmanaged(u32){};
