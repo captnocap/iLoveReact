@@ -1241,6 +1241,10 @@ fn hostModelPaintFitEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
 fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const alloc = std.heap.c_allocator;
+    // This read gets PERSISTED (paint variants, model packages) — lift the selection
+    // tint for the duration so the saved atlas holds true paint, never the orange.
+    scene3d.paintTintSuspend();
+    defer scene3d.paintTintResume();
     const pa = scene3d.paintAtlas() orelse {
         setReturnString(info, "");
         return;

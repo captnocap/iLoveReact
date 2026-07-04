@@ -579,6 +579,10 @@ fn applyMeshMutation(m: mesh_edit.Mutation) bool {
 pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
     clearActiveEditMesh();
     paint_program.reset(); // a fresh model starts with an empty stroke program
+    // Reset BEFORE the target swaps: reset restores any selection tint, and the saved
+    // base patches belong to the OUTGOING atlas — restoring them into the new one
+    // would write stale bytes (or silently no-op) wherever the layouts differ.
+    mesh_edit.reset(); // topology changed (load or quality re-mesh) → rebuild lazily
     model_paint.setTarget(hashKey(key), verts, count);
     const need = @as(usize, count) * 8;
     if (verts.len >= need) {
@@ -589,7 +593,6 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
             g_edit_count = count;
         }
     }
-    mesh_edit.reset(); // topology changed (load or quality re-mesh) → rebuild lazily
 }
 
 pub fn meshEditActiveKey() ?[]const u8 {
@@ -2692,6 +2695,11 @@ pub fn meshGroupFaceCount(lo: u32, hi: u32) u32 {
 /// the outliner swatches. Returns the number of faces painted.
 pub fn meshPaintGroupRange(lo: u32, hi: u32, r: u8, g: u8, b: u8) u32 {
     const fc = model_paint.faceCount();
+    // Painting a selection-tinted face must land UNDER the tint (the outliner can recolor
+    // a part while its faces are selected): lift the tint, paint, re-apply — the re-saved
+    // base patch then holds the new paint, so a later deselect keeps it.
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
     var painted: u32 = 0;
     var f: u32 = 0;
     while (f < fc) : (f += 1) {
@@ -2732,6 +2740,8 @@ pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
     const mat = model_paint.hasMaterialInk();
     var gbuf: [model_paint.MAX_GROUP_FACES]u32 = undefined;
     const members = model_paint.groupFaces(@intCast(face), &gbuf);
+    mesh_edit.suspendFaceTint(); // paint lands under any selection tint, never mixed with it
+    defer mesh_edit.resumeFaceTint();
     for (members) |f| {
         if (mat) {
             model_paint.paintFaceTex(f);
@@ -2769,6 +2779,11 @@ pub fn paintProgramRead() ?[]u8 {
 /// False if there's no resident mesh or the blob is malformed.
 pub fn paintProgramApply(blob: []const u8) bool {
     if (g_edit_verts == null or g_edit_count == 0) return false;
+    // The replay overwrites atlas texels wholesale — lift any selection tint first so
+    // the replayed paint is TRUE paint, then re-tint over it (depth-counted, so the
+    // nested setPaintDetail's own guard folds into this one).
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
     if (paint_program.programDetail(blob)) |d| {
         if (@as(u32, d) != model_paint.detail()) _ = setPaintDetail(@intCast(d));
     }
@@ -2778,6 +2793,8 @@ pub fn paintProgramApply(blob: []const u8) bool {
 /// Carry a per-face colour set onto the active paint target (length ≥ facecount*4) —
 /// used when a quality change derives the new mesh's colours from the source paint.
 pub fn applyPaintColors(colors: []const u8) void {
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
     model_paint.applyColors(colors);
 }
 
@@ -2789,6 +2806,8 @@ pub const DEFAULT_FACE = model_paint.DEFAULT_FACE;
 /// proof. Returns false if there's no target or the index is out of range.
 pub fn paintFaceByIndex(face: u32, r: u8, g: u8, b: u8) bool {
     if (face >= model_paint.faceCount()) return false;
+    mesh_edit.suspendFaceTint(); // paint lands under any selection tint, never mixed with it
+    defer mesh_edit.resumeFaceTint();
     model_paint.paintFace(face, .{ r, g, b, 255 });
     return true;
 }
@@ -2802,6 +2821,11 @@ pub fn setPaintBase(mode: u8, r: u8, g: u8, b: u8) bool {
         2 => .blank,
         else => .template,
     };
+    // The base re-lay reads per-face colours and rewrites the whole atlas — both sides
+    // must see TRUE paint, not the selection tint (this door fires from the Create Paint
+    // Atlas prompt, which can open while faces are still selected).
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
     model_paint.setBase(m, .{ r, g, b, 255 });
     model_paint.clearAtlas();
     return true;
@@ -2879,6 +2903,10 @@ pub fn setPaintDetail(px: i32) i32 {
     const verts = g_edit_verts orelse return -1;
     if (g_edit_count == 0) return -1;
     const want: u32 = if (px < 0) 1 else @intCast(px);
+    // The rebuild carries each face's LIVE atlas colour — lift the selection tint first
+    // so it never bakes into the carried paint (req_2611), re-tint over the new layout.
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
     model_paint.setDetail(want, verts, g_edit_count);
     const face_count = g_edit_count / 3;
     if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
@@ -2893,6 +2921,10 @@ pub fn setPaintDetail(px: i32) i32 {
 pub fn refreshPaintLayout() bool {
     const verts = g_edit_verts orelse return false;
     if (g_edit_count == 0 or !model_paint.hasTarget()) return false;
+    // The rebuild's colour carry reads the LIVE atlas — lift the selection tint first
+    // so it never bakes into the new layout (req_2611), re-tint once it settles.
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
     model_paint.rebuildLayout(verts, g_edit_count);
     const face_count = g_edit_count / 3;
     if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
@@ -2906,6 +2938,8 @@ pub fn setPaintFit(fit_texels: i32) i32 {
     const verts = g_edit_verts orelse return -1;
     if (g_edit_count == 0) return -1;
     const want: u32 = if (fit_texels < 64) 64 else @intCast(fit_texels);
+    mesh_edit.suspendFaceTint(); // as setPaintDetail: never carry the tint into the rebuild
+    defer mesh_edit.resumeFaceTint();
     model_paint.setFit(want, verts, g_edit_count);
     const face_count = g_edit_count / 3;
     if (face_count > 0) _ = patchActiveEditMesh(0, face_count - 1);
@@ -2943,8 +2977,22 @@ pub fn paintAtlas() ?PaintAtlas {
 /// Load a saved painting: restore its detail (rewrites UVs + re-uploads the mesh) then blit the
 /// saved atlas over the texture. Returns false if the bytes don't match the restored dimensions.
 pub fn applyPaintAtlas(detail_px: i32, rgba: []const u8) bool {
+    // The blit overwrites every texel — lift the tint so the saved painting lands as
+    // TRUE paint, then re-tint over it (folds with setPaintDetail's nested guard).
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
     _ = setPaintDetail(detail_px);
     return model_paint.setAtlas(rgba);
+}
+
+/// Lift / re-apply the mesh-editor selection tint around an atlas READ done outside this
+/// module — the __model_atlas_read door persists what it reads, and a persisted atlas
+/// must hold TRUE paint, never the selection orange (req_2611). Depth-counted.
+pub fn paintTintSuspend() void {
+    mesh_edit.suspendFaceTint();
+}
+pub fn paintTintResume() void {
+    mesh_edit.resumeFaceTint();
 }
 
 var g_dbg_frame: u64 = 0; // req_0727: rate-limit the r3d-census diagnostic print

@@ -79,6 +79,9 @@ var g_sel_face: ?[]bool = null;
 // free-form paint when detail>1 — a flat base restore would wipe it (req_2281).
 var g_face_base: std.AutoHashMapUnmanaged(u32, []u8) = .{};
 const SELECT_TINT: [4]u8 = .{ 255, 138, 61, 255 };
+// Tint suspension depth (suspendFaceTint/resumeFaceTint). While > 0 the atlas holds TRUE
+// paint only — applyFaceHighlight defers until the outermost resume re-applies the tint.
+var g_tint_suspend: u32 = 0;
 // Pre-press snapshot of the active set, so a press that turns into an orbit-drag can
 // undo its instant pick (select on mousedown for paint-like immediacy, revert if you drag).
 var g_snap: ?[]bool = null;
@@ -218,7 +221,7 @@ pub fn selCount() u32 {
     return switch (g_mode) {
         .vertex => countTrue(g_sel_vert),
         .edge => countTrue(g_sel_edge),
-        .face => countTrue(g_sel_face),
+        .face => countSelectedAuthoredFaces(),
         .none => 0,
     };
 }
@@ -227,6 +230,26 @@ fn countTrue(maybe: ?[]bool) u32 {
     var n: u32 = 0;
     for (s) |b| {
         if (b) n += 1;
+    }
+    return n;
+}
+
+/// Face-mode count in AUTHORED faces (a picked cube face reads as 1, not its 2 triangles):
+/// grouped triangles count once per group; ungrouped triangles count individually.
+fn countSelectedAuthoredFaces() u32 {
+    const s = g_sel_face orelse return 0;
+    var groups = std.AutoHashMapUnmanaged(u32, void){};
+    defer groups.deinit(alloc);
+    var n: u32 = 0;
+    for (s, 0..) |b, f| {
+        if (!b) continue;
+        const grp = model_source.faceGroupOf(@intCast(f));
+        if (grp == model_source.NO_FACE_GROUP) {
+            n += 1;
+        } else if (!groups.contains(grp)) {
+            groups.put(alloc, grp, {}) catch {};
+            n += 1;
+        }
     }
     return n;
 }
@@ -1137,6 +1160,7 @@ fn blendSelect(base: [4]u8) [4]u8 {
 /// Reconcile the atlas tint with g_sel_face: restore faces no longer selected, tint newly
 /// selected ones (saving their base so a later deselect is exact).
 fn applyFaceHighlight() void {
+    if (g_tint_suspend > 0) return; // atlas is being rebuilt/read — resumeFaceTint reconciles
     if (model_paint.faceCount() == 0) return;
     // In non-face modes, nothing should be tinted.
     if (g_mode != .face) {
@@ -1187,6 +1211,25 @@ fn restoreAllFaces() void {
         alloc.free(entry.value_ptr.*);
     }
     g_face_base.clearRetainingCapacity();
+}
+
+/// Lift the selection tint out of the atlas (keeping the selection sets) before an
+/// operation that rebuilds, overwrites, paints, or persists the paint atlas/layout.
+/// Depth-counted: nested guarded ops (atlas apply → detail change) reconcile exactly
+/// once, at the outermost resume. Without this a layout rebuild carries the LIVE atlas
+/// colour — the selection orange — into the new atlas, baking the highlight into paint
+/// the selection sets say isn't selected, and the saved base patches (sized for the old
+/// layout) silently fail to restore.
+pub fn suspendFaceTint() void {
+    if (g_tint_suspend == 0) restoreAllFaces();
+    g_tint_suspend += 1;
+}
+
+/// Re-apply the tint from the selection sets against the settled atlas — base patches
+/// are re-captured from the NEW atlas/layout, so a later deselect is exact.
+pub fn resumeFaceTint() void {
+    if (g_tint_suspend > 0) g_tint_suspend -= 1;
+    if (g_tint_suspend == 0) applyFaceHighlight();
 }
 
 // ── Loop cut (plane split of a triangle soup) ────────────────────────────────────
@@ -1608,4 +1651,58 @@ test "axis scale and rotate operate around the selection pivot" {
     _ = rotateSelectionAxis(.{ 0, 0, 1 }, pivot, std.math.pi);
     try testing.expectApproxEqAbs(@as(f32, 1.5), vertPos(0)[0], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(1)[0], 0.0001);
+}
+
+test "tint suspension lifts the highlight for atlas rebuilds and re-applies it after (req_2611)" {
+    setupQuad();
+    defer {
+        reset();
+        model_paint.clear();
+    }
+    const base0 = model_paint.faceColor(0).?;
+    try testing.expect(selectFaceByIndex(0, false));
+    const tinted = model_paint.faceColor(0).?;
+    try testing.expect(tinted[0] != base0[0] or tinted[1] != base0[1] or tinted[2] != base0[2]);
+
+    // Suspended: the atlas holds TRUE paint (what a layout rebuild's colour carry reads),
+    // and a selection change made meanwhile must not tint.
+    suspendFaceTint();
+    const clean = model_paint.faceColor(0).?;
+    try testing.expectEqual(base0[0], clean[0]);
+    try testing.expectEqual(base0[1], clean[1]);
+    try testing.expectEqual(base0[2], clean[2]);
+    try testing.expect(selectFaceByIndex(1, false)); // reconciles only at resume
+    const still_clean = model_paint.faceColor(1).?;
+    try testing.expectEqual(base0[0], still_clean[0]);
+
+    // Nested suspend folds into one reconcile at the OUTERMOST resume.
+    suspendFaceTint();
+    resumeFaceTint();
+    try testing.expectEqual(base0[0], model_paint.faceColor(1).?[0]);
+
+    resumeFaceTint();
+    const retinted = model_paint.faceColor(1).?;
+    try testing.expect(retinted[0] != base0[0] or retinted[1] != base0[1] or retinted[2] != base0[2]);
+    // Face 0 fell out of the selection during suspension — it must be back to base.
+    try testing.expectEqual(base0[0], model_paint.faceColor(0).?[0]);
+
+    clearSelection();
+    try testing.expectEqual(base0[0], model_paint.faceColor(1).?[0]);
+}
+
+test "face-mode selCount reads AUTHORED faces — a grouped cube face is 1, not 2 tris" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&soup);
+    const groups = [12]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    model_source.setFaceGroups(groups[0..]);
+    model_paint.setTarget(781, soup[0..], 36);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+    }
+    try testing.expect(selectFaceByIndex(0, false)); // grabs the whole quad (2 tris)
+    try testing.expectEqual(@as(u32, 1), selCount());
+    try testing.expect(selectFaceByIndex(2, true)); // a second quad, additively
+    try testing.expectEqual(@as(u32, 2), selCount());
 }
