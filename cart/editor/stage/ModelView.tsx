@@ -44,6 +44,7 @@ import {
 // The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
+import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
 
 const host = globalThis as any;
 
@@ -148,6 +149,9 @@ export type ModelViewProps = {
   // Fired after a file-parts mount with each part's authored-group range in the freshly
   // loaded host mesh — the shell stamps these onto its outliner parts (lo/hi).
   onPartRanges?: (ranges: PartRange[]) => void;
+  // The model's package identity, so the viewer can find its saved paintings on disk and
+  // restore the latest instead of re-prompting for a new atlas every open (req_2526).
+  paintTarget?: PaintTarget;
 };
 
 /** sha256 of the file bytes (host door) — keys attribution to the content. */
@@ -366,7 +370,7 @@ const DEFAULT_FIT = 1024; // the proven painter shipped at 1024²
 // SAME size brush paints finer there — exactly what you want when the strokes need to get small.
 const brushRadius = (size: number) => Math.max(0.5, size / 2);
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, paintTarget }: ModelViewProps = {}) {
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wire, setWire] = useState(false);
@@ -617,6 +621,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setShowUv(true);
     buildUvPanel();
   };
+  // Reopen a model that already has saved paintings: rebuild the atlas at the painting's
+  // own resolution, then replay it — so paint mode restores the work instead of asking for
+  // a fresh atlas size again (req_2526). Program variants replay strokes; legacy atlas
+  // variants blit their pixels.
+  const restoreSavedPaint = (v: PaintVariant): void => {
+    changeDetail(v.detail > 1 ? v.detail : 1);
+    if (v.format === 'program') host.__model_paint_program_apply?.(v.data);
+    else if (v.data) host.__model_atlas_apply?.(v.detail, v.data);
+  };
   const togglePaint = () => {
     if (paintMode) {
       setPaintMode(false);
@@ -624,6 +637,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     if (!model) return;
     if (!atlasReadyRef.current) {
+      // Already-painted model? Its atlas is a solved question — restore the latest
+      // painting (which rebuilds the atlas) rather than re-prompting (req_2526).
+      const saved = paintTarget ? listPaintVariants(paintTarget) : [];
+      if (saved.length > 0) {
+        restoreSavedPaint(saved[saved.length - 1]);
+        atlasReadyRef.current = true;
+        enterPaint();
+        return;
+      }
       setAtlasPrompt(true);
       return;
     }
