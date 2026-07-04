@@ -5,7 +5,7 @@ import { bundleCart } from '../cart/bundle.ts';
 import { fsExists, fsMkdir, fsRead, fsWrite, tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 import { spawnSync } from '../host/process.ts';
-import { pruneZigCache, resolvePruneDays } from '../host/zigcache.ts';
+import { trimZigCacheIfOversized } from '../host/zigcache.ts';
 
 type Substrate = 'gui' | 'tui';
 
@@ -87,9 +87,10 @@ export async function run(argv: string[]): Promise<number> {
   writeSpawnOutput(build);
   if (build.code !== 0) return build.code || 1;
   // Every build lands a fresh multi-hundred-MB .zig-cache/o entry and zig
-  // never evicts (756GB / full disk on 2026-07-03) — prune stale entries
-  // after each successful build. RJIT_CACHE_PRUNE_DAYS=0 disables.
-  pruneZigCache(rjitHome, resolvePruneDays());
+  // never evicts (756GB / full disk on 2026-07-03) — drop the WHOLE cache
+  // once it outgrows the budget (partial pruning is unsound, see
+  // cli/host/zigcache.ts). RJIT_CACHE_MAX_GB=0 disables.
+  trimZigCacheIfOversized(rjitHome);
 
   const buildBin = `${cartRoot}/zig-out/bin/${parsed.name}`;
   if (!fsExists(buildBin)) return fail(`build produced no binary: ${buildBin}`, 1);

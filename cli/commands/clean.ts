@@ -1,54 +1,51 @@
-// cli/commands/clean.ts - prune the local zig cache.
+// cli/commands/clean.ts - drop the local zig cache.
 //
-// `rjit clean`            prune .zig-cache/o entries older than 7 days
-// `rjit clean --days N`   custom age horizon
-// `rjit clean --all`      drop every cache entry (next build is fully cold)
+// `rjit clean`          report cache sizes (no deletion)
+// `rjit clean --drop`   drop the WHOLE local zig cache; next build is cold
 //
-// Successful ship/dev builds already auto-prune at the default horizon
-// (cli/host/zigcache.ts); this command is the manual lever plus a size report.
+// There is deliberately no partial/age-based prune: zig derives o/<hash> dir
+// names by re-hashing manifest inputs, so deleting a subset of o/ poisons
+// surviving manifests and wedges every build with "failed to check cache:
+// ... file_hash FileNotFound" (req_2535). All or nothing.
+//
+// Successful ship/dev builds already auto-drop once the cache outgrows its
+// budget (cli/host/zigcache.ts, RJIT_CACHE_MAX_GB, default 100GB).
 
 import { err, out } from '../host/log.ts';
 import { spawnSync } from '../host/process.ts';
 import { fsExists } from '../host/fs.ts';
-import { DEFAULT_PRUNE_DAYS, pruneZigCache } from '../host/zigcache.ts';
+import { DEFAULT_CACHE_MAX_GB, dropZigCache, resolveCacheMaxGb } from '../host/zigcache.ts';
 
 export async function run(argv: string[]): Promise<number> {
-  let days = DEFAULT_PRUNE_DAYS;
-  let all = false;
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === '--all') {
-      all = true;
-    } else if (arg === '--days') {
-      days = Number(argv[++i]);
-      if (!Number.isFinite(days) || days < 0) {
-        err('[clean] --days needs a non-negative number');
-        return 1;
-      }
+  let drop = false;
+  for (const arg of argv) {
+    if (arg === '--drop' || arg === '--all') {
+      drop = true;
     } else {
       err(`[clean] unknown arg: ${arg}`);
-      err('Usage: rjit clean [--days N] [--all]');
+      err('Usage: rjit clean [--drop]');
       return 1;
     }
   }
 
   const rjitHome = __env('RJIT_HOME') || __cwd();
-  const cacheDir = `${rjitHome}/.zig-cache/o`;
 
-  if (all) {
-    if (!fsExists(cacheDir)) {
+  if (drop) {
+    if (!fsExists(`${rjitHome}/.zig-cache`)) {
       out('[clean] no local zig cache');
       return 0;
     }
-    const lock = `${rjitHome}/.zig-cache/.ship.lock`;
     out('[clean] dropping the ENTIRE local zig cache (next build is fully cold)...');
-    const rm = spawnSync('flock', [lock, 'sh', '-c', `rm -rf '${cacheDir}'/*`]);
-    if (rm.code !== 0) {
-      err(`[clean] failed (exit ${rm.code}): ${rm.stderr.trim()}`);
-      return rm.code || 1;
+    const code = dropZigCache(rjitHome);
+    if (code !== 0) {
+      err(`[clean] failed (exit ${code})`);
+      return code || 1;
     }
   } else {
-    pruneZigCache(rjitHome, days, { verbose: true });
+    const maxGb = resolveCacheMaxGb();
+    const budget = maxGb > 0 ? `${maxGb}GB` : 'disabled';
+    out(`[clean] auto-drop budget: ${budget} (default ${DEFAULT_CACHE_MAX_GB}GB, RJIT_CACHE_MAX_GB overrides)`);
+    out('[clean] run `rjit clean --drop` to drop the cache now');
   }
 
   reportSize(rjitHome, '.zig-cache');

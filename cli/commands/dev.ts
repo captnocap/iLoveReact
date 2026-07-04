@@ -6,7 +6,7 @@ import { bakeIconAtlas } from './bake-icons.ts';
 import { fsExists, fsMkdir, fsRead, fsRemove, fsWrite, tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 import { spawn, spawnSync } from '../host/process.ts';
-import { pruneZigCache, resolvePruneDays } from '../host/zigcache.ts';
+import { trimZigCacheIfOversized } from '../host/zigcache.ts';
 import {
   DEV_SOCKET_PATH,
   nativeBuildFingerprint,
@@ -218,8 +218,10 @@ function buildDevHost(rjitHome: string, cartRoot: string, binName: string, subst
   writeSpawnOutput(build);
   if (build.code !== 0) return build.code || 1;
   // Same disk-leak guard as ship: zig never evicts .zig-cache/o entries and
-  // every dev rebuild lands a fresh one. RJIT_CACHE_PRUNE_DAYS=0 disables.
-  pruneZigCache(rjitHome, resolvePruneDays());
+  // every dev rebuild lands a fresh one. Whole-cache drop over budget only —
+  // partial pruning is unsound (cli/host/zigcache.ts). RJIT_CACHE_MAX_GB=0
+  // disables.
+  trimZigCacheIfOversized(rjitHome);
   return 0;
 }
 

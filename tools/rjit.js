@@ -5093,70 +5093,71 @@ ${entry}
   });
 
   // cli/host/zigcache.ts
-  var DEFAULT_PRUNE_DAYS = 7;
-  function resolvePruneDays() {
-    const raw = __env("RJIT_CACHE_PRUNE_DAYS");
-    if (!raw) return DEFAULT_PRUNE_DAYS;
-    const days = Number(raw);
-    return Number.isFinite(days) ? days : DEFAULT_PRUNE_DAYS;
+  var DEFAULT_CACHE_MAX_GB = 100;
+  function resolveCacheMaxGb() {
+    const raw = __env("RJIT_CACHE_MAX_GB");
+    if (!raw) return DEFAULT_CACHE_MAX_GB;
+    const gb = Number(raw);
+    return Number.isFinite(gb) ? gb : DEFAULT_CACHE_MAX_GB;
   }
-  var STALE_FIND_ARGS = (dir, days) => [dir, "-maxdepth", "1", "-mindepth", "1", "-type", "d", "-mtime", `+${days}`];
-  function pruneZigCache(rjitHome, days, opts = {}) {
-    if (days <= 0) return 0;
-    const dir = `${rjitHome}/.zig-cache/o`;
-    if (!fsExists(dir)) return 0;
-    const list = spawnSync("find", STALE_FIND_ARGS(dir, days));
-    const stale = list.stdout.split("\n").filter((line) => line.trim().length > 0);
-    if (stale.length === 0) {
-      if (opts.verbose) out(`[clean] zig cache: nothing older than ${days} days`);
-      return 0;
-    }
-    const lock = `${rjitHome}/.zig-cache/.ship.lock`;
-    const rm = spawnSync("flock", [lock, "find", ...STALE_FIND_ARGS(dir, days), "-exec", "rm", "-rf", "{}", "+"]);
-    if (rm.code !== 0) {
-      out(`[clean] zig cache prune FAILED (exit ${rm.code}): ${rm.stderr.trim()}`);
-      return 0;
-    }
-    out(`[clean] zig cache: pruned ${stale.length} entries older than ${days} days`);
-    return stale.length;
+  function zigCacheSizeGb(rjitHome) {
+    const cache2 = `${rjitHome}/.zig-cache`;
+    if (!fsExists(cache2)) return 0;
+    const du = spawnSync("du", ["-sb", cache2]);
+    const bytes = Number(du.stdout.trim().split("	")[0]);
+    return Number.isFinite(bytes) ? bytes / 1e9 : 0;
+  }
+  function dropZigCache(rjitHome) {
+    const cache2 = `${rjitHome}/.zig-cache`;
+    if (!fsExists(cache2)) return 0;
+    const lock = `${cache2}/.ship.lock`;
+    const rm = spawnSync("flock", [
+      lock,
+      "sh",
+      "-c",
+      `find '${cache2}' -mindepth 1 -maxdepth 1 ! -name '.ship.lock' -exec rm -rf {} +`
+    ]);
+    return rm.code;
+  }
+  function trimZigCacheIfOversized(rjitHome) {
+    const maxGb = resolveCacheMaxGb();
+    if (maxGb <= 0) return;
+    const sizeGb = zigCacheSizeGb(rjitHome);
+    if (sizeGb <= maxGb) return;
+    out(`[clean] zig cache is ${sizeGb.toFixed(0)}GB (budget ${maxGb}GB) - dropping it; the NEXT build runs fully cold`);
+    const code = dropZigCache(rjitHome);
+    if (code !== 0) out(`[clean] zig cache drop FAILED (exit ${code})`);
   }
 
   // cli/commands/clean.ts
   async function run8(argv) {
-    let days = DEFAULT_PRUNE_DAYS;
-    let all = false;
-    for (let i = 0; i < argv.length; i++) {
-      const arg = argv[i];
-      if (arg === "--all") {
-        all = true;
-      } else if (arg === "--days") {
-        days = Number(argv[++i]);
-        if (!Number.isFinite(days) || days < 0) {
-          err("[clean] --days needs a non-negative number");
-          return 1;
-        }
+    let drop = false;
+    for (const arg of argv) {
+      if (arg === "--drop" || arg === "--all") {
+        drop = true;
       } else {
         err(`[clean] unknown arg: ${arg}`);
-        err("Usage: rjit clean [--days N] [--all]");
+        err("Usage: rjit clean [--drop]");
         return 1;
       }
     }
     const rjitHome = __env("RJIT_HOME") || __cwd();
-    const cacheDir = `${rjitHome}/.zig-cache/o`;
-    if (all) {
-      if (!fsExists(cacheDir)) {
+    if (drop) {
+      if (!fsExists(`${rjitHome}/.zig-cache`)) {
         out("[clean] no local zig cache");
         return 0;
       }
-      const lock = `${rjitHome}/.zig-cache/.ship.lock`;
       out("[clean] dropping the ENTIRE local zig cache (next build is fully cold)...");
-      const rm = spawnSync("flock", [lock, "sh", "-c", `rm -rf '${cacheDir}'/*`]);
-      if (rm.code !== 0) {
-        err(`[clean] failed (exit ${rm.code}): ${rm.stderr.trim()}`);
-        return rm.code || 1;
+      const code = dropZigCache(rjitHome);
+      if (code !== 0) {
+        err(`[clean] failed (exit ${code})`);
+        return code || 1;
       }
     } else {
-      pruneZigCache(rjitHome, days, { verbose: true });
+      const maxGb = resolveCacheMaxGb();
+      const budget = maxGb > 0 ? `${maxGb}GB` : "disabled";
+      out(`[clean] auto-drop budget: ${budget} (default ${DEFAULT_CACHE_MAX_GB}GB, RJIT_CACHE_MAX_GB overrides)`);
+      out("[clean] run `rjit clean --drop` to drop the cache now");
     }
     reportSize(rjitHome, ".zig-cache");
     reportSize(rjitHome, "zig-out");
@@ -5641,7 +5642,7 @@ done
     const build = spawnSync(cmd, finalArgs);
     writeSpawnOutput2(build);
     if (build.code !== 0) return build.code || 1;
-    pruneZigCache(rjitHome, resolvePruneDays());
+    trimZigCacheIfOversized(rjitHome);
     return 0;
   }
   function ensurePgRunning(rjitHome) {
@@ -7148,18 +7149,19 @@ ${digest.stderr || digest.stdout}`);
       ]
     },
     clean: {
-      summary: "prune the local zig cache (the per-build disk eater)",
-      usage: ["rjit clean", "rjit clean --days N", "rjit clean --all"],
+      summary: "report / drop the local zig cache (the per-build disk eater)",
+      usage: ["rjit clean", "rjit clean --drop"],
       detail: [
         "Zig never evicts .zig-cache/o entries, and every build lands a fresh",
         "multi-hundred-MB one (it reached 756GB on 2026-07-03). Successful",
-        "ship/dev builds auto-prune entries older than 7 days; this command is",
-        "the manual lever plus a size report.",
+        "ship/dev builds auto-drop the whole cache once it outgrows the budget",
+        "(RJIT_CACHE_MAX_GB, default 100GB; 0 disables).",
         "",
-        "--days N   prune entries untouched for N days (default 7)",
-        "--all      drop the whole cache; the next build is fully cold",
+        "No partial prune exists ON PURPOSE: zig derives o/<hash> names by",
+        "re-hashing manifest inputs, so deleting a subset of o/ poisons the",
+        "surviving manifests and wedges every build. All or nothing.",
         "",
-        "RJIT_CACHE_PRUNE_DAYS=0 disables the post-build auto-prune."
+        "--drop   drop the whole cache now; the next build is fully cold"
       ]
     },
     "bake-icons": {
@@ -8497,7 +8499,7 @@ ${IMPORTS_MARKER}`).replace(
     const build = runLockedBuild(rjitHome, buildCommand(rjitHome, cartRoot, zig, flags));
     writeSpawnOutput6(build);
     if (build.code !== 0) return build.code || 1;
-    pruneZigCache(rjitHome, resolvePruneDays());
+    trimZigCacheIfOversized(rjitHome);
     const buildBin = `${cartRoot}/zig-out/bin/${parsed.name}`;
     if (!fsExists(buildBin)) return fail8(`build produced no binary: ${buildBin}`, 1);
     if (!verifyIngredientLabels(cartRoot, buildBin, flags)) return 1;
