@@ -1165,6 +1165,68 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // the vertex dots / edge highlights / overlay draw (vertex mode shows every vert).
     const mm = Number(callHost<string | null>('__env_get', null, 'RJIT_MESHMODE') ?? 0);
     if (mm >= 1 && mm <= 3) chooseSelMode(mm);
+    // RJIT_MESHOPS: a ';'-separated gesture script run against the live host doors — the
+    // headless repro harness for selection/tint bugs (req_2613). Each op waits a few
+    // frames so camera-dependent doors (pick/box) act on a drawn viewport. Ops:
+    //   mode:N sel:N add:N range:lo,hi pick:x,y pickadd:x,y box:x0,y0,x1,y1 snap revert
+    //   clear scope:lo,hi nudge:axis,amt gizmo:N undo redo del grouppaint:lo,hi,r,g,b
+    //   detail:px wait:frames report atlas:/path.png
+    const opsText = callHost<string | null>('__env_get', null, 'RJIT_MESHOPS');
+    if (opsText) {
+      const num = (s: string | undefined) => Number(s ?? 0) || 0;
+      const dumpAtlasPng = (path: string) => {
+        const j = host.__model_atlas_read?.();
+        if (typeof j !== 'string' || !j) { console.error('[meshops] atlas: no atlas'); return; }
+        try {
+          const o = JSON.parse(j) as { w: number; h: number; data: string };
+          const rgba = bytesFromB64(o.data);
+          const png = rgba ? host.__imageops_encode_raw?.(rgba, o.w, o.h, '{"format":"png"}') : null;
+          if (png instanceof Uint8Array && host.__imageops_write_file?.(path, png) === true) {
+            console.error(`[meshops] atlas → ${path} (${o.w}x${o.h})`);
+          } else console.error('[meshops] atlas: decode/encode/write failed');
+        } catch (e) { console.error(`[meshops] atlas threw: ${e}`); }
+      };
+      const runOp = (op: string) => {
+        const sepIdx = op.indexOf(':');
+        const name = sepIdx < 0 ? op : op.slice(0, sepIdx);
+        const a = (sepIdx < 0 ? '' : op.slice(sepIdx + 1)).split(',').map((s) => s.trim());
+        if (name === 'mode') chooseSelMode(num(a[0]));
+        else if (name === 'sel') host.__mesh_edit_select_face?.(num(a[0]), 0);
+        else if (name === 'add') host.__mesh_edit_select_face?.(num(a[0]), 1);
+        else if (name === 'range') host.__mesh_edit_select_group_range?.(num(a[0]), num(a[1]), 0);
+        else if (name === 'pick') host.__mesh_edit_pick?.(num(a[0]), num(a[1]), 0);
+        else if (name === 'pickadd') host.__mesh_edit_pick?.(num(a[0]), num(a[1]), 1);
+        else if (name === 'box') host.__mesh_edit_box?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), 0);
+        else if (name === 'snap') host.__mesh_edit_snapshot?.();
+        else if (name === 'revert') host.__mesh_edit_revert?.();
+        else if (name === 'clear') meshClearSel();
+        else if (name === 'scope') host.__mesh_edit_scope?.(num(a[0]), num(a[1]));
+        else if (name === 'nudge') host.__mesh_gizmo_nudge?.(a[0] === 'y' ? 1 : a[0] === 'z' ? 2 : 0, Number(a[1]) || 0);
+        else if (name === 'gizmo') chooseGizmoTool(num(a[0]));
+        else if (name === 'undo') adoptMesh(meshUndoDoor()); // adopt like the app's undo — the door returns a NEW mesh key
+        else if (name === 'redo') adoptMesh(meshRedoDoor());
+        else if (name === 'del') adoptMesh(meshDeleteSelection());
+        else if (name === 'grouppaint') host.__model_paint_group_range?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
+        else if (name === 'detail') applyPaintDetail(num(a[0]));
+        else if (name === 'report') console.error(`[meshops] report → ${JSON.stringify(readSelInfo())}`);
+        else if (name === 'atlas') dumpAtlasPng(a.join(','));
+        else if (name !== 'wait') console.error(`[meshops] unknown op: ${name}`);
+      };
+      const ops = opsText.split(';').map((s) => s.trim()).filter(Boolean);
+      let step = 0;
+      const runNext = () => {
+        if (step >= ops.length) {
+          setSelInfo(readSelInfo() ?? { mode: 0, verts: 0, edges: 0, sel: 0 });
+          console.error(`[meshops] DONE → ${JSON.stringify(readSelInfo())}`);
+          return;
+        }
+        const op = ops[step++]!;
+        console.error(`[meshops] ${op}`);
+        try { runOp(op); } catch (e) { console.error(`[meshops] ${op} threw: ${e}`); }
+        setTimeout(runNext, op.startsWith('wait') ? num(op.slice(5)) * 16 : 80);
+      };
+      setTimeout(runNext, 600); // let the first frames draw so pick/box have a live camera
+    }
     return () => {
       paintingRef.current = false;
       meshFocusTool(false);

@@ -27,13 +27,19 @@ import { useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
+import type { PlacedPiece, MaterialRef } from '../world/pieces';
+import { placementSlotKey } from '../world/pieces';
+import { setAuthoredPieces, authoredIdFor, type AuthoredBuildPiece } from '../world/authoredRegistry';
+import { cacheAuthoredMesh, authoredMeshData } from '../world/authoredMesh';
+import type { BuildKind } from '../world/buildCatalog';
 import { loadPersistedState, persistState } from '../data/persistView';
+import { saveAuthoredPieces } from '../data/initialState';
 import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
 import { commandForKeyEvent } from '../data/keymap';
-import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
+import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, type PrimitiveParams } from '../data/hmscAssetCatalog';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
@@ -128,6 +134,14 @@ export default function AppFrame() {
     if (latest) dispatchEdit(latest);
   }, [state.seq]);
 
+  // Mirror the authored build pieces into the module registry (req_2578) so the
+  // pure placement/render helpers resolve them without prop threading, AND persist
+  // the list to DISK so exports survive a cold restart (req_2594).
+  useEffect(() => {
+    setAuthoredPieces(state.authoredBuildPieces);
+    saveAuthoredPieces(state.authoredBuildPieces);
+  }, [state.authoredBuildPieces]);
+
   const activeCommand = commandById(state.activeCommandId);
   const activeObject = selectedObject(state);
   const catalogAssets = useMemo(() => applyAssetOverrides(ASSETS, state.assetOverrides), [state.assetOverrides]);
@@ -207,7 +221,12 @@ export default function AppFrame() {
     }
     // Model-surface tools route to the viewer's host-native tool api; the viewer
     // owns the state and reports it back, so we don't mutate world state here.
-    if (isMeshToolCommand(commandId)) {
+    // Route to the viewer's mesh-tool API — but ONLY for actual mesh TOOLS (all
+    // 'mesh-' prefixed). isMeshToolCommand is `scope === 'model'`, which also
+    // matches non-tool model commands (save-snapshot, export-build-piece-*); the
+    // prefix guard keeps this router from swallowing them before their handlers
+    // (req_2585 — the export leaf hit this and silently no-op'd).
+    if (commandId.startsWith('mesh-') && isMeshToolCommand(commandId)) {
       const api = modelToolApiRef.current;
       if (api) {
         if (commandId === 'mesh-vertex') api.selMode(1);
@@ -271,6 +290,42 @@ export default function AppFrame() {
         openMenu: null,
         actionMenu: 'File',
         status: res.ok ? `Saved "${pkg.name}" to the library → ${res.dir}` : `Save failed: ${res.error ?? 'unknown error'}`,
+      }));
+      return;
+    }
+    if (command.id.startsWith('export-build-piece-')) {
+      // Export → Build Piece → <kind> (req_2583): register the OPEN model as a
+      // placeable build piece of the chosen base kind (its snap affinity) and arm
+      // it. The mesh key is the bare stored-model id (storedModelMeshData key),
+      // stripped of the 'studio:' package prefix so residency + refs agree. The
+      // status ALWAYS reports — a silent no-op is what made this feel dead before.
+      const kind = command.id.slice('export-build-piece-'.length) as BuildKind;
+      const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+      const pkg = doc?.kind === 'model' ? modelPackageById(doc.sourceId) : null;
+      if (!pkg) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export needs a MODEL open — open one from Models, then Export → Build Piece.' }));
+        return;
+      }
+      const modelId = pkg.id.startsWith('studio:') ? pkg.id.slice('studio:'.length) : pkg.id;
+      // Resolve the geometry through the ONE resolver the viewer uses — whatever
+      // form it's stored in (EditMesh parts, a content-addressed blob, a
+      // primitive). Live edited-but-unsaved parts win when held; else the package
+      // resolver. Cache it so the resident builder draws exactly what you see.
+      const liveParts = state.modelParts[pkg.id];
+      const captured = (liveParts ? composeModelParts(liveParts).positions : null) ?? modelPackageMeshData(pkg);
+      if (captured && captured.length >= 8) cacheAuthoredMesh(modelId, captured);
+      const verts = authoredMeshData(modelId, pkg.id);
+      const vcount = verts ? Math.floor(verts.length / 8) : 0;
+      const piece: AuthoredBuildPiece = { id: authoredIdFor(modelId), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color };
+      setState((prev) => ({
+        ...prev,
+        openMenu: null,
+        actionMenu: 'Build',
+        authoredBuildPieces: [...prev.authoredBuildPieces.filter((p) => p.id !== piece.id), piece],
+        armedPieceId: piece.id,
+        status: vcount > 0
+          ? `Exported "${pkg.name}" as a ${kind} build piece (${vcount} verts) — armed. Enter Build (B) to place it.`
+          : `Exported "${pkg.name}" as a ${kind} piece, but its geometry isn't reachable (0 verts). Open it in the model editor and Save Model to Library, then re-export. (${modelId})`,
       }));
       return;
     }
@@ -475,6 +530,100 @@ export default function AppFrame() {
         status: `selected ${object.name}`,
       };
     });
+  };
+
+  // ── World pieces (req_2563 Phase 1): the real placed-piece model lives in
+  // EditorState now. WorldEditorSurface reports placements/picks up here; the
+  // Inspector reads state.selectedPieceId. This retires the phantom `objects`
+  // path as the world surface's selection source.
+  const placePiece = (piece: PlacedPiece) => {
+    setState((prev) => {
+      const id = `bp_${prev.seq}`;
+      const placed = { ...piece, id };
+      // Replace anything already occupying this footprint (req_2583): dropping a
+      // window wall onto a wall REPLACES it — no two pieces fighting for the same
+      // space. Different footprints (a wall vs the floor under it) don't collide.
+      const key = placementSlotKey(placed);
+      const kept = prev.worldPieces.filter((p) => placementSlotKey(p) !== key);
+      const replaced = kept.length !== prev.worldPieces.length;
+      return {
+        ...prev,
+        seq: prev.seq + 1,
+        worldPieces: [...kept, placed],
+        selectedPieceId: id,
+        status: `${replaced ? 'replaced' : 'placed'} ${piece.pieceId}`,
+      };
+    });
+  };
+
+  const selectPiece = (id: string | null) => {
+    setState((prev) => ({
+      ...prev,
+      selectedPieceId: id,
+      status: id ? `selected ${prev.worldPieces.find((p) => p.id === id)?.pieceId ?? id}` : 'cleared world selection',
+    }));
+  };
+
+  const armPiece = (pieceId: string) => {
+    setState((prev) => ({
+      ...prev,
+      armedPieceId: pieceId,
+      // Arming a piece opens the focus panel on it (Build mode) and clears any
+      // placed-piece selection so the panel shows the DEFINITION, not an instance.
+      selectedPieceId: null,
+      status: `armed ${pieceId}`,
+    }));
+  };
+
+  // Per-instance override edits (req_2563 Phase 3): patch / clear one property on
+  // the selected placed piece. Authoring data on the piece; the host consumes it
+  // in a later world_loader slice (today it persists as intent on the instance).
+  const setPieceOverride = (id: string, path: string, value: number | boolean) => {
+    setState((prev) => ({
+      ...prev,
+      worldPieces: prev.worldPieces.map((p) => (p.id === id ? { ...p, overrides: { ...p.overrides, [path]: value } } : p)),
+      status: `${path} = ${value}`,
+    }));
+  };
+
+  const clearPieceOverride = (id: string, path: string) => {
+    setState((prev) => ({
+      ...prev,
+      worldPieces: prev.worldPieces.map((p) => {
+        if (p.id !== id) return p;
+        const next = { ...p.overrides };
+        delete next[path];
+        return { ...p, overrides: Object.keys(next).length ? next : undefined };
+      }),
+      status: `${path} reset to default`,
+    }));
+  };
+
+  // Material-slot assignment (req_2563 Phase 4): binds the CURRENTLY selected
+  // content-browser material into the piece's named slot (piece.slots[role]).
+  // One-click flow — pick a material on the left, click a slot on the right.
+  const assignPieceSlot = (id: string, role: string) => {
+    setState((prev) => {
+      const ref: MaterialRef = { assetId: prev.activeAssetId };
+      return {
+        ...prev,
+        worldPieces: prev.worldPieces.map((p) => (p.id === id ? { ...p, slots: { ...p.slots, [role]: ref } } : p)),
+        status: `slot ${role} ← ${assetById(prev.activeAssetId, prev.assetOverrides).name}`,
+      };
+    });
+  };
+
+  const clearPieceSlot = (id: string, role: string) => {
+    setState((prev) => ({
+      ...prev,
+      worldPieces: prev.worldPieces.map((p) => {
+        if (p.id !== id) return p;
+        const next = { ...p.slots };
+        delete next[role];
+        return { ...p, slots: Object.keys(next).length ? next : undefined };
+      }),
+      status: `slot ${role} cleared`,
+    }));
   };
 
   const selectContentFolder = (contentFolder: ContentFolderId) => {
@@ -980,6 +1129,14 @@ export default function AppFrame() {
     if (prompt.mode === 'add') addPrimitivePart(prompt.kind, params);
     else createNewMeshDocument(prompt.kind, params);
   };
+
+  // RJIT_MODELDOC=<primitive kind> boots straight into a fresh model document seeded with
+  // that primitive — the headless gesture-repro path (`rjit shot editor` + RJIT_MESHOPS in
+  // ModelView drives real select gestures and captures the result). Unset = no-op.
+  useEffect(() => {
+    const kind = (globalThis as any).__env_get?.('RJIT_MODELDOC') as PrimitiveKind | null | undefined;
+    if (kind) createNewMeshDocument(kind, { size: 1, height: 1, resolution: 1 });
+  }, []);
   const selectPart = (id: string) => {
     // Focus a part = SCOPE editing to it: only its verts/edges/faces show + select, and the
     // gizmo drives just it. Clicking the already-focused part toggles back to the whole model.
@@ -1001,9 +1158,21 @@ export default function AppFrame() {
     const mid = activePartsModelId(state);
     const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
     const range = part ? partRange(part) : null;
+    // Mark the part hidden in the ref BEFORE the host op: the hide drops the displayed
+    // tri count, which fires reconcileEmptyParts against state where this part still
+    // reads visible:true — without the ref it prunes the just-hidden part like a delete.
+    if (part && range) {
+      if (part.visible) hiddenPartIdsRef.current.add(id);
+      else hiddenPartIdsRef.current.delete(id);
+    }
     // Hide if currently shown. The outcome is reported LOUDLY: a silent no-op here reads
     // as "everything vanished" with no trail. verb+range+remaining tris tell the story.
     const r = range ? modelToolApiRef.current?.setPartHidden(range.lo, range.hi, part!.visible) : null;
+    if (part && range && !r?.ok) {
+      // Host op failed — undo the ref move so reconcile semantics match reality.
+      if (part.visible) hiddenPartIdsRef.current.delete(id);
+      else hiddenPartIdsRef.current.add(id);
+    }
     const verb = part?.visible ? 'hid' : 'showed';
     const status = !part
       ? 'part not found'
@@ -1031,6 +1200,7 @@ export default function AppFrame() {
           ? `deleted ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`
           : `could not delete ${part.name} [${range.lo},${range.hi}) — host op failed`)
       : `removed ${part?.name ?? id} from the outliner`;
+    hiddenPartIdsRef.current.delete(id);
     setState((prev) => {
       const parts = (prev.modelParts[mid!] ?? []).filter((p) => p.id !== id);
       return { ...prev, status, modelParts: { ...prev.modelParts, [mid!]: parts }, modelActivePartId: prev.modelActivePartId === id ? (parts[0]?.id ?? null) : prev.modelActivePartId };
@@ -1040,6 +1210,12 @@ export default function AppFrame() {
   // delete, drop any part whose group range now has ZERO surviving faces (metadata only; no
   // geometry crosses the bridge, no recompose). Visible parts only (a hidden part is stashed in
   // the host, not deleted). Runs off the full-quality triangle drop below.
+  //
+  // hiddenPartIdsRef is the SYNCHRONOUS twin of each part's `visible` flag: hiding a part
+  // drops the tri count and fires this reconcile BEFORE the visible:false state flip lands,
+  // so the flag alone reads stale (visible:true, 0 surviving faces) and the just-hidden
+  // part would be pruned like a delete. toggleVisiblePart writes the ref before the host op.
+  const hiddenPartIdsRef = useRef(new Set<string>());
   const reconcileEmptyParts = () => {
     const mid = activePartsModelId(state);
     if (!mid) return;
@@ -1047,7 +1223,7 @@ export default function AppFrame() {
     const empty = new Set<string>();
     for (const p of state.modelParts[mid] ?? []) {
       const r = partRange(p);
-      if (!p.visible || !r) continue;
+      if (!p.visible || hiddenPartIdsRef.current.has(p.id) || !r) continue;
       if ((hostFns.__mesh_group_face_count?.(r.lo, r.hi) ?? -1) === 0) empty.add(p.id);
     }
     if (empty.size === 0) return;
@@ -1579,7 +1755,6 @@ export default function AppFrame() {
         <RenderProbe id="Workspace">
           <Workspace
             state={state}
-            activeCommand={activeCommand}
             activeAsset={activeAsset}
             onCommand={runCommand}
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
@@ -1629,6 +1804,9 @@ export default function AppFrame() {
             onStage={() => runCommand(state.activeCommandId, 'stage')}
             onContext={() => setState((prev) => ({ ...prev, contextOpen: !prev.contextOpen, openMenu: null, status: prev.contextOpen ? 'context menu closed' : 'context menu opened' }))}
             onObject={selectObject}
+            onPlacePiece={placePiece}
+            onSelectPiece={selectPiece}
+            onArmPiece={armPiece}
             onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
             onSelectColorStudioMaterial={selectColorStudioMaterial}
             onColorStudioVariant={setColorStudioVariant}
@@ -1655,6 +1833,10 @@ export default function AppFrame() {
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
             onModelBrush={(brush) => modelToolApiRef.current?.setBrush(brush)}
+            onSetPieceOverride={setPieceOverride}
+            onClearPieceOverride={clearPieceOverride}
+            onAssignSlot={assignPieceSlot}
+            onClearSlot={clearPieceSlot}
             outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart, onDuplicatePart: (id: string) => duplicatePartById(id, -1), onImportModel: () => setImportPartOpen(true), onStampRanges: stampModelPartRanges }}
             colorSpine={{
               onSetCurrent: setColorSpineCurrent,

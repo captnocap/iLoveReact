@@ -1157,8 +1157,17 @@ fn blendSelect(base: [4]u8) [4]u8 {
     return out;
 }
 
-/// Reconcile the atlas tint with g_sel_face: restore faces no longer selected, tint newly
-/// selected ones (saving their base so a later deselect is exact).
+/// Reconcile the atlas tint with g_sel_face: restore everything, then re-save + re-tint
+/// the selected set in TWO PHASES (save all patches first, tint after).
+///
+/// The phase split is load-bearing (req_2613): two faces' tint texel sets can OVERLAP —
+/// a low-density island degenerates both quad-halves to near-identical centroid discs —
+/// so the old interleaved save-tint-save-tint left a LATER face's saved patch holding an
+/// EARLIER face's tint on the shared texels. Deselect then wrote that embedded tint back
+/// as if it were paint: the "stuck orange faces with 0 selected" bake. Single picks never
+/// hit it; any multi-face selection (marquee, select-all, part select) did. Saving every
+/// patch BEFORE the first tint keeps the invariant "every stored patch is pre-tint clean",
+/// which makes restore order irrelevant and keeps savedFaceBaseColor honest.
 fn applyFaceHighlight() void {
     if (g_tint_suspend > 0) return; // atlas is being rebuilt/read — resumeFaceTint reconciles
     if (model_paint.faceCount() == 0) return;
@@ -1168,27 +1177,20 @@ fn applyFaceHighlight() void {
         return;
     }
     const sel = g_sel_face orelse return;
-    // Restore faces that fell out of the selection.
-    var to_restore = std.ArrayListUnmanaged(u32){};
-    defer to_restore.deinit(alloc);
-    var it = g_face_base.iterator();
-    while (it.next()) |entry| {
-        const f = entry.key_ptr.*;
-        if (f >= sel.len or !sel[f]) to_restore.append(alloc, f) catch {};
+    // Unchanged set → keep the standing tint (the per-move marquee reconcile hits this).
+    var want: usize = 0;
+    var same = true;
+    for (sel, 0..) |b, f| {
+        if (!b) continue;
+        want += 1;
+        if (!g_face_base.contains(@intCast(f))) same = false;
     }
-    for (to_restore.items) |f| {
-        if (g_face_base.get(f)) |patch| {
-            model_paint.restoreFacePatch(f, patch);
-            alloc.free(patch);
-        }
-        _ = g_face_base.remove(f);
-    }
-    // Tint newly selected faces — save the face's whole island rect (sized PER FACE
-    // now: islands give big faces big rects) so free-form paint survives.
+    if (same and want == g_face_base.count()) return;
+    restoreAllFaces();
+    // Phase 1: save every selected face's island rect from the still-clean atlas.
     var f: u32 = 0;
     while (f < sel.len) : (f += 1) {
         if (!sel[f]) continue;
-        if (g_face_base.contains(f)) continue;
         const plen = model_paint.facePatchLen(f);
         if (plen == 0) continue;
         const patch = alloc.alloc(u8, plen) catch continue;
@@ -1200,7 +1202,11 @@ fn applyFaceHighlight() void {
             alloc.free(patch);
             continue;
         };
-        model_paint.tintFacePatch(f, SELECT_TINT, SELECT_MIX);
+    }
+    // Phase 2: tint — no save happens after this point, so no patch can embed a tint.
+    var it = g_face_base.iterator();
+    while (it.next()) |entry| {
+        model_paint.tintFacePatch(entry.key_ptr.*, SELECT_TINT, SELECT_MIX);
     }
 }
 
@@ -1705,4 +1711,46 @@ test "face-mode selCount reads AUTHORED faces — a grouped cube face is 1, not 
     try testing.expectEqual(@as(u32, 1), selCount());
     try testing.expect(selectFaceByIndex(2, true)); // a second quad, additively
     try testing.expectEqual(@as(u32, 2), selCount());
+}
+
+test "multi-face selection clears without baking — overlapping island discs (req_2613)" {
+    // The real repro: a grouped cube at default (tiny-island) density. Both halves of a
+    // quad degenerate to near-identical centroid discs, so the old interleaved save/tint
+    // left later patches holding earlier faces' tint — deselect wrote it back as paint.
+    var soup: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&soup);
+    const groups = [12]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    model_source.setFaceGroups(groups[0..]);
+    model_paint.setTarget(782, soup[0..], 36);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+    }
+    var base: [12][4]u8 = undefined;
+    var f: u32 = 0;
+    while (f < 12) : (f += 1) base[f] = model_paint.faceColor(f).?;
+
+    // Select EVERY face (the marquee / Ctrl+A shape), then deselect.
+    try testing.expectEqual(@as(i32, 6), selectFacesByGroupRange(0, 6, false));
+    clearSelection();
+    f = 0;
+    while (f < 12) : (f += 1) {
+        const c = model_paint.faceColor(f).?;
+        try testing.expectEqual(base[f][0], c[0]);
+        try testing.expectEqual(base[f][1], c[1]);
+        try testing.expectEqual(base[f][2], c[2]);
+    }
+
+    // And the additive-pile shape (click every face with shift), same assertion.
+    f = 0;
+    while (f < 12) : (f += 2) _ = selectFaceByIndex(f, true);
+    clearSelection();
+    f = 0;
+    while (f < 12) : (f += 1) {
+        const c = model_paint.faceColor(f).?;
+        try testing.expectEqual(base[f][0], c[0]);
+        try testing.expectEqual(base[f][1], c[1]);
+        try testing.expectEqual(base[f][2], c[2]);
+    }
 }
