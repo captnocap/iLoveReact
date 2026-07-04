@@ -2528,6 +2528,20 @@ pub fn paintFaceByIndex(face: u32, r: u8, g: u8, b: u8) bool {
     return true;
 }
 
+/// Set the atlas base type (0 = Texture Template, 1 = Solid Colour, 2 = Blank) + solid colour,
+/// then re-lay it on the current (unpainted) atlas — the Create Paint Atlas "Type" pick (req_2546).
+pub fn setPaintBase(mode: u8, r: u8, g: u8, b: u8) bool {
+    if (!model_paint.hasTarget()) return false;
+    const m: model_paint.BaseMode = switch (mode) {
+        1 => .solid,
+        2 => .blank,
+        else => .template,
+    };
+    model_paint.setBase(m, .{ r, g, b, 255 });
+    model_paint.clearAtlas();
+    return true;
+}
+
 /// Triangle count of the active paint target (0 if none) — lets a cart iterate faces.
 pub fn paintFaceCount() u32 {
     return model_paint.faceCount();

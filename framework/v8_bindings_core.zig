@@ -1001,6 +1001,19 @@ fn hostModelMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnNumber(info, 1);
 }
 
+/// __model_atlas_base(mode, r, g, b) → 1. Set the atlas base TYPE — 0 Texture Template,
+/// 1 Solid Colour, 2 Blank — and re-lay it on the current unpainted atlas (req_2546).
+fn hostModelAtlasBase(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const mode: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 2));
+    const r: u8 = @intCast(std.math.clamp(argToI32(info, 1) orelse 220, 0, 255));
+    const g: u8 = @intCast(std.math.clamp(argToI32(info, 2) orelse 220, 0, 255));
+    const b: u8 = @intCast(std.math.clamp(argToI32(info, 3) orelse 225, 0, 255));
+    const ok = scene3d.setPaintBase(mode, r, g, b);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// programmatic colouring + the headless paint proof.
 fn hostModelPaintFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -2137,6 +2150,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__image_write_png", hostImageWritePng);
     v8_runtime.registerHostFn("__model_mesh_write", hostModelMeshWrite);
+    v8_runtime.registerHostFn("__model_atlas_base", hostModelAtlasBase);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
     v8_runtime.registerHostFn("__model_paint_program_read", hostModelPaintProgramRead);
     v8_runtime.registerHostFn("__model_paint_program_apply", hostModelPaintProgramApply);

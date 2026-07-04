@@ -511,6 +511,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // explicit. atlasReadyRef survives edit-op key changes and resets on a fresh load.
   const atlasReadyRef = useRef(false);
   const [atlasPrompt, setAtlasPrompt] = useState(false);
+  // The atlas base TYPE (Blockbench's Create Texture "Type"), picked in the SAME gate as the
+  // size since both gate painting (req_2546): Texture Template = per-island colours, Solid =
+  // one flat colour (the current ink), Blank = bare sheet.
+  const [baseType, setBaseType] = useState<'template' | 'solid' | 'blank'>('template');
   // AUTHORED face count (a cube has 6, not its 12 triangles) — from the mesh's face
   // groups when it carries authored grouping; null for plain/per-triangle imports. The
   // prompt reads faces to the user and triangles to the byte math, never conflating them.
@@ -655,6 +659,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const createAtlasAndPaint = (fillOnly: boolean, fitTexels: number) => {
     if (fillOnly) changeDetail(1);
     else changeFit(fitTexels);
+    // Lay the chosen base TYPE onto the fresh atlas (req_2546): 0 template, 1 solid, 2 blank.
+    // Solid uses the current ink colour so "flat colour" means the one you're holding.
+    const mode = baseType === 'solid' ? 1 : baseType === 'blank' ? 2 : 0;
+    const [sr, sg, sb] = baseType === 'solid' ? brushRgb(brush) : [220, 220, 225];
+    host.__model_atlas_base?.(mode, sr, sg, sb);
     atlasReadyRef.current = true;
     setAtlasPrompt(false);
     enterPaint();
@@ -1115,13 +1124,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         <Scene3D.Camera orbit fov={50} />
         {/* A clean object-viewer wants no distance fade. */}
         <Scene3D.Fog enabled={false} />
-        {/* Light rig — neutral WHITE ambient so painted colours read true (the old bluish
-            ambient tinted them). The shader supports ONE directional + ambient, so the switches
-            map to what actually changes the render: Flat = bright even ambient (no shading,
-            paint-true); Key = the single directional; Fill = raise ambient so the orbited-away
-            side lifts out of black. Flipped from the View menu / right-click Lighting flyout. */}
-        <Scene3D.AmbientLight color="#ffffff" intensity={litFlat ? 2.1 : (litFill ? 1.3 : 0.7)} />
-        {!litFlat && litKey ? <Scene3D.DirectionalLight direction={[-0.5, -0.8, -0.5]} color="#ffffff" intensity={1.3} /> : null}
+        {/* Light rig — neutral WHITE, and the TOTAL budget never exceeds 1.0 (req_2545).
+            The r3d shader is a plain sum (ambient×base + key×base×N·L, no tone map), so any
+            rig over 1.0 CLAMPS per channel and SHIFTS HUE — the old ambient 1.3 + key 1.3
+            drove a facing orange face to 2.2× and rendered it yellow. Now light can only
+            darken, never recolour: Flat = exact paint colour; Key/Fill trade shading depth
+            inside the 1.0 budget. PAINT MODE always renders flat — while judging colour the
+            light must not editorialize; the rig comes back when you leave paint. */}
+        <Scene3D.AmbientLight color="#ffffff" intensity={paintMode || litFlat ? 1.0 : (litFill ? 0.65 : 0.45)} />
+        {/* The key is ALWAYS mounted, zeroed when off: with no directional child the host
+            keeps its DEFAULT warm sun (light_color (1.0, 0.95, 0.9), 3d.zig) — which is why
+            "Flat" never actually looked flat. Only an explicit intensity 0 kills it. */}
+        <Scene3D.DirectionalLight direction={[-0.5, -0.8, -0.5]} color="#ffffff" intensity={paintMode || litFlat || !litKey ? 0 : (litFill ? 0.35 : 0.55)} />
         {/* White material: all colour comes from the host's per-face paint atlas
             (default grey until painted), so painted colours render true. */}
         {model && <Scene3D.Mesh hostKey={model.key} material="#ffffff" />}
@@ -1468,6 +1482,27 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 ? `${authoredFaces} faces (${Math.floor(model.count / 3)} triangles)`
                 : `${Math.floor(model.count / 3)} triangles`} — the whole model shares ONE paint atlas; its faces split it by real-world size. Bigger atlas = finer strokes on this model.`}
             </Text>
+            {/* Type — WHAT the fresh atlas starts as (Blockbench's Create Texture "Type"). Same
+                gate as the size below; both gate painting (req_2546). */}
+            <Text style={{ color: '#8b97ab', fontSize: 10, fontWeight: 700, letterSpacing: 1, marginTop: 12 }}>TYPE</Text>
+            <Row style={{ marginTop: 6, gap: 6 }}>
+              {([['template', 'Texture Template'], ['solid', 'Solid Color'], ['blank', 'Blank']] as const).map(([t, label]) => {
+                const on = baseType === t;
+                return (
+                  <Pressable key={t} onPress={() => setBaseType(t)}
+                    style={{ flexGrow: 1, alignItems: 'center', paddingTop: 6, paddingBottom: 6, borderRadius: 6,
+                      backgroundColor: on ? '#244164' : '#252b3a', borderWidth: 1, borderColor: on ? '#4e75a4' : '#3a4356' }}>
+                    <Text style={{ color: on ? '#e6f1ff' : '#9fb4cf', fontSize: 11, fontWeight: '700' }}>{label}</Text>
+                  </Pressable>
+                );
+              })}
+            </Row>
+            <Text style={{ color: '#8b97ab', fontSize: 10, marginTop: 4 }}>
+              {baseType === 'template' ? 'each UV island a distinct colour — faces stay readable while you paint'
+                : baseType === 'solid' ? 'the whole model one flat colour (your current ink)'
+                : 'a bare sheet — paint from scratch'}
+            </Text>
+            <Text style={{ color: '#8b97ab', fontSize: 10, fontWeight: 700, letterSpacing: 1, marginTop: 12 }}>SIZE</Text>
             {(() => {
               // The HOST's island layout is the truth: each budget asks it what the
               // atlas would actually be and what density this model derives from it.

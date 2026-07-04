@@ -101,11 +101,10 @@ pub fn clearAtlas() void {
     }
     g_has_dirty = false;
     if (g_atlas_h > 0) markRows(0, g_atlas_h - 1);
-    // The atlas base IS a Texture Template: each UV island tinted a distinct pastel over the
-    // default background, so the sheet has real tone and every face is distinguishable on the
-    // model — instead of a blank grey wireframe (req_2537). Regenerated deterministically from
-    // the island layout, so replaying a saved painting rebuilds the same template underneath.
-    if (g_layout != null) fillTemplate();
+    // Lay the CHOSEN atlas base (Texture Template / Solid Color / Blank) over the background,
+    // so the sheet has tone and replaying a saved painting rebuilds the same base under it
+    // (req_2537, req_2546). Template regenerates deterministically from the island layout.
+    if (g_layout != null) applyBase();
 }
 
 pub fn hasTarget() bool {
@@ -369,7 +368,7 @@ fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
         rgba[b + 3] = DEFAULT_FACE[3];
     }
     g_rgba = rgba;
-    fillTemplate(); // Texture Template base — tint each island before any carried paint lands (req_2537)
+    applyBase(); // lay the chosen base (template/solid/blank) before any carried paint lands (req_2537/req_2546)
 
     // Overwrite the mesh's UVs — each vertex to its island-texel corner, normalized.
     const aw: f32 = @floatFromInt(g_atlas_w);
@@ -466,6 +465,32 @@ pub fn fillTemplate() void {
     const lay = &(g_layout orelse return);
     var f: u32 = 0;
     while (f < g_facecount) : (f += 1) paintFace(f, templateColor(lay.tri_island[f]));
+}
+
+// The atlas base type the user picks in Create Paint Atlas — the same gate as the size, since
+// both gate painting (req_2546). Mirrors Blockbench's Create Texture "Type": Texture Template
+// (per-island pastels), Solid Color (one colour), or Blank (bare background).
+pub const BaseMode = enum(u8) { template = 0, solid = 1, blank = 2 };
+var g_base_mode: BaseMode = .template;
+var g_base_color: [4]u8 = .{ 220, 220, 225, 255 };
+
+/// Choose the atlas base type + solid colour. The next atlas build/clear lays this base; call
+/// clearAtlas afterward to re-lay it on the current (unpainted) sheet.
+pub fn setBase(mode: BaseMode, color: [4]u8) void {
+    g_base_mode = mode;
+    g_base_color = color;
+}
+
+// Lay the chosen base onto the (already background-cleared) atlas.
+fn applyBase() void {
+    switch (g_base_mode) {
+        .template => fillTemplate(),
+        .solid => {
+            var f: u32 = 0;
+            while (f < g_facecount) : (f += 1) paintFace(f, g_base_color);
+        },
+        .blank => {}, // leave the neutral background bare
+    }
 }
 
 /// Bulk-set every face's colour from a per-face RGBA array (length ≥ facecount*4) —
