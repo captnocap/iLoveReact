@@ -800,7 +800,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     cycleSafety,
     cycleDetail,
     changeDetail,
-    setBrush: (b: Brush) => { console.warn(`[slider] ModelView.setBrush size=${b.size} flow=${b.flow}`); setBrush(b); },
+    setBrush,
     setPalette,
     toggleLight: (which) => {
       if (which === 'flat') setLitFlat((v) => !v);

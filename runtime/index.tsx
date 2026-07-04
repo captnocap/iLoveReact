@@ -595,21 +595,17 @@ if (typeof registerDispatch === 'function') {
 // the value here (throttled); commit fires once on release with the settle.
 (globalThis as any).__dispatchSliderChange = (id: number, value: number) => {
   try {
-    const h = handlerRegistry.get(id);
-    console.warn(`[slider] JS change id=${id} val=${value} handlers=${h ? Object.keys(h).join(',') : 'NONE'}`);
     dispatchAliases(id, ['onChange', 'onValueChange'], { targetId: id, value });
   } catch (e) {
-    console.warn(`[slider] JS change dispatch THREW: ${e}`);
+    // swallow — host prints nothing for eval exceptions except via QJS itself
   }
 };
 
 (globalThis as any).__dispatchSliderCommit = (id: number, value: number) => {
   try {
-    const h = handlerRegistry.get(id);
-    console.warn(`[slider] JS commit id=${id} val=${value} handlers=${h ? Object.keys(h).join(',') : 'NONE'}`);
     dispatchAliases(id, ['onCommit', 'onChangeEnd'], { targetId: id, value });
   } catch (e) {
-    console.warn(`[slider] JS commit dispatch THREW: ${e}`);
+    // swallow — host prints nothing for eval exceptions except via QJS itself
   }
 };
 

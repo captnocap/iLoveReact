@@ -1075,11 +1075,8 @@ fn endSliderDrag(root: *Node) void {
     slider_drag_slot = 0;
     if (findNodeByScrollSlot(root, slot)) |node| {
         node.slider_dragging = false;
-        std.debug.print("[slider] COMMIT slot={d} val={d:.3} -> dispatching to JS\n", .{ slot, node.slider_value });
         dispatchSliderJs("__dispatchSliderCommit({d},{d})", slot, node.slider_value);
         state_mod.markDirty();
-    } else {
-        std.debug.print("[slider] COMMIT slot={d} DROPPED — node vanished before release\n", .{slot});
     }
 }
 
@@ -4191,18 +4188,6 @@ pub fn run(config_in: AppConfig) !void {
                         const rmy: f32 = event.button.y;
                         if (render_surfaces.handleMouseDown(rmx, rmy, event.button.button)) continue;
                     }
-                    // req_2511 diagnostic — log EVERY left click and whether it lands on a
-                    // slider (using the same walker the grab below uses), plus the mesh-edit
-                    // state, so we can see exactly why a slider click does or doesn't take.
-                    if (event.button.button == c.SDL_BUTTON_LEFT) {
-                        const lmx: f32 = event.button.x;
-                        const lmy: f32 = event.button.y;
-                        if (hitTestSlider(config.root, lmx, lmy)) |sn| {
-                            std.debug.print("[click] ({d:.0},{d:.0}) ON SLIDER id={d} slot={d} rect=({d:.0},{d:.0} {d:.0}x{d:.0}) val={d:.3} meshEdit={}\n", .{ lmx, lmy, sn.id, sn.scroll_persist_slot, sn.computed.x, sn.computed.y, sn.computed.w, sn.computed.h, sn.slider_value, r3d.meshEditCapturing() });
-                        } else {
-                            std.debug.print("[click] ({d:.0},{d:.0}) not on a slider (meshEdit={})\n", .{ lmx, lmy, r3d.meshEditCapturing() });
-                        }
-                    }
                     // Native mesh-editor input (modelview): middle starts an orbit; left
                     // over the viewport does the active tool (select/marquee or pan-pivot)
                     // or recentres focus on a double-click. No JS in the loop.
@@ -4360,10 +4345,7 @@ pub fn run(config_in: AppConfig) !void {
                                 sn.slider_dragging = true;
                                 input.unfocus();
                                 updateSliderDrag(config.root, mx);
-                                std.debug.print("[click]   -> GRABBED slider slot={d} newval={d:.3}\n", .{ sn.scroll_persist_slot, sn.slider_value });
                                 continue;
-                            } else {
-                                std.debug.print("[click]   -> slider slot==0, grab SKIPPED (bug)\n", .{});
                             }
                         }
                         // Alt+click on a Canvas.Node with canvas_move_draggable starts a
