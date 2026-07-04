@@ -982,6 +982,25 @@ fn hostImageWritePng(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnNumber(info, if (capture.writeRgbaPng(pathz.ptr, rgba, w, h)) 1 else 0);
 }
 
+/// __model_mesh_write(path) → 1 on success. Writes the active model's full-res mesh
+/// (interleaved 8 f32/vert, raw little-endian) to `path`, so a model's package folder
+/// carries its own geometry (mesh/base.blob) instead of an empty dir (req_2533). vert
+/// count = filesize / 32.
+fn hostModelMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
+    defer alloc.free(path);
+    const verts = model_source.verts() orelse return setReturnNumber(info, 0);
+    if (verts.len == 0) return setReturnNumber(info, 0);
+    const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
+    defer alloc.free(pathz);
+    const file = std.fs.cwd().createFile(pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
+    defer file.close();
+    file.writeAll(std.mem.sliceAsBytes(verts)) catch return setReturnNumber(info, 0);
+    setReturnNumber(info, 1);
+}
+
 /// programmatic colouring + the headless paint proof.
 fn hostModelPaintFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -2117,6 +2136,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_paint_fit_estimate", hostModelPaintFitEstimate);
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__image_write_png", hostImageWritePng);
+    v8_runtime.registerHostFn("__model_mesh_write", hostModelMeshWrite);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
     v8_runtime.registerHostFn("__model_paint_program_read", hostModelPaintProgramRead);
     v8_runtime.registerHostFn("__model_paint_program_apply", hostModelPaintProgramApply);

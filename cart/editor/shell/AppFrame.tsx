@@ -39,7 +39,7 @@ import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
-import { materializeModelPackage } from '../data/modelPackageStore';
+import { materializeModelPackage, writeModelArtifacts } from '../data/modelPackageStore';
 import { colorStudioSpec, colorStudioOverrideKey, paletteForSpecVariant, rgbToCss } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
 import { image as imageOps, quantize as quantizeImage } from '../../../runtime/image';
@@ -257,6 +257,7 @@ export default function AppFrame() {
         return;
       }
       const res = materializeModelPackage(pkg);
+      if (res.ok) writeModelArtifacts(pkg); // also write mesh/base.blob + atlases/base.png
       setState((prev) => ({
         ...prev,
         openMenu: null,

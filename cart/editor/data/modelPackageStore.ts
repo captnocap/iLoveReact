@@ -17,12 +17,15 @@ import {
   categoryDir,
   manifestPath,
   packageDir,
+  subDir,
   packageToManifest,
   parseManifest,
   manifestToPackage,
   serializeManifest,
 } from './modelPackage';
 import type { ModelPackage } from './types';
+
+const host = globalThis as any;
 
 export type MaterializeResult = { ok: boolean; id: string; dir: string; error?: string };
 export type MaterializeSummary = { total: number; wrote: number; failed: MaterializeResult[] };
@@ -99,6 +102,26 @@ export function listPackageFiles(pkg: ModelPackage, sub: (typeof MODEL_PACKAGE_S
   return listDir(dir)
     .filter((name) => name && !name.startsWith('.'))
     .map((name) => ({ name, path: `${dir}/${name}`, sub }));
+}
+
+// Write the ACTIVE model's own geometry + atlas into its package, so the folders that back
+// its paintings aren't empty: a painting implies a mesh + an atlas, so mesh/ and atlases/
+// must populate too (req_2533). mesh/base.blob = full-res interleaved verts (via the host
+// door); atlases/base.png = the current atlas readback. Best-effort — each piece is skipped
+// when its host door or data is absent (an unpainted model has no atlas yet). Call on any
+// save of the active model.
+export function writeModelArtifacts(pkg: Pick<ModelPackage, 'kind' | 'id'>): void {
+  const meshDir = subDir(pkg.kind, pkg.id, 'mesh');
+  const atlasDir = subDir(pkg.kind, pkg.id, 'atlases');
+  mkdir(meshDir);
+  mkdir(atlasDir);
+  host.__model_mesh_write?.(`${meshDir}/base.blob`);
+  try {
+    const atlas = JSON.parse(host.__model_atlas_read?.() || '{}');
+    if (atlas.data && atlas.w > 0 && atlas.h > 0) {
+      host.__image_write_png?.(`${atlasDir}/base.png`, atlas.data, atlas.w, atlas.h);
+    }
+  } catch { /* no atlas resident yet — leave atlases/ empty, which is honest */ }
 }
 
 // Re-exported so callers get the category mapping without reaching past the store.

@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { listPaintVariants, savePaintVariant, updatePaintVariant, removePaintVariant } from '../data/paintVariants';
+import { writeModelArtifacts } from '../data/modelPackageStore';
 import type { ModelPackage } from '../data/types';
 
 const host = globalThis as any;
@@ -44,6 +45,7 @@ export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
     const cur = readCurrentPaint();
     if (!cur) return;
     const v = savePaintVariant(model, { w: cur.w, h: cur.h, detail: cur.detail, data: cur.prog, format: 'program', atlasRgba: cur.rgba });
+    writeModelArtifacts(model); // the painting implies a mesh + atlas — populate those folders too
     setActiveId(v.id);
     setNote(`Saved ${v.name} to ${model.name}/paints/.`);
     refresh();
@@ -56,6 +58,7 @@ export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
     if (!cur) return;
     const v = updatePaintVariant(model, activeId, { w: cur.w, h: cur.h, detail: cur.detail, data: cur.prog, format: 'program', atlasRgba: cur.rgba });
     if (!v) return saveNew(); // the active variant vanished — don't lose the work
+    writeModelArtifacts(model); // keep mesh/ + atlases/ in step with the update
     setNote(`Updated ${v.name}.`);
     refresh();
   };
