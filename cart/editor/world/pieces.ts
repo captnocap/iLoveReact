@@ -13,6 +13,7 @@
 // v8_bindings_game_build.zig, PIECE_LOOKS collapses into a host readback.
 
 import { buildCatalogIndex, validateBuildPlacement } from '@reactjit/runtime/game/build';
+import { METERS_PER_LEVEL } from './isoStage';
 
 export type PlacedPiece = {
   id: string;
@@ -59,6 +60,29 @@ export function resolvePlacement(pieceId: string, wx: number, wz: number, levelY
     if (!v.valid) return null;
   }
   return { id: '', pieceId, x, y: levelY, z, yawDegrees: 0 };
+}
+
+/** The storey a placed piece belongs to (its base Y in level units). */
+export function pieceFloorOf(piece: PlacedPiece): number {
+  return Math.round(piece.y / METERS_PER_LEVEL);
+}
+
+/** A wall-kind piece (piece ids are kind-dotted: 'wall.concrete.common'). */
+export function isWallPiece(pieceId: string): boolean {
+  return pieceId.startsWith('wall.');
+}
+
+/** Sims-style storey cutaway (req_2567): everything ABOVE the active floor is
+ *  hidden so the storey you're editing is never buried under its own building,
+ *  and `wallsDown` additionally hides the ACTIVE floor's walls (interior /
+ *  prop-placement view). Floors below always show — they're the context. */
+export function visibleStoreyPieces(pieces: readonly PlacedPiece[], floor: number, wallsDown: boolean): PlacedPiece[] {
+  return pieces.filter((piece) => {
+    const storey = pieceFloorOf(piece);
+    if (storey > floor) return false;
+    if (wallsDown && storey === floor && isWallPiece(piece.pieceId)) return false;
+    return true;
+  });
 }
 
 /** Pack placed pieces into the world_loader live-overlay rows — 12 floats each

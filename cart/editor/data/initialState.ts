@@ -24,7 +24,7 @@ export function initialState(): EditorState {
     actionMenu: 'Build',
     activeDomain: 'world',
     activeTab: 'Skins',
-    activeCommandId: 'move-selection',
+    activeCommandId: 'select-tool',
     activeAssetId: DEFAULT_ASSET_ID,
     assetPage: 0,
     materialFocused: false,
@@ -60,6 +60,7 @@ export function initialState(): EditorState {
     // FLOORCTL req_2485: the REAL active storey (0 = Ground) — boots aligned
     // with the viewport instead of the old mock's "Floor 1" mismatch.
     floorIndex: 0,
+    wallsDown: false,
     viewMode: '3D',
     workspaceDocuments: [WORLD_DOCUMENT],
     activeWorkspaceDocumentId: WORLD_DOCUMENT_ID,

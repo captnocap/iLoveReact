@@ -18,6 +18,8 @@ export default function ToolOptions(props: {
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onSnap: () => void;
   onFloor: (delta: number) => void;
+  /** toggle hiding the ACTIVE floor's walls (storey cutaway extra, req_2567) */
+  onWallsDown: () => void;
   onViewMode: (mode: ViewMode) => void;
   /** The paint controls segment (AppFrame builds it — ink/size/flow/shape/resolution).
    *  THIS action bar is the toolbar paint tools belong to (req_2552: the row where the
@@ -84,7 +86,7 @@ export default function ToolOptions(props: {
   }
 
   const activeMenu = activeMenuFor(props.state);
-  const actionCommands = COMMANDS.filter((command) => command.menu === activeMenu && command.surface !== 'model');
+  const actionCommands = COMMANDS.filter((command) => command.menu === activeMenu && command.scope !== 'model');
   return (
     <C.HW_ToolOptions>
       <MapPaintBar state={mapPaint} onPatch={props.onMapPaint} />
@@ -119,6 +121,20 @@ export default function ToolOptions(props: {
       <C.HW_IconButton tooltip="Up a floor" onPress={() => props.onFloor(1)}>
         <C.HW_PillText>▲</C.HW_PillText>
       </C.HW_IconButton>
+      {/* Storey cutaway (req_2567): floors ABOVE the active storey are always cut
+          away; this pill additionally drops the ACTIVE floor's walls so the
+          interior is editable (Sims walls-down). */}
+      {props.state.wallsDown ? (
+        <C.HW_PillOn tooltip="Walls down — this floor's walls are hidden for interior editing. Click to show them." onPress={props.onWallsDown}>
+          <C.HW_OptionLabel>WALLS</C.HW_OptionLabel>
+          <C.HW_PillTextOn>Down</C.HW_PillTextOn>
+        </C.HW_PillOn>
+      ) : (
+        <C.HW_Pill tooltip="Walls up — click to hide this floor's walls (floors above are always cut away)." onPress={props.onWallsDown}>
+          <C.HW_OptionLabel>WALLS</C.HW_OptionLabel>
+          <C.HW_PillText>Up</C.HW_PillText>
+        </C.HW_Pill>
+      )}
       <C.HW_Spacer />
       {(['3D', '2D'] as ViewMode[]).map((mode) => {
         const Pill = props.state.viewMode === mode ? C.HW_PillOn : C.HW_Pill;

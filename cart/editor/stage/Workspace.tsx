@@ -18,6 +18,8 @@ export default function Workspace(props: {
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onSnap: () => void;
   onFloor: (delta: number) => void;
+  /** toggle hiding the ACTIVE floor's walls (storey cutaway extra, req_2567) */
+  onWallsDown: () => void;
   onViewMode: (mode: ViewMode) => void;
   /** The paint controls segment for the action bar (ToolOptions renders it while painting). */
   paintBar?: any;

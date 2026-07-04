@@ -1592,6 +1592,7 @@ export default function AppFrame() {
               const floorIndex = Math.max(0, Math.min(MAX_FLOOR, prev.floorIndex + delta));
               return { ...prev, floorIndex, status: floorIndex === 0 ? 'floor: Ground' : `floor: Floor ${floorIndex}` };
             })}
+            onWallsDown={() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' }))}
             onViewMode={(viewMode) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` }))}
             onMapPaint={patchMapPaint}
             paintBar={

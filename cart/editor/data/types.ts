@@ -96,12 +96,20 @@ export type Command = {
   native: boolean;
   undoable: boolean;
   tool?: boolean;
-  // Which document surface a command belongs to. Absent = the world surface
-  // (the default toolset). 'model' commands only surface when a model document
-  // is active — they're the host-native mesh-edit tools the model viewer brought.
-  surface?: 'world' | 'model';
+  // Which authoring surface this command is RELEVANT on — the one source of truth for
+  // menu enable/disable (see commandEnabled). 'global' = always (New Map, Open, Undo…);
+  // 'world'/'model'/'material' = only when that surface is loaded in view. Everything off
+  // the active surface renders grayed-with-reason, never hidden (sane-app behaviour).
+  scope: 'global' | 'world' | 'model' | 'material';
+  // The capability doesn't exist yet → the command is always disabled with a reason. Drop
+  // this (or set true) the moment a real handler lands. Keeps the roadmap visible without lying.
+  available?: boolean;
+  // This command operates on an existing selection → disabled when nothing is selected on
+  // its surface (Duplicate/Delete/Move/Paint/Sample/Focus…). Placement tools do NOT set this.
+  needsSelection?: boolean;
   // Groups this command under an expandable parent flyout in its menu dropdown
-  // (e.g. File → New Mesh → Cube). Rows without a submenu render at the top level.
+  // (e.g. File → New Mesh → Cube, Edit → Mesh → Topology). Rows without a submenu render
+  // at the top level. `section` is a non-interactive header inside a submenu flyout.
   submenu?: string;
 };
 
@@ -353,7 +361,10 @@ export type HistoryEvent = {
 // mock; it drives the real editor now, so the name reflects that.)
 export type EditorState = {
   openMenu: Menu | null;
-  newMeshPrompt?: PrimitiveKind | null; // when set, the "add a mesh at a chosen size" dialog is open for this kind
+  // When set, the size/resolution dialog is open for this primitive. `mode` splits the two
+  // verbs that used to share one command: 'new' always spawns a FRESH model document; 'add'
+  // appends a part to the model already in view (the outliner + and Edit → Mesh → Add Primitive).
+  newMeshPrompt?: { kind: PrimitiveKind; mode: 'new' | 'add' } | null;
   presetMenuOpen: boolean;
   actionMenu: Menu;
   activeDomain: string;
@@ -396,6 +407,9 @@ export type EditorState = {
   snapGridMeters: number;
   snapAngleDegrees: number;
   floorIndex: number;
+  /** Storey cutaway extra (req_2567): also hide the ACTIVE floor's walls, for
+   *  interior editing / prop placement. Floors above are always cut away. */
+  wallsDown: boolean;
   viewMode: ViewMode;
   workspaceDocuments: WorkspaceDocument[];
   activeWorkspaceDocumentId: string;

@@ -61,7 +61,7 @@ export default function Stage(props: {
       <C.HW_StageViewport>
         {activeDocument.kind === 'world' || activeDocument.kind === 'model' ? null : <C.HW_CanvasGrid />}
         {activeDocument.kind === 'world' ? (
-          <WorldEditorSurface paintActive={props.state.mapPaint.active} floor={props.state.floorIndex} />
+          <WorldEditorSurface paintActive={props.state.mapPaint.active} floor={props.state.floorIndex} wallsDown={props.state.wallsDown} activeCommandId={props.state.activeCommandId} />
         ) : activeDocument.kind === 'model' ? (
           <ModelDocumentSurface
             model={activeModel}
