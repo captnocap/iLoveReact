@@ -107,8 +107,12 @@ export default function WorldViewport(props: {
   // Live overlay: placed pieces render as real meshes instantly, no rebake.
   useEffect(() => {
     const nodeId = Number(loaderRef.current?.id ?? 0);
-    if (!nodeId || typeof g.__compiled_world_set_live_pieces !== 'function') return;
+    if (!nodeId || typeof g.__compiled_world_set_live_pieces !== 'function') {
+      if (props.pieces.length) console.warn(`[place] live push SKIPPED — node=${nodeId} door=${typeof g.__compiled_world_set_live_pieces}`);
+      return;
+    }
     g.__compiled_world_set_live_pieces(nodeId, pieceRows(props.pieces));
+    console.warn(`[place] live push: ${props.pieces.length} pieces -> loader node ${nodeId}`);
   }, [props.pieces]);
 
   // Unmount: drop the loader runtime + its pending camera.
@@ -166,12 +170,21 @@ export default function WorldViewport(props: {
   const onUp = useCallback((e: any) => {
     const d = dragRef.current;
     dragRef.current = null;
-    if (!d || d.turned) return;
-    const target = resolveSnap(d.x0, d.y0);
-    if (target && armedRef.current) {
-      props.onPlace({ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: 0 });
+    if (!d) { console.warn('[place] up with no down — click dropped'); return; }
+    // req_2548 diagnostic — every way a click can silently place nothing.
+    if (d.turned) {
+      const p = local(e);
+      console.warn(`[place] click ate as DRAG (travel ${Math.abs(p.x - d.x0).toFixed(0)}+${Math.abs(p.y - d.y0).toFixed(0)}px from down)`);
+      return;
     }
-  }, [resolveSnap, props.onPlace]);
+    if (!armedRef.current) { console.warn('[place] click with nothing armed'); return; }
+    const gp = stage.groundPoint(d.x0, d.y0, rectRef.current);
+    if (!gp) { console.warn(`[place] GROUND MISS at (${d.x0.toFixed(0)},${d.y0.toFixed(0)}) rect=(${rectRef.current.x},${rectRef.current.y} ${rectRef.current.width}x${rectRef.current.height})`); return; }
+    const target = resolveSnap(d.x0, d.y0);
+    if (!target) { console.warn(`[place] VALIDATOR rejected cell at world (${gp.x.toFixed(1)},${gp.z.toFixed(1)})`); return; }
+    console.warn(`[place] click -> place ${target.pieceId} at (${target.x},${target.z})`);
+    props.onPlace({ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: 0 });
+  }, [resolveSnap, props.onPlace, local, stage]);
 
   const onScroll = useCallback((e: any) => {
     const dy = Number(e?.deltaY ?? 0);
