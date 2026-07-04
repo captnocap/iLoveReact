@@ -231,6 +231,26 @@ fn countTrue(maybe: ?[]bool) u32 {
     return n;
 }
 
+/// Re-read unique-vert positions from the displayed soup — for host-side restores that
+/// bypass the mutation path (the unsafe-edit guard's Revert, req_2539). The weld map is
+/// position-independent once built, so topology, selection, and scope all stay valid;
+/// only the positions refresh. Without this the overlay dots/edges and the gizmo pivot
+/// keep drawing the pre-revert positions while the shaded mesh shows the restore.
+pub fn refreshPositionsFromSoup() void {
+    const verts = g_verts orelse return;
+    const corners = g_corner_vert orelse return;
+    const pos = model_paint.positions() orelse return;
+    const n = @min(corners.len, pos.len / 3);
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const dst = @as(usize, corners[i]) * 3;
+        if (dst + 2 >= verts.len) continue;
+        verts[dst + 0] = pos[i * 3 + 0];
+        verts[dst + 1] = pos[i * 3 + 1];
+        verts[dst + 2] = pos[i * 3 + 2];
+    }
+}
+
 /// Drop topology + selection — call on model load / quality change (topology changed).
 pub fn reset() void {
     restoreAllFaces();

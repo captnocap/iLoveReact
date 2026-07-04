@@ -2019,6 +2019,11 @@ pub fn meshEditGuardResolve(action: u8) bool {
                 _ = model_source.updateGeometryFromDisplayed(pos, 0, fc - 1);
                 _ = patchActiveEditMesh(0, fc - 1);
             }
+            // The restore bypassed mesh_edit's mutation path, so its welded
+            // vert positions (overlay dots/edges, gizmo pivot, picking) still
+            // hold the pre-revert drag — resync them from the restored soup
+            // (req_2539). Selection and topology stay.
+            mesh_edit.refreshPositionsFromSoup();
             changed = true;
             // The revert returned the mesh to the exact state the newest journal entry
             // snapshots — undoing to it would be a visible no-op, so drop the entry.
