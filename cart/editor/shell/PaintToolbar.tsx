@@ -1,17 +1,19 @@
-// editor/shell/PaintToolbar.tsx — the contextual paint controls that append INTO the
-// CHROME row while painting a model (req_2466 → req_2547: "we have a whole toolbar right
-// above to take advantage of" — no more floating bar inside the viewport). Chrome renders
-// this between its menus and the Compile pill; it carries no panel skin of its own.
+// editor/shell/PaintToolbar.tsx — the paint controls SEGMENT of the ACTION BAR
+// (ToolOptions — the row where the Paint/Vertex/wireframe buttons live). That row is
+// THE toolbar for tools (req_2466 → req_2547 → req_2552: first a floating bar in the
+// viewport, then wrongly the chrome/menu row — the action bar was the one meant).
+// ToolOptions renders this inline after the mesh tools while painting; it carries no
+// panel skin of its own.
 //
 // Hybrid layout (the user's pick): controls you touch constantly are inline (size, flow); the
 // rich pickers are one click away. The "ink" swatch unifies the color picker and the shader
 // buckets into ONE popover, and shaders show as rendered <Effect> THUMBNAILS instead of a
 // wall of text names. What's my brush dipped in = one swatch.
 //
-// Split in two: PaintToolbar is the inline chrome segment; PaintPopovers are the floating
+// Split in two: PaintToolbar is the inline action-bar segment; PaintPopovers are the floating
 // menus, which AppFrame renders LATE (this layout paints in tree order, so an overlay must
 // be a late root child to sit over the body — same as DropdownMenu). The popovers hang from
-// the chrome's bottom edge, right-anchored under where the controls sit.
+// the action bar's bottom edge, over the workspace column.
 import { useState } from 'react';
 import { Box, Row, Col, Text, Pressable, Slider, Effect } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
@@ -71,7 +73,7 @@ function brushShape(b: Brush): BrushShape {
   return b.stamp.kind === 'analytic' ? b.stamp.shape : 'round';
 }
 
-// ── The chrome segment (Chrome renders this between its menus and Compile) ────────────
+// ── The action-bar segment (ToolOptions renders this after the mesh tools) ────────────
 export default function PaintToolbar(props: Ink & {
   brushTool: BrushTool;
   detail: number;
@@ -85,7 +87,7 @@ export default function PaintToolbar(props: Ink & {
   const shaderInk = brush.ink.kind === 'shader' ? brush.ink : null;
 
   return (
-    // Bare controls, no panel skin — this row lives INSIDE the chrome bar (req_2547).
+    // Bare controls, no panel skin — this row lives INSIDE the action bar (req_2552).
     <Row style={{ alignItems: 'center', gap: 8 }}>
       <Pressable tooltip="Paint resolution — click to cycle" onPress={props.onCycleDetail} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 8, paddingRight: 8, height: 26, borderRadius: 6, borderWidth: 1, borderColor: LINE }}>
         <Icon name="Grid3x3" size={12} color={DIM} />
@@ -165,9 +167,10 @@ export function PaintPopovers(props: Ink & { popover: PaintPopover; onClose: () 
   };
 
   return (
-    // Click-away scrim starting just below the CHROME row (the bar the controls live in
-    // now, req_2547); the panels hang from its bottom edge, right-anchored under them.
-    <Box style={{ position: 'absolute', left: 0, top: 38, right: 0, bottom: 0 }}>
+    // Click-away scrim starting just below the ACTION BAR (chrome 37 + bar 36 — the row
+    // the controls live in, req_2552); the panels hang from its bottom edge, over the
+    // workspace column where the segment sits.
+    <Box style={{ position: 'absolute', left: 0, top: 74, right: 0, bottom: 0 }}>
       <Pressable onPress={props.onClose} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }} />
       {props.popover === 'ink' ? <InkPanel {...props} pickShader={pickShader} pickColor={pickColor} shaderInk={shaderInk} /> : null}
       {props.popover === 'brush' ? <BrushPanel brush={brush} patch={patch} onBrush={props.onBrush} /> : null}
@@ -186,7 +189,7 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; pickColor:
   const [tab, setTab] = useState<'color' | 'shader'>(props.shaderInk ? 'shader' : 'color');
   const [shaderPage, setShaderPage] = useState(0);
   return (
-    <Box style={{ position: 'absolute', right: 200, top: 0, width: 300, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12 }}>
+    <Box style={{ position: 'absolute', left: 410, top: 0, width: 300, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12 }}>
       <Row style={{ gap: 4, marginBottom: 10 }}>
         {(['color', 'shader'] as const).map((t) => {
           const on = tab === t;
@@ -273,7 +276,7 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; pickColor:
 
 function BrushPanel({ brush, patch, onBrush }: { brush: Brush; patch: (b: Partial<Brush>) => void; onBrush: (b: Brush) => void }) {
   return (
-    <Box style={{ position: 'absolute', right: 200, top: 0, width: 260, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12, gap: 10 }}>
+    <Box style={{ position: 'absolute', left: 410, top: 0, width: 260, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12, gap: 10 }}>
       <Text style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>SHAPE</Text>
       <Row style={{ flexWrap: 'wrap', gap: 6 }}>
         {BRUSH_PRESETS.map((preset) => {

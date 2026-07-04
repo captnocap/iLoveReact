@@ -1462,34 +1462,7 @@ export default function AppFrame() {
           activeCommand={activeCommand}
           onMenu={(menu) => setState((prev) => ({ ...prev, actionMenu: menu, openMenu: prev.openMenu === menu ? null : menu }))}
           onCommand={runCommand}
-        >
-          {/* The paint controls APPEND to the chrome row while painting (req_2547) —
-              the one toolbar the app already has, not a second bar floating in the
-              viewport. Popovers still render late below (paint-over-body ordering). */}
-          {!playing && state.modelTool.paint ? (
-            <PaintToolbar
-              brush={state.modelTool.brush}
-              brushTool={state.modelTool.brushTool}
-              detail={state.modelTool.detail}
-              onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
-              onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
-              onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
-              popover={paintPopover}
-              onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
-              current={state.colorSpineCurrent}
-              palette={state.colorSpinePalette}
-              scenePick={state.colorSpineScenePick}
-              paletteFor={paintPaletteFor}
-              spine={{
-                onSetCurrent: setColorSpineCurrent,
-                onAddToTray: addColorSpineToTray,
-                onPickTray: pickColorSpineTray,
-                onScenePick: pickColorSpineScene,
-                onLoadLibrarySet: loadColorSpineLibrarySet,
-              }}
-            />
-          ) : null}
-        </Chrome>
+        />
       </RenderProbe>
       {playing ? (
         <C.HW_PlayBody>
@@ -1556,6 +1529,35 @@ export default function AppFrame() {
             })}
             onViewMode={(viewMode) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` }))}
             onMapPaint={patchMapPaint}
+            paintBar={
+              /* The paint controls segment for the ACTION BAR (ToolOptions) — the row the
+                 Paint/Vertex/wireframe buttons live in, which is THE toolbar for tools
+                 (req_2552; the chrome/menu row was the wrong gutter). Popovers still
+                 render late at the root so they paint over the body. */
+              state.modelTool.paint ? (
+              <PaintToolbar
+                brush={state.modelTool.brush}
+                brushTool={state.modelTool.brushTool}
+                detail={state.modelTool.detail}
+                onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
+                onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
+                onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
+                popover={paintPopover}
+                onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
+                current={state.colorSpineCurrent}
+                palette={state.colorSpinePalette}
+                scenePick={state.colorSpineScenePick}
+                paletteFor={paintPaletteFor}
+                spine={{
+                  onSetCurrent: setColorSpineCurrent,
+                  onAddToTray: addColorSpineToTray,
+                  onPickTray: pickColorSpineTray,
+                  onScenePick: pickColorSpineScene,
+                  onLoadLibrarySet: loadColorSpineLibrarySet,
+                }}
+              />
+              ) : null
+            }
             onWorkspaceDocument={selectWorkspaceDocument}
             onCloseWorkspaceDocument={closeWorkspaceDocument}
             onStage={() => runCommand(state.activeCommandId, 'stage')}

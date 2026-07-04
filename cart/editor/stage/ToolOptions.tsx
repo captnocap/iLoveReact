@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { COMMANDS, activeMenuFor, meshToolCommands, meshToolActive, meshTopoCommands, meshPaintCommands } from '../data/commands';
+import { COMMANDS, activeMenuFor, meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
 import { SNAP_MODES } from '../data/content';
 import type { Command, EditorState, ViewMode } from '../data/types';
 import MapPaintBar from './MapPaintBar';
@@ -19,6 +19,10 @@ export default function ToolOptions(props: {
   onSnap: () => void;
   onFloor: (delta: number) => void;
   onViewMode: (mode: ViewMode) => void;
+  /** The paint controls segment (AppFrame builds it — ink/size/flow/shape/resolution).
+   *  THIS action bar is the toolbar paint tools belong to (req_2552: the row where the
+   *  Paint/Vertex/wireframe buttons live), rendered while painting a model. */
+  paintBar?: any;
 }) {
   const activeDoc = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
     ?? props.state.workspaceDocuments[0]!;
@@ -48,30 +52,17 @@ export default function ToolOptions(props: {
             </C.HW_IconButton>
           </Fragment>
         ))}
-        {/* Paint sub-tools — the two brush behaviours (fill · free-form) as icon buttons, then
-            the face-safety and detail toggles as state-reading pills. Only while painting. */}
-        {meshPaintCommands(props.state.modelTool).map((command, i) => {
-          const active = meshToolActive(command.id, props.state.modelTool);
-          const Btn = active ? C.HW_IconButtonOn : C.HW_IconButton;
-          return (
-            <Fragment key={command.id}>
-              {i === 0 ? <C.HW_OptionDivider /> : null}
-              <Btn tooltip={`${command.name} (${command.key})`} onPress={() => props.onCommand(command.id, 'action bar')}>
-                <Icon name={command.icon} size={14} color={accentFor(active ? 'primary' : 'textDim')} />
-              </Btn>
-            </Fragment>
-          );
-        })}
-        {props.state.modelTool.paint ? (
+        {/* The PAINT segment (req_2552) — the full brush controls (fill/brush/pick, ink,
+            size, flow, shape, resolution) live HERE in the action bar while painting,
+            plus the face-safety pill (the one control the segment doesn't carry). The
+            old fill/brush icon pair + DETAIL pill died here: the segment IS those. */}
+        {props.state.modelTool.paint && props.paintBar ? (
           <Fragment>
             <C.HW_OptionDivider />
+            {props.paintBar}
             <C.HW_Pill tooltip="Face safety — Clip paints the face under the dab; Lock masks the stroke to the pressed face" onPress={() => props.onCommand('mesh-paint-safety', 'action bar')}>
               <C.HW_OptionLabel>SAFE</C.HW_OptionLabel>
               <C.HW_PillText>{props.state.modelTool.safety === 0 ? 'Clip' : 'Lock'}</C.HW_PillText>
-            </C.HW_Pill>
-            <C.HW_Pill tooltip="Free-form detail — texels per triangle patch (higher = crisper strokes on low-poly)" onPress={() => props.onCommand('mesh-paint-detail', 'action bar')}>
-              <C.HW_OptionLabel>DETAIL</C.HW_OptionLabel>
-              <C.HW_PillText>{props.state.modelTool.detail <= 1 ? '—' : String(props.state.modelTool.detail)}</C.HW_PillText>
             </C.HW_Pill>
           </Fragment>
         ) : null}
