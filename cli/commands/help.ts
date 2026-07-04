@@ -4,7 +4,7 @@ import { tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 
 const TEMPLATES = ['basic', 'routes', 'dashboard', 'taskboard', 'canvas', 'stdlib'];
-const SUBCOMMANDS = ['init', 'dev', 'gdev', 'tui', 'ship', 'ship-tui', 'pack', 'play', 'shot', 'autotest', 'classify', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
+const SUBCOMMANDS = ['init', 'dev', 'gdev', 'tui', 'ship', 'ship-tui', 'pack', 'play', 'shot', 'autotest', 'classify', 'clean', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
 
 type HelpCommand = typeof SUBCOMMANDS[number];
 
@@ -148,6 +148,21 @@ const SUBCOMMAND_DOC: Record<HelpCommand, { summary: string; usage: string[]; de
       'a .cls.ts classifier sheet. Subcommands handle migration, renaming,',
       'manual classifier insertion, partial-pattern mining, and theme-token',
       'suggestions.',
+    ],
+  },
+  clean: {
+    summary: 'prune the local zig cache (the per-build disk eater)',
+    usage: ['rjit clean', 'rjit clean --days N', 'rjit clean --all'],
+    detail: [
+      'Zig never evicts .zig-cache/o entries, and every build lands a fresh',
+      'multi-hundred-MB one (it reached 756GB on 2026-07-03). Successful',
+      'ship/dev builds auto-prune entries older than 7 days; this command is',
+      'the manual lever plus a size report.',
+      '',
+      '--days N   prune entries untouched for N days (default 7)',
+      '--all      drop the whole cache; the next build is fully cold',
+      '',
+      'RJIT_CACHE_PRUNE_DAYS=0 disables the post-build auto-prune.',
     ],
   },
   'bake-icons': {

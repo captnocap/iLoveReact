@@ -6,6 +6,7 @@ import { bakeIconAtlas } from './bake-icons.ts';
 import { fsExists, fsMkdir, fsRead, fsRemove, fsWrite, tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 import { spawn, spawnSync } from '../host/process.ts';
+import { pruneZigCache, resolvePruneDays } from '../host/zigcache.ts';
 import {
   DEV_SOCKET_PATH,
   nativeBuildFingerprint,
@@ -215,7 +216,11 @@ function buildDevHost(rjitHome: string, cartRoot: string, binName: string, subst
   const finalArgs = cartRoot === rjitHome ? args : [`ZIG_GLOBAL_CACHE_DIR=${rjitHome}/tools/zig/cache`, zig, ...args];
   const build = spawnSync(cmd, finalArgs);
   writeSpawnOutput(build);
-  return build.code === 0 ? 0 : build.code || 1;
+  if (build.code !== 0) return build.code || 1;
+  // Same disk-leak guard as ship: zig never evicts .zig-cache/o entries and
+  // every dev rebuild lands a fresh one. RJIT_CACHE_PRUNE_DAYS=0 disables.
+  pruneZigCache(rjitHome, resolvePruneDays());
+  return 0;
 }
 
 function ensurePgRunning(rjitHome: string): void {

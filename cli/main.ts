@@ -8,6 +8,7 @@ import * as bakeIcons from './commands/bake-icons.ts';
 import * as cartManifestField from './commands/cart-manifest-field.ts';
 import * as cartBundle from './commands/cart-bundle.ts';
 import * as classify from './commands/classify.ts';
+import * as clean from './commands/clean.ts';
 import * as codegenBindings from './commands/codegen-bindings.ts';
 import * as dev from './commands/dev.ts';
 import * as firecrackerBuild from './commands/firecracker-build.ts';
@@ -39,6 +40,7 @@ const COMMANDS: Record<string, Command> = {
   'cart-bundle': cartBundle,
   'cart-manifest-field': cartManifestField,
   'classify': classify,
+  'clean': clean,
   'codegen-bindings': codegenBindings,
   'dev': dev,
   'firecracker-build': firecrackerBuild,

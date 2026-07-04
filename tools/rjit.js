@@ -5086,12 +5086,96 @@ ${entry}
     }
   }
 
+  // cli/commands/clean.ts
+  var clean_exports = {};
+  __export(clean_exports, {
+    run: () => run8
+  });
+
+  // cli/host/zigcache.ts
+  var DEFAULT_PRUNE_DAYS = 7;
+  function resolvePruneDays() {
+    const raw = __env("RJIT_CACHE_PRUNE_DAYS");
+    if (!raw) return DEFAULT_PRUNE_DAYS;
+    const days = Number(raw);
+    return Number.isFinite(days) ? days : DEFAULT_PRUNE_DAYS;
+  }
+  var STALE_FIND_ARGS = (dir, days) => [dir, "-maxdepth", "1", "-mindepth", "1", "-type", "d", "-mtime", `+${days}`];
+  function pruneZigCache(rjitHome, days, opts = {}) {
+    if (days <= 0) return 0;
+    const dir = `${rjitHome}/.zig-cache/o`;
+    if (!fsExists(dir)) return 0;
+    const list = spawnSync("find", STALE_FIND_ARGS(dir, days));
+    const stale = list.stdout.split("\n").filter((line) => line.trim().length > 0);
+    if (stale.length === 0) {
+      if (opts.verbose) out(`[clean] zig cache: nothing older than ${days} days`);
+      return 0;
+    }
+    const lock = `${rjitHome}/.zig-cache/.ship.lock`;
+    const rm = spawnSync("flock", [lock, "find", ...STALE_FIND_ARGS(dir, days), "-exec", "rm", "-rf", "{}", "+"]);
+    if (rm.code !== 0) {
+      out(`[clean] zig cache prune FAILED (exit ${rm.code}): ${rm.stderr.trim()}`);
+      return 0;
+    }
+    out(`[clean] zig cache: pruned ${stale.length} entries older than ${days} days`);
+    return stale.length;
+  }
+
+  // cli/commands/clean.ts
+  async function run8(argv) {
+    let days = DEFAULT_PRUNE_DAYS;
+    let all = false;
+    for (let i = 0; i < argv.length; i++) {
+      const arg = argv[i];
+      if (arg === "--all") {
+        all = true;
+      } else if (arg === "--days") {
+        days = Number(argv[++i]);
+        if (!Number.isFinite(days) || days < 0) {
+          err("[clean] --days needs a non-negative number");
+          return 1;
+        }
+      } else {
+        err(`[clean] unknown arg: ${arg}`);
+        err("Usage: rjit clean [--days N] [--all]");
+        return 1;
+      }
+    }
+    const rjitHome = __env("RJIT_HOME") || __cwd();
+    const cacheDir = `${rjitHome}/.zig-cache/o`;
+    if (all) {
+      if (!fsExists(cacheDir)) {
+        out("[clean] no local zig cache");
+        return 0;
+      }
+      const lock = `${rjitHome}/.zig-cache/.ship.lock`;
+      out("[clean] dropping the ENTIRE local zig cache (next build is fully cold)...");
+      const rm = spawnSync("flock", [lock, "sh", "-c", `rm -rf '${cacheDir}'/*`]);
+      if (rm.code !== 0) {
+        err(`[clean] failed (exit ${rm.code}): ${rm.stderr.trim()}`);
+        return rm.code || 1;
+      }
+    } else {
+      pruneZigCache(rjitHome, days, { verbose: true });
+    }
+    reportSize(rjitHome, ".zig-cache");
+    reportSize(rjitHome, "zig-out");
+    return 0;
+  }
+  function reportSize(rjitHome, rel3) {
+    const path = `${rjitHome}/${rel3}`;
+    if (!fsExists(path)) return;
+    const du = spawnSync("du", ["-sh", path]);
+    const size = du.stdout.trim().split("	")[0] ?? "?";
+    out(`[clean] ${rel3}: ${size}`);
+  }
+
   // cli/commands/codegen-bindings.ts
   var codegen_bindings_exports = {};
   __export(codegen_bindings_exports, {
-    run: () => run8
+    run: () => run9
   });
-  async function run8(argv) {
+  async function run9(argv) {
     const args = parseArgs(argv, { flags: { check: "bool", strict: "bool" } });
     const ingredients = loadIngredients();
     const zig = emitZig2(ingredients);
@@ -5233,7 +5317,7 @@ ${entry}
   // cli/commands/dev.ts
   var dev_exports = {};
   __export(dev_exports, {
-    run: () => run9
+    run: () => run10
   });
 
   // cli/host/net.ts
@@ -5391,7 +5475,7 @@ done
   }
 
   // cli/commands/dev.ts
-  async function run9(argv) {
+  async function run10(argv) {
     const parsed = parseDevArgs(argv);
     if (typeof parsed === "number") return parsed;
     const cartRoot = __cwd();
@@ -5556,7 +5640,9 @@ done
     const finalArgs = cartRoot === rjitHome ? args : [`ZIG_GLOBAL_CACHE_DIR=${rjitHome}/tools/zig/cache`, zig, ...args];
     const build = spawnSync(cmd, finalArgs);
     writeSpawnOutput2(build);
-    return build.code === 0 ? 0 : build.code || 1;
+    if (build.code !== 0) return build.code || 1;
+    pruneZigCache(rjitHome, resolvePruneDays());
+    return 0;
   }
   function ensurePgRunning(rjitHome) {
     const pg = resolvePg(rjitHome);
@@ -5645,9 +5731,9 @@ done
   // cli/commands/firecracker-build.ts
   var firecracker_build_exports = {};
   __export(firecracker_build_exports, {
-    run: () => run10
+    run: () => run11
   });
-  async function run10(argv) {
+  async function run11(argv) {
     const root = __cwd();
     const parsed = parseArgs2(argv, root);
     if (typeof parsed === "number") return parsed;
@@ -5827,7 +5913,7 @@ done
   // cli/commands/game.ts
   var game_exports = {};
   __export(game_exports, {
-    run: () => run11
+    run: () => run12
   });
   var GAME_DIR = "cart/hmsc-int/game";
   var SUITE_ROOTS = [GAME_DIR, "cart/hmsc-int/data", "cart/hmsc-int/editors", "cart/hmsc-int/compile", "docs/game/_index"];
@@ -5899,7 +5985,7 @@ done
     "cutscene",
     "telemetry"
   ];
-  async function run11(argv) {
+  async function run12(argv) {
     const subcommand = argv[0];
     if (subcommand === "compile") return retiredCompileCommand();
     if (subcommand === "bake") return bake(__cwd(), argv.slice(1));
@@ -6522,8 +6608,8 @@ if (failures.length > 0) {
       `ZIGOS_SCREENSHOT_OUTPUT='${root}/${outPath}'`,
       "ZIGOS_SCREENSHOT_FRAMES=8"
     ].join(" ");
-    const run26 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
-    const runOut = run26.stdout.trim();
+    const run27 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
+    const runOut = run27.stdout.trim();
     if (runOut) out(runOut);
     if (!assertPng(root, outPath)) return false;
     const match = runOut.match(/built (\d+) mesh instances/);
@@ -6589,10 +6675,10 @@ if (failures.length > 0) {
       return 1;
     }
     out("[game] launching live window \u2014 close it or press ESC to exit...");
-    const run26 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
-    if (run26.stdout.trim()) out(run26.stdout.trim());
-    if (run26.stderr.trim()) err(run26.stderr.trim());
-    return run26.code === 0 ? 0 : 1;
+    const run27 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
+    if (run27.stdout.trim()) out(run27.stdout.trim());
+    if (run27.stderr.trim()) err(run27.stderr.trim());
+    return run27.code === 0 ? 0 : 1;
   }
   function verify(root) {
     if (bundleVerifyHarness(root) !== 0) {
@@ -6642,13 +6728,13 @@ if (failures.length > 0) {
   // cli/commands/gdev.ts
   var gdev_exports = {};
   __export(gdev_exports, {
-    run: () => run12
+    run: () => run13
   });
   var DEFAULT_GAME_CART = "hmsc-int";
   var PROFILE_VERSION = "gdev-v1";
   var GDEV_SOCKET_GUI = "/tmp/reactjit-gdev.sock";
   var GDEV_SOCKET_TUI = "/tmp/reactjit-gdev-tui.sock";
-  async function run12(argv) {
+  async function run13(argv) {
     const parsed = parseGdevArgs(argv);
     if (typeof parsed === "number") return parsed;
     const cartRoot = __cwd();
@@ -6915,10 +7001,10 @@ ${digest.stderr || digest.stdout}`);
   var help_exports = {};
   __export(help_exports, {
     printTopLevel: () => printTopLevel,
-    run: () => run13
+    run: () => run14
   });
   var TEMPLATES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  var SUBCOMMANDS = ["init", "dev", "gdev", "tui", "ship", "ship-tui", "pack", "play", "shot", "autotest", "classify", "bake-icons", "pack-sdk", "firecracker-build", "help"];
+  var SUBCOMMANDS = ["init", "dev", "gdev", "tui", "ship", "ship-tui", "pack", "play", "shot", "autotest", "classify", "clean", "bake-icons", "pack-sdk", "firecracker-build", "help"];
   var SUBCOMMAND_DOC = {
     init: {
       summary: "scaffold a new cart from a template",
@@ -7061,6 +7147,21 @@ ${digest.stderr || digest.stdout}`);
         "suggestions."
       ]
     },
+    clean: {
+      summary: "prune the local zig cache (the per-build disk eater)",
+      usage: ["rjit clean", "rjit clean --days N", "rjit clean --all"],
+      detail: [
+        "Zig never evicts .zig-cache/o entries, and every build lands a fresh",
+        "multi-hundred-MB one (it reached 756GB on 2026-07-03). Successful",
+        "ship/dev builds auto-prune entries older than 7 days; this command is",
+        "the manual lever plus a size report.",
+        "",
+        "--days N   prune entries untouched for N days (default 7)",
+        "--all      drop the whole cache; the next build is fully cold",
+        "",
+        "RJIT_CACHE_PRUNE_DAYS=0 disables the post-build auto-prune."
+      ]
+    },
     "bake-icons": {
       summary: "bake runtime icon polylines into the GPU SDF atlas",
       usage: ["rjit bake-icons"],
@@ -7095,7 +7196,7 @@ ${digest.stderr || digest.stdout}`);
       detail: []
     }
   };
-  async function run13(argv) {
+  async function run14(argv) {
     const target = argv[0];
     const registry = readRegistry();
     if (!target) {
@@ -7174,10 +7275,10 @@ ${digest.stderr || digest.stdout}`);
   // cli/commands/init.ts
   var init_exports = {};
   __export(init_exports, {
-    run: () => run14
+    run: () => run15
   });
   var TEMPLATE_NAMES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  async function run14(argv) {
+  async function run15(argv) {
     const parsed = parseArgs3(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
@@ -7532,7 +7633,7 @@ export default function App() {
   // cli/commands/lab.ts
   var lab_exports = {};
   __export(lab_exports, {
-    run: () => run15
+    run: () => run16
   });
   var LABS_DIR = "cart/hmsc-int/labs";
   var SCAFFOLD_SCENE = `${LABS_DIR}/_scaffold.tsx`;
@@ -7540,7 +7641,7 @@ export default function App() {
   var REGISTRY = `${LABS_DIR}/index.ts`;
   var IMPORTS_MARKER = "// rjit:lab-imports";
   var ENTRIES_MARKER = "// rjit:lab-entries";
-  async function run15(argv) {
+  async function run16(argv) {
     if (argv[0] !== "new" && argv[0] !== "remove") {
       err("Usage: rjit lab new <name>");
       err("       rjit lab remove <name>");
@@ -7624,7 +7725,7 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/metafile-gate.ts
   var metafile_gate_exports = {};
   __export(metafile_gate_exports, {
-    run: () => run16
+    run: () => run17
   });
 
   // cli/cart/metafile.ts
@@ -7749,7 +7850,7 @@ ${IMPORTS_MARKER}`).replace(
   }
 
   // cli/commands/metafile-gate.ts
-  async function run16(argv) {
+  async function run17(argv) {
     let registryPath = "sdk/dependency-registry.json";
     let metafilePath = "";
     let format = "ship-gate";
@@ -7837,9 +7938,9 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/pack.ts
   var pack_exports = {};
   __export(pack_exports, {
-    run: () => run17
+    run: () => run18
   });
-  async function run17(argv) {
+  async function run18(argv) {
     const name = argv[0];
     let outDir = "";
     for (let i = 1; i < argv.length; i += 1) {
@@ -7910,7 +8011,7 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/pack-sdk.ts
   var pack_sdk_exports = {};
   __export(pack_sdk_exports, {
-    run: () => run18
+    run: () => run19
   });
   var ROOT = __cwd();
   var EXCLUDES = [
@@ -7975,7 +8076,7 @@ ${IMPORTS_MARKER}`).replace(
     "/lib/x86_64-linux-gnu/libresolv.so.2",
     "/lib64/ld-linux-x86-64.so.2"
   ];
-  async function run18(argv) {
+  async function run19(argv) {
     const parsed = parsePackArgs(argv);
     if (typeof parsed === "number") return parsed;
     const registryPath = `${ROOT}/sdk/dependency-registry.json`;
@@ -8224,9 +8325,9 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/play.ts
   var play_exports = {};
   __export(play_exports, {
-    run: () => run19
+    run: () => run20
   });
-  async function run19(argv) {
+  async function run20(argv) {
     const pkg = argv[0];
     if (!pkg || argv.length > 1) return usage5(pkg ? "too many arguments" : "missing package path");
     const root = __cwd();
@@ -8254,11 +8355,11 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/push-bundle.ts
   var push_bundle_exports = {};
   __export(push_bundle_exports, {
-    run: () => run20
+    run: () => run21
   });
   var SOCKET_PATH = "/tmp/reactjit.sock";
   var TIMEOUT_MS2 = 3e3;
-  async function run20(argv) {
+  async function run21(argv) {
     let parsed;
     try {
       parsed = parseArgs(argv.slice(0, 2), { positional: ["tabName", "bundlePath"] });
@@ -8337,9 +8438,9 @@ ${IMPORTS_MARKER}`).replace(
   // cli/commands/ship.ts
   var ship_exports = {};
   __export(ship_exports, {
-    run: () => run21
+    run: () => run22
   });
-  async function run21(argv) {
+  async function run22(argv) {
     const parsed = parseShipArgs(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
@@ -8396,6 +8497,7 @@ ${IMPORTS_MARKER}`).replace(
     const build = runLockedBuild(rjitHome, buildCommand(rjitHome, cartRoot, zig, flags));
     writeSpawnOutput6(build);
     if (build.code !== 0) return build.code || 1;
+    pruneZigCache(rjitHome, resolvePruneDays());
     const buildBin = `${cartRoot}/zig-out/bin/${parsed.name}`;
     if (!fsExists(buildBin)) return fail8(`build produced no binary: ${buildBin}`, 1);
     if (!verifyIngredientLabels(cartRoot, buildBin, flags)) return 1;
@@ -8880,18 +8982,18 @@ __ARCHIVE__
   // cli/commands/ship-tui.ts
   var ship_tui_exports = {};
   __export(ship_tui_exports, {
-    run: () => run22
+    run: () => run23
   });
-  async function run22(argv) {
-    return run21([...argv, "--tui"]);
+  async function run23(argv) {
+    return run22([...argv, "--tui"]);
   }
 
   // cli/commands/shot.ts
   var shot_exports = {};
   __export(shot_exports, {
-    run: () => run23
+    run: () => run24
   });
-  async function run23(argv) {
+  async function run24(argv) {
     let name = null;
     let outPath = null;
     let route = null;
@@ -9025,19 +9127,19 @@ __ARCHIVE__
   // cli/commands/tui.ts
   var tui_exports = {};
   __export(tui_exports, {
-    run: () => run24
+    run: () => run25
   });
-  async function run24(argv) {
-    return run9([...argv, "--tui"]);
+  async function run25(argv) {
+    return run10([...argv, "--tui"]);
   }
 
   // cli/commands/watch-and-push.ts
   var watch_and_push_exports = {};
   __export(watch_and_push_exports, {
-    run: () => run25
+    run: () => run26
   });
   var POLL_MS = 200;
-  async function run25(argv) {
+  async function run26(argv) {
     const cartName = argv[0];
     const cartFile = argv[1];
     const outPath = argv[2];
@@ -9115,6 +9217,7 @@ __ARCHIVE__
     "cart-bundle": cart_bundle_exports,
     "cart-manifest-field": cart_manifest_field_exports,
     "classify": classify_exports,
+    "clean": clean_exports,
     "codegen-bindings": codegen_bindings_exports,
     "dev": dev_exports,
     "firecracker-build": firecracker_build_exports,

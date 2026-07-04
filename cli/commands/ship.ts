@@ -5,6 +5,7 @@ import { bundleCart } from '../cart/bundle.ts';
 import { fsExists, fsMkdir, fsRead, fsWrite, tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 import { spawnSync } from '../host/process.ts';
+import { pruneZigCache, resolvePruneDays } from '../host/zigcache.ts';
 
 type Substrate = 'gui' | 'tui';
 
@@ -85,6 +86,10 @@ export async function run(argv: string[]): Promise<number> {
   const build = runLockedBuild(rjitHome, buildCommand(rjitHome, cartRoot, zig, flags));
   writeSpawnOutput(build);
   if (build.code !== 0) return build.code || 1;
+  // Every build lands a fresh multi-hundred-MB .zig-cache/o entry and zig
+  // never evicts (756GB / full disk on 2026-07-03) — prune stale entries
+  // after each successful build. RJIT_CACHE_PRUNE_DAYS=0 disables.
+  pruneZigCache(rjitHome, resolvePruneDays());
 
   const buildBin = `${cartRoot}/zig-out/bin/${parsed.name}`;
   if (!fsExists(buildBin)) return fail(`build produced no binary: ${buildBin}`, 1);
