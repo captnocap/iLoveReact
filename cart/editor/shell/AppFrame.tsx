@@ -32,6 +32,7 @@ import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
+import { commandForKeyEvent } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, type PrimitiveParams } from '../data/hmscAssetCatalog';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
@@ -167,10 +168,10 @@ export default function AppFrame() {
 
   const runCommand = (commandId: string, source: string) => {
     const command = commandById(commandId);
-    // Paint resolution (File → Paint Resolution): set exact texels/face on the viewer. The host
-    // clamps dense meshes to the atlas budget; the detail readout reflects what actually took.
-    if (commandId.startsWith('paint-res-')) {
-      const px = Number(commandId.slice('paint-res-'.length));
+    // Paint resolution (Edit → Mesh → Paint → Paint Resolution): set exact texels/triangle on the
+    // viewer. The host clamps dense meshes to the atlas budget; the readout reflects what took.
+    if (commandId.startsWith('mesh-paint-res-')) {
+      const px = Number(commandId.slice('mesh-paint-res-'.length));
       const applied = modelToolApiRef.current?.changeDetail(px) ?? px;
       // Shout when the atlas budget clamped the pick — otherwise a plateau at high detail looks
       // like a brush bug when it's really "this mesh has too many faces for that many texels".
@@ -178,6 +179,13 @@ export default function AppFrame() {
         ? `Paint resolution ${px} clamped → ${applied}×${applied} (atlas budget — fewer faces or lower detail for finer than this)`
         : `Paint resolution → ${px}×${px} texels/triangle`;
       setState((prev) => ({ ...prev, openMenu: null, status }));
+      return;
+    }
+    // Add Primitive (Edit → Mesh → Add Primitive → <kind>): the 'add' verb — append a part to the
+    // model in view. Opens the size/resolution dialog in add mode; the outliner + shares this path.
+    if (commandId.startsWith('add-mesh-')) {
+      const kind = commandId.slice('add-mesh-'.length) as PrimitiveKind;
+      setState((prev) => ({ ...prev, openMenu: null, contextOpen: false, actionMenu: 'Edit', newMeshPrompt: { kind, mode: 'add' } }));
       return;
     }
     // Studio-parity mesh ops — these change PART structure (or journaled mesh state),
@@ -267,11 +275,11 @@ export default function AppFrame() {
       return;
     }
     if (command.id.startsWith('new-mesh-')) {
-      // Don't drop a fixed unit primitive — prompt for its size + resolution FIRST (the old
-      // studio mesh editor's add dialog). createPrimitive builds it at the chosen params when
-      // the dialog confirms; the part-vs-new-model branch is decided there.
+      // New Mesh (File → New Mesh → <kind>): the 'new' verb — ALWAYS a fresh model document, even
+      // with a model already open. Prompt for size + resolution first; createNewMeshDocument builds
+      // it on confirm. (Appending a part to the model in view is the separate 'add' verb above.)
       const kind = command.id.slice('new-mesh-'.length) as PrimitiveKind;
-      setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', newMeshPrompt: kind }));
+      setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', newMeshPrompt: { kind, mode: 'new' } }));
       return;
     }
     if (command.id === 'open-map' || command.id === 'open-file-explorer' || command.id === 'find-import-source') {
@@ -300,6 +308,24 @@ export default function AppFrame() {
         actionMenu: 'File',
         status: 'compile output unavailable - validation 0/0',
       }));
+      return;
+    }
+    // Window menu — real toggles over the existing dock popovers/dialog (open one, close the
+    // sibling popovers so only one owns the corner at a time).
+    if (command.id === 'toggle-eventbus') {
+      setState((prev) => ({ ...prev, openMenu: null, eventbusPopoverOpen: !prev.eventbusPopoverOpen, perfPopoverOpen: false, memoryPopoverOpen: false, status: prev.eventbusPopoverOpen ? 'event bus closed' : 'event bus opened' }));
+      return;
+    }
+    if (command.id === 'toggle-performance') {
+      setState((prev) => ({ ...prev, openMenu: null, perfPopoverOpen: !prev.perfPopoverOpen, eventbusPopoverOpen: false, memoryPopoverOpen: false, status: prev.perfPopoverOpen ? 'performance closed' : 'performance opened' }));
+      return;
+    }
+    if (command.id === 'toggle-memory') {
+      setState((prev) => ({ ...prev, openMenu: null, memoryPopoverOpen: !prev.memoryPopoverOpen, eventbusPopoverOpen: false, perfPopoverOpen: false, status: prev.memoryPopoverOpen ? 'memory closed' : 'memory opened' }));
+      return;
+    }
+    if (command.id === 'toggle-build-journal') {
+      setState((prev) => ({ ...prev, openMenu: null, buildDialogOpen: !prev.buildDialogOpen, status: prev.buildDialogOpen ? 'build journal closed' : 'build journal opened' }));
       return;
     }
 
@@ -884,34 +910,52 @@ export default function AppFrame() {
     ({ id: 'part:file:1', name, sourcePath: path, visible: true, color: PART_TINTS[0]! });
   // Adding a mesh (menu or outliner) opens the size/resolution dialog instead of dropping a
   // fixed unit primitive — you author the dimensions upfront, like the old studio mesh editor.
-  const addPart = (kind: PrimitiveKind) => setState((prev) => ({ ...prev, newMeshPrompt: kind }));
-  // The dialog confirmed: build the primitive at the chosen params — a new PART on the model in
-  // view, or a fresh model document seeded with it. Same part-vs-new-model split as before, now
-  // decided here so both entry points (File → New Mesh and the outliner +) share it.
+  // The outliner + adds a part to the model in view → the 'add' verb (append), never a new document.
+  const addPart = (kind: PrimitiveKind) => setState((prev) => ({ ...prev, newMeshPrompt: { kind, mode: 'add' } }));
   // Range of a part in the host mesh: its stored [lo, hi) (set on seed/append). The host mesh
   // is authoritative — these ids are stable across deletes and appends within a session.
   const partRange = (part: ModelPart): { lo: number; hi: number } | null =>
     part.lo != null && part.hi != null ? { lo: part.lo, hi: part.hi } : null;
 
-  const createPrimitive = (kind: PrimitiveKind, params: PrimitiveParams) => {
+  // 'add' verb — APPEND the primitive as a new PART to the model in view (preserving every prior
+  // edit; no JS recompose). Reached from Edit → Mesh → Add Primitive and the outliner +.
+  const addPrimitivePart = (kind: PrimitiveKind, params: PrimitiveParams) => {
     const activeModel = activePartsModelId(state);
-    const api = modelToolApiRef.current;
-    if (activeModel && api) {
-      // Add a PART to the model in view = APPEND its geometry to the live host mesh (preserving
-      // every prior edit — no JS recompose). The host returns the group range it landed in.
-      const parts = state.modelParts[activeModel] ?? [];
-      const part = makePart(kind, parts, state.seq, params);
-      const geo = composeModelParts([{ ...part, visible: true }]);
-      const range = geo.positions.length > 0 ? api.appendPart(geo.positions, geo.faceGroups, part.color) : null;
-      if (!range) {
-        setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'could not add mesh' }));
-        return;
-      }
-      const placed: ModelPart = { ...part, lo: range.lo, hi: range.hi };
-      setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name}` }));
+    if (!activeModel) {
+      setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'Open a model first — Add Primitive appends a part to the model in view.' }));
       return;
     }
-    // No model in view → a fresh model document seeded with this one part (mount composes it).
+    const parts = state.modelParts[activeModel] ?? [];
+    const part = makePart(kind, parts, state.seq, params);
+    // An EMPTIED model has no live viewer to append into (the workspace shows NO
+    // VISIBLE PARTS and ModelView is unmounted, host mesh gone with it) — seed the
+    // part as the new base instead; the viewer remounts composing it, the same way
+    // a fresh document mounts (req_2560).
+    if (composeModelParts(parts).positions.length === 0) {
+      const seedRange = composeModelParts([{ ...part, visible: true }]).ranges[0];
+      const placed: ModelPart = { ...part, lo: seedRange?.lo ?? 0, hi: seedRange?.hi ?? 0 };
+      setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name} to the empty model` }));
+      return;
+    }
+    const api = modelToolApiRef.current;
+    if (!api) {
+      setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'Open a model first — Add Primitive appends a part to the model in view.' }));
+      return;
+    }
+    const geo = composeModelParts([{ ...part, visible: true }]);
+    const range = geo.positions.length > 0 ? api.appendPart(geo.positions, geo.faceGroups, part.color) : null;
+    if (!range) {
+      setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'could not add mesh' }));
+      return;
+    }
+    const placed: ModelPart = { ...part, lo: range.lo, hi: range.hi };
+    setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name}` }));
+  };
+
+  // 'new' verb — ALWAYS a fresh model document seeded with this one part (mount composes it), even
+  // when a model is already open. This is what makes New ≠ Add: File → New Mesh never appends to
+  // whatever's in view; it spawns its own document (req_2542).
+  const createNewMeshDocument = (kind: PrimitiveKind, params: PrimitiveParams) => {
     setState((prev) => {
       const docSeq = prev.workspaceDocuments.filter((doc) => doc.id.startsWith('model:primitive:')).length + 1;
       const mid = `primitive:${kind}:${docSeq}`;
@@ -929,6 +973,12 @@ export default function AppFrame() {
         status: `new ${kind} mesh`,
       };
     });
+  };
+
+  // The size/resolution dialog's confirm routes to the verb it was opened for.
+  const submitMeshPrompt = (prompt: { kind: PrimitiveKind; mode: 'new' | 'add' }, params: PrimitiveParams) => {
+    if (prompt.mode === 'add') addPrimitivePart(prompt.kind, params);
+    else createNewMeshDocument(prompt.kind, params);
   };
   const selectPart = (id: string) => {
     // Focus a part = SCOPE editing to it: only its verts/edges/faces show + select, and the
@@ -966,13 +1016,20 @@ export default function AppFrame() {
   };
   const deletePart = (id: string) => {
     const mid = activePartsModelId(state);
-    const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
+    const allParts = mid ? (state.modelParts[mid] ?? []) : [];
+    const part = allParts.find((p) => p.id === id) ?? null;
     const range = part ? partRange(part) : null;
-    const r = range && part!.visible ? modelToolApiRef.current?.deletePartRange(range.lo, range.hi) : null;
+    // Deleting the LAST visible part: the host refuses to empty a mesh (its guard),
+    // so don't ask it — removing the part unmounts the viewer, which drops the host
+    // mesh with it. Empty model IS the outcome we want here (req_2560).
+    const lastVisible = Boolean(part?.visible) && composeModelParts(allParts.filter((p) => p.id !== id)).positions.length === 0;
+    const r = !lastVisible && range && part!.visible ? modelToolApiRef.current?.deletePartRange(range.lo, range.hi) : null;
     const status = part && range && part.visible
-      ? (r?.ok
-        ? `deleted ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`
-        : `could not delete ${part.name} [${range.lo},${range.hi}) — host op failed`)
+      ? (lastVisible
+        ? `deleted ${part.name} — model is now empty`
+        : r?.ok
+          ? `deleted ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`
+          : `could not delete ${part.name} [${range.lo},${range.hi}) — host op failed`)
       : `removed ${part?.name ?? id} from the outliner`;
     setState((prev) => {
       const parts = (prev.modelParts[mid!] ?? []).filter((p) => p.id !== id);
@@ -1251,18 +1308,26 @@ export default function AppFrame() {
     (globalThis as any).__mesh_journal_note?.(JSON.stringify({ modelId: mid, parts: lite }));
   }, [state.modelParts, state.activeWorkspaceDocumentId]);
 
-  // Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y — routed through the same command path as the Edit
-  // menu rows, so a model document steps the host mesh journal and the world surface
-  // steps its local history.
-  useModifiers({
-    z: (mods) => {
-      if (!mods.ctrl && !mods.meta) return;
-      runCommand(mods.shift ? 'redo-local' : 'undo-local', 'hotkey');
-    },
-    y: (mods) => {
-      if (mods.ctrl || mods.meta) runCommand('redo-local', 'hotkey');
-    },
-  });
+  // One central, surface-aware hotkey layer (req_2540). Every key edge resolves through the keymap
+  // against the surface in view — so the key a menu advertises is the key that fires. World tools
+  // (B/V/P/…), the model mesh tools (routed to the host api / face-op handlers), global chords
+  // (Ctrl+Z/S/O/…) and undo/redo all dispatch through the same runCommand path as the menus.
+  // ModelView keeps only viewport-native Esc/Delete. Refs keep the once-installed subscription
+  // reading live state + the current runCommand. (The engine routes keys to focused text inputs
+  // first, so typing in a field never triggers a command.)
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const runCommandRef = useRef(runCommand);
+  runCommandRef.current = runCommand;
+  const { onKeyDown } = useModifiers();
+  useEffect(() => onKeyDown((key, mods) => {
+    const s = stateRef.current;
+    // An open menu or modal owns input — don't leak a hotkey to a command behind it (same reason
+    // overlays block clicks, req_2167).
+    if (s.openMenu || s.newMeshPrompt || s.fileExplorerOpen || s.buildDialogOpen) return;
+    const id = commandForKeyEvent(s, key, mods);
+    if (id) runCommandRef.current(id, 'hotkey');
+  }), []);
 
   // Studio colour → brush ink. The viewer owns the live brush; this is the ONE
   // sync point pouring the spine's current colour into a colour-kind ink.
@@ -1535,27 +1600,27 @@ export default function AppFrame() {
                  (req_2552; the chrome/menu row was the wrong gutter). Popovers still
                  render late at the root so they paint over the body. */
               state.modelTool.paint ? (
-              <PaintToolbar
-                brush={state.modelTool.brush}
-                brushTool={state.modelTool.brushTool}
-                detail={state.modelTool.detail}
-                onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
-                onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
-                onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
-                popover={paintPopover}
-                onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
-                current={state.colorSpineCurrent}
-                palette={state.colorSpinePalette}
-                scenePick={state.colorSpineScenePick}
-                paletteFor={paintPaletteFor}
-                spine={{
-                  onSetCurrent: setColorSpineCurrent,
-                  onAddToTray: addColorSpineToTray,
-                  onPickTray: pickColorSpineTray,
-                  onScenePick: pickColorSpineScene,
-                  onLoadLibrarySet: loadColorSpineLibrarySet,
-                }}
-              />
+                <PaintToolbar
+                  brush={state.modelTool.brush}
+                  brushTool={state.modelTool.brushTool}
+                  detail={state.modelTool.detail}
+                  onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
+                  onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
+                  onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
+                  popover={paintPopover}
+                  onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
+                  current={state.colorSpineCurrent}
+                  palette={state.colorSpinePalette}
+                  scenePick={state.colorSpineScenePick}
+                  paletteFor={paintPaletteFor}
+                  spine={{
+                    onSetCurrent: setColorSpineCurrent,
+                    onAddToTray: addColorSpineToTray,
+                    onPickTray: pickColorSpineTray,
+                    onScenePick: pickColorSpineScene,
+                    onLoadLibrarySet: loadColorSpineLibrarySet,
+                  }}
+                />
               ) : null
             }
             onWorkspaceDocument={selectWorkspaceDocument}
@@ -1641,9 +1706,10 @@ export default function AppFrame() {
       ) : null}
       {state.newMeshPrompt ? (
         <NewMeshDialog
-          kind={state.newMeshPrompt}
-          onCancel={() => setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'add mesh cancelled' }))}
-          onAdd={(params) => createPrimitive(state.newMeshPrompt!, params)}
+          kind={state.newMeshPrompt.kind}
+          mode={state.newMeshPrompt.mode}
+          onCancel={() => setState((prev) => ({ ...prev, newMeshPrompt: null, status: `${prev.newMeshPrompt?.mode === 'add' ? 'add' : 'new'} mesh cancelled` }))}
+          onAdd={(params) => submitMeshPrompt(state.newMeshPrompt!, params)}
         />
       ) : null}
       {state.fileExplorerOpen ? (
