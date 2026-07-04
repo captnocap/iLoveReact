@@ -1462,7 +1462,34 @@ export default function AppFrame() {
           activeCommand={activeCommand}
           onMenu={(menu) => setState((prev) => ({ ...prev, actionMenu: menu, openMenu: prev.openMenu === menu ? null : menu }))}
           onCommand={runCommand}
-        />
+        >
+          {/* The paint controls APPEND to the chrome row while painting (req_2547) —
+              the one toolbar the app already has, not a second bar floating in the
+              viewport. Popovers still render late below (paint-over-body ordering). */}
+          {!playing && state.modelTool.paint ? (
+            <PaintToolbar
+              brush={state.modelTool.brush}
+              brushTool={state.modelTool.brushTool}
+              detail={state.modelTool.detail}
+              onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
+              onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
+              onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
+              popover={paintPopover}
+              onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
+              current={state.colorSpineCurrent}
+              palette={state.colorSpinePalette}
+              scenePick={state.colorSpineScenePick}
+              paletteFor={paintPaletteFor}
+              spine={{
+                onSetCurrent: setColorSpineCurrent,
+                onAddToTray: addColorSpineToTray,
+                onPickTray: pickColorSpineTray,
+                onScenePick: pickColorSpineScene,
+                onLoadLibrarySet: loadColorSpineLibrarySet,
+              }}
+            />
+          ) : null}
+        </Chrome>
       </RenderProbe>
       {playing ? (
         <C.HW_PlayBody>
@@ -1640,36 +1667,6 @@ export default function AppFrame() {
       {state.openMenu ? (
         <RenderProbe id="Menu Dropdown">
           <DropdownMenu state={state} onCommand={runCommand} onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)} />
-        </RenderProbe>
-      ) : null}
-      {!playing && state.modelTool.paint ? (
-        <RenderProbe id="Paint Toolbar">
-          {/* Floats INSIDE the viewport (below the model title strip), not an in-flow strip that
-              shifts the whole UI. Anchored just past the fixed rail(48)+content panel(350). Rendered
-              LATE so it paints over the 3D view (this layout paints in tree order). */}
-          <Box style={{ position: 'absolute', left: 410, top: 78 }}>
-            <PaintToolbar
-              brush={state.modelTool.brush}
-              brushTool={state.modelTool.brushTool}
-              detail={state.modelTool.detail}
-              onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
-              onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
-              onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
-              popover={paintPopover}
-              onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
-              current={state.colorSpineCurrent}
-              palette={state.colorSpinePalette}
-              scenePick={state.colorSpineScenePick}
-              paletteFor={paintPaletteFor}
-              spine={{
-                onSetCurrent: setColorSpineCurrent,
-                onAddToTray: addColorSpineToTray,
-                onPickTray: pickColorSpineTray,
-                onScenePick: pickColorSpineScene,
-                onLoadLibrarySet: loadColorSpineLibrarySet,
-              }}
-            />
-          </Box>
         </RenderProbe>
       ) : null}
       {!playing && state.modelTool.paint && paintPopover ? (

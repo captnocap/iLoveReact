@@ -9,6 +9,10 @@ export default function Chrome(props: {
   activeCommand: Command;
   onMenu: (menu: Menu) => void;
   onCommand: (id: string, source: string) => void;
+  /** Contextual controls appended INTO the chrome row (between the menus and Compile) —
+   *  the paint bar rides here while painting instead of floating in the viewport
+   *  (req_2547: "we have a whole toolbar right above to take advantage of"). */
+  children?: any;
 }) {
   const activeMenu = activeMenuFor(props.state);
   return (
@@ -29,6 +33,7 @@ export default function Chrome(props: {
         })}
       </C.HW_MenuBar>
       <C.HW_Spacer />
+      {props.children}
       <C.HW_Compile onPress={() => props.onCommand('compile-rle', 'chrome')}>
         <Icon name="Download" size={13} color={accentFor('primary')} />
         <C.HW_PillTextOn>Compile</C.HW_PillTextOn>
