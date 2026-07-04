@@ -17,14 +17,11 @@ const host = globalThis as any;
 export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
   const [rev, setRev] = useState(0);
   const [note, setNote] = useState<string | null>(null);
-  // The variant Save writes back to. Defaults to the LATEST — the one the viewer auto-restores
-  // on open (req_2526) — so Save updates the painting you're looking at instead of forking. Set
-  // by loading a variant or a fresh Save; cleared when that variant is deleted. This component
-  // is keyed by model id (ModelDetailBody), so the default re-seeds per model.
-  const [activeId, setActiveId] = useState<string | null>(() => {
-    const vs = listPaintVariants(model);
-    return vs.length ? vs[vs.length - 1].id : null;
-  });
+  // The variant Save writes back to. null = nothing loaded, so Save forks a NEW painting and
+  // the button reads "Save". It becomes non-null ONLY when you explicitly Load a variant (or
+  // just saved one) — that's when the button becomes "Update <name>". We must NOT presume the
+  // latest is loaded: with nothing painted, "Update Painting 3" is a lie (req_2532).
+  const [activeId, setActiveId] = useState<string | null>(null);
   const variants = listPaintVariants(model);
   const activeVariant = activeId ? variants.find((v) => v.id === activeId) ?? null : null;
   const refresh = () => setRev((r) => r + 1);
