@@ -2246,7 +2246,14 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             // button is down (SLIDER-0611): a React echo arriving mid-drag
             // must never fight the pool-resident drag value.
             if (!node.slider_dragging) {
-                if (jsonFloat(v)) |f| node.slider_value = f;
+                if (jsonFloat(v)) |f| {
+                    if (node.slider and f != node.slider_value)
+                        std.debug.print("[slider] PROP slot={d} {d:.3} -> {d:.3} (React write)\n", .{ node.scroll_persist_slot, node.slider_value, f });
+                    node.slider_value = f;
+                }
+            } else if (jsonFloat(v)) |f| {
+                if (f != node.slider_value)
+                    std.debug.print("[slider] PROP slot={d} val={d:.3} IGNORED (mid-drag, engine holds {d:.3})\n", .{ node.scroll_persist_slot, f, node.slider_value });
             }
         } else if (std.mem.eql(u8, k, "sliderMin")) {
             if (jsonFloat(v)) |f| node.slider_min = f;

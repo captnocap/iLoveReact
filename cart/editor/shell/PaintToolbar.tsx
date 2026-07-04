@@ -113,7 +113,7 @@ export default function PaintToolbar(props: Ink & {
 
       <Row style={{ alignItems: 'center', gap: 7 }}>
         <Icon name="Circle" size={13} color={DIM} />
-        <Slider value={brush.size} min={1} max={128} step={1} onCommit={(v: number) => patch({ size: Math.round(v) })} style={{ width: 92, height: 30, backgroundColor: TRACK, color: ACCENT }} />
+        <Slider value={brush.size} min={1} max={128} step={1} onCommit={(v: number) => { console.warn(`[slider] toolbar size onCommit v=${v}`); patch({ size: Math.round(v) }); }} style={{ width: 92, height: 30, backgroundColor: TRACK, color: ACCENT }} />
         <Text style={{ color: TEXT, fontSize: 11, fontFamily: 'ui-monospace', width: 26 }}>{brush.size}</Text>
       </Row>
 

@@ -1075,8 +1075,11 @@ fn endSliderDrag(root: *Node) void {
     slider_drag_slot = 0;
     if (findNodeByScrollSlot(root, slot)) |node| {
         node.slider_dragging = false;
+        std.debug.print("[slider] COMMIT slot={d} val={d:.3} -> dispatching to JS\n", .{ slot, node.slider_value });
         dispatchSliderJs("__dispatchSliderCommit({d},{d})", slot, node.slider_value);
         state_mod.markDirty();
+    } else {
+        std.debug.print("[slider] COMMIT slot={d} DROPPED — node vanished before release\n", .{slot});
     }
 }
 

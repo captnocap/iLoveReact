@@ -1649,7 +1649,12 @@ export default function AppFrame() {
               brush={state.modelTool.brush}
               brushTool={state.modelTool.brushTool}
               detail={state.modelTool.detail}
-              onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
+              onBrush={(b) => {
+                const api = modelToolApiRef.current;
+                if (!api) { console.warn('[slider] onBrush DROPPED — modelToolApi ref is null'); return; }
+                console.warn(`[slider] onBrush -> ModelView.setBrush size=${b.size} flow=${b.flow}`);
+                api.setBrush(b);
+              }}
               onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
               onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
               popover={paintPopover}
