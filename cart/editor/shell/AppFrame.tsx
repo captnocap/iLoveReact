@@ -1266,16 +1266,18 @@ export default function AppFrame() {
 
   // Studio colour → brush ink. The viewer owns the live brush; this is the ONE
   // sync point pouring the spine's current colour into a colour-kind ink.
-  // (ModelBrushDock used to do this, but the paint toolbar replaced it and the
-  // dock is no longer mounted — without this, the toolbar swatch showed the
-  // picked colour while the brush kept depositing its mount default.)
+  // It reconciles on EITHER side changing (req_2538): keying only on spine picks
+  // left the mount gap — a fresh ModelView starts on its default coral ink while
+  // the swatch shows the spine's colour (its default is orange, colorSpine.ts),
+  // so the toolbar displayed one colour and the brush deposited another until the
+  // first pick. Converges then no-ops (equal hexes bail), so no feedback loop.
   useEffect(() => {
     const brush = state.modelTool.brush;
     if (!brush || brush.ink.kind !== 'color') return;
     const hex = oklchToHex(state.colorSpineCurrent);
     if (brush.ink.hex.toLowerCase() === hex.toLowerCase()) return;
     modelToolApiRef.current?.setBrush({ ...brush, ink: { kind: 'color', hex } });
-  }, [state.colorSpineCurrent]);
+  }, [state.colorSpineCurrent, state.modelTool.brush]);
 
   // Color Studio slot overrides for the PAINT path: the shader-ink pickers ask
   // for (specId, variant) and fold the user's palette into the ink data[].

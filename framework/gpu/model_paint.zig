@@ -1424,22 +1424,13 @@ test "fill paints exactly the face's triangle, not its island rect" {
         clear();
         model_source.clear();
     }
+    // The base is whatever the atlas starts with (the texture template tints islands,
+    // req_2537) — the invariant is that tri B's texels DON'T CHANGE when tri A fills.
+    const before_b = faceColor(1).?;
     paintFace(0, .{ 0, 200, 0, 255 }); // tri A only ((0,0)(1,0)(1,1) — below the diagonal)
-    const a = atlas().?;
-    const lay = &(g_layout.?);
-    // Tri A's centroid texel took the fill; tri B's did not (its silhouette is outside).
-    const ca = faceCentroidTexel(lay, 0);
-    const cb = faceCentroidTexel(lay, 1);
-    const da = (@as(usize, ca[1]) * a.w + ca[0]) * 4;
-    const db = (@as(usize, cb[1]) * a.w + cb[0]) * 4;
-    try std.testing.expectEqual(@as(u8, 200), a.rgba[da + 1]);
-    try std.testing.expectEqual(@as(u8, DEFAULT_FACE[1]), a.rgba[db + 1]);
-    // And texels well inside tri B (≥ 2 texels past the diagonal) stayed default.
-    const cB = triTexelCorners(lay, 1);
-    const bx: u32 = @intFromFloat((cB[0][0] + cB[1][0] + cB[2][0]) / 3.0);
-    const by: u32 = @intFromFloat((cB[0][1] + cB[1][1] + cB[2][1]) / 3.0);
-    const dbb = (@as(usize, by) * a.w + bx) * 4;
-    try std.testing.expectEqual(@as(u8, DEFAULT_FACE[0]), a.rgba[dbb + 0]);
+    // Tri A's centroid texel took the fill; tri B's centroid kept its base exactly.
+    try std.testing.expectEqual(@as(u8, 200), faceColor(0).?[1]);
+    try std.testing.expectEqual(before_b, faceColor(1).?);
 }
 
 test "selection tint + restore round-trips without touching the sibling triangle" {
