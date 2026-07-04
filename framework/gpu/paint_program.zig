@@ -305,6 +305,34 @@ pub fn apply(blob: []const u8) bool {
         };
     }
     _ = c.u32v() orelse return false; // ops byte length (advisory; we read to blob end)
+    const ops_start = c.p;
+
+    // ADOPT the loaded program as the live recorded program (req_2529). Loading a painting
+    // then painting MORE on top must APPEND to it, so a later serialize returns the CUMULATIVE
+    // work — not just this session's new strokes. Without this, replay painted the atlas but
+    // left g_ops empty, so "load Painting 1, add a stroke, save Painting 2" dropped Painting 1's
+    // strokes and reloading showed only the new stroke. Material order is preserved so the ops'
+    // material indices stay valid; further painting dedups/extends g_mats from here.
+    reset();
+    for (mats.items) |m| {
+        const k = alloc.dupe(u8, m.key) catch return false;
+        const w = alloc.dupe(u8, m.wgsl) catch {
+            alloc.free(k);
+            return false;
+        };
+        const d = alloc.dupe(f32, m.data) catch {
+            alloc.free(k);
+            alloc.free(w);
+            return false;
+        };
+        g_mats.append(alloc, .{ .key = k, .wgsl = w, .data = d, .tiles = m.tiles }) catch {
+            alloc.free(k);
+            alloc.free(w);
+            alloc.free(d);
+            return false;
+        };
+    }
+    g_ops.appendSlice(alloc, blob[ops_start..]) catch return false;
 
     // Prepare the canvas: the caller already set detail (a mesh re-upload); wipe to default.
     model_paint.clearAtlas();
