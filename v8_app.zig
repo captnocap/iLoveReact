@@ -3018,6 +3018,19 @@ fn syncRenderedNodeState(node: *const Node) void {
                 stable.scroll_x = node.scroll_x;
                 stable.scroll_y = node.scroll_y;
             }
+            // <Slider> (req_2528): the engine owns the thumb while grabbed, but
+            // it writes the RENDERED copy of the tree — and the grab itself marks
+            // dirty, so without this carry-back the very next rebuild re-clones
+            // the stable node and resurrects the stale prop value (the "slider
+            // snaps back to 32" bug). Value syncs only across the drag window
+            // (either side sees dragging) so React props own it when idle; the
+            // dragging flag always syncs so applyProp's mid-drag guard actually
+            // guards the node React writes to.
+            if (node.slider) {
+                if (node.slider_dragging or stable.slider_dragging)
+                    stable.slider_value = node.slider_value;
+                stable.slider_dragging = node.slider_dragging;
+            }
         }
     }
     for (node.children) |*child| syncRenderedNodeState(child);
