@@ -81,6 +81,33 @@ export function savePaintVariant(
   return variant;
 }
 
+/** Overwrite an EXISTING variant in place (Save-back), keeping its id + name and refreshing
+ *  its stroke program + .png substrate. Returns the updated variant, or null if the id is
+ *  gone (the caller can then fall back to a fresh save). */
+export function updatePaintVariant(
+  pkg: PaintTarget,
+  id: string,
+  v: { w: number; h: number; detail: number; data: string; format?: 'atlas' | 'program'; atlasRgba?: string },
+): PaintVariant | null {
+  const existing = listPaintVariants(pkg).find((x) => x.id === id);
+  if (!existing) return null;
+  let png = existing.png;
+  if (v.atlasRgba && v.w > 0 && v.h > 0 && host.__image_write_png?.(pngPath(pkg, id), v.atlasRgba, v.w, v.h) === 1) {
+    png = pngPath(pkg, id);
+  }
+  const variant: PaintVariant = {
+    ...existing,
+    w: v.w,
+    h: v.h,
+    detail: v.detail,
+    data: v.data,
+    format: v.format ?? existing.format ?? 'program',
+    png,
+  };
+  writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
+  return variant;
+}
+
 export function removePaintVariant(pkg: PaintTarget, id: string): void {
   remove(jsonPath(pkg, id));
   remove(pngPath(pkg, id));

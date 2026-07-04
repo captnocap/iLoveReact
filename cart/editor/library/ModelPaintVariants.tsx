@@ -1,14 +1,15 @@
-// editor/library/ModelPaintVariants.tsx — the real PAINT VARIANTS section of the Model Focus
-// dock. A variant is a whole saved painting of the model, stored in the editor's own store
-// (paintVariants.ts), read LIVE here — not the fabricated palette-slot swatches this section
-// used to show. Save persists the model's STROKE PROGRAM (__model_paint_program_read) — the
-// durable recipe, not the rasterized atlas (GUIDING_LIGHT: store the strokes, not the pixels);
-// loading replays it (__model_paint_program_apply). Legacy atlas variants still load via
-// __model_atlas_apply. Honest-empty until the first painting is saved.
+// editor/library/ModelPaintVariants.tsx — the PAINT VARIANTS section of the Model Focus dock.
+// A variant is a whole saved painting of the model, stored ON DISK in the model's package
+// (paints/paint_N.json = the STROKE PROGRAM, GUIDING_LIGHT "store the strokes, not the pixels";
+// paints/paint_N.png = the rasterized substrate). Loading replays the program
+// (__model_paint_program_apply); legacy atlas variants blit their pixels (__model_atlas_apply).
+//
+// Save-BACK (req_2531): loading a variant makes it the ACTIVE painting, and Save then writes
+// BACK to it (update-in-place) instead of forking a new one. A separate "New" always forks.
 import { useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { listPaintVariants, savePaintVariant, removePaintVariant } from '../data/paintVariants';
+import { listPaintVariants, savePaintVariant, updatePaintVariant, removePaintVariant } from '../data/paintVariants';
 import type { ModelPackage } from '../data/types';
 
 const host = globalThis as any;
@@ -16,39 +17,65 @@ const host = globalThis as any;
 export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
   const [rev, setRev] = useState(0);
   const [note, setNote] = useState<string | null>(null);
+  // The variant Save writes back to. Defaults to the LATEST — the one the viewer auto-restores
+  // on open (req_2526) — so Save updates the painting you're looking at instead of forking. Set
+  // by loading a variant or a fresh Save; cleared when that variant is deleted. This component
+  // is keyed by model id (ModelDetailBody), so the default re-seeds per model.
+  const [activeId, setActiveId] = useState<string | null>(() => {
+    const vs = listPaintVariants(model);
+    return vs.length ? vs[vs.length - 1].id : null;
+  });
   const variants = listPaintVariants(model);
+  const activeVariant = activeId ? variants.find((v) => v.id === activeId) ?? null : null;
   const refresh = () => setRev((r) => r + 1);
 
-  const onSave = () => {
-    // The durable form is the STROKE PROGRAM (recipe), not the rasterized atlas. "" = nothing
-    // painted (open + paint first); undefined = the host predates the door (rebuild). Both get an
-    // honest note, never a fake save.
+  // Read the model's current painting: the durable stroke PROGRAM plus the atlas readback
+  // (metadata + rasterized RGBA for the .png substrate). null (with a note) when nothing is
+  // painted yet or the host predates the door.
+  const readCurrentPaint = (): { prog: string; w: number; h: number; detail: number; rgba?: string } | null => {
     const prog = host.__model_paint_program_read?.();
     if (typeof prog !== 'string' || prog.length === 0) {
-      setNote('Open this model in the viewer and paint it before saving a variant.');
-      return;
+      setNote('Open this model in the viewer and paint it before saving.');
+      return null;
     }
-    // The atlas readback gives display metadata (w/h/detail) AND the rasterized RGBA pixels
-    // (base64 `data`) — the latter becomes the on-disk .png editing substrate/preview.
     let atlas: { w: number; h: number; detail: number; data?: string } = { w: 0, h: 0, detail: 1 };
     try { atlas = { ...atlas, ...JSON.parse(host.__model_atlas_read?.() || '{}') }; } catch { /* metadata is optional */ }
-    const v = savePaintVariant(model, { w: atlas.w, h: atlas.h, detail: atlas.detail, data: prog, format: 'program', atlasRgba: atlas.data });
+    return { prog, w: atlas.w, h: atlas.h, detail: atlas.detail, rgba: atlas.data };
+  };
+
+  const saveNew = () => {
+    const cur = readCurrentPaint();
+    if (!cur) return;
+    const v = savePaintVariant(model, { w: cur.w, h: cur.h, detail: cur.detail, data: cur.prog, format: 'program', atlasRgba: cur.rgba });
+    setActiveId(v.id);
     setNote(`Saved ${v.name} to ${model.name}/paints/.`);
     refresh();
   };
 
+  // Save BACK to the active variant; if none is loaded (or it was deleted), fork a new one.
+  const saveBack = () => {
+    if (!activeId) return saveNew();
+    const cur = readCurrentPaint();
+    if (!cur) return;
+    const v = updatePaintVariant(model, activeId, { w: cur.w, h: cur.h, detail: cur.detail, data: cur.prog, format: 'program', atlasRgba: cur.rgba });
+    if (!v) return saveNew(); // the active variant vanished — don't lose the work
+    setNote(`Updated ${v.name}.`);
+    refresh();
+  };
+
   const onLoad = (id: string) => {
-    const v = listPaintVariants(model).find((x) => x.id === id);
+    const v = variants.find((x) => x.id === id);
     if (!v) return;
-    // Replay the stroke program; legacy atlas variants blit their pixels.
     const ok = v.format === 'program'
       ? host.__model_paint_program_apply?.(v.data) === 1
       : host.__model_atlas_apply?.(v.detail, v.data) === 1;
-    setNote(ok ? `Loaded ${v.name} onto the model.` : `Couldn't load ${v.name} (open this model in the viewer first).`);
+    if (ok) setActiveId(id); // now Save writes back to this one
+    setNote(ok ? `Loaded ${v.name} — Save now updates it.` : `Couldn't load ${v.name} (open this model in the viewer first).`);
   };
 
   const onDelete = (id: string) => {
     removePaintVariant(model, id);
+    if (activeId === id) setActiveId(null);
     setNote(null);
     refresh();
   };
@@ -59,10 +86,23 @@ export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
         <Icon name="Brush" size={12} color={accentFor('primary')} />
         <C.HW_GroupText>PAINT VARIANTS</C.HW_GroupText>
         <C.HW_Spacer />
-        <C.HW_Pill tooltip="Save the model's current painting as a variant" onPress={onSave}>
-          <Icon name="Save" size={11} color={accentFor('primary')} />
-          <C.HW_PillText>Save</C.HW_PillText>
-        </C.HW_Pill>
+        {activeVariant ? (
+          <>
+            <C.HW_Pill tooltip={`Save back to ${activeVariant.name}`} onPress={saveBack}>
+              <Icon name="Save" size={11} color={accentFor('primary')} />
+              <C.HW_PillText>Update {activeVariant.name}</C.HW_PillText>
+            </C.HW_Pill>
+            <C.HW_Pill tooltip="Save the current painting as a NEW variant" onPress={saveNew}>
+              <Icon name="Plus" size={11} color={accentFor('textDim')} />
+              <C.HW_PillText>New</C.HW_PillText>
+            </C.HW_Pill>
+          </>
+        ) : (
+          <C.HW_Pill tooltip="Save the model's current painting as a variant" onPress={saveNew}>
+            <Icon name="Save" size={11} color={accentFor('primary')} />
+            <C.HW_PillText>Save</C.HW_PillText>
+          </C.HW_Pill>
+        )}
       </C.HW_ModelSectionHead>
 
       {variants.length === 0 ? (
@@ -73,6 +113,7 @@ export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
             <C.HW_ModelCardMain>
               <C.HW_MaterialTitleRow>
                 <C.HW_ToolValue>{v.name}</C.HW_ToolValue>
+                {v.id === activeId ? <C.HW_MaterialStat style={{ color: accentFor('primary') }}>editing</C.HW_MaterialStat> : null}
                 <C.HW_Spacer />
                 <C.HW_MaterialStat>{v.detail <= 1 ? 'fill' : `${v.detail}px`}</C.HW_MaterialStat>
               </C.HW_MaterialTitleRow>
@@ -80,7 +121,7 @@ export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
                 <C.HW_MaterialStat>{v.w}×{v.h}</C.HW_MaterialStat>
               </C.HW_ModelMetaRow>
             </C.HW_ModelCardMain>
-            <C.HW_IconButton tooltip={`Load ${v.name} onto the model`} onPress={() => onLoad(v.id)}>
+            <C.HW_IconButton tooltip={`Load ${v.name} onto the model (Save then updates it)`} onPress={() => onLoad(v.id)}>
               <Icon name="CornerDownLeft" size={13} color={accentFor('primary')} />
             </C.HW_IconButton>
             <C.HW_IconButton tooltip={`Delete ${v.name}`} onPress={() => onDelete(v.id)}>
