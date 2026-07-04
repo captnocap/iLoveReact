@@ -597,9 +597,22 @@ function writePackage(seed, p, mesh, normals, colors, geoR, triCount) {
 
 // ── main ───────────────────────────────────────────────────────────────────────
 
-const argv = typeof __argv !== 'undefined' ? __argv : [];
-const seeds = argv.length ? argv : ['63fc8dc5', 'c2554ea5', 'b24275a1', '461f32af'];
-const GRID_N = 88;
+// __argv is a FUNCTION under v8cli returning a JSON-encoded string array —
+// call it, then parse (scripts/classify.js normalizes the same way).
+let rawArgv = typeof __argv === 'function' ? __argv() : (typeof __argv !== 'undefined' ? __argv : []);
+if (typeof rawArgv === 'string') { try { rawArgv = JSON.parse(rawArgv); } catch (e) { rawArgv = []; } }
+const args = (Array.isArray(rawArgv) ? rawArgv : []).filter(
+  (a) => typeof a === 'string' && !a.endsWith('.js') && !a.endsWith('v8cli'),
+);
+// --grid N trades detail for triangles: 88 ≈ 27-43k tris (hero), 56 ≈ ~40% of
+// that, 44 ≈ jar-filler grade. Cost scales ~N^3, tris ~N^2.
+let GRID_N = 88;
+const seeds = [];
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--grid') { GRID_N = clamp(parseInt(args[++i], 10) || 88, 24, 160); continue; }
+  seeds.push(args[i]);
+}
+if (!seeds.length) seeds.push('63fc8dc5', 'c2554ea5', 'b24275a1', '461f32af');
 
 for (const seed of seeds) {
   const t0 = Date.now();
