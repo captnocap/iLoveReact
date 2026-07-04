@@ -101,6 +101,11 @@ pub fn clearAtlas() void {
     }
     g_has_dirty = false;
     if (g_atlas_h > 0) markRows(0, g_atlas_h - 1);
+    // The atlas base IS a Texture Template: each UV island tinted a distinct pastel over the
+    // default background, so the sheet has real tone and every face is distinguishable on the
+    // model — instead of a blank grey wireframe (req_2537). Regenerated deterministically from
+    // the island layout, so replaying a saved painting rebuilds the same template underneath.
+    if (g_layout != null) fillTemplate();
 }
 
 pub fn hasTarget() bool {
@@ -364,6 +369,7 @@ fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
         rgba[b + 3] = DEFAULT_FACE[3];
     }
     g_rgba = rgba;
+    fillTemplate(); // Texture Template base — tint each island before any carried paint lands (req_2537)
 
     // Overwrite the mesh's UVs — each vertex to its island-texel corner, normalized.
     const aw: f32 = @floatFromInt(g_atlas_w);
@@ -419,6 +425,44 @@ pub fn paintFace(face: u32, rgba: [4]u8) void {
     buf[dc + 2] = rgba[2];
     buf[dc + 3] = rgba[3];
     markRows(@min(bb[1], ct[1]), @max(bb[3], ct[1]));
+}
+
+// ── Texture template (req_2537) ─────────────────────────────────────────────────────
+// Fill every UV island a distinct flat colour — Blockbench's "Texture Template". The atlas
+// gets real tone and each face shows its own island colour on the model, so painting starts
+// from a readable base instead of a blank grey sheet. Pastel hues are spread by the golden
+// ratio so adjacent islands stay distinct; all of an island's triangles take its colour.
+fn hsvPastel(h: f32) [4]u8 {
+    const s: f32 = 0.32; // soft, so overpainting reads clearly against the template
+    const v: f32 = 0.92;
+    const i = @as(u32, @intFromFloat(h * 6.0)) % 6;
+    const f = h * 6.0 - @floor(h * 6.0);
+    const p = v * (1.0 - s);
+    const q = v * (1.0 - s * f);
+    const t = v * (1.0 - s * (1.0 - f));
+    var r: f32 = v;
+    var g: f32 = v;
+    var b: f32 = v;
+    switch (i) {
+        0 => { g = t; b = p; },
+        1 => { r = q; b = p; },
+        2 => { r = p; b = t; },
+        3 => { r = p; g = q; },
+        4 => { r = t; g = p; },
+        else => { g = p; b = q; },
+    }
+    return .{ @as(u8, @intFromFloat(r * 255.0)), @as(u8, @intFromFloat(g * 255.0)), @as(u8, @intFromFloat(b * 255.0)), 255 };
+}
+
+fn templateColor(island_idx: u32) [4]u8 {
+    return hsvPastel(@mod(@as(f32, @floatFromInt(island_idx)) * 0.61803398875, 1.0));
+}
+
+/// Paint every island its template colour (the Create-Texture "Texture Template" type).
+pub fn fillTemplate() void {
+    const lay = &(g_layout orelse return);
+    var f: u32 = 0;
+    while (f < g_facecount) : (f += 1) paintFace(f, templateColor(lay.tri_island[f]));
 }
 
 /// Bulk-set every face's colour from a per-face RGBA array (length ≥ facecount*4) —
@@ -1026,14 +1070,19 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
     const c = triTexelCorners(lay, face);
     const cx = c[0][0] + cu * (c[1][0] - c[0][0]) + cv * (c[2][0] - c[0][0]);
     const cy = c[0][1] + cu * (c[1][1] - c[0][1]) + cv * (c[2][1] - c[0][1]);
-    const r = @max(radius, 0.6);
+    // HARD-EDGED pixel dab — the proven painter stamps cells, it does not airbrush
+    // (req_2538: the AA coverage ramp made every dab mostly soft ring, and a dragged
+    // stroke stacked those partial texels into a blurry fan; a texel is either painted
+    // at full flow or untouched). The 0.75 floor keeps a 1px brush from ever missing:
+    // the farthest a texel CENTRE can sit from an arbitrary point is √2/2 ≈ 0.71.
+    const r = @max(radius, 0.75);
 
     // Disc bounds ∩ island rect (a dab can bleed into the pad gutter via PAINT_EPS,
     // never into a neighbour island).
-    const x0f = @max(@floor(cx - r - 0.5), @as(f32, @floatFromInt(isl.x)));
-    const y0f = @max(@floor(cy - r - 0.5), @as(f32, @floatFromInt(isl.y)));
-    const x1f = @min(@ceil(cx + r + 0.5), @as(f32, @floatFromInt(isl.x + isl.w)) - 1.0);
-    const y1f = @min(@ceil(cy + r + 0.5), @as(f32, @floatFromInt(isl.y + isl.h)) - 1.0);
+    const x0f = @max(@floor(cx - r), @as(f32, @floatFromInt(isl.x)));
+    const y0f = @max(@floor(cy - r), @as(f32, @floatFromInt(isl.y)));
+    const x1f = @min(@ceil(cx + r), @as(f32, @floatFromInt(isl.x + isl.w)) - 1.0);
+    const y1f = @min(@ceil(cy + r), @as(f32, @floatFromInt(isl.y + isl.h)) - 1.0);
     if (x1f < x0f or y1f < y0f) return;
     const x0: u32 = @intFromFloat(@max(0, x0f));
     const y0: u32 = @intFromFloat(@max(0, y0f));
@@ -1046,20 +1095,15 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
         while (tx <= x1) : (tx += 1) {
             const fx: f32 = @floatFromInt(tx);
             const fy: f32 = @floatFromInt(ty);
-            // Antialiased coverage: full inside the disc, ramping to 0 across the
-            // boundary texel, so a stroke reads as a smooth line, not a staircase.
+            // Binary coverage: the texel centre is in the disc or it isn't.
             const dx = fx + 0.5 - cx;
             const dy = fy + 0.5 - cy;
-            const dist = @sqrt(dx * dx + dy * dy);
-            if (dist > r + 0.5) continue; // outside the antialiased disc
-            const cov = std.math.clamp(r + 0.5 - dist, 0.0, 1.0); // 1-texel soft edge
-            const amt = flow_amt * cov;
-            if (amt <= 0.0) continue;
+            if (dx * dx + dy * dy > r * r) continue;
             // Clip to the island silhouette — the dab covers every member triangle it
             // overlaps, so the diagonal is invisible to the stroke.
             if (!pointInIsland(lay, isl_idx, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
             const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
-            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, amt);
+            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, flow_amt);
         }
     }
     markRows(y0, y1);
