@@ -1,0 +1,18 @@
+// editor/world/worldTool.ts — the active world-editor tool, derived from the armed command.
+//
+// The world viewport is MODAL: the armed tool owns the click (req_2550). Before this, the
+// viewport was always armed to place a floor, so placement fired on every click regardless of
+// which tool was active — turning on Focus didn't stop you dropping pieces. This maps the armed
+// command id to the one tool that gets the click, so exactly one behaviour is live at a time.
+export type WorldTool = 'select' | 'place' | 'move' | 'focus';
+
+export function worldToolFor(activeCommandId: string): WorldTool {
+  switch (activeCommandId) {
+    case 'place-piece': return 'place';
+    case 'move-selection': return 'move';
+    case 'focus-selection': return 'focus';
+    // 'select-tool' and anything that isn't a viewport click-mode (paint-material, color studio,
+    // sample, …) fall to Select: a click picks the piece under it and never places.
+    default: return 'select';
+  }
+}

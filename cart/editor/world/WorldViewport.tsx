@@ -13,23 +13,52 @@
 //   floors   — the ACTIVE LEVEL is a prop; the workspace action bar is the one
 //              control (req_2485 — the floating Ground chip died with the old pane).
 //
+//   select   — off the Place tool, a click host-raycasts the catalog pieces
+//              (pickBuildPieceHostHit) and slab-tests authored (model:) pieces in
+//              JS (pickAuthoredPlacement — the static catalog can't index them);
+//              nearest hit wins. The viewport is MODAL — the armed tool owns the
+//              click (req_2550).
+//
 // Deliberately NOT here (they die with hmsc-int or arrive by door): the TS build
 // brain (host-ported, req_2349), prefab stamping, skins, cooked-asset residency,
-// selection/move — each returns as a door-driven slice when the palette needs it.
+// piece MOVE (the drag slice lands next) — each returns as a door-driven slice.
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable } from '@reactjit/primitives';
 import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
-import { pieceRows, resolvePlacement, PIECE_LOOKS, type ArmedPiece, type PlacedPiece } from './pieces';
+import { pieceInstanceRows, resolvePlacement, pieceLook, pickAuthoredPlacement, type ArmedPiece, type PlacedPiece } from './pieces';
+import { pieceSkinBoxes } from './pieceSkins';
+import { encodeResidentMeshes, encodeMeshRefs, encodeMeshGhost, type ResidentMesh, type MeshRef } from './meshProps';
+import { isAuthoredPiece, type AuthoredBuildPiece } from './authoredRegistry';
+import { authoredMeshData } from './authoredMesh';
+import { pickBuildPieceHostHit } from '../../../runtime/game/build';
+import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
+import type { WorldTool } from './worldTool';
+
+/** `model:<modelId>` → the stored model id (the resident-mesh + ref key). */
+function modelIdOf(pieceId: string): string {
+  return pieceId.slice('model:'.length);
+}
+
+// WASD camera pan. Distance-scaled so a keypress crosses the same fraction of the view whether
+// you're surveying a district or detailing a wall (matches the drag-pan feel). Per ~16ms tick.
+const WASD_KEYS = new Set(['w', 'a', 's', 'd']);
+const WASD_PAN_PER_TICK = 0.02; // × eye→target distance, metres/tick
 
 const g: any = globalThis;
 
-type Snap = { x: number; y: number; z: number; pieceId: string };
+type Snap = { x: number; y: number; z: number; pieceId: string; yaw: number };
 
-/** Project a box's 12 edges into pane-space polyline segments (the ghost). */
-function boxSegments(stage: IsoStage, rect: Rect, cx: number, baseY: number, cz: number, w: number, h: number, d: number): number[] {
+/** Project a box's 12 edges into pane-space polyline segments (the ghost),
+ *  rotated by yawDeg about its centre so an edge-snapped wall's ghost lays along
+ *  the edge exactly as the placed piece will (req_2569). */
+function boxSegments(stage: IsoStage, rect: Rect, cx: number, baseY: number, cz: number, w: number, h: number, d: number, yawDeg = 0): number[] {
   const hw = w / 2;
   const hd = d / 2;
-  const corners: [number, number][] = [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]];
+  const a = (yawDeg * Math.PI) / 180;
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  const rot = (lx: number, lz: number): [number, number] => [lx * ca - lz * sa, lx * sa + lz * ca];
+  const corners: [number, number][] = ([[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]] as [number, number][]).map(([lx, lz]) => rot(lx, lz));
   const bot = corners.map(([lx, lz]) => stage.project(cx + lx, baseY, cz + lz, rect));
   const top = corners.map(([lx, lz]) => stage.project(cx + lx, baseY + h, cz + lz, rect));
   const segs: number[] = [];
@@ -48,7 +77,15 @@ export default function WorldViewport(props: {
   gameFile: string;
   storeDir: string;
   pieces: readonly PlacedPiece[];
+  /** the authored (mesh) pieces to keep RESIDENT so their placements can draw. */
+  authoredPieces: readonly AuthoredBuildPiece[];
   armed: ArmedPiece;
+  /** the modal tool that owns a click: place / select / move / focus (req_2550) */
+  tool: WorldTool;
+  /** the currently selected placed piece (highlighted), or null */
+  selectedId: string | null;
+  /** report the piece a Select/Move/Focus click hit (null = clicked empty ground) */
+  onSelect: (id: string | null) => void;
   onPlace: (piece: PlacedPiece) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
   floor: number;
@@ -60,9 +97,23 @@ export default function WorldViewport(props: {
   if (!stageRef.current) stageRef.current = new IsoStage({ centerX: 0, centerZ: 0 });
   const stage = stageRef.current;
   const [snap, setSnap] = useState<Snap | null>(null);
+  // Bumped on every camera move (zoom/rotate/pan) to force the overlays to RE-PROJECT. The
+  // placement ghost re-renders for free via setSnap, but the selection box has no such trigger
+  // when the tool isn't armed — without this it freezes at its last projection while the world
+  // zooms/rotates under it (req_2555).
+  const [, bumpCam] = useState(0);
+  const reprojectOverlays = useCallback(() => bumpCam((v) => v + 1), []);
 
   const armedRef = useRef(props.armed);
   armedRef.current = props.armed;
+  // Live refs so the once-created pointer callbacks read the current tool / piece list / selection
+  // sink without being torn down and rebuilt every render.
+  const toolRef = useRef(props.tool);
+  toolRef.current = props.tool;
+  const piecesRef = useRef(props.pieces);
+  piecesRef.current = props.pieces;
+  const onSelectRef = useRef(props.onSelect);
+  onSelectRef.current = props.onSelect;
 
   // Push the JS-solved iso pose to the native loader. Cheap (8 floats) — the only
   // per-interaction bridge traffic; the host re-applies it every embedded frame.
@@ -96,6 +147,47 @@ export default function WorldViewport(props: {
     setSnap(null);
   }, [props.floor, stage, pushCamera]);
 
+  // WASD camera panning (req_2558) — it worked before the world surface moved to this viewport
+  // and never got re-wired. Held keys slide the iso centre along the view's own forward/right
+  // axes (stage.nudge), so W is always "into the screen" no matter the facing. A single self-
+  // terminating tick loop runs only while a key is held (no idle timer). The engine routes keys
+  // to focused inputs first, so this never fights text fields.
+  const heldRef = useRef<Set<string>>(new Set());
+  const panTimerRef = useRef<any>(null);
+  const panStep = useCallback(() => {
+    const h = heldRef.current;
+    let forward = 0, strafe = 0;
+    if (h.has('w')) forward += 1;
+    if (h.has('s')) forward -= 1;
+    if (h.has('d')) strafe += 1;
+    if (h.has('a')) strafe -= 1;
+    if (forward || strafe) {
+      const step = stage.distance() * WASD_PAN_PER_TICK;
+      stage.nudge(forward * step, strafe * step);
+      pushCamera();
+      reprojectOverlays();
+    }
+    panTimerRef.current = h.size ? setTimeout(panStep, 16) : null;
+  }, [stage, pushCamera, reprojectOverlays]);
+  const { onKeyDown: onPanKeyDown, onKeyUp: onPanKeyUp } = useModifiers();
+  useEffect(() => {
+    const offDown = onPanKeyDown((key) => {
+      if (!WASD_KEYS.has(key)) return;
+      heldRef.current.add(key);
+      if (!panTimerRef.current) panTimerRef.current = setTimeout(panStep, 0);
+    });
+    const offUp = onPanKeyUp((key) => { heldRef.current.delete(key); });
+    return () => {
+      offDown(); offUp();
+      if (panTimerRef.current) { clearTimeout(panTimerRef.current); panTimerRef.current = null; }
+      heldRef.current.clear();
+    };
+    // Subscribe ONCE on mount: onPanKeyDown/onPanKeyUp just wrap the module key bus and panStep is
+    // stable, so re-subscribing per render is both unnecessary and harmful — it would clear the
+    // held-key set mid-pan on any unrelated re-render and stall the camera.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Arm/disarm in-viewport map painting (host claims the pointer while on).
   useEffect(() => {
     const nodeId = Number(loaderRef.current?.id ?? 0);
@@ -111,9 +203,68 @@ export default function WorldViewport(props: {
       if (props.pieces.length) console.warn(`[place] live push SKIPPED — node=${nodeId} door=${typeof g.__compiled_world_set_live_pieces}`);
       return;
     }
-    g.__compiled_world_set_live_pieces(nodeId, pieceRows(props.pieces));
-    console.warn(`[place] live push: ${props.pieces.length} pieces -> loader node ${nodeId}`);
+    g.__compiled_world_set_live_pieces(nodeId, pieceInstanceRows(props.pieces));
+    // Real textures (req_2575 Stage B): faces wearing an assigned material push
+    // their WGSL shader once, then a skin box per face so the loader samples it
+    // over the flat live box. Unskinned faces stay flat. Doors gated behind their
+    // presence so an older host without them still renders the flat geometry.
+    const skin = pieceSkinBoxes(props.pieces);
+    if (typeof g.__compiled_world_set_live_material === 'function') {
+      for (const m of skin.materials) g.__compiled_world_set_live_material(nodeId, m.hash, 0, m.wgsl, new Float32Array(m.data), m.opacity);
+    }
+    if (typeof g.__compiled_world_set_live_skin_boxes === 'function') {
+      g.__compiled_world_set_live_skin_boxes(nodeId, skin.boxes);
+    }
+    // Authored (mesh) pieces render via the live MESH-PROP path (req_2577): one
+    // ref per placement pointing at its resident mesh by key. Real geometry.
+    if (typeof g.__compiled_world_set_live_mesh_props === 'function') {
+      const refs: MeshRef[] = [];
+      for (const piece of props.pieces) {
+        if (!isAuthoredPiece(piece.pieceId)) continue;
+        refs.push({ key: modelIdOf(piece.pieceId), x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees });
+      }
+      g.__compiled_world_set_live_mesh_props(nodeId, encodeMeshRefs(refs));
+    }
+    console.warn(`[place] live push: ${props.pieces.length} pieces (decomposed) + ${skin.materials.length} materials -> loader node ${nodeId}`);
   }, [props.pieces]);
+
+  // Keep the authored meshes RESIDENT so their placements can draw (req_2577).
+  // Rebuilds + pushes the MESH_PROPS catalog whenever the authored list changes;
+  // retries until the loader node exists (it lands a few frames after mount).
+  useEffect(() => {
+    const push = (): boolean => {
+      const nodeId = Number(loaderRef.current?.id ?? 0);
+      if (!nodeId || typeof g.__compiled_world_set_resident_meshes !== 'function') return false;
+      const meshes: ResidentMesh[] = [];
+      for (const ap of props.authoredPieces) {
+        const verts = authoredMeshData(ap.modelId, ap.pkgId);
+        if (verts && verts.length >= 8) meshes.push({ key: ap.modelId, vertices: verts });
+        else console.warn(`[authored] no mesh data for '${ap.modelId}' (${ap.label}) — not resident (re-open + re-export the model)`);
+      }
+      g.__compiled_world_set_resident_meshes(nodeId, encodeResidentMeshes(meshes));
+      console.warn(`[authored] resident catalog: ${meshes.length} authored mesh(es) -> loader node ${nodeId}`);
+      return true;
+    };
+    if (push()) return;
+    let tries = 0;
+    const t = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(t); }, 32);
+    return () => clearInterval(t);
+  }, [props.authoredPieces]);
+
+  // Mesh GHOST: while an authored piece is armed in Place mode, preview its real
+  // mesh translucently at the snapped cell (the box-outline ghost can't show a
+  // mesh). Cleared otherwise. (Catalog pieces keep the projected box ghost.)
+  useEffect(() => {
+    const nodeId = Number(loaderRef.current?.id ?? 0);
+    if (!nodeId) return;
+    const armed = props.armed;
+    const show = armed && isAuthoredPiece(armed.pieceId) && props.tool === 'place' && snap;
+    if (show && typeof g.__compiled_world_set_live_mesh_ghost === 'function') {
+      g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({ key: modelIdOf(armed.pieceId), x: snap!.x, y: snap!.y, z: snap!.z, yaw: snap!.yaw }));
+    } else if (typeof g.__compiled_world_clear_live_mesh_ghost === 'function') {
+      g.__compiled_world_clear_live_mesh_ghost(nodeId);
+    }
+  }, [snap, props.armed, props.tool]);
 
   // Unmount: drop the loader runtime + its pending camera.
   useEffect(() => () => {
@@ -131,7 +282,7 @@ export default function WorldViewport(props: {
     const gp = stage.groundPoint(px, py, rectRef.current);
     if (!gp) return null;
     const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, levelY);
-    return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId } : null;
+    return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId, yaw: placed.yawDegrees } : null;
   }, [stage, levelY]);
 
   // ── input: left-drag rotates, shift-drag grabs the map, wheel zooms to the
@@ -161,11 +312,14 @@ export default function WorldViewport(props: {
       }
       d.x = p.x;
       pushCamera();
+      // Armed → setSnap re-renders (ghost follows). Not armed → force a re-project so the
+      // selection box stays glued to its piece as the camera rotates/pans (req_2555).
       if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
+      else reprojectOverlays();
       return;
     }
     if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
-  }, [local, stage, pushCamera, resolveSnap]);
+  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays]);
 
   const onUp = useCallback((e: any) => {
     const d = dragRef.current;
@@ -177,13 +331,32 @@ export default function WorldViewport(props: {
       console.warn(`[place] click ate as DRAG (travel ${Math.abs(p.x - d.x0).toFixed(0)}+${Math.abs(p.y - d.y0).toFixed(0)}px from down)`);
       return;
     }
+    // Modal click routing (req_2550): OFF the Place tool a click PICKS the piece under it via the
+    // host raycast and highlights it — Select/Move/Focus all just select for now — and never places.
+    // This is what makes turning on Focus (etc.) stop dropping pieces. (Focus does NOT pan the
+    // camera on the pick: that shifted the JS pose the overlay projects through while the native
+    // frame lagged, so the outline landed a tile off, req_2554. Camera-frame is a deferred slice
+    // done through a re-render-safe path.)
+    const tool = toolRef.current;
+    if (tool !== 'place') {
+      const ray = stage.worldRay(d.x0, d.y0, rectRef.current);
+      // Two pickers, nearest wins: the host raycast covers catalog pieces; authored
+      // (model:) placements never reach it — the static catalog can't index them —
+      // so they slab-test in JS against their mesh AABB (req_2601).
+      const hostHit = ray ? pickBuildPieceHostHit(ray, piecesRef.current, 1000) : null;
+      const authoredHit = ray ? pickAuthoredPlacement(ray, piecesRef.current, 1000) : null;
+      const host = hostHit ?? null; // undefined = host binding missing → JS pick only
+      const best = host && authoredHit ? (host.t <= authoredHit.t ? host : authoredHit) : (host ?? authoredHit);
+      onSelectRef.current(best ? best.piece.id : null);
+      return;
+    }
     if (!armedRef.current) { console.warn('[place] click with nothing armed'); return; }
     const gp = stage.groundPoint(d.x0, d.y0, rectRef.current);
     if (!gp) { console.warn(`[place] GROUND MISS at (${d.x0.toFixed(0)},${d.y0.toFixed(0)}) rect=(${rectRef.current.x},${rectRef.current.y} ${rectRef.current.width}x${rectRef.current.height})`); return; }
     const target = resolveSnap(d.x0, d.y0);
     if (!target) { console.warn(`[place] VALIDATOR rejected cell at world (${gp.x.toFixed(1)},${gp.z.toFixed(1)})`); return; }
-    console.warn(`[place] click -> place ${target.pieceId} at (${target.x},${target.z})`);
-    props.onPlace({ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: 0 });
+    console.warn(`[place] click -> place ${target.pieceId} at (${target.x},${target.z}) yaw ${target.yaw}`);
+    props.onPlace({ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw });
   }, [resolveSnap, props.onPlace, local, stage]);
 
   const onScroll = useCallback((e: any) => {
@@ -199,15 +372,28 @@ export default function WorldViewport(props: {
     // with no render — the loader repaints with the new solve while the overlay
     // keeps the old one (req_2541). Re-snap at the cursor so it reprojects.
     if (armedRef.current) setSnap(resolveSnap(mx - r.x, my - r.y));
-  }, [stage, pushCamera, resolveSnap]);
+    else reprojectOverlays(); // keep the selection box glued through a wheel zoom (req_2555)
+  }, [stage, pushCamera, resolveSnap, reprojectOverlays]);
 
   // The armed ghost: the piece's box edges projected through the same solve the
   // loader renders with (2D overlay, no second 3D surface).
   const rect = rectRef.current;
   const ghostSegs: number[] = [];
-  if (snap) {
-    const look = PIECE_LOOKS[snap.pieceId];
-    if (look) ghostSegs.push(...boxSegments(stage, rect, snap.x, snap.y, snap.z, look.w, look.h, look.d));
+  // Only the Place tool shows the placement ghost — otherwise the last snap would linger as a
+  // stale outline after switching to Select/Focus/Move (armed is null in those modes).
+  if (snap && props.tool === 'place') {
+    const look = pieceLook(snap.pieceId);
+    if (look) ghostSegs.push(...boxSegments(stage, rect, snap.x, snap.y, snap.z, look.w, look.h, look.d, snap.yaw));
+  }
+  // The selection highlight: the same projected box around the selected piece (req_2550), so a
+  // Select/Move/Focus click shows what it grabbed. Same overlay technique as the ghost. NOT shown
+  // in Place mode — there the green placement ghost owns the overlay, and a lingering cyan
+  // selection from an earlier pick just reads as a confusing second outline (req_2554).
+  const selectedSegs: number[] = [];
+  if (props.selectedId && props.tool !== 'place') {
+    const sel = props.pieces.find((p) => p.id === props.selectedId);
+    const look = sel ? pieceLook(sel.pieceId) : null;
+    if (sel && look) selectedSegs.push(...boxSegments(stage, rect, sel.x, sel.y, sel.z, look.w, look.h, look.d, sel.yawDegrees));
   }
 
   return (
@@ -228,6 +414,15 @@ export default function WorldViewport(props: {
         <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
           <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
             <Graph.Polyline segments points={ghostSegs} stroke="#34d399" strokeWidth={1.6} />
+          </Graph>
+        </Box>
+      ) : null}
+
+      {/* Selection highlight — the box around the picked piece (Select/Move/Focus). */}
+      {selectedSegs.length ? (
+        <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'visible' }}>
+          <Graph style={{ width: rect.width, height: rect.height }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+            <Graph.Polyline segments points={selectedSegs} stroke="#42d9e8" strokeWidth={2.2} />
           </Graph>
         </Box>
       ) : null}

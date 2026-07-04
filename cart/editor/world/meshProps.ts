@@ -1,0 +1,128 @@
+// world/meshProps.ts — the editor's bridge to the host's live MESH-PROP path
+// (req_2577/2579). An authored build piece is a real mesh; to draw it in the
+// world loader we (1) register its vertex geometry as a RESIDENT mesh (a
+// MESH_PROPS lump), then (2) push a live mesh REF per placement that points at
+// that resident mesh by a hash of its key. Both host doors already exist
+// (__compiled_world_set_resident_meshes / _set_live_mesh_props / _mesh_ghost),
+// so this is a pure JS bridge — no framework rebuild.
+//
+// The lump byte format is the host decoder's contract verbatim
+// (framework/world/constructor.zig decodeMeshProps, MESH_PROPS_VERSION 8). We
+// write the mesh-only form (instanceCount 0) at version 7 — untextured (the mesh
+// draws with its flat colour; its own painted atlas is a later slice) with no
+// slots/door/collision blocks. The ref hash is FNV-1a over the mesh key, the
+// SAME hash the loader keys residency on (world_loader.zig liveMeshHash).
+
+/** FNV-1a 32-bit — MUST match world_loader.zig liveMeshHash so a key resolves to
+ *  the same resident mesh on both sides. */
+export function meshKeyHash(key: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < key.length; i += 1) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+export type ResidentMesh = {
+  key: string;
+  /** interleaved vertices, stride 8: pos3 + normal3 + uv2 (the storedModelMeshData shape). */
+  vertices: Float32Array;
+  /** flat draw colour 0..1 (untextured meshes render with this). */
+  color?: [number, number, number];
+};
+
+function boundsOf(v: Float32Array): { radius: number; w: number; d: number; h: number } {
+  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i + 2 < v.length; i += 8) {
+    const x = v[i]!, y = v[i + 1]!, z = v[i + 2]!;
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  if (!Number.isFinite(minX)) return { radius: 1, w: 1, d: 1, h: 1 };
+  const w = maxX - minX, h = maxY - minY, d = maxZ - minZ;
+  return { radius: Math.max(w, h, d) * 0.5 || 1, w: w || 1, d: d || 1, h: h || 1 };
+}
+
+const MESH_PROPS_VERSION = 7; // mesh-only form the host decoder accepts (<= 8)
+
+/** Encode resident meshes into a MESH_PROPS lump for __compiled_world_set_resident_meshes.
+ *  instanceCount 0 (a catalog, not a baked scene); each mesh untextured with no
+ *  slots/door/boxes. Empty list → a 12-byte header that clears residency. */
+export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Array {
+  // Size pass.
+  let total = 12; // header
+  for (const m of meshes) {
+    const keyBytes = m.key.length; // keys are ASCII ids
+    total += 4 + keyBytes;         // keyLen + key
+    total += 36;                   // meta
+    total += m.vertices.length * 4; // vertices
+    total += 4;                    // pngLen (0)
+    total += 4;                    // slotCount (0)
+    total += 4;                    // doorFlag (0)
+    total += 4;                    // boxCount (0)
+  }
+  const buf = new ArrayBuffer(total);
+  const dv = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+  dv.setUint32(0, MESH_PROPS_VERSION, true);
+  dv.setUint32(4, meshes.length, true);
+  dv.setUint32(8, 0, true); // instanceCount
+  let o = 12;
+  for (const m of meshes) {
+    dv.setUint32(o, m.key.length, true); o += 4;
+    for (let i = 0; i < m.key.length; i += 1) bytes[o + i] = m.key.charCodeAt(i) & 0xff;
+    o += m.key.length;
+    const b = boundsOf(m.vertices);
+    const col = m.color ?? [0.72, 0.74, 0.78];
+    const vertexCount = Math.floor(m.vertices.length / 8);
+    dv.setFloat32(o, col[0], true); dv.setFloat32(o + 4, col[1], true); dv.setFloat32(o + 8, col[2], true);
+    dv.setFloat32(o + 12, b.radius, true);
+    dv.setFloat32(o + 16, b.w, true);
+    dv.setFloat32(o + 20, b.d, true);
+    dv.setFloat32(o + 24, b.h, true);
+    dv.setUint32(o + 28, 1, true);            // solid
+    dv.setUint32(o + 32, vertexCount, true);  // vertexCount
+    o += 36;
+    for (let i = 0; i < m.vertices.length; i += 1) { dv.setFloat32(o, m.vertices[i]!, true); o += 4; }
+    dv.setUint32(o, 0, true); o += 4; // pngLen
+    dv.setUint32(o, 0, true); o += 4; // slotCount
+    dv.setUint32(o, 0, true); o += 4; // doorFlag
+    dv.setUint32(o, 0, true); o += 4; // boxCount
+  }
+  return bytes;
+}
+
+export type MeshRef = { key: string; x: number; y: number; z: number; yaw: number };
+const MESH_REF_HEADER_BYTES = 24; // u32 hash, f32 x,y,z,yaw, u32 matCount
+
+/** Pack one live mesh ref (no per-slot materials → the mesh's own look). */
+export function encodeMeshGhost(ref: MeshRef): Uint8Array {
+  const buf = new ArrayBuffer(MESH_REF_HEADER_BYTES);
+  const dv = new DataView(buf);
+  dv.setUint32(0, meshKeyHash(ref.key), true);
+  dv.setFloat32(4, ref.x, true);
+  dv.setFloat32(8, ref.y, true);
+  dv.setFloat32(12, ref.z, true);
+  dv.setFloat32(16, ref.yaw, true);
+  dv.setUint32(20, 0, true); // matCount
+  return new Uint8Array(buf);
+}
+
+/** Pack all placed mesh refs into one contiguous buffer (24 bytes each, no mats). */
+export function encodeMeshRefs(refs: readonly MeshRef[]): Uint8Array {
+  const buf = new ArrayBuffer(refs.length * MESH_REF_HEADER_BYTES);
+  const dv = new DataView(buf);
+  let o = 0;
+  for (const r of refs) {
+    dv.setUint32(o, meshKeyHash(r.key), true);
+    dv.setFloat32(o + 4, r.x, true);
+    dv.setFloat32(o + 8, r.y, true);
+    dv.setFloat32(o + 12, r.z, true);
+    dv.setFloat32(o + 16, r.yaw, true);
+    dv.setUint32(o + 20, 0, true);
+    o += MESH_REF_HEADER_BYTES;
+  }
+  return new Uint8Array(buf);
+}

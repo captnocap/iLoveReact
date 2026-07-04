@@ -84,28 +84,40 @@ export function raycastBuild(ray: BuildRay, pieces: readonly BuildPieceLite[], m
   };
 }
 
-/** Host-raycast a placed-piece list and return the HIT PIECE (from `pieces`), or
- *  `null` for a genuine miss, or `undefined` when the host binding isn't live
- *  (the framework hasn't been built with -Dhas-game-build) — callers should keep
- *  their existing path in that case. Non-catalog pieces (props/cooked ids) are
- *  skipped for the host path since the static catalog index doesn't cover them. */
-export function pickBuildPieceHost<T extends { pieceId: string; x: number; y: number; z: number; yawDegrees: number }>(
+/** Host-raycast a placed-piece list and return the HIT PIECE with its ray
+ *  distance, or `null` for a genuine miss, or `undefined` when the host binding
+ *  isn't live (the framework hasn't been built with -Dhas-game-build) — callers
+ *  should keep their existing path in that case. Non-catalog pieces (authored/
+ *  props/cooked ids) are skipped since the static catalog index doesn't cover
+ *  them — callers with such pieces run their own pick and merge by distance. */
+export function pickBuildPieceHostHit<T extends { pieceId: string; x: number; y: number; z: number; yawDegrees: number }>(
   ray: BuildRay,
   pieces: readonly T[],
   maxDistance: number,
-): T | null | undefined {
+): { piece: T; t: number } | null | undefined {
   if (!buildHostLive()) return undefined;
   const lite: BuildPieceLite[] = [];
   const orig: number[] = [];
   for (let i = 0; i < pieces.length; i += 1) {
     const ci = buildCatalogIndex(pieces[i]!.pieceId);
-    if (ci < 0) continue; // props/cooked: not in the static catalog
+    if (ci < 0) continue; // authored/props/cooked: not in the static catalog
     lite.push({ catalogIndex: ci, x: pieces[i]!.x, y: pieces[i]!.y, z: pieces[i]!.z, yawDegrees: pieces[i]!.yawDegrees });
     orig.push(i);
   }
   const hit = raycastBuild(ray, lite, maxDistance);
   if (!hit) return null;
-  return pieces[orig[hit.pieceIndex]!] ?? null;
+  const piece = pieces[orig[hit.pieceIndex]!];
+  return piece ? { piece, t: hit.t } : null;
+}
+
+/** pickBuildPieceHostHit without the distance — the original piece-only shape. */
+export function pickBuildPieceHost<T extends { pieceId: string; x: number; y: number; z: number; yawDegrees: number }>(
+  ray: BuildRay,
+  pieces: readonly T[],
+  maxDistance: number,
+): T | null | undefined {
+  const hit = pickBuildPieceHostHit(ray, pieces, maxDistance);
+  return hit === undefined ? undefined : hit?.piece ?? null;
 }
 
 /** Validate a placement (host validatePlacement). editIndex < 0 ⇒ no edit. */
