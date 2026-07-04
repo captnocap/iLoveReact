@@ -181,7 +181,12 @@ export default function WorldViewport(props: {
     const my = Number(g.getMouseY?.() ?? (r.y + r.height / 2));
     stage.zoomToCursor(mx - r.x, my - r.y, dy > 0 ? 1.15 : 1 / 1.15, r);
     pushCamera();
-  }, [stage, pushCamera]);
+    // The ghost outline is a render-time projection through this stage. Rotate
+    // and pan refresh it via onMove's setSnap, but a wheel zoom moves the camera
+    // with no render — the loader repaints with the new solve while the overlay
+    // keeps the old one (req_2541). Re-snap at the cursor so it reprojects.
+    if (armedRef.current) setSnap(resolveSnap(mx - r.x, my - r.y));
+  }, [stage, pushCamera, resolveSnap]);
 
   // The armed ghost: the piece's box edges projected through the same solve the
   // loader renders with (2D overlay, no second 3D surface).
