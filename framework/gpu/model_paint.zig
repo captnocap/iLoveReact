@@ -433,7 +433,10 @@ pub fn paintFace(face: u32, rgba: [4]u8) void {
 // from a readable base instead of a blank grey sheet. Pastel hues are spread by the golden
 // ratio so adjacent islands stay distinct; all of an island's triangles take its colour.
 fn hsvPastel(h: f32) [4]u8 {
-    const s: f32 = 0.32; // soft, so overpainting reads clearly against the template
+    // Saturation high enough that hues read as DISTINCT colours (Blockbench's green/pink/
+    // yellow/blue register), not a wash of near-cream tints where every island looks the same
+    // (req_2543). Still light (high v) so overpainting stays legible on top.
+    const s: f32 = 0.5;
     const v: f32 = 0.92;
     const i = @as(u32, @intFromFloat(h * 6.0)) % 6;
     const f = h * 6.0 - @floor(h * 6.0);
