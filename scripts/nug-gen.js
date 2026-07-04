@@ -279,10 +279,13 @@ function surfaceNets(field, R, N) {
   const tris = [];
   const gv = (i, j, k) => grid[(k * M + j) * M + i];
   const cv = (i, j, k) => cellVert[(k * N + j) * N + i];
+  // Winding: the engine draws with cull_mode=.back, front_face=.ccw
+  // (framework/gpu/3d.zig), so triangles must be CCW seen from OUTSIDE the
+  // surface. Verified post-build against the SDF gradient (see main()).
   const quad = (a, b, c, d, flip) => {
     if (a < 0 || b < 0 || c < 0 || d < 0) return;
-    if (flip) tris.push(a, d, c, a, c, b);
-    else tris.push(a, b, c, a, c, d);
+    if (flip) tris.push(a, b, c, a, c, d);
+    else tris.push(a, d, c, a, c, b);
   };
   for (let k = 1; k < N; k++)
     for (let j = 1; j < N; j++)
@@ -620,6 +623,33 @@ for (const seed of seeds) {
     let nz = field(x, y, z + e) - field(x, y, z - e);
     const l = Math.hypot(nx, ny, nz) || 1;
     normals[i * 3] = nx / l; normals[i * 3 + 1] = ny / l; normals[i * 3 + 2] = nz / l;
+  }
+
+  // Winding audit: a CCW-from-outside triangle's geometric normal
+  // (cross(b-a, c-a), right-hand rule) must point OUT of the surface, i.e.
+  // along the SDF gradient. Anything under ~99% means the mesher regressed.
+  {
+    let ok = 0, total = 0;
+    const v = mesh.verts, t = mesh.tris;
+    for (let i = 0; i < t.length; i += 3) {
+      const a = t[i] * 3, b = t[i + 1] * 3, c = t[i + 2] * 3;
+      const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2];
+      const wx = v[c] - v[a], wy = v[c + 1] - v[a + 1], wz = v[c + 2] - v[a + 2];
+      const gx = uy * wz - uz * wy, gy = uz * wx - ux * wz, gz = ux * wy - uy * wx;
+      const cx = (v[a] + v[b] + v[c]) / 3, cyy = (v[a + 1] + v[b + 1] + v[c + 1]) / 3, cz = (v[a + 2] + v[b + 2] + v[c + 2]) / 3;
+      const ge = cellSize * 0.5;
+      const dx = field(cx + ge, cyy, cz) - field(cx - ge, cyy, cz);
+      const dy = field(cx, cyy + ge, cz) - field(cx, cyy - ge, cz);
+      const dz = field(cx, cyy, cz + ge) - field(cx, cyy, cz - ge);
+      total++;
+      if (gx * dx + gy * dy + gz * dz > 0) ok++;
+    }
+    const pct = (100 * ok / total);
+    if (pct < 99) {
+      err('seed ' + seed + ': WINDING FAIL — only ' + pct.toFixed(1) + '% of triangles face outward, skipping');
+      continue;
+    }
+    out('  winding: ' + pct.toFixed(2) + '% outward (' + ok + '/' + total + ')');
   }
 
   const colors = bakeAlbedo(p, pl, F, mesh.verts, normals);
