@@ -946,6 +946,263 @@ pub fn meshTopoLoopCut() bool {
     return ok;
 }
 
+// ── Loop cut on a FACE: the studio treatment as a host-owned popup session ─────────
+// The old studio's Blockbench loop cut (req_0984/0985/0990): the cut axis is one of the
+// clicked face's two IN-PLANE axes (never its normal — cutting ⟂ the normal would slab
+// toward the face and leave it whole), the plane comb spans the SELECTED face's extent on
+// that axis (req_1006: a cut on an already-cut half subdivides THAT half), and the popup
+// previews live before committing. The session mirrors the gizmo-drag pattern: snapshot
+// at begin, every preview re-cuts from a captured base, journal-commit only on
+// end(commit) — cancel restores the base exactly, leaving no undo entry.
+const LcSession = struct {
+    base_pos: []f32, // positions-only soup at begin (tri_count * 9)
+    tri_count: u32,
+    base_groups: ?[]u32, // per-tri authored groups at begin (null = ungrouped import)
+    axes: [2]u8, // the face's two in-plane axes; popup direction 0/1 picks one
+    lo: [2]f32, // selected-face extent on each in-plane axis
+    hi: [2]f32,
+    keep_group: u32, // clicked face's group id — its −side piece re-selects after commit
+    snap: ?JournalEntry,
+};
+var g_lc: ?LcSession = null;
+
+fn lcFree() void {
+    var s = g_lc orelse return;
+    std.heap.c_allocator.free(s.base_pos);
+    if (s.base_groups) |g| std.heap.c_allocator.free(g);
+    journalDiscard(&s.snap);
+    g_lc = null;
+}
+
+/// The plane comb for `cuts` planes at `offset` within [lo,hi] — the studio's
+/// loopCutPositions: at offset = size/2 the planes divide the span into cuts+1 EQUAL
+/// slabs; raising the offset translates the comb toward +axis, shrinking the −side
+/// (selected-face) end slab. Planes that land outside the span are skipped.
+fn lcPlanes(lo: f32, hi: f32, cuts: u32, offset: f32, out: []f32) u32 {
+    const n: u32 = @max(1, cuts);
+    const size = hi - lo;
+    const even = size / @as(f32, @floatFromInt(n + 1));
+    const shift = -(offset - size / 2.0);
+    var m: u32 = 0;
+    var k: u32 = 1;
+    while (k <= n and m < out.len) : (k += 1) {
+        const p = lo + @as(f32, @floatFromInt(k)) * even + shift;
+        if (p > lo + 1e-5 and p < hi - 1e-5) {
+            out[m] = p;
+            m += 1;
+        }
+    }
+    return m;
+}
+
+/// Rebuild the interleaved edit mesh from a positions-only soup and install it —
+/// the shared tail of every session step (preview, cancel-restore). appendTri
+/// recomputes normals; UVs are rewritten on adopt. Stays in face mode.
+fn lcInstallSoup(pos: []const f32, tri_count: u32, groups: ?[]const u32) bool {
+    var out = std.ArrayListUnmanaged(f32){};
+    var t: u32 = 0;
+    while (t < tri_count) : (t += 1) {
+        const b = @as(usize, t) * 9;
+        const p0: [3]f32 = .{ pos[b + 0], pos[b + 1], pos[b + 2] };
+        const p1: [3]f32 = .{ pos[b + 3], pos[b + 4], pos[b + 5] };
+        const p2: [3]f32 = .{ pos[b + 6], pos[b + 7], pos[b + 8] };
+        if (!appendTri(&out, p0, p1, p2)) {
+            out.deinit(std.heap.c_allocator);
+            return false;
+        }
+    }
+    const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
+        out.deinit(std.heap.c_allocator);
+        return false;
+    };
+    defer std.heap.c_allocator.free(owned);
+    if (!replaceActiveEditMesh(owned, tri_count * 3)) return false;
+    if (groups) |g| {
+        model_source.setFaceGroups(g);
+        _ = refreshPaintLayout(); // re-island by the fresh grouping (groups land after adopt)
+    }
+    mesh_edit.setMode(.face);
+    return true;
+}
+
+pub const LcInfo = struct { size0: f32, size1: f32 };
+
+/// Open a loop-cut session on the CURRENT face selection: capture the base soup, derive
+/// the face's two in-plane axes (dominant axis of the average selected-face normal is
+/// the normal axis; the other two are the cut candidates) and the selection's extent on
+/// each. Returns the two span sizes for the popup, or null when not in face mode /
+/// nothing selected. A prior session (stale popup) is dropped, not committed.
+pub fn meshLoopCutFaceBegin() ?LcInfo {
+    lcFree();
+    if (!model_paint.hasTarget()) return null;
+    if (mesh_edit.mode() != .face) return null;
+    const verts = g_edit_verts orelse return null;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0 or model_paint.faceCount() < tri_count) return null;
+
+    const mask = std.heap.c_allocator.alloc(bool, model_paint.faceCount()) catch return null;
+    defer std.heap.c_allocator.free(mask);
+    if (mesh_edit.buildDeleteMask(mask) == 0) return null;
+
+    // Extract a positions-only soup (9 f32/tri) from the interleaved edit mesh.
+    const pos = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return null;
+    {
+        var f: u32 = 0;
+        while (f < tri_count) : (f += 1) {
+            var k: u32 = 0;
+            while (k < 3) : (k += 1) {
+                const src = (@as(usize, f) * 3 + k) * 8;
+                const dst = (@as(usize, f) * 3 + k) * 3;
+                if (src + 2 >= verts.len) {
+                    std.heap.c_allocator.free(pos);
+                    return null;
+                }
+                pos[dst + 0] = verts[src + 0];
+                pos[dst + 1] = verts[src + 1];
+                pos[dst + 2] = verts[src + 2];
+            }
+        }
+    }
+
+    // Average selected-face normal → its dominant axis; the OTHER two axes are the
+    // cut candidates (in ascending order, matching the studio's direction toggle).
+    var acc: [3]f32 = .{ 0, 0, 0 };
+    var keep_group: u32 = model_source.NO_FACE_GROUP;
+    {
+        var f: u32 = 0;
+        while (f < tri_count) : (f += 1) {
+            if (!mask[f]) continue;
+            acc = vadd(acc, faceCrossFromPositions(pos, f));
+            if (keep_group == model_source.NO_FACE_GROUP) keep_group = model_source.faceGroupOf(f);
+        }
+    }
+    const ax = @abs(acc[0]);
+    const ay = @abs(acc[1]);
+    const az = @abs(acc[2]);
+    const na: u8 = if (ax >= ay and ax >= az) 0 else if (ay >= az) 1 else 2;
+    var axes: [2]u8 = undefined;
+    {
+        var w: u8 = 0;
+        var a: u8 = 0;
+        while (a < 3) : (a += 1) {
+            if (a != na) {
+                axes[w] = a;
+                w += 1;
+            }
+        }
+    }
+
+    // The SELECTED faces' extent on each candidate axis (not the whole mesh — req_1006).
+    var lo: [2]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32) };
+    var hi: [2]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32) };
+    {
+        var f: u32 = 0;
+        while (f < tri_count) : (f += 1) {
+            if (!mask[f]) continue;
+            var k: u32 = 0;
+            while (k < 3) : (k += 1) {
+                const vb = (@as(usize, f) * 3 + k) * 3;
+                var d: u8 = 0;
+                while (d < 2) : (d += 1) {
+                    const v = pos[vb + axes[d]];
+                    if (v < lo[d]) lo[d] = v;
+                    if (v > hi[d]) hi[d] = v;
+                }
+            }
+        }
+    }
+
+    var groups: ?[]u32 = null;
+    if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
+        const g = std.heap.c_allocator.alloc(u32, tri_count) catch {
+            std.heap.c_allocator.free(pos);
+            return null;
+        };
+        var i: u32 = 0;
+        while (i < tri_count) : (i += 1) g[i] = model_source.faceGroupOf(i);
+        groups = g;
+    }
+
+    g_lc = .{
+        .base_pos = pos,
+        .tri_count = tri_count,
+        .base_groups = groups,
+        .axes = axes,
+        .lo = lo,
+        .hi = hi,
+        .keep_group = keep_group,
+        .snap = journalSnapshotCurrent("loop cut"),
+    };
+    return .{ .size0 = hi[0] - lo[0], .size1 = hi[1] - lo[1] };
+}
+
+/// Re-cut from the captured base at (direction, cuts, offset) and install the result as
+/// the live mesh — the popup's live preview. offset_frac is 0..1 of the span (0.5 = the
+/// even comb). Zero surviving planes (offset pushed them all out) restores the bare base,
+/// so scrubbing the offset never strands a stale cut on screen.
+pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
+    const s = g_lc orelse return false;
+    const d: usize = @min(dir, 1);
+    const axis = s.axes[d];
+    const lo = s.lo[d];
+    const hi = s.hi[d];
+    if (hi - lo < 1e-6) return false;
+    var planes: [64]f32 = undefined; // the studio popup's cut cap
+    const offset = std.math.clamp(offset_frac, 0.0, 1.0) * (hi - lo);
+    const n_planes = lcPlanes(lo, hi, @min(cuts, 64), offset, &planes);
+
+    // Cut the BASE soup by each plane in turn (planeCutSoup allocs a fresh soup per
+    // plane; intermediates free as we go — only the final result installs).
+    var cur_pos: []const f32 = s.base_pos;
+    var cur_groups: ?[]const u32 = if (s.base_groups) |g| g else null;
+    var cur_count: u32 = s.tri_count;
+    var owned = false; // false while cur_* still aliases the session base
+    var pi: u32 = 0;
+    while (pi < n_planes) : (pi += 1) {
+        var nvec: [3]f32 = .{ 0, 0, 0 };
+        nvec[axis] = 1;
+        const cut = mesh_edit.planeCutSoup(cur_pos, cur_count, nvec, planes[pi], cur_groups) orelse break;
+        if (owned) {
+            std.heap.c_allocator.free(@constCast(cur_pos));
+            if (cur_groups) |g| std.heap.c_allocator.free(@constCast(g));
+        }
+        cur_pos = cut.positions;
+        cur_groups = cut.groups;
+        cur_count = cut.tri_count;
+        owned = true;
+    }
+    defer if (owned) {
+        std.heap.c_allocator.free(@constCast(cur_pos));
+        if (cur_groups) |g| std.heap.c_allocator.free(@constCast(g));
+    };
+    return lcInstallSoup(cur_pos, cur_count, cur_groups);
+}
+
+/// Close the session. commit keeps the previewed cut as ONE journal entry and re-selects
+/// the clicked face's −side piece (planeCutSoup keeps the original group id on the −side,
+/// so the selection rides the cut like the studio's, req_0989). cancel restores the
+/// captured base exactly and leaves no undo entry.
+pub fn meshLoopCutFaceEnd(commit: bool) bool {
+    var s = g_lc orelse return false;
+    var ok = true;
+    if (commit) {
+        journalCommit(&s.snap);
+        if (s.keep_group != model_source.NO_FACE_GROUP) {
+            _ = mesh_edit.selectFacesByGroupRange(s.keep_group, s.keep_group + 1, false);
+        }
+        mesh_edit.setMode(.face);
+    } else {
+        const groups_arg: ?[]const u32 = if (s.base_groups) |g| g else null;
+        ok = lcInstallSoup(s.base_pos, s.tri_count, groups_arg);
+        journalDiscard(&s.snap);
+    }
+    std.heap.c_allocator.free(s.base_pos);
+    if (s.base_groups) |g| std.heap.c_allocator.free(g);
+    journalDiscard(&s.snap); // no-op when committed
+    g_lc = null;
+    return ok;
+}
+
 /// Delete exactly the selected mesh elements: drop every triangle the current selection
 /// marks (mesh_edit.buildDeleteMask — selected faces, or faces touching a selected vert/edge)
 /// and rebuild the edit mesh from the survivors, carrying their face groups. Refuses to empty
@@ -1362,6 +1619,7 @@ pub fn meshJournalClear() void {
     journalFreeStack(&g_journal_undo);
     journalFreeStack(&g_journal_redo);
     journalDiscard(&g_gizmo_snap);
+    lcFree(); // a live loop-cut popup can't outlive the mesh it captured
     if (g_journal_note) |n| jalloc.free(n);
     g_journal_note = null;
 }

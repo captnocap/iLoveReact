@@ -248,6 +248,22 @@ const meshExtrudeEdge = (distance: number) => readTopoResult(host.__mesh_topo_ex
 const meshCreateFace = () => readTopoResult(host.__mesh_topo_create_face?.());
 // Loop cut: slice the mesh by the plane perpendicular to the ONE selected edge (host op).
 const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
+// ── Face loop cut (the studio's Blockbench treatment): a host-owned popup session ──
+// begin captures the base mesh + the clicked face's two in-plane axes; preview installs
+// the cut live at (direction, cuts, offset); end commits ONE journal entry or restores
+// the base exactly. size0/size1 are the face's spans for direction 0/1.
+type LcInfo = { ok: number; size0?: number; size1?: number };
+const meshLcBegin = (): LcInfo | null => {
+  try {
+    const j = host.__mesh_lc_begin?.();
+    return typeof j === 'string' && j ? (JSON.parse(j) as LcInfo) : null;
+  } catch {
+    return null;
+  }
+};
+const meshLcPreview = (dir: number, cuts: number, offsetFrac: number) =>
+  readTopoResult(host.__mesh_lc_preview?.(dir, cuts, offsetFrac));
+const meshLcEnd = (commit: boolean) => readTopoResult(host.__mesh_lc_end?.(commit ? 1 : 0));
 // Delete exactly the selected elements (faces, or faces touching a selected vert/edge).
 const meshDeleteSelection = () => readTopoResult(host.__mesh_delete_selection?.());
 // ── Host-authoritative part ops ──────────────────────────────────────────────────
@@ -470,6 +486,32 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     resolveGuard(action);
     setGuard(null);
     setSelInfo(readSelInfo() ?? selInfo);
+  };
+
+  // ── Face loop cut popup (the studio treatment): direction picks which of the clicked
+  // face's two in-plane axes, cuts 1..64, offset in % of the face's span on that axis
+  // (50 = even slabs). Non-null = a host session is live; every change re-previews.
+  const [lc, setLc] = useState<null | { dir: 0 | 1; cuts: number; offset: number; sizes: [number, number] }>(null);
+  const openLoopCut = () => {
+    const info = meshLcBegin();
+    if (!info?.ok) {
+      setError('Select a face to loop-cut (face mode)');
+      return;
+    }
+    const next = { dir: 0 as 0 | 1, cuts: 1, offset: 50, sizes: [info.size0 ?? 0, info.size1 ?? 0] as [number, number] };
+    setLc(next);
+    adoptMesh(meshLcPreview(next.dir, next.cuts, next.offset / 100));
+  };
+  const changeLoopCut = (patch: Partial<{ dir: 0 | 1; cuts: number; offset: number }>) => {
+    if (!lc) return;
+    const next = { ...lc, ...patch };
+    setLc(next);
+    adoptMesh(meshLcPreview(next.dir, next.cuts, next.offset / 100));
+  };
+  const closeLoopCut = (commit: boolean) => {
+    if (!lc) return;
+    adoptMesh(meshLcEnd(commit));
+    setLc(null);
   };
 
   // The outliner part ranges currently resident in the host mesh — the source for
@@ -727,7 +769,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     wire: () => setWire((v) => !v),
     extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
-    loopCut: () => applyTopo(meshLoopCut(), 'Select exactly one edge to loop-cut across'),
+    // Mode-aware: face mode opens the studio-style popup session (direction/cuts/offset
+    // with live preview); edge mode keeps the one-shot perpendicular-plane cut.
+    loopCut: () => {
+      if (selMode === 3) { openLoopCut(); return; }
+      applyTopo(meshLoopCut(), 'Select exactly one edge to loop-cut across');
+    },
     deleteSelection: () => applyTopo(meshDeleteSelection(), 'Nothing selected to delete'),
     // Host-authoritative part ops (the outliner). Append preserves prior edits; hide/delete
     // act on the part's group range. All adopt the new host mesh key without a JS recompose.
@@ -893,7 +940,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }),
     delete: () => { if (selMode !== 0) applyTopo(meshDeleteSelection(), 'Nothing selected to delete'); },
     backspace: () => { if (selMode !== 0) applyTopo(meshDeleteSelection(), 'Nothing selected to delete'); },
-    Escape: () => { if (selMode !== 0) { meshClearSel(); setSelInfo(readSelInfo() ?? selInfo); } },
+    Escape: () => {
+      if (lc) { closeLoopCut(false); return; } // an open loop-cut popup cancels first
+      if (selMode !== 0) { meshClearSel(); setSelInfo(readSelInfo() ?? selInfo); }
+    },
   });
 
   // A fresh model NEVER inherits paint state: paint mode drops (the live atlas belonged
@@ -903,6 +953,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setPaintMode(false);
     setAtlasPrompt(false);
     atlasReadyRef.current = false;
+    setLc(null); // the host drops a live loop-cut session with the old mesh's journal
   };
 
   // One load path for every source (picker, drop, CLI): validate the extension, hand
@@ -1399,6 +1450,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                   )}
                 </>
               )}
+              {selMode === 3 && selInfo.sel > 0 && (
+                <>
+                  <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
+                  <Pressable
+                    onPress={openLoopCut}
+                    tooltip="Loop cut across this face — popup picks direction, cuts, and offset (L)"
+                    style={{
+                      paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                      backgroundColor: lc ? '#2a4a3aee' : '#203a2fee', borderWidth: 1, borderColor: lc ? '#57a87f' : '#3d765c',
+                    }}
+                  >
+                    <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Loop Cut</Text>
+                  </Pressable>
+                </>
+              )}
               <Box style={{ flexGrow: 1 }} />
               <Text style={{ color: '#7d899c', fontSize: 12, fontFamily: 'monospace' }}>
                 {`${selInfo.sel} sel · ${selMode === 1 ? `${selInfo.verts} verts` : selMode === 2 ? `${selInfo.edges} edges` : `${(model.count / 3).toLocaleString()} faces`}`}
@@ -1414,6 +1480,63 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           )}
         </Row>
       )}
+
+      {/* Loop-cut popup (the studio's Blockbench panel): direction (which in-plane axis),
+          cuts, offset in % of the face's span. Every change re-previews live through the
+          host session; Apply commits one journal entry, ✕ (or Esc) restores the base. */}
+      {lc ? (
+        <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 62, alignItems: 'center' }}>
+          <Col
+            style={{
+              minWidth: 260, paddingLeft: 14, paddingRight: 14, paddingTop: 12, paddingBottom: 12,
+              backgroundColor: 'rgba(11,19,32,0.96)', borderWidth: 1, borderColor: '#2c4a6a',
+              borderRadius: 8, gap: 8,
+            }}
+          >
+            <Row style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700 }}>Loop Cut</Text>
+              <Pressable
+                onPress={() => closeLoopCut(false)}
+                tooltip="Cancel (Esc) — restore the uncut mesh"
+                style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
+              >
+                <Text style={{ color: '#b9c4d4', fontSize: 11 }}>✕</Text>
+              </Pressable>
+            </Row>
+            {([
+              { label: 'direction', value: lc.dir, min: 0, max: 1, step: 1, patch: (n: number) => ({ dir: (n ? 1 : 0) as 0 | 1 }) },
+              { label: 'cuts', value: lc.cuts, min: 1, max: 64, step: 1, patch: (n: number) => ({ cuts: n }) },
+              { label: 'offset %', value: lc.offset, min: 0, max: 100, step: 5, patch: (n: number) => ({ offset: n }) },
+            ] as const).map((field) => (
+              <Row key={field.label} style={{ alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <Text style={{ color: '#8fa1b8', fontSize: 12 }}>{field.label}</Text>
+                <Row style={{ alignItems: 'center', gap: 6 }}>
+                  <Pressable
+                    onPress={() => changeLoopCut(field.patch(Math.max(field.min, field.value - field.step)))}
+                    style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+                  >
+                    <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>−</Text>
+                  </Pressable>
+                  <Text style={{ color: '#e6eefb', fontSize: 12, fontFamily: 'monospace', minWidth: 30, textAlign: 'center' }}>{`${field.value}`}</Text>
+                  <Pressable
+                    onPress={() => changeLoopCut(field.patch(Math.min(field.max, field.value + field.step)))}
+                    style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+                  >
+                    <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>+</Text>
+                  </Pressable>
+                </Row>
+              </Row>
+            ))}
+            <Pressable
+              onPress={() => closeLoopCut(true)}
+              tooltip="Commit the cut (one undo step); the clicked face's near side stays selected"
+              style={{ marginTop: 2, paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}
+            >
+              <Text style={{ color: '#7fd6a0', fontSize: 12, fontWeight: 700 }}>Apply</Text>
+            </Pressable>
+          </Col>
+        </Box>
+      ) : null}
 
       {inkWarn ? (
         <Col

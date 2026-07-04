@@ -551,6 +551,48 @@ fn hostMeshTopoLoopCut(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_lc_begin() → JSON {"ok","size0","size1"}. Open a face loop-cut session on the
+/// CURRENT face selection (the studio's Blockbench treatment): captures the base mesh and
+/// the clicked face's two in-plane axes + spans. Previews re-cut from that base until
+/// __mesh_lc_end closes the session. size0/size1 are the spans for direction 0/1.
+fn hostMeshLcBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const lc = scene3d.meshLoopCutFaceBegin() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf: [128]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"size0\":{d},\"size1\":{d}}}", .{ lc.size0, lc.size1 }) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+
+/// __mesh_lc_preview(dir, cuts, offsetFrac) → JSON {"ok","key","count"}. Install the cut
+/// at these popup params as the live mesh (the live preview — not journaled). offsetFrac
+/// is 0..1 of the face's span on the chosen axis; 0.5 is the even comb.
+fn hostMeshLcPreview(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const dir = argToI32(info, 0) orelse 0;
+    const cuts = argToI32(info, 1) orelse 1;
+    const off: f32 = @floatCast(argToF64(info, 2) orelse 0.5);
+    const ok = scene3d.meshLoopCutFacePreview(@intCast(@max(0, dir)), @intCast(@max(1, cuts)), off);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_lc_end(commit) → JSON {"ok","key","count"}. Apply (journal ONE 'loop cut' entry;
+/// the clicked face's −side piece stays selected) or Cancel (restore the pre-cut mesh
+/// exactly, no undo entry).
+fn hostMeshLcEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const commit = (argToI32(info, 0) orelse 0) != 0;
+    const ok = scene3d.meshLoopCutFaceEnd(commit);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_delete_selection() → JSON {"ok","key","count"}. Delete exactly the selected mesh
 /// elements (selected faces, or faces touching a selected vert/edge) and rebuild the mesh.
 fn hostMeshDeleteSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -2109,6 +2151,9 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
+    v8_runtime.registerHostFn("__mesh_lc_begin", hostMeshLcBegin);
+    v8_runtime.registerHostFn("__mesh_lc_preview", hostMeshLcPreview);
+    v8_runtime.registerHostFn("__mesh_lc_end", hostMeshLcEnd);
     v8_runtime.registerHostFn("__mesh_delete_selection", hostMeshDeleteSelection);
     v8_runtime.registerHostFn("__mesh_group_face_count", hostMeshGroupFaceCount);
     v8_runtime.registerHostFn("__mesh_append_group", hostMeshAppendGroup);
