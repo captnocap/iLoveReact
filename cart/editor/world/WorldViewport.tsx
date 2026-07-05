@@ -31,6 +31,7 @@ import { encodeResidentMeshes, encodeMeshRefs, encodeMeshGhost, type ResidentMes
 import { isAuthoredPiece, type AuthoredBuildPiece } from './authoredRegistry';
 import { authoredMeshData } from './authoredMesh';
 import { pickBuildPieceHostHit } from '../../../runtime/game/build';
+import { ensureMapSeeded } from '../stage/mapPaint';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import type { WorldTool } from './worldTool';
 
@@ -139,6 +140,23 @@ export default function WorldViewport(props: {
     }, 32);
     return () => clearInterval(t);
   }, [pushCamera]);
+
+  // Boot ground (req_2651 gap XX): seed the map layer as soon as the host map
+  // doors are live. Before this, no chunk existed until the user armed Map
+  // Paint (the only mapGrowChunk call site), so a fresh editor booted into a
+  // VOID — pure skybox, placed floors floating in nothing. The host paint
+  // mirror renders any seeded chunk as a real ground slab, so load-or-seed at
+  // mount gives boot-time ground + orientation for free. Same retry pattern as
+  // the camera boot push above — the doors land a few frames after mount.
+  useEffect(() => {
+    if (ensureMapSeeded()) return;
+    let tries = 0;
+    const t = setInterval(() => {
+      tries += 1;
+      if (ensureMapSeeded() || tries > 120) clearInterval(t);
+    }, 32);
+    return () => clearInterval(t);
+  }, []);
 
   // The active floor lifts the camera target + the pick plane (Sims storeys).
   useEffect(() => {
@@ -284,6 +302,42 @@ export default function WorldViewport(props: {
     const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, levelY);
     return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId, yaw: placed.yawDegrees } : null;
   }, [stage, levelY]);
+
+  // Free-hover ghost tracking (req_2651 gap VV): the framework delivers
+  // onMouseMove ONLY under pointer capture (capture starts at mousedown —
+  // nodeWantsPointerCapture, framework/engine.zig), so with no button held the
+  // armed ghost froze at its last projection until the camera moved. The host's
+  // paint brush beam is immune because it polls SDL mouse state per frame
+  // (world_loader.zig) — same pattern here: while the Place tool is armed, a
+  // self-terminating ~16ms tick (the panStep shape — setTimeout chain, no idle
+  // timer when disarmed) reads the global mouse, and re-snaps only while the
+  // pointer is inside the pane rect (the ghost clears when it leaves). setSnap
+  // is skipped when the resolved snap is unchanged, so an idle pointer causes
+  // zero re-renders. The onMove path stays — it is still correct during drags.
+  const hoverTimerRef = useRef<any>(null);
+  const armedHover = props.tool === 'place' && !!props.armed;
+  useEffect(() => {
+    if (!armedHover) return;
+    const sameSnap = (a: Snap | null, b: Snap | null): boolean =>
+      a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z && a.yaw === b.yaw && a.pieceId === b.pieceId);
+    const step = () => {
+      const r = rectRef.current;
+      const mx = Number(g.getMouseX?.() ?? NaN);
+      const my = Number(g.getMouseY?.() ?? NaN);
+      if (Number.isFinite(mx) && Number.isFinite(my)) {
+        const inside = mx >= r.x && mx < r.x + r.width && my >= r.y && my < r.y + r.height;
+        const next = inside ? resolveSnap(mx - r.x, my - r.y) : null;
+        setSnap((cur) => (sameSnap(cur, next) ? cur : next));
+      }
+      hoverTimerRef.current = setTimeout(step, 16);
+    };
+    hoverTimerRef.current = setTimeout(step, 0);
+    return () => {
+      if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
+    };
+    // armedHover collapses props.armed (a fresh object every parent render) to a boolean, so the
+    // loop tears down only on real disarm/tool change — not on every unrelated re-render.
+  }, [armedHover, resolveSnap]);
 
   // ── input: left-drag rotates, shift-drag grabs the map, wheel zooms to the
   // cursor, a click (no travel) places the armed piece. Paint clicks never reach

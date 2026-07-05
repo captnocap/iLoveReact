@@ -128,6 +128,22 @@ function pushMapTool(s: MapPaintState): void {
   });
 }
 
+/** One-time map-layer setup: load the saved painting (fresh seed chunk when
+ *  none) and push the ground look (formula + palettes), road kind mapping, and
+ *  flora specs. Extracted from the arming branch (req_2651 gap XX) so the world
+ *  viewport can seed it at BOOT — before this, no chunk existed until the user
+ *  armed Map Paint and the editor booted into a groundless void. Returns false
+ *  when the host map doors aren't live yet (callers retry). */
+export function ensureMapSeeded(overrides: TileMaterialOverrides = {}, zones: readonly MapZoneDef[] = []): boolean {
+  if (!mapHostLive()) return false;
+  if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0);
+  mapSetGroundLook(editorGroundFormula(overrides), TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(zones));
+  mapRoadSetKinds(ROAD_KIND_INDICES);
+  mapSetFloraSpecs(FLORA_SPECS); // req_2497: painting flora grows LITERAL foliage live
+  console.warn(`[map-seed] ground seeded — ${mapChunkCount()} chunk(s) live`);
+  return true;
+}
+
 /** The one place chrome state reaches the host — AppFrame calls this on every
  *  mapPaint patch. Arming loads the saved painting (fresh seed chunk when none),
  *  pushes the ground look (formula + palettes) + road kind mapping; a changed
@@ -135,10 +151,7 @@ function pushMapTool(s: MapPaintState): void {
 export function applyMapPaintEffects(prev: MapPaintState, next: MapPaintState): void {
   if (!mapHostLive() || !next.active) return;
   if (!prev.active) {
-    if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0);
-    mapSetGroundLook(editorGroundFormula(next.tileMaterialOverrides), TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(next.zones));
-    mapRoadSetKinds(ROAD_KIND_INDICES);
-    mapSetFloraSpecs(FLORA_SPECS); // req_2497: painting flora grows LITERAL foliage live
+    ensureMapSeeded(next.tileMaterialOverrides, next.zones);
   } else if (prev.tileMaterialOverrides !== next.tileMaterialOverrides) {
     // A rebind regenerates the formula (the kind→material tables are baked
     // into the WGSL) — one shader rebuild per pick, authoring-rate.
