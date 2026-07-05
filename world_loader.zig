@@ -70,9 +70,11 @@ const SHAPE_CYLINDER8: f32 = 2;
 // never collide with them.
 const MAX_PAINT_SLOTS: usize = 64;
 const PAINT_COLLIDER_BASE: usize = game_physics.MAX_HEIGHTFIELDS - MAX_PAINT_SLOTS;
-/// The THPS-style brush beam: a translucent column over the brush footprint.
+/// The default THPS-style brush beam: a translucent column over the brush footprint.
 const PAINT_BEAM_HEIGHT_METERS: f32 = 42;
 const PAINT_BEAM_ALPHA: f32 = 0.32;
+const PAINT_GIZMO_SURFACE_LIFT_M: f32 = 0.035;
+const PAINT_GIZMO_PROFILE_MAX_M: f32 = 8;
 // Live-foliage preview row caps (req_2497: painting flora grows LITERAL
 // blades/bushes/flowers/palms live). Truncation is LOUD — the Compile bake
 // grows the full population; this is the authoring preview's budget.
@@ -1149,6 +1151,116 @@ fn buildUnitCylinder(comptime segments: usize) [segments * 12 * 8]f32 {
         pushTriSmooth(out[0..], &idx, a, c0, b, n1, n2, n2, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 });
         pushTri(out[0..], &idx, .{ 0, hy, 0 }, c0, d, .{ 0, 1, 0 }, .{ 0.5, 0.5 }, .{ 1, 1 }, .{ 0, 1 });
         pushTri(out[0..], &idx, .{ 0, -hy, 0 }, a, b, .{ 0, -1, 0 }, .{ 0.5, 0.5 }, .{ 0, 0 }, .{ 1, 0 });
+    }
+    return out;
+}
+
+fn pushFlatDisc(comptime segments: usize, out: []f32, idx: *usize, radius: f32, y: f32) void {
+    const center = [3]f32{ 0, y, 0 };
+    var j: usize = 0;
+    while (j < segments) : (j += 1) {
+        const a1 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(segments));
+        const a2 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j + 1)) / @as(f32, @floatFromInt(segments));
+        const p1 = [3]f32{ radius * @cos(a1), y, radius * @sin(a1) };
+        const p2 = [3]f32{ radius * @cos(a2), y, radius * @sin(a2) };
+        pushTri(out, idx, center, p2, p1, .{ 0, 1, 0 }, .{ 0.5, 0.5 }, .{ 1, 1 }, .{ 0, 1 });
+    }
+}
+
+fn pushFlatRingBand(comptime segments: usize, out: []f32, idx: *usize, inner: f32, outer: f32, y: f32) void {
+    var j: usize = 0;
+    while (j < segments) : (j += 1) {
+        const a1 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(segments));
+        const a2 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j + 1)) / @as(f32, @floatFromInt(segments));
+        const o1 = [3]f32{ outer * @cos(a1), y, outer * @sin(a1) };
+        const o2 = [3]f32{ outer * @cos(a2), y, outer * @sin(a2) };
+        const inner1 = [3]f32{ inner * @cos(a1), y, inner * @sin(a1) };
+        const inner2 = [3]f32{ inner * @cos(a2), y, inner * @sin(a2) };
+        pushTri(out, idx, o1, inner2, o2, .{ 0, 1, 0 }, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 });
+        pushTri(out, idx, o1, inner1, inner2, .{ 0, 1, 0 }, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 });
+    }
+}
+
+fn pushFlatQuad(out: []f32, idx: *usize, min_x: f32, min_z: f32, max_x: f32, max_z: f32, y: f32) void {
+    const a = [3]f32{ min_x, y, min_z };
+    const b = [3]f32{ max_x, y, min_z };
+    const c0 = [3]f32{ max_x, y, max_z };
+    const d = [3]f32{ min_x, y, max_z };
+    pushTri(out, idx, a, c0, b, .{ 0, 1, 0 }, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 });
+    pushTri(out, idx, a, d, c0, .{ 0, 1, 0 }, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 });
+}
+
+fn buildBrushDecal(comptime segments: usize) [segments * 3 * 8]f32 {
+    var out: [segments * 3 * 8]f32 = undefined;
+    var idx: usize = 0;
+    pushFlatDisc(segments, out[0..], &idx, 0.5, 0);
+    return out;
+}
+
+fn buildBrushRings(comptime segments: usize) [(segments * 3 * 6 + 12) * 8]f32 {
+    var out: [(segments * 3 * 6 + 12) * 8]f32 = undefined;
+    var idx: usize = 0;
+    pushFlatRingBand(segments, out[0..], &idx, 0.485, 0.5, 0);
+    pushFlatRingBand(segments, out[0..], &idx, 0.32, 0.335, 0);
+    pushFlatRingBand(segments, out[0..], &idx, 0.14, 0.155, 0);
+    pushFlatQuad(out[0..], &idx, -0.5, -0.01, 0.5, 0.01, 0);
+    pushFlatQuad(out[0..], &idx, -0.01, -0.5, 0.01, 0.5, 0);
+    return out;
+}
+
+fn buildBrushHandles(comptime segments: usize) [(segments * 2 * 6 + segments * 3 + 4 * 6) * 8]f32 {
+    var out: [(segments * 2 * 6 + segments * 3 + 4 * 6) * 8]f32 = undefined;
+    var idx: usize = 0;
+    pushFlatRingBand(segments, out[0..], &idx, 0.47, 0.5, 0);
+    pushFlatRingBand(segments, out[0..], &idx, 0.25, 0.27, 0);
+    pushFlatDisc(segments, out[0..], &idx, 0.045, 0);
+    const h: f32 = 0.055;
+    pushFlatQuad(out[0..], &idx, -h, 0.5 - h, h, 0.5 + h, 0);
+    pushFlatQuad(out[0..], &idx, -h, -0.5 - h, h, -0.5 + h, 0);
+    pushFlatQuad(out[0..], &idx, 0.5 - h, -h, 0.5 + h, h, 0);
+    pushFlatQuad(out[0..], &idx, -0.5 - h, -h, -0.5 + h, h, 0);
+    return out;
+}
+
+fn buildBrushCone(comptime segments: usize) [segments * 3 * 8]f32 {
+    var out: [segments * 3 * 8]f32 = undefined;
+    var idx: usize = 0;
+    const top = [3]f32{ 0, 0.5, 0 };
+    var j: usize = 0;
+    while (j < segments) : (j += 1) {
+        const a1 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(segments));
+        const a2 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j + 1)) / @as(f32, @floatFromInt(segments));
+        const p1 = [3]f32{ 0.5 * @cos(a1), 0, 0.5 * @sin(a1) };
+        const p2 = [3]f32{ 0.5 * @cos(a2), 0, 0.5 * @sin(a2) };
+        const mid = (a1 + a2) * 0.5;
+        const n = normalize3(@cos(mid), 0.7, @sin(mid));
+        pushTri(out[0..], &idx, p1, top, p2, n, .{ 0, 1 }, .{ 0.5, 0 }, .{ 1, 1 });
+    }
+    return out;
+}
+
+fn buildBrushDome(comptime segments: usize, comptime rings: usize) [segments * rings * 6 * 8]f32 {
+    var out: [segments * rings * 6 * 8]f32 = undefined;
+    var idx: usize = 0;
+    var i: usize = 0;
+    while (i < rings) : (i += 1) {
+        const t1 = (std.math.pi * 0.5) * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(rings));
+        const t2 = (std.math.pi * 0.5) * @as(f32, @floatFromInt(i + 1)) / @as(f32, @floatFromInt(rings));
+        var j: usize = 0;
+        while (j < segments) : (j += 1) {
+            const p1 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(segments));
+            const p2 = 2.0 * std.math.pi * @as(f32, @floatFromInt(j + 1)) / @as(f32, @floatFromInt(segments));
+            const a = spherePos(0.5, t1, p1);
+            const b = spherePos(0.5, t1, p2);
+            const c0 = spherePos(0.5, t2, p2);
+            const d = spherePos(0.5, t2, p1);
+            const na = sphereNormal(t1, p1);
+            const nb = sphereNormal(t1, p2);
+            const nc = sphereNormal(t2, p2);
+            const nd = sphereNormal(t2, p1);
+            pushTriSmooth(out[0..], &idx, a, c0, d, na, nc, nd, sphereUv(na), sphereUv(nc), sphereUv(nd));
+            pushTriSmooth(out[0..], &idx, a, b, c0, na, nb, nc, sphereUv(na), sphereUv(nb), sphereUv(nc));
+        }
     }
     return out;
 }
@@ -2973,6 +3085,11 @@ pub const Runtime = struct {
     cylinder8: [8 * 12 * 8]f32 = undefined,
     cylinder16: [16 * 12 * 8]f32 = undefined,
     sphere: [12 * 8 * 6 * 8]f32 = undefined,
+    brush_decal: [32 * 3 * 8]f32 = undefined,
+    brush_rings: [(32 * 3 * 6 + 12) * 8]f32 = undefined,
+    brush_handles: [(32 * 2 * 6 + 32 * 3 + 4 * 6) * 8]f32 = undefined,
+    brush_cone: [32 * 3 * 8]f32 = undefined,
+    brush_dome: [32 * 6 * 6 * 8]f32 = undefined,
     gable_prism: [24 * 8]f32 = undefined,
     corner_miter_prism: [12 * 8]f32 = undefined,
     corner_miter_mirror_prism: [12 * 8]f32 = undefined,
@@ -4094,6 +4211,11 @@ pub const Runtime = struct {
         self.cylinder8 = buildUnitCylinder(8);
         self.cylinder16 = buildUnitCylinder(16);
         self.sphere = buildUnitSphere(12, 8);
+        self.brush_decal = buildBrushDecal(32);
+        self.brush_rings = buildBrushRings(32);
+        self.brush_handles = buildBrushHandles(32);
+        self.brush_cone = buildBrushCone(32);
+        self.brush_dome = buildBrushDome(32, 6);
         self.gable_prism = buildGablePrism();
         self.corner_miter_prism = buildCornerMiterPrism();
         self.corner_miter_mirror_prism = buildCornerMiterMirrorPrism();
@@ -4688,8 +4810,8 @@ pub const Runtime = struct {
             .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
             .scene3d_instance_static = false,
         });
-        // MAPPAINT req_2473: the brush beam + the live-painted terrain mirror.
-        // The beam is a single translucent box column (instance_count 0 + alpha
+        // MAPPAINT req_2473: the brush gizmo + the live-painted terrain mirror.
+        // The gizmo is one translucent preview mesh (instance_count 0 + alpha
         // < 1 routes it through the transparent pass); the paint slots are inert
         // until applyPaintLayer assigns a painted chunk to one. All in the stable
         // prefix so streaming's tail rebuild never clobbers them.
@@ -6683,8 +6805,8 @@ fn applyPendingLive(runtime: *Runtime) void {
 // field, re-baked + collider-refreshed only when the chunk's height channel is
 // dirty. Pointer input routes here from engine.zig when a paint tool is armed
 // (setPaintMode) — screen → ext-camera ray → terrain hit → stroke engine, with
-// zero JS per event. The brush beam (THPS park-editor style) is a translucent
-// column the hover point drags around.
+// zero JS per event. The brush gizmo is preview-only chrome the hover point
+// drags around.
 
 const PendingPaint = struct {
     node_id: u32 = 0,
@@ -6870,9 +6992,99 @@ fn paintWaterSurface(raw_depths: []const f32, beds: []const f32, depths: []f32, 
     return true;
 }
 
+fn paintGizmoColor(tool: map_paint.Tool) [3]f32 {
+    if (tool.mode == .erase) return .{ 0.95, 0.25, 0.2 };
+    return switch (tool.channel) {
+        .terrain => if (tool.terrain_tool == .brush and tool.center_z < 0) .{ 0.95, 0.32, 0.24 } else .{ 0.45, 0.9, 0.28 },
+        .water => .{ 0.25, 0.55, 0.95 },
+        .flora => .{ 0.35, 0.88, 0.45 },
+        .zone => .{ 0.85, 0.42, 1.0 },
+        .road => .{ 1.0, 0.86, 0.25 },
+        .tile => .{ 1.0, 0.72, 0.25 },
+    };
+}
+
+fn paintGizmoProfileHeight(tool: map_paint.Tool, radius: f32) f32 {
+    const raw = if (tool.channel == .terrain and tool.terrain_tool == .brush) @abs(tool.center_z) else radius * 0.75;
+    return @max(0.75, @min(PAINT_GIZMO_PROFILE_MAX_M, raw));
+}
+
+fn setPaintGizmoMesh(node: *Node, key: []const u8, verts: []const f32, alpha: f32) void {
+    node.scene3d_mesh = true;
+    node.scene3d_geom_key = key;
+    node.scene3d_vertices = verts;
+    node.scene3d_vert_count = @intCast(verts.len / 8);
+    node.scene3d_tex_key = null;
+    node.scene3d_heights = null;
+    node.scene3d_ground_formula = null;
+    node.scene3d_ground_data = null;
+    node.scene3d_instance_data = null;
+    node.scene3d_instance_count = 0;
+    node.scene3d_color_a = alpha;
+}
+
+fn setPaintGizmoTransform(node: *Node, hover: [3]f32, sx: f32, sy: f32, sz: f32, y_offset: f32, rot_y: f32) void {
+    node.scene3d_pos_x = hover[0];
+    node.scene3d_pos_y = hover[1] + y_offset;
+    node.scene3d_pos_z = hover[2];
+    node.scene3d_scale_x = sx;
+    node.scene3d_scale_y = sy;
+    node.scene3d_scale_z = sz;
+    node.scene3d_rot_x = 0;
+    node.scene3d_rot_y = rot_y;
+    node.scene3d_rot_z = 0;
+}
+
+fn dressPaintGizmo(runtime: *Runtime, node: *Node, hover: [3]f32, tool: map_paint.Tool) void {
+    const radius = @max(0.5, tool.radius_m);
+    const diameter = radius * 2;
+    const color = paintGizmoColor(tool);
+    node.scene3d_color_r = color[0];
+    node.scene3d_color_g = color[1];
+    node.scene3d_color_b = color[2];
+
+    const diamond_rot: f32 = if (tool.shape == .diamond) std.math.pi / 4.0 else 0.0;
+    switch (map_paint.brushGizmo()) {
+        .beam => {
+            setPaintGizmoMesh(node, "box", runtime.cube[0..], PAINT_BEAM_ALPHA);
+            setPaintGizmoTransform(node, hover, diameter, PAINT_BEAM_HEIGHT_METERS, diameter, PAINT_BEAM_HEIGHT_METERS / 2, diamond_rot);
+        },
+        .decal => {
+            if (tool.shape == .circle) {
+                setPaintGizmoMesh(node, "paint-gizmo-decal", runtime.brush_decal[0..], 0.42);
+                setPaintGizmoTransform(node, hover, diameter, 1, diameter, PAINT_GIZMO_SURFACE_LIFT_M, 0);
+            } else {
+                setPaintGizmoMesh(node, "box", runtime.cube[0..], 0.34);
+                setPaintGizmoTransform(node, hover, diameter, PAINT_GIZMO_SURFACE_LIFT_M, diameter, PAINT_GIZMO_SURFACE_LIFT_M * 0.5, diamond_rot);
+            }
+        },
+        .rings => {
+            setPaintGizmoMesh(node, "paint-gizmo-rings", runtime.brush_rings[0..], 0.88);
+            setPaintGizmoTransform(node, hover, diameter, 1, diameter, PAINT_GIZMO_SURFACE_LIFT_M, diamond_rot);
+        },
+        .profile => {
+            const h = paintGizmoProfileHeight(tool, radius);
+            if (tool.profile == .flat) {
+                setPaintGizmoMesh(node, "paint-gizmo-decal", runtime.brush_decal[0..], 0.46);
+                setPaintGizmoTransform(node, hover, diameter, 1, diameter, PAINT_GIZMO_SURFACE_LIFT_M, diamond_rot);
+            } else if (tool.profile == .dome) {
+                setPaintGizmoMesh(node, "paint-gizmo-dome", runtime.brush_dome[0..], 0.3);
+                setPaintGizmoTransform(node, hover, diameter, h * 2, diameter, PAINT_GIZMO_SURFACE_LIFT_M, diamond_rot);
+            } else {
+                setPaintGizmoMesh(node, "paint-gizmo-cone", runtime.brush_cone[0..], 0.34);
+                setPaintGizmoTransform(node, hover, diameter, h * 2, diameter, PAINT_GIZMO_SURFACE_LIFT_M, diamond_rot);
+            }
+        },
+        .handles => {
+            setPaintGizmoMesh(node, "paint-gizmo-handles", runtime.brush_handles[0..], 0.9);
+            setPaintGizmoTransform(node, hover, diameter, 1, diameter, PAINT_GIZMO_SURFACE_LIFT_M, diamond_rot);
+        },
+    }
+}
+
 /// Per-frame paint pass (renderEmbedded): mirror every painted chunk into its
-/// reserved node + collider (dirty-coalesced), poll the hover beam, and dress
-/// the beam node. Runs unconditionally — with no painted chunks and paint
+/// reserved node + collider (dirty-coalesced), poll the hover gizmo, and dress
+/// the gizmo node. Runs unconditionally — with no painted chunks and paint
 /// disarmed it is a cheap slot scan.
 fn applyPaintLayer(runtime: *Runtime) void {
     const first = runtime.paint_kids_first orelse return;
@@ -7090,36 +7302,13 @@ fn applyPaintLayer(runtime: *Runtime) void {
 
     if (foliage_stale) regenPaintFoliage(runtime);
 
-    // the brush beam: a translucent column over the footprint at the hover point
+    // the brush gizmo: preview-only chrome over the footprint at the hover point
     if (runtime.paint_beam_kid) |beam_kid| {
         const node = &runtime.kid_list.items[beam_kid];
         if (armed and runtime.paint_hover != null) {
             const hover = runtime.paint_hover.?;
             const tool = map_paint.tool();
-            const radius = @max(0.5, tool.radius_m);
-            node.scene3d_mesh = true;
-            node.scene3d_pos_x = hover[0];
-            node.scene3d_pos_y = hover[1] + PAINT_BEAM_HEIGHT_METERS / 2;
-            node.scene3d_pos_z = hover[2];
-            node.scene3d_scale_x = radius * 2;
-            node.scene3d_scale_y = PAINT_BEAM_HEIGHT_METERS;
-            node.scene3d_scale_z = radius * 2;
-            // diamond footprint reads as a 45° square; circle/square share the box
-            node.scene3d_rot_y = if (tool.shape == .diamond) std.math.pi / 4.0 else 0;
-            if (tool.mode == .erase) {
-                node.scene3d_color_r = 0.95;
-                node.scene3d_color_g = 0.25;
-                node.scene3d_color_b = 0.2;
-            } else if (tool.channel == .water) {
-                node.scene3d_color_r = 0.25;
-                node.scene3d_color_g = 0.55;
-                node.scene3d_color_b = 0.95;
-            } else {
-                node.scene3d_color_r = 1.0;
-                node.scene3d_color_g = 0.72;
-                node.scene3d_color_b = 0.25;
-            }
-            node.scene3d_color_a = PAINT_BEAM_ALPHA;
+            dressPaintGizmo(runtime, node, hover, tool);
         } else {
             node.scene3d_mesh = false;
         }
@@ -7135,6 +7324,15 @@ fn applyPaintLayer(runtime: *Runtime) void {
 
 fn lerpF64(a: f64, b: f64, t: f64) f64 {
     return a + (b - a) * t;
+}
+
+/// Re-seat a foliage row on the terrain under its OWN x/z. The generators
+/// plant every row at the CELL-CENTRE height; on a slope the ground under a
+/// scattered blade can sit a metre above that sample and swallow it whole —
+/// the bare-hillside bug (req_2699). The delta keeps any in-row y offset
+/// (flower stems, frond fans) intact.
+fn seatRowOnTerrain(row: *[foliage.STRIDE]f32, cell_top: f64) void {
+    row[1] += map_paint.heightAt(row[0], row[2]) - @as(f32, @floatCast(cell_top));
 }
 
 /// Append one 12-float foliage row; false = family budget full.
@@ -7216,8 +7414,11 @@ fn regenPaintFoliage(runtime: *Runtime) void {
                             const px = @as(f64, wx) + (foliage.unit(foliage.mix(h0 ^ 0xa5)) - 0.5) * 0.7;
                             const pz = @as(f64, wz) + (foliage.unit(foliage.mix(h1 ^ 0xa5)) - 0.5) * 0.7;
                             const span: f32 = @floatCast(radius / PALM_TRUNK_UNIT_RADIUS);
+                            // Trunk + crown ride ONE ground delta (the trunk's
+                            // footing) so bark and fronds stay attached on slopes.
+                            const trunk_delta = map_paint.heightAt(@floatCast(px), @floatCast(pz)) - @as(f32, @floatCast(top));
                             if (!pushFoliageRow(trunk, &trunk_n, PAINT_TRUNK_ROW_CAP, .{
-                                @floatCast(px),        @as(f32, @floatCast(top)), @floatCast(pz),
+                                @floatCast(px),        @as(f32, @floatCast(top)) + trunk_delta, @floatCast(pz),
                                 0,                     @floatCast(lean),          0,
                                 span,                  @floatCast(trunk_h),       span,
                                 PALM_TRUNK_COLOR[0],   PALM_TRUNK_COLOR[1],       PALM_TRUNK_COLOR[2],
@@ -7226,25 +7427,33 @@ fn regenPaintFoliage(runtime: *Runtime) void {
                             const fc = crown.total();
                             var k: u32 = 0;
                             while (k < fc) : (k += 1) {
-                                if (!pushFoliageRow(frond, &frond_n, PAINT_FROND_ROW_CAP, foliage.palmFrondRow(&crown, k))) frond_full = true;
+                                var row = foliage.palmFrondRow(&crown, k);
+                                row[1] += trunk_delta;
+                                if (!pushFoliageRow(frond, &frond_n, PAINT_FROND_ROW_CAP, row)) frond_full = true;
                             }
                         },
                         2 => {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
-                                if (!pushFoliageRow(flowers, &flower_n, PAINT_FLOWER_ROW_CAP, foliage.flowerRow(&foliage.FLOWER, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) flower_full = true;
+                                var row = foliage.flowerRow(&foliage.FLOWER, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
+                                seatRowOnTerrain(&row, top);
+                                if (!pushFoliageRow(flowers, &flower_n, PAINT_FLOWER_ROW_CAP, row)) flower_full = true;
                             }
                         },
                         1 => {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
-                                if (!pushFoliageRow(bush, &bush_n, PAINT_BUSH_ROW_CAP, foliage.bladeRow(&foliage.BUSH, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) bush_full = true;
+                                var row = foliage.bladeRow(&foliage.BUSH, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
+                                seatRowOnTerrain(&row, top);
+                                if (!pushFoliageRow(bush, &bush_n, PAINT_BUSH_ROW_CAP, row)) bush_full = true;
                             }
                         },
                         else => {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
-                                if (!pushFoliageRow(grass, &grass_n, PAINT_GRASS_ROW_CAP, foliage.bladeRow(&foliage.GRASS, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) grass_full = true;
+                                var row = foliage.bladeRow(&foliage.GRASS, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
+                                seatRowOnTerrain(&row, top);
+                                if (!pushFoliageRow(grass, &grass_n, PAINT_GRASS_ROW_CAP, row)) grass_full = true;
                             }
                         },
                     }
