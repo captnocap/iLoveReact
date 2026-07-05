@@ -88,8 +88,16 @@ function composedFillFuncs(): string {
   if (!FILL_FUNCS.includes(MAT_PAL_COUNT_LINE)) {
     throw new Error('[groundFormula] dispatch drift: mat_pal count line not found — re-check build-shaders.ts output');
   }
+  // Catalog fills are authored for the EFFECT pipeline, whose uniform struct is
+  // bound as `U` (U.time drives water waves, neon flicker, CRT scan …). The
+  // ground pipeline binds the shared SceneUniforms as `S` and exposes the same
+  // wrapped wall-clock as `S.time` — without this rewrite any time-animated
+  // fill (water and grass are in the DEFAULTS) makes the whole composed module
+  // fail WGSL compile ("no definition in scope for identifier: U") and ALL
+  // painted ground goes invisible (req_2651).
   return FILL_FUNCS.replace(D_DECL, '// (D is declared by the heightfield harness)')
-    .replace(MAT_PAL_COUNT_LINE, 'let n = 0; // ground stream carries cells, not a fill palette — baked colors only');
+    .replace(MAT_PAL_COUNT_LINE, 'let n = 0; // ground stream carries cells, not a fill palette — baked colors only')
+    .replace(/\bU\.time\b/g, 'S.time');
 }
 
 /** Build the ground formula for the given kind→material overrides. */

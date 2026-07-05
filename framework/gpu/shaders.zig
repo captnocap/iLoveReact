@@ -754,7 +754,7 @@ pub const scene3d_wgsl =
     \\    ambient_color: vec3f,
     \\    _pad2: f32,
     \\    camera_pos: vec3f,
-    \\    _pad3: f32,
+    \\    time: f32,      // 124 — wrapped wall-clock the host writes each frame (was _pad3); animated ground/foliage materials read S.time
     \\    fog_color: vec3f,
     \\    fog_near: f32,
     \\    fog_far: f32,
@@ -1578,7 +1578,7 @@ pub const scene3d_ground_prefix =
     \\    ambient_color: vec3f,
     \\    _pad2: f32,
     \\    camera_pos: vec3f,
-    \\    _pad3: f32,
+    \\    time: f32,      // 124 — wrapped wall-clock the host writes each frame (was _pad3); animated ground/foliage materials read S.time
     \\    fog_color: vec3f,
     \\    fog_near: f32,
     \\    fog_far: f32,

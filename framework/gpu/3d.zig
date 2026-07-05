@@ -5900,9 +5900,15 @@ fn ensureGroundPipeline(formula: []const u8) void {
     g_ground_pipeline = null;
     const wgsl = std.fmt.bufPrint(&g_ground_wgsl_buf, "{s}\n{s}\n{s}\n{s}", .{
         shaders.scene3d_ground_prefix, effect_assemble.MATH, formula, shaders.scene3d_ground_epilogue,
-    }) catch return;
+    }) catch {
+        std.debug.print("[r3d-ground] ERROR: assembled ground shader ({d}B formula, hash {x}) overflows g_ground_wgsl_buf ({d}B) — the GROUND PIPELINE never builds and ALL painted ground is INVISIBLE until this is fixed.\n", .{ formula.len, h, g_ground_wgsl_buf.len });
+        return;
+    };
     const sm_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_ground", .code = wgsl });
-    const sm = device.createShaderModule(&sm_desc) orelse return;
+    const sm = device.createShaderModule(&sm_desc) orelse {
+        std.debug.print("[r3d-ground] ERROR: ground formula WGSL FAILED TO COMPILE (formula hash {x}, {d}B) — createShaderModule returned null; the GROUND PIPELINE never builds and ALL painted ground (terrain, tiles, water) is INVISIBLE until the formula is fixed. Check the wgpu validation output above for the naga error.\n", .{ h, formula.len });
+        return;
+    };
     defer sm.release();
     const gl = [_]?*wgpu.BindGroupLayout{ g_bind_group_layout.?, g_ground_bgl.? };
     const pl = device.createPipelineLayout(&.{
@@ -5951,7 +5957,11 @@ fn ensureGroundPipeline(formula: []const u8) void {
         .multisample = .{},
         .fragment = &frag,
     });
-    if (g_ground_pipeline != null) g_ground_formula_hash = h;
+    if (g_ground_pipeline != null) {
+        g_ground_formula_hash = h;
+    } else {
+        std.debug.print("[r3d-ground] ERROR: createRenderPipeline returned null for the ground formula (hash {x}) — the GROUND PIPELINE never builds and ALL painted ground (terrain, tiles, water) is INVISIBLE until this is fixed.\n", .{h});
+    }
 }
 
 fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32) void {
