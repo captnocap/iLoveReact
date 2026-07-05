@@ -423,6 +423,12 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn meshLcHandleDrag(_: f32, _: f32, _: bool) bool {
         return false;
     }
+    pub fn meshCompassHit(_: f32, _: f32) i32 {
+        return -1;
+    }
+    pub fn meshCompassSnap(_: i32) bool {
+        return false;
+    }
     pub fn setMeshGizmoTool(_: u8) void {}
     pub fn drawEditorOverlay(_: f32, _: f32) void {}
     pub fn meshSetMarquee(_: f32, _: f32, _: f32, _: f32) void {}
@@ -4240,6 +4246,17 @@ pub fn run(config_in: AppConfig) !void {
                                     me_lc_dragging = true;
                                     state_mod.markDirty();
                                 }
+                                continue;
+                            }
+                            // Orientation compass (req_2643 gap LL): the bottom-left
+                            // nav ball is furniture, never a mesh pick — an axis dot
+                            // snaps the orbit to that axis-aligned view; the ball body
+                            // just consumes the press so nothing selects through it.
+                            // Checked after the loop-cut modal (its law: other presses
+                            // are inert) and before every pick.
+                            const compass_hit = r3d.meshCompassHit(mx, my);
+                            if (compass_hit >= 0) {
+                                if (r3d.meshCompassSnap(compass_hit)) state_mod.markDirty();
                                 continue;
                             }
                             const gh = r3d.meshGizmoHit(mx, my);
