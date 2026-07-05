@@ -7,17 +7,46 @@
 // React arms the tool; every stroke/stamp/re-bake runs host-side
 // (framework/game/map). All door traffic is UI-rate.
 import { Fragment } from 'react';
-import { C } from '../workspace.cls';
+import { Icon } from '../../../runtime/icons/Icon';
+import { C, accentFor } from '../workspace.cls';
 import { mapRoadCancel, mapRoadCommit, mapRoadStats, type MapBrushProfile, type MapBrushShape, type MapTerrainTool } from '../../../runtime/game/map';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { addZonePatch, PAINTABLE_TILE_KINDS, type MapPaintChannel, type MapPaintState, saveMapFile } from './mapPaint';
 import { tileBindingFor } from '../render3d/groundFormula';
 
+// BAR LAW (req_2675): verbs and mode toggles are ICONS with tooltips; text is
+// reserved for VALUE READOUTS (SNAP/SIZE/HEIGHT-style label+value pills). A
+// mode's name is never spelled twice in one bar. Every glyph below is verified
+// against the baked SDF atlas (runtime/icons/baked-names.ts) — no tofu.
 const CHANNELS: MapPaintChannel[] = ['terrain', 'tile', 'water', 'flora', 'zone', 'road'];
+const CHANNEL_META: Record<MapPaintChannel, { icon: string; tooltip: string }> = {
+  terrain: { icon: 'Mountain', tooltip: 'Terrain — sculpt the heightfield' },
+  tile: { icon: 'Grid3x3', tooltip: 'Tile — paint ground tile kinds' },
+  water: { icon: 'Waves', tooltip: 'Water — paint bodies of water' },
+  flora: { icon: 'Leaf', tooltip: 'Flora — plant trees, palms and grass' },
+  zone: { icon: 'LandPlot', tooltip: 'Zone — paint named zone regions' },
+  road: { icon: 'Route', tooltip: 'Road — draft a centerline, commit lanes' },
+};
 const TERRAIN_TOOLS: MapTerrainTool[] = ['brush', 'ramp', 'slope', 'smooth'];
+const TERRAIN_TOOL_META: Record<MapTerrainTool, { icon: string; tooltip: string }> = {
+  brush: { icon: 'Brush', tooltip: 'Brush — stamp hills and basins' },
+  ramp: { icon: 'TriangleRight', tooltip: 'Ramp — a straight low→high ramp band' },
+  slope: { icon: 'MoveUpRight', tooltip: 'Slope — grade the brushed area low→high' },
+  smooth: { icon: 'Blend', tooltip: 'Smooth — blend and average terrain heights' },
+};
 const SHAPES: MapBrushShape[] = ['circle', 'square', 'diamond'];
 const PROFILES: MapBrushProfile[] = ['cone', 'flat', 'dome'];
+
+/** The action bar's icon control (matches ToolOptions' tool buttons exactly). */
+function IconButton(props: { icon: string; tooltip: string; on?: boolean; onPress: () => void }) {
+  const Btn = props.on ? C.HW_IconButtonOn : C.HW_IconButton;
+  return (
+    <Btn tooltip={props.tooltip} onPress={props.onPress}>
+      <Icon name={props.icon} size={14} color={accentFor(props.on ? 'primary' : 'textDim')} />
+    </Btn>
+  );
+}
 
 function cycle<T>(items: readonly T[], current: T): T {
   return items[(items.indexOf(current) + 1) % items.length]!;
@@ -50,38 +79,49 @@ export default function MapPaintBar(props: {
   onPatch: (patch: Partial<MapPaintState>) => void;
 }) {
   const s = props.state;
-  const Toggle = s.active ? C.HW_PillOn : C.HW_Pill;
-  const ToggleText = s.active ? C.HW_PillTextOn : C.HW_PillText;
   return (
     <Fragment>
-      <Toggle tooltip="Map Paint — sculpt terrain, paint ground/water/flora/zones, lay roads" onPress={() => props.onPatch({ active: !s.active })}>
-        <ToggleText>PAINT</ToggleText>
-      </Toggle>
+      <IconButton
+        icon="Paintbrush"
+        tooltip="Map Paint — sculpt terrain, paint ground/water/flora/zones, lay roads"
+        on={s.active}
+        onPress={() => props.onPatch({ active: !s.active })}
+      />
       {s.active ? (
         <Fragment>
           <C.HW_OptionDivider />
-          {CHANNELS.map((channel) => {
-            const Pill = channel === s.channel ? C.HW_PillOn : C.HW_Pill;
-            const Label = channel === s.channel ? C.HW_PillTextOn : C.HW_PillText;
-            return <Pill key={channel} onPress={() => props.onPatch({ channel })}><Label>{channel.toUpperCase()}</Label></Pill>;
-          })}
+          {CHANNELS.map((channel) => (
+            <IconButton
+              key={channel}
+              icon={CHANNEL_META[channel].icon}
+              tooltip={CHANNEL_META[channel].tooltip}
+              on={channel === s.channel}
+              onPress={() => props.onPatch({ channel })}
+            />
+          ))}
           <C.HW_OptionDivider />
+          {/* Erase is the exceptional mode — one icon toggle arms it; off = paint.
+              The mode is never spelled out next to itself (req_2675). */}
           {s.channel !== 'road' ? (
-            <CyclePill
-              label="MODE"
-              value={s.mode.toUpperCase()}
-              tooltip="Paint or erase with the brush"
+            <IconButton
+              icon="Eraser"
+              tooltip="Erase mode — strokes remove instead of paint"
+              on={s.mode === 'erase'}
               onPress={() => props.onPatch({ mode: s.mode === 'paint' ? 'erase' : 'paint' })}
             />
           ) : null}
 
           {s.channel === 'terrain' ? (
             <Fragment>
-              {TERRAIN_TOOLS.map((tool) => {
-                const Pill = tool === s.terrainTool ? C.HW_PillOn : C.HW_Pill;
-                const Label = tool === s.terrainTool ? C.HW_PillTextOn : C.HW_PillText;
-                return <Pill key={tool} onPress={() => props.onPatch({ terrainTool: tool })}><Label>{tool.toUpperCase()}</Label></Pill>;
-              })}
+              {TERRAIN_TOOLS.map((tool) => (
+                <IconButton
+                  key={tool}
+                  icon={TERRAIN_TOOL_META[tool].icon}
+                  tooltip={TERRAIN_TOOL_META[tool].tooltip}
+                  on={tool === s.terrainTool}
+                  onPress={() => props.onPatch({ terrainTool: tool })}
+                />
+              ))}
             </Fragment>
           ) : null}
 
@@ -136,9 +176,7 @@ export default function MapPaintBar(props: {
                   </Swatch>
                 );
               })}
-              <C.HW_Pill tooltip="Add a zone" onPress={() => props.onPatch(addZonePatch(s))}>
-                <C.HW_PillText>+ ZONE</C.HW_PillText>
-              </C.HW_Pill>
+              <IconButton icon="Plus" tooltip="Add a zone" onPress={() => props.onPatch(addZonePatch(s))} />
             </Fragment>
           ) : null}
 
@@ -157,23 +195,29 @@ export default function MapPaintBar(props: {
                 onUp={() => props.onPatch({ roadLanesB: Math.min(3, s.roadLanesB + 1) })}
               />
               {(() => {
-                const Walk = s.roadSidewalks ? C.HW_PillOn : C.HW_Pill;
-                const WalkText = s.roadSidewalks ? C.HW_PillTextOn : C.HW_PillText;
                 const stats = mapRoadStats();
                 return (
                   <Fragment>
-                    <Walk onPress={() => props.onPatch({ roadSidewalks: !s.roadSidewalks })}>
-                      <WalkText>SIDEWALKS</WalkText>
-                    </Walk>
+                    <IconButton
+                      icon="Footprints"
+                      tooltip="Sidewalks — flank the committed road with sidewalks"
+                      on={s.roadSidewalks}
+                      onPress={() => props.onPatch({ roadSidewalks: !s.roadSidewalks })}
+                    />
                     <C.HW_OptionDivider />
                     <C.HW_PillText>{`${stats.draftPoints} PTS · ${stats.strokes} ROADS`}</C.HW_PillText>
                     {stats.planTruncated ? <C.HW_PillText>PLAN TRUNCATED</C.HW_PillText> : null}
-                    <C.HW_PillOn tooltip="Compile the clicked centerline into lanes/junctions/crosswalks" onPress={() => { mapRoadCommit(); props.onPatch({}); }}>
-                      <C.HW_PillTextOn>COMMIT</C.HW_PillTextOn>
-                    </C.HW_PillOn>
-                    <C.HW_Pill tooltip="Drop the drafted centerline" onPress={() => { mapRoadCancel(); props.onPatch({}); }}>
-                      <C.HW_PillText>CANCEL</C.HW_PillText>
-                    </C.HW_Pill>
+                    <IconButton
+                      icon="Check"
+                      tooltip="Commit road — compile the clicked centerline into lanes/junctions/crosswalks"
+                      on
+                      onPress={() => { mapRoadCommit(); props.onPatch({}); }}
+                    />
+                    <IconButton
+                      icon="X"
+                      tooltip="Cancel road — drop the drafted centerline"
+                      onPress={() => { mapRoadCancel(); props.onPatch({}); }}
+                    />
                   </Fragment>
                 );
               })()}
@@ -214,15 +258,14 @@ export default function MapPaintBar(props: {
                 onDown={() => props.onPatch({ heightM: Math.max(1, s.heightM - 1) })}
                 onUp={() => props.onPatch({ heightM: Math.min(64, s.heightM + 1) })}
               />
-              {(() => {
-                const Dir = s.raise ? C.HW_PillOn : C.HW_Pill;
-                const DirText = s.raise ? C.HW_PillTextOn : C.HW_PillText;
-                return (
-                  <Dir tooltip="Raise hills or dig basins" onPress={() => props.onPatch({ raise: !s.raise })}>
-                    <DirText>{s.raise ? 'RAISE' : 'DIG'}</DirText>
-                  </Dir>
-                );
-              })()}
+              {/* Direction is a VALUE the brush carries (like SHAPE/PROF), not a
+                  mode name — it reads as the bar's labeled cycle readout. */}
+              <CyclePill
+                label="DIR"
+                value={s.raise ? 'RAISE' : 'DIG'}
+                tooltip="Raise hills or dig basins"
+                onPress={() => props.onPatch({ raise: !s.raise })}
+              />
             </Fragment>
           ) : null}
           {s.channel === 'terrain' && (s.terrainTool === 'ramp' || s.terrainTool === 'slope') ? (
@@ -259,9 +302,7 @@ export default function MapPaintBar(props: {
           ) : null}
 
           <C.HW_Spacer />
-          <C.HW_Pill tooltip="Save the painted map to the map file" onPress={saveMapFile}>
-            <C.HW_PillText>SAVE</C.HW_PillText>
-          </C.HW_Pill>
+          <IconButton icon="Save" tooltip="Save the painted map to the map file" onPress={saveMapFile} />
         </Fragment>
       ) : null}
     </Fragment>
