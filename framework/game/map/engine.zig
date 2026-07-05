@@ -34,6 +34,8 @@ pub const Channel = enum(u8) { terrain = 0, tile = 1, water = 2, flora = 3, zone
 pub const Mode = enum(u8) { paint = 0, erase = 1 };
 /// Terrain sub-tools (the height card's modes: brush/ramp/slope/smooth).
 pub const TerrainTool = enum(u8) { brush = 0, ramp = 1, slope = 2, smooth = 3 };
+/// In-world brush gizmo and the matching dab footprint.
+pub const BrushGizmo = stamps.BrushStyle;
 
 pub const Tool = struct {
     channel: Channel = .terrain,
@@ -55,6 +57,10 @@ pub const Tool = struct {
     smooth_strength: f32 = 0.5,
     /// armed tile kind (content index; the engine treats it as opaque)
     kind_idx: i16 = chunks.EMPTY_CELL,
+    /// armed MATERIAL binding (tile-binding table index; EMPTY_CELL = the
+    /// kind's default look). Stamped per cell so neighboring tiles of one
+    /// kind can wear different materials (req_2693).
+    bind_idx: i16 = chunks.EMPTY_CELL,
     /// armed flora kind + its population lane (0 grass, 1 tree, 2 bush)
     flora_kind_idx: i16 = chunks.EMPTY_CELL,
     flora_lane: u8 = 0,
@@ -63,6 +69,7 @@ pub const Tool = struct {
 };
 
 var g_tool: Tool = .{};
+var g_brush_gizmo: BrushGizmo = .profile;
 
 pub fn setTool(next: Tool) void {
     g_tool = next;
@@ -70,6 +77,14 @@ pub fn setTool(next: Tool) void {
 
 pub fn tool() Tool {
     return g_tool;
+}
+
+pub fn setBrushGizmo(gizmo: BrushGizmo) void {
+    g_brush_gizmo = gizmo;
+}
+
+pub fn brushGizmo() BrushGizmo {
+    return g_brush_gizmo;
 }
 
 // ── stroke state ──────────────────────────────────────────────────────────────
@@ -119,6 +134,7 @@ pub fn reset() void {
     g_road_under.clearRetainingCapacity();
     road_plan_truncated = false;
     g_tool = .{};
+    g_brush_gizmo = .profile;
     g_stroke_active = false;
     g_last = null;
     g_slope_count = 0;
@@ -280,6 +296,7 @@ fn stampHeightAt(x: f32, z: f32) void {
             .radiusM = radiusM,
             .shape = g_tool.shape,
             .profile = g_tool.profile,
+            .style = g_brush_gizmo,
             .erase = g_tool.mode == .erase,
         });
         ch.dirty.height = true;
@@ -321,8 +338,9 @@ fn stampWaterAt(x: f32, z: f32) void {
             while (dx <= rd) : (dx += 1) {
                 const jx = cix + dx;
                 if (jx < 0 or jx > edge) continue;
-                const dm = stamps.footprintDistance(g_tool.shape, @floatFromInt(dx), @floatFromInt(dz)) * DOT_M;
-                if (dm > radiusM) continue;
+                const dx_m = @as(f32, @floatFromInt(dx)) * DOT_M;
+                const dz_m = @as(f32, @floatFromInt(dz)) * DOT_M;
+                if (stamps.brushStyleWeight(g_brush_gizmo, g_tool.shape, g_tool.profile, dx_m, dz_m, radiusM) <= 0) continue;
                 const idx = @as(usize, @intCast(jz)) * chunks.SAMPLE_COLS + @as(usize, @intCast(jx));
                 const bed = ch.height[idx];
                 if (bed < 0) g_water_wet_any = true;
@@ -390,9 +408,7 @@ fn stampSmoothAt(x: f32, z: f32) void {
             while (jx <= max_x) : (jx += 1) {
                 const px = (@as(f32, @floatFromInt(jx)) - cix) * DOT_M;
                 const py = (@as(f32, @floatFromInt(jy)) - ciz) * DOT_M;
-                const dm = stamps.footprintDistance(g_tool.shape, px / DOT_M, py / DOT_M) * DOT_M;
-                if (dm > radiusM) continue;
-                const falloff = stamps.brushProfile(g_tool.profile, dm / radiusM);
+                const falloff = stamps.brushStyleWeight(g_brush_gizmo, g_tool.shape, g_tool.profile, px, py, radiusM);
                 if (falloff <= 0) continue;
                 if (count >= g_smooth_scratch.len) continue;
                 const idx = jy * chunks.SAMPLE_COLS + jx;
@@ -552,7 +568,7 @@ fn stampCellsAt(x: f32, z: f32) void {
     while (dz <= r) : (dz += 1) {
         var dx: i32 = -r;
         while (dx <= r) : (dx += 1) {
-            if (stamps.footprintDistance(g_tool.shape, @floatFromInt(dx), @floatFromInt(dz)) > reach) continue;
+            if (!stamps.brushStyleCoversCell(g_brush_gizmo, g_tool.shape, g_tool.profile, @floatFromInt(dx), @floatFromInt(dz), reach)) continue;
             paintGlobalCell(gtx + dx, gtz + dz, erase);
         }
     }
@@ -568,6 +584,7 @@ fn paintGlobalCell(gtx: i32, gtz: i32, erase: bool) void {
             // TODO(phase 5): road-owned cells become immutable to paint/erase
             // once the road recipe layer lands (USER RULING req_0795).
             ch.tiles[idx] = if (erase) chunks.EMPTY_CELL else g_tool.kind_idx;
+            ch.materials[idx] = if (erase) chunks.EMPTY_CELL else g_tool.bind_idx;
             ch.dirty.tiles = true;
         },
         .flora => {
@@ -698,10 +715,14 @@ pub fn downsampleFloorHeights(src: *const [chunks.SAMPLE_CELLS]f32, dst: []f32) 
 // engine encodes each chunk's D stream from its cell grids. Formula + palettes
 // are CONTENT — pushed at UI rate, kept across map reset.
 //
-// D layout v2 (one PACKED cell array keeps three channels inside the ground
-// pipeline's per-chunk float budget):
+// D layout v3 (one PACKED cell array keeps three channels inside the ground
+// pipeline's per-chunk float budget; v3 adds the tile-binding table + a second
+// per-cell MATERIAL array so a pick is a data push, never a shader rebuild):
 //   [0]cols [1]rows [2]tilePaletteCount [3]floraPaletteCount [4]zonePaletteCount
-//   tilePal×3 rgb, floraPal×3 rgb, zonePal×3 rgb, then rows×cols packed cells.
+//   [5]bindingCount
+//   tilePal×3 rgb, floraPal×3 rgb, zonePal×3 rgb, bindingCount×4 rows,
+//   then rows×cols packed cells, then rows×cols material cells (binding+1;
+//   0 = the kind's default look).
 // Packed cell (exact in f32 — 24 bits): (tile+1) + (flora+1)·1024 + (zone+1)·262144
 //   tile+1 in [0,1024) · flora+1 in [0,256) · zone+1 in [0,64); 0 = empty slot.
 // Flora is the COMPOSITE authoring tint of the three lanes (tree over bush over
@@ -757,13 +778,45 @@ pub fn setZonePalette(zone_rgb: []const f32) void {
     g_zone_palette_count = copyPalette(&g_zone_palette, zone_rgb);
 }
 
+// ── the tile-binding table (req_2693) ─────────────────────────────────────────
+// Painted-material bindings: each entry is an opaque 4-float row the cart's
+// formula understands ([materialId, boardIndex, variant, jointFlag] for the
+// editor's catalog dispatch). Cells reference entries by index (chunk.materials);
+// EMPTY_CELL cells fall back to the kind's default look inside the formula.
+// The table is DATA in the D stream — rebinding/arming a material never
+// recompiles the ground shader (the 10-15s pick freeze this replaces).
+// Persisted with the map (store.zig v2): the painting owns its palette of looks.
+
+pub const MAX_TILE_BINDINGS: usize = 256;
+pub const BINDING_FLOATS: usize = 4;
+var g_tile_bindings: [MAX_TILE_BINDINGS][BINDING_FLOATS]f32 = undefined;
+var g_tile_binding_count: usize = 0;
+
+/// vals = count×4 rows. Re-encodes every painted chunk (the table rides each
+/// chunk's D stream), so an edited entry repaints live.
+pub fn setTileBindings(vals: []const f32) void {
+    g_tile_binding_count = @min(MAX_TILE_BINDINGS, vals.len / BINDING_FLOATS);
+    for (0..g_tile_binding_count) |i| {
+        g_tile_bindings[i] = .{ vals[i * 4], vals[i * 4 + 1], vals[i * 4 + 2], vals[i * 4 + 3] };
+    }
+    for (chunks.slots()) |maybe| {
+        const ch = maybe orelse continue;
+        ch.dirty.tiles = true;
+    }
+}
+
+pub fn tileBindings() []const [BINDING_FLOATS]f32 {
+    return g_tile_bindings[0..g_tile_binding_count];
+}
+
 pub fn groundFormula() ?[]const u8 {
     return g_ground_formula;
 }
 
-/// Floats one chunk's D stream needs at the current palettes.
+/// Floats one chunk's D stream needs at the current palettes + binding table.
 pub fn groundDataFloats() usize {
-    return 5 + (g_palette_count + g_flora_palette_count + g_zone_palette_count) * 3 + chunks.TILE_CELLS;
+    return 6 + (g_palette_count + g_flora_palette_count + g_zone_palette_count) * 3 +
+        g_tile_binding_count * BINDING_FLOATS + chunks.TILE_CELLS * 2;
 }
 
 /// Composite flora lane tint for one cell: tree over bush over grass.
@@ -773,7 +826,7 @@ fn floraCompositeAt(chunk: *const chunks.Chunk, idx: usize) i16 {
     return chunk.flora[0][idx]; // grass (or empty)
 }
 
-/// Encode a chunk's cell channels as the ground formula's D stream (layout v2).
+/// Encode a chunk's cell channels as the ground formula's D stream (layout v3).
 /// dst.len must be ≥ groundDataFloats(). Returns the floats written.
 pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
     dst[0] = @floatFromInt(chunks.TILE_COLS);
@@ -781,7 +834,8 @@ pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
     dst[2] = @floatFromInt(g_palette_count);
     dst[3] = @floatFromInt(g_flora_palette_count);
     dst[4] = @floatFromInt(g_zone_palette_count);
-    var n: usize = 5;
+    dst[5] = @floatFromInt(g_tile_binding_count);
+    var n: usize = 6;
     for (g_palette[0..g_palette_count]) |rgb| {
         dst[n] = rgb[0];
         dst[n + 1] = rgb[1];
@@ -800,11 +854,25 @@ pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
         dst[n + 2] = rgb[2];
         n += 3;
     }
+    for (g_tile_bindings[0..g_tile_binding_count]) |row| {
+        dst[n] = row[0];
+        dst[n + 1] = row[1];
+        dst[n + 2] = row[2];
+        dst[n + 3] = row[3];
+        n += 4;
+    }
     for (chunk.tiles, 0..) |tile, i| {
         const t: u32 = @intCast(@min(PACK_TILE_LIMIT, tile) + 1);
         const f: u32 = @intCast(@min(PACK_FLORA_LIMIT, floraCompositeAt(chunk, i)) + 1);
         const z: u32 = @intCast(@min(PACK_ZONE_LIMIT, chunk.zones[i]) + 1);
         dst[n] = @floatFromInt(t + f * 1024 + z * 262144);
+        n += 1;
+    }
+    for (chunk.materials) |m| {
+        // A stale index past the live table means the binding is gone — fall
+        // to the kind default rather than show a random neighbor's look.
+        const bind: i32 = if (m >= 0 and m < g_tile_binding_count) m else -1;
+        dst[n] = @floatFromInt(bind + 1);
         n += 1;
     }
     return n;
@@ -821,7 +889,8 @@ pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
 
 const MAX_PLAN_CELLS: usize = 65536;
 var g_plan_cells: [MAX_PLAN_CELLS]roads.PlanCell = undefined;
-var g_road_under: std.AutoHashMapUnmanaged(u64, i16) = .empty;
+/// cell → the (tile, material) pair beneath the road stamp.
+var g_road_under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty;
 var g_road_strokes_buf: [roads.MAX_STROKES]roads.RoadStroke = undefined;
 /// LOUD truncation flag from the last restamp (surface it in chrome, never drop silently).
 pub var road_plan_truncated: bool = false;
@@ -830,13 +899,15 @@ fn roadCellKey(gx: i32, gz: i32) u64 {
     return (@as(u64, @as(u32, @bitCast(gx))) << 32) | @as(u64, @as(u32, @bitCast(gz)));
 }
 
-fn tileAtGlobal(gx: i32, gz: i32) ?*i16 {
+const CellRef = struct { tile: *i16, material: *i16 };
+
+fn cellAtGlobal(gx: i32, gz: i32) ?CellRef {
     const cx = chunks.chunkOfGlobalTile(gx);
     const cz = chunks.chunkOfGlobalTile(gz);
     const ch = chunks.chunkAt(cx, cz) orelse return null;
     const idx = chunks.cellIndex(gx - cx * CHUNK_TILES, gz - cz * CHUNK_TILES) orelse return null;
     ch.dirty.tiles = true;
-    return &ch.tiles[idx];
+    return .{ .tile = &ch.tiles[idx], .material = &ch.materials[idx] };
 }
 
 /// Restore every undercoated cell, replan all strokes, stamp the plan, and
@@ -847,7 +918,10 @@ pub fn roadsRestamp() void {
     while (it.next()) |entry| {
         const gx: i32 = @bitCast(@as(u32, @truncate(entry.key_ptr.* >> 32)));
         const gz: i32 = @bitCast(@as(u32, @truncate(entry.key_ptr.*)));
-        if (tileAtGlobal(gx, gz)) |cell| cell.* = entry.value_ptr.*;
+        if (cellAtGlobal(gx, gz)) |cell| {
+            cell.tile.* = entry.value_ptr.*[0];
+            cell.material.* = entry.value_ptr.*[1];
+        }
     }
     g_road_under.clearRetainingCapacity();
 
@@ -856,11 +930,13 @@ pub fn roadsRestamp() void {
     const plan = roads.planRoads(g_road_strokes_buf[0..count], g_plan_cells[0..]);
     road_plan_truncated = plan.truncated;
 
-    // 3. stamp, capturing the undercoat
+    // 3. stamp, capturing the undercoat. Road cells wear the kind default
+    // (hand-painted materials never bleed into the grammar's lanes).
     for (g_plan_cells[0..plan.count]) |pc| {
-        const cell = tileAtGlobal(pc.gx, pc.gz) orelse continue;
-        g_road_under.put(seen_alloc, roadCellKey(pc.gx, pc.gz), cell.*) catch continue;
-        cell.* = roads.kindIndex(pc.kind);
+        const cell = cellAtGlobal(pc.gx, pc.gz) orelse continue;
+        g_road_under.put(seen_alloc, roadCellKey(pc.gx, pc.gz), .{ cell.tile.*, cell.material.* }) catch continue;
+        cell.tile.* = roads.kindIndex(pc.kind);
+        cell.material.* = chunks.EMPTY_CELL;
     }
 }
 
@@ -931,14 +1007,16 @@ pub fn saveSizeUpperBound() usize {
 
 /// Serialize the painting (roads resolved back to their undercoat base).
 pub fn saveMap(dst: []u8) usize {
-    return store.save(dst, &g_road_under);
+    return store.save(dst, &g_road_under, tileBindings());
 }
 
 /// Rebuild the painting from a save blob, then re-derive the road stamps
 /// (grid = base + roads, req_0795). False on a malformed blob (world cleared).
 pub fn loadMap(bytes: []const u8) bool {
     g_road_under.clearRetainingCapacity();
-    const ok = store.load(bytes);
+    var binding_count: usize = 0;
+    const ok = store.load(bytes, g_tile_bindings[0..], &binding_count);
+    g_tile_binding_count = if (ok) binding_count else 0;
     if (ok) roadsRestamp();
     return ok;
 }

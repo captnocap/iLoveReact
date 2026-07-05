@@ -18,7 +18,14 @@ const chunks = @import("chunks.zig");
 const roads = @import("roads.zig");
 
 pub const MAGIC: u32 = 0x50414d52; // "RMAP"
-pub const VERSION: u32 = 1;
+/// v2 (req_2693): + the tile-binding table (count u32, count×4 f32 rows right
+/// after the header) and a per-chunk MATERIALS cell channel (RLE, after tiles).
+/// v1 blobs still load: no bindings, materials all EMPTY (kind-default look).
+pub const VERSION: u32 = 2;
+
+/// Floats per tile-binding row (engine.zig BINDING_FLOATS — kept in sync by
+/// the loadMap/saveMap call sites passing engine-owned buffers).
+const BINDING_FLOATS: usize = 4;
 
 const HEIGHT_Q: f32 = 100; // meters → hundredths
 
@@ -117,10 +124,12 @@ fn rleReadQuantized(src: *Source, samples: []f32, scratch: []i16) void {
 
 // ── the base-grid view (roads resolved back to the paint beneath) ─────────────
 
-/// Fill `out` with the chunk's tile grid, substituting undercoat values on
-/// road-stamped cells — the persisted BASE the load-time restamp rebuilds from.
-fn baseTiles(chunk: *const chunks.Chunk, under: *const std.AutoHashMapUnmanaged(u64, i16), out: []i16) void {
-    @memcpy(out, chunk.tiles[0..]);
+/// Fill `out` with one of the chunk's cell grids (tiles or materials),
+/// substituting undercoat values on road-stamped cells — the persisted BASE
+/// the load-time restamp rebuilds from. `which` picks the undercoat lane:
+/// 0 = tile, 1 = material (the g_road_under value layout).
+fn baseCells(chunk: *const chunks.Chunk, cells: []const i16, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), which: usize, out: []i16) void {
+    @memcpy(out, cells);
     var it = under.iterator();
     while (it.next()) |entry| {
         const gx: i32 = @bitCast(@as(u32, @truncate(entry.key_ptr.* >> 32)));
@@ -129,7 +138,7 @@ fn baseTiles(chunk: *const chunks.Chunk, under: *const std.AutoHashMapUnmanaged(
         const cz = chunks.chunkOfGlobalTile(gz);
         if (cx != chunk.cx or cz != chunk.cz) continue;
         if (chunks.cellIndex(gx - cx * chunks.CHUNK_TILES, gz - cz * chunks.CHUNK_TILES)) |idx| {
-            out[idx] = entry.value_ptr.*;
+            out[idx] = entry.value_ptr.*[which];
         }
     }
 }
@@ -143,24 +152,31 @@ var g_tile_scratch: [chunks.TILE_CELLS]i16 = undefined;
 pub fn saveSizeUpperBound() usize {
     const per_cell_channel = 8 + chunks.TILE_CELLS * 4;
     const per_sample_channel = 8 + chunks.SAMPLE_CELLS * 4;
-    const per_chunk = 8 + per_cell_channel * 5 + per_sample_channel * 2;
+    const per_chunk = 8 + per_cell_channel * 6 + per_sample_channel * 2;
     const road_bytes = 16 + roads.MAX_STROKES * (24 + roads.MAX_POINTS_PER_STROKE * 8);
-    return 16 + chunks.chunkCount() * per_chunk + road_bytes;
+    const binding_bytes = 8 + 256 * BINDING_FLOATS * 4;
+    return 16 + binding_bytes + chunks.chunkCount() * per_chunk + road_bytes;
 }
 
 /// Serialize the whole painting into dst. Returns bytes written, or 0 when dst
 /// is too small (LOUD — callers size by saveSizeUpperBound()).
-pub fn save(dst: []u8, under: *const std.AutoHashMapUnmanaged(u64, i16)) usize {
+pub fn save(dst: []u8, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bindings: []const [BINDING_FLOATS]f32) usize {
     var sink = Sink{ .buf = dst };
     sink.put(u32, MAGIC);
     sink.put(u32, VERSION);
+    sink.put(u32, @intCast(bindings.len));
+    for (bindings) |row| {
+        for (row) |v| sink.put(f32, v);
+    }
     sink.put(u32, @intCast(chunks.chunkCount()));
 
     for (chunks.slots()) |maybe| {
         const chunk = maybe orelse continue;
         sink.put(i32, chunk.cx);
         sink.put(i32, chunk.cz);
-        baseTiles(chunk, under, g_tile_scratch[0..]);
+        baseCells(chunk, chunk.tiles[0..], under, 0, g_tile_scratch[0..]);
+        rleWriteCells(&sink, g_tile_scratch[0..]);
+        baseCells(chunk, chunk.materials[0..], under, 1, g_tile_scratch[0..]);
         rleWriteCells(&sink, g_tile_scratch[0..]);
         rleWriteCells(&sink, chunk.zones[0..]);
         for (chunk.flora) |lane| rleWriteCells(&sink, lane[0..]);
@@ -188,13 +204,28 @@ pub fn save(dst: []u8, under: *const std.AutoHashMapUnmanaged(u64, i16)) usize {
 
 /// Rebuild the painting from a save() blob. Clears the world first; the CALLER
 /// restamps roads after (engine.roadsRestamp) so the grid re-derives base+roads.
-/// Returns false (world left cleared) on a malformed blob.
-pub fn load(bytes: []const u8) bool {
+/// The loaded tile-binding table lands in `bindings_buf` (count via
+/// `bindings_count`); v1 blobs have none. Returns false (world left cleared)
+/// on a malformed blob.
+pub fn load(bytes: []const u8, bindings_buf: [][BINDING_FLOATS]f32, bindings_count: *usize) bool {
     chunks.clearAll();
     roads.clearAll();
+    bindings_count.* = 0;
     var src = Source{ .buf = bytes };
     if (src.get(u32) != MAGIC) return false;
-    if (src.get(u32) != VERSION) return false;
+    const version = src.get(u32);
+    if (version < 1 or version > VERSION) return false;
+
+    if (version >= 2) {
+        const bind_count = src.get(u32);
+        if (bind_count > bindings_buf.len) return false;
+        var bi: u32 = 0;
+        while (bi < bind_count) : (bi += 1) {
+            for (&bindings_buf[bi]) |*v| v.* = src.get(f32);
+        }
+        if (src.bad) return false;
+        bindings_count.* = bind_count;
+    }
 
     const chunk_count = src.get(u32);
     if (chunk_count > chunks.SLOT_COUNT) return false;
@@ -204,6 +235,7 @@ pub fn load(bytes: []const u8) bool {
         const cz = src.get(i32);
         const chunk = chunks.growChunk(cx, cz) orelse return false;
         rleReadCells(&src, chunk.tiles[0..]);
+        if (version >= 2) rleReadCells(&src, chunk.materials[0..]);
         rleReadCells(&src, chunk.zones[0..]);
         for (&chunk.flora) |*lane| rleReadCells(&src, lane[0..]);
         rleReadQuantized(&src, chunk.height[0..], g_cell_scratch[0..]);
@@ -249,6 +281,7 @@ test "save/load round-trips every channel and the road recipes" {
 
     const chunk = chunks.growChunk(1, 0).?;
     chunk.tiles[7] = 3;
+    chunk.materials[7] = 1;
     chunk.zones[9] = 1;
     chunk.flora[1][11] = 5;
     chunk.height[100] = 4.25;
@@ -259,15 +292,23 @@ test "save/load round-trips every channel and the road recipes" {
     roads.addDraftPoint(40.5, 20.5);
     _ = roads.commitDraft().?;
 
-    var empty_under: std.AutoHashMapUnmanaged(u64, i16) = .empty;
+    var empty_under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty;
+    const bindings = [_][BINDING_FLOATS]f32{ .{ 41, 2, 1, 0 }, .{ 7, 0, 2, 1 } };
     const buf = std.testing.allocator.alloc(u8, saveSizeUpperBound()) catch unreachable;
     defer std.testing.allocator.free(buf);
-    const n = save(buf, &empty_under);
+    const n = save(buf, &empty_under, bindings[0..]);
     try std.testing.expect(n > 0);
 
-    try std.testing.expect(load(buf[0..n]));
+    var bind_back: [8][BINDING_FLOATS]f32 = undefined;
+    var bind_count: usize = 0;
+    try std.testing.expect(load(buf[0..n], bind_back[0..], &bind_count));
+    try std.testing.expectEqual(@as(usize, 2), bind_count);
+    try std.testing.expectEqual(@as(f32, 41), bind_back[0][0]);
+    try std.testing.expectEqual(@as(f32, 1), bind_back[1][3]);
     const back = chunks.chunkAt(1, 0).?;
     try std.testing.expectEqual(@as(i16, 3), back.tiles[7]);
+    try std.testing.expectEqual(@as(i16, 1), back.materials[7]);
+    try std.testing.expectEqual(@as(i16, chunks.EMPTY_CELL), back.materials[8]);
     try std.testing.expectEqual(@as(i16, 1), back.zones[9]);
     try std.testing.expectEqual(@as(i16, 5), back.flora[1][11]);
     try std.testing.expectApproxEqAbs(@as(f32, 4.25), back.height[100], 0.005);
@@ -291,20 +332,25 @@ test "save resolves road-stamped cells back to the undercoat base" {
     const chunk = chunks.growChunk(0, 0).?;
     const idx = chunks.cellIndex(60, 60).?;
     chunk.tiles[idx] = 12; // as if a road stamped over paint 4
-    var under: std.AutoHashMapUnmanaged(u64, i16) = .empty;
+    var under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty;
     defer under.deinit(std.testing.allocator);
     // global cell of local (60,60) in chunk (0,0): 0*120+60
-    under.put(std.testing.allocator, (@as(u64, 60) << 32) | 60, 4) catch unreachable;
+    under.put(std.testing.allocator, (@as(u64, 60) << 32) | 60, .{ 4, chunks.EMPTY_CELL }) catch unreachable;
 
     var buf: [1 << 20]u8 = undefined;
-    const n = save(buf[0..], &under);
+    const empty_bindings = [_][BINDING_FLOATS]f32{};
+    const n = save(buf[0..], &under, empty_bindings[0..]);
     try std.testing.expect(n > 0);
-    try std.testing.expect(load(buf[0..n]));
+    var bind_back: [8][BINDING_FLOATS]f32 = undefined;
+    var bind_count: usize = 0;
+    try std.testing.expect(load(buf[0..n], bind_back[0..], &bind_count));
     try std.testing.expectEqual(@as(i16, 4), chunks.chunkAt(0, 0).?.tiles[idx]);
 }
 
 test "load rejects garbage LOUDLY and leaves a clean world" {
     const junk = [_]u8{ 1, 2, 3, 4, 5, 6, 7, 8 };
-    try std.testing.expect(!load(junk[0..]));
+    var bind_back: [8][BINDING_FLOATS]f32 = undefined;
+    var bind_count: usize = 0;
+    try std.testing.expect(!load(junk[0..], bind_back[0..], &bind_count));
     try std.testing.expectEqual(@as(usize, 0), chunks.chunkCount());
 }

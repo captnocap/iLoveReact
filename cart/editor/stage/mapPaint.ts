@@ -5,11 +5,14 @@
 // state and calls applyMapPaintEffects on every patch so the host tool always
 // tracks the chrome.
 import {
-  mapChunkCount, mapGrowChunk, mapHostLive, mapLoadFile, mapSaveFile, mapSetGroundLook,
-  mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds, mapRoadSetProfile,
-  type MapBrushProfile, type MapBrushShape, type MapTerrainTool,
+  mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapSaveFile, mapSetGroundLook,
+  mapSetTileBindings, mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds, mapRoadSetProfile, mapSetBrushGizmo,
+  type MapBrushGizmo, type MapBrushProfile, type MapBrushShape, type MapTerrainTool,
 } from '../../../runtime/game/map';
-import { editorGroundFormula, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf, type TileMaterialOverrides } from '../render3d/groundFormula';
+import {
+  EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf,
+  bindingsToFloats, floatsToBindings, type TileMaterialBinding,
+} from '../render3d/groundFormula';
 import { FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, FLORA_SPECS, ZONE_COLORS } from '../world/floraKinds';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 
@@ -23,6 +26,8 @@ export type MapPaintState = {
   terrainTool: MapTerrainTool;
   shape: MapBrushShape;
   profile: MapBrushProfile;
+  /** in-world brush gizmo and matching dab footprint */
+  gizmo: MapBrushGizmo;
   radiusM: number;
   /** height-brush peak, meters (signed via the RAISE/DIG toggle) */
   heightM: number;
@@ -33,9 +38,12 @@ export type MapPaintState = {
   smoothStrength: number;
   /** armed ground tile kind — index into TILE_KINDS (the engine legend order) */
   tileKindIdx: number;
-  /** per-kind material rebinds (kind → catalog material fn + variant) — the
-   *  "paint THIS texture" control (req_2494). Empty = the curated defaults. */
-  tileMaterialOverrides: TileMaterialOverrides;
+  /** the map's palette of hand-picked looks (req_2693) — mirror of the host
+   *  tile-binding table (persisted in the RMAP). Painted cells reference
+   *  entries by index, so two sidewalks can wear different materials. */
+  tileBindings: TileMaterialBinding[];
+  /** armed binding — index into tileBindings; -1 = the kind's curated default */
+  tileBindIdx: number;
   /** the tile-texture picker popover (rendered late by AppFrame) */
   texturePickerOpen: boolean;
   /** armed flora kind — index into FLORA_KIND_DEFINITIONS */
@@ -58,6 +66,7 @@ export function defaultMapPaint(): MapPaintState {
     terrainTool: 'brush',
     shape: 'circle',
     profile: 'cone',
+    gizmo: 'profile',
     radiusM: 4,
     heightM: 6,
     raise: true,
@@ -66,7 +75,8 @@ export function defaultMapPaint(): MapPaintState {
     rampWide: 3,
     smoothStrength: 0.5,
     tileKindIdx: Math.max(0, TILE_KINDS.indexOf('sidewalk')),
-    tileMaterialOverrides: {},
+    tileBindings: [],
+    tileBindIdx: -1,
     texturePickerOpen: false,
     floraKindIdx: 1, // 'Grass'
     zones: [],
@@ -108,6 +118,7 @@ export const EDITOR_MAP_FILE = 'zig-out/game/editor/painted-map.rmap';
  *  height dial + RAISE/DIG toggle collapse into the engine's signed centerZ. */
 function pushMapTool(s: MapPaintState): void {
   const flora = FLORA_KIND_DEFINITIONS[s.floraKindIdx];
+  const gizmo = s.gizmo ?? 'profile';
   mapRoadSetProfile({ lanesF: s.roadLanesF, lanesB: s.roadLanesB, sidewalks: s.roadSidewalks });
   mapSetTool({
     channel: s.channel,
@@ -125,7 +136,9 @@ function pushMapTool(s: MapPaintState): void {
     floraKindIdx: s.floraKindIdx,
     floraLane: flora ? FLORA_LANE_INDEX[flora.lane] : 0,
     zoneIdx: s.zones.length ? Math.min(s.zoneIdx, s.zones.length - 1) : -1,
+    bindIdx: s.tileBindIdx,
   });
+  mapSetBrushGizmo(gizmo);
 }
 
 /** One-time map-layer setup: load the saved painting (fresh seed chunk when
@@ -134,10 +147,10 @@ function pushMapTool(s: MapPaintState): void {
  *  viewport can seed it at BOOT — before this, no chunk existed until the user
  *  armed Map Paint and the editor booted into a groundless void. Returns false
  *  when the host map doors aren't live yet (callers retry). */
-export function ensureMapSeeded(overrides: TileMaterialOverrides = {}, zones: readonly MapZoneDef[] = []): boolean {
+export function ensureMapSeeded(zones: readonly MapZoneDef[] = []): boolean {
   if (!mapHostLive()) return false;
   if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0);
-  mapSetGroundLook(editorGroundFormula(overrides), TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(zones));
+  mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(zones));
   mapRoadSetKinds(ROAD_KIND_INDICES);
   mapSetFloraSpecs(FLORA_SPECS); // req_2497: painting flora grows LITERAL foliage live
   console.warn(`[map-seed] ground seeded — ${mapChunkCount()} chunk(s) live`);
@@ -145,21 +158,33 @@ export function ensureMapSeeded(overrides: TileMaterialOverrides = {}, zones: re
 }
 
 /** The one place chrome state reaches the host — AppFrame calls this on every
- *  mapPaint patch. Arming loads the saved painting (fresh seed chunk when none),
- *  pushes the ground look (formula + palettes) + road kind mapping; a changed
- *  zone list re-pushes just the zone palette; the armed tool always re-pushes. */
-export function applyMapPaintEffects(prev: MapPaintState, next: MapPaintState): void {
-  if (!mapHostLive() || !next.active) return;
+ *  mapPaint patch. Arming loads the saved painting (fresh seed chunk when none)
+ *  and pushes the ground look (STATIC formula + palettes) + road kind mapping;
+ *  a changed binding list re-pushes the table (pure data — the 10-15s per-pick
+ *  shader rebuild is gone, req_2693); a changed zone list re-pushes just the
+ *  zone palette; the armed tool always re-pushes. Returns a state patch when
+ *  the HOST is the truth-holder (the loaded map's binding table on arm) —
+ *  callers merge it into the next state. */
+export function applyMapPaintEffects(prev: MapPaintState, next: MapPaintState): Partial<MapPaintState> | null {
+  if (!mapHostLive() || !next.active) return null;
   if (!prev.active) {
-    ensureMapSeeded(next.tileMaterialOverrides, next.zones);
-  } else if (prev.tileMaterialOverrides !== next.tileMaterialOverrides) {
-    // A rebind regenerates the formula (the kind→material tables are baked
-    // into the WGSL) — one shader rebuild per pick, authoring-rate.
-    mapSetGroundLook(editorGroundFormula(next.tileMaterialOverrides), TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(next.zones));
+    ensureMapSeeded(next.zones);
+    // The RMAP carries the painting's binding table — mirror it out so the
+    // picker shows the map's real palette of looks after a reload.
+    const hostBindings = floatsToBindings(mapGetTileBindings());
+    if (hostBindings.length > 0 && next.tileBindings.length === 0) {
+      pushMapTool({ ...next, tileBindings: hostBindings });
+      return { tileBindings: hostBindings };
+    }
+    // A fresh map (or a chrome that already mirrors) — push the chrome's table.
+    if (next.tileBindings.length > 0) mapSetTileBindings(bindingsToFloats(next.tileBindings));
+  } else if (prev.tileBindings !== next.tileBindings) {
+    mapSetTileBindings(bindingsToFloats(next.tileBindings));
   } else if (prev.zones !== next.zones) {
     mapSetZonePalette(zonePaletteOf(next.zones));
   }
   pushMapTool(next);
+  return null;
 }
 
 /** A zone patch: mint the next zone def (ZONE_COLORS cycle) and arm it. */

@@ -69,6 +69,10 @@ pub const Chunk = struct {
     cz: i32,
     /// ground tile-kind index per 1m cell, EMPTY_CELL = unpainted (tileData.ts:19)
     tiles: [TILE_CELLS]i16,
+    /// per-cell MATERIAL binding index (engine.zig tile-binding table),
+    /// EMPTY_CELL = the kind's default look. This is what lets two sidewalk
+    /// tiles wear different materials (req_2693).
+    materials: [TILE_CELLS]i16,
     /// zone list index per cell, EMPTY_CELL = unzoned (zoneData.ts:20)
     zones: [TILE_CELLS]i16,
     /// flora kind index per cell per lane (grass/tree/bush), EMPTY_CELL = none
@@ -83,6 +87,7 @@ pub const Chunk = struct {
         self.cx = cx;
         self.cz = cz;
         @memset(self.tiles[0..], EMPTY_CELL);
+        @memset(self.materials[0..], EMPTY_CELL);
         @memset(self.zones[0..], EMPTY_CELL);
         for (self.flora[0..]) |*lane| @memset(lane[0..], EMPTY_CELL);
         @memset(self.height[0..], 0);

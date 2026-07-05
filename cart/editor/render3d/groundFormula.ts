@@ -16,13 +16,15 @@
 // point any kind at any surface material. Rebinding regenerates this formula
 // and re-pushes the ground look — pure cart-side, no engine change.
 //
-// D[] layout v2 (the engine's encodeGroundData contract): [0]cols [1]rows
-// [2]tilePal [3]floraPal [4]zonePal, then tilePal×3 + floraPal×3 + zonePal×3
-// palette rgb floats, then rows×cols PACKED cells. Packed cell (24 bits, exact
-// in f32): (tile+1) + (flora+1)·1024 + (zone+1)·262144; 0 = empty slot. Flora
-// and zones tint OVER the ground material — the authoring overlay view; the
-// real populations materialize at Compile. (WGSL: no unary +, no backticks in
-// comments.)
+// D[] layout v3 (the engine's encodeGroundData contract): [0]cols [1]rows
+// [2]tilePal [3]floraPal [4]zonePal [5]bindCount, then tilePal×3 + floraPal×3
+// + zonePal×3 palette rgb floats, then bindCount×4 binding rows ([materialId,
+// boardIndex, variant, joint]), then rows×cols PACKED cells, then rows×cols
+// per-cell material indices (binding+1; 0 = kind default). Packed cell
+// (24 bits, exact in f32): (tile+1) + (flora+1)·1024 + (zone+1)·262144;
+// 0 = empty slot. Flora and zones tint OVER the ground material — the
+// authoring overlay view; the real populations materialize at Compile.
+// (WGSL: no unary +, no backticks in comments.)
 import { hexToRgb01 } from '@reactjit/runtime/paint';
 import { FILL_FUNCS } from './shaders/_generated/dispatch';
 import { MATERIALS, type RegistryMaterial } from './shaders/_generated/registry';
@@ -30,7 +32,6 @@ import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 
 export type TileMaterialBinding = { fn: string; variant: number };
-export type TileMaterialOverrides = Record<string, TileMaterialBinding>;
 
 const MATERIAL_BY_FN = new Map(MATERIALS.map((m) => [m.fn, m]));
 
@@ -59,8 +60,39 @@ const DEFAULT_BINDINGS: TileMaterialOverrides = {
 };
 const FALLBACK_BINDING: TileMaterialBinding = { fn: 'concrete', variant: 0 };
 
-export function tileBindingFor(kind: string, overrides: TileMaterialOverrides): TileMaterialBinding {
-  return overrides[kind] ?? DEFAULT_BINDINGS[kind] ?? FALLBACK_BINDING;
+/** The curated DEFAULT look for a tile kind — what binding-less cells wear. */
+export function tileBindingFor(kind: string): TileMaterialBinding {
+  return DEFAULT_BINDINGS[kind] ?? FALLBACK_BINDING;
+}
+
+// ── the painted-material binding table (req_2693) ────────────────────────────
+// The map's palette of hand-picked looks: the host engine owns the table
+// (persisted in the RMAP), cells reference entries by index, and the formula
+// dispatches on the 4-float rows packed here. Cart⇄host mirror is these two
+// codecs. joint rides per binding so a picked sidewalk material keeps its slab
+// edge and a picked asphalt stays seamless.
+
+export function bindingsToFloats(bindings: readonly TileMaterialBinding[]): Float32Array {
+  const out = new Float32Array(bindings.length * 4);
+  bindings.forEach((b, i) => {
+    const mat = MATERIAL_BY_FN.get(b.fn) ?? MATERIAL_BY_FN.get(FALLBACK_BINDING.fn)!;
+    if (!MATERIAL_BY_FN.has(b.fn)) console.error(`[groundFormula] unknown binding material '${b.fn}' — packing ${FALLBACK_BINDING.fn}`);
+    out[i * 4] = mat.materialId;
+    out[i * 4 + 1] = mat.boardIndex;
+    out[i * 4 + 2] = b.variant;
+    out[i * 4 + 3] = SLAB_JOINT_FNS.has(mat.fn) ? 1 : 0;
+  });
+  return out;
+}
+
+export function floatsToBindings(rows: Float32Array): TileMaterialBinding[] {
+  const out: TileMaterialBinding[] = [];
+  for (let i = 0; i + 3 < rows.length; i += 4) {
+    const mat = MATERIALS.find((m) => m.materialId === rows[i] && m.boardIndex === rows[i + 1]);
+    if (!mat) console.error(`[groundFormula] host binding row ${i / 4} references unknown material id ${rows[i]} board ${rows[i + 1]} — keeping ${FALLBACK_BINDING.fn} so cell indices stay aligned`);
+    out.push({ fn: mat?.fn ?? FALLBACK_BINDING.fn, variant: rows[i + 2] ?? 0 });
+  }
+  return out;
 }
 
 // Kinds whose ground reads as poured slabs — they keep the darkened tile-edge
@@ -100,10 +132,15 @@ function composedFillFuncs(): string {
     .replace(/\bU\.time\b/g, 'S.time');
 }
 
-/** Build the ground formula for the given kind→material overrides. */
-export function editorGroundFormula(overrides: TileMaterialOverrides = {}): string {
+/** Build the STATIC ground formula. The kind→material tables baked here are
+ *  the curated DEFAULTS only — they never change at runtime, so this WGSL
+ *  compiles exactly once per app run. Hand-picked looks arrive as DATA: the
+ *  binding table + per-cell material indices in the D stream (layout v3),
+ *  pushed via mapSetTileBindings — a pick used to regenerate this source and
+ *  stall 10-15s in the driver compile (req_2693). */
+export function editorGroundFormula(): string {
   const bindings = TILE_KINDS.map((k) => {
-    const b = tileBindingFor(k, overrides);
+    const b = tileBindingFor(k);
     const mat = MATERIAL_BY_FN.get(b.fn);
     if (!mat) {
       console.error(`[groundFormula] unknown material '${b.fn}' bound to tile kind '${k}' — using ${FALLBACK_BINDING.fn}`);
@@ -138,9 +175,12 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
   let tilePal = i32(D[2]);
   let floraPal = i32(D[3]);
   let zonePal = i32(D[4]);
-  let floraBase = 5 + tilePal * 3;
+  let bindCount = i32(D[5]);
+  let floraBase = 6 + tilePal * 3;
   let zoneBase = floraBase + floraPal * 3;
-  let cellBase = zoneBase + zonePal * 3;
+  let bindBase = zoneBase + zonePal * 3;
+  let cellBase = bindBase + bindCount * 4;
+  let matBase = cellBase + rows * cols;
 
   let cx = clamp(i32(floor(uv0.x * f32(cols))), 0, cols - 1);
   let cy = clamp(i32(floor(uv0.y * f32(rows))), 0, rows - 1);
@@ -163,10 +203,24 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
     let g = smoothstep(0.46, 0.5, edge0) * 0.07;
     rgb = vec3f(0.05 + g, 0.07 + g, 0.10 + g);
   } else {
-    rgb = fill_pick(hf_tile_mat(kind), hf_tile_board(kind), fc, fc * 64.0, hf_tile_var(kind), seed);
+    // The cell's HAND-PICKED binding wins over the kind default — this is
+    // what lets neighboring tiles of one kind wear different materials.
+    var mat = hf_tile_mat(kind);
+    var board = hf_tile_board(kind);
+    var take = hf_tile_var(kind);
+    var joint = hf_tile_joint(kind);
+    let bind = i32(D[matBase + cy * cols + cx]) - 1;
+    if (bind >= 0 && bind < bindCount) {
+      let bb = bindBase + bind * 4;
+      mat = i32(D[bb]);
+      board = D[bb + 1];
+      take = D[bb + 2];
+      joint = D[bb + 3];
+    }
+    rgb = fill_pick(mat, board, fc, fc * 64.0, take, seed);
     // Slab joint at tile edges — concrete/sidewalk slabs carry it; seamless
     // surfaces (asphalt, earth, water) skip it so they read as one carriageway.
-    if (hf_tile_joint(kind) > 0.5) {
+    if (joint > 0.5) {
       let je = min(min(fc.x, 1.0 - fc.x), min(fc.y, 1.0 - fc.y));
       let jaa = max(fwidth(je), 0.0008);
       rgb = mix(rgb, rgb * 0.5, (1.0 - smoothstep(0.012, 0.012 + jaa, je)) * 0.8);
@@ -201,8 +255,7 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
 `;
 }
 
-/** The default-bindings formula (boot arm; rebinds regenerate via
- *  editorGroundFormula(overrides)). */
+/** THE ground formula — static for the whole run; material picks are data. */
 export const EDITOR_GROUND_FORMULA = editorGroundFormula();
 
 function paletteOf(colors: readonly string[]): Float32Array {

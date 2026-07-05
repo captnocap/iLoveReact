@@ -9,7 +9,7 @@
 import { Fragment } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { mapRoadCancel, mapRoadCommit, mapRoadStats, type MapBrushProfile, type MapBrushShape, type MapTerrainTool } from '../../../runtime/game/map';
+import { mapRoadCancel, mapRoadCommit, mapRoadStats, type MapBrushGizmo, type MapBrushProfile, type MapBrushShape, type MapTerrainTool } from '../../../runtime/game/map';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { addZonePatch, PAINTABLE_TILE_KINDS, type MapPaintChannel, type MapPaintState, saveMapFile } from './mapPaint';
@@ -37,6 +37,14 @@ const TERRAIN_TOOL_META: Record<MapTerrainTool, { icon: string; tooltip: string 
 };
 const SHAPES: MapBrushShape[] = ['circle', 'square', 'diamond'];
 const PROFILES: MapBrushProfile[] = ['cone', 'flat', 'dome'];
+const GIZMOS: MapBrushGizmo[] = ['beam', 'decal', 'rings', 'profile', 'handles'];
+const GIZMO_META: Record<MapBrushGizmo, { icon: string; tooltip: string }> = {
+  beam: { icon: 'Cuboid', tooltip: 'Hard beam brush — solid footprint' },
+  decal: { icon: 'Disc3', tooltip: 'Projected decal brush — filled center with feathered edge' },
+  rings: { icon: 'Target', tooltip: 'Ring brush — center and banded footprint' },
+  profile: { icon: 'Cone', tooltip: 'Falloff profile brush — follows the selected profile' },
+  handles: { icon: 'Crosshair', tooltip: 'Handle brush — center, axes and cardinal pads' },
+};
 
 /** The action bar's icon control (matches ToolOptions' tool buttons exactly). */
 function IconButton(props: { icon: string; tooltip: string; on?: boolean; onPress: () => void }) {
@@ -79,6 +87,7 @@ export default function MapPaintBar(props: {
   onPatch: (patch: Partial<MapPaintState>) => void;
 }) {
   const s = props.state;
+  const activeGizmo = s.gizmo ?? 'profile';
   return (
     <Fragment>
       <IconButton
@@ -136,15 +145,15 @@ export default function MapPaintBar(props: {
                   </Swatch>
                 );
               })}
-              {/* Bind the armed kind's LOOK to any catalog material — the picker
-                  popover (MapTexturePicker, rendered late by AppFrame). */}
+              {/* Arm the LOOK the brush deposits (per-cell binding, req_2693) —
+                  the picker popover (MapTexturePicker, rendered late by AppFrame). */}
               {(() => {
                 const kind = TILE_KINDS[s.tileKindIdx] ?? 'sidewalk';
-                const binding = tileBindingFor(kind, s.tileMaterialOverrides);
+                const binding = (s.tileBindIdx >= 0 ? s.tileBindings[s.tileBindIdx] : undefined) ?? tileBindingFor(kind);
                 const Pill = s.texturePickerOpen ? C.HW_PillOn : C.HW_Pill;
                 const Label = s.texturePickerOpen ? C.HW_PillTextOn : C.HW_PillText;
                 return (
-                  <Pill tooltip="Pick which material this kind paints" onPress={() => props.onPatch({ texturePickerOpen: !s.texturePickerOpen })}>
+                  <Pill tooltip="Pick which material the brush paints" onPress={() => props.onPatch({ texturePickerOpen: !s.texturePickerOpen })}>
                     <C.HW_OptionLabel>TEXTURE</C.HW_OptionLabel>
                     <Label>{binding.fn.replace(/_/g, ' ').toUpperCase()}</Label>
                   </Pill>
@@ -226,6 +235,16 @@ export default function MapPaintBar(props: {
 
           {s.channel !== 'road' ? (
             <Fragment>
+              <C.HW_OptionDivider />
+              {GIZMOS.map((gizmo) => (
+                <IconButton
+                  key={gizmo}
+                  icon={GIZMO_META[gizmo].icon}
+                  tooltip={GIZMO_META[gizmo].tooltip}
+                  on={gizmo === activeGizmo}
+                  onPress={() => props.onPatch({ gizmo })}
+                />
+              ))}
               <C.HW_OptionDivider />
               <CyclePill
                 label="SHAPE"

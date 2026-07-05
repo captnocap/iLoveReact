@@ -157,7 +157,10 @@ export default function AppFrame() {
   // that rehydrated active=true left the host with no ground look and a stale
   // tool (paint strokes silently did nothing).
   useEffect(() => {
-    if (state.mapPaint.active) applyMapPaintEffects(defaultMapPaint(), state.mapPaint);
+    if (!state.mapPaint.active) return;
+    const hostPatch = applyMapPaintEffects(defaultMapPaint(), state.mapPaint);
+    // the loaded RMAP's binding table is the truth — mirror it into the chrome
+    if (hostPatch) setState((prev) => ({ ...prev, mapPaint: { ...prev.mapPaint, ...hostPatch } }));
   }, []);
 
   // Board the bus: every recorded edit (state.seq bumps once per edit; undo/redo
@@ -2148,8 +2151,10 @@ export default function AppFrame() {
   // the zone palette; the armed tool always re-pushes.
   const patchMapPaint = (patch: Partial<EditorState['mapPaint']>) => {
     setState((prev) => {
-      const mapPaint = { ...prev.mapPaint, ...patch };
-      applyMapPaintEffects(prev.mapPaint, mapPaint);
+      let mapPaint = { ...prev.mapPaint, ...patch };
+      const hostPatch = applyMapPaintEffects(prev.mapPaint, mapPaint);
+      // arming mirrors the loaded map's binding table out of the host
+      if (hostPatch) mapPaint = { ...mapPaint, ...hostPatch };
       // One mode at a time (req_2666 WW): arming Map Paint puts the build tool
       // DOWN — back to the neutral Select tool with no armed piece. worldToolFor
       // derives the Build tray from the command id, so neutralizing it closes the

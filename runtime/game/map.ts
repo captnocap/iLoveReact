@@ -19,12 +19,14 @@ export type MapMode = 'paint' | 'erase';
 export type MapTerrainTool = 'brush' | 'ramp' | 'slope' | 'smooth';
 export type MapBrushShape = 'circle' | 'square' | 'diamond';
 export type MapBrushProfile = 'cone' | 'flat' | 'dome';
+export type MapBrushGizmo = 'beam' | 'decal' | 'rings' | 'profile' | 'handles';
 
 const CHANNEL_INDEX: Record<MapChannel, number> = { terrain: 0, tile: 1, water: 2, flora: 3, zone: 4, road: 5 };
 const MODE_INDEX: Record<MapMode, number> = { paint: 0, erase: 1 };
 const TERRAIN_TOOL_INDEX: Record<MapTerrainTool, number> = { brush: 0, ramp: 1, slope: 2, smooth: 3 };
 const SHAPE_INDEX: Record<MapBrushShape, number> = { circle: 0, square: 1, diamond: 2 };
 const PROFILE_INDEX: Record<MapBrushProfile, number> = { cone: 0, flat: 1, dome: 2 };
+const GIZMO_INDEX: Record<MapBrushGizmo, number> = { beam: 0, decal: 1, rings: 2, profile: 3, handles: 4 };
 
 export interface MapTool {
   channel: MapChannel;
@@ -49,6 +51,10 @@ export interface MapTool {
   floraLane?: number;
   /** armed zone list index */
   zoneIdx?: number;
+  /** armed material binding (tile-binding table index; -1 = the kind's
+   *  default look). Stamped per cell — neighboring tiles of one kind can
+   *  wear different materials (req_2693). */
+  bindIdx?: number;
 }
 
 export interface MapStrokeStats {
@@ -91,7 +97,7 @@ export function mapOpenNeighbors(cx: number, cz: number): { cx: number; cz: numb
 
 /** Arm the paint tool. Everything a stroke needs crosses ONCE here (UI rate). */
 export function mapSetTool(tool: MapTool): void {
-  const buf = new Float32Array(17);
+  const buf = new Float32Array(18);
   buf[0] = CHANNEL_INDEX[tool.channel];
   buf[1] = MODE_INDEX[tool.mode ?? 'paint'];
   buf[2] = TERRAIN_TOOL_INDEX[tool.terrainTool ?? 'brush'];
@@ -109,13 +115,21 @@ export function mapSetTool(tool: MapTool): void {
   buf[14] = tool.floraKindIdx ?? -1;
   buf[15] = tool.floraLane ?? 0;
   buf[16] = tool.zoneIdx ?? -1;
+  buf[17] = tool.bindIdx ?? -1;
   callHost('__map_set_tool', undefined, buf);
 }
 
+/** The in-world brush gizmo and matching dab footprint. */
+export function mapSetBrushGizmo(gizmo: MapBrushGizmo): void {
+  callHost('__map_set_brush_gizmo', undefined, GIZMO_INDEX[gizmo]);
+}
+
 /** Push the cell channels' shader contract: a WGSL body defining
- *  `fn hf_ground_rgb(uv) -> vec3f` over the engine's D stream (layout v2:
- *  packed tile+flora+zone cells), plus the three palettes (rgb triples in
- *  legend order). Content — push once at UI rate. */
+ *  `fn hf_ground_rgb(uv) -> vec3f` over the engine's D stream (layout v3:
+ *  packed tile+flora+zone cells + the binding table + per-cell materials),
+ *  plus the three palettes (rgb triples in legend order). Content — push once
+ *  at UI rate. The formula is STATIC; picking materials rides
+ *  mapSetTileBindings, never a formula re-push (req_2693). */
 export function mapSetGroundLook(
   formulaWgsl: string,
   tilePaletteRgb: Float32Array,
@@ -123,6 +137,24 @@ export function mapSetGroundLook(
   zonePaletteRgb: Float32Array,
 ): void {
   callHost('__map_set_ground_look', undefined, formulaWgsl, tilePaletteRgb, floraPaletteRgb, zonePaletteRgb);
+}
+
+/** Push the painted-material table (req_2693): count×4 opaque rows the ground
+ *  formula dispatches on ([materialId, boardIndex, variant, jointFlag] for the
+ *  editor catalog). Pure DATA — re-encodes chunk streams, never a shader
+ *  rebuild. Persisted in the map file; mirror with mapGetTileBindings. */
+export function mapSetTileBindings(rows: Float32Array): void {
+  callHost('__map_set_tile_bindings', undefined, rows);
+}
+
+/** Read the live tile-binding table back (count×4 rows) — the chrome's mirror
+ *  after mapLoadFile. */
+export function mapGetTileBindings(): Float32Array {
+  const ab = callHost<ArrayBuffer | null>('__map_get_tile_bindings', null);
+  if (!ab) return new Float32Array(0);
+  const raw = new Float32Array(ab);
+  const count = raw[0] ?? 0;
+  return raw.slice(1, 1 + count * 4);
 }
 
 /** Re-push just the zone palette (zones are user-authored and change mid-map). */

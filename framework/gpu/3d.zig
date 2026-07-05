@@ -14,6 +14,7 @@ const build_options = @import("build_options");
 const math = @import("../math/root.zig");
 const layout = @import("../layout.zig");
 const effect_assemble = @import("effect_assemble.zig");
+const compile_progress = @import("compile_progress.zig");
 const static_instance_policy = @import("static_instance_policy.zig");
 const model_paint = @import("model_paint.zig");
 const paint_islands_mod = @import("paint_islands.zig");
@@ -697,6 +698,11 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
 
     // setPaintTarget rewrites UVs for the per-face paint atlas; retain/stash the same
     // mutated vertices so quality changes and first draw see the new topology.
+    // An EDIT replace resets the stroke program (strokes can't survive a topology
+    // change; the atlas texel carry preserves the pixels) — but the user's LAYER
+    // table is organizational setup, not geometry: stash it so the reset re-adopts
+    // it instead of nuking the layer list on every eye toggle / topo op (req_2672).
+    paint_program.snapshotLayersForCarry();
     setPaintTarget(key, new_verts, count);
     model_source.retain(key, new_verts[0..need], count);
     if (old_ranges) |r| model_source.setPartRanges(r);
@@ -2698,6 +2704,10 @@ pub fn setPaintSession(on: bool) void {
     if (on) {
         mesh_edit.clearSelection(); // restores tinted faces to true paint (atlas patches)
         mesh_edit.setMode(.none); // drops the face-mode dressing with it
+    } else {
+        // Leaving paint commits any half-open stroke as its own undo unit — the journal
+        // must never carry a dangling gesture across sessions (req_2672).
+        _ = paint_program.endStrokeUnit();
     }
 }
 pub fn paintSessionActive() bool {
@@ -3733,6 +3743,7 @@ pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
     const mat = model_paint.hasMaterialInk();
     var gbuf: [model_paint.MAX_GROUP_FACES]u32 = undefined;
     const members = model_paint.groupFaces(@intCast(face), &gbuf);
+    paint_program.beginRecordedOp(); // anchor the undo baseline BEFORE the fill lands (req_2672)
     mesh_edit.suspendFaceTint(); // paint lands under any selection tint, never mixed with it
     defer mesh_edit.resumeFaceTint();
     for (members) |f| {
@@ -3781,6 +3792,80 @@ pub fn paintProgramApply(blob: []const u8) bool {
         if (@as(u32, d) != model_paint.detail()) _ = setPaintDetail(@intCast(d));
     }
     return paint_program.apply(blob);
+}
+
+// ── Stroke journal + paint layers (req_2672) ────────────────────────────────────────
+// Thin wrappers over paint_program: every path that RE-RUNS the program onto the atlas
+// lifts the selection tint first (the replay writes texels wholesale — it must lay TRUE
+// paint, never mix with the orange; same law as paintProgramApply).
+
+/// Commit the open stroke unit (pointer-up). Returns true when a stroke was recorded.
+pub fn paintStrokeEnd() bool {
+    return paint_program.endStrokeUnit();
+}
+
+/// Undo/redo ONE stroke-journal unit (a stroke or a structural layer op) by program
+/// replay. False when the journal side is empty.
+pub fn paintStrokeUndo() bool {
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    return paint_program.undoStroke();
+}
+pub fn paintStrokeRedo() bool {
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    return paint_program.redoStroke();
+}
+pub fn paintHistoryCounts() [2]u32 {
+    return paint_program.historyCounts();
+}
+pub fn paintUndoLabel() []const u8 {
+    return paint_program.undoLabel();
+}
+pub fn paintRedoLabel() []const u8 {
+    return paint_program.redoLabel();
+}
+
+/// Layer ops — each mutates the stroke program and (when the composite changes)
+/// re-runs it. See paint_program for the per-op journal semantics.
+pub const PaintLayerInfo = paint_program.LayerInfo;
+pub fn paintLayerCount() usize {
+    return paint_program.layerCount();
+}
+pub fn paintLayerAt(i: usize) PaintLayerInfo {
+    return paint_program.layerInfoAt(i);
+}
+pub fn paintActiveLayer() u32 {
+    return paint_program.activeLayerId();
+}
+pub fn paintLayerAdd() u32 {
+    return paint_program.layerAdd();
+}
+pub fn paintLayerDelete(id: u32) bool {
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    return paint_program.layerDelete(id);
+}
+pub fn paintLayerMove(id: u32, up: bool) bool {
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    return paint_program.layerMove(id, up);
+}
+pub fn paintLayerSetVisible(id: u32, on: bool) bool {
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    return paint_program.layerSetVisible(id, on);
+}
+pub fn paintLayerSetActive(id: u32) bool {
+    return paint_program.layerSetActive(id);
+}
+pub fn paintLayerRename(id: u32, name: []const u8) bool {
+    return paint_program.layerRename(id, name);
+}
+pub fn paintLayerMergeDown(id: u32) bool {
+    mesh_edit.suspendFaceTint();
+    defer mesh_edit.resumeFaceTint();
+    return paint_program.layerMergeDown(id);
 }
 
 /// Carry a per-face colour set onto the active paint target (length ≥ facecount*4) —
@@ -3861,6 +3946,7 @@ pub fn paintStrokeBegin(mx: f32, my: f32) i32 {
 /// overlaps (the island is one continuous space), and stamping each member separately
 /// would double-blend the texels near the diagonal.
 fn stampGroup(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, rgb: [3]u8) void {
+    paint_program.beginRecordedOp(); // anchor the undo baseline BEFORE the dab lands (req_2672)
     if (mat) model_paint.paintStampTex(face, u, v, radius, flow) else model_paint.paintStamp(face, u, v, radius, rgba, flow);
     paint_program.recordDab(face, u, v, radius, flow, mat, rgb);
 }
@@ -3914,6 +4000,9 @@ pub fn setPaintDetail(px: i32) i32 {
 pub fn refreshPaintLayout() bool {
     const verts = g_edit_verts orelse return false;
     if (g_edit_count == 0 or !model_paint.hasTarget()) return false;
+    // The authored grouping just (re)landed — the stroke program's hide-stable face
+    // keys (group + intra-group ordinal) must recompute against it (req_2672).
+    paint_program.invalidateFaceKeys();
     // The rebuild's colour carry reads the LIVE atlas — lift the selection tint first
     // so it never bakes into the new layout (req_2611), re-tint once it settles.
     mesh_edit.suspendFaceTint();
@@ -6119,6 +6208,12 @@ fn ensureGroundPipeline(formula: []const u8) void {
         return;
     };
     defer std.heap.c_allocator.free(wgsl);
+    // Narrate a slow (cold driver cache) compile — the catalog-composed ground
+    // formula is megashader-class, and this call blocks the render thread with
+    // zero output otherwise (req_2692).
+    var progress = compile_progress.CompileProgress{};
+    progress.start(wgsl.len);
+    defer progress.stop();
     const sm_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_ground", .code = wgsl });
     const sm = device.createShaderModule(&sm_desc) orelse {
         std.debug.print("[r3d-ground] ERROR: ground formula WGSL FAILED TO COMPILE (formula hash {x}, {d}B) — createShaderModule returned null; the GROUND PIPELINE never builds and ALL painted ground (terrain, tiles, water) is INVISIBLE until the formula is fixed. Check the wgpu validation output above for the naga error.\n", .{ h, formula.len });
@@ -6174,6 +6269,7 @@ fn ensureGroundPipeline(formula: []const u8) void {
     });
     if (g_ground_pipeline != null) {
         g_ground_formula_hash = h;
+        progress.finishOk();
     } else {
         std.debug.print("[r3d-ground] ERROR: createRenderPipeline returned null for the ground formula (hash {x}) — the GROUND PIPELINE never builds and ALL painted ground (terrain, tiles, water) is INVISIBLE until this is fixed.\n", .{h});
     }

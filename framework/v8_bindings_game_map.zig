@@ -11,7 +11,10 @@
 //!   __map_grow_chunk(cx, cz) -> 0|1
 //!   __map_chunk_count() -> f64
 //!   __map_open_neighbors(cx, cz) -> Float32 ArrayBuffer [count, x0,z0, …]
-//!   __map_set_tool(f32[17])                    — arm channel/tool/brush params
+//!   __map_set_tool(f32[18])                    — arm channel/tool/brush params
+//!   __map_set_brush_gizmo(index)               — in-world brush gizmo + dab style
+//!   __map_set_tile_bindings(f32 count×4 rows)  — the painted-material table (req_2693)
+//!   __map_get_tile_bindings() -> Float32 ArrayBuffer [count, rows…]
 //!   __map_stroke_begin(x, z) / __map_stroke_move(x, z)
 //!   __map_stroke_end() -> Float32 ArrayBuffer [samples, stamps, touched, waterDry]
 //!   __map_stats() -> Float32 ArrayBuffer [chunkCount, dirtyChunks]
@@ -19,13 +22,14 @@
 //!       -> Float32 ArrayBuffer of SAMPLE_CELLS (a copy; verification/readback)
 //!   __map_read_cells(cx, cz, channel) -> Float32 ArrayBuffer of TILE_CELLS
 //!       channel: 0 tiles · 1 zones · 2 flora grass · 3 flora tree · 4 flora bush
+//!       · 5 materials (per-cell binding index)
 //!
-//! __map_set_tool packing (f32[17]):
+//! __map_set_tool packing (f32[18]):
 //!   [0] channel  [1] mode  [2] terrainTool  [3] shape  [4] profile
 //!   [5] radiusM  [6] centerZ
 //!   [7] rampMin  [8] rampMax  [9] rampWide  [10] rampLong  [11] rampAngleDeg
 //!   [12] smoothStrength  [13] kindIdx  [14] floraKindIdx  [15] floraLane
-//!   [16] zoneIdx
+//!   [16] zoneIdx  [17] bindIdx (armed material binding; -1 = kind default)
 //!
 //! Gated ingredient (V18): registered only when the metafile gate flips
 //! -Dhas-game-map (see sdk/dependency-registry.json `game-map` and
@@ -150,7 +154,10 @@ fn hostOpenNeighbors(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 
 // ── tool + stroke doors ───────────────────────────────────────────────────────
 
-const TOOL_FLOATS: usize = 17;
+// 18 floats since req_2693 ([17] = armed material binding); a 17-float pack
+// from an older bundle still arms (bind_idx falls to the kind default).
+const TOOL_FLOATS: usize = 18;
+const TOOL_FLOATS_V1: usize = 17;
 
 fn enumFromF32(comptime E: type, raw: f32) E {
     const count = @typeInfo(E).@"enum".fields.len;
@@ -165,9 +172,9 @@ fn enumFromF32(comptime E: type, raw: f32) E {
 fn hostSetTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const bytes = argBytes(info, 0) orelse return;
-    if (bytes.len < TOOL_FLOATS * @sizeOf(f32)) return;
+    if (bytes.len < TOOL_FLOATS_V1 * @sizeOf(f32)) return;
     const in_ptr: [*]const f32 = @ptrCast(@alignCast(bytes.ptr));
-    const p = in_ptr[0..TOOL_FLOATS];
+    const p = in_ptr[0 .. bytes.len / @sizeOf(f32)];
     engine.setTool(.{
         .channel = enumFromF32(engine.Channel, p[0]),
         .mode = enumFromF32(engine.Mode, p[1]),
@@ -186,7 +193,14 @@ fn hostSetTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         .flora_kind_idx = @intFromFloat(@max(-1, p[14])),
         .flora_lane = @intFromFloat(@max(0, @min(2, p[15]))),
         .zone_idx = @intFromFloat(@max(-1, p[16])),
+        .bind_idx = if (p.len >= TOOL_FLOATS) @intFromFloat(@max(-1, p[17])) else chunks.EMPTY_CELL,
     });
+}
+
+fn hostSetBrushGizmo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const raw = argToF64(info, 0) orelse 0;
+    engine.setBrushGizmo(enumFromF32(engine.BrushGizmo, @floatCast(raw)));
 }
 
 // __map_set_ground_look(wgslBody, paletteFloat32Array) — the tile channel's
@@ -213,6 +227,29 @@ fn hostSetGroundLook(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 fn hostSetZonePalette(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     engine.setZonePalette(argF32Slice(info, 0));
+}
+
+// __map_set_tile_bindings(f32 rows) — the painted-material table (req_2693):
+// count×4 opaque rows the cart's formula dispatches on ([materialId,
+// boardIndex, variant, jointFlag] for the editor catalog). Pure DATA — arming
+// or editing a binding re-encodes chunk D streams, never rebuilds the shader.
+fn hostSetTileBindings(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    engine.setTileBindings(argF32Slice(info, 0));
+}
+
+// __map_get_tile_bindings() -> Float32 ArrayBuffer [count, then count×4 rows] —
+// the chrome's mirror after __map_load_file (the table persists in the RMAP).
+var g_bindings_out: [1 + engine.MAX_TILE_BINDINGS * engine.BINDING_FLOATS]f32 = undefined;
+
+fn hostGetTileBindings(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const rows = engine.tileBindings();
+    g_bindings_out[0] = @floatFromInt(rows.len);
+    for (rows, 0..) |row, i| {
+        for (row, 0..) |v, j| g_bindings_out[1 + i * engine.BINDING_FLOATS + j] = v;
+    }
+    setReturnF32Buffer(info, g_bindings_out[0 .. 1 + rows.len * engine.BINDING_FLOATS]);
 }
 
 // __map_drop_zone(index) — deleting zone list entry `index`: unzone its cells
@@ -424,11 +461,12 @@ fn hostReadCells(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     const channel = argToF64(info, 2) orelse 0;
-    const src: []const i16 = switch (@as(u8, if (channel > 0 and channel < 5) @intFromFloat(channel) else 0)) {
+    const src: []const i16 = switch (@as(u8, if (channel > 0 and channel < 6) @intFromFloat(channel) else 0)) {
         1 => chunk.zones[0..],
         2 => chunk.flora[0][0..],
         3 => chunk.flora[1][0..],
         4 => chunk.flora[2][0..],
+        5 => chunk.materials[0..],
         else => chunk.tiles[0..],
     };
     for (src, 0..) |v, i| cell_scratch[i] = @floatFromInt(v);
@@ -441,7 +479,10 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_chunk_count", hostChunkCount);
     v8_runtime.registerHostFn("__map_open_neighbors", hostOpenNeighbors);
     v8_runtime.registerHostFn("__map_set_tool", hostSetTool);
+    v8_runtime.registerHostFn("__map_set_brush_gizmo", hostSetBrushGizmo);
     v8_runtime.registerHostFn("__map_set_ground_look", hostSetGroundLook);
+    v8_runtime.registerHostFn("__map_set_tile_bindings", hostSetTileBindings);
+    v8_runtime.registerHostFn("__map_get_tile_bindings", hostGetTileBindings);
     v8_runtime.registerHostFn("__map_set_zone_palette", hostSetZonePalette);
     v8_runtime.registerHostFn("__map_drop_zone", hostDropZone);
     v8_runtime.registerHostFn("__map_set_flora_specs", hostSetFloraSpecs);
