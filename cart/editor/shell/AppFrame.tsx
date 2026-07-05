@@ -2298,17 +2298,20 @@ export default function AppFrame() {
     onStampRanges: stampModelPartRanges,
   };
 
-  // ── Texture picker vs the host pointer claim (req_2666 gap ZZ) ───────────────
+  // ── Overlays vs the host pointer claim (req_2666 gap ZZ, req_2707) ───────────
   // While paint is armed the HOST claims every pointer event inside the loader
   // pane (WorldViewport's __compiled_world_set_paint_mode effect, fed from
-  // mapPaint.active via Stage) BEFORE JS hit-testing — so clicks aimed at the
-  // MapTexturePicker popover stroked the map instead. A DERIVED state at this
-  // pass-down site (never a real mapPaint patch): the workspace sees paint as
-  // inactive while the picker popover is unresolved, so the host releases the
-  // claim; the picker itself renders off REAL state below and stays mounted, and
-  // applyMapPaintEffects sees no fake active flips. Closing the picker (its
-  // backdrop patches texturePickerOpen: false) restores the claim next render.
-  const workspaceState = state.mapPaint.active && state.mapPaint.texturePickerOpen
+  // mapPaint.active via Stage) BEFORE JS hit-testing — so clicks aimed at any
+  // overlay above the viewport stroked the map instead (hover tooltips still
+  // worked; only the press was claimed). A DERIVED state at this pass-down site
+  // (never a real mapPaint patch): the workspace sees paint as inactive while
+  // the texture-picker popover OR any BLOCKING dialog (Add Chunk, file
+  // explorer, …) is unresolved, so the host releases the claim; the overlays
+  // render off REAL state below and stay mounted, and applyMapPaintEffects
+  // sees no fake active flips. Resolving the overlay restores the claim next
+  // render. Modal discipline says a blocker gates EVERYTHING — that includes
+  // the host's pointer claim, not just JS input.
+  const workspaceState = state.mapPaint.active && (state.mapPaint.texturePickerOpen || blockingOverlay(state) !== null)
     ? { ...state, mapPaint: { ...state.mapPaint, active: false } }
     : state;
 
