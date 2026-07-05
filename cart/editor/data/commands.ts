@@ -165,10 +165,59 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-paint-detail', menu: 'Edit', scope: 'model', name: 'Brush Detail', icon: 'Grid2x2', key: 'Y', context: true, native: true, undoable: false, tool: true },
 ];
 
+// ── Blocking overlays (modal discipline, req_2626 gap HH) ─────────────────────────────────────
+// USER LAW: while a blocking session/dialog is unresolved, every other input surface is inert —
+// no mode switches, no new dialogs, no tool commands stacked over a captured base mesh. This is
+// the ONE state-visible predicate; AppFrame layers its component-local dialogs (import image /
+// import part) on top. `closerCommandId` is the single command still allowed while blocked (it
+// CLOSES the blocker — e.g. Window → Build Journal toggles its own dialog shut).
+export type BlockingOverlay = { id: string; label: string; closerCommandId?: string };
+export function blockingOverlay(state: EditorState): BlockingOverlay | null {
+  const mv = state.modelTool.blocking;
+  if (mv === 'loop-cut') return { id: 'loop-cut', label: 'Loop Cut' };
+  if (mv === 'paint-atlas') return { id: 'paint-atlas', label: 'Create Paint Atlas' };
+  if (mv === 'face-guard') return { id: 'face-guard', label: 'Unsafe Face Edit' };
+  if (state.newMeshPrompt) return { id: 'new-mesh', label: state.newMeshPrompt.mode === 'add' ? 'Add Mesh' : 'New Mesh' };
+  if (state.fileExplorerOpen) return { id: 'file-explorer', label: 'File Explorer' };
+  if (state.buildDialogOpen) return { id: 'build-journal', label: 'Build Journal', closerCommandId: 'toggle-build-journal' };
+  return null;
+}
+
+// ── Live undo/redo depths (req_2620 gap W) ────────────────────────────────────────────────────
+// The TRUTH behind every undo/redo control: on a model surface the HOST mesh journal's depths
+// (__mesh_history — the door cart code never called before this), on the world the real
+// worldUndo/worldRedo stacks. Menus, the dock buttons, and the hotkey gate all read this — a
+// button that would do nothing renders disabled with the reason instead.
+export type UndoDepths = { undo: number; redo: number; source: 'mesh' | 'world' };
+export function undoDepths(state: EditorState): UndoDepths {
+  if (activeSurface(state) === 'model') {
+    try {
+      const j = (globalThis as any).__mesh_history?.();
+      if (typeof j === 'string' && j) {
+        const o = JSON.parse(j);
+        return { undo: (o.undo ?? 0) | 0, redo: (o.redo ?? 0) | 0, source: 'mesh' };
+      }
+    } catch { /* door missing/malformed → honest zeros below */ }
+    return { undo: 0, redo: 0, source: 'mesh' };
+  }
+  return { undo: state.worldUndo.length, redo: state.worldRedo.length, source: 'world' };
+}
+
+// Menu-row count annotation: commandById has no state parameter (DropdownMenu calls it bare), so
+// AppFrame publishes the current depths each render and commandById folds them into the Undo/Redo
+// row names — "Undo (3 mesh)" is the journal talking, not decoration.
+let g_undoDepths: UndoDepths = { undo: 0, redo: 0, source: 'world' };
+export function publishUndoDepths(d: UndoDepths): void { g_undoDepths = d; }
+
 // ── Enablement (the sane-app grayed-with-reason gate) ─────────────────────────────────────────
-// A command is off when: the capability doesn't exist yet, its surface isn't in view, or it needs
-// a selection and there is none. Off commands render grayed with the reason; they never vanish.
+// A command is off when: a blocking overlay is unresolved (modal discipline), the capability
+// doesn't exist yet, its surface isn't in view, it needs a selection and there is none, or it's
+// undo/redo with an empty stack. Off commands render grayed with the reason; they never vanish.
 export function commandEnabled(cmd: Command, state: EditorState): { on: boolean; reason?: string } {
+  const block = blockingOverlay(state);
+  if (block && cmd.id !== block.closerCommandId) {
+    return { on: false, reason: `resolve ${block.label} first` };
+  }
   if (cmd.available === false) return { on: false, reason: 'not available yet' };
   const surface = activeSurface(state);
   if (cmd.scope !== 'global' && cmd.scope !== surface) {
@@ -176,6 +225,18 @@ export function commandEnabled(cmd: Command, state: EditorState): { on: boolean;
   }
   if (cmd.needsSelection && !hasSelection(state, surface)) {
     return { on: false, reason: 'select something first' };
+  }
+  if (cmd.id === 'undo-local' || cmd.id === 'redo-local') {
+    const d = undoDepths(state);
+    const n = cmd.id === 'undo-local' ? d.undo : d.redo;
+    if (n <= 0) {
+      return {
+        on: false,
+        reason: cmd.id === 'undo-local'
+          ? (d.source === 'mesh' ? 'mesh journal empty' : 'nothing to undo on the world')
+          : (d.source === 'mesh' ? 'nothing to redo in the mesh journal' : 'nothing to redo on the world'),
+      };
+    }
   }
   return { on: true };
 }
@@ -305,7 +366,14 @@ export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: n
 }
 
 export function commandById(id: string): Command {
-  return COMMANDS.find((command) => command.id === id) ?? COMMANDS[0]!;
+  const found = COMMANDS.find((command) => command.id === id) ?? COMMANDS[0]!;
+  // Count-annotate the Undo/Redo rows from the LIVE depths (published by AppFrame each
+  // render): "Undo (3 mesh)" tells the truth about which journal answers and how deep.
+  if (found.id === 'undo-local' || found.id === 'redo-local') {
+    const n = found.id === 'undo-local' ? g_undoDepths.undo : g_undoDepths.redo;
+    return { ...found, name: `${found.name} (${n} ${g_undoDepths.source})` };
+  }
+  return found;
 }
 
 function menuItemWidth(menu: Menu): number {

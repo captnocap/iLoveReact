@@ -25,7 +25,7 @@ import RenderProbe from '../../../runtime/render_tracker';
 import PlayRoute from '../PlayRoute';
 import { useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
-import type { EditorState, Command, Asset, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
+import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, MaterialRef } from '../world/pieces';
 import { placementSlotKey } from '../world/pieces';
@@ -37,12 +37,16 @@ import { saveAuthoredPieces } from '../data/initialState';
 import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchEdit } from '../data/editorEvents';
-import { commandById, isMeshToolCommand, PRIMITIVE_MESHES } from '../data/commands';
-import { commandForKeyEvent } from '../data/keymap';
+import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
+import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, type PrimitiveParams } from '../data/hmscAssetCatalog';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
-import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
+// Key edges come straight off the ffi bus (not useModifiers.onKeyDown): the active key
+// bridge is useIFTTT's, whose events carry ctrlKey/shiftKey flags but NO `mods` object —
+// useModifiers' fallback modifiers never update off those events, which is what killed
+// every Ctrl chord (see modifiersFromKeyEvent in data/keymap.ts, req_2620 gap W).
+import { subscribe } from '@reactjit/runtime/ffi';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
@@ -102,6 +106,34 @@ export default function AppFrame() {
   // the viewer mirrors its live state back into state.modelTool for highlights.
   const modelToolApiRef = useRef<ModelToolApi | null>(null);
 
+  // ── Modal discipline (req_2626 gap HH, USER LAW) ────────────────────────────
+  // While ANY blocking session/dialog is unresolved — the viewer's loop-cut
+  // session / atlas prompt / face guard (via state.modelTool.blocking), the
+  // shell's newMeshPrompt / file explorer / build journal (via the shared
+  // predicate in data/commands.ts), or the component-local import dialogs — every
+  // other input surface is inert: runCommand refuses (with the reason in the
+  // status line, never silently), the menus won't open, tools won't arm, and the
+  // hotkey layer only lets Esc through to cancel. blockingNow() layers the
+  // component-local dialogs over the state-visible predicate.
+  const blockingNow = (s: EditorState): BlockingOverlay | null => {
+    const block = blockingOverlay(s);
+    if (block) return block;
+    if (importPlan) return { id: 'import-image', label: 'Import Image' };
+    if (importPartOpen) return { id: 'import-part', label: 'Add From Library' };
+    return null;
+  };
+  // Live handle for the once-installed hotkey subscription (fresh closures per render).
+  const blockingNowRef = useRef(blockingNow);
+  blockingNowRef.current = blockingNow;
+  const refuseBlocked = (block: BlockingOverlay) =>
+    setState((prev) => ({ ...prev, status: `resolve ${block.label} first — finish or cancel it before doing anything else` }));
+  /** Wrap a handler so it is inert (with the honest status) while a blocker is open. */
+  const guarded = <A extends unknown[]>(fn: (...a: A) => void) => (...a: A) => {
+    const block = blockingNow(state);
+    if (block) { refuseBlocked(block); return; }
+    fn(...a);
+  };
+
   // The model surface's right-click menu. Lives at the app ROOT (rendered below,
   // as the last child of HW_App) so it lands at the cursor — an absolutely-placed
   // menu positions relative to its parent, and only the root sits at window origin
@@ -141,6 +173,12 @@ export default function AppFrame() {
     setAuthoredPieces(state.authoredBuildPieces);
     saveAuthoredPieces(state.authoredBuildPieces);
   }, [state.authoredBuildPieces]);
+
+  // Publish the LIVE undo/redo depths (model → the host mesh journal via __mesh_history;
+  // world → the real worldUndo/worldRedo stacks) so the Edit-menu rows count-annotate and
+  // gray honestly. Every render is an event edge, so the menus read fresh depths whenever
+  // they can possibly be looked at (req_2620 gap W).
+  publishUndoDepths(undoDepths(state));
 
   const activeCommand = commandById(state.activeCommandId);
   const activeObject = selectedObject(state);
@@ -182,6 +220,13 @@ export default function AppFrame() {
 
   const runCommand = (commandId: string, source: string) => {
     const command = commandById(commandId);
+    // Modal discipline (req_2626 HH): while a blocking session/dialog is unresolved every
+    // command is inert except the one that CLOSES the blocker. The refusal is loud (status
+    // line), never a silent swallow — and never a stacked op over a captured base mesh.
+    {
+      const block = blockingNow(state);
+      if (block && commandId !== block.closerCommandId) { refuseBlocked(block); return; }
+    }
     // Paint resolution (Edit → Mesh → Paint → Paint Resolution): set exact texels/triangle on the
     // viewer. The host clamps dense meshes to the atlas budget; the readout reflects what took.
     if (commandId.startsWith('mesh-paint-res-')) {
@@ -477,32 +522,61 @@ export default function AppFrame() {
       const event = command.id === 'sample-material'
         ? { history: prev.history, redo: prev.redo, seq: prev.seq }
         : pushHistory(prev, command, target, `${source} - ${command.native ? 'native-ready' : 'design-only'}`, editMs);
-      return { ...next, ...event };
+      // Any world slice this command touched becomes a REAL reversible entry
+      // (recordWorldEdit self-no-ops for commands that changed none — req_2620 W).
+      return recordWorldEdit(prev, { ...next, ...event }, command.name.toLowerCase());
     });
+  };
+
+  // ── Real world undo (req_2620 gap W) ─────────────────────────────────────────
+  // Every world-surface mutation records the slices it changed (references — the
+  // immutable-update chain makes an entry cost pointers, not copies) onto a bounded
+  // stack. undoLocal/redoLocal REVERT/REAPPLY those slices. The old shape only
+  // spliced entries out of the 8-deep history FEED — it reverted nothing (the
+  // placebo); the feed is display-only now. NOT covered (host-side, never in
+  // EditorState): map paint strokes and in-viewer mesh edits — mesh docs route to
+  // the host mesh journal instead (meshUndoRedo below).
+  const WORLD_UNDO_CAP = 32;
+  const WORLD_UNDO_KEYS = ['worldPieces', 'objects', 'authoredBuildPieces', 'selectedPieceId', 'selectedObjectId', 'armedPieceId'] as const;
+  const recordWorldEdit = (prev: EditorState, next: EditorState, label: string): EditorState => {
+    const before: WorldUndoSlices = {};
+    const after: WorldUndoSlices = {};
+    let changed = false;
+    for (const k of WORLD_UNDO_KEYS) {
+      if (prev[k] !== next[k]) {
+        (before as Record<string, unknown>)[k] = prev[k];
+        (after as Record<string, unknown>)[k] = next[k];
+        changed = true;
+      }
+    }
+    if (!changed) return next;
+    return { ...next, worldUndo: [{ label, before, after }, ...prev.worldUndo].slice(0, WORLD_UNDO_CAP), worldRedo: [] };
   };
 
   const undoLocal = () => {
     setState((prev) => {
-      const event = prev.history.find((item) => item.undoable);
-      if (!event) return { ...prev, status: 'nothing undoable in local history' };
+      const [entry, ...rest] = prev.worldUndo;
+      if (!entry) return { ...prev, status: 'nothing to undo on the world — piece/slot/object edits are covered; map paint strokes are host-side and not undoable yet' };
       return {
         ...prev,
-        history: prev.history.filter((item) => item.id !== event.id),
-        redo: [event, ...prev.redo].slice(0, 8),
-        status: `undo ${event.verb} - ${event.target}`,
+        ...entry.before,
+        worldUndo: rest,
+        worldRedo: [entry, ...prev.worldRedo].slice(0, WORLD_UNDO_CAP),
+        status: `undid ${entry.label} — restored ${Object.keys(entry.before).join(', ')}`,
       };
     });
   };
 
   const redoLocal = () => {
     setState((prev) => {
-      const [event, ...rest] = prev.redo;
-      if (!event) return { ...prev, status: 'nothing to redo in local history' };
+      const [entry, ...rest] = prev.worldRedo;
+      if (!entry) return { ...prev, status: 'nothing to redo on the world' };
       return {
         ...prev,
-        history: [event, ...prev.history].slice(0, 8),
-        redo: rest,
-        status: `redo ${event.verb} - ${event.target}`,
+        ...entry.after,
+        worldRedo: rest,
+        worldUndo: [entry, ...prev.worldUndo].slice(0, WORLD_UNDO_CAP),
+        status: `redid ${entry.label} — reapplied ${Object.keys(entry.after).join(', ')}`,
       };
     });
   };
@@ -546,13 +620,13 @@ export default function AppFrame() {
       const key = placementSlotKey(placed);
       const kept = prev.worldPieces.filter((p) => placementSlotKey(p) !== key);
       const replaced = kept.length !== prev.worldPieces.length;
-      return {
+      return recordWorldEdit(prev, {
         ...prev,
         seq: prev.seq + 1,
         worldPieces: [...kept, placed],
         selectedPieceId: id,
         status: `${replaced ? 'replaced' : 'placed'} ${piece.pieceId}`,
-      };
+      }, `${replaced ? 'replace' : 'place'} ${piece.pieceId}`);
     });
   };
 
@@ -579,15 +653,15 @@ export default function AppFrame() {
   // the selected placed piece. Authoring data on the piece; the host consumes it
   // in a later world_loader slice (today it persists as intent on the instance).
   const setPieceOverride = (id: string, path: string, value: number | boolean) => {
-    setState((prev) => ({
+    setState((prev) => recordWorldEdit(prev, {
       ...prev,
       worldPieces: prev.worldPieces.map((p) => (p.id === id ? { ...p, overrides: { ...p.overrides, [path]: value } } : p)),
       status: `${path} = ${value}`,
-    }));
+    }, `override ${path}`));
   };
 
   const clearPieceOverride = (id: string, path: string) => {
-    setState((prev) => ({
+    setState((prev) => recordWorldEdit(prev, {
       ...prev,
       worldPieces: prev.worldPieces.map((p) => {
         if (p.id !== id) return p;
@@ -596,7 +670,7 @@ export default function AppFrame() {
         return { ...p, overrides: Object.keys(next).length ? next : undefined };
       }),
       status: `${path} reset to default`,
-    }));
+    }, `clear override ${path}`));
   };
 
   // Material-slot assignment (req_2563 Phase 4): binds the CURRENTLY selected
@@ -605,16 +679,16 @@ export default function AppFrame() {
   const assignPieceSlot = (id: string, role: string) => {
     setState((prev) => {
       const ref: MaterialRef = { assetId: prev.activeAssetId };
-      return {
+      return recordWorldEdit(prev, {
         ...prev,
         worldPieces: prev.worldPieces.map((p) => (p.id === id ? { ...p, slots: { ...p.slots, [role]: ref } } : p)),
         status: `slot ${role} ← ${assetById(prev.activeAssetId, prev.assetOverrides).name}`,
-      };
+      }, `slot ${role}`);
     });
   };
 
   const clearPieceSlot = (id: string, role: string) => {
-    setState((prev) => ({
+    setState((prev) => recordWorldEdit(prev, {
       ...prev,
       worldPieces: prev.worldPieces.map((p) => {
         if (p.id !== id) return p;
@@ -623,7 +697,7 @@ export default function AppFrame() {
         return { ...p, slots: Object.keys(next).length ? next : undefined };
       }),
       status: `slot ${role} cleared`,
-    }));
+    }, `clear slot ${role}`));
   };
 
   const selectContentFolder = (contentFolder: ContentFolderId) => {
@@ -1495,15 +1569,61 @@ export default function AppFrame() {
   stateRef.current = state;
   const runCommandRef = useRef(runCommand);
   runCommandRef.current = runCommand;
-  const { onKeyDown } = useModifiers();
-  useEffect(() => onKeyDown((key, mods) => {
+  // Subscribed DIRECTLY to the __keydown bus and normalized through modifiersFromKeyEvent:
+  // the winning key bridge (useIFTTT's) emits ctrlKey/shiftKey flags with no `mods` object,
+  // so useModifiers.onKeyDown handed every chord all-false modifiers — Ctrl+Z arrived as
+  // bare 'z' and the whole keyboard undo path was dead (req_2620 gap W root cause).
+  useEffect(() => subscribe('__keydown', (e: any) => {
     const s = stateRef.current;
-    // An open menu or modal owns input — don't leak a hotkey to a command behind it (same reason
+    const key = typeof e?.key === 'string' ? e.key : '';
+    if (!key) return;
+    const mods = modifiersFromKeyEvent(e);
+    // An open menu owns input — don't leak a hotkey to a command behind it (same reason
     // overlays block clicks, req_2167).
-    if (s.openMenu || s.newMeshPrompt || s.fileExplorerOpen || s.buildDialogOpen) return;
+    if (s.openMenu) return;
+    // Modal discipline (req_2626 HH): while a blocker is unresolved, Esc CANCELS the
+    // shell-owned dialogs (the viewer-owned sessions handle their own Esc inside
+    // ModelView), and any other command-shaped key gets the honest refusal — not silence.
+    const block = blockingNowRef.current(s);
+    if (block) {
+      if (key === 'escape') {
+        if (block.id === 'new-mesh') setState((prev) => ({ ...prev, newMeshPrompt: null, status: `${prev.newMeshPrompt?.mode === 'add' ? 'add' : 'new'} mesh cancelled` }));
+        else if (block.id === 'file-explorer') setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'file explorer closed' }));
+        else if (block.id === 'build-journal') setState((prev) => ({ ...prev, buildDialogOpen: false, status: 'build journal closed' }));
+        else if (block.id === 'import-image') setImportPlan(null);
+        else if (block.id === 'import-part') setImportPartOpen(false);
+        return;
+      }
+      if (key.length === 1 || ['enter', 'delete', 'backspace', 'tab', 'space'].includes(key)) {
+        setState((prev) => ({ ...prev, status: `resolve ${block.label} first — finish or cancel it before doing anything else` }));
+      }
+      return;
+    }
     const id = commandForKeyEvent(s, key, mods);
     if (id) runCommandRef.current(id, 'hotkey');
   }), []);
+
+  // RJIT_EDKEYS: ';'-separated synthetic key edges driven through the LIVE bridge
+  // (syntheticKeyEdge → __ifttt_onKeyDown), 300ms apart — the headless proof of the
+  // WORLD-surface undo path (`rjit shot editor` + RJIT_EDKEYS="b;ctrl,z"): the world
+  // has no RJIT_MESHOPS host, so this is its gesture harness. Each step logs the
+  // post-dispatch state a beat later (setState flushes between steps). Unset = no-op.
+  useEffect(() => {
+    const script = (globalThis as any).__env_get?.('RJIT_EDKEYS') as string | null | undefined;
+    if (!script) return;
+    const steps = script.split(';').map((sp) => sp.trim()).filter(Boolean);
+    steps.forEach((step, i) => {
+      setTimeout(() => {
+        const parts = step.split(',').map((p) => p.trim()).filter(Boolean);
+        const { sym, mod } = syntheticKeyEdge(parts);
+        console.error(`[edkeys] ${parts.join('+')} (sym=${sym} mod=${mod})`);
+        setTimeout(() => {
+          const s = stateRef.current;
+          console.error(`[edkeys] after ${parts.join('+')} → status="${s.status}" worldUndo=${s.worldUndo.length} worldRedo=${s.worldRedo.length} objects=${s.objects.filter((o) => !o.hidden).length} pieces=${s.worldPieces.length}`);
+        }, 150);
+      }, 800 + i * 300);
+    });
+  }, []);
 
   // Studio colour → brush ink. The viewer owns the live brush; this is the ONE
   // sync point pouring the spine's current colour into a colour-kind ink.
@@ -1695,13 +1815,27 @@ export default function AppFrame() {
       return { ...prev, modelDupes: [...prev.modelDupes, dupe], seq: prev.seq + 1, status: `duplicated ${model.name}` };
     });
 
+  // The ONE outliner handler set (Workspace + Inspector mount the same object). Part
+  // mutations are guarded: they must not fire over an unresolved blocking session
+  // (req_2626 HH — e.g. adding/deleting parts mid loop-cut stacks state on a captured
+  // base mesh). onStampRanges stays unguarded — it's the viewer REPORTING ranges, not input.
+  const outlinerHandlers = {
+    onSelectPart: guarded(selectPart),
+    onToggleVisiblePart: guarded(toggleVisiblePart),
+    onDeletePart: guarded(deletePart),
+    onAddPart: guarded(addPart),
+    onDuplicatePart: guarded((id: string) => duplicatePartById(id, -1)),
+    onImportModel: guarded(() => setImportPartOpen(true)),
+    onStampRanges: stampModelPartRanges,
+  };
+
   return (
     <C.HW_App>
       <RenderProbe id="Chrome">
         <Chrome
           state={state}
           activeCommand={activeCommand}
-          onMenu={(menu) => setState((prev) => ({ ...prev, actionMenu: menu, openMenu: prev.openMenu === menu ? null : menu }))}
+          onMenu={guarded((menu: Menu) => setState((prev) => ({ ...prev, actionMenu: menu, openMenu: prev.openMenu === menu ? null : menu })))}
           onCommand={runCommand}
         />
       </RenderProbe>
@@ -1760,15 +1894,18 @@ export default function AppFrame() {
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
             onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => ({ ...prev, modelTool }))}
             modelContextTrigger={modelMenu.triggerProps}
-            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart, onDuplicatePart: (id: string) => duplicatePartById(id, -1), onImportModel: () => setImportPartOpen(true), onStampRanges: stampModelPartRanges }}
-            onTool={(id) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` }))}
-            onSnap={() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` }))}
-            onFloor={(delta) => setState((prev) => {
+            outlinerHandlers={outlinerHandlers}
+            // Mode row / action-bar controls are guarded (req_2626 HH): arming tools or
+            // flipping view state while a blocking session is unresolved is the exact
+            // "switch up to paint mid loop-cut" the user ruled WRONG.
+            onTool={guarded((id: string) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` })))}
+            onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
+            onFloor={guarded((delta: number) => setState((prev) => {
               const floorIndex = Math.max(0, Math.min(MAX_FLOOR, prev.floorIndex + delta));
               return { ...prev, floorIndex, status: floorIndex === 0 ? 'floor: Ground' : `floor: Floor ${floorIndex}` };
-            })}
-            onWallsDown={() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' }))}
-            onViewMode={(viewMode) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` }))}
+            }))}
+            onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
+            onViewMode={guarded((viewMode: EditorState['viewMode']) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` })))}
             onMapPaint={patchMapPaint}
             paintBar={
               /* The paint controls segment for the ACTION BAR (ToolOptions) — the row the
@@ -1784,7 +1921,7 @@ export default function AppFrame() {
                   onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
                   onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
                   popover={paintPopover}
-                  onToggle={(which) => setPaintPopover((p) => (p === which ? null : which))}
+                  onToggle={guarded((which: PaintPopover) => setPaintPopover((p) => (p === which ? null : which)))}
                   current={state.colorSpineCurrent}
                   palette={state.colorSpinePalette}
                   scenePick={state.colorSpineScenePick}
@@ -1799,10 +1936,12 @@ export default function AppFrame() {
                 />
               ) : null
             }
-            onWorkspaceDocument={selectWorkspaceDocument}
-            onCloseWorkspaceDocument={closeWorkspaceDocument}
+            // Doc switching mid-blocking-session would unmount the surface that owns the
+            // session (loop cut's captured base mesh dies with it) — guarded (req_2626 HH).
+            onWorkspaceDocument={guarded(selectWorkspaceDocument)}
+            onCloseWorkspaceDocument={guarded(closeWorkspaceDocument)}
             onStage={() => runCommand(state.activeCommandId, 'stage')}
-            onContext={() => setState((prev) => ({ ...prev, contextOpen: !prev.contextOpen, openMenu: null, status: prev.contextOpen ? 'context menu closed' : 'context menu opened' }))}
+            onContext={guarded(() => setState((prev) => ({ ...prev, contextOpen: !prev.contextOpen, openMenu: null, status: prev.contextOpen ? 'context menu closed' : 'context menu opened' })))}
             onObject={selectObject}
             onPlacePiece={placePiece}
             onSelectPiece={selectPiece}
@@ -1837,7 +1976,7 @@ export default function AppFrame() {
             onClearPieceOverride={clearPieceOverride}
             onAssignSlot={assignPieceSlot}
             onClearSlot={clearPieceSlot}
-            outlinerHandlers={{ onSelectPart: selectPart, onToggleVisiblePart: toggleVisiblePart, onDeletePart: deletePart, onAddPart: addPart, onDuplicatePart: (id: string) => duplicatePartById(id, -1), onImportModel: () => setImportPartOpen(true), onStampRanges: stampModelPartRanges }}
+            outlinerHandlers={outlinerHandlers}
             colorSpine={{
               onSetCurrent: setColorSpineCurrent,
               onAddToTray: addColorSpineToTray,
@@ -1852,12 +1991,15 @@ export default function AppFrame() {
         <BuildDock
           state={state}
           journal={journal}
-          onBuild={() => setState((prev) => ({ ...prev, buildDialogOpen: true, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: `opened build journal ${journal.activeBuild}` }))}
-          onEventbus={() => setState((prev) => ({ ...prev, eventbusPopoverOpen: !prev.eventbusPopoverOpen, perfPopoverOpen: false, memoryPopoverOpen: false, status: prev.eventbusPopoverOpen ? 'eventbus review closed' : 'eventbus review opened' }))}
-          onUndo={undoLocal}
-          onRedo={redoLocal}
-          onPerf={() => setState((prev) => ({ ...prev, perfPopoverOpen: !prev.perfPopoverOpen, memoryPopoverOpen: false, eventbusPopoverOpen: false, buildDialogOpen: false, status: prev.perfPopoverOpen ? 'performance churn closed' : 'performance churn opened' }))}
-          onMemory={() => setState((prev) => ({ ...prev, memoryPopoverOpen: !prev.memoryPopoverOpen, perfPopoverOpen: false, eventbusPopoverOpen: false, buildDialogOpen: false, status: prev.memoryPopoverOpen ? 'memory accumulation closed' : 'memory accumulation opened' }))}
+          onBuild={guarded(() => setState((prev) => ({ ...prev, buildDialogOpen: true, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: `opened build journal ${journal.activeBuild}` })))}
+          onEventbus={guarded(() => setState((prev) => ({ ...prev, eventbusPopoverOpen: !prev.eventbusPopoverOpen, perfPopoverOpen: false, memoryPopoverOpen: false, status: prev.eventbusPopoverOpen ? 'eventbus review closed' : 'eventbus review opened' })))}
+          // Toolbar undo/redo route EXACTLY like Ctrl+Z — through runCommand, which
+          // sends a model doc to the host mesh journal and the world to the real
+          // world undo stacks (req_2620 W). Never the old feed-splice placebo.
+          onUndo={() => runCommand('undo-local', 'dock')}
+          onRedo={() => runCommand('redo-local', 'dock')}
+          onPerf={guarded(() => setState((prev) => ({ ...prev, perfPopoverOpen: !prev.perfPopoverOpen, memoryPopoverOpen: false, eventbusPopoverOpen: false, buildDialogOpen: false, status: prev.perfPopoverOpen ? 'performance churn closed' : 'performance churn opened' })))}
+          onMemory={guarded(() => setState((prev) => ({ ...prev, memoryPopoverOpen: !prev.memoryPopoverOpen, perfPopoverOpen: false, eventbusPopoverOpen: false, buildDialogOpen: false, status: prev.memoryPopoverOpen ? 'memory accumulation closed' : 'memory accumulation opened' })))}
         />
       </RenderProbe>
       {state.eventbusPopoverOpen ? (

@@ -1,9 +1,10 @@
+import { useEffect, useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { useTelemetry } from '../../../runtime/hooks/useTelemetry';
 import { C, accentFor } from '../workspace.cls';
 import { editTelemetry, formatMs } from '../data/telemetry';
-import { selectedObject } from '../data/content';
-import { formatBytes, formatCount, formatMeters, selectionPosition, snapReadout } from '../data/readouts';
+import { formatBytes, formatCount, formatMeters, selectedPieceReadout } from '../data/readouts';
+import { PIECE_MODULE_METERS } from '../world/pieces';
 import type { BuildJournalSnapshot, EditorState } from '../data/types';
 
 export default function BuildDock({
@@ -26,10 +27,33 @@ export default function BuildDock({
   onMemory: () => void;
 }) {
   const telemetry = editTelemetry(state.history);
-  const undoCount = state.history.filter((event) => event.undoable).length;
-  const activeObject = selectedObject(state);
-  const position = selectionPosition(state, activeObject);
-  const snap = snapReadout(state);
+  // Undo/redo TRUTH (req_2620 gap W): on a model doc the HOST mesh journal's depths
+  // (__mesh_history — polled at 2Hz, because host-native gizmo drags journal without any
+  // React render, so a state mirror would lie); on the world the real worldUndo/worldRedo
+  // stacks. The buttons render faint at zero and the count is always the live journal —
+  // never the old history-FEED length, which reverted nothing.
+  const isModelDoc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId)?.kind === 'model';
+  const [meshDepths, setMeshDepths] = useState({ undo: 0, redo: 0 });
+  useEffect(() => {
+    if (!isModelDoc) return;
+    const read = () => {
+      try {
+        const j = (globalThis as any).__mesh_history?.();
+        if (typeof j === 'string' && j) {
+          const o = JSON.parse(j);
+          const next = { undo: (o.undo ?? 0) | 0, redo: (o.redo ?? 0) | 0 };
+          setMeshDepths((prev) => (prev.undo === next.undo && prev.redo === next.redo ? prev : next));
+        }
+      } catch { /* door missing → honest zeros */ }
+    };
+    read();
+    const t = setInterval(read, 500);
+    return () => clearInterval(t);
+  }, [isModelDoc]);
+  const undoCount = isModelDoc ? meshDepths.undo : state.worldUndo.length;
+  const redoCount = isModelDoc ? meshDepths.redo : state.worldRedo.length;
+  // The SELECTED world piece, or null — the dock shows dashes over phantom zeros.
+  const piece = selectedPieceReadout(state);
   // Real host telemetry — polled at 2Hz (cheap; never per-frame). Empty sources
   // render as 0/— instead of seeded historical data.
   const { value: fps } = useTelemetry({ kind: 'fps', pollMs: 500 });
@@ -50,15 +74,15 @@ export default function BuildDock({
       <C.HW_DockDivider />
       <C.HW_DockGroup>
         <C.HW_DockLabel>POS</C.HW_DockLabel>
-        <C.HW_DockCoord>X {position.x}</C.HW_DockCoord>
-        <C.HW_DockCoord>Y {position.y}</C.HW_DockCoord>
-        <C.HW_DockCoord>Z {position.z}</C.HW_DockCoord>
+        <C.HW_DockCoord>{`X ${piece ? piece.x : '—'}`}</C.HW_DockCoord>
+        <C.HW_DockCoord>{`Y ${piece ? piece.y : '—'}`}</C.HW_DockCoord>
+        <C.HW_DockCoord>{`Z ${piece ? piece.z : '—'}`}</C.HW_DockCoord>
       </C.HW_DockGroup>
       <C.HW_DockGroup>
         <C.HW_DockLabel>GRID</C.HW_DockLabel>
-        <C.HW_DockValue>{formatMeters(snap.gridMeters)}</C.HW_DockValue>
+        <C.HW_DockValue>{formatMeters(PIECE_MODULE_METERS)}</C.HW_DockValue>
         <C.HW_DockLabel>ANG</C.HW_DockLabel>
-        <C.HW_DockValue>{Math.max(0, Math.round(snap.angleDegrees))}deg</C.HW_DockValue>
+        <C.HW_DockValue>{piece ? `${piece.yawDegrees}deg` : '—'}</C.HW_DockValue>
       </C.HW_DockGroup>
       <C.HW_DockDivider />
       <C.HW_DockBuild onPress={onEventbus}>
@@ -66,13 +90,15 @@ export default function BuildDock({
         <C.HW_DockLabel>BUS</C.HW_DockLabel>
         <C.HW_DockValue>{state.history.length}</C.HW_DockValue>
       </C.HW_DockBuild>
-      <C.HW_DockBuild onPress={onUndo} tooltip="Undo">
+      <C.HW_DockBuild onPress={onUndo} tooltip={isModelDoc ? 'Undo (host mesh journal)' : 'Undo (world edits)'}>
         <Icon name="Undo2" size={12} color={accentFor(undoCount > 0 ? 'textSecondary' : 'textFaint')} />
         <C.HW_DockLabel>UNDO</C.HW_DockLabel>
+        <C.HW_DockValue>{undoCount}</C.HW_DockValue>
       </C.HW_DockBuild>
-      <C.HW_DockBuild onPress={onRedo} tooltip="Redo">
-        <Icon name="Redo2" size={12} color={accentFor(state.redo.length > 0 ? 'textSecondary' : 'textFaint')} />
+      <C.HW_DockBuild onPress={onRedo} tooltip={isModelDoc ? 'Redo (host mesh journal)' : 'Redo (world edits)'}>
+        <Icon name="Redo2" size={12} color={accentFor(redoCount > 0 ? 'textSecondary' : 'textFaint')} />
         <C.HW_DockLabel>REDO</C.HW_DockLabel>
+        <C.HW_DockValue>{redoCount}</C.HW_DockValue>
       </C.HW_DockBuild>
       <C.HW_DockGroup>
         <C.HW_DockLabel>AVG</C.HW_DockLabel>

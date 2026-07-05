@@ -12,6 +12,8 @@ import type { OklchColor } from '../../../runtime/paint/colors';
 import type { Brush, BrushTool, Palette } from '../../../runtime/paint/model';
 import type { EditMesh } from '../model/editMesh';
 import type { MapPaintState } from '../stage/mapPaint';
+import type { PlacedPiece } from '../world/pieces';
+import type { AuthoredBuildPiece } from '../world/authoredRegistry';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Window' | 'Help';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
@@ -117,7 +119,14 @@ export type Command = {
 // in editor state so the toolbar + context menu can highlight the active tool.
 // Shapes match modelview's exported ModelToolSnapshot / ModelToolApi (structural).
 export type LightId = 'flat' | 'key' | 'fill' | 'rim';
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean };
+// A BLOCKING session the model viewer owns (req_2626 gap HH — modal discipline).
+// While one is live, every other input surface must be inert until it resolves:
+// 'loop-cut' = the host-side lc_begin…lc_end popup session (captured base mesh),
+// 'paint-atlas' = the Create Paint Atlas prompt, 'face-guard' = the unsafe-face-
+// edit confirmation. Mirrored up through ModelToolSnapshot so the shell's central
+// gate (AppFrame) can see it without owning the session.
+export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession };
 export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
@@ -356,6 +365,17 @@ export type HistoryEvent = {
   richMs?: number;
 };
 
+// ── Real world-surface undo (req_2620 gap W) ──────────────────────────────────
+// One reversible edit over the world surface: the minimal state slices the edit
+// touched, captured before/after (references into the immutable-update chain, so
+// an entry costs pointers, not copies). undoLocal/redoLocal apply these — the
+// history FEED above (HistoryEvent) stays a display feed and is no longer
+// conflated with the undo mechanism. Host-side map paint strokes are NOT covered
+// (they never flow through EditorState); the empty-stack status says so.
+export type WorldUndoSlices = Partial<Pick<EditorState,
+  'worldPieces' | 'objects' | 'authoredBuildPieces' | 'selectedPieceId' | 'selectedObjectId' | 'armedPieceId'>>;
+export type WorldUndoEntry = { label: string; before: WorldUndoSlices; after: WorldUndoSlices };
+
 // The editor's whole authoring state — one plain object threaded through every
 // panel, reduced by AppFrame. (Was `MockState` while the shell was a design
 // mock; it drives the real editor now, so the name reflects that.)
@@ -404,8 +424,6 @@ export type EditorState = {
   search: string;
   surfacePreset: string;
   snapIndex: number;
-  snapGridMeters: number;
-  snapAngleDegrees: number;
   floorIndex: number;
   /** Storey cutaway extra (req_2567): also hide the ACTIVE floor's walls, for
    *  interior editing / prop placement. Floors above are always cut away. */
@@ -421,6 +439,21 @@ export type EditorState = {
   history: HistoryEvent[];
   redo: HistoryEvent[];
   seq: number;
+  // Real world-surface undo/redo stacks (req_2620 gap W; bounded ~32). See
+  // WorldUndoEntry above. `history`/`redo` remain the display FEED only.
+  worldUndo: WorldUndoEntry[];
+  worldRedo: WorldUndoEntry[];
+  // ── The REAL world model (req_2563 Phase 1) — the unified source of truth for
+  // the world surface. `worldPieces` is the authored placed-piece list (was
+  // WorldEditorSurface-local state); `selectedPieceId` is the focused instance
+  // the Inspector edits; `armedPieceId` is the palette piece Build mode drops.
+  // These retire the phantom `objects`/`selectedObjectId` mock for world work.
+  worldPieces: PlacedPiece[];
+  selectedPieceId: string | null;
+  armedPieceId: string | null;
+  // Authored build pieces (req_2578): meshes exported "as a wall piece" (etc.),
+  // placeable alongside the catalog. Persisted; mirrored into authoredRegistry.
+  authoredBuildPieces: AuthoredBuildPiece[];
   objects: WorldObject[];
   assetOverrides: Record<string, AssetOverride>;
   modelOverrides: Record<string, ModelOverride>;

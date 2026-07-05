@@ -46,6 +46,7 @@ import {
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
 import { writeModelArtifacts } from '../data/modelPackageStore';
+import { syntheticKeyEdge } from '../data/keymap';
 
 const host = globalThis as any;
 
@@ -75,7 +76,12 @@ export type ModelViewInitialMesh = {
 // litFlat/Key/Fill: the viewer light-rig switches, mirrored out so the editor's View menu +
 // right-click flyout can host + highlight them.
 export type LightId = 'flat' | 'key' | 'fill';
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean };
+// blocking: the viewer-owned BLOCKING session currently unresolved (req_2626 gap HH —
+// modal discipline): the loop-cut popup session (host-captured base mesh), the Create
+// Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
+// snapshot and holds every other input surface inert until it resolves.
+export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession };
 // The handlers the viewer owns, handed out so an external surface can invoke
 // them. Same functions the floating buttons and hotkeys call — one owner, no
 // split-brain: the shell remote-controls; the viewer stays the source of truth.
@@ -387,6 +393,14 @@ const DEFAULT_FIT = 1024; // the proven painter shipped at 1024²
 // SAME size brush paints finer there — exactly what you want when the strokes need to get small.
 const brushRadius = (size: number) => Math.max(0.5, size / 2);
 
+// Loop-cut popup control grid (req_2626 II): ONE label column (flexes) + fixed-width
+// − / value / + stepper columns. Every row uses these cells, so all controls share a
+// single right edge and per-row baseline — no ad hoc per-control padding.
+const LC_BTN_W = 26;
+const LC_VAL_W = 64;
+const LC_GAP = 6;
+const LC_STEP_W = LC_BTN_W + LC_GAP + LC_VAL_W + LC_GAP + LC_BTN_W; // the stepper zone width
+
 export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, paintTarget }: ModelViewProps = {}) {
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -466,6 +480,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setWire(true);
       setSelInfo(readSelInfo() ?? { mode: 2, verts: 0, edges: 0, sel: 0 });
       setError(null);
+      refreshUvIfLive(); // the op rewrote the atlas layout — the UV panel must follow (req_2625 GG)
     } else {
       setError(fail);
     }
@@ -473,10 +488,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
 
   // Adopt a host op's new mesh key WITHOUT forcing a select mode (append/hide/delete-part just
   // change the resident mesh; they don't imply an edit mode like the topo ops do).
+  // Every adopt re-keys the mesh, which is exactly the "topology/paint layout changed"
+  // signal — the live UV panel refreshes off it (req_2625 GG: no manual refresh click).
   const adoptMesh = (r: TopoResult | null): boolean => {
     if (r?.ok && typeof r.key === 'string' && typeof r.count === 'number') {
       setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
       setSelInfo(readSelInfo() ?? selInfo);
+      refreshUvIfLive();
       return true;
     }
     return false;
@@ -489,20 +507,23 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   };
 
   // ── Face loop cut popup (the studio treatment): direction picks which of the clicked
-  // face's two in-plane axes, cuts 1..64, offset in % of the face's span on that axis
-  // (50 = even slabs). Non-null = a host session is live; every change re-previews.
-  const [lc, setLc] = useState<null | { dir: 0 | 1; cuts: number; offset: number; sizes: [number, number] }>(null);
+  // face's two in-plane axes, cuts 1..64, offset as a fraction of the face's span on that
+  // axis (50% = even slabs). Non-null = a host session is live; every change re-previews.
+  // `unit` (req_2625 EE) picks how the offset cell READS — 'units' (the studio default:
+  // real mesh units along the face's span, from the lc_begin sizes) or 'percent'. The
+  // internal offset stays a percent; the door always takes the 0..1 frac (offset/100).
+  const [lc, setLc] = useState<null | { dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent'; sizes: [number, number] }>(null);
   const openLoopCut = () => {
     const info = meshLcBegin();
     if (!info?.ok) {
       setError('Select a face to loop-cut (face mode)');
       return;
     }
-    const next = { dir: 0 as 0 | 1, cuts: 1, offset: 50, sizes: [info.size0 ?? 0, info.size1 ?? 0] as [number, number] };
+    const next = { dir: 0 as 0 | 1, cuts: 1, offset: 50, unit: 'units' as const, sizes: [info.size0 ?? 0, info.size1 ?? 0] as [number, number] };
     setLc(next);
     adoptMesh(meshLcPreview(next.dir, next.cuts, next.offset / 100));
   };
-  const changeLoopCut = (patch: Partial<{ dir: 0 | 1; cuts: number; offset: number }>) => {
+  const changeLoopCut = (patch: Partial<{ dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent' }>) => {
     if (!lc) return;
     const next = { ...lc, ...patch };
     setLc(next);
@@ -513,6 +534,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     adoptMesh(meshLcEnd(commit));
     setLc(null);
   };
+  // Offset stepping in the CURRENT unit: percent steps 5; size units step 0.1u converted
+  // to the internal percent (clamped 0..100 and kept to 2dp so the cell reads clean).
+  const lcSpan = lc ? (lc.sizes[lc.dir] || 0) : 0;
+  const lcStepOffset = (dir: -1 | 1) => {
+    if (!lc) return;
+    const stepPct = lc.unit === 'percent' ? 5 : (lcSpan > 0 ? Math.max(0.5, (0.1 / lcSpan) * 100) : 5);
+    const next = Math.max(0, Math.min(100, lc.offset + dir * stepPct));
+    changeLoopCut({ offset: Math.round(next * 100) / 100 });
+  };
+  const lcOffsetDisplay = lc
+    ? (lc.unit === 'percent' ? `${Math.round(lc.offset)}` : `${(lcSpan * lc.offset / 100).toFixed(2)}`)
+    : '';
 
   // The outliner part ranges currently resident in the host mesh — the source for
   // meshSetPartRanges. Seeded from initialMesh.partColors on load, maintained through
@@ -658,6 +691,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     uvFileRef.current = path;
     setUvPanel({ src: path, w: o.w, h: o.h, detail: o.detail, note: null });
   };
+  // Refresh the UV/atlas panel when it is LIVE (paint mode + shown) — invoked off every
+  // mesh adopt / topo op and at stroke end, so the panel tracks the real atlas without
+  // the manual refresh click (req_2625 GG). The refresh button stays as a fallback.
+  const refreshUvIfLive = () => { if (paintMode && showUv) buildUvPanel(); };
 
   const enterPaint = () => {
     setFocusMode(false);
@@ -918,9 +955,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setInkWarn(null);
     host.__model_paint_material_clear?.();
   }, [brush.ink]);
+  // The viewer's unresolved BLOCKING session, mirrored up with the tool state so the
+  // shell can enforce modal discipline (req_2626 HH): while one is live, the shell
+  // holds every other input surface inert until the user resolves it HERE.
+  const blocking: ModelBlockingSession = lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill });
-  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking });
+  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking]);
 
   // Viewport hotkeys. In the editor embed (hostChrome) the shell's central keymap owns every tool
   // key (W/P/F/G/S/R/1/2/3 and the topology/face/paint keys the shell adds), dispatching them
@@ -938,10 +979,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       r: () => chooseGizmoTool(2), R: () => chooseGizmoTool(2),
       '1': () => chooseSelMode(1), '2': () => chooseSelMode(2), '3': () => chooseSelMode(3),
     }),
-    delete: () => { if (selMode !== 0) applyTopo(meshDeleteSelection(), 'Nothing selected to delete'); },
-    backspace: () => { if (selMode !== 0) applyTopo(meshDeleteSelection(), 'Nothing selected to delete'); },
-    Escape: () => {
+    // Delete is inert while a blocking session is unresolved (req_2626 HH) — deleting
+    // faces over a loop-cut's captured base mesh is exactly the stacked-state bug.
+    delete: () => { if (blocking) return; if (selMode !== 0) applyTopo(meshDeleteSelection(), 'Nothing selected to delete'); },
+    backspace: () => { if (blocking) return; if (selMode !== 0) applyTopo(meshDeleteSelection(), 'Nothing selected to delete'); },
+    // NOTE: the key name is LOWERCASE 'escape' — the active key bridge (useIFTTT's)
+    // emits lowercase names, so the old 'Escape' binding never fired (dead Esc was
+    // part of the req_2620 undo-path break; same normalization story as keymap.ts).
+    escape: () => {
       if (lc) { closeLoopCut(false); return; } // an open loop-cut popup cancels first
+      if (atlasPrompt) { setAtlasPrompt(false); return; } // the atlas gate cancels next
       if (selMode !== 0) { meshClearSel(); setSelInfo(readSelInfo() ?? selInfo); }
     },
   });
@@ -1203,8 +1250,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'scope') host.__mesh_edit_scope?.(num(a[0]), num(a[1]));
         else if (name === 'nudge') host.__mesh_gizmo_nudge?.(a[0] === 'y' ? 1 : a[0] === 'z' ? 2 : 0, Number(a[1]) || 0);
         else if (name === 'gizmo') chooseGizmoTool(num(a[0]));
-        else if (name === 'undo') adoptMesh(meshUndoDoor()); // adopt like the app's undo — the door returns a NEW mesh key
-        else if (name === 'redo') adoptMesh(meshRedoDoor());
+        // undo/redo adopt like the app's undo (the door returns a NEW mesh key) and LOG the
+        // door result + __mesh_history depths — the headless proof the journal moved.
+        else if (name === 'undo') { const r = meshUndoDoor(); adoptMesh(r); console.error(`[meshops] undo → ${JSON.stringify(r)} history=${host.__mesh_history?.() ?? 'n/a'}`); }
+        else if (name === 'redo') { const r = meshRedoDoor(); adoptMesh(r); console.error(`[meshops] redo → ${JSON.stringify(r)} history=${host.__mesh_history?.() ?? 'n/a'}`); }
+        else if (name === 'history') console.error(`[meshops] history → ${host.__mesh_history?.() ?? 'n/a'}`);
+        // key:z / key:ctrl,z — synthesize a REAL SDL key edge through the live bridge
+        // (__ifttt_onKeyDown, the exact global engine.zig pumps). This drives the FULL
+        // keyboard path headlessly: bridge → __keydown bus → AppFrame's normalized
+        // subscription → keymap chord → runCommand → host door. The repro that proved
+        // Ctrl+Z dead and the fix live (req_2620 gap W).
+        else if (name === 'key') {
+          const parts = a.filter(Boolean);
+          const { sym, mod } = syntheticKeyEdge(parts);
+          console.error(`[meshops] key ${parts.join('+')} → sym=${sym} mod=${mod} history=${host.__mesh_history?.() ?? 'n/a'}`);
+        }
         else if (name === 'del') adoptMesh(meshDeleteSelection());
         else if (name === 'grouppaint') host.__model_paint_group_range?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
         else if (name === 'detail') applyPaintDetail(num(a[0]));
@@ -1296,8 +1356,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             }
             lastPtRef.current = { x, y };
           }}
-          onMouseUp={() => { paintingRef.current = false; lastPtRef.current = null; }}
-          onMouseLeave={() => { paintingRef.current = false; lastPtRef.current = null; }}
+          // Stroke END refreshes the live UV panel (req_2625 GG) — once per stroke, never
+          // per dab (a read+encode per dab would drag the brush).
+          onMouseUp={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) refreshUvIfLive(); }}
+          onMouseLeave={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) refreshUvIfLive(); }}
           onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
         />
@@ -1544,49 +1606,75 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       )}
 
       {/* Loop-cut popup (the studio's Blockbench panel): direction (which in-plane axis),
-          cuts, offset in % of the face's span. Every change re-previews live through the
-          host session; Apply commits one journal entry, ✕ (or Esc) restores the base. */}
+          cuts, offset along the face's span (size units or percent — req_2625 EE). Every
+          change re-previews live through the host session; Apply commits one journal
+          entry, ✕ (or Esc) restores the base.
+          Anchored bottom-center and CLAMPED fully on-screen (req_2625 FF): the wrapper
+          spans the viewport minus an 8px inset so the panel can never hang off an edge.
+          overflow:'hidden' also forces a GPU scissor segment, which lifts the panel above
+          the mesh overlay capsules (capsules flush after rects WITHIN a segment — the
+          same stacking law as req_2618 gap K).
+          Control grid (req_2626 II): one flexing label column + fixed − / value / +
+          stepper columns; every row shares the SAME cell widths, so all controls end on
+          one right edge; the unit toggle and Apply span the stepper zone / full grid. */}
       {lc ? (
-        <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 62, alignItems: 'center' }}>
+        <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 62, alignItems: 'center', overflow: 'hidden' }}>
           <Col
             style={{
-              minWidth: 260, paddingLeft: 14, paddingRight: 14, paddingTop: 12, paddingBottom: 12,
+              width: 300, maxWidth: '100%', paddingLeft: 14, paddingRight: 14, paddingTop: 12, paddingBottom: 12,
               backgroundColor: 'rgba(11,19,32,0.96)', borderWidth: 1, borderColor: '#2c4a6a',
               borderRadius: 8, gap: 8,
             }}
           >
-            <Row style={{ alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700 }}>Loop Cut</Text>
+            <Row style={{ alignItems: 'center' }}>
+              <Text style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700, flexGrow: 1 }}>Loop Cut</Text>
               <Pressable
                 onPress={() => closeLoopCut(false)}
                 tooltip="Cancel (Esc) — restore the uncut mesh"
-                style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
+                style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
               >
                 <Text style={{ color: '#b9c4d4', fontSize: 11 }}>✕</Text>
               </Pressable>
             </Row>
+            {/* Unit toggle — Size Units (studio default) vs Percent. Occupies exactly the
+                stepper zone so its right edge lines up with every stepper below. */}
+            <Row style={{ alignItems: 'center' }}>
+              <Text style={{ color: '#8fa1b8', fontSize: 12, flexGrow: 1 }}>offset units</Text>
+              {(['units', 'percent'] as const).map((u, i) => {
+                const on = lc.unit === u;
+                return (
+                  <Pressable
+                    key={u}
+                    onPress={() => changeLoopCut({ unit: u })}
+                    tooltip={u === 'units' ? 'Offset in mesh size units along the face span' : 'Offset as a percent of the face span'}
+                    style={{ width: (LC_STEP_W - LC_GAP) / 2, marginLeft: i === 0 ? 0 : LC_GAP, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6,
+                      backgroundColor: on ? '#244164' : '#16233aee', borderWidth: 1, borderColor: on ? '#4e75a4' : '#2c4a6a' }}
+                  >
+                    <Text style={{ color: on ? '#e6f1ff' : '#cfe0f5', fontSize: 11, fontWeight: 700 }}>{u === 'units' ? 'Size' : '%'}</Text>
+                  </Pressable>
+                );
+              })}
+            </Row>
             {([
-              { label: 'direction', value: lc.dir, min: 0, max: 1, step: 1, patch: (n: number) => ({ dir: (n ? 1 : 0) as 0 | 1 }) },
-              { label: 'cuts', value: lc.cuts, min: 1, max: 64, step: 1, patch: (n: number) => ({ cuts: n }) },
-              { label: 'offset %', value: lc.offset, min: 0, max: 100, step: 5, patch: (n: number) => ({ offset: n }) },
-            ] as const).map((field) => (
-              <Row key={field.label} style={{ alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <Text style={{ color: '#8fa1b8', fontSize: 12 }}>{field.label}</Text>
-                <Row style={{ alignItems: 'center', gap: 6 }}>
-                  <Pressable
-                    onPress={() => changeLoopCut(field.patch(Math.max(field.min, field.value - field.step)))}
-                    style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
-                  >
-                    <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>−</Text>
-                  </Pressable>
-                  <Text style={{ color: '#e6eefb', fontSize: 12, fontFamily: 'monospace', minWidth: 30, textAlign: 'center' }}>{`${field.value}`}</Text>
-                  <Pressable
-                    onPress={() => changeLoopCut(field.patch(Math.min(field.max, field.value + field.step)))}
-                    style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
-                  >
-                    <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>+</Text>
-                  </Pressable>
-                </Row>
+              { label: 'direction', display: `${lc.dir}`, dec: () => changeLoopCut({ dir: 0 }), inc: () => changeLoopCut({ dir: 1 }) },
+              { label: 'cuts', display: `${lc.cuts}`, dec: () => changeLoopCut({ cuts: Math.max(1, lc.cuts - 1) }), inc: () => changeLoopCut({ cuts: Math.min(64, lc.cuts + 1) }) },
+              { label: lc.unit === 'units' ? `offset (of ${lcSpan.toFixed(2)}u)` : 'offset %', display: lcOffsetDisplay, dec: () => lcStepOffset(-1), inc: () => lcStepOffset(1) },
+            ]).map((field) => (
+              <Row key={field.label} style={{ alignItems: 'center' }}>
+                <Text style={{ color: '#8fa1b8', fontSize: 12, flexGrow: 1 }}>{field.label}</Text>
+                <Pressable
+                  onPress={field.dec}
+                  style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+                >
+                  <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>−</Text>
+                </Pressable>
+                <Text style={{ color: '#e6eefb', fontSize: 12, fontFamily: 'monospace', width: LC_VAL_W, marginLeft: LC_GAP, marginRight: LC_GAP, textAlign: 'center' }}>{field.display}</Text>
+                <Pressable
+                  onPress={field.inc}
+                  style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+                >
+                  <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>+</Text>
+                </Pressable>
               </Row>
             ))}
             <Pressable
@@ -1622,10 +1710,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         </Col>
       ) : null}
 
+      {/* Wrapped in a transparent overflow:'hidden' Box: the scissor push starts a new GPU
+          segment, so the prompt paints ABOVE the mesh overlay capsules (which flush after
+          rects within a segment) — same stacking law as the atlas dialog (req_2618 K).
+          The wrapper (not the panel) carries the overflow because a node's own background
+          rect paints BEFORE the scissor that wraps its children. */}
       {guard?.pending ? (
+        <Box style={{ position: 'absolute', left: 18, bottom: 62, width: 360, overflow: 'hidden' }}>
         <Col
           style={{
-            position: 'absolute', left: 18, bottom: 62, width: 360,
+            width: '100%',
             paddingLeft: 14, paddingRight: 14, paddingTop: 12, paddingBottom: 12,
             backgroundColor: 'rgba(17,20,29,0.96)', borderWidth: 1, borderColor: '#805f3c',
             borderRadius: 8,
@@ -1656,14 +1750,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             </Pressable>
           </Row>
         </Col>
+        </Box>
       ) : null}
 
       {/* Create Paint Atlas — the explicit step between modeling and painting (every paint
           tool has it). Entering paint the first time on a loaded model picks the atlas
           resolution HERE, with the real texture cost shown; options the GPU can't take are
-          disabled (the host clamps regardless — this is the honest preview of that). */}
+          disabled (the host clamps regardless — this is the honest preview of that).
+          overflow:'hidden' on the (transparent) full-viewport wrapper fixes req_2618 gap K:
+          the dialog rendered UNDERNEATH the mesh wireframe overlay because overlay capsules
+          flush AFTER rects within one GPU segment — the scissor push starts a fresh segment,
+          so every dialog rect/glyph now paints above the wireframe. */}
       {atlasPrompt && model && (
-        <Col style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+        <Col style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
           <Col
             style={{
               width: 420, paddingLeft: 16, paddingRight: 16, paddingTop: 14, paddingBottom: 14,

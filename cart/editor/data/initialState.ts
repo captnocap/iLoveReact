@@ -5,6 +5,25 @@ import type { EditorState, ModelToolSnapshot, WorldObject } from './types';
 import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
 import { DEFAULT_BRUSH, defaultPalette } from '../../../runtime/paint/model';
 import { defaultMapPaint } from '../stage/mapPaint';
+import { nsGet, nsSet } from '../../../runtime/hooks/localstore';
+import type { AuthoredBuildPiece } from '../world/authoredRegistry';
+
+// Authored build pieces persist to DISK (localstore) so an export survives a COLD
+// restart, not just a hot reload (req_2594). Metadata only — the geometry is
+// re-resolved from the model store on load (authoredMesh).
+const AUTHORED_STORE = { ns: 'editor', key: 'authoredBuildPieces' };
+export function loadAuthoredPieces(): AuthoredBuildPiece[] {
+  try {
+    const raw = nsGet(AUTHORED_STORE.ns, AUTHORED_STORE.key);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+export function saveAuthoredPieces(list: readonly AuthoredBuildPiece[]): void {
+  try { nsSet(AUTHORED_STORE.ns, AUTHORED_STORE.key, JSON.stringify(list)); } catch { /* non-fatal */ }
+}
 
 export const INITIAL_OBJECTS: WorldObject[] = [
   { id: 'obj-tile', kind: 'TILE', name: 'Selected material', assetId: DEFAULT_ASSET_ID, left: 248, top: 116, width: 78, height: 70, metrics: [] },
@@ -14,7 +33,7 @@ export const INITIAL_OBJECTS: WorldObject[] = [
 // hot-reload reset so the toolbar highlight always matches a clean viewer. A fresh palette
 // per call (defaultPalette()) keeps the recents ring from being shared across resets.
 export function defaultModelTool(): ModelToolSnapshot {
-  return { selMode: 0, gizmoTool: 0, paint: false, focus: false, wire: false, sel: 0, quality: 1, tris: 0, brushTool: 'fill', safety: 0, detail: 1, brush: DEFAULT_BRUSH, palette: defaultPalette(), litFlat: false, litKey: true, litFill: true, litRim: false };
+  return { selMode: 0, gizmoTool: 0, paint: false, focus: false, wire: false, sel: 0, quality: 1, tris: 0, brushTool: 'fill', safety: 0, detail: 1, brush: DEFAULT_BRUSH, palette: defaultPalette(), litFlat: false, litKey: true, litFill: true, litRim: false, blocking: null };
 }
 
 export function initialState(): EditorState {
@@ -55,8 +74,6 @@ export function initialState(): EditorState {
     search: '',
     surfacePreset: 'default',
     snapIndex: 0,
-    snapGridMeters: 0,
-    snapAngleDegrees: 0,
     // FLOORCTL req_2485: the REAL active storey (0 = Ground) — boots aligned
     // with the viewport instead of the old mock's "Floor 1" mismatch.
     floorIndex: 0,
@@ -72,6 +89,14 @@ export function initialState(): EditorState {
     history: [],
     redo: [],
     seq: 1,
+    worldUndo: [],
+    worldRedo: [],
+    worldPieces: [],
+    selectedPieceId: null,
+    // Default armed piece = a concrete floor (the placeholder Place piece the
+    // surface always dropped). The Build bar (Phase 2) overwrites this on pick.
+    armedPieceId: 'floor.concrete.common',
+    authoredBuildPieces: loadAuthoredPieces(),
     objects: INITIAL_OBJECTS,
     assetOverrides: {},
     modelOverrides: {},
