@@ -58,6 +58,7 @@ export function initialState(): EditorState {
     colorSpinePalette: SPINE_DEFAULT_PALETTE.map((c) => ({ ...c })),
     colorSpineScenePick: null,
     buildDialogOpen: false,
+    addChunkOpen: false,
     eventbusPopoverOpen: false,
     perfPopoverOpen: false,
     memoryPopoverOpen: false,

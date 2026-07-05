@@ -84,6 +84,24 @@ export function mapChunkCount(): number {
   return callHost<number>('__map_chunk_count', 0);
 }
 
+/** Whether the host carries the chunk-list door (req_2703) — a hot-reloaded
+ *  bundle on an older binary doesn't; the Add Chunk dialog says so honestly. */
+export function mapChunkListLive(): boolean {
+  return hasHost('__map_chunk_list');
+}
+
+/** Every grown chunk's coords plus the address window — the Add Chunk
+ *  topology dialog's read (req_2703). */
+export function mapChunkList(): { maxCol: number; maxRow: number; chunks: { cx: number; cz: number }[] } {
+  const ab = callHost<ArrayBuffer | null>('__map_chunk_list', null);
+  if (!ab) return { maxCol: 0, maxRow: 0, chunks: [] };
+  const out = new Float32Array(ab);
+  const count = out[2] ?? 0;
+  const chunks: { cx: number; cz: number }[] = [];
+  for (let i = 0; i < count; i += 1) chunks.push({ cx: out[3 + i * 2]!, cz: out[4 + i * 2]! });
+  return { maxCol: out[0] ?? 0, maxRow: out[1] ?? 0, chunks };
+}
+
 /** The in-bounds, unoccupied neighbour slots of (cx,cz) — where "+" grows. */
 export function mapOpenNeighbors(cx: number, cz: number): { cx: number; cz: number }[] {
   const ab = callHost<ArrayBuffer | null>('__map_open_neighbors', null, cx, cz);

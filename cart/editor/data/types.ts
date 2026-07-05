@@ -411,6 +411,8 @@ export type EditorState = {
   colorSpinePalette: OklchColor[];
   colorSpineScenePick: string | null;
   buildDialogOpen: boolean;
+  /** Map → Add Chunk… topology dialog (req_2703) */
+  addChunkOpen: boolean;
   eventbusPopoverOpen: boolean;
   perfPopoverOpen: boolean;
   memoryPopoverOpen: boolean;

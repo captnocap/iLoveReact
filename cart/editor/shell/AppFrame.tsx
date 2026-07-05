@@ -20,6 +20,7 @@ import LibraryPanel from '../library/LibraryPanel';
 import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
 import FileExplorerDialog from '../dialogs/FileExplorerDialog';
+import AddChunkDialog from '../dialogs/AddChunkDialog';
 import ModelContextMenu from '../stage/ModelContextMenu';
 import RenderProbe from '../../../runtime/render_tracker';
 import PlayRoute from '../PlayRoute';
@@ -481,6 +482,12 @@ export default function AppFrame() {
           ? 'file explorer opened on importable models'
           : 'file explorer opened',
       }));
+      return;
+    }
+    if (command.id === 'add-chunk') {
+      // Map → Add Chunk… (req_2703): the 2D chunk-topology dialog; growth runs
+      // through the host doors and the viewport mirrors the new ground live.
+      setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'Map', addChunkOpen: true, status: 'add chunk — press a + at an open edge' }));
       return;
     }
     if (command.id === 'import-model-file') {
@@ -1952,6 +1959,7 @@ export default function AppFrame() {
         if (block.id === 'new-mesh') setState((prev) => ({ ...prev, newMeshPrompt: null, status: `${prev.newMeshPrompt?.mode === 'add' ? 'add' : 'new'} mesh cancelled` }));
         else if (block.id === 'file-explorer') setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'file explorer closed' }));
         else if (block.id === 'build-journal') setState((prev) => ({ ...prev, buildDialogOpen: false, status: 'build journal closed' }));
+        else if (block.id === 'add-chunk') setState((prev) => ({ ...prev, addChunkOpen: false, status: 'add chunk closed' }));
         else if (block.id === 'import-image') setImportPlan(null);
         else if (block.id === 'import-part') setImportPartOpen(false);
         return;
@@ -2524,6 +2532,11 @@ export default function AppFrame() {
           onCancel={() => setState((prev) => ({ ...prev, newMeshPrompt: null, status: `${prev.newMeshPrompt?.mode === 'add' ? 'add' : 'new'} mesh cancelled` }))}
           onAdd={(params) => submitMeshPrompt(state.newMeshPrompt!, params)}
         />
+      ) : null}
+      {state.addChunkOpen ? (
+        <RenderProbe id="Add Chunk Dialog">
+          <AddChunkDialog onClose={() => setState((prev) => ({ ...prev, addChunkOpen: false, status: 'add chunk closed' }))} />
+        </RenderProbe>
       ) : null}
       {state.fileExplorerOpen ? (
         <RenderProbe id="File Explorer Dialog">

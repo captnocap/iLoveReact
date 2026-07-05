@@ -10,6 +10,7 @@
 //!   __map_reset()                              — drop the whole painting
 //!   __map_grow_chunk(cx, cz) -> 0|1
 //!   __map_chunk_count() -> f64
+//!   __map_chunk_list() -> Float32 ArrayBuffer [maxCol, maxRow, count, cx0,cz0, …]
 //!   __map_open_neighbors(cx, cz) -> Float32 ArrayBuffer [count, x0,z0, …]
 //!   __map_set_tool(f32[18])                    — arm channel/tool/brush params
 //!   __map_set_brush_gizmo(index)               — in-world brush gizmo + dab style
@@ -132,6 +133,26 @@ fn hostGrowChunk(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostChunkCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     setReturnF64(info, @floatFromInt(chunks.chunkCount()));
+}
+
+// __map_chunk_list() -> Float32 ArrayBuffer [maxCol, maxRow, count, cx0,cz0, …]
+// — every grown chunk's coords plus the address window, for the Add Chunk
+// topology dialog (req_2703). UI-rate.
+var chunk_list_out: [3 + chunks.SLOT_COUNT * 2]f32 = undefined;
+
+fn hostChunkList(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    chunk_list_out[0] = @floatFromInt(chunks.MAX_CHUNK_COL);
+    chunk_list_out[1] = @floatFromInt(chunks.MAX_CHUNK_ROW);
+    var n: usize = 0;
+    for (chunks.slots()) |maybe| {
+        const ch = maybe orelse continue;
+        chunk_list_out[3 + n * 2] = @floatFromInt(ch.cx);
+        chunk_list_out[4 + n * 2] = @floatFromInt(ch.cz);
+        n += 1;
+    }
+    chunk_list_out[2] = @floatFromInt(n);
+    setReturnF32Buffer(info, chunk_list_out[0 .. 3 + n * 2]);
 }
 
 var neighbors_out: [9]f32 = undefined;
@@ -477,6 +498,7 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_reset", hostReset);
     v8_runtime.registerHostFn("__map_grow_chunk", hostGrowChunk);
     v8_runtime.registerHostFn("__map_chunk_count", hostChunkCount);
+    v8_runtime.registerHostFn("__map_chunk_list", hostChunkList);
     v8_runtime.registerHostFn("__map_open_neighbors", hostOpenNeighbors);
     v8_runtime.registerHostFn("__map_set_tool", hostSetTool);
     v8_runtime.registerHostFn("__map_set_brush_gizmo", hostSetBrushGizmo);

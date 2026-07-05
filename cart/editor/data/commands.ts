@@ -98,6 +98,9 @@ export const COMMANDS: Command[] = [
   { id: 'focus-selection', menu: 'View', name: 'Focus Selection', icon: 'ScanSearch', key: 'F', context: true, native: true, undoable: false, tool: true, scope: 'world' },
 
   // ── Map (world) ───────────────────────────────────────────────────────────────────────────
+  // Grow the world by 120 m chunks from a 2D topology view (req_2703): the dialog
+  // shows the map's chunk occupancy with a "+" on every open edge slot.
+  { id: 'add-chunk', menu: 'Map', name: 'Add Chunk...', icon: 'Grid2x2Plus', key: '', context: false, native: true, undoable: false, scope: 'world' },
   { id: 'add-trigger', menu: 'Map', name: 'Add Trigger Volume', icon: 'BoxSelect', key: 'T', context: true, native: true, undoable: true, tool: true, scope: 'world', available: false },
   { id: 'set-spawn', menu: 'Map', name: 'Set Spawn Point', icon: 'MapPin', key: 'S', context: true, native: true, undoable: true, tool: true, scope: 'world', available: false },
   // FLOORCTL req_2485: steps the REAL active storey (0 = Ground) up, wrapping past the cap.
@@ -180,6 +183,7 @@ export function blockingOverlay(state: EditorState): BlockingOverlay | null {
   if (state.newMeshPrompt) return { id: 'new-mesh', label: state.newMeshPrompt.mode === 'add' ? 'Add Mesh' : 'New Mesh' };
   if (state.fileExplorerOpen) return { id: 'file-explorer', label: 'File Explorer' };
   if (state.buildDialogOpen) return { id: 'build-journal', label: 'Build Journal', closerCommandId: 'toggle-build-journal' };
+  if (state.addChunkOpen) return { id: 'add-chunk', label: 'Add Chunk' };
   return null;
 }
 
@@ -188,9 +192,22 @@ export function blockingOverlay(state: EditorState): BlockingOverlay | null {
 // (__mesh_history — the door cart code never called before this), on the world the real
 // worldUndo/worldRedo stacks. Menus, the dock buttons, and the hotkey gate all read this — a
 // button that would do nothing renders disabled with the reason instead.
-export type UndoDepths = { undo: number; redo: number; source: 'mesh' | 'world' };
+export type UndoDepths = { undo: number; redo: number; source: 'mesh' | 'world' | 'strokes' };
 export function undoDepths(state: EditorState): UndoDepths {
   if (activeSurface(state) === 'model') {
+    // While the paint session is live the STROKE journal is the undo truth (req_2672):
+    // menu rows read "Undo (N strokes)" and an empty journal refuses honestly instead
+    // of silently falling through to the mesh journal.
+    if (state.modelTool.paint) {
+      try {
+        const j = (globalThis as any).__mesh_paint_history?.();
+        if (typeof j === 'string' && j) {
+          const o = JSON.parse(j);
+          return { undo: (o.undo ?? 0) | 0, redo: (o.redo ?? 0) | 0, source: 'strokes' };
+        }
+      } catch { /* door missing/malformed → honest zeros below */ }
+      return { undo: 0, redo: 0, source: 'strokes' };
+    }
     try {
       const j = (globalThis as any).__mesh_history?.();
       if (typeof j === 'string' && j) {
@@ -233,8 +250,8 @@ export function commandEnabled(cmd: Command, state: EditorState): { on: boolean;
       return {
         on: false,
         reason: cmd.id === 'undo-local'
-          ? (d.source === 'mesh' ? 'mesh journal empty' : 'nothing to undo on the world')
-          : (d.source === 'mesh' ? 'nothing to redo in the mesh journal' : 'nothing to redo on the world'),
+          ? (d.source === 'strokes' ? 'nothing to undo in paint' : d.source === 'mesh' ? 'mesh journal empty' : 'nothing to undo on the world')
+          : (d.source === 'strokes' ? 'nothing to redo in paint' : d.source === 'mesh' ? 'nothing to redo in the mesh journal' : 'nothing to redo on the world'),
       };
     }
   }

@@ -23,6 +23,7 @@ const RESET_ON_RELOAD: Partial<EditorState> = {
   presetMenuOpen: false,
   contextOpen: false,
   buildDialogOpen: false,
+  addChunkOpen: false,
   eventbusPopoverOpen: false,
   perfPopoverOpen: false,
   memoryPopoverOpen: false,
