@@ -69,9 +69,12 @@ import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFol
 import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 
 // FLOORCTL req_2485: floorIndex is the world viewport's REAL active storey
-// (0 = Ground) — the action bar's ▼/▲ is the one control. Storeys above this
-// are out of the build envelope for now.
-const MAX_FLOOR = 8;
+// (0 = Ground) — the action bar's ▼/▲ is the one control. 128 storeys
+// (req_2677 — "literal burj khalifa levels of floors"); audited downstream:
+// isoStage.setLevel clamps at ground only, the storey cutaway is an integer
+// filter, and the host validator (build.zig validatePlacement) has no storey
+// cap — floor 128 places at terrainY + 384m and validates clean.
+const MAX_FLOOR = 128;
 
 export default function AppFrame() {
   // The shell for BOTH routes. AppFrame stays mounted across the Editor/Play
@@ -361,14 +364,25 @@ export default function AppFrame() {
     if (command.id === 'undo-local') {
       // On a model document Ctrl+Z drives the HOST mesh journal (geometry, parts,
       // paint colours all restore); the world surface keeps its local history list.
+      // While the PAINT SESSION is live the STROKE journal owns undo (req_2672) — an
+      // empty stroke journal refuses honestly, it never falls through to the mesh
+      // journal (mid-paint mesh mutations are gated anyway).
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
-      if (doc?.kind === 'model') { meshUndoRedo(false); return; }
+      if (doc?.kind === 'model') {
+        if (state.modelTool.paint) { paintUndoRedo(false); return; }
+        meshUndoRedo(false);
+        return;
+      }
       undoLocal();
       return;
     }
     if (command.id === 'redo-local') {
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
-      if (doc?.kind === 'model') { meshUndoRedo(true); return; }
+      if (doc?.kind === 'model') {
+        if (state.modelTool.paint) { paintUndoRedo(true); return; }
+        meshUndoRedo(true);
+        return;
+      }
       redoLocal();
       return;
     }
@@ -1820,6 +1834,26 @@ export default function AppFrame() {
     } else {
       setState((prev) => ({ ...prev, status: `${verb} ${r.label}` }));
     }
+  };
+
+  // ── Paint stroke undo/redo (host stroke journal; req_2672) ────────────────────
+  // Live only while the paint session is on: one unit = one stroke (pointer-down→up,
+  // fills included) or one structural layer op. The host drops/re-appends the unit and
+  // RE-RUNS the stroke program onto the atlas — geometry never changes, so no mesh
+  // adopt/outliner resync rides this path.
+  const paintUndoRedo = (redo: boolean) => {
+    const verb = redo ? 'redo' : 'undo';
+    try {
+      const j = (globalThis as any)[redo ? '__mesh_paint_redo' : '__mesh_paint_undo']?.();
+      if (typeof j === 'string' && j) {
+        const o = JSON.parse(j);
+        if (o?.ok === 1) {
+          setState((prev) => ({ ...prev, status: `${verb} ${o.label || 'stroke'} — ${o.undo | 0} strokes left to undo` }));
+          return;
+        }
+      }
+    } catch { /* malformed door answer reads as empty below */ }
+    setState((prev) => ({ ...prev, status: `nothing to ${verb} in paint — the stroke journal is empty` }));
   };
 
   // Mirror the outliner's parts metadata into the host journal note after EVERY parts
