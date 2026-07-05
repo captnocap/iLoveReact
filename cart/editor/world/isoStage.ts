@@ -24,6 +24,11 @@ const BASE_DIST = 90;          // metres from target at zoom 1 (a chunk is 120m)
 const MIN_ZOOM = 0.12;         // far out — survey a whole district
 const MAX_ZOOM = 10;           // close in — detail a single wall
 export const ISO_PITCH = 35.264; // true isometric elevation: atan(1/sqrt(2))
+// Tilt range (req_2710): low enough to almost level out with the horizon,
+// high enough for a near-plan view — but shy of 90°, where the yaw basis
+// degenerates (the host brush ray bails on a straight-down camera).
+const MIN_PITCH = 12;
+const MAX_PITCH = 80;
 
 // One floor level == one storey == one build-mode wall. This IS the build
 // catalog's WALL_SIZE.heightMeters (HMSC_SCALE.storyHeightMeters = 3) — sourced
@@ -35,6 +40,7 @@ export interface IsoPose {
   centerX: number; // world tile the view orbits over (pan), in tiles
   centerZ: number;
   yaw: number;     // compass rotation in DEGREES — continuous (mouse-drag) + 90° buttons
+  pitch: number;   // elevation above the horizon in DEGREES — tilt between near-level and near-plan
   zoom: number;    // 1 = BASE_DIST; larger = closer
   level: number;   // active floor; clicks land on its slab (>= 0)
 }
@@ -66,7 +72,7 @@ export class IsoStage {
   private sampleHeight: HeightSampler;
 
   constructor(initial?: Partial<IsoPose>, heightAt: HeightSampler = () => 0) {
-    this.pose = { centerX: 0, centerZ: 0, yaw: ISO_YAW_START, zoom: 1, level: 0, ...initial };
+    this.pose = { centerX: 0, centerZ: 0, yaw: ISO_YAW_START, pitch: ISO_PITCH, zoom: 1, level: 0, ...initial };
     this.sampleHeight = heightAt;
   }
 
@@ -95,6 +101,7 @@ export class IsoStage {
       yaw: this.yawDegrees(),
       dist,
       fov: ISO_FOV,
+      pitch: clamp(this.pose.pitch ?? ISO_PITCH, MIN_PITCH, MAX_PITCH),
     });
   }
 
@@ -107,9 +114,15 @@ export class IsoStage {
   }
 
   // Continuous rotate from a mouse drag (degrees). Lets you spin the view to any angle,
-  // not just the four detents — the locked iso pitch keeps the dimetric look.
+  // not just the four detents.
   rotateBy(deltaDegrees: number): void {
     this.pose.yaw += deltaDegrees;
+  }
+
+  // Tilt the view (req_2710): raise toward a plan view or lower toward the
+  // horizon. Clamped so the camera never goes level or straight-down.
+  pitchBy(deltaDegrees: number): void {
+    this.pose.pitch = clamp((this.pose.pitch ?? ISO_PITCH) + deltaDegrees, MIN_PITCH, MAX_PITCH);
   }
 
   zoomBy(factor: number): void {

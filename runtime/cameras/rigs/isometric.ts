@@ -11,6 +11,7 @@ export type IsometricParams = {
   yaw: number; // degrees — the (usually fixed) compass rotation
   dist: number; // long, to flatten perspective
   fov: number; // narrow, to flatten perspective
+  pitch?: number; // degrees above the horizon — omit for the true-iso lock (req_2710)
 };
 
 // True isometric elevation: atan(1/sqrt(2)) ≈ 35.264°.
@@ -21,7 +22,7 @@ export const ISOMETRIC_DEFAULTS: IsometricParams = {
 };
 
 function solve(p: IsometricParams) {
-  return { pos: orbitalEye(p.target, p.yaw, ISO_PITCH, p.dist), target: p.target, fov: p.fov };
+  return { pos: orbitalEye(p.target, p.yaw, p.pitch ?? ISO_PITCH, p.dist), target: p.target, fov: p.fov };
 }
 
 export const Isometric: CameraDef<IsometricParams> = { id: 'Isometric', solve, defaults: ISOMETRIC_DEFAULTS };

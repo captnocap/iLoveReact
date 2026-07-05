@@ -32,7 +32,7 @@ import { isAuthoredPiece, type AuthoredBuildPiece } from './authoredRegistry';
 import { authoredMeshData } from './authoredMesh';
 import { pickBuildPieceHostHit } from '../../../runtime/game/build';
 import { ensureMapSeeded } from '../stage/mapPaint';
-import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
+import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import type { WorldTool } from './worldTool';
 
 /** `model:<modelId>` → the stored model id (the resident-mesh + ref key). */
@@ -44,6 +44,9 @@ function modelIdOf(pieceId: string): string {
 // you're surveying a district or detailing a wall (matches the drag-pan feel). Per ~16ms tick.
 const WASD_KEYS = new Set(['w', 'a', 's', 'd']);
 const WASD_PAN_PER_TICK = 0.02; // × eye→target distance, metres/tick
+
+// ctrl+wheel camera tilt (req_2711), degrees per wheel notch.
+const WHEEL_PITCH_STEP_DEG = 3;
 
 const g: any = globalThis;
 
@@ -362,34 +365,41 @@ export default function WorldViewport(props: {
     // loop tears down only on real disarm/tool change — not on every unrelated re-render.
   }, [armedHover, resolveSnap]);
 
-  // ── input: middle-drag rotates (matching the mesh studio — req_2704),
-  // shift-drag grabs the map, wheel zooms to the cursor, a click (no travel)
-  // places the armed piece. Paint clicks never reach here — the host claims
-  // LEFT while the paint tool is armed, which is exactly why the rotate lives
-  // on MIDDLE: you can orbit mid-painting without disarming the brush.
+  // ── input: middle-drag orbits — x-travel spins the yaw, y-travel tilts the
+  // pitch (req_2710) — shift-drag grabs the map, wheel zooms to the cursor
+  // (ctrl+wheel tilts instead), a click (no travel) places the armed piece.
+  // Paint clicks never reach here — the host claims LEFT while the paint tool
+  // is armed, which is exactly why the orbit lives on MIDDLE: you can orbit
+  // mid-painting without disarming the brush.
   //
   // The engine dispatches middle only as a one-shot onMiddleClick (the JS
   // capture pipeline is LEFT-only), so the drag is a self-terminating ~16ms
-  // poll (the panStep shape): rotate by the cursor's x-travel until the host's
+  // poll (the panStep shape): orbit by the cursor's travel until the host's
   // getMouseButtons() mask says the middle button lifted.
   const MMB_MASK = 2; // SDL button mask bit for the middle button
+  const ORBIT_YAW_PER_PX = 0.3;
+  const ORBIT_PITCH_PER_PX = 0.25; // drag down = lower toward the horizon
   const orbitTimerRef = useRef<any>(null);
-  const orbitLastXRef = useRef(0);
+  const orbitLastRef = useRef({ x: 0, y: 0 });
   const orbitStep = useCallback(() => {
     const held = (Number(g.getMouseButtons?.() ?? 0) & MMB_MASK) !== 0;
     if (!held) { orbitTimerRef.current = null; return; }
-    const x = Number(g.getMouseX?.() ?? orbitLastXRef.current);
-    const dx = x - orbitLastXRef.current;
-    if (dx) {
-      orbitLastXRef.current = x;
-      stage.rotateBy(dx * 0.3);
+    const last = orbitLastRef.current;
+    const x = Number(g.getMouseX?.() ?? last.x);
+    const y = Number(g.getMouseY?.() ?? last.y);
+    const dx = x - last.x;
+    const dy = y - last.y;
+    if (dx || dy) {
+      orbitLastRef.current = { x, y };
+      if (dx) stage.rotateBy(dx * ORBIT_YAW_PER_PX);
+      if (dy) stage.pitchBy(-dy * ORBIT_PITCH_PER_PX);
       pushCamera();
       reprojectOverlays();
     }
     orbitTimerRef.current = setTimeout(orbitStep, 16);
   }, [stage, pushCamera, reprojectOverlays]);
   const onMiddleDown = useCallback(() => {
-    orbitLastXRef.current = Number(g.getMouseX?.() ?? 0);
+    orbitLastRef.current = { x: Number(g.getMouseX?.() ?? 0), y: Number(g.getMouseY?.() ?? 0) };
     if (!orbitTimerRef.current) orbitTimerRef.current = setTimeout(orbitStep, 16);
   }, [orbitStep]);
   useEffect(() => () => {
@@ -475,7 +485,13 @@ export default function WorldViewport(props: {
     const r = rectRef.current;
     const mx = Number(g.getMouseX?.() ?? (r.x + r.width / 2));
     const my = Number(g.getMouseY?.() ?? (r.y + r.height / 2));
-    stage.zoomToCursor(mx - r.x, my - r.y, dy > 0 ? 1.15 : 1 / 1.15, r);
+    if (currentModifiers().ctrl) {
+      // ctrl+wheel tilts (req_2711): wheel up climbs toward a plan view,
+      // wheel down levels toward the horizon. Zoom stays untouched.
+      stage.pitchBy(dy > 0 ? -WHEEL_PITCH_STEP_DEG : WHEEL_PITCH_STEP_DEG);
+    } else {
+      stage.zoomToCursor(mx - r.x, my - r.y, dy > 0 ? 1.15 : 1 / 1.15, r);
+    }
     pushCamera();
     // The ghost outline is a render-time projection through this stage. Rotate
     // and pan refresh it via onMove's setSnap, but a wheel zoom moves the camera
