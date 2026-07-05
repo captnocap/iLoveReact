@@ -7,6 +7,7 @@
 // Save-BACK (req_2531): loading a variant makes it the ACTIVE painting, and Save then writes
 // BACK to it (update-in-place) instead of forking a new one. A separate "New" always forks.
 import { useState } from 'react';
+import { ScrollView } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { listPaintVariants, savePaintVariant, updatePaintVariant, removePaintVariant } from '../data/paintVariants';
@@ -14,6 +15,18 @@ import { writeModelArtifacts } from '../data/modelPackageStore';
 import type { ModelPackage } from '../data/types';
 
 const host = globalThis as any;
+
+// The section's space budget inside the FIXED focus panel (req_2627): the
+// variant list is a bounded nested scroll — at most this many rows tall, the
+// list scrolls inside its slice instead of stretching the panel.
+const VARIANT_ROW_HEIGHT = 34; // HW_ModelAtlasCard height
+const VARIANT_ROW_GAP = 4;
+const VARIANT_ROWS_VISIBLE = 4;
+
+function variantListHeight(count: number): number {
+  const rows = Math.min(count, VARIANT_ROWS_VISIBLE);
+  return rows * VARIANT_ROW_HEIGHT + Math.max(0, rows - 1) * VARIANT_ROW_GAP;
+}
 
 export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
   const [rev, setRev] = useState(0);
@@ -80,55 +93,71 @@ export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
     refresh();
   };
 
+  // The fixed-region grid layout (req_2627 / req_2626 II): the section header
+  // row carries the TITLE only (single line, never wraps); the save verbs live
+  // on their own VERB ROW below it — a primary action flexing to the section's
+  // one right edge plus a fixed "New" column. Button labels are single-line by
+  // law; a long variant name truncates loudly (the tooltip carries it in full).
   return (
     <C.HW_ModelSection>
       <C.HW_ModelSectionHead>
         <Icon name="Brush" size={12} color={accentFor('primary')} />
         <C.HW_GroupText>PAINT VARIANTS</C.HW_GroupText>
         <C.HW_Spacer />
+        <C.HW_KeyText>{String(variants.length)}</C.HW_KeyText>
+      </C.HW_ModelSectionHead>
+
+      <C.HW_VerbRow>
         {activeVariant ? (
           <>
-            <C.HW_Pill tooltip={`Save back to ${activeVariant.name}`} onPress={saveBack}>
+            <C.HW_VerbPrimary tooltip={`Save back to ${activeVariant.name}`} onPress={saveBack}>
               <Icon name="Save" size={11} color={accentFor('primary')} />
-              <C.HW_PillText>Update {activeVariant.name}</C.HW_PillText>
-            </C.HW_Pill>
-            <C.HW_Pill tooltip="Save the current painting as a NEW variant" onPress={saveNew}>
+              <C.HW_VerbText>{`Update ${activeVariant.name}`}</C.HW_VerbText>
+            </C.HW_VerbPrimary>
+            <C.HW_VerbFixed tooltip="Save the current painting as a NEW variant" onPress={saveNew}>
               <Icon name="Plus" size={11} color={accentFor('textDim')} />
-              <C.HW_PillText>New</C.HW_PillText>
-            </C.HW_Pill>
+              <C.HW_VerbText>New</C.HW_VerbText>
+            </C.HW_VerbFixed>
           </>
         ) : (
-          <C.HW_Pill tooltip="Save the model's current painting as a variant" onPress={saveNew}>
+          <C.HW_VerbPrimary tooltip="Save the model's current painting as a variant" onPress={saveNew}>
             <Icon name="Save" size={11} color={accentFor('primary')} />
-            <C.HW_PillText>Save</C.HW_PillText>
-          </C.HW_Pill>
+            <C.HW_VerbText>Save Painting</C.HW_VerbText>
+          </C.HW_VerbPrimary>
         )}
-      </C.HW_ModelSectionHead>
+      </C.HW_VerbRow>
 
       {variants.length === 0 ? (
         <C.HW_ToolHint>No paintings saved yet — paint the model, then Save to keep this look as a variant.</C.HW_ToolHint>
       ) : (
-        variants.map((v) => (
-          <C.HW_ModelAtlasCard key={v.id}>
-            <C.HW_ModelCardMain>
-              <C.HW_MaterialTitleRow>
-                <C.HW_ToolValue>{v.name}</C.HW_ToolValue>
-                {v.id === activeId ? <C.HW_MaterialStat style={{ color: accentFor('primary') }}>editing</C.HW_MaterialStat> : null}
-                <C.HW_Spacer />
-                <C.HW_MaterialStat>{v.detail <= 1 ? 'fill' : `${v.detail}px`}</C.HW_MaterialStat>
-              </C.HW_MaterialTitleRow>
-              <C.HW_ModelMetaRow>
-                <C.HW_MaterialStat>{v.w}×{v.h}</C.HW_MaterialStat>
-              </C.HW_ModelMetaRow>
-            </C.HW_ModelCardMain>
-            <C.HW_IconButton tooltip={`Load ${v.name} onto the model (Save then updates it)`} onPress={() => onLoad(v.id)}>
-              <Icon name="CornerDownLeft" size={13} color={accentFor('primary')} />
-            </C.HW_IconButton>
-            <C.HW_IconButton tooltip={`Delete ${v.name}`} onPress={() => onDelete(v.id)}>
-              <Icon name="Trash2" size={13} color={accentFor('textDim')} />
-            </C.HW_IconButton>
-          </C.HW_ModelAtlasCard>
-        ))
+        /* Bounded NESTED scroll (req_2627): the list scrolls inside its fixed
+           slice of the panel; explicit height per the layout rules. */
+        <ScrollView
+          style={{ height: variantListHeight(variants.length) }}
+          contentContainerStyle={{ flexDirection: 'column', gap: VARIANT_ROW_GAP }}
+        >
+          {variants.map((v) => (
+            <C.HW_ModelAtlasCard key={v.id}>
+              <C.HW_ModelCardMain>
+                <C.HW_MaterialTitleRow>
+                  <C.HW_ToolValue>{v.name}</C.HW_ToolValue>
+                  {v.id === activeId ? <C.HW_MaterialStat style={{ color: accentFor('primary') }}>editing</C.HW_MaterialStat> : null}
+                  <C.HW_Spacer />
+                  <C.HW_MaterialStat>{v.detail <= 1 ? 'fill' : `${v.detail}px`}</C.HW_MaterialStat>
+                </C.HW_MaterialTitleRow>
+                <C.HW_ModelMetaRow>
+                  <C.HW_MaterialStat>{`${v.w}×${v.h}`}</C.HW_MaterialStat>
+                </C.HW_ModelMetaRow>
+              </C.HW_ModelCardMain>
+              <C.HW_IconMiniButton tooltip={`Load ${v.name} onto the model (Save then updates it)`} onPress={() => onLoad(v.id)}>
+                <Icon name="CornerDownLeft" size={13} color={accentFor('primary')} />
+              </C.HW_IconMiniButton>
+              <C.HW_IconMiniButton tooltip={`Delete ${v.name}`} onPress={() => onDelete(v.id)}>
+                <Icon name="Trash2" size={13} color={accentFor('textDim')} />
+              </C.HW_IconMiniButton>
+            </C.HW_ModelAtlasCard>
+          ))}
+        </ScrollView>
       )}
 
       {note ? <C.HW_ToolHint>{note}</C.HW_ToolHint> : null}

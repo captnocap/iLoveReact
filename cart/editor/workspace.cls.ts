@@ -1,5 +1,9 @@
 import { classifier, classifiers as C, getColors, setStyleTokens, setTokens } from '../../runtime/classifier';
 import { EDITOR_COLORS, EDITOR_STYLES } from './theme';
+// The fixed-region layout contract (req_2627): every region dimension below
+// (chrome/action bar/content browser/focus panel/status bar) comes from
+// REGIONS — one source of truth, imported by panel content too.
+import { REGIONS } from './shell/regions';
 
 setTokens(EDITOR_COLORS);
 setStyleTokens(EDITOR_STYLES);
@@ -14,7 +18,7 @@ classifier({
   HW_App: { type: 'Box', style: { width: '100%', height: '100%', flexDirection: 'column', position: 'relative', backgroundColor: 'theme:bg', overflow: 'hidden' } },
   // paddingRight reserves room for the floating RouteToggle (Editor/Play), which is
   // position:absolute at right:10 over the top strip — keeps Compile from being smothered.
-  HW_Chrome: { type: 'Box', style: { height: 37, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
+  HW_Chrome: { type: 'Box', style: { height: REGIONS.chrome.height, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_Brand: { type: 'Box', style: { width: 136, height: '100%', flexDirection: 'row', alignItems: 'center', gap: 7, borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:borderSoft' } },
   HW_BrandText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 2 } },
   HW_MenuBar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 2, height: '100%' } },
@@ -25,10 +29,12 @@ classifier({
   HW_Spacer: { type: 'Box', style: { flexGrow: 1, minWidth: 0 } },
   HW_Pill: { type: 'Pressable', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
   HW_PillOn: { type: 'Pressable', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 9, paddingRight: 9, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
-  HW_PillText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 700 } },
-  HW_PillTextOn: { type: 'Text', fontSize: 10, color: 'theme:segActiveText', style: { fontFamily: MONO, fontWeight: 800 } },
+  // Button labels NEVER wrap (req_2626 II) — truncate loudly instead.
+  HW_PillText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
+  HW_PillTextOn: { type: 'Text', fontSize: 10, color: 'theme:segActiveText', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
   HW_Compile: { type: 'Pressable', style: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 12, paddingRight: 12, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:compileBg' }, hoverStyle: { backgroundColor: 'theme:compileBgHover' } },
-  HW_BuildDock: { type: 'Box', style: { height: 31, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border' } },
+  // STATUS BAR region (req_2627): the bottom dock IS the status bar.
+  HW_BuildDock: { type: 'Box', style: { height: REGIONS.statusBar.height, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border' } },
   HW_DockBuild: { type: 'Pressable', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_DockGroup: { type: 'Box', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 7 } },
   HW_DockDivider: { type: 'Box', style: { width: 1, height: 18, backgroundColor: 'theme:borderSoft' } },
@@ -68,7 +74,7 @@ classifier({
   HW_EventSummary: { type: 'Box', style: { height: 33, flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 12, paddingRight: 12, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' } },
   HW_DockHistoryRows: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', paddingTop: 6, paddingBottom: 6, overflow: 'scroll' } },
   HW_DockHistoryRow: { type: 'Box', style: { height: 24, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' } },
-  HW_DialogScrim: { type: 'Box', blocksPointerEvents: true, style: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 31, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.48)' } },
+  HW_DialogScrim: { type: 'Box', blocksPointerEvents: true, style: { position: 'absolute', left: 0, right: 0, top: 0, bottom: REGIONS.statusBar.height, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.48)' } },
   HW_BuildDialog: { type: 'Box', style: { width: 900, height: 620, flexDirection: 'column', borderRadius: 'theme:radiusLg', backgroundColor: 'theme:bgAlt', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', overflow: 'hidden' } },
   HW_DialogHead: { type: 'Box', style: { height: 42, flexDirection: 'row', alignItems: 'center', gap: 9, paddingLeft: 12, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_DialogBody: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', padding: 12, gap: 10 } },
@@ -84,12 +90,13 @@ classifier({
   HW_Body: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'row' } },
   // /play body — fills the space under the persistent chrome, hosts the WorldLoader.
   HW_PlayBody: { type: 'Box', style: { flexGrow: 1, minHeight: 0, position: 'relative' } },
-  HW_LeftRail: { type: 'Box', style: { width: 48, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, paddingBottom: 8, backgroundColor: 'theme:surface', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
+  HW_LeftRail: { type: 'Box', style: { width: REGIONS.leftRail.width, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, paddingBottom: 8, backgroundColor: 'theme:surface', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
   HW_RailButton: { type: 'Pressable', style: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusLg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_RailButtonOn: { type: 'Pressable', style: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
-  HW_SidePanel: { type: 'Box', style: { width: 350, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bgAlt', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
+  // CONTENT BROWSER region (req_2627): fixed left panel.
+  HW_SidePanel: { type: 'Box', style: { width: REGIONS.contentBrowser.width, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bgAlt', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
   HW_PanelHead: { type: 'Box', style: { height: 30, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 12, paddingRight: 10, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
-  HW_Kicker: { type: 'Text', fontSize: 9, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 1.5 } },
+  HW_Kicker: { type: 'Text', fontSize: 9, color: 'theme:textFaint', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 1.5 } },
   HW_HeadTitle: { type: 'Text', fontSize: 12, color: 'theme:text', style: { fontWeight: 800 } },
   HW_Search: { type: 'TextInput', style: { height: 25, marginLeft: 10, marginRight: 10, marginTop: 7, marginBottom: 5, paddingLeft: 9, paddingRight: 8, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg', color: 'theme:textSecondary', fontSize: 11 } },
   HW_ContentTree: { type: 'Box', style: { flexGrow: 1, flexShrink: 1, minHeight: 0, flexDirection: 'column', paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 3, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border', overflow: 'scroll' } },
@@ -135,6 +142,14 @@ classifier({
   HW_ModelSectionHead: { type: 'Box', style: { height: 17, flexDirection: 'row', alignItems: 'center', gap: 6 } },
   HW_ModelDataRow: { type: 'Pressable', style: { height: 19, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_ModelAtlasCard: { type: 'Pressable', style: { height: 34, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 7, paddingRight: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
+  // ── The VERB ROW (req_2626 II / req_2627): a section's actions live on their
+  // own fixed-height row on the shared column grid — a primary verb that flexes
+  // to the section's ONE right edge plus fixed-width secondary columns. Labels
+  // are single-line by law (truncate loudly, never wrap, never squeeze).
+  HW_VerbRow: { type: 'Box', style: { height: REGIONS.grid.verbRowHeight, flexDirection: 'row', alignItems: 'center', gap: 6 } },
+  HW_VerbPrimary: { type: 'Pressable', style: { flexGrow: 1, minWidth: 0, height: REGIONS.grid.verbHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_VerbFixed: { type: 'Pressable', style: { width: REGIONS.grid.verbColWidth, height: REGIONS.grid.verbHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
+  HW_VerbText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
   HW_MaterialGrid: { type: 'Box', style: { height: 284, flexShrink: 0, flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start', justifyContent: 'space-between', gap: 4, paddingLeft: 10, paddingRight: 10, paddingBottom: 4, overflow: 'hidden' } },
   HW_MaterialTile: { type: 'Pressable', style: { width: 68, height: 68, position: 'relative', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:cardBg', overflow: 'hidden' }, hoverStyle: { borderColor: 'theme:textDim' } },
   HW_MaterialTileOn: { type: 'Pressable', style: { width: 68, height: 68, position: 'relative', borderRadius: 'theme:radiusMd', borderWidth: 2, borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg', overflow: 'hidden' } },
@@ -151,7 +166,7 @@ classifier({
   HW_MaterialSwatch: { type: 'Box', style: { width: 43, height: 50, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
   HW_MaterialInfo: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 3 } },
   HW_MaterialTitleRow: { type: 'Box', style: { height: 15, flexDirection: 'row', alignItems: 'center', gap: 6 } },
-  HW_MaterialName: { type: 'Text', fontSize: 11, color: 'theme:text', style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_MaterialName: { type: 'Text', fontSize: 11, color: 'theme:text', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900 } },
   HW_MaterialStatsRow: { type: 'Box', style: { height: 11, flexDirection: 'row', gap: 8, alignItems: 'center' } },
   HW_MaterialStat: { type: 'Text', fontSize: 8, color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 700 } },
   HW_VariantStrip: { type: 'Box', style: { flexDirection: 'row', gap: 5 } },
@@ -173,21 +188,22 @@ classifier({
   HW_SelectedVariant: { type: 'Pressable', style: { flexGrow: 1, height: 49, alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' }, hoverStyle: { borderColor: 'theme:primary' } },
   HW_SelectedVariantSwatch: { type: 'Box', style: { width: 43, height: 17, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' } },
   HW_ToolRow: { type: 'Box', style: { minHeight: 21, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12 } },
-  HW_ToolLabel: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO, minWidth: 74 } },
-  HW_ToolValue: { type: 'Text', fontSize: 10, color: 'theme:text', style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_ToolLabel: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, minWidth: 74 } },
+  HW_ToolValue: { type: 'Text', fontSize: 10, color: 'theme:text', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
   HW_ToolHint: { type: 'Text', fontSize: 8, color: 'theme:textFaint', style: { fontFamily: MONO } },
   HW_MiniBar: { type: 'Box', style: { flexGrow: 1, height: 4, backgroundColor: 'theme:track', borderRadius: 2, overflow: 'hidden' } },
   HW_MiniFill: { type: 'Box', style: { height: '100%', backgroundColor: 'theme:primary', borderRadius: 2 } },
   HW_ChipRow: { type: 'Box', style: { flexDirection: 'row', gap: 4, flexWrap: 'wrap' } },
   HW_Group: { type: 'Box', style: { borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:borderSoft', paddingTop: 8, paddingBottom: 8 } },
   HW_GroupTitle: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, paddingRight: 12, marginBottom: 7 } },
-  HW_GroupText: { type: 'Text', fontSize: 10, color: 'theme:primary', style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 1.1 } },
+  HW_GroupText: { type: 'Text', fontSize: 10, color: 'theme:primary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 1.1 } },
   HW_MemoryRow: { type: 'Pressable', style: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 24, paddingLeft: 12, paddingRight: 12 }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_MemoryLabel: { type: 'Text', fontSize: 10, color: 'theme:textDim', style: { fontFamily: MONO, minWidth: 72 } },
   HW_MemoryValue: { type: 'Text', fontSize: 11, color: 'theme:text', style: { fontWeight: 700 } },
 
   HW_Workspace: { type: 'Box', style: { flexGrow: 1, minWidth: 0, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bg' } },
-  HW_ToolOptions: { type: 'Box', style: { height: 36, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
+  // ACTION BAR region (req_2627): THE toolbar row.
+  HW_ToolOptions: { type: 'Box', style: { height: REGIONS.actionBar.height, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_IconButton: { type: 'Pressable', style: { width: 28, height: 26, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusLg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_IconButtonOn: { type: 'Pressable', style: { width: 30, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
   HW_OptionDivider: { type: 'Box', style: { width: 1, height: 21, backgroundColor: 'theme:border' } },
@@ -202,6 +218,21 @@ classifier({
   HW_TileSwatch: { type: 'Box', style: { width: 12, height: 12, borderRadius: 3, borderWidth: 'theme:borderThin', borderColor: 'theme:border' } },
   HW_SwatchButton: { type: 'Pressable', style: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft', backgroundColor: 'theme:controlBg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover', borderColor: 'theme:textDim' } },
   HW_SwatchButtonOn: { type: 'Pressable', style: { width: 26, height: 26, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
+  // ── Sims-style build bar (req_2563): the piece palette pinned to the bottom of
+  // the world viewport in Build mode. A category header row swaps which pieces
+  // show; a wrapping tray of piece cards below it arms the picked piece.
+  HW_BuildBar: { type: 'Box', style: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'column', gap: 6, paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 8, backgroundColor: '#0b1119f2', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border' } },
+  HW_BuildBarRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 5 } },
+  HW_BuildCat: { type: 'Pressable', style: { height: 22, flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
+  HW_BuildCatOn: { type: 'Pressable', style: { height: 22, flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
+  HW_BuildCatText: { type: 'Text', fontSize: 9, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 0.6 } },
+  HW_BuildCatTextOn: { type: 'Text', fontSize: 9, color: 'theme:segActiveText', style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 0.6 } },
+  HW_BuildCatCount: { type: 'Text', fontSize: 8, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_BuildPiece: { type: 'Pressable', style: { height: 34, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 7, paddingRight: 11, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft' }, hoverStyle: { backgroundColor: 'theme:surfaceHover', borderColor: 'theme:textDim' } },
+  HW_BuildPieceOn: { type: 'Pressable', style: { height: 34, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 7, paddingRight: 11, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
+  HW_BuildPieceChip: { type: 'Box', style: { width: 16, height: 16, borderRadius: 'theme:radiusSm', borderWidth: 'theme:borderThin', borderColor: 'theme:border' } },
+  HW_BuildPieceLabel: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 700 } },
+  HW_BuildPieceLabelOn: { type: 'Text', fontSize: 10, color: 'theme:segActiveText', style: { fontFamily: MONO, fontWeight: 800 } },
   HW_StageTabStrip: { type: 'Box', style: { height: 31, flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 8, paddingRight: 8, backgroundColor: 'theme:surface', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', overflow: 'hidden' } },
   HW_StageWorldTab: { type: 'Pressable', style: { width: 32, height: 25, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft', backgroundColor: 'theme:controlBg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover', borderColor: 'theme:textDim' } },
   HW_StageWorldTabOn: { type: 'Pressable', style: { width: 32, height: 25, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },
@@ -389,10 +420,14 @@ classifier({
   HW_StatusBar: { type: 'Box', style: { height: 28, flexDirection: 'row', alignItems: 'center', gap: 12, paddingLeft: 10, paddingRight: 10, backgroundColor: 'theme:surface', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border' } },
   HW_StatusText: { type: 'Text', fontSize: 10, color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 700 } },
 
-  HW_RightPanel: { type: 'Box', style: { width: 326, height: '100%', flexDirection: 'row', backgroundColor: 'theme:bgAlt', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
+  // FOCUS PANEL region (req_2627): fixed right panel = inspector column + pane rail.
+  HW_RightPanel: { type: 'Box', style: { width: REGIONS.focusPanel.width, height: '100%', flexDirection: 'row', backgroundColor: 'theme:bgAlt', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
   HW_Inspector: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column' } },
   HW_InspectorBody: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', gap: 5, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8, overflow: 'scroll' } },
-  HW_RightRail: { type: 'Box', style: { width: 40, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, backgroundColor: 'theme:surface', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
+  // The no-whole-panel-scroll body (req_2627): sections inside are budgeted
+  // slices with their OWN bounded nested scrolls; the panel itself never scrolls.
+  HW_InspectorBodyFixed: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', gap: 5, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8, overflow: 'hidden' } },
+  HW_RightRail: { type: 'Box', style: { width: REGIONS.focusPanel.railWidth, height: '100%', alignItems: 'center', gap: 7, paddingTop: 8, backgroundColor: 'theme:surface', borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:border' } },
   HW_ObjectHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_Tag: { type: 'Box', style: { paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:success' } },
   HW_TagText: { type: 'Text', fontSize: 8, color: '#061015', style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 1 } },
@@ -405,12 +440,33 @@ classifier({
   HW_Section: { type: 'Box', style: { borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:borderSoft', paddingTop: 8, paddingBottom: 8 } },
   HW_SectionHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, paddingRight: 12, marginBottom: 5 } },
   HW_AccentBar: { type: 'Box', style: { width: 3, height: 12, backgroundColor: 'theme:primary' } },
-  HW_SectionTitle: { type: 'Text', fontSize: 10, color: 'theme:primary', style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 1.2 } },
+  // Section headers sit on the grid and NEVER wrap (req_2626 II) — a too-long
+  // title truncates LOUDLY with … instead of folding mid-word.
+  HW_SectionTitle: { type: 'Text', fontSize: 10, color: 'theme:primary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 900, letterSpacing: 1.2 } },
   HW_FormRow: { type: 'Box', style: { height: 25, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12 } },
-  HW_ReadRow: { type: 'Box', style: { minHeight: 21, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12 } },
-  HW_FormLabel: { type: 'Text', fontSize: 10, color: 'theme:textDim', style: { fontFamily: MONO, minWidth: 82 } },
+  HW_ReadRow: { type: 'Box', style: { minHeight: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12 } },
+  // The shared LABEL column (req_2626 II): one fixed-width column, one baseline.
+  HW_FormLabel: { type: 'Text', fontSize: 10, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, minWidth: REGIONS.grid.labelWidth } },
   HW_FormValue: { type: 'Text', fontSize: 11, color: 'theme:text', style: { fontFamily: MONO, fontWeight: 700 } },
-  HW_ReadValue: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 700 } },
+  HW_ReadValue: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
+  // ── Per-instance override fields (req_2563 Phase 3): a num stepper / bool
+  // toggle with a reset rider, folded from the last editor's tile-override panel.
+  HW_OvBtn: { type: 'Pressable', style: { width: REGIONS.grid.stepBtn, height: REGIONS.grid.stepBtn, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
+  HW_OvBtnText: { type: 'Text', fontSize: 12, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_OvVal: { type: 'Text', fontSize: 10, color: 'theme:valNum', style: { fontFamily: MONO, fontWeight: 800, minWidth: REGIONS.grid.valueWidth, textAlign: 'center' } },
+  HW_OvValIdle: { type: 'Text', fontSize: 10, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 700, minWidth: REGIONS.grid.valueWidth, textAlign: 'center' } },
+  // Bool toggle spans the SAME fixed column block as the [−] value [+] stepper
+  // (stepBtn + gap + valueWidth + gap + stepBtn) so every override row shares
+  // one control column and one right edge (req_2626 II).
+  HW_OvToggle: { type: 'Pressable', style: { width: REGIONS.grid.stepBtn * 2 + REGIONS.grid.valueWidth + 16, height: REGIONS.grid.stepBtn, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:textDim' } },
+  HW_OvToggleOn: { type: 'Pressable', style: { width: REGIONS.grid.stepBtn * 2 + REGIONS.grid.valueWidth + 16, height: REGIONS.grid.stepBtn, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
+  HW_OvToggleText: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 800 } },
+  HW_OvToggleTextOn: { type: 'Text', fontSize: 9, color: 'theme:segActiveText', style: { fontFamily: MONO, fontWeight: 900 } },
+  // The reset-rider END column: ALWAYS reserved (set or idle) so every row
+  // shares the same right edge — no squeezing when an override appears.
+  HW_OvReset: { type: 'Pressable', style: { width: REGIONS.grid.endBtn, height: REGIONS.grid.endBtn, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'transparent' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
+  HW_OvResetText: { type: 'Text', fontSize: 10, color: 'theme:warning', style: { fontFamily: MONO, fontWeight: 900 } },
+  HW_OvResetIdle: { type: 'Box', style: { width: REGIONS.grid.endBtn, height: REGIONS.grid.endBtn } },
   HW_DropChip: { type: 'Box', style: { height: 21, flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 8, paddingRight: 8, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
   HW_SelectRow: { type: 'Box', style: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, paddingBottom: 4 } },
   HW_SelectControl: { type: 'Pressable', style: { flexGrow: 1, minWidth: 0, height: 23, flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 7, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
@@ -473,11 +529,19 @@ classifier({
   HW_FileHistoryCards: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'row', gap: 8, paddingLeft: 12, paddingRight: 12, paddingBottom: 10 } },
   HW_FileHistoryCard: { type: 'Pressable', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 4, padding: 8, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
 
-  HW_MenuDropdown: { type: 'Box', style: { position: 'absolute', left: 156, top: 37, width: 420, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:surface', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', overflow: 'hidden' } },
+  HW_MenuDropdown: { type: 'Box', style: { position: 'absolute', left: 156, top: REGIONS.chrome.height, width: 420, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:surface', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', overflow: 'hidden' } },
   HW_MenuDropHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 7, backgroundColor: 'theme:bgElevated', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   HW_MenuDropRow: { type: 'Pressable', style: { minHeight: 27, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 9, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_MenuDropText: { type: 'Text', fontSize: 11, color: 'theme:text' },
   HW_MenuDropSub: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO } },
+  // Disabled command row — grayed, no hover affordance (inaccessible), with the reason in the
+  // sub slot. Non-pressable at the callsite (rendered as a Box), so no press feedback either.
+  HW_MenuDropRowOff: { type: 'Box', style: { minHeight: 27, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 9, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft', opacity: 0.4 } },
+  HW_MenuDropTextOff: { type: 'Text', fontSize: 11, color: 'theme:textDim' },
+  HW_MenuDropReason: { type: 'Text', fontSize: 9, color: 'theme:textFaint', style: { fontFamily: MONO, fontStyle: 'italic' } },
+  // Non-interactive section header inside a submenu flyout (Select / Transform / Topology / …).
+  HW_MenuSectionRow: { type: 'Box', style: { minHeight: 19, flexDirection: 'row', alignItems: 'center', paddingLeft: 10, paddingRight: 9, paddingTop: 6, backgroundColor: 'theme:bgElevated' } },
+  HW_MenuSectionText: { type: 'Text', fontSize: 8, color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 800, letterSpacing: 1.5 } },
   HW_CheckCell: { type: 'Box', style: { width: 13, height: 13, alignItems: 'center', justifyContent: 'center', borderRadius: 7, backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary' } },
   HW_CheckCellOff: { type: 'Box', style: { width: 13, height: 13, borderRadius: 7, borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
   HW_HistoryTitle: { type: 'Text', fontSize: 11, color: 'theme:text', style: { fontWeight: 800 } },

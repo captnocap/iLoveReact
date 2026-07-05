@@ -1,6 +1,7 @@
 import { Box, Col, Row, Text, Pressable, ScrollView } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { PRIMITIVE_MESHES } from '../data/commands';
+import { REGIONS } from '../shell/regions';
 import type { ModelPart, PrimitiveKind } from '../data/types';
 
 // The model OUTLINER — the Studio concept ported to the new editor: a model is a list of
@@ -9,6 +10,27 @@ import type { ModelPart, PrimitiveKind } from '../data/types';
 // part or append a saved library model (cross-model reuse). Selection highlights the
 // whole part in the host (via its face-group range) so the gizmo moves it.
 // Housed in the Model Focus panel (Inspector) — an inline block, not a viewport overlay.
+//
+// Fixed-region contract (req_2627 / req_2626 II): rows are a FIXED height on the
+// shared column grid — a fixed eye column at the start, the name flexing between,
+// and fixed-width verb columns at the one right edge. The part list is a bounded
+// NESTED scroll (explicit height, capped at PART_ROWS_VISIBLE rows) so the panel
+// itself never has to scroll for it.
+const PART_ROW_HEIGHT = 27;
+const PART_ROWS_VISIBLE = 10;
+const EMPTY_HINT_HEIGHT = 38;
+
+/** fixed per-row control column — every row's verbs land on the same grid lines. */
+const ROW_CONTROL = {
+  width: REGIONS.grid.stepBtn, height: PART_ROW_HEIGHT,
+  alignItems: 'center', justifyContent: 'center',
+} as const;
+
+function partListHeight(count: number): number {
+  if (count === 0) return EMPTY_HINT_HEIGHT;
+  return Math.min(count, PART_ROWS_VISIBLE) * PART_ROW_HEIGHT;
+}
+
 export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisible, onDuplicate, onDelete, onAdd, onImportModel }: {
   parts: ModelPart[];
   activeId: string | null;
@@ -29,12 +51,12 @@ export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisib
     >
       <Row style={{ alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 8, height: 30, backgroundColor: 'rgba(20,24,34,0.9)', borderBottomWidth: 1, borderColor: '#1d2330' }}>
         <Icon name="ListTree" size={13} color="#8fb6c9" />
-        <Text style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>OUTLINER</Text>
+        <Text noWrap numberOfLines={1} style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>OUTLINER</Text>
         <Box style={{ flexGrow: 1 }} />
         <Text style={{ color: '#5d6878', fontSize: 11, fontFamily: 'monospace' }}>{`${parts.length}`}</Text>
       </Row>
 
-      <ScrollView style={{ maxHeight: 300 }} contentContainerStyle={{ flexDirection: 'column' }}>
+      <ScrollView style={{ height: partListHeight(parts.length) }} contentContainerStyle={{ flexDirection: 'column' }}>
         {parts.length === 0 ? (
           <Text style={{ color: '#5d6878', fontSize: 11, padding: 12 }}>No parts yet — add one below.</Text>
         ) : parts.map((part) => {
@@ -43,22 +65,22 @@ export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisib
             <Row
               key={part.id}
               style={{
-                alignItems: 'center', gap: 7, paddingLeft: 9, paddingRight: 7, height: 27,
+                alignItems: 'center', gap: 4, paddingLeft: 5, paddingRight: 5, height: PART_ROW_HEIGHT,
                 backgroundColor: active ? '#2a466e' : 'transparent',
                 borderBottomWidth: 1, borderColor: '#161b26',
               }}
             >
-              <Pressable onPress={() => onToggleVisible(part.id)} tooltip={part.visible ? 'Hide part' : 'Show part'}>
+              <Pressable style={ROW_CONTROL} onPress={() => onToggleVisible(part.id)} tooltip={part.visible ? 'Hide part' : 'Show part'}>
                 <Icon name={part.visible ? 'Eye' : 'EyeOff'} size={13} color={part.visible ? '#9db4d0' : '#4a5464'} />
               </Pressable>
-              <Pressable onPress={() => onSelect(part.id)} style={{ flexGrow: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Pressable onPress={() => onSelect(part.id)} style={{ flexGrow: 1, minWidth: 0, height: PART_ROW_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Box style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: part.color }} />
                 <Text numberOfLines={1} noWrap style={{ color: active ? '#eaf2ff' : (part.visible ? '#cfe0f5' : '#6b7686'), fontSize: 12, fontWeight: active ? 700 : 500 }}>{part.name}</Text>
               </Pressable>
-              <Pressable onPress={() => onDuplicate(part.id)} tooltip="Duplicate part (paint carries; Mirror lives in the right-click menu)">
+              <Pressable style={ROW_CONTROL} onPress={() => onDuplicate(part.id)} tooltip="Duplicate part (paint carries; Mirror lives in the right-click menu)">
                 <Icon name="CopyPlus" size={12} color="#6f8296" />
               </Pressable>
-              <Pressable onPress={() => onDelete(part.id)} tooltip="Delete part">
+              <Pressable style={ROW_CONTROL} onPress={() => onDelete(part.id)} tooltip="Delete part">
                 <Icon name="Trash2" size={12} color="#7d5a5a" />
               </Pressable>
             </Row>
