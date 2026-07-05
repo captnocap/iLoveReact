@@ -932,6 +932,10 @@
         {
           "kind": "metafileInput",
           "input": "cart/hmsc-int/LoaderIsoView.tsx"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "cart/editor/world/WorldViewport.tsx"
         }
       ],
       "buildOptions": [
