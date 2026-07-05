@@ -19,7 +19,7 @@ import {
   moveRequest, noteRequest, migrateBoard, boardColumns,
   tagRequest, filterByTag, allTags,
   hookCapturePrompt, requestsForSession, loadLedgerConfig,
-  markDispatch, DISPATCH_ORIGIN,
+  markDispatch, DISPATCH_ORIGIN, markOneOff, isOffBoard,
   type RequestRecord, type RequestStatus, type RequestEvent,
 } from './requests';
 
@@ -31,8 +31,9 @@ declare const process: { argv: string[]; exit(code: number): void };
 const USAGE = `request — the REQUEST LEDGER job board (new → doing → review → done; docs/game/REQUESTS.md)
 
   request board [--since <ISO>] [--all] [--tag <tag>]
-      the four columns (dispatch-exempt — records, not jobs; --all includes
-      them); --since appends the ACTIVITY log; --tag filters to one tag
+      the four columns (off-board-exempt — dispatches + one-offs are records,
+      not jobs; --all includes them); --since appends the ACTIVITY log;
+      --tag filters to one tag
   request log "<verbatim ask>" --origin <pane|lane|supervisor-relay> [--session <id>]
   request move <id> <new|doing|review|done> --by <actor> [--para "<paragraph>"] [--shas <sha,sha|none>] [--note "<why>"]
       new→doing worker claims · doing→review needs --para + --shas · review→done USER ONLY
@@ -45,15 +46,21 @@ const USAGE = `request — the REQUEST LEDGER job board (new → doing → revie
       REVIEW, NOT done. Only the user (via the supervisor) flips review→done.
       (paragraph also accepted on stdin)
   request list [--open] [--all] [--session <id>] [--tag <tag>]
-      (--open = everything not done; hides supervisor dispatches unless --all)
+      (--open = everything not done; hides dispatches + one-offs unless --all)
   request tags                         every tag in use, with counts
   request show <id>
   request migrate-board                one-shot: legacy open→new, resolved→done (idempotent)
   request mark-dispatch <id>           amend a mis-captured entry to supervisor-dispatch
+  request oneoff <id> --by <actor>     REQSCOPE-0705 scope gate: the ask is UNRELATED to the
+      editor/game building — drop it off the board as a one-off (the record
+      stays durable and oracle-served; the board, list --open, and the stop
+      nudge stop carrying it)
 
 hook mode (wired by .claude/settings.json + .codex/hooks.json; payload JSON on stdin):
   request hook-prompt [--cli codex]   UserPromptSubmit → blanket-capture the literal prompt
-                                      (only trivial acks / short prompts / slash-shell skipped)
+                                      (only trivial acks / short prompts / slash-shell skipped);
+                                      the context line asks the session to SCOPE-GATE:
+                                      editor/game work → claim; unrelated → oneoff
   request hook-stop   [--cli codex]   Stop → remind the session of entries it holds in doing`;
 
 function fail(message: string, code = 1): never {
@@ -173,10 +180,12 @@ function cmdBoard(flags: Map<string, string>): void {
   // --tag narrows the whole board to one secretary category (REQSEC-0607)
   const records = flags.has('tag') ? filterByTag(loaded, flags.get('tag')!) : loaded;
   if (flags.has('tag')) console.log(`(board filtered to #${flags.get('tag')})\n`);
-  // dispatches are records, not jobs — exempt from every column unless --all
-  // (the columns must agree with the true open-asks set, like list --open)
+  // dispatches + one-offs are records, not jobs — exempt from every column
+  // unless --all (the columns must agree with the true open-asks set, like
+  // list --open)
   const columns = boardColumns(records, flags.has('all'));
   const dispatches = records.filter((record) => record.origin === DISPATCH_ORIGIN).length;
+  const oneOffs = records.filter(isOffBoard).length - dispatches;
   for (const status of ['new', 'doing', 'review', 'done'] as RequestStatus[]) {
     const inColumn = columns[status];
     console.log(`${status.toUpperCase()} (${inColumn.length})`);
@@ -188,15 +197,19 @@ function cmdBoard(flags: Map<string, string>): void {
     for (const record of rows) console.log(boardRow(record));
     console.log('');
   }
-  if (!flags.has('all') && dispatches > 0) {
-    console.log(`(${dispatches} supervisor dispatches off-board — records, not jobs; \`board --all\` to include)`);
+  if (!flags.has('all') && dispatches + oneOffs > 0) {
+    const parts = [
+      ...(dispatches > 0 ? [`${dispatches} supervisor dispatches`] : []),
+      ...(oneOffs > 0 ? [`${oneOffs} one-offs (unrelated to the editor/game)`] : []),
+    ];
+    console.log(`(${parts.join(' + ')} off-board — records, not jobs; \`board --all\` to include)`);
   }
   const since = flags.get('since');
   if (since !== undefined) {
     if (isNaN(new Date(since).getTime())) fail(`--since is not a timestamp: ${JSON.stringify(since)} (ISO, e.g. 2026-06-07T12:00:00Z)`, 2);
     const activity: { id: string; event: RequestEvent }[] = [];
     for (const record of records) {
-      if (!flags.has('all') && record.origin === DISPATCH_ORIGIN) continue;
+      if (!flags.has('all') && isOffBoard(record)) continue;
       for (const event of record.events ?? []) {
         if (event.at > new Date(since).toISOString()) activity.push({ id: record.id, event });
       }
@@ -293,9 +306,13 @@ function cmdHookPrompt(flags: Map<string, string>): void {
   const originLabel = flags.get('cli') === 'codex' ? 'codex' : 'session';
   const result = hookCapturePrompt(defaultRequestsDir(), sessionId, prompt, undefined, originLabel);
   if (result.action === 'logged') {
+    // REQSCOPE-0705: the hook can't judge scope — the SESSION can. The
+    // context line carries the scope gate: editor/game-building work is
+    // claimed into the pile as ever; an unrelated ask gets dropped off the
+    // board as a one-off (the record stays, the board doesn't carry it).
     const line = result.record.origin === DISPATCH_ORIGIN
       ? `[request-ledger] captured ${result.record.id} (supervisor dispatch — recorded for the durable record; its marker tracks resolution, no board flow required)`
-      : `[request-ledger] captured ${result.record.id} on the board (new). Claim it (tools/request move ${result.record.id} doing --by <you>); when done, move it to REVIEW: tools/request move ${result.record.id} review --by <you> --para "<what was done, why, what changed>" --shas <sha,...|none>. Only the user flips review→done.`;
+      : `[request-ledger] captured ${result.record.id} on the board (new). SCOPE GATE first: is this ask about the editor/game building (this repo's game, editors, carts, framework)? IF YES — claim it (tools/request move ${result.record.id} doing --by <you>); when done, move it to REVIEW: tools/request move ${result.record.id} review --by <you> --para "<what was done, why, what changed>" --shas <sha,...|none>. Only the user flips review→done. IF NO — it is a one-off/unrelated: drop it off the board (tools/request oneoff ${result.record.id} --by <you>) and just answer it; no board flow.`;
     console.log(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: line },
     }));
@@ -320,7 +337,7 @@ function cmdHookStop(): void {
   const sessionId = typeof payload.session_id === 'string' ? payload.session_id : '';
   if (sessionId.length === 0) return;
   const doing = requestsForSession(defaultRequestsDir(), sessionId)
-    .filter((record) => record.status === 'doing' && record.origin !== DISPATCH_ORIGIN);
+    .filter((record) => record.status === 'doing' && !isOffBoard(record));
   if (doing.length === 0) return;
   const listing = doing
     .map((record) => `${record.id} "${record.text.replace(/\n/g, ' ').slice(0, 100)}"`)
@@ -349,9 +366,10 @@ function cmdList(flags: Map<string, string>): void {
     ? tagged.filter((record) => record.sessionId === flags.get('session'))
     : tagged;
   // --open is the debt list (everything not yet done): supervisor dispatches
-  // are exempt from the board flow, so they hide there unless --all asks.
+  // and one-offs are exempt from the board flow, so they hide there unless
+  // --all asks.
   const records = flags.has('open')
-    ? inSession.filter((record) => record.status !== 'done' && (flags.has('all') || record.origin !== DISPATCH_ORIGIN))
+    ? inSession.filter((record) => record.status !== 'done' && (flags.has('all') || !isOffBoard(record)))
     : inSession;
   if (records.length === 0) {
     console.log(flags.has('open') ? '(no open requests)' : '(empty ledger)');
@@ -366,6 +384,15 @@ function cmdMarkDispatch(positionals: string[]): void {
   const id = positionals[0] ?? fail(`mark-dispatch needs an id.\n${USAGE}`, 2);
   const record = markDispatch(defaultRequestsDir(), id);
   console.log(`${record.id} amended — origin: ${record.origin} (exempt from the open list and the stop nudge; the ask text is untouched)`);
+}
+
+/** REQSCOPE-0705: the session's drop-off door for asks unrelated to the
+ *  editor/game building — off the board, record kept. */
+function cmdOneOff(positionals: string[], flags: Map<string, string>): void {
+  const id = positionals[0] ?? fail(`oneoff needs an id.\n${USAGE}`, 2);
+  const by = flags.get('by') ?? fail('--by is required: who judged this a one-off (your worker label)', 2);
+  const record = markOneOff(defaultRequestsDir(), id, by);
+  console.log(`${record.id} dropped off the board — origin: ${record.origin} (one-off, unrelated to the editor/game; the record stays durable, the board/list --open/stop nudge stop carrying it)`);
 }
 
 function cmdShow(positionals: string[]): void {
@@ -391,6 +418,7 @@ try {
   else if (command === 'show') cmdShow(positionals);
   else if (command === 'migrate-board') cmdMigrateBoard();
   else if (command === 'mark-dispatch') cmdMarkDispatch(positionals);
+  else if (command === 'oneoff') cmdOneOff(positionals, flags);
   else if (command === 'hook-prompt') cmdHookPrompt(flags);
   else if (command === 'hook-stop') cmdHookStop();
   else {

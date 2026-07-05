@@ -24,6 +24,7 @@ import {
   hookCapturePrompt,
   loadRequests,
   logRequest,
+  markOneOff,
   moveRequest,
   noteRequest,
   tagRequest,
@@ -66,6 +67,20 @@ test('UNRESOLVED is the default lens on what is left: board-open asks, newest fi
   assertEqual(store.rowsFor('all').length, 2, "'all asks' stays dispatch-free too");
   const counts = store.counts();
   assertEqual(`${counts.unresolved}/${counts.resolved}/${counts.all}/${counts.dispatches}`, '2/0/2/1', 'live counts');
+  assert(__fs_remove(dir), 'cleanup');
+});
+
+test('ONE-OFFS (REQSCOPE-0705): a dropped-off ask leaves every default view, lives behind its own, gets no verbs', () => {
+  const { store, dir, ids } = realFixture('-oneoff');
+  markOneOff(dir, ids[1], 'worker-scope'); // the camera ask judged unrelated (for the test)
+  assertEqual(store.rowsFor('unresolved').length, 1, 'the one-off left the default lens');
+  assertEqual(store.rowsFor('all').length, 1, "'all asks' stays one-off-free too");
+  assertEqual(store.rowsFor('one-offs').map((r) => r.id).join(','), ids[1], 'one-offs live behind their own view');
+  assertEqual(store.rowsFor('dispatches').length, 1, 'dispatches and one-offs are separate views');
+  assertEqual(store.counts()['one-offs'], 1, 'the one-offs chip counts live');
+  store.select(ids[1]);
+  assertEqual(requestDetail(store).verbs.length, 0, 'one-offs offer no board verbs — records, not jobs');
+  assertEqual(requestsActions(store, 'one-offs').length, 0, 'no hero verb on a one-off');
   assert(__fs_remove(dir), 'cleanup');
 });
 
@@ -309,7 +324,7 @@ test('model absent: the board works untagged — capture, views, moves all indif
   const { store, dir, ids } = realFixture();
   // nobody ever ran the secretary: no tags anywhere
   assertEqual(store.tagsInUse().length, 0, 'no tags in use');
-  assertEqual(requestsRoster(store).length, 4, 'roster is just the fixed views — no phantom chips');
+  assertEqual(requestsRoster(store).length, 5, 'roster is just the fixed views (incl. one-offs, REQSCOPE-0705) — no phantom chips');
   store.moveByUser(ids[0], 'doing');
   store.moveByUser(ids[0], 'review');
   store.moveByUser(ids[0], 'done');

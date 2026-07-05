@@ -25,19 +25,22 @@
 
 import {
   DISPATCH_ORIGIN,
+  ONEOFF_ORIGIN,
+  isOffBoard,
   allTags,
   type MoveInput,
   type RequestRecord,
   type RequestStatus,
 } from '../../../../../docs/game/_index/requests';
 
-export type RequestsView = 'unresolved' | 'resolved' | 'all' | 'dispatches' | `tag:${string}`;
+export type RequestsView = 'unresolved' | 'resolved' | 'all' | 'dispatches' | 'one-offs' | `tag:${string}`;
 
 export const REQUESTS_VIEWS: Array<{ id: RequestsView; label: string }> = [
   { id: 'unresolved', label: 'unresolved' }, // the default — "what is left"
   { id: 'resolved', label: 'resolved' },
   { id: 'all', label: 'all asks' },
   { id: 'dispatches', label: 'dispatches' },
+  { id: 'one-offs', label: 'one-offs' },     // REQSCOPE-0705: unrelated asks, off-board
 ];
 
 /** The user-click resolution paragraph — a real paragraph (the ledger's
@@ -99,11 +102,12 @@ function isDispatch(record: RequestRecord): boolean {
 
 function inView(record: RequestRecord, view: RequestsView): boolean {
   if (view === 'dispatches') return isDispatch(record);
-  if (isDispatch(record)) return false; // hidden by default, the --open rule
+  if (view === 'one-offs') return record.origin === ONEOFF_ORIGIN;
+  if (isOffBoard(record)) return false; // hidden by default, the --open rule
   if (view.startsWith('tag:')) return (record.tags ?? []).includes(view.slice(4));
   if (view === 'unresolved') return record.status !== 'done';
   if (view === 'resolved') return record.status === 'done';
-  return true; // 'all' (still dispatch-free)
+  return true; // 'all' (still off-board-free)
 }
 
 export function createRequestsStore(deps: RequestsStoreDeps): RequestsStore {
@@ -127,7 +131,7 @@ export function createRequestsStore(deps: RequestsStoreDeps): RequestsStore {
     },
     counts(): Record<string, number> {
       const records = all();
-      const counts: Record<string, number> = { unresolved: 0, resolved: 0, all: 0, dispatches: 0 };
+      const counts: Record<string, number> = { unresolved: 0, resolved: 0, all: 0, dispatches: 0, 'one-offs': 0 };
       for (const tag of allTags(records)) counts[`tag:${tag}`] = 0;
       for (const record of records) {
         for (const view of Object.keys(counts) as RequestsView[]) {

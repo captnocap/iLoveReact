@@ -1,4 +1,4 @@
-# REQUESTS.md — the Request Board (REQLEDGER-0606 → REQBOARD-0607)
+# REQUESTS.md — the Request Board (REQLEDGER-0606 → REQBOARD-0607 → REQSCOPE-0705)
 
 User asks become durable, oracle-served, resolution-accountable JOBS moving
 across a four-state board: **new → doing → review → done**.
@@ -110,17 +110,18 @@ tools/request tags                        # every tag in use, with counts
 tools/request resolve <id> --para "<paragraph>" --shas <sha,sha|none>   # ALIAS for `move <id> review`
 tools/request list [--open] [--session <id>] [--tag <tag>]
 tools/request show <id>
+tools/request oneoff <id> --by <actor>    # REQSCOPE-0705: unrelated ask → off the board, record kept
 tools/request migrate-board
 ```
 
 - **`board`** is the supervisor's loop tool: the four columns with counts and
   compact rows (id, age, origin, first 80 chars of the ask; `done` shows its
-  recent tail). **Dispatch-exempt by default**: supervisor dispatches are
-  records, not jobs — they never appear in any column (the columns agree with
-  the true open-asks set, exactly the old `list --open` filter); `--all` is
-  the only door to them. `--since <ISO>` appends an ACTIVITY section — every
-  event after that timestamp (id, transition/note, actor) — so a supervisor
-  pass reads exactly what moved since the last pass.
+  recent tail). **Off-board-exempt by default**: supervisor dispatches and
+  one-offs are records, not jobs — they never appear in any column (the
+  columns agree with the true open-asks set, exactly the old `list --open`
+  filter); `--all` is the only door to them. `--since <ISO>` appends an
+  ACTIVITY section — every event after that timestamp (id, transition/note,
+  actor) — so a supervisor pass reads exactly what moved since the last pass.
 - **`resolve` is REDEFINED**: it is now an alias for `move <id> review`. The
   workers' existing habit lands work in **review, not done** — only the user
   flips review→done. `resolve` on an unclaimed (`new`) entry is rejected:
@@ -176,6 +177,34 @@ Config is P2 data in `docs/game/_requests/_config.json`: `minPromptChars`,
 `ackPattern`, `stopReminder` (`block-once` | `context` | `off`),
 `dispatchPrefixes`. Mis-captured dispatches amend with
 `tools/request mark-dispatch <id>` — a field-fill on origin only.
+
+## The SCOPE GATE: one-offs (REQSCOPE-0705)
+
+The user's ask, verbatim:
+
+> hey the current hook system effectively treats all requests between both
+> claude and codex as game-based requests, which, for the last month or more
+> has been correct, but there has been intermittent requests that are totally
+> unrelated, so im wondering if we can change the system where the hook would
+> prompt that if it is related to the editor/game building that then the
+> request can be picked up and forwarded into the pile otherwise to drop it
+> off as one offs/unrelated
+
+Mechanism — **capture stays blanket; the SESSION judges scope**. The hook
+can't tell a game ask from a resume-formatting favor, but the model receiving
+the prompt can. So the capture context line now carries the scope gate:
+
+- **Related to the editor/game building** (the game, its editors, carts,
+  framework) → claim it into the pile as ever (`move <id> doing`), board flow
+  unchanged.
+- **Unrelated / a one-off** → `tools/request oneoff <id> --by <you>` and just
+  answer it. The entry's origin flips to `one-off` (a field-fill; the ask
+  text and history are untouched, plus one appended note event naming who
+  made the call). Same exemption fold as supervisor dispatches: off the
+  board, off `list --open`, off the stop nudge — but the record stays
+  durable and oracle-served. Already-one-off is a no-op; `done` entries
+  can't be amended. The workbench shows them behind their own `one-offs`
+  view (no board verbs — records, not jobs).
 
 ## The SECRETARY: tags (REQSEC-0607)
 

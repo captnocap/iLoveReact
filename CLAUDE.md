@@ -201,6 +201,11 @@ Unsure model → entry untouched; no model → everything works untagged.
 
 **The worker contract** (the only moves that are yours):
 
+0. **SCOPE GATE first** (REQSCOPE-0705): is the ask about the editor/game
+   building (the game, its editors, carts, framework)? IF NO — it is a
+   one-off/unrelated: `tools/request oneoff <id> --by <you>` drops it off
+   the board (record kept, no board flow) and you just answer it. IF YES —
+   continue:
 1. **Claim** before working: `tools/request move <id> doing --by <you>`.
 2. Work. Append progress with `tools/request note <id> --by <you> "<text>"`.
 3. **Move to review** when finished:

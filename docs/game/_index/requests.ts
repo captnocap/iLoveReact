@@ -353,17 +353,18 @@ export function allTags(records: RequestRecord[]): string[] {
   return Array.from(seen).sort();
 }
 
-/** The board fold: the four columns, DISPATCH-EXEMPT by default. Supervisor
- *  dispatches (origin 'supervisor-dispatch') are durable records, never jobs
- *  — their markers track resolution — so they are EXCLUDED from every column
+/** The board fold: the four columns, OFF-BOARD-EXEMPT by default. Supervisor
+ *  dispatches (origin 'supervisor-dispatch' — markers track resolution) and
+ *  one-offs (origin 'one-off', REQSCOPE-0705 — unrelated to the editor/game)
+ *  are durable records, never jobs, so they are EXCLUDED from every column
  *  unless explicitly asked for (USER FINDING REQBOARD-0607: "i see a ton of
  *  them as 'dispatches' marked as new but then only 13 of them in
  *  unresolved? is that correct." — the columns must agree with the true
  *  open-asks set, the old list --open filter). */
-export function boardColumns(records: RequestRecord[], includeDispatches = false): Record<RequestStatus, RequestRecord[]> {
+export function boardColumns(records: RequestRecord[], includeOffBoard = false): Record<RequestStatus, RequestRecord[]> {
   const columns: Record<RequestStatus, RequestRecord[]> = { new: [], doing: [], review: [], done: [] };
   for (const record of records) {
-    if (!includeDispatches && record.origin === DISPATCH_ORIGIN) continue;
+    if (!includeOffBoard && isOffBoard(record)) continue;
     columns[record.status].push(record);
   }
   return columns;
@@ -464,6 +465,22 @@ export const DEFAULT_LEDGER_CONFIG: LedgerConfig = {
 /** The origin marking a captured supervisor dispatch — the exemption key. */
 export const DISPATCH_ORIGIN = 'supervisor-dispatch';
 
+/** The origin marking a ONE-OFF (REQSCOPE-0705): an ask UNRELATED to the
+ *  editor/game building. Capture stays blanket — the hook can't judge scope —
+ *  but the capture context line asks the RECEIVING SESSION to make the call:
+ *  editor/game work → claim into the pile as ever; unrelated → drop it off
+ *  the board with `tools/request oneoff <id> --by <you>`. The record stays
+ *  (durable, oracle-served); the board doesn't carry it — same exemption
+ *  fold as supervisor dispatches. */
+export const ONEOFF_ORIGIN = 'one-off';
+
+/** Off-board records — durable but never jobs: supervisor dispatches
+ *  (markers track them) and one-offs (unrelated to the editor/game).
+ *  THE one predicate every board/open/nudge fold shares. */
+export function isOffBoard(record: RequestRecord): boolean {
+  return record.origin === DISPATCH_ORIGIN || record.origin === ONEOFF_ORIGIN;
+}
+
 /** _config.json in the requests dir overrides the defaults, key by key. */
 export function loadLedgerConfig(dir: string = defaultRequestsDir()): LedgerConfig {
   const raw = __fs_read(`${dir}/_config.json`);
@@ -520,6 +537,33 @@ export function markDispatch(dir: string, id: string): RequestRecord {
   if (record.status === 'done') throw new Error(`${id} is already done — its record stands as-is`);
   if (record.origin === DISPATCH_ORIGIN) return record;
   const amended: RequestRecord = { ...record, origin: DISPATCH_ORIGIN };
+  writeEntry(dir, amended);
+  return amended;
+}
+
+/** Drop an entry off the board as a ONE-OFF (REQSCOPE-0705): the receiving
+ *  session judged the ask UNRELATED to the editor/game building. A field-fill
+ *  on origin (the ask text and timestamps are untouched) plus one appended
+ *  note event recording who made the scope call — the record stays durable
+ *  and oracle-served, the board just stops carrying it. done entries keep
+ *  their record as-is; already-one-off is a no-op. */
+export function markOneOff(dir: string, id: string, by: string): RequestRecord {
+  const path = `${dir}/${id}.json`;
+  if (!__fs_exists(path)) throw new Error(`no such request: ${id}`);
+  if (!by || by.trim().length === 0) throw new Error('--by is required: who judged this a one-off');
+  const record = parseEntry(path);
+  if (record.status === 'done') throw new Error(`${id} is already done — its record stands as-is`);
+  if (record.origin === ONEOFF_ORIGIN) return record;
+  const amended: RequestRecord = {
+    ...record,
+    origin: ONEOFF_ORIGIN,
+    events: [...(record.events ?? []), {
+      at: new Date().toISOString(),
+      actor: by.trim(),
+      kind: 'note',
+      text: 'dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)',
+    }],
+  };
   writeEntry(dir, amended);
   return amended;
 }

@@ -13,7 +13,7 @@
 
 import type { FieldSpec, PanelSpec } from '../../../shell/fields';
 import type { ActionSpec, RosterRow } from '../../../shell/Workbench';
-import { DISPATCH_ORIGIN, type RequestEvent, type RequestRecord, type RequestStatus } from '../../../../../docs/game/_index/requests';
+import { isOffBoard, type RequestEvent, type RequestRecord, type RequestStatus } from '../../../../../docs/game/_index/requests';
 import { REQUESTS_VIEWS, type RequestsStore, type RequestsView } from './store';
 
 /** roster = the fixed views + a #chip per tag in use (REQSEC-0607: "search
@@ -152,7 +152,8 @@ export type RequestDetail = {
 /** The selected request's full data — ask verbatim, resolution, history, and
  *  the board verbs (REQBOARD-0607: 'mark resolved' vocabulary is dead;
  *  review→done stays user-gated — the panel IS the user, accept moves as
- *  actor 'user'; dispatches are records, not jobs — no verbs at all). */
+ *  actor 'user'; dispatches and one-offs are records, not jobs — no verbs
+ *  at all). */
 export function requestDetail(store: RequestsStore): RequestDetail {
   const id = store.selectedId();
   const record = id ? store.record(id) : null;
@@ -165,7 +166,7 @@ export function requestDetail(store: RequestsStore): RequestDetail {
   }
   const verbs: DetailVerb[] = [];
   let terminal: string | null = null;
-  const isJob = record.origin !== DISPATCH_ORIGIN;
+  const isJob = !isOffBoard(record);
   if (isJob && record.status === 'new') {
     verbs.push({ k: 'claim → doing', tone: 'accent', run: () => { store.moveByUser(record.id, 'doing'); } });
   } else if (isJob && record.status === 'doing') {
@@ -186,7 +187,7 @@ export function requestDetail(store: RequestsStore): RequestDetail {
 export function requestsActions(store: RequestsStore, _view: RequestsView): ActionSpec[] {
   const id = store.selectedId();
   const record = id ? store.record(id) : null;
-  if (!record || record.status === 'done' || record.origin === DISPATCH_ORIGIN) return [];
+  if (!record || record.status === 'done' || isOffBoard(record)) return [];
   if (record.status === 'new') return [{ id: 'claim', label: '→ doing', icon: 'ListChecks', run: () => { store.moveByUser(record.id, 'doing'); } }];
   if (record.status === 'doing') return [{ id: 'review', label: '→ review', icon: 'ListChecks', run: () => { store.moveByUser(record.id, 'review'); } }];
   return [{ id: 'accept', label: '✓ done', icon: 'ListChecks', run: () => { store.moveByUser(record.id, 'done'); } }];

@@ -54,6 +54,17 @@ export const request_ledger: DocIndex = {
       status: 'live',
     },
     {
+      name: 'the SCOPE GATE (one-offs)',
+      purpose: ['maintenance'],
+      kind: 'utility',
+      sourceFile: 'docs/game/_index/requests.ts',
+      codeRef: 'docs/game/_index/requests.ts (markOneOff, ONEOFF_ORIGIN, isOffBoard)',
+      description: 'REQSCOPE-0705 (USER ASK: "if it is related to the editor/game building … the request can be picked up and forwarded into the pile otherwise to drop it off as one offs/unrelated"). Capture stays blanket — the hook can\'t judge scope; the SESSION can. The capture context line carries the gate: editor/game work → claim as ever; unrelated → `tools/request oneoff <id> --by <you>` flips origin to \'one-off\' (field-fill; ask/history untouched, one note event names who judged). Same exemption fold as dispatches via isOffBoard(): off the board columns, list --open, the stop nudge, and the --since activity — but the record stays durable and oracle-served. done entries can\'t be amended; re-oneoff is a no-op. Workbench: one-offs live behind their own view, no board verbs.',
+      dependsOn: ['RequestRecord'],
+      consumers: ['tools/request (oneoff)', 'every session receiving the capture context line', 'the workbench requests source (WBREQUESTS)'],
+      status: 'live',
+    },
+    {
       name: 'the SECRETARY (tags)',
       purpose: ['maintenance'],
       kind: 'utility',

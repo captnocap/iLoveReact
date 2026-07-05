@@ -53,7 +53,7 @@ export function SecretaryBar(props: { store: RequestsStore }) {
   const seenRef = useRef(0);
   const replyRef = useRef('');
 
-  const allRecords = () => store.rowsFor('all').concat(store.rowsFor('dispatches'));
+  const allRecords = () => store.rowsFor('all').concat(store.rowsFor('dispatches'), store.rowsFor('one-offs'));
   const untagged = untaggedEntries(allRecords(), Infinity).length;
 
   const standDown = (finalReport: string) => {

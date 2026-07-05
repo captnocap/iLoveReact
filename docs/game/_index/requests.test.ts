@@ -23,7 +23,7 @@ import {
   migrateBoard, boardColumns, MIN_RESOLUTION_CHARS,
   tagRequest, filterByTag, allTags, SEED_TAGS, SECRETARY_PROMPT_PREFIX,
   hookCapturePrompt, requestsForSession, loadLedgerConfig, DEFAULT_LEDGER_CONFIG,
-  markDispatch, DISPATCH_ORIGIN,
+  markDispatch, DISPATCH_ORIGIN, markOneOff, ONEOFF_ORIGIN, isOffBoard,
   type RequestRecord, type RequestStatus,
 } from './requests';
 import { searchRequests, tokenize } from './oracle';
@@ -296,6 +296,37 @@ test('boardColumns EXCLUDES supervisor dispatches by default — records, not jo
 
   const withDispatches = boardColumns(loadRequests(dir), true);
   assertEqual(withDispatches.new.length, 2, '--all is the only door to the dispatch records');
+});
+
+// ── the scope gate: one-offs (REQSCOPE-0705) ─────────────────────────────────
+
+test('markOneOff drops an unrelated ask off the board: origin flips, record and ask stay', () => {
+  const dir = freshDir('oneoff');
+  const unrelated = logRequest(dir, 'hey can you check my resume pdf and fix the formatting real quick', 'session:abc12345');
+  const job = logRequest(dir, 'JOB: the mesa tops still eat placements on storey 3', 'session:abc12345');
+
+  const dropped = markOneOff(dir, unrelated.id, 'worker-scope');
+  assertEqual(dropped.origin, ONEOFF_ORIGIN, 'origin flips to one-off');
+  assertEqual(dropped.text, unrelated.text, 'the ask is untouched — verbatim as ever');
+  assertEqual(dropped.status, 'new', 'status untouched — the exemption is the origin, not a state');
+  const lastEvent = dropped.events![dropped.events!.length - 1];
+  assertEqual(lastEvent.kind, 'note', 'the drop-off appends a note event');
+  assertEqual(lastEvent.actor, 'worker-scope', 'the event records who made the scope call');
+  assert(isOffBoard(dropped), 'one-offs are off-board');
+  assert(!isOffBoard(loadRequests(dir).find((r) => r.id === job.id)!), 'real jobs stay on-board');
+
+  // the board fold hides one-offs exactly like dispatches
+  const columns = boardColumns(loadRequests(dir));
+  assertEqual(columns.new.map((r) => r.id).join(','), job.id, 'the one-off left every default column');
+  assertEqual(boardColumns(loadRequests(dir), true).new.length, 2, '--all still shows the record');
+
+  // idempotent no-op + guards
+  const again = markOneOff(dir, unrelated.id, 'worker-scope');
+  assertEqual((again.events ?? []).length, dropped.events!.length, 'already-one-off is a no-op — no event spam');
+  assertThrows(() => markOneOff(dir, 'req_9999', 'w'), 'unknown id rejected');
+  assertThrows(() => markOneOff(dir, unrelated.id, '  '), 'missing actor rejected');
+  moveRequest(dir, job.id, 'done', { by: 'supervisor', note: 'closing for the terminal guard' });
+  assertThrows(() => markOneOff(dir, job.id, 'w'), 'done entries cannot be amended');
 });
 
 // ── oracle match ──────────────────────────────────────────────────────────────
