@@ -557,6 +557,16 @@ classifier({
   HW_CheckCellOff: { type: 'Box', style: { width: 13, height: 13, borderRadius: 7, borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
   HW_HistoryTitle: { type: 'Text', fontSize: 11, color: 'theme:text', style: { fontWeight: 800 } },
   HW_HistoryMeta: { type: 'Text', fontSize: 9, color: 'theme:textDim', style: { fontFamily: MONO } },
+
+  // ── Model-focus UV + SHAPE sections (req_2643 OO / req_2619 P / req_2618 G):
+  // the UV atlas preview relocated from the floating viewport card into the FIXED
+  // focus panel, plus the studio count strip. Content imports its space from the
+  // region contract (REGIONS.focusPanel) — never measured, never wrapped.
+  HW_UvFrame: { type: 'Box', style: { alignSelf: 'center', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:stageBg', overflow: 'hidden' } },
+  HW_UvImage: { type: 'Image', style: { width: '100%', height: '100%' } },
+  HW_UvNote: { type: 'Text', fontSize: 9, color: 'theme:warning', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
+  // A section header's tiny inline verb (e.g. UV refresh) — present but never REQUIRED.
+  HW_MiniVerb: { type: 'Pressable', style: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', backgroundColor: 'theme:controlBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' }, hoverStyle: { borderColor: 'theme:primary' } },
 });
 
 export { C };

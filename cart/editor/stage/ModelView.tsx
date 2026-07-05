@@ -23,7 +23,7 @@
 // model under `./tools/rjit dev modelview`, or `RJIT_MODEL=path ./tools/rjit shot
 // modelview` to render one headlessly.
 import { useState, useRef, useEffect } from 'react';
-import { Box, Col, Row, Text, Image, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Text, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
@@ -50,6 +50,9 @@ import { syntheticKeyEdge } from '../data/keymap';
 // Headless harness only (RJIT_MESHOPS addpart) — builds a primitive's grouped soup so the
 // gesture script can exercise the REAL appendPart path without the outliner UI (req_2644).
 import { primitiveMeshData } from '../data/hmscAssetCatalog';
+// The fixed-region layout contract (req_2627): popup control grids share the editor's
+// ONE column grid instead of inventing local cell widths.
+import { REGIONS } from '../shell/regions';
 
 const host = globalThis as any;
 
@@ -85,6 +88,24 @@ export type LightId = 'flat' | 'key' | 'fill';
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
 export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession };
+// ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
+// The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
+// truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
+// the viewer publishes a snapshot on globalThis.__modelFocusBridge and pings
+// __modelFocusBridgeChanged; the Inspector subscribes. Deliberately OUTSIDE the
+// ModelToolSnapshot prop path (data/types.ts + AppFrame own that plumbing).
+export type ModelFocusUv = { src: string | null; w: number; h: number; detail: number; note: string | null };
+export type ModelFocusShape = {
+  verts: number; // welded verts (0 until the host builds topology in vertex/edge mode — read '—')
+  edges: number; // welded edges (same honesty rule)
+  faces: number; // authored faces when grouping exists, else triangles
+  tris: number;
+  uvd: number; // faces carrying an atlas island — the whole-model atlas covers all once it exists, 0 before
+  mounts: number; // honest 0 until the rig slice lands
+  radius: number; // host bounding-sphere radius (load-time)
+  center: [number, number, number] | null; // cart-side bounds center (primitive/studio loads only)
+};
+export type ModelFocusBridge = { uv: ModelFocusUv | null; paintLive: boolean; refreshUv: () => void; shape: ModelFocusShape | null };
 // The handlers the viewer owns, handed out so an external surface can invoke
 // them. Same functions the floating buttons and hotkeys call — one owner, no
 // split-brain: the shell remote-controls; the viewer stays the source of truth.
@@ -217,6 +238,26 @@ function loadModelVertices(mesh: ModelViewInitialMesh): Loaded | null {
     return null;
   }
 }
+
+/** Bounds CENTER from interleaved vertex data (stride 8, position first) — one pass
+ *  at load time (req_2618 G). Only primitive/studio loads have vertices cart-side;
+ *  file imports keep the host's radius and read center as honest-empty. */
+const meshBoundsCenter = (mesh: ModelViewInitialMesh): [number, number, number] | null => {
+  const v = mesh.vertices instanceof Float32Array ? mesh.vertices : new Float32Array(mesh.vertices);
+  if (v.length < 8) return null;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i + 2 < v.length; i += 8) {
+    const x = v[i]!, y = v[i + 1]!, z = v[i + 2]!;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
+  }
+  return [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2];
+};
 
 // Wheel zoom is the one orbit door the cart still calls directly — from the paint-mode
 // Pressable's onScroll (in paint mode that surface owns the wheel; everywhere else the
@@ -424,13 +465,25 @@ const DEFAULT_FIT = 1024; // the proven painter shipped at 1024²
 // SAME size brush paints finer there — exactly what you want when the strokes need to get small.
 const brushRadius = (size: number) => Math.max(0.5, size / 2);
 
-// Loop-cut popup control grid (req_2626 II): ONE label column (flexes) + fixed-width
-// − / value / + stepper columns. Every row uses these cells, so all controls share a
-// single right edge and per-row baseline — no ad hoc per-control padding.
-const LC_BTN_W = 26;
-const LC_VAL_W = 64;
+// Loop-cut popup control grid (req_2626 II / req_2643 MM): the SHARED editor grid —
+// one FIXED label column + fixed − / value / + stepper columns straight from
+// REGIONS.grid, so every row shares the panel-wide cell widths and ONE right edge.
+// The card's width IS the sum of its content columns — no dead interior space.
 const LC_GAP = 6;
+const LC_BTN_W = REGIONS.grid.stepBtn;
+const LC_VAL_W = REGIONS.grid.valueWidth;
+const LC_LABEL_W = REGIONS.grid.labelWidth;
 const LC_STEP_W = LC_BTN_W + LC_GAP + LC_VAL_W + LC_GAP + LC_BTN_W; // the stepper zone width
+const LC_PAD = 12;
+const LC_CARD_W = LC_PAD * 2 + LC_LABEL_W + LC_GAP + LC_STEP_W; // content columns = the card
+// Compact axis-span readout for the direction toggle labels ("U 2.0u").
+const lcSpanLabel = (s: number) => `${s >= 10 ? s.toFixed(0) : s.toFixed(1)}u`;
+// Create Paint Atlas size-picker grid (req_2643 NN): fixed columns — size label,
+// density, recommended-chip (ALWAYS reserved, empty for others), bytes right-aligned
+// to the row's one right edge. Single-line cells, loud truncation.
+const AP_SIZE_W = 68;
+const AP_DENS_W = 88;
+const AP_REC_W = 76;
 
 export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, paintTarget }: ModelViewProps = {}) {
   const [model, setModel] = useState<Loaded | null>(null);
@@ -677,15 +730,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // groups when it carries authored grouping; null for plain/per-triangle imports. The
   // prompt reads faces to the user and triangles to the byte math, never conflating them.
   const [authoredFaces, setAuthoredFaces] = useState<number | null>(null);
+  // Model-space bounds CENTER, computed one-shot from the composed vertices at load
+  // (req_2618 G). File imports have no vertices cart-side → null (honest-empty).
+  const [boundsCenter, setBoundsCenter] = useState<[number, number, number] | null>(null);
   // ── UV / atlas inspector ─────────────────────────────────────────────────────
-  // Paint mode shows the LIVE atlas as an image panel — the actual UV layout the paint
-  // system built (per-triangle patches), so it can be compared against a hand-authored
-  // unwrap instead of guessed at. Read back via __model_atlas_read, PNG-encoded by the
-  // host codec (__imageops_encode_raw); refreshed on entry/detail change/manual refresh,
-  // not per stroke (a read+encode per dab would drag the brush).
-  type UvPanel = { src: string | null; w: number; h: number; detail: number; note: string | null };
-  const [uvPanel, setUvPanel] = useState<UvPanel | null>(null);
-  const [showUv, setShowUv] = useState(true);
+  // The LIVE atlas as an image — the actual UV layout the paint system built. Read
+  // back via __model_atlas_read, PNG-encoded by the host codec (__imageops_encode_raw);
+  // refreshed on entry/detail change/manual refresh, not per stroke (a read+encode per
+  // dab would drag the brush). RENDERED IN THE FOCUS PANEL (Inspector's UV section,
+  // req_2643 OO) via the model-focus bridge below — the floating viewport card is GONE.
+  const [uvPanel, setUvPanel] = useState<ModelFocusUv | null>(null);
   const UV_PREVIEW_BYTE_CAP = 32 * 1024 * 1024; // reading a 100MB atlas into JS would stall the app
   // No atob/btoa in this runtime (they're Web APIs, not V8 builtins) — decode the atlas
   // door's base64 by hand. ~1MB for a 512² atlas; one-shot per refresh, not per frame.
@@ -773,10 +827,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     uvFileRef.current = path;
     setUvPanel({ src: path, w: o.w, h: o.h, detail: o.detail, note: null });
   };
-  // Refresh the UV/atlas panel when it is LIVE (paint mode + shown) — invoked off every
-  // mesh adopt / topo op and at stroke end, so the panel tracks the real atlas without
-  // the manual refresh click (req_2625 GG). The refresh button stays as a fallback.
-  const refreshUvIfLive = () => { if (paintMode && showUv) buildUvPanel(); };
+  // Refresh the UV/atlas panel when it is LIVE (paint mode) — invoked off every mesh
+  // adopt / topo op and at stroke end, so the panel tracks the real atlas without the
+  // manual refresh click (req_2625 GG). The Inspector's refresh verb stays a fallback.
+  const refreshUvIfLive = () => { if (paintMode) buildUvPanel(); };
 
   const enterPaint = () => {
     setFocusMode(false);
@@ -784,7 +838,6 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setSelMode(0);
     meshSetMode(0);
     setPaintMode(true);
-    setShowUv(true);
     buildUvPanel();
   };
   // Reopen a model that already has saved paintings: rebuild the atlas at the painting's
@@ -903,6 +956,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     appendPart: (positions, faceGroups, color) => {
       const r = meshAppendGroup(positions, faceGroups);
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
+      // The appended part's authored grouping IS cart-side here — keep the authored
+      // face count true through Add Part (req_2618 G: the SHAPE strip must not keep
+      // reading the load-time count after the model grew).
+      setAuthoredFaces((prev) => (prev != null ? prev + new Set(faceGroups).size : prev));
       const [rr, gg, bb] = hexToRgb01(color);
       host.__model_paint_group_range?.(r.lo, r.hi, Math.round(rr * 255), Math.round(gg * 255), Math.round(bb * 255));
       if (!resyncPartRanges()) {
@@ -1059,6 +1116,36 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking });
   }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking]);
 
+  // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
+  // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
+  // Only what is ALREADY real cart-side goes out: counts from the host counts door,
+  // faces from the authored grouping, uv'd derived from the whole-model atlas,
+  // mounts an honest 0 until the rig slice lands. Never invented.
+  useEffect(() => {
+    const g = globalThis as any;
+    const tris = model ? Math.floor(model.count / 3) : 0;
+    const faces = authoredFaces ?? tris;
+    const bridge: ModelFocusBridge = {
+      uv: uvPanel,
+      paintLive: paintMode,
+      refreshUv: buildUvPanel,
+      shape: model
+        ? {
+          verts: selInfo.verts,
+          edges: selInfo.edges,
+          faces,
+          tris,
+          uvd: atlasReadyRef.current ? faces : 0,
+          mounts: 0,
+          radius: model.radius,
+          center: boundsCenter,
+        }
+        : null,
+    };
+    g.__modelFocusBridge = bridge;
+    g.__modelFocusBridgeChanged?.();
+  }, [uvPanel, paintMode, model, selInfo.verts, selInfo.edges, authoredFaces, boundsCenter]);
+
   // Viewport hotkeys. In the editor embed (hostChrome) the shell's central keymap owns every tool
   // key (W/P/F/G/S/R/1/2/3 and the topology/face/paint keys the shell adds), dispatching them
   // through runCommand → this same tool api — so binding them here too would double-fire and cancel
@@ -1117,6 +1204,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setSelInfo({ mode: selMode, verts: 0, edges: 0, sel: 0 }); // new mesh → selection cleared
       freshModelPaintReset();
       setAuthoredFaces(null); // a raw import carries no authored n-gon grouping
+      setBoundsCenter(null); // the file's vertices never cross the bridge — no cart-side center
       partRangesRef.current = []; // a plain file import is one unstructured mesh, no parts
       recordAttribution(path); // account for where this asset came from
     } else {
@@ -1135,6 +1223,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       // Distinct authored-face ids (a studio cube: 6 quads over 12 triangles) — what the
       // atlas prompt reads to the user as "faces".
       setAuthoredFaces(mesh.faceGroups && mesh.faceGroups.length > 0 ? new Set(mesh.faceGroups).size : null);
+      setBoundsCenter(meshBoundsCenter(mesh)); // vertices are cart-side here — real center, one pass
       // Seed the weld's part ranges from the composed parts (partColors carries every
       // part's [lo,hi)) so stacked parts stay independently editable from the first frame.
       partRangesRef.current = (mesh.partColors ?? []).map((pc) => ({ lo: pc.lo, hi: pc.hi }));
@@ -1184,6 +1273,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // The import's groups are per-TRIANGLE (no authored n-gons), so "faces" would just
     // repeat the triangle count — the prompt talks triangles for these.
     setAuthoredFaces(null);
+    setBoundsCenter(null); // the base import's vertices are host-side only
     onPartRanges?.(ranges);
   };
 
@@ -1434,6 +1524,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       paintingRef.current = false;
       meshFocusTool(false);
       meshCapture(false);
+      // The viewer is gone — retract the focus-panel snapshot so the Inspector's
+      // UV/SHAPE sections read honest-empty instead of a stale model's truth.
+      (globalThis as any).__modelFocusBridge = null;
+      (globalThis as any).__modelFocusBridgeChanged?.();
     };
   }, []);
 
@@ -1764,13 +1858,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         <Box style={{ position: 'absolute', left: 8, right: 8, bottom: 62, alignItems: 'center', overflow: 'hidden' }}>
           <Col
             style={{
-              width: 300, maxWidth: '100%', paddingLeft: 14, paddingRight: 14, paddingTop: 12, paddingBottom: 12,
+              width: LC_CARD_W, maxWidth: '100%', paddingLeft: LC_PAD, paddingRight: LC_PAD, paddingTop: 10, paddingBottom: 10,
               backgroundColor: 'rgba(11,19,32,0.96)', borderWidth: 1, borderColor: '#2c4a6a',
               borderRadius: 8, gap: 8,
             }}
           >
             <Row style={{ alignItems: 'center' }}>
-              <Text style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700, flexGrow: 1 }}>Loop Cut</Text>
+              <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700, flexGrow: 1, minWidth: 0 }}>Loop Cut</Text>
               <Pressable
                 onPress={() => closeLoopCut(false)}
                 tooltip="Cancel (Esc) — restore the uncut mesh"
@@ -1779,10 +1873,33 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 <Text style={{ color: '#b9c4d4', fontSize: 11 }}>✕</Text>
               </Pressable>
             </Row>
+            {/* Direction — a TWO-STATE toggle labeled by the face's two in-plane axes
+                (U/V) with each axis's real span, not a 0/1 stepper in a wide container
+                (req_2643 MM). Same treatment as [Size | %]; both pairs span exactly the
+                stepper zone, so every control ends on the one right edge. */}
+            <Row style={{ alignItems: 'center' }}>
+              <Text numberOfLines={1} noWrap style={{ color: '#8fa1b8', fontSize: 12, width: LC_LABEL_W }}>direction</Text>
+              <Box style={{ flexGrow: 1 }} />
+              {([0, 1] as const).map((d) => {
+                const on = lc.dir === d;
+                return (
+                  <Pressable
+                    key={d}
+                    onPress={() => changeLoopCut({ dir: d })}
+                    tooltip={`Cut across the face's ${d === 0 ? 'U' : 'V'} axis — ${(lc.sizes[d] || 0).toFixed(2)}u span`}
+                    style={{ width: (LC_STEP_W - LC_GAP) / 2, marginLeft: d === 0 ? 0 : LC_GAP, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6,
+                      backgroundColor: on ? '#244164' : '#16233aee', borderWidth: 1, borderColor: on ? '#4e75a4' : '#2c4a6a' }}
+                  >
+                    <Text numberOfLines={1} noWrap style={{ color: on ? '#e6f1ff' : '#cfe0f5', fontSize: 10, fontWeight: 700 }}>{`${d === 0 ? 'U' : 'V'} ${lcSpanLabel(lc.sizes[d] || 0)}`}</Text>
+                  </Pressable>
+                );
+              })}
+            </Row>
             {/* Unit toggle — Size Units (studio default) vs Percent. Occupies exactly the
                 stepper zone so its right edge lines up with every stepper below. */}
             <Row style={{ alignItems: 'center' }}>
-              <Text style={{ color: '#8fa1b8', fontSize: 12, flexGrow: 1 }}>offset units</Text>
+              <Text numberOfLines={1} noWrap style={{ color: '#8fa1b8', fontSize: 12, width: LC_LABEL_W }}>units</Text>
+              <Box style={{ flexGrow: 1 }} />
               {(['units', 'percent'] as const).map((u, i) => {
                 const on = lc.unit === u;
                 return (
@@ -1793,25 +1910,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                     style={{ width: (LC_STEP_W - LC_GAP) / 2, marginLeft: i === 0 ? 0 : LC_GAP, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6,
                       backgroundColor: on ? '#244164' : '#16233aee', borderWidth: 1, borderColor: on ? '#4e75a4' : '#2c4a6a' }}
                   >
-                    <Text style={{ color: on ? '#e6f1ff' : '#cfe0f5', fontSize: 11, fontWeight: 700 }}>{u === 'units' ? 'Size' : '%'}</Text>
+                    <Text numberOfLines={1} noWrap style={{ color: on ? '#e6f1ff' : '#cfe0f5', fontSize: 11, fontWeight: 700 }}>{u === 'units' ? 'Size' : '%'}</Text>
                   </Pressable>
                 );
               })}
             </Row>
             {([
-              { label: 'direction', display: `${lc.dir}`, dec: () => changeLoopCut({ dir: 0 }), inc: () => changeLoopCut({ dir: 1 }) },
               { label: 'cuts', display: `${lc.cuts}`, dec: () => changeLoopCut({ cuts: Math.max(1, lc.cuts - 1) }), inc: () => changeLoopCut({ cuts: Math.min(64, lc.cuts + 1) }) },
-              { label: lc.unit === 'units' ? `offset (of ${lcSpan.toFixed(2)}u)` : 'offset %', display: lcOffsetDisplay, dec: () => lcStepOffset(-1), inc: () => lcStepOffset(1) },
+              { label: lc.unit === 'units' ? 'offset u' : 'offset %', display: lcOffsetDisplay, dec: () => lcStepOffset(-1), inc: () => lcStepOffset(1) },
             ]).map((field) => (
               <Row key={field.label} style={{ alignItems: 'center' }}>
-                <Text style={{ color: '#8fa1b8', fontSize: 12, flexGrow: 1 }}>{field.label}</Text>
+                <Text numberOfLines={1} noWrap style={{ color: '#8fa1b8', fontSize: 12, width: LC_LABEL_W }}>{field.label}</Text>
+                <Box style={{ flexGrow: 1 }} />
                 <Pressable
                   onPress={field.dec}
                   style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
                 >
                   <Text style={{ color: '#cfe0f5', fontSize: 12, fontWeight: 700 }}>−</Text>
                 </Pressable>
-                <Text style={{ color: '#e6eefb', fontSize: 12, fontFamily: 'monospace', width: LC_VAL_W, marginLeft: LC_GAP, marginRight: LC_GAP, textAlign: 'center' }}>{field.display}</Text>
+                <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 12, fontFamily: 'monospace', width: LC_VAL_W, marginLeft: LC_GAP, marginRight: LC_GAP, textAlign: 'center' }}>{field.display}</Text>
                 <Pressable
                   onPress={field.inc}
                   style={{ width: LC_BTN_W, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
@@ -1921,14 +2038,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             {/* Type — WHAT the fresh atlas starts as (Blockbench's Create Texture "Type"). Same
                 gate as the size below; both gate painting (req_2546). */}
             <Text style={{ color: '#8b97ab', fontSize: 10, fontWeight: 700, letterSpacing: 1, marginTop: 12 }}>TYPE</Text>
+            {/* TYPE buttons sit on equal-width columns (req_2643 NN): flexBasis 0 splits
+                the row evenly regardless of label length; labels never wrap. */}
             <Row style={{ marginTop: 6, gap: 6 }}>
               {([['template', 'Texture Template'], ['solid', 'Solid Color'], ['blank', 'Blank']] as const).map(([t, label]) => {
                 const on = baseType === t;
                 return (
                   <Pressable key={t} onPress={() => setBaseType(t)}
-                    style={{ flexGrow: 1, alignItems: 'center', paddingTop: 6, paddingBottom: 6, borderRadius: 6,
+                    style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, alignItems: 'center', paddingTop: 6, paddingBottom: 6, borderRadius: 6,
                       backgroundColor: on ? '#244164' : '#252b3a', borderWidth: 1, borderColor: on ? '#4e75a4' : '#3a4356' }}>
-                    <Text style={{ color: on ? '#e6f1ff' : '#9fb4cf', fontSize: 11, fontWeight: '700' }}>{label}</Text>
+                    <Text numberOfLines={1} noWrap style={{ color: on ? '#e6f1ff' : '#9fb4cf', fontSize: 11, fontWeight: '700' }}>{label}</Text>
                   </Pressable>
                 );
               })}
@@ -1952,6 +2071,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                       return mb >= 1 ? `${Math.round(mb)} MB` : `${Math.max(1, Math.round(mb * 1024))} KB`;
                     })()
                   : null;
+                // The size picker is a FIXED column grid (req_2643 NN): size label,
+                // density, recommended-chip (column ALWAYS reserved — empty for the
+                // others, so no row blows out), bytes right-aligned to ONE edge.
                 return (
                   <Pressable
                     key={ft ?? 'fill'}
@@ -1963,16 +2085,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                     }}
                   >
                     <Row style={{ alignItems: 'center', gap: 8 }}>
-                      <Text style={{ color: '#e6f1ff', fontSize: 12, fontWeight: 700 }}>
-                        {ft == null ? 'Fill only — one color per face' : `${ft}² atlas`}
+                      <Text numberOfLines={1} noWrap style={{ width: AP_SIZE_W, color: '#e6f1ff', fontSize: 12, fontWeight: 700 }}>
+                        {ft == null ? 'Fill only' : `${ft}²`}
                       </Text>
-                      {ft != null && est ? (
-                        <Text style={{ color: '#9fb4cf', fontSize: 11 }}>{`≈ ${est.density} texels/m on this model`}</Text>
-                      ) : null}
-                      {rec ? <Text style={{ color: '#8fc9bb', fontSize: 11, fontWeight: 700 }}>recommended</Text> : null}
-                      <Box style={{ flexGrow: 1 }} />
-                      <Text style={{ color: '#8b97ab', fontSize: 11 }}>
-                        {ft == null ? 'tiny' : est ? `${est.w}×${est.h} (${mbLabel})` : '—'}
+                      <Text numberOfLines={1} noWrap style={{ width: AP_DENS_W, color: '#9fb4cf', fontSize: 11 }}>
+                        {ft == null ? '1 color/face' : est ? `${est.density} tx/m` : '—'}
+                      </Text>
+                      <Text numberOfLines={1} noWrap style={{ width: AP_REC_W, color: '#8fc9bb', fontSize: 10, fontWeight: 700 }}>
+                        {rec ? 'recommended' : ''}
+                      </Text>
+                      <Text numberOfLines={1} noWrap style={{ flexGrow: 1, minWidth: 0, color: '#8b97ab', fontSize: 10, textAlign: 'right' }}>
+                        {ft == null ? 'tiny' : est ? `${est.w}×${est.h} · ${mbLabel}` : '—'}
                       </Text>
                     </Row>
                   </Pressable>
@@ -1991,51 +2114,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         </Col>
       )}
 
-      {/* UV / atlas inspector — the LIVE paint atlas image (the actual island layout the
-          paint system rasterizes into: one island per authored face, sized by physical
-          footprint × density). Refresh re-reads it after strokes; painted faces +
-          selection tint show exactly where each face lands. */}
-      {paintMode && showUv && uvPanel && (
-        <Col
-          style={{
-            position: 'absolute', right: 12, top: 56, width: 264,
-            paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 10,
-            backgroundColor: 'rgba(17,20,29,0.94)', borderWidth: 1, borderColor: '#2c4a6a', borderRadius: 8,
-          }}
-        >
-          <Row style={{ alignItems: 'center', gap: 8 }}>
-            <Text style={{ color: '#dbe7ff', fontSize: 12, fontWeight: 700 }}>UV ATLAS</Text>
-            <Text style={{ color: '#8b97ab', fontSize: 11 }}>{`${uvPanel.w}×${uvPanel.h} · ${uvPanel.detail}x/m`}</Text>
-            <Box style={{ flexGrow: 1 }} />
-            <Pressable onPress={buildUvPanel} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#244164', borderWidth: 1, borderColor: '#4e75a4' }}>
-              <Text style={{ color: '#e6f1ff', fontSize: 10, fontWeight: 700 }}>refresh</Text>
-            </Pressable>
-            <Pressable onPress={() => setShowUv(false)} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}>
-              <Text style={{ color: '#e1e7f1', fontSize: 10, fontWeight: 700 }}>×</Text>
-            </Pressable>
-          </Row>
-          {uvPanel.src ? (
-            <Box style={{ marginTop: 8, width: 244, height: Math.max(24, Math.round(244 * (uvPanel.h / Math.max(1, uvPanel.w)))), borderWidth: 1, borderColor: '#3a4356' }}>
-              <Image src={uvPanel.src} style={{ width: '100%', height: '100%' }} />
-            </Box>
-          ) : (
-            <Text style={{ color: '#ffb38f', fontSize: 11, marginTop: 8 }}>{uvPanel.note ?? 'no atlas'}</Text>
-          )}
-          <Text style={{ color: '#5d6878', fontSize: 10, marginTop: 6 }}>
-            {uvPanel.detail > 1
-              ? 'each outlined rect = one face’s UV island, sized by its real-world size × density — big faces get more texels'
-              : 'fill-only density (1x) — each face is a tiny island; pick a density to paint strokes'}
-          </Text>
-        </Col>
-      )}
-      {paintMode && !showUv && (
-        <Pressable
-          onPress={() => { setShowUv(true); buildUvPanel(); }}
-          style={{ position: 'absolute', right: 12, top: 56, paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
-        >
-          <Text style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 700 }}>UV</Text>
-        </Pressable>
-      )}
+      {/* The UV / atlas inspector lives in the FOCUS PANEL now (Inspector's UV section,
+          req_2643 OO) — fed by the model-focus bridge above. The floating viewport card
+          is REMOVED, not hidden. */}
 
       {/* Quality strip — commit-only decimation. Drag to trade detail for triangles; the
           host owns the thumb mid-drag and re-meshes from the retained full-res source ONCE
