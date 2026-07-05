@@ -43,6 +43,12 @@ export type PlacedPiece = {
   y: number;
   z: number;
   yawDegrees: number;
+  // The storey ACTIVE when the piece was placed (req_2676) — recorded explicitly
+  // because y now carries the painted-terrain base too: a Ground placement on a
+  // 6m mesa has y=6 but is still storey 0, and deriving the storey from y hid it
+  // until the user climbed the floor control. Absent on pre-terrain saves ⇒
+  // pieceFloorOf falls back to the y-derived storey (flat pieces: identical).
+  floor?: number;
   // Per-instance material slots keyed by slot role (see pieceSlots.ts) — the
   // focus panel writes these; the live overlay reflects the primary slot's tint.
   slots?: Record<string, MaterialRef>;
@@ -165,25 +171,28 @@ function snapToEdge(wx: number, wz: number): { x: number; z: number; yaw: number
   return { x: cx, z: cellZ * M + M, yaw: 0 };
 }
 
-/** Resolve a click into a placement for the armed piece on the active level.
+/** Resolve a click into a placement for the armed piece on the active storey.
  *  Honours the piece's snap mode: edge-snap kinds (walls, fences, …) land on the
  *  nearest CELL EDGE, oriented along it; plates centre-snap. Returns null when
  *  the HOST validator rejects (validateBuildPlacement, framework/game/build.zig).
- *  `terrainY` is the painted-terrain surface under the cursor (req_2666 — the
- *  __compiled_world_ground_hit door): the piece bases at terrainY + levelY, so a
- *  Ground placement sits ON a sculpted hill and Floor 1 is the hill + 3m. Omitted
- *  (no door / off-map) it is 0 — the flat behavior, y = levelY exactly. */
-export function resolvePlacement(pieceId: string, wx: number, wz: number, levelY: number, terrainY = 0): PlacedPiece | null {
+ *  `floor` is the active storey INDEX (the action bar's floor control) — recorded
+ *  on the piece so the cutaway never re-derives it from y (req_2676). `terrainY`
+ *  is the painted-terrain surface under the cursor (req_2666 — the
+ *  __compiled_world_ground_hit door): the piece bases at terrainY + floor×3m, so
+ *  a Ground placement sits ON a sculpted hill and Floor 1 is the hill + 3m.
+ *  Omitted (no door / off-map) it is 0 — flat behavior, y = the storey exactly. */
+export function resolvePlacement(pieceId: string, wx: number, wz: number, floor: number, terrainY = 0): PlacedPiece | null {
   const catalogIndex = buildCatalogIndex(pieceId);
   const kind = pieceKindOf(pieceId);
   const edge = kind ? EDGE_SNAP_KINDS.has(kind) : false;
   const { x, z, yaw } = edge ? snapToEdge(wx, wz) : { x: snapToModule(wx), z: snapToModule(wz), yaw: 0 };
+  const levelY = floor > 0 ? floor * METERS_PER_LEVEL : 0;
   const y = terrainY + levelY;
   if (catalogIndex >= 0) {
     const v = validateBuildPlacement(catalogIndex, x, y, z, yaw);
     if (!v.valid) return null;
   }
-  return { id: '', pieceId, x, y, z, yawDegrees: yaw };
+  return { id: '', pieceId, x, y, z, yawDegrees: yaw, floor };
 }
 
 /** The placement SLOT a piece occupies — its footprint identity (req_2583). Two
@@ -201,9 +210,12 @@ export function placementSlotKey(piece: PlacedPiece): string {
     : `grid:${q(piece.x)},${q(piece.y)},${q(piece.z)}`;
 }
 
-/** The storey a placed piece belongs to (its base Y in level units). */
+/** The storey a placed piece belongs to. The RECORDED floor index wins (req_2676
+ *  — y also carries the painted-terrain base now, so a Ground piece on a 6m mesa
+ *  is storey 0, not 2); pre-terrain saves have no record and derive from y, which
+ *  for flat placements IS their storey — bit-identical filtering, no regression. */
 export function pieceFloorOf(piece: PlacedPiece): number {
-  return Math.round(piece.y / METERS_PER_LEVEL);
+  return piece.floor ?? Math.round(piece.y / METERS_PER_LEVEL);
 }
 
 /** A wall-kind piece — a catalog wall id or an authored piece with wall affinity. */

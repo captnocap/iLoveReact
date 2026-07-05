@@ -24,7 +24,7 @@
 // piece MOVE (the drag slice lands next) — each returns as a door-driven slice.
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable } from '@reactjit/primitives';
-import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
+import { IsoStage, type Rect } from './isoStage';
 import { pieceInstanceRows, resolvePlacement, pieceLook, pickAuthoredPlacement, type ArmedPiece, type PlacedPiece } from './pieces';
 import { pieceSkinBoxes } from './pieceSkins';
 import { encodeResidentMeshes, encodeMeshRefs, encodeMeshGhost, type ResidentMesh, type MeshRef } from './meshProps';
@@ -47,7 +47,7 @@ const WASD_PAN_PER_TICK = 0.02; // × eye→target distance, metres/tick
 
 const g: any = globalThis;
 
-type Snap = { x: number; y: number; z: number; pieceId: string; yaw: number };
+type Snap = { x: number; y: number; z: number; pieceId: string; yaw: number; floor: number };
 
 /** Project a box's 12 edges into pane-space polyline segments (the ghost),
  *  rotated by yawDeg about its centre so an edge-snapped wall's ghost lays along
@@ -292,8 +292,6 @@ export default function WorldViewport(props: {
     if (typeof g.__compiled_world_unmount === 'function') g.__compiled_world_unmount(nodeId);
   }, []);
 
-  const levelY = props.floor > 0 ? props.floor * METERS_PER_LEVEL : 0;
-
   // The ground under a pane-local cursor, TERRAIN-AWARE (req_2666): ask the host
   // door first — __compiled_world_ground_hit raycasts the painted heightfield on
   // the brush beam's exact code path (paintGroundHitAt), so a placement lands ON
@@ -321,9 +319,12 @@ export default function WorldViewport(props: {
     if (!armed) return null;
     const gp = groundUnder(px, py);
     if (!gp) return null;
-    const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, levelY, gp.terrainY);
-    return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId, yaw: placed.yawDegrees } : null;
-  }, [groundUnder, levelY]);
+    // The floor INDEX threads through whole (req_2676): resolvePlacement records
+    // it on the piece so the storey cutaway never re-derives storey from a y that
+    // now carries the terrain base too (a mesa-top Ground piece is storey 0).
+    const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, props.floor, gp.terrainY);
+    return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId, yaw: placed.yawDegrees, floor: placed.floor ?? props.floor } : null;
+  }, [groundUnder, props.floor]);
 
   // Free-hover ghost tracking (req_2651 gap VV): the framework delivers
   // onMouseMove ONLY under pointer capture (capture starts at mousedown —
@@ -434,7 +435,7 @@ export default function WorldViewport(props: {
     const target = resolveSnap(d.x0, d.y0);
     if (!target) { console.warn(`[place] VALIDATOR rejected cell at world (${gp.x.toFixed(1)},${gp.z.toFixed(1)})`); return; }
     console.warn(`[place] click -> place ${target.pieceId} at (${target.x},${target.y},${target.z}) yaw ${target.yaw}`);
-    props.onPlace({ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw });
+    props.onPlace({ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw, floor: target.floor });
   }, [resolveSnap, groundUnder, props.onPlace, local, stage]);
 
   const onScroll = useCallback((e: any) => {
