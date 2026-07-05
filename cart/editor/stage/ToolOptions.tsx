@@ -3,7 +3,7 @@ import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { COMMANDS, activeMenuFor, meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
 import { SNAP_MODES } from '../data/content';
-import type { Command, EditorState, ViewMode } from '../data/types';
+import type { EditorState, ViewMode } from '../data/types';
 import MapPaintBar from './MapPaintBar';
 
 // A model document owns the host-native mesh editor — the toolbar becomes the
@@ -12,7 +12,6 @@ const MESH_GROUP_DIVIDER = new Set(['mesh-move', 'mesh-paint']);
 
 export default function ToolOptions(props: {
   state: EditorState;
-  activeCommand: Command;
   onCommand: (id: string, source: string) => void;
   onTool: (id: string) => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
@@ -86,7 +85,10 @@ export default function ToolOptions(props: {
   }
 
   const activeMenu = activeMenuFor(props.state);
-  const actionCommands = COMMANDS.filter((command) => command.menu === activeMenu && command.scope !== 'model');
+  // Submenu-nested commands (File → New Mesh → the seven primitives, etc.) stay in their
+  // menus — mirroring them here dumped a row of context-free primitive icons onto the map
+  // bar whenever File was the active menu (req_2646: "why are all these buttons here").
+  const actionCommands = COMMANDS.filter((command) => command.menu === activeMenu && command.scope !== 'model' && !command.submenu);
   return (
     <C.HW_ToolOptions>
       <MapPaintBar state={mapPaint} onPatch={props.onMapPaint} />
@@ -94,7 +96,7 @@ export default function ToolOptions(props: {
       {actionCommands.map((command) => {
         const Btn = props.state.activeCommandId === command.id ? C.HW_IconButtonOn : C.HW_IconButton;
         return (
-          <Btn key={command.id} onPress={() => command.tool ? props.onTool(command.id) : props.onCommand(command.id, 'action bar')}>
+          <Btn key={command.id} tooltip={`${command.name} (${command.key})`} onPress={() => command.tool ? props.onTool(command.id) : props.onCommand(command.id, 'action bar')}>
             <Icon name={command.icon} size={14} color={accentFor(props.state.activeCommandId === command.id ? 'primary' : 'textDim')} />
           </Btn>
         );
@@ -104,10 +106,6 @@ export default function ToolOptions(props: {
         <C.HW_OptionLabel>SNAP</C.HW_OptionLabel>
         <C.HW_PillTextOn>{SNAP_MODES[props.state.snapIndex]}</C.HW_PillTextOn>
       </C.HW_PillOn>
-      <C.HW_Pill onPress={() => props.onTool('move-selection')}>
-        <C.HW_OptionLabel>TOOL</C.HW_OptionLabel>
-        <C.HW_PillText>{props.activeCommand.key}</C.HW_PillText>
-      </C.HW_Pill>
       {/* FLOORCTL req_2485: the ONE floor control — drives the viewport's real
           active storey (the floating Ground chip died with the old world pane).
           Label matches the level vocabulary: Ground, Floor 1, Floor 2, … */}
