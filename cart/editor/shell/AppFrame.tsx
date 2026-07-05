@@ -47,6 +47,9 @@ import ImportPartDialog from '../dialogs/ImportPartDialog';
 // useModifiers' fallback modifiers never update off those events, which is what killed
 // every Ctrl chord (see modifiersFromKeyEvent in data/keymap.ts, req_2620 gap W).
 import { subscribe } from '@reactjit/runtime/ffi';
+// Live modifier state (no re-render) — the outliner's shift-click multi-select
+// (req_2659) reads shift at press time instead of threading it through every row.
+import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
@@ -254,6 +257,21 @@ export default function AppFrame() {
     redo: command.undoable ? [] : prev.redo,
     seq: prev.seq + 1,
   });
+
+  // ── One mode at a time (req_2666 gap WW; modal-discipline law req_2626) ──────
+  // Map Paint and the world click-tools are EXCLUSIVE viewport owners — the state
+  // layer arbitrates, never presentation. This is the ONE paint-exit door every
+  // tool-arming path shares: it routes the active flip through
+  // applyMapPaintEffects exactly like the bar toggle (the host tool tracks the
+  // transition; the pointer claim itself releases via the paintActive prop chain
+  // into WorldViewport's __compiled_world_set_paint_mode effect). The dependent
+  // texture-picker popover dies with the mode it belongs to.
+  const withMapPaintOff = (prev: EditorState): EditorState => {
+    if (!prev.mapPaint.active) return prev;
+    const mapPaint = { ...prev.mapPaint, active: false, texturePickerOpen: false };
+    applyMapPaintEffects(prev.mapPaint, mapPaint);
+    return { ...prev, mapPaint };
+  };
 
   const runCommand = (commandId: string, source: string) => {
     const command = commandById(commandId);
@@ -481,8 +499,14 @@ export default function AppFrame() {
       return;
     }
 
-    setState((prev) => {
+    setState((prev0) => {
       const t0 = Date.now();
+      // One mode at a time (req_2666 WW): arming ANY tool here EXITS Map Paint
+      // through the shared withMapPaintOff door. 'B' mid-paint is a one-keypress
+      // mode SWAP (paint down, Place Piece armed — never ignored, never stacked);
+      // Esc keeps its meaning (paint down, back to the neutral Select tool).
+      const prev = command.tool ? withMapPaintOff(prev0) : prev0;
+      const paintDropped = prev !== prev0;
       const object = selectedObject(prev);
       const asset = assetById(prev.activeAssetId, prev.assetOverrides);
       let next: EditorState = {
@@ -490,7 +514,7 @@ export default function AppFrame() {
         openMenu: source === 'stage' ? prev.openMenu : null,
         actionMenu: command.menu,
         activeCommandId: command.tool ? command.id : prev.activeCommandId,
-        status: `${command.name} - ${source}`,
+        status: `${command.name} - ${source}${paintDropped ? ' — map paint off (one mode at a time)' : ''}`,
         contextOpen: source === 'context' ? false : prev.contextOpen,
       };
 
@@ -1910,7 +1934,21 @@ export default function AppFrame() {
     setState((prev) => {
       const mapPaint = { ...prev.mapPaint, ...patch };
       applyMapPaintEffects(prev.mapPaint, mapPaint);
-      return { ...prev, mapPaint };
+      // One mode at a time (req_2666 WW): arming Map Paint puts the build tool
+      // DOWN — back to the neutral Select tool with no armed piece. worldToolFor
+      // derives the Build tray from the command id, so neutralizing it closes the
+      // tray and the armed-piece focus panel together; paint alone owns the click.
+      const arming = mapPaint.active && !prev.mapPaint.active;
+      const hadBuild = prev.activeCommandId !== 'select-tool' || prev.armedPieceId !== null;
+      return {
+        ...prev,
+        mapPaint,
+        activeCommandId: arming ? 'select-tool' : prev.activeCommandId,
+        armedPieceId: arming ? null : prev.armedPieceId,
+        status: arming
+          ? (hadBuild ? 'map paint armed — build tool put down (one mode at a time)' : 'map paint armed')
+          : prev.status,
+      };
     });
   };
 
@@ -2031,6 +2069,20 @@ export default function AppFrame() {
     onStampRanges: stampModelPartRanges,
   };
 
+  // ── Texture picker vs the host pointer claim (req_2666 gap ZZ) ───────────────
+  // While paint is armed the HOST claims every pointer event inside the loader
+  // pane (WorldViewport's __compiled_world_set_paint_mode effect, fed from
+  // mapPaint.active via Stage) BEFORE JS hit-testing — so clicks aimed at the
+  // MapTexturePicker popover stroked the map instead. A DERIVED state at this
+  // pass-down site (never a real mapPaint patch): the workspace sees paint as
+  // inactive while the picker popover is unresolved, so the host releases the
+  // claim; the picker itself renders off REAL state below and stays mounted, and
+  // applyMapPaintEffects sees no fake active flips. Closing the picker (its
+  // backdrop patches texturePickerOpen: false) restores the claim next render.
+  const workspaceState = state.mapPaint.active && state.mapPaint.texturePickerOpen
+    ? { ...state, mapPaint: { ...state.mapPaint, active: false } }
+    : state;
+
   return (
     <C.HW_App>
       <RenderProbe id="Chrome">
@@ -2090,7 +2142,7 @@ export default function AppFrame() {
         </RenderProbe>
         <RenderProbe id="Workspace">
           <Workspace
-            state={state}
+            state={workspaceState}
             activeAsset={activeAsset}
             onCommand={runCommand}
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
@@ -2100,7 +2152,12 @@ export default function AppFrame() {
             // Mode row / action-bar controls are guarded (req_2626 HH): arming tools or
             // flipping view state while a blocking session is unresolved is the exact
             // "switch up to paint mid loop-cut" the user ruled WRONG.
-            onTool={guarded((id: string) => setState((prev) => ({ ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}` })))}
+            // Arming from the bar also EXITS Map Paint (req_2666 WW) — same
+            // withMapPaintOff door as the hotkey/menu path; one mode at a time.
+            onTool={guarded((id: string) => setState((prev0) => {
+              const prev = withMapPaintOff(prev0);
+              return { ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}${prev !== prev0 ? ' — map paint off (one mode at a time)' : ''}` };
+            }))}
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
             onFloor={guarded((delta: number) => setState((prev) => {
               const floorIndex = Math.max(0, Math.min(MAX_FLOOR, prev.floorIndex + delta));
