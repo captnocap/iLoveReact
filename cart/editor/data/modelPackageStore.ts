@@ -10,18 +10,21 @@
 // atlas / paint / shader BYTES into the subdirs (so a copied folder is truly
 // self-contained) is the next slice; the subdirs are created now so the shape
 // is visible and the writers have a home.
-import { exists, listDir, mkdir, readFile, writeFile } from '../../../runtime/hooks/fs';
+import { exists, listDir, mkdir, readFile, readFileBase64, writeFile, writeFileBase64Atomic } from '../../../runtime/hooks/fs';
 import {
   MODELS_HOME,
   MODEL_PACKAGE_SUBDIRS,
   categoryDir,
   manifestPath,
+  modelFolderIdFor,
   packageDir,
   subDir,
   packageToManifest,
   parseManifest,
   manifestToPackage,
   serializeManifest,
+  type ModelManifest,
+  type ModelPackageKind,
 } from './modelPackage';
 import type { ModelPackage } from './types';
 
@@ -54,6 +57,74 @@ export function materializeCatalog(pkgs: ModelPackage[]): MaterializeSummary {
     else failed.push(result);
   }
   return { total: pkgs.length, wrote, failed };
+}
+
+// True when THIS model already has a package directory (manifest on disk). The
+// durable-identity gate (req_2620 S/T/U): rename/favorite/delete write through
+// to the manifest only when it exists; autosave only covers materialized models.
+export function isMaterialized(kind: ModelPackageKind, id: string): boolean {
+  return exists(manifestPath(kind, id));
+}
+
+// Patch the durable-identity fields of an EXISTING on-disk manifest in place
+// (rename / favorite / hidden write-through — req_2620 S/U). MANIFEST IS DISK
+// TRUTH: the session's modelOverrides mirror these live; this is what makes
+// them survive a cold restart. Reads-merges-writes the real file so fields a
+// newer writer added are preserved. False when the package isn't on disk yet
+// (callers keep the pending override and let the FIRST save write it).
+export function updateManifestIdentity(
+  kind: ModelPackageKind,
+  id: string,
+  patch: Partial<Pick<ModelManifest, 'name' | 'favorite' | 'hidden'>>,
+): boolean {
+  const file = manifestPath(kind, id);
+  const text = readFile(file);
+  if (!text) return false;
+  try {
+    const manifest = parseManifest(text);
+    return writeFile(file, serializeManifest({ ...manifest, ...patch }));
+  } catch {
+    return false; // unreadable manifest — never clobber it with a guess
+  }
+}
+
+// Copy a materialized package directory wholesale into a NEW package (the
+// req_2168 promise made literal: "i could copy the entire folder for the one
+// model and have all my basis covered"). Duplicates the manifest under the new
+// id/name and every blob in the four subdirs, so a dupe is real on disk with
+// its own manifest — not a session phantom. Returns the new ModelPackage, or
+// null when the source isn't on disk / any write fails.
+export function copyModelPackage(src: ModelPackage, newId: string, newName: string): ModelPackage | null {
+  if (!isMaterialized(src.kind, src.id)) return null;
+  const srcDir = packageDir(src.kind, src.id);
+  const destDir = packageDir(src.kind, newId);
+  const manifest = packageToManifest({
+    ...src,
+    id: newId,
+    name: newName,
+    favorite: false,
+    hidden: false,
+    folderId: modelFolderIdFor(newId),
+  });
+  // A viewer source living INSIDE the source package (imported .glb/.obj bytes)
+  // travels with the copy; anything outside the package keeps its shared path.
+  if (manifest.mesh.viewerPath?.startsWith(`${srcDir}/`)) {
+    manifest.mesh.viewerPath = `${destDir}${manifest.mesh.viewerPath.slice(srcDir.length)}`;
+  }
+  if (!mkdir(destDir)) return null;
+  for (const sub of MODEL_PACKAGE_SUBDIRS) {
+    if (!mkdir(`${destDir}/${sub}`)) return null;
+    const from = `${srcDir}/${sub}`;
+    if (!exists(from)) continue;
+    for (const name of listDir(from)) {
+      if (!name || name.startsWith('.')) continue;
+      const bytes = readFileBase64(`${from}/${name}`);
+      if (bytes === null) continue; // nested dir or unreadable leaf — skip, keep copying
+      if (!writeFileBase64Atomic(`${destDir}/${sub}/${name}`, bytes)) return null;
+    }
+  }
+  if (!writeFile(manifestPath(src.kind, newId), serializeManifest(manifest))) return null;
+  return manifestToPackage(manifest);
 }
 
 // True once at least one materialized package exists on disk. Lets callers

@@ -1,7 +1,7 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { commandById } from '../data/commands';
-import { FLOORS, PRESETS, RIGHT_PANES, SNAP_MODES, modelPackageById } from '../data/content';
+import { FLOORS, PRESETS, RIGHT_PANES, SNAP_MODES, effectiveModelPackage } from '../data/content';
 import { missionCounts, objectMetricRows } from '../data/readouts';
 import type { Asset, EditorState, WorldObject } from '../data/types';
 import type { MaterialRef } from '../world/pieces';
@@ -43,6 +43,12 @@ export default function Inspector(props: {
   onPreset: () => void;
   onPresetOption: (preset: string) => void;
   onModelBrush: (brush: Brush) => void;
+  // Durable model identity (req_2620 S/T): the model card's editable name writes
+  // through AppFrame's one rename path (manifest = disk truth); Save runs the same
+  // 'save-snapshot' command as File → Save; onDisk feeds the save-state chip.
+  onRenameModel: (id: string, name: string) => void;
+  onSaveModel: () => void;
+  modelOnDisk: boolean;
   // World-piece focus-panel edits (req_2563 Phase 3/4).
   onSetPieceOverride: (id: string, path: string, value: number | boolean) => void;
   onClearPieceOverride: (id: string, path: string) => void;
@@ -52,8 +58,10 @@ export default function Inspector(props: {
   outlinerHandlers: OutlinerHandlers;
 }) {
   const activeDocument = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId);
-  const activeModel = activeDocument?.kind === 'model' && activeDocument.sourceId
-    ? modelPackageById(activeDocument.sourceId)
+  // EFFECTIVE package (req_2620 S): session renames + dupes resolve here, so the
+  // card shows the name the next save writes — never a stale synthesized one.
+  const activeModel = activeDocument?.kind === 'model'
+    ? effectiveModelPackage(activeDocument.sourceId, props.state.modelOverrides, props.state.modelDupes)
     : null;
   const activeCommand = commandById(props.state.activeCommandId);
   const counts = missionCounts(props.state);
@@ -124,6 +132,13 @@ export default function Inspector(props: {
     );
   }
   if (activeModel) {
+    const modelDirty = Boolean(props.state.modelDirty[activeModel.id]);
+    // Save-state chip (req_2620 T): loud until the model is a real directory on
+    // disk AND clean since the last materialize. One line, fixed rows — the name
+    // field and the save row sit on the region's standard control grid
+    // (REGIONS.grid.labelWidth label + REGIONS.grid.verbColWidth verb).
+    const saveChip = !props.modelOnDisk ? 'NOT ON DISK' : modelDirty ? 'UNSAVED EDITS' : 'ON DISK';
+    const saveChipTone = props.modelOnDisk && !modelDirty ? 'success' : 'warning';
     return (
       <C.HW_RightPanel>
         <C.HW_Inspector>
@@ -136,6 +151,23 @@ export default function Inspector(props: {
               column of budgeted slices — the outliner and paint-variant lists carry
               their OWN bounded nested scrolls. */}
           <C.HW_InspectorBodyFixed>
+            {/* The model's NAME, editable in place (req_2620 S — the old studio's
+                name field). Typing renames through the ONE write-through path:
+                manifest for on-disk models, pending-until-first-save otherwise. */}
+            <C.HW_RenameBar>
+              <C.HW_FormLabel>name</C.HW_FormLabel>
+              <C.HW_RenameInput value={activeModel.name} onChange={(name: string) => props.onRenameModel(activeModel.id, name)} />
+            </C.HW_RenameBar>
+            <C.HW_RenameBar>
+              <C.HW_Tag style={{ backgroundColor: accentFor(saveChipTone) }}>
+                <C.HW_TagText>{saveChip}</C.HW_TagText>
+              </C.HW_Tag>
+              <C.HW_Spacer />
+              <C.HW_VerbFixed onPress={props.onSaveModel}>
+                <Icon name="Save" size={12} color={accentFor('textDim')} />
+                <C.HW_VerbText>Save</C.HW_VerbText>
+              </C.HW_VerbFixed>
+            </C.HW_RenameBar>
             <ModelDetailBody model={activeModel} />
             {/* The OUTLINER — parts of this multi-part model (add / select / hide / delete).
                 Only primitive-authored models carry parts state. */}

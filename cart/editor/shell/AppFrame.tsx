@@ -49,8 +49,9 @@ import ImportPartDialog from '../dialogs/ImportPartDialog';
 import { subscribe } from '@reactjit/runtime/ffi';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
-import { materializeModelPackage, writeModelArtifacts } from '../data/modelPackageStore';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
+import { MODEL_PACKAGES } from '../data/catalog';
+import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, copyModelPackage } from '../data/modelPackageStore';
 import { colorStudioSpec, colorStudioOverrideKey, paletteForSpecVariant, rgbToCss } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
 import { image as imageOps, quantize as quantizeImage } from '../../../runtime/image';
@@ -178,7 +179,43 @@ export default function AppFrame() {
   // world → the real worldUndo/worldRedo stacks) so the Edit-menu rows count-annotate and
   // gray honestly. Every render is an event edge, so the menus read fresh depths whenever
   // they can possibly be looked at (req_2620 gap W).
-  publishUndoDepths(undoDepths(state));
+  const liveUndoDepths = undoDepths(state);
+  publishUndoDepths(liveUndoDepths);
+
+  // ── Durable identity + visible save state (req_2620 gaps S/T/U) ──────────────
+  // The model doc in view, resolved through the EFFECTIVE package (session rename
+  // applied) — the same record every save writes, so what you see is what lands
+  // in the manifest. onDisk gates the dirty semantics: an on-disk model autosaves
+  // on doc switch; a never-saved doc stays loud until the user saves it first.
+  const activeModelId = (() => {
+    const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+    return doc?.kind === 'model' ? (doc.sourceId ?? null) : null;
+  })();
+  const activeModelPkg = activeModelId ? effectiveModelPackage(activeModelId, state.modelOverrides, state.modelDupes) : null;
+  const activeModelOnDisk = activeModelPkg ? isMaterialized(activeModelPkg.kind, activeModelPkg.id) : false;
+  // Mesh-journal baseline per model: the depth recorded at the last save (reset to
+  // 0 on every doc activate — the host journal restarts with the remount). Depth
+  // ABOVE the baseline = host-side edits since the last materialize (gizmo, paint,
+  // topology and part ops all journal) → the doc is dirty. Rename marks explicitly
+  // (names never journal); Save/autosave clear the flag and re-baseline.
+  const savedMeshDepthRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (activeModelId) savedMeshDepthRef.current[activeModelId] = 0;
+  }, [state.activeWorkspaceDocumentId]);
+  const dirtyProbeDocRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeModelId || liveUndoDepths.source !== 'mesh') return;
+    // The commit that switches docs still read the OLD viewer's journal (it only
+    // unmounts with this same commit) — skip one edge per doc so a stale depth
+    // can never dirty the incoming document.
+    if (dirtyProbeDocRef.current !== state.activeWorkspaceDocumentId) {
+      dirtyProbeDocRef.current = state.activeWorkspaceDocumentId;
+      return;
+    }
+    if (liveUndoDepths.undo > (savedMeshDepthRef.current[activeModelId] ?? 0) && !state.modelDirty[activeModelId]) {
+      setState((prev) => ({ ...prev, modelDirty: { ...prev.modelDirty, [activeModelId]: true } }));
+    }
+  }, [liveUndoDepths.undo, liveUndoDepths.source, activeModelId, state.activeWorkspaceDocumentId, state.modelDirty]);
 
   const activeCommand = commandById(state.activeCommandId);
   const activeObject = selectedObject(state);
@@ -322,18 +359,32 @@ export default function AppFrame() {
       // directory + manifest under cart/editor/data/models/…). Imports already do this on
       // drop; this is the explicit "commit my model to the library" for anything not yet on
       // disk. Paint variants save separately into paints/ (ModelPaintVariants). req_2523.
+      // Resolved through the EFFECTIVE package (req_2620 S): a session rename is part of
+      // the model's identity, so the manifest this writes carries the renamed name — the
+      // old modelPackageById path re-synthesized "Model N" and threw the rename away.
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
-      const pkg = doc?.kind === 'model' ? modelPackageById(doc.sourceId) : null;
+      const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
       if (!pkg) {
         setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Open a model first — Save writes the ACTIVE model to the library.' }));
         return;
       }
       const res = materializeModelPackage(pkg);
-      if (res.ok) writeModelArtifacts(pkg); // also write mesh/base.blob + atlases/base.png
+      const firstSave = res.ok && !MODEL_PACKAGES.some((m) => m.id === pkg.id);
+      if (res.ok) {
+        writeModelArtifacts(pkg); // also write mesh/base.blob + atlases/base.png
+        registerSavedPackage(pkg); // a first save joins the live library roster now, not next boot
+        savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
+      }
       setState((prev) => ({
         ...prev,
         openMenu: null,
         actionMenu: 'File',
+        // Saved = clean. The dirty chip (focus panel) reads this flag.
+        modelDirty: res.ok ? { ...prev.modelDirty, [pkg.id]: false } : prev.modelDirty,
+        // First save also lands in modelDupes: the visible-model memo keys off it,
+        // so the gallery/tree pick the new package up THIS render (the roster push
+        // above is invisible to React). visibleModelPackages dedupes by id.
+        modelDupes: firstSave && !prev.modelDupes.some((m) => m.id === pkg.id) ? [...prev.modelDupes, pkg] : prev.modelDupes,
         status: res.ok ? `Saved "${pkg.name}" to the library → ${res.dir}` : `Save failed: ${res.error ?? 'unknown error'}`,
       }));
       return;
@@ -346,7 +397,8 @@ export default function AppFrame() {
       // status ALWAYS reports — a silent no-op is what made this feel dead before.
       const kind = command.id.slice('export-build-piece-'.length) as BuildKind;
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
-      const pkg = doc?.kind === 'model' ? modelPackageById(doc.sourceId) : null;
+      // Effective package: the exported piece's label carries the renamed name (req_2620 S).
+      const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
       if (!pkg) {
         setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export needs a MODEL open — open one from Models, then Export → Build Piece.' }));
         return;
@@ -1180,8 +1232,10 @@ export default function AppFrame() {
   // whatever's in view; it spawns its own document (req_2542).
   const createNewMeshDocument = (kind: PrimitiveKind, params: PrimitiveParams) => {
     setState((prev) => {
-      const docSeq = prev.workspaceDocuments.filter((doc) => doc.id.startsWith('model:primitive:')).length + 1;
-      const mid = `primitive:${kind}:${docSeq}`;
+      // Collision-free id: skips open docs AND saved library packages — once
+      // primitive:cube:1 is materialized on disk it is a model forever, and the
+      // old open-doc count would have reused its id after a restart (req_2620 S).
+      const mid = nextPrimitiveDocId(kind, prev.workspaceDocuments);
       const doc = modelDocument(primitiveModelPackage(mid));
       const base = makePart(kind, [], prev.seq, params);
       const range = composeModelParts([base]).ranges[0];
@@ -1625,6 +1679,28 @@ export default function AppFrame() {
     });
   }, []);
 
+  // RJIT_EDNAME: rename the ACTIVE model doc — the tiny headless hook proving the
+  // rename path end to end. ';'-separated names apply 800ms apart, so one run with
+  // RJIT_MODELDOC=<kind> + RJIT_EDKEYS="ctrl,s" (save fires between the two) covers
+  // BOTH legs: pending name → the first save's manifest, then live manifest
+  // write-through on the now-materialized model. Unset = no-op.
+  useEffect(() => {
+    const script = (globalThis as any).__env_get?.('RJIT_EDNAME') as string | null | undefined;
+    if (!script) return;
+    script.split(';').filter(Boolean).forEach((name, i) => {
+      setTimeout(() => {
+        const s = stateRef.current;
+        const doc = s.workspaceDocuments.find((d) => d.id === s.activeWorkspaceDocumentId);
+        if (doc?.kind === 'model' && doc.sourceId) {
+          renameModel(doc.sourceId, name);
+          console.error(`[edname] renamed ${doc.sourceId} -> "${name}"`);
+        } else {
+          console.error('[edname] no model doc active — rename skipped');
+        }
+      }, 600 + i * 800);
+    });
+  }, []);
+
   // Studio colour → brush ink. The viewer owns the live brush; this is the ONE
   // sync point pouring the spine's current colour into a colour-kind ink.
   // It reconciles on EITHER side changing (req_2538): keying only on spine picks
@@ -1726,7 +1802,26 @@ export default function AppFrame() {
     }));
   };
 
+  // ── Autosave, bounded (req_2620 T) ────────────────────────────────────────────
+  // Leaving a model doc (switch/close) auto-materializes it IF it is dirty AND
+  // already has a package dir (previously saved at least once). A brand-new
+  // never-saved doc is NOT silently autosaved — the user decides the first save;
+  // its NOT-ON-DISK chip stays loud. Must run BEFORE the doc switch lands: the
+  // artifact writers read the live viewer (host mesh/atlas doors), which unmounts
+  // with the doc. No quit-signal door exists in the host, so quit-autosave is out
+  // of scope — doc-switch autosave is the bounded coverage.
+  const autosaveActiveModelDoc = (s: EditorState): { id: string; name: string } | null => {
+    const doc = s.workspaceDocuments.find((d) => d.id === s.activeWorkspaceDocumentId);
+    if (doc?.kind !== 'model' || !doc.sourceId) return null;
+    const pkg = effectiveModelPackage(doc.sourceId, s.modelOverrides, s.modelDupes);
+    if (!pkg || !s.modelDirty[pkg.id] || !isMaterialized(pkg.kind, pkg.id)) return null;
+    if (!materializeModelPackage(pkg).ok) return null;
+    writeModelArtifacts(pkg);
+    return { id: pkg.id, name: pkg.name };
+  };
+
   const selectWorkspaceDocument = (activeWorkspaceDocumentId: string) => {
+    const autosaved = state.activeWorkspaceDocumentId === activeWorkspaceDocumentId ? null : autosaveActiveModelDoc(state);
     setState((prev) => {
       const doc = prev.workspaceDocuments.find((item) => item.id === activeWorkspaceDocumentId);
       if (!doc) return prev;
@@ -1736,7 +1831,8 @@ export default function AppFrame() {
         materialFocused: doc.kind === 'material',
         activeAssetId: doc.kind === 'material' && doc.sourceId ? doc.sourceId : prev.activeAssetId,
         contextOpen: false,
-        status: `workspace document: ${doc.title}`,
+        modelDirty: autosaved ? { ...prev.modelDirty, [autosaved.id]: false } : prev.modelDirty,
+        status: autosaved ? `autosaved "${autosaved.name}" · workspace document: ${doc.title}` : `workspace document: ${doc.title}`,
       };
     });
   };
@@ -1755,6 +1851,9 @@ export default function AppFrame() {
 
   const closeWorkspaceDocument = (documentId: string) => {
     if (documentId === WORLD_DOCUMENT_ID) return;
+    // Closing the ACTIVE model doc is a doc-switch too — same bounded autosave
+    // (dirty + already-on-disk only), before the viewer unmounts (req_2620 T).
+    const autosaved = state.activeWorkspaceDocumentId === documentId ? autosaveActiveModelDoc(state) : null;
     setState((prev) => {
       const remaining = prev.workspaceDocuments.filter((doc) => doc.id !== documentId);
       const nextActive = prev.activeWorkspaceDocumentId === documentId
@@ -1767,7 +1866,8 @@ export default function AppFrame() {
         activeWorkspaceDocumentId: activeDoc?.id ?? WORLD_DOCUMENT_ID,
         materialFocused: activeDoc?.kind === 'material',
         contextOpen: false,
-        status: 'workspace document closed',
+        modelDirty: autosaved ? { ...prev.modelDirty, [autosaved.id]: false } : prev.modelDirty,
+        status: autosaved ? `autosaved "${autosaved.name}" · workspace document closed` : 'workspace document closed',
       };
     });
   };
@@ -1781,38 +1881,75 @@ export default function AppFrame() {
   );
   const contentTreeNodes = useMemo(() => liveContentTree(visibleModels), [visibleModels]);
 
+  // MANIFEST IS DISK TRUTH (req_2620 S/U): favorite/delete/rename write through to
+  // the model's on-disk manifest when the package is materialized, so they survive
+  // a cold restart. The session override stays as the live mirror either way; for
+  // a not-yet-saved model the override is the PENDING value the first save writes
+  // (save-snapshot resolves through effectiveModelPackage).
   const favoriteModel = (id: string) =>
     setState((prev) => {
-      const next = !(prev.modelOverrides[id]?.favorite ?? false);
+      const pkg = effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes);
+      const next = !(prev.modelOverrides[id]?.favorite ?? pkg?.favorite ?? false);
+      const durable = pkg ? updateManifestIdentity(pkg.kind, id, { favorite: next }) : false;
       return {
         ...prev,
         modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], favorite: next } },
-        status: next ? 'favorited model' : 'unfavorited model',
+        status: `${next ? 'favorited' : 'unfavorited'} model${durable ? '' : ' (in session — saves with the model)'}`,
       };
     });
 
   const deleteModel = (id: string) =>
-    setState((prev) => ({
-      ...prev,
-      modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], hidden: true } },
-      status: 'deleted model (hidden from browser)',
-    }));
+    setState((prev) => {
+      const pkg = effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes);
+      const durable = pkg ? updateManifestIdentity(pkg.kind, id, { hidden: true }) : false;
+      return {
+        ...prev,
+        modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], hidden: true } },
+        status: durable ? 'deleted model (hidden from browser — recorded in its manifest)' : 'deleted model (hidden from browser)',
+      };
+    });
 
   const startRenameModel = (id: string) => setState((prev) => ({ ...prev, modelRenamingId: id, status: 'renaming model' }));
+  // Rename writes through to the manifest AS YOU TYPE for a materialized model
+  // (tiny JSON, human keystroke rate) so the name on disk is never behind the name
+  // on screen; an unmaterialized doc keeps the name pending (dirty chip) until its
+  // first save applies it. The open doc tab retitles in the same update.
   const renameModel = (id: string, name: string) =>
-    setState((prev) => ({ ...prev, modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], name } } }));
+    setState((prev) => {
+      const pkg = effectiveModelPackage(id, prev.modelOverrides, prev.modelDupes);
+      const durable = pkg ? updateManifestIdentity(pkg.kind, id, { name }) : false;
+      return {
+        ...prev,
+        modelOverrides: { ...prev.modelOverrides, [id]: { ...prev.modelOverrides[id], name } },
+        workspaceDocuments: prev.workspaceDocuments.map((doc) => (doc.kind === 'model' && doc.sourceId === id ? { ...doc, title: name } : doc)),
+        modelDirty: durable ? prev.modelDirty : { ...prev.modelDirty, [id]: true },
+      };
+    });
   const finishRenameModel = () => setState((prev) => ({ ...prev, modelRenamingId: null, status: 'renamed model' }));
 
+  // Duplicate = copy the whole package DIRECTORY when the source is materialized
+  // (req_2620 U: dupes are real on disk, own manifest, own name — the req_2168
+  // "copy the folder, have all my basis covered" promise). A source not on disk
+  // yet falls back to the session-only clone, and the status says so honestly.
   const duplicateModel = (model: ModelPackage) =>
     setState((prev) => {
-      const dupe: ModelPackage = {
+      const copied = copyModelPackage(model, `${model.id}::dup-${prev.seq}`, `${model.name} copy`);
+      const dupe: ModelPackage = copied ?? {
         ...model,
         id: `${model.id}::dup-${prev.seq}`,
         folderId: `model-dup-${prev.seq}` as ContentFolderId,
         name: `${model.name} copy`,
         favorite: false,
       };
-      return { ...prev, modelDupes: [...prev.modelDupes, dupe], seq: prev.seq + 1, status: `duplicated ${model.name}` };
+      if (copied) registerSavedPackage(copied); // in the live roster now; next boot reads it from disk
+      return {
+        ...prev,
+        modelDupes: [...prev.modelDupes, dupe],
+        seq: prev.seq + 1,
+        status: copied
+          ? `duplicated ${model.name} → ${dupe.path}`
+          : `duplicated ${model.name} (in session only — open it and Save Model to Library to keep it)`,
+      };
     });
 
   // The ONE outliner handler set (Workspace + Inspector mount the same object). Part
@@ -1972,6 +2109,12 @@ export default function AppFrame() {
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
             onModelBrush={(brush) => modelToolApiRef.current?.setBrush(brush)}
+            // Durable identity (req_2620 S/T): the model card's name field renames
+            // through the SAME write-through path as the library right-click; the
+            // Save verb runs the SAME 'save-snapshot' command as File → Save.
+            onRenameModel={renameModel}
+            onSaveModel={() => runCommand('save-snapshot', 'focus-panel')}
+            modelOnDisk={activeModelOnDisk}
             onSetPieceOverride={setPieceOverride}
             onClearPieceOverride={clearPieceOverride}
             onAssignSlot={assignPieceSlot}

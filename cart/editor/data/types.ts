@@ -313,6 +313,9 @@ export type ModelPackage = {
   kind: 'build' | 'prop' | 'character' | 'vehicle';
   stage: 'wip' | 'ready' | 'locked';
   favorite?: boolean;
+  // Deleted-from-browser, as recorded in the on-disk manifest (req_2620 U). Kept in
+  // the loaded roster (so name-dedupe still sees it) but filtered from every list.
+  hidden?: boolean;
   color: string;
   source: string;
   viewerPath?: string;
@@ -459,6 +462,10 @@ export type EditorState = {
   modelOverrides: Record<string, ModelOverride>;
   modelDupes: ModelPackage[];
   modelRenamingId: string | null;
+  // Unsaved-work flag per model id (req_2620 T): true once mesh/paint/parts/name
+  // changed since the last materialize; cleared by Save (and by doc-switch
+  // autosave for models already on disk). Drives the focus panel's save chip.
+  modelDirty: Record<string, boolean>;
   // Multi-part model authoring (the outliner). Parts per model id; the active part is the
   // one the outliner highlights + the gizmo drives. Only primitive-authored models carry
   // parts; imported single meshes have none (their outliner is a follow-up).

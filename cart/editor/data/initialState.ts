@@ -102,6 +102,7 @@ export function initialState(): EditorState {
     modelOverrides: {},
     modelDupes: [],
     modelRenamingId: null,
+    modelDirty: {},
     modelParts: {},
     modelActivePartId: null,
     mapPaint: defaultMapPaint(),

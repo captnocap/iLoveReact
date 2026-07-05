@@ -43,6 +43,11 @@ export type ModelManifest = {
   name: string;
   kind: ModelPackageKind;
   stage: ModelPackage['stage'];
+  // Durable identity flags (req_2620 gaps S/T/U): favorite/hidden used to live only
+  // in the session's modelOverrides, so a rename/favorite/delete evaporated on a
+  // cold restart. The manifest is disk truth now; overrides are the live mirror.
+  favorite?: boolean;
+  hidden?: boolean;
   folderId: ContentFolderId;
   semanticKind?: string;
   sourceKind?: ModelPackage['sourceKind'];
@@ -109,6 +114,8 @@ export function packageToManifest(pkg: ModelPackage): ModelManifest {
     name: pkg.name,
     kind: pkg.kind,
     stage: pkg.stage,
+    favorite: pkg.favorite,
+    hidden: pkg.hidden,
     folderId: pkg.folderId,
     semanticKind: pkg.semanticKind,
     sourceKind: pkg.sourceKind,
@@ -134,6 +141,8 @@ export function manifestToPackage(manifest: ModelManifest): ModelPackage {
     path: displayPath(manifest.kind, manifest.id),
     kind: manifest.kind,
     stage: manifest.stage,
+    favorite: manifest.favorite,
+    hidden: manifest.hidden,
     color: manifest.color,
     source: manifestPath(manifest.kind, manifest.id),
     viewerPath: manifest.mesh.viewerPath,
@@ -147,6 +156,10 @@ export function manifestToPackage(manifest: ModelManifest): ModelPackage {
     paints: manifest.paints,
     sourceKind: manifest.sourceKind,
     semanticKind: manifest.semanticKind,
+    // A saved primitive package re-arms its generator on load (semanticKind IS the
+    // seed kind), so reopening it from disk still builds viewable geometry — the
+    // manifest carries identity; mesh-blob readback is a later slice.
+    primitive: manifest.sourceKind === 'primitive' ? (manifest.semanticKind as ModelPackage['primitive']) : undefined,
   };
 }
 

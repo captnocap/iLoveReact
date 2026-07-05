@@ -5,7 +5,7 @@ import { listPackageFiles, type PackageFile } from './modelPackageStore';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 import { commandById, PRIMITIVE_MESHES } from './commands';
 import { INITIAL_OBJECTS } from './initialState';
-import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, WorldObject } from './types';
+import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, PrimitiveKind, WorkspaceDocument, WorldObject } from './types';
 
 export const DOMAINS = [
   ['world', 'Eye'],
@@ -111,13 +111,19 @@ export function visibleModelPackages(
   overrides: Record<string, ModelOverride>,
   dupes: ModelPackage[],
 ): ModelPackage[] {
+  // Dedupe by id, DISK-BACKED (catalog) first: a session-added package (first
+  // save / dupe) also loads from its manifest after a hot reload rebuilt the
+  // catalog, and the disk copy is the truth of the pair (req_2620 S).
+  const seen = new Set<string>();
   return [...MODEL_PACKAGES, ...dupes]
+    .filter((model) => (seen.has(model.id) ? false : (seen.add(model.id), true)))
     .map((model) => {
       const override = overrides[model.id];
       if (!override) return model;
       return { ...model, name: override.name ?? model.name, favorite: override.favorite ?? model.favorite };
     })
-    .filter((model) => !overrides[model.id]?.hidden);
+    // hidden: the session override OR the manifest's durable flag (req_2620 U).
+    .filter((model) => !(overrides[model.id]?.hidden ?? model.hidden));
 }
 
 export function modelPackagesForFolder(
@@ -192,11 +198,55 @@ export function primitiveModelPackage(id: string): ModelPackage {
 }
 
 export function modelPackageById(id: string): ModelPackage | null {
+  // DISK-BACKED WINS (req_2620 S): a saved primitive doc has a real package in the
+  // catalog (loadMaterializedPackages / a session save) — its manifest name is the
+  // truth, so the roster lookup runs BEFORE the synthesizers, never after.
+  const registered = MODEL_PACKAGES.find((model) => model.id === id);
+  if (registered) return registered;
   if (id.startsWith('primitive:')) return primitiveModelPackage(id);
   // A file-explorer / disk-picker open (`file:<path>`) re-synthesizes from the path in
   // the id — the file may live outside every indexed catalog dir.
   if (id.startsWith('file:')) return fileModelPackage(id.slice('file:'.length));
-  return MODEL_PACKAGES.find((model) => model.id === id) ?? null;
+  return null;
+}
+
+// The model as the USER knows it right now: the catalog/dupe record with the
+// session's rename/favorite override applied. THE resolver for every path that
+// writes identity to disk — Ctrl+S used to call modelPackageById bare, so a
+// rename never reached the manifest it wrote ("Model 3" forever, req_2620 S).
+export function effectiveModelPackage(
+  id: string | undefined,
+  overrides: Record<string, ModelOverride>,
+  dupes: ModelPackage[],
+): ModelPackage | null {
+  if (!id) return null;
+  const base = dupes.find((model) => model.id === id) ?? modelPackageById(id);
+  if (!base) return null;
+  const override = overrides[id];
+  if (!override) return base;
+  return { ...base, name: override.name ?? base.name, favorite: override.favorite ?? base.favorite };
+}
+
+// The next pristine `primitive:<kind>:<n>` document id. Skips open documents AND
+// library packages: once `primitive:cube:1` is saved to disk it is a real model
+// forever, and a fresh File → New Mesh must never collide with it (the old
+// open-doc count reused saved ids after a restart). <n> is also skipped when any
+// saved model already answers to the synthesized "Model <n>" name — the boot
+// roster dedupes by NAME, so two saved "Model 1"s would silently drop one.
+export function nextPrimitiveDocId(kind: PrimitiveKind, docs: WorkspaceDocument[]): string {
+  const taken = (n: number) =>
+    MODEL_PACKAGES.some((model) => model.id === `primitive:${kind}:${n}` || model.name === `Model ${n}`)
+    || docs.some((doc) => doc.kind === 'model' && doc.sourceId?.startsWith('primitive:') && doc.sourceId.endsWith(`:${n}`));
+  let n = 1;
+  while (taken(n)) n += 1;
+  return `primitive:${kind}:${n}`;
+}
+
+// Register a first-saved package into the live catalog roster so THIS session's
+// gallery/tree/search see it immediately (next boot reads it from disk). Same
+// in-session registration move importModelFilePackage makes. Idempotent.
+export function registerSavedPackage(pkg: ModelPackage): void {
+  if (!MODEL_PACKAGES.some((model) => model.id === pkg.id)) MODEL_PACKAGES.push(pkg);
 }
 
 export function exactModelForFolder(folder: ContentFolderId): ModelPackage | null {
