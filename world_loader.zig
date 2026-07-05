@@ -76,11 +76,18 @@ const PAINT_BEAM_ALPHA: f32 = 0.32;
 // Live-foliage preview row caps (req_2497: painting flora grows LITERAL
 // blades/bushes/flowers/palms live). Truncation is LOUD — the Compile bake
 // grows the full population; this is the authoring preview's budget.
-const PAINT_GRASS_ROW_CAP: u32 = 65536;
-const PAINT_BUSH_ROW_CAP: u32 = 16384;
-const PAINT_FLOWER_ROW_CAP: u32 = 16384;
-const PAINT_FROND_ROW_CAP: u32 = 24576;
-const PAINT_TRUNK_ROW_CAP: u32 = 2048;
+// Sized for a HEAVY hand-painted map (req_2649: the old 24576-frond cap
+// exhausted at ~1.5k palms while trunks kept placing — topless palms). One
+// palm = 1 trunk + ~16 crown fronds, so frond:trunk stays 16:1. The rows are
+// SLIM on the GPU: grass/bush/flower/frond ride the 24 B SlimInstance pool
+// (262144+65536+65536+262144 = 655360 rows ≈ 15.7 MB of the shared
+// 1048576-row slim static pool) and trunks the 80 B InstanceData pool
+// (16384 rows ≈ 1.3 MB). CPU side is 12 f32/row → ~31 MB, allocated once.
+const PAINT_GRASS_ROW_CAP: u32 = 262144;
+const PAINT_BUSH_ROW_CAP: u32 = 65536;
+const PAINT_FLOWER_ROW_CAP: u32 = 65536;
+const PAINT_FROND_ROW_CAP: u32 = 262144;
+const PAINT_TRUNK_ROW_CAP: u32 = 16384;
 // Verbatim palm trunk constants (render3d/palmPopulation.ts PALM_CONFIG +
 // PALM_TRUNK_UNIT_RADIUS) — the live trunk must roll the SAME hash chain the
 // crown does so bark and fronds agree per cell.
@@ -7126,6 +7133,11 @@ fn pushFoliageRow(buf: []f32, count: *u32, cap: u32, row: [foliage.STRIDE]f32) b
     return true;
 }
 
+/// Marker for the regen-end saturation log: names WHICH family hit its cap.
+fn clippedMark(family_full: bool) []const u8 {
+    return if (family_full) " CLIPPED" else "";
+}
+
 fn ensureFoliageBuf(runtime: *Runtime, slot: *?[]f32, cap: u32) ?[]f32 {
     if (slot.*) |buf| return buf;
     const buf = runtime.allocator.alloc(f32, @as(usize, cap) * foliage.STRIDE) catch return null;
@@ -7146,7 +7158,13 @@ fn regenPaintFoliage(runtime: *Runtime) void {
     var bush_n: u32 = 0;
     var frond_n: u32 = 0;
     var trunk_n: u32 = 0;
-    var full = false;
+    // Per-family saturation flags: the regen-end log names WHICH family
+    // clipped (a saturated frond budget with trunk headroom = topless palms).
+    var grass_full = false;
+    var flower_full = false;
+    var bush_full = false;
+    var frond_full = false;
+    var trunk_full = false;
 
     for (map_chunks.slots()) |maybe| {
         const chunk = maybe orelse continue;
@@ -7190,30 +7208,30 @@ fn regenPaintFoliage(runtime: *Runtime) void {
                                 0,                     @floatCast(lean),          0,
                                 span,                  @floatCast(trunk_h),       span,
                                 PALM_TRUNK_COLOR[0],   PALM_TRUNK_COLOR[1],       PALM_TRUNK_COLOR[2],
-                            })) full = true;
+                            })) trunk_full = true;
                             const crown = foliage.palmCrown(&foliage.PALM, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key);
                             const fc = crown.total();
                             var k: u32 = 0;
                             while (k < fc) : (k += 1) {
-                                if (!pushFoliageRow(frond, &frond_n, PAINT_FROND_ROW_CAP, foliage.palmFrondRow(&crown, k))) full = true;
+                                if (!pushFoliageRow(frond, &frond_n, PAINT_FROND_ROW_CAP, foliage.palmFrondRow(&crown, k))) frond_full = true;
                             }
                         },
                         2 => {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
-                                if (!pushFoliageRow(flowers, &flower_n, PAINT_FLOWER_ROW_CAP, foliage.flowerRow(&foliage.FLOWER, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) full = true;
+                                if (!pushFoliageRow(flowers, &flower_n, PAINT_FLOWER_ROW_CAP, foliage.flowerRow(&foliage.FLOWER, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) flower_full = true;
                             }
                         },
                         1 => {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
-                                if (!pushFoliageRow(bush, &bush_n, PAINT_BUSH_ROW_CAP, foliage.bladeRow(&foliage.BUSH, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) full = true;
+                                if (!pushFoliageRow(bush, &bush_n, PAINT_BUSH_ROW_CAP, foliage.bladeRow(&foliage.BUSH, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) bush_full = true;
                             }
                         },
                         else => {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
-                                if (!pushFoliageRow(grass, &grass_n, PAINT_GRASS_ROW_CAP, foliage.bladeRow(&foliage.GRASS, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) full = true;
+                                if (!pushFoliageRow(grass, &grass_n, PAINT_GRASS_ROW_CAP, foliage.bladeRow(&foliage.GRASS, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k))) grass_full = true;
                             }
                         },
                     }
@@ -7222,9 +7240,13 @@ fn regenPaintFoliage(runtime: *Runtime) void {
         }
     }
 
-    if (full) {
-        log.print("[paint] LIVE FOLIAGE PREVIEW FULL (grass {d}/{d} flowers {d}/{d} bush {d}/{d} fronds {d}/{d} trunks {d}/{d}) — the Compile bake grows the full population\n", .{
-            grass_n, PAINT_GRASS_ROW_CAP, flower_n, PAINT_FLOWER_ROW_CAP, bush_n, PAINT_BUSH_ROW_CAP, frond_n, PAINT_FROND_ROW_CAP, trunk_n, PAINT_TRUNK_ROW_CAP,
+    if (grass_full or flower_full or bush_full or frond_full or trunk_full) {
+        log.print("[paint] LIVE FOLIAGE PREVIEW FULL (grass {d}/{d}{s} flowers {d}/{d}{s} bush {d}/{d}{s} fronds {d}/{d}{s} trunks {d}/{d}{s}) — the Compile bake grows the full population\n", .{
+            grass_n,  PAINT_GRASS_ROW_CAP,  clippedMark(grass_full),
+            flower_n, PAINT_FLOWER_ROW_CAP, clippedMark(flower_full),
+            bush_n,   PAINT_BUSH_ROW_CAP,   clippedMark(bush_full),
+            frond_n,  PAINT_FROND_ROW_CAP,  clippedMark(frond_full),
+            trunk_n,  PAINT_TRUNK_ROW_CAP,  clippedMark(trunk_full),
         });
     }
 
