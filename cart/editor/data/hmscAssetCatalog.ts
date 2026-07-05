@@ -193,6 +193,28 @@ export function storedModelMeshData(modelId: string): Float32Array | null {
   return storedModelMeshes[modelId] ?? null;
 }
 
+// The ONE way to get a model's vertices, whatever drawer they live in (req_2598).
+// A model is JUST a mesh — some carry EditMesh parts (studio, multi-part), some a
+// content-addressed mesh blob (cooked / saved-to-library), some are primitives.
+// This mirrors the viewer's resolveViewer so a placed piece renders the SAME
+// geometry the editor shows — no "special" representation. Stride-8 interleaved
+// (pos3/normal3/uv2). Returns null only for a file-backed model whose geometry
+// lives host-side (viewerPath) — the one case JS can't read without the host.
+export function modelPackageMeshData(pkg: ModelPackage): Float32Array | null {
+  const ok = (v: Float32Array | null | undefined): v is Float32Array => !!v && v.length >= 8;
+  // 1. primitive — built on the fly (same as the viewer)
+  if (pkg.primitive) { const v = primitiveMeshData(pkg.primitive).positions; if (ok(v)) return v; }
+  // 2. content-addressed mesh blob (cooked assets + models saved to the library)
+  const meshRef = pkg.viewerMeshRef
+    ?? (pkg.sourceKind === 'cooked-asset' ? cookedMeshRefForAsset(pkg.id.startsWith('cooked:') ? pkg.id.slice('cooked:'.length) : pkg.id) : null);
+  if (meshRef) { const v = cookedMeshBlobData(meshRef); if (ok(v)) return v; }
+  // 3. stored EditMesh parts (studio multi-part models — vault_door's path)
+  const storedId = pkg.id.startsWith('studio:') ? pkg.id.slice('studio:'.length) : pkg.id;
+  const direct = storedModelMeshData(storedId); if (ok(direct)) return direct;
+  const parts = storedModelParts(storedId); if (parts) { const c = composeModelParts(parts).positions; if (ok(c)) return c; }
+  return null;
+}
+
 export function storedModelFaceGroupData(modelId: string): Uint32Array | null {
   return storedModelFaceGroups[modelId] ?? null;
 }
@@ -238,15 +260,35 @@ function buildStoredModelParts(snapshot: ModelSnapshot | null): Record<string, M
 // mesh editor — so you get a properly-sized thing to paint on instead of a fixed unit cube.
 // One flat param bag drives every kind; PRIMITIVE_FIELDS says which knobs each kind exposes
 // (self-describing label/range), and primitiveEditMesh maps them onto the generators.
+//
+// UNITS (req_2624): the dialog speaks u — 16 u = 1 game tile = 1 m — the SAME basis the
+// viewport's stage grid draws (framework/gpu/3d.zig: STAGE_TILE_M 1 m panels, 16-division
+// fine grid) and per-face UV uses. The generators (editMesh.ts cuboid/cylinder/…) speak
+// world METERS: a size-1.0 cuboid spans exactly one stage tile panel. PrimitiveParams
+// therefore exists in two spaces — dialog u (PRIMITIVE_FIELDS ranges, integer-stepped)
+// and generator meters (what primitiveEditMesh/primitivePartMesh consume) — and
+// primitiveParamsFromU is the ONE conversion at the dialog boundary.
+export const U_PER_TILE = 16; // 16 u = 1 tile = 1 m (old studio's Blockbench 16x basis)
 export type PrimitiveParams = { size: number; height: number; resolution: number };
-export type PrimitiveField = { key: keyof PrimitiveParams; label: string; min: number; max: number; step: number; default: number };
+export type PrimitiveField = {
+  key: keyof PrimitiveParams;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  /** 'u' = a dimension in u (converted /16 to generator meters); 'count' = a unitless resolution knob. */
+  unit: 'u' | 'count';
+  /** true when the u dimension reads as a diameter (⌀ in the tile readout). */
+  diameter?: boolean;
+};
 
 const F = {
-  size: { key: 'size', label: 'Size', min: 0.1, max: 50, step: 0.1, default: 1 } as PrimitiveField,
-  diameter: { key: 'size', label: 'Diameter', min: 0.1, max: 50, step: 0.1, default: 1 } as PrimitiveField,
-  height: { key: 'height', label: 'Height', min: 0.1, max: 50, step: 0.1, default: 1 } as PrimitiveField,
-  segments: { key: 'resolution', label: 'Segments', min: 3, max: 96, step: 1, default: 24 } as PrimitiveField,
-  subdiv: { key: 'resolution', label: 'Subdivisions', min: 0, max: 5, step: 1, default: 2 } as PrimitiveField,
+  size: { key: 'size', label: 'Size', min: 1, max: 800, step: 1, default: 16, unit: 'u' } as PrimitiveField,
+  diameter: { key: 'size', label: 'Diameter', min: 1, max: 800, step: 1, default: 16, unit: 'u', diameter: true } as PrimitiveField,
+  height: { key: 'height', label: 'Height', min: 1, max: 800, step: 1, default: 16, unit: 'u' } as PrimitiveField,
+  segments: { key: 'resolution', label: 'Segments', min: 3, max: 96, step: 1, default: 24, unit: 'count' } as PrimitiveField,
+  subdiv: { key: 'resolution', label: 'Subdivisions', min: 0, max: 5, step: 1, default: 2, unit: 'count' } as PrimitiveField,
 };
 
 export const PRIMITIVE_FIELDS: Record<PrimitiveKind, PrimitiveField[]> = {
@@ -259,25 +301,47 @@ export const PRIMITIVE_FIELDS: Record<PrimitiveKind, PrimitiveField[]> = {
   icosphere: [F.diameter, F.subdiv],
 };
 
-/** The starting params for a kind's dialog — each exposed field seeded from its default. */
-export function defaultPrimitiveParams(kind: PrimitiveKind): PrimitiveParams {
-  const p: PrimitiveParams = { size: 1, height: 1, resolution: 24 };
+/** The starting DIALOG params for a kind (u space) — each exposed field seeded from its
+ *  default. 16 u = one tile, so the default primitive spans exactly one stage tile panel. */
+export function defaultPrimitiveParamsU(kind: PrimitiveKind): PrimitiveParams {
+  const p: PrimitiveParams = { size: U_PER_TILE, height: U_PER_TILE, resolution: 24 };
   for (const f of PRIMITIVE_FIELDS[kind]) p[f.key] = f.default;
   return p;
 }
 
-function primitiveEditMesh(kind: PrimitiveKind, p: PrimitiveParams = defaultPrimitiveParams(kind)): EditMesh {
+/** Dialog u → generator meters: dimensions divide by 16; resolution is a count, untouched. */
+export function primitiveParamsFromU(p: PrimitiveParams): PrimitiveParams {
+  return { size: p.size / U_PER_TILE, height: p.height / U_PER_TILE, resolution: p.resolution };
+}
+
+// SPAWN RESTING ON THE FLOOR (req_2643): the generators mint meshes CENTERED at the origin
+// (editMesh.ts's contract), which dropped every fresh primitive half-sunk through the stage
+// ground plane. The old studio rested parts ON the floor — lift the AUTHORED mesh so its
+// lowest vertex sits at y = 0 (base flush with the tile panels). Runs on the freshly-built
+// mesh only, so it composes with any authored size: a 32-u-tall cube rests base 0, top 2 m.
+function restOnGround(mesh: EditMesh): EditMesh {
+  let minY = Infinity;
+  for (const v of mesh.verts) minY = Math.min(minY, v[1]);
+  if (!Number.isFinite(minY) || minY === 0) return mesh; // empty, or already grounded (plane)
+  for (const v of mesh.verts) v[1] -= minY;
+  return mesh;
+}
+
+function primitiveEditMesh(kind: PrimitiveKind, p: PrimitiveParams = primitiveParamsFromU(defaultPrimitiveParamsU(kind))): EditMesh {
   const s = p.size, h = p.height, r = p.size / 2;
   const seg = Math.max(3, Math.round(p.resolution)); // round kinds want ≥3 segments
-  switch (kind) {
-    case 'cube': return cuboid(s, h, s);
-    case 'cylinder': return cylinder(r, h, seg);
-    case 'cone': return cone(r, h, seg);
-    case 'pyramid': return pyramid(s, h, s);
-    case 'plane': return plane(s, s);
-    case 'sphere': return sphere(r, seg);
-    case 'icosphere': return icosphere(r, Math.max(0, Math.round(p.resolution))); // resolution = subdivisions here
-  }
+  const centered = (() => {
+    switch (kind) {
+      case 'cube': return cuboid(s, h, s);
+      case 'cylinder': return cylinder(r, h, seg);
+      case 'cone': return cone(r, h, seg);
+      case 'pyramid': return pyramid(s, h, s);
+      case 'plane': return plane(s, s);
+      case 'sphere': return sphere(r, seg);
+      case 'icosphere': return icosphere(r, Math.max(0, Math.round(p.resolution))); // resolution = subdivisions here
+    }
+  })();
+  return restOnGround(centered);
 }
 export function primitiveMeshData(kind: PrimitiveKind): { positions: Float32Array; faceGroups: Uint32Array } {
   const groups: number[] = [];
@@ -286,10 +350,12 @@ export function primitiveMeshData(kind: PrimitiveKind): { positions: Float32Arra
 }
 
 // Build one primitive's authored EditMesh (the outliner's per-part geometry) at the given
-// params. Public so the AppFrame add-part handler can seed a part without importing the
-// generators directly. Omitting params yields the kind's defaults (a unit primitive).
+// params (GENERATOR METERS — the dialog converts its u fields via primitiveParamsFromU
+// before calling in). Public so the AppFrame add-part handler can seed a part without
+// importing the generators directly. Omitting params yields the kind's defaults (a
+// one-tile primitive), resting on the ground plane like every fresh primitive (req_2643).
 export function primitivePartMesh(kind: PrimitiveKind, params?: PrimitiveParams): EditMesh {
-  return primitiveEditMesh(kind, params ?? defaultPrimitiveParams(kind));
+  return primitiveEditMesh(kind, params);
 }
 
 export type PartGroupRange = { id: string; lo: number; hi: number };
