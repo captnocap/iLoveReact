@@ -414,6 +414,15 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn meshGizmoNudge(_: u8, _: f32) bool {
         return false;
     }
+    pub fn meshLcActive() bool {
+        return false;
+    }
+    pub fn meshLcHandleHit(_: f32, _: f32) bool {
+        return false;
+    }
+    pub fn meshLcHandleDrag(_: f32, _: f32) bool {
+        return false;
+    }
     pub fn setMeshGizmoTool(_: u8) void {}
     pub fn drawEditorOverlay(_: f32, _: f32) void {}
     pub fn meshSetMarquee(_: f32, _: f32, _: f32, _: f32) void {}
@@ -809,6 +818,7 @@ var me_selecting: bool = false; // left held in a select mode (pick on press, ma
 var me_panning: bool = false; // left held with the Focus tool
 var me_gizmo_dragging: bool = false; // left held on a transform gizmo handle
 var me_gizmo_axis: i32 = -1;
+var me_lc_dragging: bool = false; // left held on the loop-cut plane handle (req_2625 DD)
 var me_marquee: bool = false; // the select press travelled → became a marquee
 var me_down_x: f32 = 0;
 var me_down_y: f32 = 0;
@@ -4219,6 +4229,19 @@ pub fn run(config_in: AppConfig) !void {
                                 me_panning = true;
                                 continue;
                             }
+                            // A LIVE loop-cut session is MODAL (req_2625 gap DD): the
+                            // drawn cut-plane handle is the only grabbable — a hit
+                            // starts the host-side offset drag; any other press is
+                            // inert (falling through to a face pick would mutate the
+                            // selection the session's captured base was built from).
+                            // The popup buttons and Esc are the exits.
+                            if (r3d.meshLcActive()) {
+                                if (r3d.meshLcHandleHit(mx, my)) {
+                                    me_lc_dragging = true;
+                                    state_mod.markDirty();
+                                }
+                                continue;
+                            }
                             const gh = r3d.meshGizmoHit(mx, my);
                             if (gh >= 0) {
                                 me_gizmo_dragging = true;
@@ -4672,6 +4695,13 @@ pub fn run(config_in: AppConfig) !void {
                             state_mod.markDirty();
                             continue;
                         }
+                        if (me_lc_dragging) {
+                            // Loop-cut handle drag: the host re-previews internally; the
+                            // popup polls __mesh_lc_state to track it (no JS per move).
+                            _ = r3d.meshLcHandleDrag(event.motion.xrel, event.motion.yrel);
+                            state_mod.markDirty();
+                            continue;
+                        }
                         if (me_selecting) {
                             if (!me_marquee and (@abs(mx - me_down_x) > 4 or @abs(my - me_down_y) > 4)) {
                                 me_marquee = true; // the press became a drag → revert the press-pick, switch to marquee
@@ -4895,6 +4925,13 @@ pub fn run(config_in: AppConfig) !void {
                         if (event.button.button == c.SDL_BUTTON_LEFT) {
                             if (me_panning) {
                                 me_panning = false;
+                                continue;
+                            }
+                            if (me_lc_dragging) {
+                                // Release just ends the grab — the previewed cut stays
+                                // live in the session (commit/cancel remain the popup's).
+                                me_lc_dragging = false;
+                                state_mod.markDirty();
                                 continue;
                             }
                             if (me_gizmo_dragging) {

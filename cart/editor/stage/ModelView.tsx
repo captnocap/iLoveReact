@@ -270,6 +270,17 @@ const meshLcBegin = (): LcInfo | null => {
 const meshLcPreview = (dir: number, cuts: number, offsetFrac: number) =>
   readTopoResult(host.__mesh_lc_preview?.(dir, cuts, offsetFrac));
 const meshLcEnd = (commit: boolean) => readTopoResult(host.__mesh_lc_end?.(commit ? 1 : 0));
+// Read back the LIVE session's last-previewed params: a host-side handle drag re-previews
+// internally (engine.zig → meshLcHandleDrag), so the popup polls this while open.
+type LcState = { ok: number; dir?: number; cuts?: number; offsetFrac?: number; key?: string; count?: number };
+const meshLcState = (): LcState | null => {
+  try {
+    const j = host.__mesh_lc_state?.();
+    return typeof j === 'string' && j ? (JSON.parse(j) as LcState) : null;
+  } catch {
+    return null;
+  }
+};
 // Delete exactly the selected elements (faces, or faces touching a selected vert/edge).
 const meshDeleteSelection = () => readTopoResult(host.__mesh_delete_selection?.());
 // ── Host-authoritative part ops ──────────────────────────────────────────────────
@@ -513,16 +524,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // real mesh units along the face's span, from the lc_begin sizes) or 'percent'. The
   // internal offset stays a percent; the door always takes the 0..1 frac (offset/100).
   //
-  // HANDLE DRAG (req_2625 gap DD, still host-blocked): the host DRAWS a translate-style
-  // handle on the middle cut plane (3d.zig drawLoopCutOverlay — "drawing only for now"),
-  // but its native input loop owns every left-drag while the editor captures
-  // (engine.zig routes presses to meshGizmoHit → face pick; the lc handle is never
-  // hit-tested), and no door echoes a session's offset back. Wiring the drag needs the
-  // host side: an lc-handle hit + drag path in engine.zig/3d.zig that re-previews
-  // internally, plus ONE read-back door `__mesh_lc_state()` → JSON
-  // {ok, dir, cuts, offsetFrac, key, count} the popup polls while `lc` is live to keep
-  // these steppers/value tracking the drag. Do NOT fake it with a JS overlay — the cart
-  // never sees those pointer events.
+  // HANDLE DRAG (req_2625 gap DD, WIRED): grab the translate-style handle on the middle
+  // cut plane and drag — engine.zig hit-tests it FIRST while a session is live
+  // (meshLcHandleHit; a live session is modal, so no press falls through to a face pick)
+  // and routes the motion to meshLcHandleDrag, which re-previews HOST-side. The popup
+  // polls `__mesh_lc_state` (~4 Hz, effect below) to adopt each drag's new mesh key and
+  // mirror dir/cuts/offset back into this state WITHOUT re-previewing.
   const [lc, setLc] = useState<null | { dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent'; sizes: [number, number] }>(null);
   const openLoopCut = () => {
     const info = meshLcBegin();
@@ -545,6 +552,31 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     adoptMesh(meshLcEnd(commit));
     setLc(null);
   };
+  // While the popup is live: poll the host session (~4 Hz) and adopt what a handle drag
+  // did — every host re-preview installs a NEW mesh key (adoptMesh, the steppers' path),
+  // and dir/cuts/offset mirror into `lc` WITHOUT re-previewing (the host already did).
+  // Functional setLc — this timer closure is mount-frozen (same trap as the meshops
+  // harness). lastKey seeds on the first tick so the open-preview's key isn't re-adopted.
+  useEffect(() => {
+    if (!lc) return;
+    let live = true;
+    let lastKey: string | null = null;
+    const poll = () => {
+      if (!live) return;
+      const st = meshLcState();
+      if (st?.ok && typeof st.offsetFrac === 'number' && typeof st.key === 'string' && typeof st.count === 'number') {
+        if (lastKey !== null && st.key !== lastKey) adoptMesh({ ok: 1, key: st.key, count: st.count });
+        lastKey = st.key;
+        const pct = Math.round(st.offsetFrac * 10000) / 100;
+        const dir = (st.dir === 1 ? 1 : 0) as 0 | 1;
+        const cuts = Math.max(1, st.cuts ?? 1);
+        setLc((prev) => (prev && (prev.offset !== pct || prev.dir !== dir || prev.cuts !== cuts) ? { ...prev, dir, cuts, offset: pct } : prev));
+      }
+      setTimeout(poll, 250);
+    };
+    setTimeout(poll, 250);
+    return () => { live = false; };
+  }, [lc !== null]);
   // Offset stepping in the CURRENT unit: percent steps 5; size units step 0.1u converted
   // to the internal percent (clamped 0..100 and kept to 2dp so the cell reads clean).
   const lcSpan = lc ? (lc.sizes[lc.dir] || 0) : 0;
@@ -1229,7 +1261,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     //   mode:N sel:N add:N range:lo,hi pick:x,y pickadd:x,y box:x0,y0,x1,y1 snap revert
     //   clear scope:lo,hi nudge:axis,amt gizmo:N undo redo del grouppaint:lo,hi,r,g,b
     //   detail:px wait:frames report atlas:/path.png
-    //   lcbegin lcprev:dir,cuts,off lcend:0|1  (loop-cut session; off = the door's 0..1 frac)
+    //   lcbegin lcprev:dir,cuts,off lcend:0|1 lcstate  (loop-cut session; off = 0..1 frac)
     const opsText = callHost<string | null>('__env_get', null, 'RJIT_MESHOPS');
     if (opsText) {
       const num = (s: string | undefined) => Number(s ?? 0) || 0;
@@ -1300,6 +1332,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           setLc((prev) => (prev ? { ...prev, dir, cuts, offset: Math.round(off * 10000) / 100 } : prev));
         }
         else if (name === 'lcend') { adoptMesh(meshLcEnd(num(a[0]) === 1)); setLc(null); }
+        // lcstate: log the raw __mesh_lc_state JSON — the headless proof the read-back
+        // door echoes the session's last-previewed dir/cuts/offsetFrac + live key.
+        else if (name === 'lcstate') console.error(`[meshops] lcstate → ${host.__mesh_lc_state?.() ?? 'n/a'}`);
         else if (name === 'del') adoptMesh(meshDeleteSelection());
         else if (name === 'grouppaint') host.__model_paint_group_range?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
         else if (name === 'detail') applyPaintDetail(num(a[0]));

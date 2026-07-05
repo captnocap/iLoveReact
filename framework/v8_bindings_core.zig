@@ -593,6 +593,28 @@ fn hostMeshLcEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_lc_state() → JSON {"ok","dir","cuts","offsetFrac","key","count"}. Read back the
+/// LIVE session's last-previewed params (req_2625 gap DD): a host-side handle drag
+/// re-previews internally, so the popup polls this to keep its value tracking the drag —
+/// key/count because every re-preview installs a NEW mesh key the cart must adopt.
+fn hostMeshLcState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const st = scene3d.meshLcState() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf: [320]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"dir\":{d},\"cuts\":{d},\"offsetFrac\":{d},\"key\":\"{s}\",\"count\":{d}}}", .{ st.dir, st.cuts, st.offset_frac, key, scene3d.meshEditActiveCount() }) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+
 /// __mesh_delete_selection() → JSON {"ok","key","count"}. Delete exactly the selected mesh
 /// elements (selected faces, or faces touching a selected vert/edge) and rebuild the mesh.
 fn hostMeshDeleteSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -2158,6 +2180,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_lc_begin", hostMeshLcBegin);
     v8_runtime.registerHostFn("__mesh_lc_preview", hostMeshLcPreview);
     v8_runtime.registerHostFn("__mesh_lc_end", hostMeshLcEnd);
+    v8_runtime.registerHostFn("__mesh_lc_state", hostMeshLcState);
     v8_runtime.registerHostFn("__mesh_delete_selection", hostMeshDeleteSelection);
     v8_runtime.registerHostFn("__mesh_group_face_count", hostMeshGroupFaceCount);
     v8_runtime.registerHostFn("__mesh_append_group", hostMeshAppendGroup);

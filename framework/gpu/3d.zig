@@ -974,6 +974,10 @@ const LcSession = struct {
     last_dir: u32 = 0,
     last_planes: [64]f32 = undefined,
     last_plane_count: u32 = 0,
+    // Full last-preview params (req_2625 gap DD): the handle drag re-previews at the
+    // session's own dir/cuts, and __mesh_lc_state echoes them back to the popup.
+    last_cuts: u32 = 1,
+    last_offset_frac: f32 = 0.5,
 };
 var g_lc: ?LcSession = null;
 
@@ -1173,6 +1177,8 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     s.last_dir = @intCast(d);
     s.last_planes = planes;
     s.last_plane_count = n_planes;
+    s.last_cuts = @min(@max(cuts, 1), 64);
+    s.last_offset_frac = std.math.clamp(offset_frac, 0.0, 1.0);
 
     // Cut the BASE soup by each plane in turn (planeCutSoup allocs a fresh soup per
     // plane; intermediates free as we go — only the final result installs).
@@ -1224,6 +1230,23 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
     journalDiscard(&s.snap); // no-op when committed
     g_lc = null;
     return ok;
+}
+
+/// A loop-cut popup session is LIVE. The engine's press routing treats a live session as
+/// MODAL: the drawn cut-plane handle is the only grabbable — nothing falls through to a
+/// face pick that would mutate the selection the captured base was built from (req_2625
+/// gap DD). The popup buttons and Esc are the exits.
+pub fn meshLcActive() bool {
+    return g_lc != null;
+}
+
+pub const LcState = struct { dir: u32, cuts: u32, offset_frac: f32 };
+/// The live session's last-previewed params — the __mesh_lc_state read-back. A host-side
+/// handle drag re-previews internally, so the popup polls this to keep its steppers and
+/// offset cell tracking the drag.
+pub fn meshLcState() ?LcState {
+    const sp: *const LcSession = if (g_lc) |*p| p else return null;
+    return .{ .dir = sp.last_dir, .cuts = sp.last_cuts, .offset_frac = sp.last_offset_frac };
 }
 
 /// Delete exactly the selected mesh elements: drop every triangle the current selection
@@ -2956,27 +2979,89 @@ fn drawEdgeOverlay(cam: model_paint.Camera, mode: u8, ox: f32, oy: f32) void {
         overlayLine(a[0], a[1], b[0], b[1], OV_EDGE[0], OV_EDGE[1], OV_EDGE[2], w);
     }
 }
-/// While a loop-cut popup session is live: a translate-style handle on the MIDDLE cut
-/// plane, anchored at the selection's centroid — the future drag surface for the offset
-/// (drawing only for now; wiring the drag needs the cart-side popup, req_2625 gap DD).
-fn drawLoopCutOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
-    const sp: *const LcSession = if (g_lc) |*p| p else return;
-    if (sp.last_plane_count == 0) return;
+const LcHandleGeom = struct { p: [3]f32, a: [3]f32, b: [3]f32, axis: i32, half_w: f32 };
+/// The loop-cut handle's world geometry — the ONE source drawn, hit-tested, and dragged
+/// (the gizmoRingWorldR rule: draw and hit can never disagree). Anchor = the selection's
+/// centroid moved onto the MIDDLE cut plane; when the comb is empty (offset scrubbed to
+/// 0/1 pushed every plane out) it falls back to the span midpoint so a drag in flight
+/// keeps a stable direction/scale.
+fn lcHandleGeom(cam: model_paint.Camera) ?LcHandleGeom {
+    const sp: *const LcSession = if (g_lc) |*p| p else return null;
     const d: usize = @min(sp.last_dir, 1);
     const axis: i32 = sp.axes[d];
     var p = sp.sel_center;
-    p[@intCast(axis)] = sp.last_planes[sp.last_plane_count / 2];
+    p[@intCast(axis)] = if (sp.last_plane_count > 0)
+        sp.last_planes[sp.last_plane_count / 2]
+    else
+        (sp.lo[d] + sp.hi[d]) * 0.5;
     const half_w = worldUnitsPerPixel(cam, p) * OV_LC_HANDLE_PX;
-    const a3 = vadd(p, vmul(axisVec(axis), -half_w));
-    const b3 = vadd(p, vmul(axisVec(axis), half_w));
-    const pa = ovProject(cam, a3, ox, oy) orelse return;
-    const pb = ovProject(cam, b3, ox, oy) orelse return;
-    const c = axisColor(axis);
+    return .{
+        .p = p,
+        .a = vadd(p, vmul(axisVec(axis), -half_w)),
+        .b = vadd(p, vmul(axisVec(axis), half_w)),
+        .axis = axis,
+        .half_w = half_w,
+    };
+}
+/// While a loop-cut popup session is live: a translate-style handle on the MIDDLE cut
+/// plane, anchored at the selection's centroid — the drag surface for the offset
+/// (meshLcHandleHit/meshLcHandleDrag, req_2625 gap DD).
+fn drawLoopCutOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const sp: *const LcSession = if (g_lc) |*p| p else return;
+    if (sp.last_plane_count == 0) return;
+    const g = lcHandleGeom(cam) orelse return;
+    const pa = ovProject(cam, g.a, ox, oy) orelse return;
+    const pb = ovProject(cam, g.b, ox, oy) orelse return;
+    const c = axisColor(g.axis);
     overlayLine(pa[0], pa[1], pb[0], pb[1], c[0], c[1], c[2], 4.0);
     overlayDot(pa[0], pa[1], c[0], c[1], c[2], 6);
     overlayDot(pb[0], pb[1], c[0], c[1], c[2], 6);
-    const pc = ovProject(cam, p, ox, oy) orelse return;
+    const pc = ovProject(cam, g.p, ox, oy) orelse return;
     overlayDot(pc[0], pc[1], OV_LC_ACCENT[0], OV_LC_ACCENT[1], OV_LC_ACCENT[2], 5);
+}
+/// Is (mx,my) — window px, like meshGizmoHit — on the drawn loop-cut handle? Same
+/// geometry as drawLoopCutOverlay via lcHandleGeom, same GIZMO_HIT_PX threshold. O(1).
+pub fn meshLcHandleHit(mx: f32, my: f32) bool {
+    if (!g_me_capture or !model_paint.hasTarget()) return false;
+    const sp: *const LcSession = if (g_lc) |*p| p else return false;
+    if (sp.last_plane_count == 0) return false; // no comb drawn → nothing to grab
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const g = lcHandleGeom(cam) orelse return false;
+    const pa = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, g.a) orelse return false;
+    const pb = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, g.b) orelse return false;
+    return segDist2(vpLocalX(mx), vpLocalY(my), pa[0], pa[1], pb[0], pb[1]) <= GIZMO_HIT_PX * GIZMO_HIT_PX;
+}
+/// Drag the grabbed loop-cut handle by a pixel delta: project the delta onto the
+/// handle's SCREEN direction, map it through the drawn handle length to world units (the
+/// meshGizmoDrag precision rule), convert to an offset-frac delta on the cut axis, clamp
+/// 0..1, and re-preview at the session's own dir/cuts. Sign: lcPlanes' shift is
+/// −(offset − size/2), i.e. dPlane/dOffset = −1, so offset moves OPPOSITE the world
+/// delta — that is exactly what keeps the drawn comb following the cursor.
+pub fn meshLcHandleDrag(dx: f32, dy: f32) bool {
+    const sp: *const LcSession = if (g_lc) |*p| p else return false;
+    if (!model_paint.hasTarget()) return false;
+    const d: usize = @min(sp.last_dir, 1);
+    const span = sp.hi[d] - sp.lo[d];
+    if (span < 1e-6) return false;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const g = lcHandleGeom(cam) orelse return false;
+    const pa = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, g.a) orelse return false;
+    const pb = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, g.b) orelse return false;
+    const hdx = pb[0] - pa[0];
+    const hdy = pb[1] - pa[1];
+    const hlen = @sqrt(hdx * hdx + hdy * hdy);
+    // Degenerate projection (axis into the screen): fall back to raw horizontal px at
+    // the depth-based rate, mirroring meshGizmoDrag's fallback.
+    var px = dx;
+    var world_per_px = worldUnitsPerPixel(cam, g.p);
+    if (hlen > 4) {
+        px = (dx * hdx + dy * hdy) / hlen;
+        world_per_px = (g.half_w * 2.0) / hlen;
+    }
+    const dir = sp.last_dir;
+    const cuts = sp.last_cuts;
+    const new_frac = std.math.clamp(sp.last_offset_frac - (px * world_per_px) / span, 0.0, 1.0);
+    return meshLoopCutFacePreview(dir, cuts, new_frac);
 }
 
 /// Draw the editor overlay — the modeling stage (tile panels + grid + axes), mode
