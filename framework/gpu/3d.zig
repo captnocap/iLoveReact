@@ -370,12 +370,15 @@ pub fn orbitFrame(target: [3]f32, radius: f32) void {
     g_orbit.dist = g_orbit.radius * 2.6;
     g_orbit.framed = true;
 }
+/// Pitch clamp shy of the poles — straight-down is degenerate for a Y-up orbit (the
+/// view basis loses its right vector). Shared by drag AND the compass axis snaps so a
+/// snapped view is always reachable by dragging too.
+const ORBIT_PITCH_LIM: f32 = 1.5;
 /// Orbit by a screen-space drag delta (pixels). Pitch clamps shy of the poles.
 pub fn orbitDrag(dx: f32, dy: f32) void {
     g_orbit.yaw -= dx * 0.01;
     g_orbit.pitch += dy * 0.01;
-    const lim: f32 = 1.5;
-    g_orbit.pitch = @max(-lim, @min(lim, g_orbit.pitch));
+    g_orbit.pitch = @max(-ORBIT_PITCH_LIM, @min(ORBIT_PITCH_LIM, g_orbit.pitch));
 }
 /// Dolly in/out by a wheel delta (sign only matters). Clamped to a sane band of the
 /// model radius so you can't fly through it or lose it.
@@ -2762,6 +2765,26 @@ const STAGE_PANEL_CENTER = [4]f32{ 0.36, 0.48, 0.72, 0.13 }; // brighter fine ce
 const STAGE_LINE = [4]f32{ 0.46, 0.56, 0.78, 0.38 }; // tile boundary lines
 const STAGE_FINE_LINE = [4]f32{ 0.46, 0.56, 0.78, 0.16 }; // center sub-grid (dimmer)
 const STAGE_AXIS_ALPHA: f32 = 0.55;
+// ── Viewport orientation compass (req_2643 gap LL) ─────────────────────────────────
+// The old studio's bottom-left nav ball, host-native: a small ball whose three axis
+// arms are the CURRENT camera's rotation applied to the world basis (rotation only —
+// no translation, no perspective), so it turns live with every orbit. Positive ends
+// are solid labeled dots; negative ends dimmer hollow rings (the standard nav-ball
+// read). Drawn whenever the model doc view has a mesh — like the stage, not only in
+// edit modes. Clicking a dot snaps the orbit to that axis-aligned view (the engine's
+// press path routes through meshCompassHit/meshCompassSnap).
+const COMPASS_R_PX: f32 = 38; // ball (backdrop disc) radius
+const COMPASS_MARGIN_PX: f32 = 14; // inset from the pane's bottom-left corner
+const COMPASS_ARM_PX: f32 = 25; // axis arm length, ball centre → dot centre
+const COMPASS_DOT_PX: f32 = 13; // positive (labeled) dot diameter
+const COMPASS_DOT_NEG_PX: f32 = 9; // negative ring outer diameter
+const COMPASS_RING_GAP_PX: f32 = 4; // ring wall: outer minus inner disc diameter
+const COMPASS_HIT_PX: f32 = 11; // click-to-snap pick radius around a dot
+const COMPASS_MIN_PANE_PX: f32 = 170; // hide on panes too small to host the ball
+const COMPASS_BACK = [4]f32{ 0.05, 0.07, 0.12, 0.66 }; // ball backdrop
+const COMPASS_RIM = [4]f32{ 0.35, 0.42, 0.58, 0.55 }; // 1.5px rim ring
+const COMPASS_TEXT = [3]f32{ 0.72, 0.79, 0.95 }; // readout text (OV_FACE_DOT blue)
+const COMPASS_AWAY_FADE: f32 = 0.72; // depth cue: ends pointing away sit dimmer
 
 /// A haloed dot: a dark disc, then the bright fill on top — visible on any background.
 fn overlayDot(px: f32, py: f32, r: f32, g: f32, b: f32, size: f32) void {
@@ -3370,6 +3393,142 @@ pub fn meshLcHandleDrag(dx: f32, dy: f32, snap: bool) bool {
     return ok;
 }
 
+// ── Orientation compass (req_2643 gap LL) ──────────────────────────────────────────
+const CompassEnd = struct { x: f32, y: f32, depth: f32, axis: i32, positive: bool };
+const CompassGeom = struct { cx: f32, cy: f32, ends: [6]CompassEnd };
+/// Big enough pane to host the ball without crowding the corner chips.
+fn compassVisible() bool {
+    return g_paint_vp_w >= COMPASS_MIN_PANE_PX and g_paint_vp_h >= COMPASS_MIN_PANE_PX;
+}
+/// The ball's screen geometry from the CURRENT camera — rotation only: each world axis
+/// is resolved against the view's right/up/forward basis (never the perspective
+/// transform), so the ball reads pure orientation at a fixed corner size. depth > 0
+/// means the end points AWAY from the viewer (into the screen).
+fn compassGeom(cam: model_paint.Camera) CompassGeom {
+    const cx = g_paint_vp_x + COMPASS_MARGIN_PX + COMPASS_R_PX;
+    const cy = g_paint_vp_y + g_paint_vp_h - COMPASS_MARGIN_PX - COMPASS_R_PX;
+    const fwd = vnorm(vsub(cam.target, cam.eye));
+    var right = vcross(fwd, .{ 0, 1, 0 });
+    right = if (vdot(right, right) < 1e-8) .{ 1, 0, 0 } else vnorm(right);
+    const up = vcross(right, fwd);
+    var g = CompassGeom{ .cx = cx, .cy = cy, .ends = undefined };
+    var a: i32 = 0;
+    while (a < 3) : (a += 1) {
+        const e = axisVec(a);
+        const sx = vdot(e, right) * COMPASS_ARM_PX;
+        const sy = -vdot(e, up) * COMPASS_ARM_PX; // screen y grows downward
+        const depth = vdot(e, fwd);
+        g.ends[@intCast(a * 2)] = .{ .x = cx + sx, .y = cy + sy, .depth = depth, .axis = a, .positive = true };
+        g.ends[@intCast(a * 2 + 1)] = .{ .x = cx - sx, .y = cy - sy, .depth = -depth, .axis = a, .positive = false };
+    }
+    return g;
+}
+/// The ball itself (capsule layer): backdrop disc + rim, then the six ends painter's-
+/// ordered back-to-front so near dots cover far arms at the centre. Positive ends get
+/// an arm line + solid dot (labels ride a LATER glyph segment — text flushes before
+/// capsules inside one segment); negative ends a dimmer hollow ring.
+fn drawCompassBall(cam: model_paint.Camera) void {
+    const g = compassGeom(cam);
+    capsules.drawCapsule(g.cx, g.cy, g.cx, g.cy, COMPASS_RIM[0], COMPASS_RIM[1], COMPASS_RIM[2], COMPASS_RIM[3], COMPASS_R_PX * 2 + 3);
+    capsules.drawCapsule(g.cx, g.cy, g.cx, g.cy, COMPASS_BACK[0], COMPASS_BACK[1], COMPASS_BACK[2], COMPASS_BACK[3], COMPASS_R_PX * 2);
+    var order: [6]usize = .{ 0, 1, 2, 3, 4, 5 };
+    var i: usize = 0;
+    while (i < 6) : (i += 1) { // 6 items: selection sort is the whole story
+        var j: usize = i + 1;
+        while (j < 6) : (j += 1) {
+            if (g.ends[order[j]].depth > g.ends[order[i]].depth) {
+                const t = order[i];
+                order[i] = order[j];
+                order[j] = t;
+            }
+        }
+    }
+    for (order) |k| {
+        const e = g.ends[k];
+        const c = axisColor(e.axis);
+        const fade: f32 = if (e.depth > 0) COMPASS_AWAY_FADE else 1.0;
+        if (e.positive) {
+            capsules.drawCapsule(g.cx, g.cy, e.x, e.y, c[0] * fade, c[1] * fade, c[2] * fade, 1.0, 2.6);
+            capsules.drawCapsule(e.x, e.y, e.x, e.y, c[0] * fade, c[1] * fade, c[2] * fade, 1.0, COMPASS_DOT_PX);
+        } else {
+            const dim = 0.55 * fade;
+            capsules.drawCapsule(e.x, e.y, e.x, e.y, c[0] * dim, c[1] * dim, c[2] * dim, 0.95, COMPASS_DOT_NEG_PX);
+            capsules.drawCapsule(e.x, e.y, e.x, e.y, COMPASS_BACK[0], COMPASS_BACK[1], COMPASS_BACK[2], 1.0, COMPASS_DOT_NEG_PX - COMPASS_RING_GAP_PX);
+        }
+    }
+}
+/// Axis labels on the positive dots + the live angle readout beside the ball. yaw/pitch
+/// are derived from the SAME camera the frame drew (the exact orbitCamPos() angles:
+/// yaw around +Y, pitch above the XZ plane), so the numbers stay honest even if a
+/// future pane drives this camera without the orbit doors.
+fn drawCompassText(cam: model_paint.Camera) void {
+    const g = compassGeom(cam);
+    const labels = [3][]const u8{ "X", "Y", "Z" };
+    for (g.ends) |e| {
+        if (!e.positive) continue;
+        core.drawTextLine(labels[@intCast(e.axis)], e.x - 3, e.y - 6, 10, 0.04, 0.05, 0.09, 0.95);
+    }
+    const dir = vsub(cam.eye, cam.target);
+    const len = @sqrt(vdot(dir, dir));
+    if (len < 1e-6) return;
+    const yaw_deg = std.math.atan2(dir[0], dir[2]) * 180.0 / std.math.pi;
+    const pitch_deg = std.math.asin(std.math.clamp(dir[1] / len, -1.0, 1.0)) * 180.0 / std.math.pi;
+    var buf: [64]u8 = undefined;
+    const line = std.fmt.bufPrint(&buf, "yaw {d:.0}\u{00B0}  pitch {d:.0}\u{00B0}  fov {d:.0}\u{00B0}", .{ yaw_deg, pitch_deg, cam.fov_deg }) catch return;
+    const tx = g.cx + COMPASS_R_PX + 10;
+    const ty = g.cy - 8;
+    core.drawTextLine(line, tx + 1, ty + 1, 12, 0.02, 0.03, 0.07, 0.85); // shadow
+    core.drawTextLine(line, tx, ty, 12, COMPASS_TEXT[0], COMPASS_TEXT[1], COMPASS_TEXT[2], 1.0);
+}
+/// What does a press at (mx,my) (window px) hit on the compass? 0..5 = axis*2 (+1 for
+/// the negative end); 6 = the ball body (furniture — consume the press, no snap);
+/// -1 = not on the compass at all. Where dots overlap the closer dot wins, front
+/// (toward-viewer) end breaking ties.
+pub fn meshCompassHit(mx: f32, my: f32) i32 {
+    if (!g_me_capture or !model_paint.hasTarget()) return -1;
+    if (g_paint_vp_w <= 1 or g_paint_vp_h <= 1 or !compassVisible()) return -1;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const g = compassGeom(cam);
+    const dxc = mx - g.cx;
+    const dyc = my - g.cy;
+    if (dxc * dxc + dyc * dyc > COMPASS_R_PX * COMPASS_R_PX) return -1;
+    var best: i32 = 6;
+    var best_key: f32 = std.math.floatMax(f32);
+    for (g.ends, 0..) |e, k| {
+        const dx = mx - e.x;
+        const dy = my - e.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 > COMPASS_HIT_PX * COMPASS_HIT_PX) continue;
+        const key = d2 + e.depth; // depth ∈ [-1,1] px² — a pure tie-break
+        if (key < best_key) {
+            best_key = key;
+            best = @intCast(k);
+        }
+    }
+    return best;
+}
+/// Snap the orbit to the axis-aligned view for a compass hit code (axis*2 + neg):
+/// clicking a dot moves the EYE onto that world axis (front/right/top…), keeping the
+/// target and distance. Y uses the orbit's own pitch clamp — the pole is degenerate
+/// for a Y-up camera — so "top" is the same near-vertical view dragging reaches.
+pub fn meshCompassSnap(code: i32) bool {
+    if (code < 0 or code > 5) return false;
+    const neg = @rem(code, 2) == 1;
+    const half_pi: f32 = std.math.pi / 2.0;
+    switch (@divTrunc(code, 2)) {
+        0 => { // ±X
+            g_orbit.yaw = if (neg) -half_pi else half_pi;
+            g_orbit.pitch = 0;
+        },
+        1 => g_orbit.pitch = if (neg) -ORBIT_PITCH_LIM else ORBIT_PITCH_LIM, // ±Y (top/bottom)
+        else => { // ±Z
+            g_orbit.yaw = if (neg) std.math.pi else 0;
+            g_orbit.pitch = 0;
+        },
+    }
+    return true;
+}
+
 /// Draw the editor overlay — the modeling stage (tile panels + grid + axes), mode
 /// dressing (face wash/centroid dots, edge lines, vertex dots), loop-cut accents, the
 /// gizmo, and the marquee — as screen-space capsules/polys projected with the EXACT
@@ -3426,6 +3585,15 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     drawLoopCutOverlay(cam, ox, oy);
     drawGizmoOverlay(cam, ox, oy);
     drawMarqueeOverlay();
+    // Layer 5: the orientation compass — always-on view furniture like the stage
+    // (req_2643 gap LL). Ball/arms/dots ride this capsule segment (on top of the mesh
+    // dressing); the break puts labels + the angle readout in a LATER segment so the
+    // glyphs land ON the dots (within one segment text flushes before capsules).
+    if (compassVisible()) {
+        drawCompassBall(cam);
+        overlayLayerBreak(ox, oy);
+        drawCompassText(cam);
+    }
     core.popScissor();
 }
 /// Marquee (rubber-band) select every element inside the screen rect (Alt+drag).
@@ -3940,7 +4108,6 @@ var g_ground_data_bg: [GROUND_POOL]?*wgpu.BindGroup = [_]?*wgpu.BindGroup{null} 
 // floor colliders first), so it gets its OWN small buffer — one InstanceData per
 // drawn chunk, never contending with foliage. GROUND_POOL * 80 B ≈ 10 KB.
 var g_ground_inst_buf: ?*wgpu.Buffer = null;
-var g_ground_wgsl_buf: [96 * 1024]u8 = undefined; // scratch for the one-time assembled module
 var g_vertex_buffer: ?*wgpu.Buffer = null;
 var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
 var g_instance_buf: ?*wgpu.Buffer = null; // per-frame InstanceData buffer (step=instance, vbuf 1)
@@ -5898,12 +6065,17 @@ fn ensureGroundPipeline(formula: []const u8) void {
     if (g_bind_group_layout == null or g_ground_bgl == null) return;
     if (g_ground_pipeline) |old| old.release();
     g_ground_pipeline = null;
-    const wgsl = std.fmt.bufPrint(&g_ground_wgsl_buf, "{s}\n{s}\n{s}\n{s}", .{
+    // Heap-assemble the module sized to the formula (the catalog-composed editor
+    // formula is ~188 KB — a fixed scratch buffer silently truncated it and the
+    // ground never drew, req_2651). The text is only needed for the duration of
+    // createShaderModule, so it is freed on every path out of this function.
+    const wgsl = std.fmt.allocPrint(std.heap.c_allocator, "{s}\n{s}\n{s}\n{s}", .{
         shaders.scene3d_ground_prefix, effect_assemble.MATH, formula, shaders.scene3d_ground_epilogue,
     }) catch {
-        std.debug.print("[r3d-ground] ERROR: assembled ground shader ({d}B formula, hash {x}) overflows g_ground_wgsl_buf ({d}B) — the GROUND PIPELINE never builds and ALL painted ground is INVISIBLE until this is fixed.\n", .{ formula.len, h, g_ground_wgsl_buf.len });
+        std.debug.print("[r3d-ground] ERROR: out of memory assembling the ground shader ({d}B formula, hash {x}) — the GROUND PIPELINE never builds and ALL painted ground is INVISIBLE until this is fixed.\n", .{ formula.len, h });
         return;
     };
+    defer std.heap.c_allocator.free(wgsl);
     const sm_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "render3d_ground", .code = wgsl });
     const sm = device.createShaderModule(&sm_desc) orelse {
         std.debug.print("[r3d-ground] ERROR: ground formula WGSL FAILED TO COMPILE (formula hash {x}, {d}B) — createShaderModule returned null; the GROUND PIPELINE never builds and ALL painted ground (terrain, tiles, water) is INVISIBLE until the formula is fixed. Check the wgpu validation output above for the naga error.\n", .{ h, formula.len });
