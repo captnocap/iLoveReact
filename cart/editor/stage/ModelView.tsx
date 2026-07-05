@@ -512,6 +512,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // `unit` (req_2625 EE) picks how the offset cell READS — 'units' (the studio default:
   // real mesh units along the face's span, from the lc_begin sizes) or 'percent'. The
   // internal offset stays a percent; the door always takes the 0..1 frac (offset/100).
+  //
+  // HANDLE DRAG (req_2625 gap DD, still host-blocked): the host DRAWS a translate-style
+  // handle on the middle cut plane (3d.zig drawLoopCutOverlay — "drawing only for now"),
+  // but its native input loop owns every left-drag while the editor captures
+  // (engine.zig routes presses to meshGizmoHit → face pick; the lc handle is never
+  // hit-tested), and no door echoes a session's offset back. Wiring the drag needs the
+  // host side: an lc-handle hit + drag path in engine.zig/3d.zig that re-previews
+  // internally, plus ONE read-back door `__mesh_lc_state()` → JSON
+  // {ok, dir, cuts, offsetFrac, key, count} the popup polls while `lc` is live to keep
+  // these steppers/value tracking the drag. Do NOT fake it with a JS overlay — the cart
+  // never sees those pointer events.
   const [lc, setLc] = useState<null | { dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent'; sizes: [number, number] }>(null);
   const openLoopCut = () => {
     const info = meshLcBegin();
@@ -1218,6 +1229,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     //   mode:N sel:N add:N range:lo,hi pick:x,y pickadd:x,y box:x0,y0,x1,y1 snap revert
     //   clear scope:lo,hi nudge:axis,amt gizmo:N undo redo del grouppaint:lo,hi,r,g,b
     //   detail:px wait:frames report atlas:/path.png
+    //   lcbegin lcprev:dir,cuts,off lcend:0|1  (loop-cut session; off = the door's 0..1 frac)
     const opsText = callHost<string | null>('__env_get', null, 'RJIT_MESHOPS');
     if (opsText) {
       const num = (s: string | undefined) => Number(s ?? 0) || 0;
@@ -1265,6 +1277,29 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           const { sym, mod } = syntheticKeyEdge(parts);
           console.error(`[meshops] key ${parts.join('+')} → sym=${sym} mod=${mod} history=${host.__mesh_history?.() ?? 'n/a'}`);
         }
+        // Loop-cut session ops (req_2625 DD / req_2627): drive the host lc doors headlessly
+        // so a shot proves the cyan cut accents + plane handle with the popup tracking.
+        // lcbegin mirrors openLoopCut (session on the current face selection, even 1-cut
+        // preview); lcprev re-previews at (dir, cuts, offset-frac 0..1) and mirrors the frac
+        // into the popup as its percent; lcend:0|1 cancels/commits. State goes through
+        // setLc's FUNCTIONAL form — this harness closure is mount-frozen, so the `lc`
+        // snapshot inside changeLoopCut/closeLoopCut is stale (null) here.
+        else if (name === 'lcbegin') {
+          const info = meshLcBegin();
+          if (info?.ok) {
+            setLc({ dir: 0, cuts: 1, offset: 50, unit: 'units', sizes: [info.size0 ?? 0, info.size1 ?? 0] });
+            adoptMesh(meshLcPreview(0, 1, 0.5));
+          }
+          console.error(`[meshops] lcbegin → ${JSON.stringify(info)}`);
+        }
+        else if (name === 'lcprev') {
+          const dir = (num(a[0]) >= 1 ? 1 : 0) as 0 | 1;
+          const cuts = Math.max(1, Math.min(64, num(a[1])));
+          const off = Math.max(0, Math.min(1, num(a[2])));
+          adoptMesh(meshLcPreview(dir, cuts, off));
+          setLc((prev) => (prev ? { ...prev, dir, cuts, offset: Math.round(off * 10000) / 100 } : prev));
+        }
+        else if (name === 'lcend') { adoptMesh(meshLcEnd(num(a[0]) === 1)); setLc(null); }
         else if (name === 'del') adoptMesh(meshDeleteSelection());
         else if (name === 'grouppaint') host.__model_paint_group_range?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
         else if (name === 'detail') applyPaintDetail(num(a[0]));

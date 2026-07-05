@@ -7,6 +7,7 @@
 // "N parts". A model's kind, its synthetic snapshot path, and empty contract slots are
 // noise, not data: we show the name, stage, real triangle count, and the single real
 // source, then gate every section to actual content (req_2406, req_2416).
+import { ScrollView } from '../../../runtime/primitives';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';
@@ -15,6 +16,18 @@ import ModelPaintVariants from './ModelPaintVariants';
 
 // A folder-contract value counts as real only if it's present and not the "-" placeholder.
 const hasValue = (value?: string): value is string => !!value && value !== '-';
+
+// ATLAS SETS space budget inside the FIXED focus panel (req_2627, the ModelPaintVariants
+// treatment): the list is a bounded nested scroll — at most this many rows tall, then it
+// scrolls inside its slice instead of stretching (and clipping) the non-scrolling body.
+const ATLAS_ROW_HEIGHT = 34; // HW_ModelAtlasCard height
+const ATLAS_ROW_GAP = 4;
+const ATLAS_ROWS_VISIBLE = 4;
+
+function atlasListHeight(count: number): number {
+  const rows = Math.min(count, ATLAS_ROWS_VISIBLE);
+  return rows * ATLAS_ROW_HEIGHT + Math.max(0, rows - 1) * ATLAS_ROW_GAP;
+}
 
 export default function ModelDetailBody({ model }: { model: ModelPackage }) {
   const isPrimitive = model.sourceKind === 'primitive';
@@ -65,21 +78,29 @@ export default function ModelDetailBody({ model }: { model: ModelPackage }) {
             <Icon name="Layers" size={12} color={accentFor('primary')} />
             <C.HW_GroupText>ATLAS SETS</C.HW_GroupText>
           </C.HW_ModelSectionHead>
-          {model.atlases.map((atlas) => (
-            <C.HW_ModelAtlasCard key={atlas.id}>
-              <C.HW_VariantSwatch style={{ backgroundColor: atlas.color }} />
-              <C.HW_ModelCardMain>
-                <C.HW_MaterialTitleRow>
-                  <C.HW_ToolValue>{atlas.label}</C.HW_ToolValue>
-                  <C.HW_Spacer />
-                  <C.HW_MaterialStat>{atlas.resolution}</C.HW_MaterialStat>
-                </C.HW_MaterialTitleRow>
-                <C.HW_ModelMetaRow>
-                  <C.HW_MaterialStat>{atlas.scope}</C.HW_MaterialStat>
-                </C.HW_ModelMetaRow>
-              </C.HW_ModelCardMain>
-            </C.HW_ModelAtlasCard>
-          ))}
+          {/* Bounded NESTED scroll (req_2627): a many-atlas model scrolls inside this
+              fixed slice instead of stretching past the non-scrolling MODEL FOCUS body;
+              explicit height per the layout rules (ScrollView is excluded from fallback). */}
+          <ScrollView
+            style={{ height: atlasListHeight(model.atlases.length) }}
+            contentContainerStyle={{ flexDirection: 'column', gap: ATLAS_ROW_GAP }}
+          >
+            {model.atlases.map((atlas) => (
+              <C.HW_ModelAtlasCard key={atlas.id}>
+                <C.HW_VariantSwatch style={{ backgroundColor: atlas.color }} />
+                <C.HW_ModelCardMain>
+                  <C.HW_MaterialTitleRow>
+                    <C.HW_ToolValue>{atlas.label}</C.HW_ToolValue>
+                    <C.HW_Spacer />
+                    <C.HW_MaterialStat>{atlas.resolution}</C.HW_MaterialStat>
+                  </C.HW_MaterialTitleRow>
+                  <C.HW_ModelMetaRow>
+                    <C.HW_MaterialStat>{atlas.scope}</C.HW_MaterialStat>
+                  </C.HW_ModelMetaRow>
+                </C.HW_ModelCardMain>
+              </C.HW_ModelAtlasCard>
+            ))}
+          </ScrollView>
         </C.HW_ModelSection>
       ) : null}
 

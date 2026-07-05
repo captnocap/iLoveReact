@@ -18,6 +18,11 @@ export default function ReadOnlySection(props: {
           <C.HW_FormLabel>{label}</C.HW_FormLabel>
           <C.HW_Spacer />
           <C.HW_ReadValue>{value}</C.HW_ReadValue>
+          {/* Reserved reset-column spacer (req_2626 II / req_2627): read-only rows sit on
+              the SAME column grid as OverrideField/PieceBody rows, whose end column is
+              always occupied (HW_OvReset or HW_OvResetIdle) — without it these values
+              landed endBtn+gap px right of every override value's edge. */}
+          <C.HW_OvResetIdle />
         </C.HW_ReadRow>
       ))}
     </C.HW_Section>
