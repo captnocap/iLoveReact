@@ -6755,6 +6755,19 @@ pub fn paintPointer(node_id: u32, phase: PaintPhase, mx: f32, my: f32) void {
     }
 }
 
+/// Window-space cursor → painted-terrain surface point, for the PLACEMENT path
+/// (__compiled_world_ground_hit, req_2666). The EXACT brush-beam code path
+/// (paintGroundHitAt below), so where a piece lands and where the brush strokes
+/// can never disagree about the ground. Null when the loader isn't mounted, the
+/// camera isn't the editor's external iso pose, the pane rect isn't live yet,
+/// or the ray misses every painted chunk (off-map — the cart falls back to its
+/// analytic flat plane).
+pub fn groundHitAt(node_id: u32, mx: f32, my: f32) ?[3]f32 {
+    const entry = findMounted(node_id) orelse return null;
+    const runtime = entry.runtime orelse return null;
+    return paintGroundHitAt(runtime, mx, my);
+}
+
 /// Screen (window-absolute) → world ray through the external iso camera →
 /// painted-terrain hit. The ray basis mirrors gpu/3d.zig drawScene's
 /// m4perspective(fov_y, aspect) + lookAt(up = +Y) exactly, so the brush lands

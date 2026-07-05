@@ -282,6 +282,63 @@ fn hostSetHideWalls(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnString(info, "ok");
 }
 
+// __compiled_world_ground_hit(nodeId, px, py) -> ArrayBuffer [x, y, z] | null — the
+// painted-terrain surface point under a WINDOW-space cursor (the same space as
+// getMouseX()/SDL_GetMouseState, checked against the pane rect renderEmbedded stored).
+// Resolved on the brush beam's EXACT code path (paintGroundHitAt → map_paint.groundHit)
+// so placement and painting can never disagree about the ground (req_2666). Null on a
+// bad/unmounted node, a pre-camera boot frame, or a ray that misses every painted chunk
+// — the cart falls back to its analytic flat plane.
+var g_ground_hit_ret: [3]f32 = .{ 0, 0, 0 };
+
+fn setReturnNull(info: v8.FunctionCallbackInfo) void {
+    info.getReturnValue().set(info.getIsolate().initNull());
+}
+
+fn noopBackingStoreDeleter(_: ?*anyopaque, _: usize, _: ?*anyopaque) callconv(.c) void {}
+
+/// Zero-copy ArrayBuffer over module-static floats (the v8_bindings_game_physics.zig
+/// return pattern) — JS wraps it in a Float32Array; the next call overwrites it.
+fn setReturnF32Buffer(info: v8.FunctionCallbackInfo, floats: []f32) void {
+    const iso = info.getIsolate();
+    const bytes = std.mem.sliceAsBytes(floats);
+    const bs_raw = v8.c.v8__ArrayBuffer__NewBackingStore2(
+        @ptrCast(bytes.ptr),
+        bytes.len,
+        noopBackingStoreDeleter,
+        null,
+    ) orelse {
+        setReturnNull(info);
+        return;
+    };
+    var shared = v8.c.v8__BackingStore__TO_SHARED_PTR(bs_raw);
+    defer v8.BackingStore.sharedPtrReset(&shared);
+    const ab = v8.ArrayBuffer.initWithBackingStore(iso, &shared);
+    info.getReturnValue().set(ab);
+}
+
+fn hostGroundHit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const px = argToF64(info, 1) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const py = argToF64(info, 2) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const hit = world_loader.groundHitAt(node_id, @floatCast(px), @floatCast(py)) orelse {
+        setReturnNull(info);
+        return;
+    };
+    g_ground_hit_ret = hit;
+    setReturnF32Buffer(info, g_ground_hit_ret[0..]);
+}
+
 // __compiled_world_set_paint_mode(nodeId, on) arms/disarms in-viewport map painting
 // (MAPPAINT req_2473): while on, the left button over this loader routes into the
 // host map painter (framework/game/map) — strokes, brush beam, live terrain mirror
@@ -383,6 +440,7 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_set_live_skin_boxes", hostSetLiveSkinBoxes);
     v8_runtime.registerHostFn("__compiled_world_set_dirty_erase", hostSetDirtyErase);
     v8_runtime.registerHostFn("__compiled_world_set_hide_walls", hostSetHideWalls);
+    v8_runtime.registerHostFn("__compiled_world_ground_hit", hostGroundHit);
     v8_runtime.registerHostFn("__compiled_world_set_paint_mode", hostSetPaintMode);
     v8_runtime.registerHostFn("__compiled_world_set_resident_meshes", hostSetResidentMeshes);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);

@@ -294,14 +294,36 @@ export default function WorldViewport(props: {
 
   const levelY = props.floor > 0 ? props.floor * METERS_PER_LEVEL : 0;
 
+  // The ground under a pane-local cursor, TERRAIN-AWARE (req_2666): ask the host
+  // door first — __compiled_world_ground_hit raycasts the painted heightfield on
+  // the brush beam's exact code path (paintGroundHitAt), so a placement lands ON
+  // the sculpted mesa the brush just raised instead of burying at the flat y=0
+  // plane. The door takes WINDOW coords (getMouseX's space); pane-local px/py
+  // convert via the live rect. Falls back to the analytic flat plane
+  // (stage.groundPoint, terrainY 0) when the door is absent or the ray misses
+  // every painted chunk (off-map) — flat placement behaves exactly as before.
+  const groundUnder = useCallback((px: number, py: number): { x: number; z: number; terrainY: number } | null => {
+    const r = rectRef.current;
+    const nodeId = Number(loaderRef.current?.id ?? 0);
+    if (nodeId && typeof g.__compiled_world_ground_hit === 'function') {
+      const buf = g.__compiled_world_ground_hit(nodeId, r.x + px, r.y + py);
+      if (buf) {
+        const hit = new Float32Array(buf);
+        if (hit.length >= 3) return { x: hit[0]!, z: hit[2]!, terrainY: hit[1]! };
+      }
+    }
+    const gp = stage.groundPoint(px, py, r);
+    return gp ? { x: gp.x, z: gp.z, terrainY: 0 } : null;
+  }, [stage]);
+
   const resolveSnap = useCallback((px: number, py: number): Snap | null => {
     const armed = armedRef.current;
     if (!armed) return null;
-    const gp = stage.groundPoint(px, py, rectRef.current);
+    const gp = groundUnder(px, py);
     if (!gp) return null;
-    const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, levelY);
+    const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, levelY, gp.terrainY);
     return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId, yaw: placed.yawDegrees } : null;
-  }, [stage, levelY]);
+  }, [groundUnder, levelY]);
 
   // Free-hover ghost tracking (req_2651 gap VV): the framework delivers
   // onMouseMove ONLY under pointer capture (capture starts at mousedown —
@@ -405,13 +427,15 @@ export default function WorldViewport(props: {
       return;
     }
     if (!armedRef.current) { console.warn('[place] click with nothing armed'); return; }
-    const gp = stage.groundPoint(d.x0, d.y0, rectRef.current);
+    // Terrain-aware ground check (req_2666): the same door-first resolve the snap
+    // path uses, so the click and its ghost agree about where the ground is.
+    const gp = groundUnder(d.x0, d.y0);
     if (!gp) { console.warn(`[place] GROUND MISS at (${d.x0.toFixed(0)},${d.y0.toFixed(0)}) rect=(${rectRef.current.x},${rectRef.current.y} ${rectRef.current.width}x${rectRef.current.height})`); return; }
     const target = resolveSnap(d.x0, d.y0);
     if (!target) { console.warn(`[place] VALIDATOR rejected cell at world (${gp.x.toFixed(1)},${gp.z.toFixed(1)})`); return; }
-    console.warn(`[place] click -> place ${target.pieceId} at (${target.x},${target.z}) yaw ${target.yaw}`);
+    console.warn(`[place] click -> place ${target.pieceId} at (${target.x},${target.y},${target.z}) yaw ${target.yaw}`);
     props.onPlace({ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw });
-  }, [resolveSnap, props.onPlace, local, stage]);
+  }, [resolveSnap, groundUnder, props.onPlace, local, stage]);
 
   const onScroll = useCallback((e: any) => {
     const dy = Number(e?.deltaY ?? 0);

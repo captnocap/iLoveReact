@@ -168,17 +168,22 @@ function snapToEdge(wx: number, wz: number): { x: number; z: number; yaw: number
 /** Resolve a click into a placement for the armed piece on the active level.
  *  Honours the piece's snap mode: edge-snap kinds (walls, fences, …) land on the
  *  nearest CELL EDGE, oriented along it; plates centre-snap. Returns null when
- *  the HOST validator rejects (validateBuildPlacement, framework/game/build.zig). */
-export function resolvePlacement(pieceId: string, wx: number, wz: number, levelY: number): PlacedPiece | null {
+ *  the HOST validator rejects (validateBuildPlacement, framework/game/build.zig).
+ *  `terrainY` is the painted-terrain surface under the cursor (req_2666 — the
+ *  __compiled_world_ground_hit door): the piece bases at terrainY + levelY, so a
+ *  Ground placement sits ON a sculpted hill and Floor 1 is the hill + 3m. Omitted
+ *  (no door / off-map) it is 0 — the flat behavior, y = levelY exactly. */
+export function resolvePlacement(pieceId: string, wx: number, wz: number, levelY: number, terrainY = 0): PlacedPiece | null {
   const catalogIndex = buildCatalogIndex(pieceId);
   const kind = pieceKindOf(pieceId);
   const edge = kind ? EDGE_SNAP_KINDS.has(kind) : false;
   const { x, z, yaw } = edge ? snapToEdge(wx, wz) : { x: snapToModule(wx), z: snapToModule(wz), yaw: 0 };
+  const y = terrainY + levelY;
   if (catalogIndex >= 0) {
-    const v = validateBuildPlacement(catalogIndex, x, levelY, z, yaw);
+    const v = validateBuildPlacement(catalogIndex, x, y, z, yaw);
     if (!v.valid) return null;
   }
-  return { id: '', pieceId, x, y: levelY, z, yawDegrees: yaw };
+  return { id: '', pieceId, x, y, z, yawDegrees: yaw };
 }
 
 /** The placement SLOT a piece occupies — its footprint identity (req_2583). Two
