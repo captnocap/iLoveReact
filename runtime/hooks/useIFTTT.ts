@@ -353,7 +353,10 @@ const SDL_KEY_NAMES: Record<number, string> = {
   0x4000004b: 'pageup', 0x4000004e: 'pagedown',
 };
 
-function decodeKey(packed: number): { key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean } {
+function decodeKey(packed: number): {
+  key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean;
+  mods: { ctrl: boolean; shift: boolean; alt: boolean; meta: boolean };
+} {
   // (mod << 32) | sym — arithmetic decode; 32-bit bitwise would truncate.
   const sym = packed % 0x100000000;
   const mod = Math.floor(packed / 0x100000000);
@@ -362,12 +365,20 @@ function decodeKey(packed: number): { key: string; ctrlKey: boolean; shiftKey: b
     if (sym >= 0x20 && sym < 0x7f) key = String.fromCharCode(sym).toLowerCase();
     else key = `sdl:${sym}`;
   }
+  const ctrl = (mod & SDL_KMOD_CTRL) !== 0;
+  const shift = (mod & SDL_KMOD_SHIFT) !== 0;
+  const alt = (mod & SDL_KMOD_ALT) !== 0;
+  const meta = (mod & SDL_KMOD_GUI) !== 0;
   return {
     key,
-    ctrlKey: (mod & SDL_KMOD_CTRL) !== 0,
-    shiftKey: (mod & SDL_KMOD_SHIFT) !== 0,
-    altKey: (mod & SDL_KMOD_ALT) !== 0,
-    metaKey: (mod & SDL_KMOD_GUI) !== 0,
+    ctrlKey: ctrl,
+    shiftKey: shift,
+    altKey: alt,
+    metaKey: meta,
+    // useModifiers' g_mods tracker only updates off `e.mods` — when this bridge wins
+    // at boot (engine.zig pre-defines __ifttt_onKeyDown), omitting it left every
+    // modifier permanently false and killed all Ctrl chords cart-wide.
+    mods: { ctrl, shift, alt, meta },
   };
 }
 
