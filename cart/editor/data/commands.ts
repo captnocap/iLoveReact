@@ -300,7 +300,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
   ],
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('delete-selection'), MESH_SUBMENU],
   View: [cmd('toggle-view-mode'), cmd('toggle-minimap'), cmd('focus-selection')],
-  Map: [cmd('add-trigger'), cmd('set-spawn'), cmd('cycle-floor')],
+  Map: [cmd('add-chunk'), cmd('add-trigger'), cmd('set-spawn'), cmd('cycle-floor')],
   Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('paint-material'), cmd('open-color-studio'), cmd('sample-material')],
   Story: [cmd('mission-point'), cmd('author-sequence')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],
