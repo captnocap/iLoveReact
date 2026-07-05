@@ -233,6 +233,17 @@ classifier({
   HW_BuildPieceChip: { type: 'Box', style: { width: 16, height: 16, borderRadius: 'theme:radiusSm', borderWidth: 'theme:borderThin', borderColor: 'theme:border' } },
   HW_BuildPieceLabel: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', style: { fontFamily: MONO, fontWeight: 700 } },
   HW_BuildPieceLabelOn: { type: 'Text', fontSize: 10, color: 'theme:segActiveText', style: { fontFamily: MONO, fontWeight: 800 } },
+  // ── Build-palette thumbnail tiles (req_2651): every piece shows a REAL
+  // product-shot render (BuildBar PieceThumb) over its label — never a bare
+  // colour chip. Tray height is bounded (3 tile rows max) so a big category
+  // can't swallow the viewport. Labels never wrap — truncate loudly.
+  HW_BuildTray: { type: 'Box', style: { flexDirection: 'row', alignItems: 'flex-start', flexWrap: 'wrap', gap: 5, maxHeight: 195, overflow: 'hidden' } },
+  HW_BuildPieceTile: { type: 'Pressable', style: { width: 64, height: 60, flexDirection: 'column', alignItems: 'center', gap: 2, paddingTop: 3, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft', overflow: 'hidden' }, hoverStyle: { backgroundColor: 'theme:surfaceHover', borderColor: 'theme:textDim' } },
+  HW_BuildPieceTileOn: { type: 'Pressable', style: { width: 64, height: 60, flexDirection: 'column', alignItems: 'center', gap: 2, paddingTop: 3, borderRadius: 'theme:radiusMd', backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', overflow: 'hidden' } },
+  HW_BuildPieceThumb: { type: 'Box', style: { width: 42, height: 42, borderRadius: 'theme:radiusSm', overflow: 'hidden' } },
+  HW_BuildPieceTileLabelBox: { type: 'Box', style: { width: 58, height: 11, flexDirection: 'row', justifyContent: 'center', overflow: 'hidden' } },
+  HW_BuildPieceTileLabel: { type: 'Text', fontSize: 8, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
+  HW_BuildPieceTileLabelOn: { type: 'Text', fontSize: 8, color: 'theme:segActiveText', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
   HW_StageTabStrip: { type: 'Box', style: { height: 31, flexDirection: 'row', alignItems: 'center', gap: 3, paddingLeft: 8, paddingRight: 8, backgroundColor: 'theme:surface', borderTopWidth: 'theme:borderThin', borderTopColor: 'theme:border', overflow: 'hidden' } },
   HW_StageWorldTab: { type: 'Pressable', style: { width: 32, height: 25, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:borderSoft', backgroundColor: 'theme:controlBg' }, hoverStyle: { backgroundColor: 'theme:surfaceHover', borderColor: 'theme:textDim' } },
   HW_StageWorldTabOn: { type: 'Pressable', style: { width: 32, height: 25, flexShrink: 0, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' } },

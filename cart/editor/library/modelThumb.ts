@@ -53,17 +53,53 @@ export function buildThumbView(mesh: ThumbMesh): ThumbView {
   };
 }
 
+// ── multi-part product shots (the build palette, req_2651) ─────────────────
+// A CATALOG build piece isn't one stored mesh — pieceShapes decomposes it into
+// coloured boxes/ramps (jambs, a glass pane, a door leaf, roof slopes). A part
+// is one triangulated colour group; the view frames the SAME product-shot orbit
+// camera on the UNION of every part's bounds so the whole piece reads as one
+// shot, exactly like a single-mesh model does.
+export type ThumbPart = { key: string; vertices: Float32Array; count: number; color: string; opacity?: number };
+export type PartsThumbView = {
+  meshes: { geometry: ThumbView['geometry']; color: string; opacity?: number }[];
+  cam: ThumbView['cam'];
+};
+
+export function buildPartsThumbView(parts: readonly ThumbPart[]): PartsThumbView | null {
+  if (parts.length === 0) return null;
+  const b = scanBounds(parts.map((p) => p.vertices));
+  return {
+    meshes: parts.map((p) => ({
+      geometry: {
+        id: `piece-thumb:${p.key}`,
+        defaults: {},
+        generate: () => ({ positions: p.vertices, count: p.count, bounds: { radius: b.radius } }),
+      },
+      color: p.color,
+      opacity: p.opacity,
+    })),
+    cam: thumbCamera(b),
+  };
+}
+
 type Bounds = { cx: number; cy: number; cz: number; w: number; h: number; d: number; radius: number };
 
 /** AABB + framing radius from interleaved vertices. */
 function meshBounds(v: Float32Array): Bounds {
+  return scanBounds([v]);
+}
+
+/** AABB + framing radius across MULTIPLE interleaved vertex arrays (the union). */
+function scanBounds(arrays: readonly Float32Array[]): Bounds {
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (let i = 0; i + 2 < v.length; i += STRIDE) {
-    const x = v[i]!, y = v[i + 1]!, z = v[i + 2]!;
-    if (x < minX) minX = x; if (x > maxX) maxX = x;
-    if (y < minY) minY = y; if (y > maxY) maxY = y;
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  for (const v of arrays) {
+    for (let i = 0; i + 2 < v.length; i += STRIDE) {
+      const x = v[i]!, y = v[i + 1]!, z = v[i + 2]!;
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
   }
   if (!Number.isFinite(minX)) return { cx: 0, cy: 0, cz: 0, w: 1, h: 1, d: 1, radius: 0.87 };
   const w = maxX - minX, h = maxY - minY, d = maxZ - minZ;
