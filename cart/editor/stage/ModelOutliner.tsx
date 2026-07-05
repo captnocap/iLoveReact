@@ -31,9 +31,12 @@ function partListHeight(count: number): number {
   return Math.min(count, PART_ROWS_VISIBLE) * PART_ROW_HEIGHT;
 }
 
-export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisible, onDuplicate, onDelete, onAdd, onImportModel }: {
+export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, onToggleVisible, onDuplicate, onDelete, onAdd, onImportModel }: {
   parts: ModelPart[];
   activeId: string | null;
+  // Multi-select set (req_2659, shift-click accumulate): members highlight; the PRIMARY
+  // (activeId) keeps the strong row. Optional — absent reads as single-select.
+  selectedIds?: string[];
   onSelect: (id: string) => void;
   onToggleVisible: (id: string) => void;
   onDuplicate: (id: string) => void;
@@ -61,12 +64,14 @@ export default function ModelOutliner({ parts, activeId, onSelect, onToggleVisib
           <Text style={{ color: '#5d6878', fontSize: 11, padding: 12 }}>No parts yet — add one below.</Text>
         ) : parts.map((part) => {
           const active = part.id === activeId;
+          // Set member but not primary: a dimmer tint of the active blue (req_2659).
+          const inSet = !active && Boolean(selectedIds?.includes(part.id));
           return (
             <Row
               key={part.id}
               style={{
                 alignItems: 'center', gap: 4, paddingLeft: 5, paddingRight: 5, height: PART_ROW_HEIGHT,
-                backgroundColor: active ? '#2a466e' : 'transparent',
+                backgroundColor: active ? '#2a466e' : inSet ? '#20344f' : 'transparent',
                 borderBottomWidth: 1, borderColor: '#161b26',
               }}
             >

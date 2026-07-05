@@ -911,6 +911,38 @@ fn hostMeshEditScope(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     state.markDirty();
 }
 
+/// __mesh_edit_scope_ranges(u32Pairs) → 1|0. Restrict editing to the UNION of group
+/// ranges — flattened [lo,hi) pairs (Uint32Array), the outliner's shift-accumulated
+/// multi-select (req_2659). Empty/absent clears the scope (whole model).
+fn hostMeshEditScopeRanges(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        scene3d.meshEditSetScopeRanges(&.{});
+        state.markDirty();
+        setReturnNumber(info, 1);
+        return;
+    };
+    if (bytes.len % (2 * @sizeOf(u32)) != 0) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const pairs: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
+    scene3d.meshEditSetScopeRanges(pairs);
+    state.markDirty();
+    setReturnNumber(info, 1);
+}
+
+/// __mesh_paint_session(on) — the cart's paint mode, mirrored to the host so the mode
+/// row stays ONE exclusive state machine (req_2662): while on, selection doors are
+/// inert and the edit overlay (face wash/dots/edges/gizmo) goes quiet. Turning it on
+/// resets the selection (paint entry clears; leaving paint starts clean).
+fn hostMeshPaintSession(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const on = (argToI32(info, 0) orelse 0) != 0;
+    scene3d.setPaintSession(on);
+    state.markDirty();
+}
+
 /// __mesh_set_part_ranges(u32Pairs) → 1|0. Adopt the outliner's PART ranges — flattened
 /// [lo,hi) authored-group pairs, sorted, non-overlapping. The weld keys on (position, part)
 /// so coincident verts in different parts never merge and edits can't bleed across stacked
@@ -1287,12 +1319,13 @@ fn hostModelPaintFitEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     returnEstimateJson(info, est);
 }
 
-/// __model_atlas_read() → JSON {"w":W,"h":H,"detail":D,"islands":[x,y,w,h,...],"data":
-/// "<base64 rgba>"} for the current painting, or "" if there's no paint target.
-/// `detail` is the applied density (texels/meter); `islands` is the packed island
-/// rects (flat quads) so the UV inspector can draw the real layout — omitted when the
-/// mesh has more islands than are worth outlining. The editor also persists this as a
-/// paint variant.
+/// __model_atlas_read() → JSON {"w":W,"h":H,"detail":D,"islands":[x,y,w,h,...],
+/// "groups":[g,...],"data":"<base64 rgba>"} for the current painting, or "" if there's
+/// no paint target. `detail` is the applied density (texels/meter); `islands` is the
+/// packed island rects (flat quads, 4-stride) and `groups` the PARALLEL per-island
+/// authored group id (req_2619 P — the UV inspector filters islands to the active
+/// part's group range) — both omitted when the mesh has more islands than are worth
+/// outlining. The editor also persists this as a paint variant.
 fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const alloc = std.heap.c_allocator;
@@ -1325,6 +1358,15 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
             w.writeAll(",\"islands\":[") catch return setReturnString(info, "");
             for (isls, 0..) |isl, i| {
                 w.print("{s}{d},{d},{d},{d}", .{ if (i == 0) "" else ",", isl.x, isl.y, isl.w, isl.h }) catch return setReturnString(info, "");
+            }
+            w.writeAll("]") catch return setReturnString(info, "");
+            // Parallel per-island GROUP ids (req_2619 P): island k's authored group is
+            // groups[k] (4294967295 = a loose ungrouped triangle's island). A parallel
+            // array, not a 5-tuple, so every existing 4-stride islands consumer keeps
+            // working; the UV inspector filters islands to the active part's group range.
+            w.writeAll(",\"groups\":[") catch return setReturnString(info, "");
+            for (isls, 0..) |isl, i| {
+                w.print("{s}{d}", .{ if (i == 0) "" else ",", isl.group }) catch return setReturnString(info, "");
             }
             w.writeAll("]") catch return setReturnString(info, "");
         }
@@ -2235,6 +2277,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_select_face", hostMeshEditSelectFace);
     v8_runtime.registerHostFn("__mesh_edit_select_group_range", hostMeshEditSelectGroupRange);
     v8_runtime.registerHostFn("__mesh_edit_scope", hostMeshEditScope);
+    v8_runtime.registerHostFn("__mesh_edit_scope_ranges", hostMeshEditScopeRanges);
+    v8_runtime.registerHostFn("__mesh_paint_session", hostMeshPaintSession);
     v8_runtime.registerHostFn("__mesh_set_part_ranges", hostMeshSetPartRanges);
     v8_runtime.registerHostFn("__mesh_part_ranges", hostMeshPartRanges);
     v8_runtime.registerHostFn("__model_paint_group_range", hostModelPaintGroupRange);

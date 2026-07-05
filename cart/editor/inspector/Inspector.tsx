@@ -95,17 +95,19 @@ function ShapeSection({ shape }: { shape: ModelFocusShape | null }) {
 // the UV read is per-outliner even while storage stays whole-model) plus the dims/
 // density readout on one line; the refresh verb is a fallback, never REQUIRED (the
 // viewer auto-refreshes off adoptMesh/applyTopo/stroke-end while paint is live).
-// The VIEW still shows the whole-model atlas: __model_atlas_read emits island rects
-// without their group ids, so the active part's islands cannot be told apart cart-side
-// yet — the scope row reads the honest state.
-function UvSection({ bridge, partName }: { bridge: ModelFocusBridge | null; partName: string }) {
+// __model_atlas_read now emits per-island GROUP ids (req_2619 P), so the preview
+// FILTERS to the active part: its islands full-strength, every other island dimmed
+// (the viewer bakes the dim at read time from __modelActivePartRange). The scope row
+// reads whichever state is actually shown — uv.scope is set by the same bake.
+// extraCount is the multi-select overflow (req_2659d): 'CUBE 1 +2' = primary + 2 more.
+function UvSection({ bridge, partName, extraCount }: { bridge: ModelFocusBridge | null; partName: string; extraCount: number }) {
   const uv = bridge?.uv ?? null;
   const scale = uv && uv.src ? Math.min(UV_IMG_W / Math.max(1, uv.w), UV_IMG_MAX_H / Math.max(1, uv.h)) : 0;
   return (
     <C.HW_Section>
       <C.HW_SectionHead>
         <C.HW_AccentBar />
-        <C.HW_SectionTitle>{`UV · ${partName.toUpperCase()}`}</C.HW_SectionTitle>
+        <C.HW_SectionTitle>{`UV · ${partName.toUpperCase()}${extraCount > 0 ? ` +${extraCount}` : ''}`}</C.HW_SectionTitle>
         <C.HW_Spacer />
         <C.HW_ReadValue>{uv ? `${uv.w}×${uv.h} · ${uv.detail} x/m` : '—'}</C.HW_ReadValue>
         <C.HW_MiniVerb onPress={() => bridge?.refreshUv()} tooltip="Re-read the live paint atlas">
@@ -128,7 +130,7 @@ function UvSection({ bridge, partName }: { bridge: ModelFocusBridge | null; part
       )}
       <C.HW_ReadRow>
         <C.HW_FormLabel>scope</C.HW_FormLabel>
-        <C.HW_ReadValue>whole model</C.HW_ReadValue>
+        <C.HW_ReadValue>{uv?.scope ?? 'whole model'}</C.HW_ReadValue>
       </C.HW_ReadRow>
     </C.HW_Section>
   );
@@ -174,6 +176,9 @@ export default function Inspector(props: {
   onClearSlot: (id: string, role: string) => void;
   colorSpine: ColorSpineHandlers;
   outlinerHandlers: OutlinerHandlers;
+  // The outliner multi-select set (req_2659) — row highlights + the UV '+N' header.
+  // AppFrame owns it (shell-local, not EditorState); primary stays modelActivePartId.
+  selectedPartIds: string[];
 }) {
   // Subscribed unconditionally (hook order) — only the MODEL FOCUS branch reads it.
   const focusBridge = useModelFocusBridge();
@@ -258,6 +263,10 @@ export default function Inspector(props: {
     const modelParts = props.state.modelParts[activeModel.id];
     const activePart = modelParts?.find((p) => p.id === props.state.modelActivePartId) ?? null;
     const uvPartName = activePart?.name ?? activeModel.name;
+    // Multi-select (req_2659): the set pruned to live rows; extras beyond the primary
+    // surface as '+N' in the UV header, and every member's row highlights.
+    const selectedSet = (props.selectedPartIds ?? []).filter((sid) => modelParts?.some((p) => p.id === sid));
+    const uvExtraCount = activePart ? Math.max(0, selectedSet.filter((sid) => sid !== activePart.id).length) : 0;
     // Save-state chip (req_2620 T): loud until the model is a real directory on
     // disk AND clean since the last materialize. One line, fixed rows — the name
     // field and the save row sit on the region's standard control grid
@@ -303,6 +312,7 @@ export default function Inspector(props: {
               <ModelOutliner
                 parts={modelParts}
                 activeId={props.state.modelActivePartId}
+                selectedIds={selectedSet}
                 onSelect={props.outlinerHandlers.onSelectPart}
                 onToggleVisible={props.outlinerHandlers.onToggleVisiblePart}
                 onDuplicate={props.outlinerHandlers.onDuplicatePart}
@@ -315,7 +325,7 @@ export default function Inspector(props: {
                 fixed panel (req_2643 OO), scoped-by-name to the active outliner part
                 (req_2619 P). Sits below the outliner so a tall preview can never crowd
                 the part list out of the non-scrolling body. */}
-            <UvSection bridge={focusBridge} partName={uvPartName} />
+            <UvSection bridge={focusBridge} partName={uvPartName} extraCount={uvExtraCount} />
             {/* Brush controls moved OUT of this corner dock to the top PaintToolbar (req_2466):
                 paint controls belong at the top as icons, not a bottom-right text-pill panel.
                 The Inspector now stays focused on selection/material inspection. */}

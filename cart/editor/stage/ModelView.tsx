@@ -94,7 +94,9 @@ export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boo
 // the viewer publishes a snapshot on globalThis.__modelFocusBridge and pings
 // __modelFocusBridgeChanged; the Inspector subscribes. Deliberately OUTSIDE the
 // ModelToolSnapshot prop path (data/types.ts + AppFrame own that plumbing).
-export type ModelFocusUv = { src: string | null; w: number; h: number; detail: number; note: string | null };
+// `scope` is the honest readout of what the preview FILTERS to (req_2619 P): the active
+// part's group range when island group ids let us tell its islands apart, else 'whole model'.
+export type ModelFocusUv = { src: string | null; w: number; h: number; detail: number; note: string | null; scope: string };
 export type ModelFocusShape = {
   verts: number; // welded verts (0 until the host builds topology in vertex/edge mode — read '—')
   edges: number; // welded edges (same honesty rule)
@@ -773,13 +775,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // previous file is removed. No data URLs, no pixel base64 in JS on the way out.
   const uvFileRef = useRef<string | null>(null);
   const buildUvPanel = () => {
-    const fail = (w: number, h: number, d: number, note: string) => setUvPanel({ src: null, w, h, detail: d, note });
+    const fail = (w: number, h: number, d: number, note: string) => setUvPanel({ src: null, w, h, detail: d, note, scope: 'whole model' });
     const j = host.__model_atlas_read?.();
     if (typeof j !== 'string' || !j) {
       fail(0, 0, 0, 'the host returned no atlas (is a mesh loaded?)');
       return;
     }
-    let o: { w: number; h: number; detail: number; islands?: number[]; data: string };
+    let o: { w: number; h: number; detail: number; islands?: number[]; groups?: number[]; data: string };
     try {
       o = JSON.parse(j);
     } catch {
@@ -799,19 +801,37 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // face-shaped layout the paint system built (one island per authored face, sized by
     // its physical footprint × density), comparable to a hand unwrap. The host omits
     // `islands` when there are too many to outline; the caption carries the structure.
+    //
+    // ACTIVE-PART filter (req_2619 P): the door now emits each island's authored group
+    // id (parallel `groups` array), and part ranges ARE group-id ranges — so when the
+    // shell has published the active part's range (__modelActivePartRange, AppFrame's
+    // selectPart), the active part's islands keep full strength and every other
+    // island's INTERIOR dims. The scope readout tells exactly which state is shown.
+    const activeRange = (globalThis as any).__modelActivePartRange as { lo: number; hi: number } | null | undefined;
+    const hasGroups = Boolean(o.islands && o.groups && o.groups.length * 4 === o.islands.length);
+    const filtering = Boolean(hasGroups && activeRange && activeRange.hi > activeRange.lo);
+    let scope = 'whole model';
     if (o.islands && o.islands.length >= 4) {
-      const darken = (x: number, y: number) => {
+      const darken = (x: number, y: number, k: number) => {
         if (x < 0 || y < 0 || x >= o.w || y >= o.h) return;
         const i = (y * o.w + x) * 4;
-        rgba[i + 0] = Math.round(rgba[i + 0]! * 0.45);
-        rgba[i + 1] = Math.round(rgba[i + 1]! * 0.45);
-        rgba[i + 2] = Math.round(rgba[i + 2]! * 0.45);
+        rgba[i + 0] = Math.round(rgba[i + 0]! * k);
+        rgba[i + 1] = Math.round(rgba[i + 1]! * k);
+        rgba[i + 2] = Math.round(rgba[i + 2]! * k);
       };
       for (let k = 0; k + 3 < o.islands.length; k += 4) {
         const [ix, iy, iw, ih] = [o.islands[k]!, o.islands[k + 1]!, o.islands[k + 2]!, o.islands[k + 3]!];
-        for (let x = ix; x < ix + iw; x++) { darken(x, iy); darken(x, iy + ih - 1); }
-        for (let y = iy; y < iy + ih; y++) { darken(ix, y); darken(ix + iw - 1, y); }
+        const grp = hasGroups ? o.groups![k / 4]! : -1;
+        const inActive = filtering && grp >= activeRange!.lo && grp < activeRange!.hi;
+        if (filtering && !inActive) {
+          // Off-part island: dim the whole rect so the active part's islands pop.
+          for (let y = iy; y < iy + ih; y++) for (let x = ix; x < ix + iw; x++) darken(x, y, 0.35);
+          continue;
+        }
+        for (let x = ix; x < ix + iw; x++) { darken(x, iy, 0.45); darken(x, iy + ih - 1, 0.45); }
+        for (let y = iy; y < iy + ih; y++) { darken(ix, y, 0.45); darken(ix + iw - 1, y, 0.45); }
       }
+      if (filtering) scope = `part [${activeRange!.lo},${activeRange!.hi}) — others dimmed`;
     }
     const png = host.__imageops_encode_raw?.(rgba, o.w, o.h, '{"format":"png"}');
     if (!(png instanceof Uint8Array)) {
@@ -825,7 +845,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     if (uvFileRef.current && uvFileRef.current !== path) host.__fs_remove?.(uvFileRef.current);
     uvFileRef.current = path;
-    setUvPanel({ src: path, w: o.w, h: o.h, detail: o.detail, note: null });
+    setUvPanel({ src: path, w: o.w, h: o.h, detail: o.detail, note: null, scope });
   };
   // Refresh the UV/atlas panel when it is LIVE (paint mode) — invoked off every mesh
   // adopt / topo op and at stroke end, so the panel tracks the real atlas without the
@@ -923,6 +943,20 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
 
   // Push the free-form face-safety mode to the host whenever it (or paint mode) changes.
   useEffect(() => { if (paintMode) setPaintSafety(safety); }, [safety, paintMode]);
+  // Mirror paint mode to the host (req_2662): the mode row is ONE exclusive state
+  // machine. While the session is live the host holds every edit-selection affordance
+  // quiet — selection doors inert, face wash/tint/gizmo undrawn — and entering it
+  // RESETS the selection host-side (documented choice: paint entry clears; leaving
+  // paint starts clean in Object mode, nothing to restore). Covers every entry/exit
+  // path (toolbar, hotkey, focus toggle, fresh-load reset) because they all flow
+  // through this one state.
+  useEffect(() => {
+    host.__mesh_paint_session?.(paintMode ? 1 : 0);
+    if (paintMode) setSelInfo(readSelInfo() ?? { mode: 0, verts: 0, edges: 0, sel: 0 }); // the entry reset zeroed the selection — the HUD count must follow
+    // Unmounting mid-paint (doc switch) must not leave the host session stuck on —
+    // the next viewer would boot with every selection door inert.
+    return () => { if (paintMode) host.__mesh_paint_session?.(0); };
+  }, [paintMode]);
   // NOTE: the host CARRIES the paint density across mesh adopts (edits and fresh loads
   // rebuild the island atlas at the last-chosen density), so the JS mirror deliberately
   // survives model key changes too — no reset-to-1 here.
@@ -1481,6 +1515,32 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'del') adoptMesh(meshDeleteSelection());
         else if (name === 'grouppaint') host.__model_paint_group_range?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
         else if (name === 'detail') applyPaintDetail(num(a[0]));
+        // hidepart:lo,hi / showpart:lo,hi — the outliner eye, headless (req_2660 repro:
+        // paint → hide → paint → show; the stroke made while hidden must SURVIVE).
+        else if (name === 'hidepart' || name === 'showpart') {
+          const r = toolApiRef.current?.setPartHidden(num(a[0]), num(a[1]), name === 'hidepart');
+          console.error(`[meshops] ${name}:${a[0]},${a[1]} → ${JSON.stringify(r)}`);
+        }
+        // paint:1|0 — enter/leave paint mode DIRECTLY (bypasses the Create Paint Atlas
+        // gate, which is interactive UI; the host atlas always exists). Flows through the
+        // same paintMode state, so the __mesh_paint_session mirror + selection reset fire
+        // exactly as the real toggle (req_2662's headless proof).
+        else if (name === 'paint') { if (num(a[0]) === 1) { setSelMode(0); meshSetMode(0); setPaintMode(true); buildUvPanel(); } else setPaintMode(false); }
+        // stamp:x,y,r,g,b,radius,flow — one free-form brush dab at viewport px (the
+        // sub-face stroke the flat per-face carry could never preserve). Logs the hit
+        // face (or -1) so a scripted stamp is verifiable.
+        else if (name === 'stamp') {
+          const hit = host.__model_paint_stamp?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]), Number(a[5]) || 4, Number(a[6]) || 1);
+          console.error(`[meshops] stamp @${a[0]},${a[1]} → face ${hit}`);
+        }
+        // rangeadd:lo,hi — ADDITIVE group-range select (the outliner's shift-click, host
+        // side); scopes:lo,hi[,lo,hi…] — the multi-range union scope door (req_2659).
+        else if (name === 'rangeadd') host.__mesh_edit_select_group_range?.(num(a[0]), num(a[1]), 1);
+        else if (name === 'scopes') {
+          const nums = a.map((s) => num(s)).filter((_, i, arr) => i < arr.length - (arr.length % 2));
+          const ok = host.__mesh_edit_scope_ranges?.(new Uint32Array(nums));
+          console.error(`[meshops] scopes [${nums.join(',')}] → ${ok}`);
+        }
         else if (name === 'report') console.error(`[meshops] report → ${JSON.stringify(readSelInfo())}`);
         // parts: log the HOST's part-range truth + a partition audit — every triangle
         // must be owned by exactly one range (req_2644's contract, headlessly checkable).

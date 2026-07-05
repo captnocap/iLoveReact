@@ -267,6 +267,86 @@ fn freeLayoutState() void {
     g_has_dirty = false;
 }
 
+// ── Atlas carry stash (req_2660: paint survives hide/show) ──────────────────────────
+// Hide/show replaces the resident mesh (replaceActiveEditMesh → setTarget → clear), so
+// the atlas that held the user's strokes is DESTROYED before the groups-driven
+// re-layout runs — the old carry (per-face centroid colour) flooded every island flat
+// and WIPED all sub-face paint. The op snapshots the whole atlas + its island rects
+// here FIRST (3d.zig, tint-suspended so only true paint is stashed); the next
+// carry-rebuild blits each surviving island's texels into its new rect, keyed by the
+// authored group id (hide/show preserves group ids verbatim). Islands whose rect size
+// changed (FIT mode re-derives density from the visible face set) resample
+// nearest-neighbour — same face content, different texel scale. Faces whose island has
+// no stashed twin fall back to the flat base-colour carry.
+const CarryIsle = struct { group: u32, x: u32, y: u32, w: u32, h: u32 };
+var g_carry_isles: ?[]CarryIsle = null;
+var g_carry_rgba: ?[]u8 = null;
+var g_carry_w: u32 = 0;
+
+/// Stash the CURRENT atlas + island rects for the next carry-rebuild. Call with the
+/// selection tint lifted (the stash must hold TRUE paint, req_2611). Survives
+/// clear()/setTarget() deliberately — that is the whole point (the op in between
+/// destroys the live atlas). Consumed (and freed) by the next rebuild with carry.
+pub fn snapshotAtlasForCarry() void {
+    dropAtlasCarry();
+    const lay = &(g_layout orelse return);
+    const buf = g_rgba orelse return;
+    const rgba = alloc.dupe(u8, buf) catch return;
+    const isles = alloc.alloc(CarryIsle, lay.islands.len) catch {
+        alloc.free(rgba);
+        return;
+    };
+    for (lay.islands, 0..) |s, i| isles[i] = .{ .group = s.group, .x = s.x, .y = s.y, .w = s.w, .h = s.h };
+    g_carry_rgba = rgba;
+    g_carry_isles = isles;
+    g_carry_w = g_atlas_w;
+}
+
+/// Free the stash without consuming it — the op that took it failed.
+pub fn dropAtlasCarry() void {
+    if (g_carry_rgba) |r| alloc.free(r);
+    if (g_carry_isles) |i| alloc.free(i);
+    g_carry_rgba = null;
+    g_carry_isles = null;
+    g_carry_w = 0;
+}
+
+/// Blit every new island whose authored group has a stashed twin, old rect → new rect
+/// (nearest-neighbour when the size changed). Marks which islands were carried whole so
+/// the flat colour fallback skips them (flooding would re-wipe the strokes). Returns the
+/// per-island carried mask (caller frees), or null when there was no stash / no memory.
+fn consumeAtlasCarry(lay: *const paint_islands.Layout, rgba: []u8) ?[]bool {
+    const old_isles = g_carry_isles orelse return null;
+    const old_rgba = g_carry_rgba orelse return null;
+    defer dropAtlasCarry();
+    const carried = alloc.alloc(bool, lay.islands.len) catch return null;
+    @memset(carried, false);
+    var by_group = std.AutoHashMapUnmanaged(u32, usize){};
+    defer by_group.deinit(alloc);
+    for (old_isles, 0..) |oi, i| {
+        if (oi.group == paint_islands.NO_GROUP or oi.w == 0 or oi.h == 0) continue;
+        by_group.put(alloc, oi.group, i) catch {};
+    }
+    for (lay.islands, 0..) |ni, i| {
+        if (ni.group == paint_islands.NO_GROUP or ni.w == 0 or ni.h == 0) continue;
+        const oi = old_isles[by_group.get(ni.group) orelse continue];
+        var py: u32 = 0;
+        while (py < ni.h) : (py += 1) {
+            const sy = oi.y + py * oi.h / ni.h;
+            var px: u32 = 0;
+            while (px < ni.w) : (px += 1) {
+                const sx = oi.x + px * oi.w / ni.w;
+                const src = (@as(usize, sy) * g_carry_w + sx) * 4;
+                const dst = (@as(usize, ni.y + py) * g_atlas_w + (ni.x + px)) * 4;
+                if (src + 4 > old_rgba.len or dst + 4 > rgba.len) continue;
+                @memcpy(rgba[dst .. dst + 4], old_rgba[src .. src + 4]);
+            }
+        }
+        carried[i] = true;
+    }
+    return carried;
+}
+
 /// One authored-group id per displayed triangle, from model_source (NO_FACE_GROUP and
 /// paint_islands.NO_GROUP are both maxInt(u32), so loose triangles pass through).
 fn collectFaceGroups(fc: u32) ?[]u32 {
@@ -380,7 +460,21 @@ fn rebuildLayoutInner(verts: []f32, vert_count: u32, carry: bool) void {
         verts[vi * 8 + 7] = lay.corner_uv[@as(usize, vi) * 2 + 1] / ah;
     }
 
-    if (snap) |s| applyColors(s); // flood each face with its carried base colour
+    // Texel-true carry first (req_2660): islands stashed by snapshotAtlasForCarry blit
+    // whole — every sub-face stroke survives. Only faces whose island was NOT blitted
+    // fall back to the flat base-colour flood (the pre-req_2660 behaviour).
+    const carried: ?[]bool = if (carry) consumeAtlasCarry(&g_layout.?, rgba) else null;
+    defer if (carried) |c| alloc.free(c);
+    if (snap) |s| {
+        var f2: u32 = 0;
+        while (f2 < fc) : (f2 += 1) {
+            if (carried) |c| {
+                const isl = g_layout.?.tri_island[f2];
+                if (isl < c.len and c[isl]) continue; // texels carried whole — a flood would re-wipe the strokes
+            }
+            paintFace(f2, .{ s[f2 * 4 + 0], s[f2 * 4 + 1], s[f2 * 4 + 2], s[f2 * 4 + 3] });
+        }
+    }
     g_has_dirty = false;
     markRows(0, g_atlas_h - 1); // the whole fresh atlas needs its first upload
 }

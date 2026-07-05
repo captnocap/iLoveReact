@@ -1654,7 +1654,16 @@ var g_hidden_groups: std.ArrayListUnmanaged(HiddenGroup) = .{};
 pub fn meshSetGroupHidden(lo: u32, hi: u32, hidden: bool) bool {
     if (!model_paint.hasTarget()) return false;
     var snap = journalSnapshotCurrent(if (hidden) "hide part" else "show part");
+    // req_2660 (paint survives hide/show): the op replaces the resident mesh, which
+    // DESTROYS the paint atlas before the re-layout — stash it (tint lifted so only
+    // true paint rides) and the groups-driven rebuild inside hide/show blits every
+    // surviving island's texels back. Without this, every sub-face stroke wiped on
+    // each eye toggle (the flat per-face colour carry was the only survivor).
+    mesh_edit.suspendFaceTint();
+    model_paint.snapshotAtlasForCarry();
+    mesh_edit.resumeFaceTint();
     const ok = if (hidden) hideGroup(lo, hi) else showGroup(lo, hi);
+    if (!ok) model_paint.dropAtlasCarry(); // failed op — never let a stale stash blit later
     if (ok) journalCommit(&snap) else journalDiscard(&snap);
     return ok;
 }
@@ -2676,9 +2685,28 @@ pub fn meshEditSetMode(m: u8) void {
         else => .none,
     });
 }
+// ── Paint session (req_2662: the mode row is ONE exclusive state machine) ───────────
+// While the cart is in paint mode, every edit-selection affordance goes quiet:
+// selection doors are inert (an outliner click mid-paint used to force face mode +
+// tint + live gizmo rings — "i dont know how i got here"), and the overlay draws no
+// mode dressing / gizmo. Entering the session RESETS the selection (documented choice:
+// paint entry clears; leaving paint starts clean in Object mode — nothing to restore).
+var g_paint_session: bool = false;
+pub fn setPaintSession(on: bool) void {
+    if (on == g_paint_session) return;
+    g_paint_session = on;
+    if (on) {
+        mesh_edit.clearSelection(); // restores tinted faces to true paint (atlas patches)
+        mesh_edit.setMode(.none); // drops the face-mode dressing with it
+    }
+}
+pub fn paintSessionActive() bool {
+    return g_paint_session;
+}
 /// Pick the element under (mx,my) in the current mode (additive = shift toggle/extend),
 /// fold it into the selection, and repaint. Returns the new selected count, -1 if no mesh.
 pub fn meshEditPick(mx: f32, my: f32, additive: bool) i32 {
+    if (g_paint_session) return -1; // paint owns the surface — no selection gestures (req_2662)
     if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     return mesh_edit.pick(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my), additive);
@@ -2689,6 +2717,7 @@ pub fn meshEditClear() void {
 /// Mesh-editor Ctrl+A — select every element of the current mode within the focused part
 /// (or the whole model). Returns the selected count, -1 if no mesh.
 pub fn meshEditSelectAll() i32 {
+    if (g_paint_session) return -1;
     return mesh_edit.selectAll();
 }
 // Marquee rectangle (window px), set by the native input loop during a left drag-select.
@@ -2986,6 +3015,7 @@ fn ringHitDist2(cam: model_paint.Camera, pivot: [3]f32, axis: i32, mx: f32, my: 
 }
 
 fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    if (g_paint_session) return; // paint mode suspends the gizmo entirely (req_2662)
     if (meshEditModeRaw() == 0) return;
     const pivot = mesh_edit.selectionPivot() orelse return;
     const pc = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return;
@@ -3007,6 +3037,7 @@ fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
 }
 
 pub fn meshGizmoHit(mx: f32, my: f32) i32 {
+    if (g_paint_session) return -1; // req_2662: no gizmo grabs while paint owns the surface
     if (!g_me_capture or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return -1;
     const pivot = mesh_edit.selectionPivot() orelse return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
@@ -3548,7 +3579,10 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     // pane's origin would smear the stage/dots across it.
     if (@abs(ox - g_paint_vp_x) > 0.5 or @abs(oy - g_paint_vp_y) > 0.5) return;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
-    const mode = meshEditModeRaw();
+    // Paint session (req_2662): the whole mode dressing goes quiet — the stage,
+    // compass and marquee are view furniture and stay; wash/dots/edges/gizmo are
+    // EDIT affordances and must never render over a paint surface.
+    const mode: u8 = if (g_paint_session) 0 else meshEditModeRaw();
     // Clip everything to the pane, and use segment breaks to layer polys under capsules.
     core.pushScissor(ox, oy, g_paint_vp_w, g_paint_vp_h);
     // Layer 1 (polys): the tile-panel fills. Always drawn in the model doc view — the
@@ -3598,6 +3632,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
 }
 /// Marquee (rubber-band) select every element inside the screen rect (Alt+drag).
 pub fn meshEditBox(x0: f32, y0: f32, x1: f32, y1: f32, additive: bool) i32 {
+    if (g_paint_session) return -1; // req_2662: paint owns the drag — no marquee selects
     if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     return mesh_edit.boxSelect(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(x0), vpLocalY(y0), vpLocalX(x1), vpLocalY(y1), additive);
@@ -3611,16 +3646,24 @@ pub fn meshEditRevert() void {
 }
 /// Select a face by index (no raycast) — programmatic / headless. Returns true on success.
 pub fn meshEditSelectFace(idx: u32, additive: bool) bool {
+    if (g_paint_session) return false; // req_2662: selection doors are inert in paint mode
     return mesh_edit.selectFaceByIndex(idx, additive);
 }
 /// Select every face in the authored group range [lo, hi) — the outliner grabs a whole part.
 pub fn meshEditSelectGroupRange(lo: u32, hi: u32, additive: bool) i32 {
+    if (g_paint_session) return -1; // req_2662: an outliner click mid-paint must not force face mode
     return mesh_edit.selectFacesByGroupRange(lo, hi, additive);
 }
 /// Restrict editing (select + overlay) to the authored group range [lo, hi) — the outliner
 /// focusing ONE part. hi <= lo edits the whole model.
 pub fn meshEditSetScope(lo: u32, hi: u32) void {
     mesh_edit.setEditScope(lo, hi);
+}
+/// Restrict editing to the UNION of group ranges (flattened [lo,hi) pairs) — the outliner's
+/// multi-select (req_2659): shift-click accumulates parts and the gizmo/pick/marquee operate
+/// on all of them. Empty clears the scope (whole model).
+pub fn meshEditSetScopeRanges(pairs: []const u32) void {
+    mesh_edit.setEditScopeRanges(pairs);
 }
 /// Adopt the outliner's part ranges (flattened [lo,hi) group-id pairs) and rebuild the
 /// welded topology, so coincident verts in DIFFERENT parts stay separate logical verts.

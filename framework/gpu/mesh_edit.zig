@@ -58,13 +58,15 @@ var g_edge_count: u32 = 0;
 // edit overlay use ONLY boundary edges, so a cube reads as 12 edges, not 18. (req_2367)
 var g_edge_boundary: ?[]bool = null;
 // Active edit SCOPE: when set, vertex/edge/face selection AND the overlay only consider faces
-// whose authored group is in [g_scope_lo, g_scope_hi) — the outliner focusing ONE part so you
-// edit just it, not the whole composed model. Inactive = the whole mesh. g_scope_vert/edge are
-// derived masks (a vert is in scope if it belongs to an in-scope face; an edge if both ends
-// are), rebuilt lazily when the scope or facecount changes. (req_2415)
+// whose authored group falls in ANY of g_scope_ranges' [lo,hi) pairs — the outliner focusing
+// one part (one range) or a shift-accumulated multi-select (several ranges, req_2659) so you
+// edit just those, not the whole composed model. Inactive = the whole mesh. g_scope_vert/edge
+// are derived masks (a vert is in scope if it belongs to an in-scope face; an edge if both
+// ends are), rebuilt lazily when the scope or facecount changes. (req_2415)
+const MAX_SCOPE_RANGES: usize = 64; // outliner parts are dozens at most — truncation is LOUD below
 var g_scope_active: bool = false;
-var g_scope_lo: u32 = 0;
-var g_scope_hi: u32 = 0;
+var g_scope_ranges: [MAX_SCOPE_RANGES][2]u32 = undefined;
+var g_scope_count: usize = 0;
 var g_scope_vert: ?[]bool = null;
 var g_scope_edge: ?[]bool = null;
 var g_scope_built: u64 = 0;
@@ -307,34 +309,62 @@ pub fn reset() void {
     g_built_for = 0;
 }
 
-// ── Edit scope (focus one part) ──────────────────────────────────────────────────
+// ── Edit scope (focus one part, or a multi-selected set of parts) ─────────────────
 /// Restrict editing to the authored group range [lo, hi). hi <= lo clears the scope (edit
 /// the whole model). The outliner sets this to the focused part's range.
 pub fn setEditScope(lo: u32, hi: u32) void {
     if (hi > lo) {
         g_scope_active = true;
-        g_scope_lo = lo;
-        g_scope_hi = hi;
+        g_scope_ranges[0] = .{ lo, hi };
+        g_scope_count = 1;
     } else {
         g_scope_active = false;
+        g_scope_count = 0;
     }
+}
+
+/// Restrict editing to the UNION of several group ranges — flattened [lo,hi) pairs, the
+/// outliner's shift-accumulated multi-select (req_2659). Degenerate pairs (hi <= lo) are
+/// skipped; zero valid pairs clears the scope. Beyond MAX_SCOPE_RANGES the excess is
+/// dropped LOUDLY (never silently mis-scoped).
+pub fn setEditScopeRanges(pairs: []const u32) void {
+    g_scope_count = 0;
+    var i: usize = 0;
+    while (i + 1 < pairs.len) : (i += 2) {
+        if (pairs[i + 1] <= pairs[i]) continue;
+        if (g_scope_count >= MAX_SCOPE_RANGES) {
+            std.debug.print("[mesh_edit] scope ranges TRUNCATED at {d} — {d} pairs requested\n", .{ MAX_SCOPE_RANGES, pairs.len / 2 });
+            break;
+        }
+        g_scope_ranges[g_scope_count] = .{ pairs[i], pairs[i + 1] };
+        g_scope_count += 1;
+    }
+    g_scope_active = g_scope_count > 0;
 }
 
 fn faceInScope(f: u32) bool {
     if (!g_scope_active) return true;
     const g = model_source.faceGroupOf(f);
-    return g != model_source.NO_FACE_GROUP and g >= g_scope_lo and g < g_scope_hi;
+    if (g == model_source.NO_FACE_GROUP) return false;
+    for (g_scope_ranges[0..g_scope_count]) |r| {
+        if (g >= r[0] and g < r[1]) return true;
+    }
+    return false;
 }
 pub fn faceInScopePub(f: u32) bool {
     return faceInScope(f);
 }
 
 /// Build the per-vert / per-edge scope masks for the active scope (lazy; keyed on
-/// facecount+range). A vert is in scope if any in-scope face touches it; an edge if both
+/// facecount+ranges). A vert is in scope if any in-scope face touches it; an edge if both
 /// endpoints are. No-op when the scope is inactive or the topology isn't welded yet.
 fn ensureScopeMasks() void {
     if (!g_scope_active or g_verts == null) return;
-    const sig = (@as(u64, model_paint.faceCount()) << 32) ^ (@as(u64, g_scope_lo) << 12) ^ @as(u64, g_scope_hi);
+    var sig: u64 = @as(u64, model_paint.faceCount()) << 32;
+    for (g_scope_ranges[0..g_scope_count]) |r| {
+        sig ^= (@as(u64, r[0]) << 12) ^ @as(u64, r[1]);
+        sig = sig *% 0x9e3779b97f4a7c15 +% 1; // order-sensitive mix so [a,b],[c,d] ≠ [c,d],[a,b]
+    }
     if (g_scope_built == sig and g_scope_vert != null) return;
     if (g_scope_vert) |m| alloc.free(m);
     if (g_scope_edge) |m| alloc.free(m);

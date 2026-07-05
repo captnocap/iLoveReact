@@ -1289,78 +1289,177 @@ export default function AppFrame() {
     const kind = (globalThis as any).__env_get?.('RJIT_MODELDOC') as PrimitiveKind | null | undefined;
     if (kind) createNewMeshDocument(kind, { size: 1, height: 1, resolution: 1 });
   }, []);
-  const selectPart = (id: string) => {
-    // Focus a part = SCOPE editing to it: only its verts/edges/faces show + select, and the
-    // gizmo drives just it. EXACTLY ONE part is always focused (req_2644): clicking the
-    // already-focused row RE-ASSERTS it — the old toggle-off left a "no part focused"
-    // state whose scope(0,0) made the gizmo drag the WHOLE buffer at once.
-    const host = globalThis as any;
-    const mid = activePartsModelId(state);
-    const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
-    const range = part ? partRange(part) : null;
-    if (range) {
-      host.__mesh_edit_scope?.(range.lo, range.hi);
-      // Selecting the part's faces is a FACE-mode gesture — the host door flips its pick
-      // mode to face. In vertex/edge mode focus only scopes (dots/edges restrict to the
-      // part), so the toolbar's mode and the host's pick mode never diverge (req_2645 SS:
-      // "vertex mode picks faces" after an outliner click).
-      const m = state.modelTool.selMode;
-      if (m === 0 || m === 3) host.__mesh_edit_select_group_range?.(range.lo, range.hi, 0);
-      else host.__mesh_edit_clear?.();
-    }
-    setState((prev) => ({ ...prev, modelActivePartId: id }));
+  // ── Outliner multi-select (req_2659) ──────────────────────────────────────────
+  // Shift-click accumulates parts into ONE selected set with a PRIMARY part (the last
+  // clicked — state.modelActivePartId; it drives the UV/SHAPE headers). Plain click
+  // replaces the set. The set can never go empty (the no-zero-focus law, req_2644).
+  // Shell-local state: EditorState (data/types.ts) stays untouched.
+  const [selectedPartIds, setSelectedPartIds] = useState<string[]>([]);
+  const selectedPartIdsRef = useRef<string[]>([]);
+  selectedPartIdsRef.current = selectedPartIds;
+  /** The live selected set, pruned to parts that still exist; falls back to the active part. */
+  const effectiveSelectedIds = (s: EditorState, parts: ModelPart[], sel: string[]): string[] => {
+    const valid = sel.filter((sid) => parts.some((p) => p.id === sid));
+    if (valid.length > 0) return valid;
+    return s.modelActivePartId && parts.some((p) => p.id === s.modelActivePartId) ? [s.modelActivePartId] : [];
   };
+  /** Row verbs act on the WHOLE selected set when the pressed row is in it (req_2659),
+   *  else on just that row. */
+  const verbTargets = (id: string, parts: ModelPart[]): string[] => {
+    const set = effectiveSelectedIds(state, parts, selectedPartIds);
+    return set.includes(id) && set.length > 1 ? set : [id];
+  };
+  /** Push the selected set to the host: scope = the UNION of every member's range (the
+   *  gizmo/nudge/pick/marquee machinery then operates on all of them; the selection
+   *  pivot is the union centroid because the pivot averages selected elements). Face
+   *  selection follows in object/face mode — and NEVER during paint (req_2662: the
+   *  mode row is exclusive; an outliner click mid-paint scopes without selecting). */
+  const pushPartSetToHost = (s: EditorState, parts: ModelPart[], ids: string[], primaryId: string) => {
+    const host = globalThis as any;
+    const ranges = ids
+      .map((sid) => { const p = parts.find((pp) => pp.id === sid); return p ? partRange(p) : null; })
+      .filter((r): r is { lo: number; hi: number } => r !== null);
+    const prim = parts.find((p) => p.id === primaryId);
+    host.__modelActivePartRange = prim ? partRange(prim) : null; // the UV filter's truth (req_2619 P)
+    if (ranges.length === 0) return;
+    if (ranges.length === 1) {
+      host.__mesh_edit_scope?.(ranges[0]!.lo, ranges[0]!.hi);
+    } else {
+      const pairs = new Uint32Array(ranges.length * 2);
+      ranges.forEach((r, i) => { pairs[i * 2] = r.lo; pairs[i * 2 + 1] = r.hi; });
+      host.__mesh_edit_scope_ranges?.(pairs);
+    }
+    if (s.modelTool.paint) return; // paint owns the surface — scope only (req_2662)
+    // Selecting the parts' faces is a FACE-mode gesture — the host door flips its pick
+    // mode to face. In vertex/edge mode focus only scopes (dots/edges restrict to the
+    // set), so the toolbar's mode and the host's pick mode never diverge (req_2645 SS).
+    const m = s.modelTool.selMode;
+    if (m === 0 || m === 3) ranges.forEach((r, i) => host.__mesh_edit_select_group_range?.(r.lo, r.hi, i === 0 ? 0 : 1));
+    else host.__mesh_edit_clear?.();
+  };
+  const selectPart = (id: string) => {
+    // Focus = SCOPE editing to the selected set. EXACTLY ONE primary is always focused
+    // (req_2644): a plain click replaces the set with [id] (clicking the focused row
+    // RE-ASSERTS it — never a toggle-off into scope(0,0)); shift-click toggles set
+    // membership (req_2659) but the set never empties.
+    const mid = activePartsModelId(state);
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const cur = effectiveSelectedIds(state, parts, selectedPartIds);
+    let nextIds = [id];
+    let primary = id;
+    if (currentModifiers().shift && parts.some((p) => p.id === id)) {
+      if (cur.includes(id)) {
+        if (cur.length <= 1) nextIds = cur; // the set can never go empty (no zero-focus)
+        else {
+          nextIds = cur.filter((x) => x !== id);
+          primary = nextIds[nextIds.length - 1]!;
+        }
+      } else nextIds = [...cur, id];
+    }
+    setSelectedPartIds(nextIds);
+    pushPartSetToHost(state, parts, nextIds, primary);
+    setState((prev) => ({
+      ...prev,
+      modelActivePartId: primary,
+      status: nextIds.length > 1 ? `selected ${nextIds.length} parts — primary ${parts.find((p) => p.id === primary)?.name ?? primary}` : prev.status,
+    }));
+    // Track the pick in the live UV preview (its filter keys off the primary's range).
+    const bridge = (globalThis as any).__modelFocusBridge;
+    if (bridge?.paintLive) bridge.refreshUv?.();
+  };
+  // A structural flow (add/dup/delete/import/undo) re-points the active part OUTSIDE
+  // selectPart — collapse the multi-set to the new active so a stale set can't keep
+  // group verbs firing on rows the user no longer sees selected.
+  useEffect(() => {
+    if (state.modelActivePartId && !selectedPartIds.includes(state.modelActivePartId)) {
+      setSelectedPartIds([state.modelActivePartId]);
+    }
+  }, [state.modelActivePartId]);
+  // Keep the UV filter's active-range global fresh for every flow that moves focus or
+  // re-stamps ranges (selectPart writes it synchronously; this covers the rest).
+  useEffect(() => {
+    const mid = activePartsModelId(state);
+    const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === state.modelActivePartId) : null;
+    (globalThis as any).__modelActivePartRange = part ? partRange(part) : null;
+  }, [state.modelActivePartId, state.modelParts, state.activeWorkspaceDocumentId]);
   const toggleVisiblePart = (id: string) => {
     const mid = activePartsModelId(state);
-    const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
-    const range = part ? partRange(part) : null;
-    // Mark the part hidden in the ref BEFORE the host op: the hide drops the displayed
-    // tri count, which fires reconcileEmptyParts against state where this part still
-    // reads visible:true — without the ref it prunes the just-hidden part like a delete.
-    if (part && range) {
-      if (part.visible) hiddenPartIdsRef.current.add(id);
-      else hiddenPartIdsRef.current.delete(id);
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const pressed = parts.find((p) => p.id === id);
+    if (!mid || !pressed) {
+      setState((prev) => ({ ...prev, status: 'part not found' }));
+      return;
     }
-    // Hide if currently shown. The outcome is reported LOUDLY: a silent no-op here reads
-    // as "everything vanished" with no trail. verb+range+remaining tris tell the story.
-    const r = range ? modelToolApiRef.current?.setPartHidden(range.lo, range.hi, part!.visible) : null;
-    if (part && range && !r?.ok) {
-      // Host op failed — undo the ref move so reconcile semantics match reality.
-      if (part.visible) hiddenPartIdsRef.current.delete(id);
-      else hiddenPartIdsRef.current.add(id);
+    // The pressed row picks the DIRECTION for the whole set (req_2659): hiding a visible
+    // row hides every visible member; showing a hidden row shows every hidden member.
+    const hide = pressed.visible;
+    const targets = verbTargets(id, parts)
+      .map((tid) => parts.find((p) => p.id === tid))
+      .filter((p): p is ModelPart => Boolean(p && p.visible === hide));
+    const flipped = new Set<string>();
+    const lines: string[] = [];
+    for (const part of targets) {
+      const range = partRange(part);
+      if (!range) {
+        lines.push(`cannot ${hide ? 'hide' : 'show'} ${part.name} — its host range is not stamped yet`);
+        continue;
+      }
+      // Mark the part hidden in the ref BEFORE the host op: the hide drops the displayed
+      // tri count, which fires reconcileEmptyParts against state where this part still
+      // reads visible:true — without the ref it prunes the just-hidden part like a delete.
+      if (hide) hiddenPartIdsRef.current.add(part.id);
+      else hiddenPartIdsRef.current.delete(part.id);
+      // The outcome is reported LOUDLY: a silent no-op here reads as "everything
+      // vanished" with no trail. verb+range+remaining tris tell the story per part.
+      const r = modelToolApiRef.current?.setPartHidden(range.lo, range.hi, hide);
+      if (r?.ok) {
+        flipped.add(part.id);
+        lines.push(`${hide ? 'hid' : 'showed'} ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`);
+      } else {
+        // Host op failed — undo the ref move so reconcile semantics match reality.
+        if (hide) hiddenPartIdsRef.current.delete(part.id);
+        else hiddenPartIdsRef.current.add(part.id);
+        lines.push(`could not ${hide ? 'hide' : 'show'} ${part.name} [${range.lo},${range.hi}) — host op failed`);
+      }
     }
-    const verb = part?.visible ? 'hid' : 'showed';
-    const status = !part
-      ? 'part not found'
-      : !range
-        ? `cannot ${part.visible ? 'hide' : 'show'} ${part.name} — its host range is not stamped yet`
-        : r?.ok
-          ? `${verb} ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain in the mesh`
-          : `could not ${part.visible ? 'hide' : 'show'} ${part.name} [${range.lo},${range.hi}) — host op failed`;
-    setState((prev) => ({ ...prev, status, modelParts: { ...prev.modelParts, [mid!]: (prev.modelParts[mid!] ?? []).map((p) => (p.id === id ? { ...p, visible: !p.visible } : p)) } }));
+    const status = lines.length > 0 ? lines.join(' · ') : `${pressed.name} is already ${hide ? 'hidden' : 'shown'}`;
+    setState((prev) => ({ ...prev, status, modelParts: { ...prev.modelParts, [mid]: (prev.modelParts[mid] ?? []).map((p) => (flipped.has(p.id) ? { ...p, visible: !hide } : p)) } }));
   };
   const deletePart = (id: string) => {
     const mid = activePartsModelId(state);
     const allParts = mid ? (state.modelParts[mid] ?? []) : [];
-    const part = allParts.find((p) => p.id === id) ?? null;
-    const range = part ? partRange(part) : null;
-    // Deleting the LAST visible part: the host refuses to empty a mesh (its guard),
-    // so don't ask it — removing the part unmounts the viewer, which drops the host
+    if (!mid || allParts.length === 0) {
+      setState((prev) => ({ ...prev, status: 'part not found' }));
+      return;
+    }
+    const targets = verbTargets(id, allParts);
+    // Deleting the LAST visible geometry: the host refuses to empty a mesh (its guard),
+    // so don't ask it — removing the rows unmounts the viewer, which drops the host
     // mesh with it. Empty model IS the outcome we want here (req_2560).
-    const lastVisible = Boolean(part?.visible) && composeModelParts(allParts.filter((p) => p.id !== id)).positions.length === 0;
-    const r = !lastVisible && range && part!.visible ? modelToolApiRef.current?.deletePartRange(range.lo, range.hi) : null;
-    const status = part && range && part.visible
-      ? (lastVisible
-        ? `deleted ${part.name} — model is now empty`
-        : r?.ok
-          ? `deleted ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`
-          : `could not delete ${part.name} [${range.lo},${range.hi}) — host op failed`)
-      : `removed ${part?.name ?? id} from the outliner`;
-    hiddenPartIdsRef.current.delete(id);
+    const emptiesModel = composeModelParts(allParts.filter((p) => !targets.includes(p.id))).positions.length === 0;
+    const lines: string[] = [];
+    for (const tid of targets) {
+      const part = allParts.find((p) => p.id === tid);
+      if (!part) continue;
+      const range = partRange(part);
+      // Each visible part is its own host op and its own journal entry — the status
+      // reads one line per part (honest N entries, no faked atomicity; req_2659e).
+      const r = !emptiesModel && range && part.visible ? modelToolApiRef.current?.deletePartRange(range.lo, range.hi) : null;
+      lines.push(part.visible && range
+        ? (emptiesModel
+          ? `deleted ${part.name}`
+          : r?.ok
+            ? `deleted ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`
+            : `could not delete ${part.name} [${range.lo},${range.hi}) — host op failed`)
+        : `removed ${part.name} from the outliner`);
+      hiddenPartIdsRef.current.delete(tid);
+    }
+    const status = emptiesModel ? `${lines.join(' · ')} — model is now empty` : lines.join(' · ');
     setState((prev) => {
-      const parts = (prev.modelParts[mid!] ?? []).filter((p) => p.id !== id);
-      return { ...prev, status, modelParts: { ...prev.modelParts, [mid!]: parts }, modelActivePartId: prev.modelActivePartId === id ? (parts[0]?.id ?? null) : prev.modelActivePartId };
+      const parts = (prev.modelParts[mid] ?? []).filter((p) => !targets.includes(p.id));
+      return { ...prev, status, modelParts: { ...prev.modelParts, [mid]: parts }, modelActivePartId: targets.includes(prev.modelActivePartId ?? '') ? (parts[0]?.id ?? null) : prev.modelActivePartId };
     });
+    setSelectedPartIds((prev) => prev.filter((sid) => !targets.includes(sid)));
   };
   // The host mesh is authoritative, so a delete just changes it — parts are metadata. After a
   // delete, drop any part whose group range now has ZERO surviving faces (metadata only; no
@@ -1409,34 +1508,55 @@ export default function AppFrame() {
   // -1 = plain copy). The host copies geometry + paint and returns the new range;
   // the outliner gains a row. A mirrored/cloned SEED mesh rides along when the
   // source part has one, so the copy survives a document remount.
+  // Acts on the WHOLE selected set when the pressed row is in it (req_2659): each part
+  // duplicates as its own host op (its own journal entry — honest N entries, never a
+  // faked atomic one); the fresh twins become the selection afterwards.
   const duplicatePartById = (id: string | null, mirrorAxis: number) => {
     const mid = activePartsModelId(state);
     const api = modelToolApiRef.current;
-    const part = mid && id ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
-    const range = part ? partRange(part) : null;
-    if (!mid || !api || !part || !range) {
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const rows = id
+      ? verbTargets(id, parts).map((tid) => parts.find((p) => p.id === tid)).filter((p): p is ModelPart => Boolean(p))
+      : [];
+    if (!mid || !api || rows.length === 0) {
       setState((prev) => ({ ...prev, status: 'duplicate needs a focused part with a stamped range' }));
       return;
     }
-    if (!part.visible) {
-      setState((prev) => ({ ...prev, status: `cannot duplicate ${part.name} while it is hidden — show it first` }));
+    const placedRows: ModelPart[] = [];
+    const lines: string[] = [];
+    let seq = state.seq;
+    for (const part of rows) {
+      const range = partRange(part);
+      if (!range) {
+        lines.push(`${part.name} has no stamped range`);
+        continue;
+      }
+      if (!part.visible) {
+        lines.push(`cannot duplicate ${part.name} while it is hidden — show it first`);
+        continue;
+      }
+      const r = api.duplicatePart(range.lo, range.hi, mirrorAxis);
+      if (!r) {
+        lines.push(`could not duplicate ${part.name} [${range.lo},${range.hi}) — host op failed`);
+        continue;
+      }
+      const axisName = mirrorAxis >= 0 ? ` mirror ${'XYZ'[mirrorAxis]}` : ' copy';
+      const seed = part.mesh ? (mirrorAxis >= 0 ? mirrorMesh(part.mesh, mirrorAxis as 0 | 1 | 2) : cloneMesh(part.mesh)) : undefined;
+      placedRows.push({ id: `part:dup:${seq++}`, name: `${part.name}${axisName}`, kind: part.kind, ...(seed ? { mesh: seed } : {}), visible: true, color: part.color, lift: part.lift, lo: r.lo, hi: r.hi });
+      lines.push(`${mirrorAxis >= 0 ? 'mirrored' : 'duplicated'} ${part.name} → [${r.lo},${r.hi})`);
+    }
+    if (placedRows.length === 0) {
+      setState((prev) => ({ ...prev, status: lines.join(' · ') || 'duplicate needs a focused part with a stamped range' }));
       return;
     }
-    const r = api.duplicatePart(range.lo, range.hi, mirrorAxis);
-    if (!r) {
-      setState((prev) => ({ ...prev, status: `could not duplicate ${part.name} [${range.lo},${range.hi}) — host op failed` }));
-      return;
-    }
-    const axisName = mirrorAxis >= 0 ? ` mirror ${'XYZ'[mirrorAxis]}` : ' copy';
-    const seed = part.mesh ? (mirrorAxis >= 0 ? mirrorMesh(part.mesh, mirrorAxis as 0 | 1 | 2) : cloneMesh(part.mesh)) : undefined;
-    const placed: ModelPart = { id: `part:dup:${state.seq}`, name: `${part.name}${axisName}`, kind: part.kind, ...(seed ? { mesh: seed } : {}), visible: true, color: part.color, lift: part.lift, lo: r.lo, hi: r.hi };
     setState((prev) => ({
       ...prev,
-      seq: prev.seq + 1,
-      modelParts: { ...prev.modelParts, [mid]: [...(prev.modelParts[mid] ?? []), placed] },
-      modelActivePartId: placed.id,
-      status: `${mirrorAxis >= 0 ? 'mirrored' : 'duplicated'} ${part.name} → ${placed.name} [${r.lo},${r.hi})`,
+      seq: seq + 1,
+      modelParts: { ...prev.modelParts, [mid]: [...(prev.modelParts[mid] ?? []), ...placedRows] },
+      modelActivePartId: placedRows[placedRows.length - 1]!.id,
+      status: lines.join(' · '),
     }));
+    setSelectedPartIds(placedRows.map((p) => p.id)); // the twins are the new working set
   };
 
   // Detach the face-mode selection into a NEW part (host group remap — geometry and
@@ -1625,10 +1745,25 @@ export default function AppFrame() {
         // delete) — its own handler adds/removes the row with the op's range.
         if (rows.length === 0 || rows.length !== ranges.length) return prev;
         const stamped = stampRowsByRank(rows, ranges);
-        // The focused part re-scopes to its refreshed range: the move gizmo must
-        // always drive the ACTIVE part's true faces, never a stale span.
+        // The focused SET re-scopes to its refreshed ranges: the move gizmo must
+        // always drive the selected parts' true faces, never a stale span. Multi-
+        // select (req_2659) re-pushes the whole union; the UV filter's active-range
+        // global follows the primary.
         const active = stamped.find((p) => p.id === prev.modelActivePartId);
-        if (active && active.lo != null && active.hi != null) (globalThis as any).__mesh_edit_scope?.(active.lo, active.hi);
+        if (active && active.lo != null && active.hi != null) {
+          (globalThis as any).__modelActivePartRange = { lo: active.lo, hi: active.hi };
+          const sel = selectedPartIdsRef.current.filter((sid) => stamped.some((p) => p.id === sid));
+          if (sel.length > 1) {
+            const pairs: number[] = [];
+            for (const sid of sel) {
+              const p = stamped.find((pp) => pp.id === sid);
+              if (p && p.lo != null && p.hi != null) pairs.push(p.lo, p.hi);
+            }
+            (globalThis as any).__mesh_edit_scope_ranges?.(new Uint32Array(pairs));
+          } else {
+            (globalThis as any).__mesh_edit_scope?.(active.lo, active.hi);
+          }
+        }
         return { ...prev, modelParts: { ...prev.modelParts, [mid]: stamped } };
       });
     };
@@ -1712,6 +1847,53 @@ export default function AppFrame() {
   stateRef.current = state;
   const runCommandRef = useRef(runCommand);
   runCommandRef.current = runCommand;
+  // ── RJIT_PARTOPS: headless outliner harness (req_2659) ────────────────────────
+  // Drives the REAL outliner handlers by row index — the shell-side twin of
+  // RJIT_MESHOPS (which drives host doors). ';'-separated ops:
+  //   sel:i · shiftsel:i (the shift-click accumulate path, shift asserted on the live
+  //   modifier record for the call) · eye:i · dup:i · del:i · wait:frames ·
+  //   report (rows + selected set + primary as JSON on stderr).
+  // Handlers are per-render closures — the ref keeps the once-installed timer calling
+  // the CURRENT ones (the same mount-frozen-closure trap as the meshops harness).
+  const partOpsRef = useRef({ selectPart, toggleVisiblePart, duplicatePartById, deletePart });
+  partOpsRef.current = { selectPart, toggleVisiblePart, duplicatePartById, deletePart };
+  useEffect(() => {
+    const opsText = (globalThis as any).__env_get?.('RJIT_PARTOPS') as string | null | undefined;
+    if (!opsText) return;
+    const ops = opsText.split(';').map((t) => t.trim()).filter(Boolean);
+    let step = 0;
+    const runOp = (op: string) => {
+      const [name, arg] = op.split(':');
+      const s = stateRef.current;
+      const mid = activePartsModelId(s);
+      const parts = mid ? (s.modelParts[mid] ?? []) : [];
+      const idx = Number(arg ?? -1);
+      const id = parts[idx]?.id ?? null;
+      const h = partOpsRef.current;
+      if (name === 'sel' && id) h.selectPart(id);
+      else if (name === 'shiftsel' && id) {
+        const m = currentModifiers() as { shift: boolean };
+        m.shift = true; // assert the live modifier record for this one call — the REAL shift branch runs
+        try { h.selectPart(id); } finally { m.shift = false; }
+      } else if (name === 'eye' && id) h.toggleVisiblePart(id);
+      else if (name === 'dup' && id) h.duplicatePartById(id, -1);
+      else if (name === 'del' && id) h.deletePart(id);
+      else if (name === 'report') {
+        const sel = effectiveSelectedIds(s, parts, selectedPartIdsRef.current);
+        const rows = parts.map((p) => ({ name: p.name, lo: p.lo ?? null, hi: p.hi ?? null, visible: p.visible, selected: sel.includes(p.id), primary: p.id === s.modelActivePartId }));
+        console.error(`[partops] report → ${JSON.stringify(rows)}`);
+      } else if (name !== 'wait') console.error(`[partops] unknown/invalid op: ${op}`);
+    };
+    const runNext = () => {
+      if (step >= ops.length) { console.error('[partops] DONE'); return; }
+      const op = ops[step++]!;
+      console.error(`[partops] ${op}`);
+      try { runOp(op); } catch (e) { console.error(`[partops] ${op} threw: ${e}`); }
+      setTimeout(runNext, op.startsWith('wait') ? (Number(op.slice(5)) || 0) * 16 : 150);
+    };
+    setTimeout(runNext, 1200); // after RJIT_MODELDOC's document mount + first frames
+    return undefined;
+  }, []);
   // Subscribed DIRECTLY to the __keydown bus and normalized through modifiersFromKeyEvent:
   // the winning key bridge (useIFTTT's) emits ctrlKey/shiftKey flags with no `mods` object,
   // so useModifiers.onKeyDown handed every chord all-false modifiers — Ctrl+Z arrived as
@@ -2242,6 +2424,8 @@ export default function AppFrame() {
             onAssignSlot={assignPieceSlot}
             onClearSlot={clearPieceSlot}
             outlinerHandlers={outlinerHandlers}
+            // Multi-select set (req_2659): row highlights + the UV header's '+N'.
+            selectedPartIds={selectedPartIds}
             colorSpine={{
               onSetCurrent: setColorSpineCurrent,
               onAddToTray: addColorSpineToTray,
