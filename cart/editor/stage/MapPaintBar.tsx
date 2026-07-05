@@ -23,7 +23,7 @@ const CHANNELS: MapPaintChannel[] = ['terrain', 'tile', 'water', 'flora', 'zone'
 const CHANNEL_META: Record<MapPaintChannel, { icon: string; tooltip: string }> = {
   terrain: { icon: 'Mountain', tooltip: 'Terrain — sculpt the heightfield' },
   tile: { icon: 'Grid3x3', tooltip: 'Tile — paint ground tile kinds' },
-  water: { icon: 'Waves', tooltip: 'Water — paint bodies of water' },
+  water: { icon: 'Waves', tooltip: 'Water — carves its own bed into any terrain' },
   flora: { icon: 'Leaf', tooltip: 'Flora — plant trees, palms and grass' },
   zone: { icon: 'LandPlot', tooltip: 'Zone — paint named zone regions' },
   road: { icon: 'Route', tooltip: 'Road — draft a centerline, commit lanes' },
@@ -269,6 +269,14 @@ export default function MapPaintBar(props: {
             </Fragment>
           ) : null}
 
+          {s.channel === 'water' ? (
+            <Stepper
+              label="DEPTH"
+              value={`${s.heightM}m`}
+              onDown={() => props.onPatch({ heightM: Math.max(1, s.heightM - 1) })}
+              onUp={() => props.onPatch({ heightM: Math.min(64, s.heightM + 1) })}
+            />
+          ) : null}
           {s.channel === 'terrain' && s.terrainTool === 'brush' ? (
             <Fragment>
               <Stepper

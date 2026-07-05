@@ -94,7 +94,7 @@ pub const StrokeStats = struct {
     stamps: u32 = 0,
     /// chunks dirtied by this stroke
     touched: u32 = 0,
-    /// water stroke found no sub-0 basin to fill (PaintCanvas:940 nudge)
+    /// water stroke wet nothing (zero-weight footprint — req_2701 self-carve)
     water_dry: bool = false,
 };
 
@@ -307,10 +307,15 @@ fn fieldOf(z: *[chunks.SAMPLE_CELLS]f32) stamps.FieldView {
     return .{ .z = z[0..], .cols = chunks.SAMPLE_COLS, .rows = chunks.SAMPLE_COLS };
 }
 
-// ── water (PaintCanvas stampWaterAtGraph:899) ─────────────────────────────────
-// Water does not dig: the brush marks wet samples only where the terrain bed is
-// below zero and stores depth = −bed, so the surface resolves to world height 0.
-// Erase drains without changing terrain.
+// ── water (self-carving brush — req_2701) ─────────────────────────────────────
+// The water brush digs its OWN bed: every covered sample is carved depth·weight
+// below the pre-stroke surface and the carved volume fills with water, so the
+// water surface sits exactly at the original grade and FOLLOWS it — a river
+// painted down a hill flows downhill; no pre-dug sub-0 basin required. A wet
+// sample reconstructs its pre-stroke surface as bed + depth, which keeps
+// re-stamping idempotent (dragging over the same spot never trenches deeper;
+// a bigger DEPTH dial does). Erase drains (depth → 0) without re-filling the
+// carve — the dry riverbed stays until terrain tools re-level it.
 
 fn stampWaterAt(x: f32, z: f32) void {
     const gsx: i32 = @intFromFloat(@round(x / DOT_M));
@@ -319,6 +324,7 @@ fn stampWaterAt(x: f32, z: f32) void {
     g_stats.stamps += 1;
 
     const radiusM = @max(0.5, g_tool.radius_m);
+    const depthM = @max(DOT_M, @abs(g_tool.center_z));
     const rd_f: f32 = @max(1, @ceil(radiusM / DOT_M));
     const rd: i32 = @intFromFloat(rd_f);
     const erase = g_tool.mode == .erase;
@@ -329,7 +335,8 @@ fn stampWaterAt(x: f32, z: f32) void {
         const ciz: i32 = @intFromFloat(@round(local[1]));
         const edge: i32 = @intCast(chunks.SAMPLE_COLS - 1);
         if (cix + rd < 0 or cix - rd > edge or ciz + rd < 0 or ciz - rd > edge) continue;
-        var wrote = false;
+        var wrote_water = false;
+        var wrote_height = false;
         var dz: i32 = -rd;
         while (dz <= rd) : (dz += 1) {
             const jz = ciz + dz;
@@ -340,18 +347,35 @@ fn stampWaterAt(x: f32, z: f32) void {
                 if (jx < 0 or jx > edge) continue;
                 const dx_m = @as(f32, @floatFromInt(dx)) * DOT_M;
                 const dz_m = @as(f32, @floatFromInt(dz)) * DOT_M;
-                if (stamps.brushStyleWeight(g_brush_gizmo, g_tool.shape, g_tool.profile, dx_m, dz_m, radiusM) <= 0) continue;
+                const weight = stamps.brushStyleWeight(g_brush_gizmo, g_tool.shape, g_tool.profile, dx_m, dz_m, radiusM);
+                if (weight <= 0) continue;
                 const idx = @as(usize, @intCast(jz)) * chunks.SAMPLE_COLS + @as(usize, @intCast(jx));
-                const bed = ch.height[idx];
-                if (bed < 0) g_water_wet_any = true;
-                const next: f32 = if (erase) 0 else @max(0, -bed);
-                if (ch.water[idx] != next) {
-                    ch.water[idx] = next;
-                    wrote = true;
+                if (erase) {
+                    if (ch.water[idx] != 0) {
+                        ch.water[idx] = 0;
+                        wrote_water = true;
+                    }
+                    continue;
+                }
+                // Wet cells carry the pre-stroke surface as bed + depth; dry
+                // cells are bare ground. Carving toward surface − depth·weight
+                // with a min-blend is why overlap is idempotent.
+                const surface = ch.height[idx] + ch.water[idx];
+                const target_bed = stamps.clampHeight(surface - depthM * weight);
+                if (target_bed < ch.height[idx]) {
+                    ch.height[idx] = target_bed;
+                    wrote_height = true;
+                }
+                const next_depth = @max(0, surface - ch.height[idx]);
+                if (next_depth > 0) g_water_wet_any = true;
+                if (ch.water[idx] != next_depth) {
+                    ch.water[idx] = next_depth;
+                    wrote_water = true;
                 }
             }
         }
-        if (wrote) ch.dirty.water = true;
+        if (wrote_water) ch.dirty.water = true;
+        if (wrote_height) ch.dirty.height = true;
     }
 }
 
@@ -1129,35 +1153,48 @@ test "stroke interpolation fills a fast drag without gaps" {
     try std.testing.expect(ch.dirty.tiles);
 }
 
-test "water fills only carved basins and flags dry strokes" {
+test "water carves its own bed and fills to the pre-stroke grade" {
     reset();
     defer reset();
     _ = chunks.growChunk(0, 0).?;
-
-    // dry stroke first: flat terrain has no basin
-    setTool(.{ .channel = .water, .radius_m = 2 });
-    strokeBegin(0, 0);
-    var stats = strokeEnd();
-    try std.testing.expect(stats.water_dry);
-
-    // carve a pit, then water fills depth = -bed
-    setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 3, .center_z = -4, .profile = .flat });
-    strokeBegin(0, 0);
-    _ = strokeEnd();
-    setTool(.{ .channel = .water, .radius_m = 3 });
-    strokeBegin(0, 0);
-    stats = strokeEnd();
-    try std.testing.expect(!stats.water_dry);
-
     const ch = chunks.chunkAt(0, 0).?;
     const center = 120 * chunks.SAMPLE_COLS + 120;
-    try std.testing.expectApproxEqAbs(@as(f32, 4), ch.water[center], 0.0001);
-    // erase drains without touching terrain
+
+    // raise a 6 m plateau — water needs NO sub-0 basin (req_2701)
+    setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 4, .center_z = 6, .profile = .flat });
+    strokeBegin(0, 0);
+    _ = strokeEnd();
+
+    // water depth 2 carves the bed to 4 and fills to the original grade (6)
+    setTool(.{ .channel = .water, .radius_m = 3, .center_z = 2, .profile = .flat });
+    strokeBegin(0, 0);
+    var stats = strokeEnd();
+    try std.testing.expect(!stats.water_dry);
+    try std.testing.expectApproxEqAbs(@as(f32, 4), ch.height[center], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), ch.water[center], 0.0001);
+
+    // re-stroking is idempotent: the wet cell reconstructs its pre-stroke
+    // surface as bed + depth, so a re-drag never trenches deeper
+    strokeBegin(0, 0);
+    _ = strokeEnd();
+    try std.testing.expectApproxEqAbs(@as(f32, 4), ch.height[center], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), ch.water[center], 0.0001);
+
+    // flat unpainted ground works too: bed −3, surface at grade 0
+    const flat = 120 * chunks.SAMPLE_COLS + 180; // world (30, 0)
+    setTool(.{ .channel = .water, .radius_m = 2, .center_z = 3, .profile = .flat });
+    strokeBegin(30, 0);
+    stats = strokeEnd();
+    try std.testing.expect(!stats.water_dry);
+    try std.testing.expectApproxEqAbs(@as(f32, -3), ch.height[flat], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), ch.water[flat], 0.0001);
+
+    // erase drains without re-filling the carve
     setTool(.{ .channel = .water, .mode = .erase, .radius_m = 3 });
     strokeBegin(0, 0);
     _ = strokeEnd();
     try std.testing.expectApproxEqAbs(@as(f32, 0), ch.water[center], 0.0001);
-    try std.testing.expectApproxEqAbs(@as(f32, -4), ch.height[center], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 4), ch.height[center], 0.0001);
 }
 
 test "ramp drag stamps the lerped grade between anchor and release" {
