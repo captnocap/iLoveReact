@@ -131,7 +131,7 @@ var g_effect_queue_logged: bool = false;
 // Instance struct (~couple hundred bytes incl. GPU pipeline pointers
 // and uniform buffer handles) — 4096 × ~256 bytes ≈ 1MB, fine.
 // GPU pipelines themselves are shared across instances with the same
-// shader source via `gpu_shader_hash`, so increasing the instance
+// shader source via `g_pipeline_cache`, so increasing the instance
 // count doesn't multiply pipeline objects.
 const MAX_INSTANCES = 4096;
 
@@ -724,6 +724,75 @@ fn texturesHash(ids: []const []const u8) u64 {
     return hasher.final();
 }
 
+// Process-wide pipeline cache keyed by WGSL-source hash (salted by bind-group
+// layout kind). Thumbnail grids mount dozens of Effects that all carry the
+// SAME shader string — the generated fill megashader is ~700KB of WGSL — and
+// without this cache every mount re-ran createShaderModule's parse/validate
+// (~60-90ms each), so paging a 16-thumb picker stalled 1-1.5s. The cache holds
+// its own reference; instances addRef a cached pipeline and keep their existing
+// release-in-deinit semantics. Entries live until cart teardown (deinit) —
+// unique shader sources number in the tens, never the thousands.
+var g_pipeline_cache: std.AutoHashMapUnmanaged(u64, *wgpu.RenderPipeline) = .{};
+
+fn pipelineCacheKey(shader_hash: u64, wants_textures: bool) u64 {
+    // The two bind-group layouts produce incompatible pipelines for the same
+    // WGSL; salt the key so they never collide.
+    return if (wants_textures) shader_hash ^ 0x9e3779b97f4a7c15 else shader_hash;
+}
+
+fn getOrCreatePipeline(device: *wgpu.Device, bgl: *wgpu.BindGroupLayout, wgsl: []const u8, shader_hash: u64, wants_textures: bool) ?*wgpu.RenderPipeline {
+    const key = pipelineCacheKey(shader_hash, wants_textures);
+    if (g_pipeline_cache.get(key)) |cached| {
+        cached.addRef();
+        return cached;
+    }
+
+    const module_desc = wgpu.shaderModuleWGSLDescriptor(.{
+        .label = "effect_gpu_shader",
+        .code = wgsl,
+    });
+    const shader_module = device.createShaderModule(&module_desc) orelse return null;
+    defer shader_module.release();
+
+    const pipeline_layout = device.createPipelineLayout(&.{
+        .bind_group_layout_count = 1,
+        .bind_group_layouts = @ptrCast(&bgl),
+    }) orelse return null;
+    defer pipeline_layout.release();
+
+    const color_target = wgpu.ColorTargetState{
+        .format = .rgba8_unorm,
+        .blend = null,
+        .write_mask = wgpu.ColorWriteMasks.all,
+    };
+
+    const fragment_state = wgpu.FragmentState{
+        .module = shader_module,
+        .entry_point = wgpu.StringView.fromSlice("fs_main"),
+        .target_count = 1,
+        .targets = @ptrCast(&color_target),
+    };
+
+    const pipeline = device.createRenderPipeline(&.{
+        .layout = pipeline_layout,
+        .vertex = .{
+            .module = shader_module,
+            .entry_point = wgpu.StringView.fromSlice("vs_main"),
+            .buffer_count = 0,
+            .buffers = &[0]wgpu.VertexBufferLayout{},
+        },
+        .primitive = .{ .topology = .triangle_list },
+        .multisample = .{},
+        .fragment = &fragment_state,
+    }) orelse return null;
+
+    // One reference for the cache, one for the caller's instance. If the cache
+    // can't take its entry (OOM), drop its ref — the caller's is still valid.
+    pipeline.addRef();
+    g_pipeline_cache.put(page_alloc, key, pipeline) catch pipeline.release();
+    return pipeline;
+}
+
 fn ensureGpuPipeline(self: *Instance) bool {
     const shader_desc = self.shader_desc orelse return false;
 
@@ -845,50 +914,7 @@ fn ensureGpuPipeline(self: *Instance) bool {
     self.gpu_textures_hash = new_tex_hash;
     self.gpu_textures_generation = paintable_mod.generation();
 
-    const module_desc = wgpu.shaderModuleWGSLDescriptor(.{
-        .label = "effect_gpu_shader",
-        .code = shader_desc.wgsl,
-    });
-    const shader_module = device.createShaderModule(&module_desc) orelse {
-        effect_bg.release();
-        return false;
-    };
-    defer shader_module.release();
-
-    const pipeline_layout = device.createPipelineLayout(&.{
-        .bind_group_layout_count = 1,
-        .bind_group_layouts = @ptrCast(&bgl),
-    }) orelse {
-        effect_bg.release();
-        return false;
-    };
-    defer pipeline_layout.release();
-
-    const color_target = wgpu.ColorTargetState{
-        .format = .rgba8_unorm,
-        .blend = null,
-        .write_mask = wgpu.ColorWriteMasks.all,
-    };
-
-    const fragment_state = wgpu.FragmentState{
-        .module = shader_module,
-        .entry_point = wgpu.StringView.fromSlice("fs_main"),
-        .target_count = 1,
-        .targets = @ptrCast(&color_target),
-    };
-
-    const pipeline = device.createRenderPipeline(&.{
-        .layout = pipeline_layout,
-        .vertex = .{
-            .module = shader_module,
-            .entry_point = wgpu.StringView.fromSlice("vs_main"),
-            .buffer_count = 0,
-            .buffers = &[0]wgpu.VertexBufferLayout{},
-        },
-        .primitive = .{ .topology = .triangle_list },
-        .multisample = .{},
-        .fragment = &fragment_state,
-    }) orelse {
+    const pipeline = getOrCreatePipeline(device, bgl, shader_desc.wgsl, new_hash, wants_textures) orelse {
         effect_bg.release();
         return false;
     };
@@ -1009,6 +1035,10 @@ pub fn init() void {
 pub fn deinit() void {
     for (instances[0..instance_count]) |*inst| inst.deinit();
     instance_count = 0;
+    var pipe_it = g_pipeline_cache.valueIterator();
+    while (pipe_it.next()) |pipe| pipe.*.release();
+    g_pipeline_cache.deinit(page_alloc);
+    g_pipeline_cache = .{};
     if (g_gpu_bind_group_layout) |layout_ref| layout_ref.release();
     g_gpu_bind_group_layout = null;
     if (g_gpu_bind_group_layout_tex) |layout_ref| layout_ref.release();
