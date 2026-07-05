@@ -4187,6 +4187,25 @@ var g_slim_static_cache_len: usize = 0;
 // static→dynamic degrade path), the SlimInstance analogue of g_inst_scratch.
 var g_slim_inst_scratch: [MAX_INSTANCES]SlimInstance = undefined;
 
+// LOUD one-shot warnings for every instance-pool degrade (req_2708). A batch
+// that can't retain falls to per-frame staging; a full per-frame pool DROPS the
+// rest of the frame's groups — either way something on screen quietly changed,
+// and the user's standing rule is that truncation is never silent (req_0892).
+var g_static_retain_warned: bool = false;
+var g_frame_pool_warned: bool = false;
+
+fn staticRetainWarn(pool: []const u8, what: []const u8, rows: u32, used: u32) void {
+    if (g_static_retain_warned) return;
+    g_static_retain_warned = true;
+    std.debug.print("[r3d] static {s} instance {s} FULL ({d}-row batch refused, {d}/{d} rows retained) — the batch degrades to per-frame staging and can VANISH if the per-frame pool also fills. Raise MAX_STATIC_INSTANCES / STATIC_INST_CACHE_LEN in framework/gpu/3d.zig.\n", .{ pool, what, rows, used, MAX_STATIC_INSTANCES });
+}
+
+fn framePoolWarn(pool: []const u8) void {
+    if (g_frame_pool_warned) return;
+    g_frame_pool_warned = true;
+    std.debug.print("[r3d] per-frame {s} instance pool FULL — the remaining instance groups this frame were DROPPED (foliage/props visibly missing). Raise MAX_INSTANCES in framework/gpu/3d.zig or free the static pools.\n", .{pool});
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Pipeline state
 // ════════════════════════════════════════════════════════════════════════
@@ -5093,6 +5112,8 @@ pub fn resetForReload() void {
     g_dyn_len = 0;
     g_dyn_bump_verts = 0;
     g_dyn_warned = false;
+    g_static_retain_warned = false;
+    g_frame_pool_warned = false;
     for (&g_dyn_slots) |*s| s.* = .{};
     // The geo cache (above) was cleared, so any stashed-but-not-yet-interned host
     // mesh would re-intern fine — but free the host copies so a reload doesn't leak
@@ -5576,18 +5597,31 @@ fn dynSlotLocate(prefix_len: usize, key: []const u8) ?DynLoc {
 /// region in place when it already fits (the common case: a live edit keeps the same
 /// grid resolution, so nothing grows); otherwise bump-allocates a fresh block from the
 /// dyn tail (the old block leaks until resetForReload — the same bump-never-evict
-/// contract the intern region uses). Returns the byte offset, or null when the tail is
-/// full (LOUD, once). Callers guarantee 0 < count ≤ MAX_DYN_VERTS.
-fn dynEnsureRegion(s: *DynSlot, count: u32) ?u64 {
+/// contract the intern region uses).
+///
+/// `reserve_hint` is the growth armor (req_2708): a mesh that OUTGREW its region is
+/// mid-edit and will keep growing — sculpting terrain grew the heightfield's vert
+/// count a little EVERY FRAME of the stroke, and exact-fit re-allocation leaked a
+/// fresh region per frame until the 4.7M-vert tail filled mid-stroke (then every
+/// re-bake drew the stale mesh: "terrain stops painting", while colliders — fed the
+/// raw heights — kept working). On a growth re-alloc we reserve max(count, hint) so
+/// each entry re-allocates at most once more (heightfields pass their grid's worst
+/// case; live-edit meshes pass count×2 for geometric growth). Returns the byte
+/// offset, or null when the tail is full (LOUD, once). Callers guarantee
+/// 0 < count ≤ MAX_DYN_VERTS.
+fn dynEnsureRegion(s: *DynSlot, count: u32, reserve_hint: u32) ?u64 {
     if (s.capacity >= count) return s.offset_bytes;
-    if (g_dyn_bump_verts + count > DYN_REGION_VERTS) {
+    // First sight reserves exact fit (a flat chunk is ~30 verts — that's what lets
+    // hundreds of untouched chunks coexist); growth reserves the hint.
+    const reserve = if (s.capacity == 0) count else @max(count, @min(reserve_hint, MAX_DYN_VERTS));
+    if (g_dyn_bump_verts + reserve > DYN_REGION_VERTS) {
         dynWarnFull("vertex region", DYN_REGION_VERTS);
         return null;
     }
     const off = (@as(u64, MAX_RETAINED_VERTS) + g_dyn_bump_verts) * @sizeOf(Vertex);
     s.offset_bytes = off;
-    s.capacity = count;
-    g_dyn_bump_verts += count;
+    s.capacity = reserve;
+    g_dyn_bump_verts += reserve;
     return off;
 }
 
@@ -5615,7 +5649,9 @@ fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, 
         const v = verts orelse return existingDyn(s);
         if (count == 0 or count > MAX_DYN_VERTS or v.len < @as(usize, count) * 8) return existingDyn(s);
         const buf = g_retained_vbuf orelse return null;
-        const off = dynEnsureRegion(s, count) orelse return existingDyn(s);
+        // Growth hint ×2: a live-edited mesh that grew will grow again; geometric
+        // reservation bounds the total leaked bytes to ~one extra copy.
+        const off = dynEnsureRegion(s, count, count *| 2) orelse return existingDyn(s);
         queue.writeBuffer(buf, off, @ptrCast(v.ptr), bu.bytesOfCount(Vertex, count));
         s.version_hash = loc.ver_hash;
         s.count = count;
@@ -5841,7 +5877,12 @@ fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]co
         const buf = g_retained_vbuf orelse return null;
         // Bump-allocate by the mesh's REAL vert count: a flat chunk is ~30 verts, not a
         // fixed 98k slot — that's what lets hundreds of painted ground chunks coexist.
-        const off = dynEnsureRegion(s, cnt) orelse return existingDyn(s);
+        // The growth hint is this grid's WORST CASE (every top quad + the perimeter
+        // skirt): a chunk being sculpted grows a little every stroke frame, so on its
+        // first growth it reserves the ceiling once instead of leaking a region per
+        // frame until the tail filled mid-stroke (req_2708).
+        const worst: u32 = (cols - 1) * (rows - 1) * 6 + 2 * ((cols - 1) + (rows - 1)) * 6;
+        const off = dynEnsureRegion(s, cnt, worst) orelse return existingDyn(s);
         bu.writeTypedBuffer(queue, buf, off, Vertex, g_hf_scratch[0..cnt]);
         s.version_hash = loc.ver_hash;
         s.count = cnt;
@@ -6094,7 +6135,10 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
         }
     }
     if (icount == 0) return null;
-    if (g_static_inst_cache_len >= STATIC_INST_CACHE_LEN) return null;
+    if (g_static_inst_cache_len >= STATIC_INST_CACHE_LEN) {
+        staticRetainWarn("standard", "cache table", icount, @intCast(g_static_inst_top / @sizeOf(InstanceData)));
+        return null;
+    }
     if (g_static_inst_buf == null) {
         g_static_inst_buf = device.createBuffer(&.{
             .label = wgpu.StringView.fromSlice("render3d_static_instances"),
@@ -6110,7 +6154,10 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
     // address sub-ranges by scene3d_instance_first. A partial upload makes any
     // later range clamp to count=0, so turning the camera can drop whole chunks.
     // Oversized batches fall back to the dynamic sub-range path below instead.
-    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, MAX_STATIC_INSTANCES)) return null;
+    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, MAX_STATIC_INSTANCES)) {
+        staticRetainWarn("standard", "row budget", icount, used_count);
+        return null;
+    }
     const n: u32 = icount;
     if (n == 0) return null;
     const base_offset = g_static_inst_top;
@@ -6167,7 +6214,10 @@ fn resolveStaticSlimInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: [
         }
     }
     if (icount == 0) return null;
-    if (g_slim_static_cache_len >= STATIC_INST_CACHE_LEN) return null;
+    if (g_slim_static_cache_len >= STATIC_INST_CACHE_LEN) {
+        staticRetainWarn("slim (foliage)", "cache table", icount, @intCast(g_slim_static_top / @sizeOf(SlimInstance)));
+        return null;
+    }
     if (g_slim_static_buf == null) {
         g_slim_static_buf = device.createBuffer(&.{
             .label = wgpu.StringView.fromSlice("render3d_slim_static_instances"),
@@ -6179,7 +6229,10 @@ fn resolveStaticSlimInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: [
         g_slim_static_top = 0;
     }
     const used_count: u32 = @intCast(g_slim_static_top / @sizeOf(SlimInstance));
-    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, MAX_STATIC_INSTANCES)) return null;
+    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, MAX_STATIC_INSTANCES)) {
+        staticRetainWarn("slim (foliage)", "row budget", icount, used_count);
+        return null;
+    }
     const base_offset = g_slim_static_top;
     stageStaticSlimBytes(queue, idata, stride, icount, base_offset);
     g_slim_static_top += @as(u64, icount) * @sizeOf(SlimInstance);
@@ -7011,7 +7064,10 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                 if (mslot[hf].offset != group_slot.offset) continue;
                 if (mtex[hf] != group_tex) continue;
                 if (hf != gi and scene_node.children[midx[hf]].scene3d_instance_static) continue;
-                if (slim_inst_top + @sizeOf(SlimInstance) > slim_cap_bytes) break;
+                if (slim_inst_top + @sizeOf(SlimInstance) > slim_cap_bytes) {
+                    framePoolWarn("slim (foliage)");
+                    break;
+                }
                 const child = &scene_node.children[midx[hf]];
                 if (child.scene3d_instance_data) |idata| {
                     const stride = child.scene3d_instance_stride;
@@ -7019,6 +7075,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                         const total_rows: u32 = @intCast(idata.len / stride);
                         const ifirst: u32 = @min(child.scene3d_instance_first, total_rows);
                         const icount: u32 = @min(child.scene3d_instance_count, total_rows - ifirst);
+                        if (icount > 0 and slim_inst_top + @as(u64, icount) * @sizeOf(SlimInstance) > slim_cap_bytes) framePoolWarn("slim (foliage)");
                         var ii: u32 = 0;
                         while (ii < icount and slim_inst_top + @sizeOf(SlimInstance) <= slim_cap_bytes) : (ii += 1) {
                             const base = @as(usize, ifirst + ii) * stride;
@@ -7070,7 +7127,10 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
             // sub-range chunk draw the WRONG rows (req_0631's partial renders:
             // walls vanished while their building's other faces drew).
             if (hi != gi and scene_node.children[midx[hi]].scene3d_instance_static) continue;
-            if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) break; // overflow
+            if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) {
+                framePoolWarn("standard");
+                break; // overflow
+            }
 
             const child = &scene_node.children[midx[hi]];
             if (child.scene3d_instance_data) |idata| {
@@ -7082,6 +7142,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                 const ifirst: u32 = @min(child.scene3d_instance_first, total_rows);
                 const icount: u32 = @min(child.scene3d_instance_count, total_rows - ifirst);
                 if (stride >= 9 and icount > 0) {
+                    if (inst_top + @as(u64, icount) * @sizeOf(InstanceData) > inst_cap_bytes) framePoolWarn("standard");
                     var ii: u32 = 0;
                     while (ii < icount and inst_top + @sizeOf(InstanceData) <= inst_cap_bytes) : (ii += 1) {
                         const base = @as(usize, ifirst + ii) * stride;
