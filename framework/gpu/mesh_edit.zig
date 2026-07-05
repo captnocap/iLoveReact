@@ -1249,7 +1249,10 @@ pub fn resumeFaceTint() void {
 // loopCut(EditMesh) does, but on the resident host mesh so it stays fast on big meshes.
 // This is PURE (no wgpu, no globals) so it unit-tests standalone; 3d.zig derives the
 // cut plane from the selected edge and installs the result.
-pub const CutResult = struct { positions: []f32, groups: ?[]u32, tri_count: u32 };
+// src_face (req_2644): one INPUT face index per OUTPUT triangle — the parentage a caller
+// needs to carry per-face bookkeeping (which outliner PART a face belongs to) through the
+// cut, since the group remap mints fresh ids the caller can't trace back on its own.
+pub const CutResult = struct { positions: []f32, groups: ?[]u32, src_face: []u32, tri_count: u32 };
 
 const CUT_EPS: f32 = 1e-5;
 
@@ -1313,6 +1316,8 @@ fn planeClipSide(p: [3][3]f32, s: [3]f32, keep_positive: bool, out: *[4][3]f32) 
 pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_in: ?[]const u32) ?CutResult {
     var out_pos = std.ArrayListUnmanaged(f32){};
     var out_grp = std.ArrayListUnmanaged(u32){};
+    var out_src = std.ArrayListUnmanaged(u32){};
+    errdefer out_src.deinit(alloc);
     const want_groups = groups_in != null;
 
     var remap = std.AutoHashMapUnmanaged(u32, u32){};
@@ -1352,6 +1357,7 @@ pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_
         if (strict_pos == 0 or strict_neg == 0) {
             // Entirely on one side (or coplanar) — copy unchanged, grouped by side.
             if (!emitTriPos(&out_pos, p[0], p[1], p[2])) return null;
+            out_src.append(alloc, f) catch return null;
             if (want_groups) {
                 const gid = if (strict_pos == 0) og else remapGroup(&remap, og, &next_id);
                 out_grp.append(alloc, gid) catch return null;
@@ -1365,6 +1371,7 @@ pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_
                 while (k + 1 < cnt) : (k += 1) {
                     if (triArea2Local(poly[0], poly[k], poly[k + 1]) < 1e-14) continue;
                     if (!emitTriPos(&out_pos, poly[0], poly[k], poly[k + 1])) return null;
+                    out_src.append(alloc, f) catch return null;
                     if (want_groups) {
                         const gid = if (keep_pos) remapGroup(&remap, og, &next_id) else og;
                         out_grp.append(alloc, gid) catch return null;
@@ -1376,8 +1383,13 @@ pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_
 
     const tris: u32 = @intCast(out_pos.items.len / 9);
     const positions = out_pos.toOwnedSlice(alloc) catch return null;
+    const src_face = out_src.toOwnedSlice(alloc) catch {
+        alloc.free(positions);
+        out_grp.deinit(alloc);
+        return null;
+    };
     const groups: ?[]u32 = if (want_groups) (out_grp.toOwnedSlice(alloc) catch null) else null;
-    return CutResult{ .positions = positions, .groups = groups, .tri_count = tris };
+    return CutResult{ .positions = positions, .groups = groups, .src_face = src_face, .tri_count = tris };
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────────
@@ -1406,10 +1418,14 @@ test "planeCutSoup splits a crossing triangle and regroups the positive side" {
     const r = planeCutSoup(pos[0..], 1, .{ 1, 0, 0 }, 1.0, groups[0..]).?;
     defer {
         alloc.free(r.positions);
+        alloc.free(r.src_face);
         if (r.groups) |g| alloc.free(g);
     }
     // Negative side is one small triangle; positive side is a quad → 2 triangles.
     try testing.expectEqual(@as(u32, 3), r.tri_count);
+    // Every output tri descends from the one input face (src_face parentage, req_2644).
+    try testing.expectEqual(@as(usize, 3), r.src_face.len);
+    for (r.src_face) |sf| try testing.expectEqual(@as(u32, 0), sf);
     const g = r.groups.?;
     try testing.expectEqual(@as(usize, 3), g.len);
     var neg: u32 = 0;
@@ -1429,10 +1445,12 @@ test "planeCutSoup leaves a non-crossing triangle whole" {
     const r = planeCutSoup(pos[0..], 1, .{ 1, 0, 0 }, 5.0, groups[0..]).?;
     defer {
         alloc.free(r.positions);
+        alloc.free(r.src_face);
         if (r.groups) |g| alloc.free(g);
     }
     try testing.expectEqual(@as(u32, 1), r.tri_count);
     try testing.expectEqual(@as(u32, 9), r.groups.?[0]);
+    try testing.expectEqual(@as(u32, 0), r.src_face[0]);
 }
 
 // A unit-cube triangle soup (6 quads → 12 tris → 36 interleaved verts), the exact shape

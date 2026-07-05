@@ -680,6 +680,12 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     if (count < 3 or new_verts.len < need) return false;
     const old_colors = collectCurrentFaceColors();
     defer if (old_colors) |c| std.heap.c_allocator.free(c);
+    // Part ranges are pure authored-group-id spans — they survive every EDIT replace
+    // (retain() clears them, which is right for a fresh LOAD but was silently destroying
+    // the outliner's part identity on every topology op; req_2644). Ops that change the
+    // spans (append/detach/merge/renormalize) overwrite them right after.
+    const old_ranges: ?[]u32 = if (model_source.partRanges()) |pr| (std.heap.c_allocator.dupe(u32, pr) catch null) else null;
+    defer if (old_ranges) |r| std.heap.c_allocator.free(r);
 
     const old_hash = g_edit_key_hash;
     g_edit_revision +%= 1;
@@ -690,6 +696,7 @@ fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     // mutated vertices so quality changes and first draw see the new topology.
     setPaintTarget(key, new_verts, count);
     model_source.retain(key, new_verts[0..need], count);
+    if (old_ranges) |r| model_source.setPartRanges(r);
     applyCarriedFaceColors(old_colors, count / 3);
     if (!stashHostMesh(key, new_verts[0..need], count)) return false;
     return true;
@@ -709,6 +716,52 @@ fn appendCurrentDisplayed(list: *std.ArrayListUnmanaged(f32)) bool {
     const need = @as(usize, g_edit_count) * 8;
     if (need > verts.len) return false;
     return appendFloats(list, verts[0..need]);
+}
+
+/// The part owning the FIRST face that uses welded verts (va, vb) — where an edge op's
+/// new geometry belongs. NO_PART when nothing grouped uses the edge. Reads the CURRENT
+/// weld, so call it BEFORE the op replaces the mesh.
+fn partOfWeldedEdge(va: u32, vb: u32) u32 {
+    const fc = g_edit_count / 3;
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        var has_a = false;
+        var has_b = false;
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const v = mesh_edit.cornerVertPub(f, k);
+            if (v == va) has_a = true;
+            if (v == vb) has_b = true;
+        }
+        if (has_a and has_b) return model_source.partIndexOf(model_source.faceGroupOf(f));
+    }
+    return model_source.NO_PART;
+}
+
+/// req_2644: an edge op (extrude / create face) appends faces and used to let retain()
+/// silently DROP the whole authored grouping — the mesh went ungrouped, and with it every
+/// part range. Re-apply the pre-op grouping, give the appended faces one fresh authored
+/// id, and fold them into `src_part`'s contiguous range (renormalize keeps the partition).
+fn adoptAppendedFaces(old_groups: ?[]const u32, old_faces: u32, src_part: u32) void {
+    const og = old_groups orelse return; // ungrouped import — nothing to maintain
+    const fc = g_edit_count / 3;
+    if (fc <= old_faces or og.len < old_faces) return;
+    const groups = std.heap.c_allocator.alloc(u32, fc) catch return;
+    defer std.heap.c_allocator.free(groups);
+    @memcpy(groups[0..old_faces], og[0..old_faces]);
+    const new_id: u32 = @intCast(maxGroupId(og[0..old_faces]) + 1);
+    @memset(groups[old_faces..fc], new_id);
+    model_source.setFaceGroups(groups);
+    const pc = hostPartCount();
+    if (pc > 0) {
+        const fp = std.heap.c_allocator.alloc(u32, fc) catch return;
+        defer std.heap.c_allocator.free(fp);
+        var f: u32 = 0;
+        while (f < old_faces) : (f += 1) fp[f] = model_source.partIndexOf(og[f]);
+        @memset(fp[old_faces..fc], src_part);
+        renormalizePartRanges(fp, pc);
+    }
+    _ = refreshPaintLayout();
 }
 
 pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
@@ -737,9 +790,15 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
         return false;
     };
     defer std.heap.c_allocator.free(owned);
+    // Grouping bookkeeping BEFORE the replace wipes it (req_2644).
+    const old_faces = g_edit_count / 3;
+    const old_groups: ?[]u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) captureFaceGroups() else null;
+    defer if (old_groups) |g| std.heap.c_allocator.free(g);
+    const src_part = partOfWeldedEdge(ep[0], ep[1]);
     var snap = journalSnapshotCurrent("extrude edge");
     const ok = replaceActiveEditMesh(owned, g_edit_count + 6);
     if (ok) {
+        adoptAppendedFaces(old_groups, old_faces, src_part);
         mesh_edit.setMode(.edge);
         journalCommit(&snap);
     } else journalDiscard(&snap);
@@ -850,17 +909,100 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     };
     defer std.heap.c_allocator.free(owned);
     const added: u32 = @intCast((owned.len / 8) - @as(usize, g_edit_count));
+    // Grouping bookkeeping BEFORE the replace wipes it (req_2644): the bridged face
+    // joins the part of the first selected edge's face.
+    const old_faces = g_edit_count / 3;
+    const old_groups: ?[]u32 = if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) captureFaceGroups() else null;
+    defer if (old_groups) |g| std.heap.c_allocator.free(g);
+    const src_part = partOfWeldedEdge(edges[0][0], edges[0][1]);
     var snap = journalSnapshotCurrent("create face");
     const replaced = replaceActiveEditMesh(owned, g_edit_count + added);
     if (replaced) {
+        adoptAppendedFaces(old_groups, old_faces, src_part);
         mesh_edit.setMode(.edge);
         journalCommit(&snap);
     } else journalDiscard(&snap);
     return replaced;
 }
 
+// ── Part-range truth (req_2644) ──────────────────────────────────────────────────
+// The outliner's parts are contiguous authored-group-id ranges. planeCutSoup mints
+// FRESH ids for every +side piece it touches, so after a loop cut a part's faces no
+// longer sit inside its [lo,hi) — the cart's stale ranges then select the wrong slab,
+// tear the mesh on part moves, and mis-scope appended parts. The host is the single
+// source of truth: ops that re-group carry per-face part parentage through the cut and
+// renormalize below; __mesh_part_ranges reads the result back for the cart to mirror.
+
+/// The number of parts currently declared (0 = unparted mesh — plain viewer flows).
+fn hostPartCount() u32 {
+    const pr = model_source.partRanges() orelse return 0;
+    return @intCast(pr.len / 2);
+}
+
+/// One part index per DISPLAYED face, from the current ranges (caller frees).
+/// Null when the mesh has no parts or no grouping — callers skip renormalizing.
+fn capturePartOfFaces() ?[]u32 {
+    if (hostPartCount() == 0) return null;
+    if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return null;
+    const fc = g_edit_count / 3;
+    const out = std.heap.c_allocator.alloc(u32, fc) catch return null;
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) out[f] = model_source.partIndexOf(model_source.faceGroupOf(f));
+    return out;
+}
+
+/// Renumber the CURRENT face grouping so every part's distinct groups are contiguous
+/// again — parts keep their (ascending-lo) order — and re-derive the part ranges from
+/// the result. `face_part` is one part index per displayed face (NO_PART = unowned;
+/// those ids land after every part, outside all ranges). Rebuilds the weld/scope
+/// (mesh_edit.reset) because part membership changed, so this DROPS the selection —
+/// callers re-select after when the op's contract wants one.
+fn renormalizePartRanges(face_part: []const u32, part_count: u32) void {
+    if (part_count == 0) return;
+    if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return;
+    const fc = g_edit_count / 3;
+    if (face_part.len < fc) return;
+    const groups = captureFaceGroups() orelse return;
+    defer std.heap.c_allocator.free(groups);
+    const new_groups = std.heap.c_allocator.alloc(u32, fc) catch return;
+    defer std.heap.c_allocator.free(new_groups);
+    var ranges = std.ArrayListUnmanaged(u32){};
+    defer ranges.deinit(std.heap.c_allocator);
+
+    var next: u32 = 0;
+    var p: u32 = 0;
+    while (p <= part_count) : (p += 1) { // the extra pass sweeps NO_PART faces
+        const want: u32 = if (p == part_count) model_source.NO_PART else p;
+        const start = next;
+        var remap = std.AutoHashMapUnmanaged(u32, u32){};
+        defer remap.deinit(std.heap.c_allocator);
+        var f: u32 = 0;
+        while (f < fc) : (f += 1) {
+            if (face_part[f] != want) continue;
+            if (groups[f] == model_source.NO_FACE_GROUP) {
+                new_groups[f] = groups[f];
+                continue;
+            }
+            const gop = remap.getOrPut(std.heap.c_allocator, groups[f]) catch return;
+            if (!gop.found_existing) {
+                gop.value_ptr.* = next;
+                next += 1;
+            }
+            new_groups[f] = gop.value_ptr.*;
+        }
+        if (p < part_count) {
+            ranges.append(std.heap.c_allocator, start) catch return;
+            ranges.append(std.heap.c_allocator, next) catch return;
+        }
+    }
+    model_source.setFaceGroups(new_groups);
+    model_source.setPartRanges(ranges.items);
+    mesh_edit.reset(); // part membership moved → weld/scope masks are stale
+    _ = refreshPaintLayout(); // islands key off the grouping
+}
+
 /// Loop cut: slice the resident mesh by the plane perpendicular to the ONE selected edge,
-/// through that edge's midpoint (Blender's rule — the new loop runs across the ring the
+/// through its midpoint (Blender's rule — the new loop runs across the ring the
 /// edge belongs to). Straddling faces split; authored face grouping (studio meshes)
 /// carries through so each crossed n-gon becomes two clean faces — the host-native twin of
 /// the Studio's loopCut(EditMesh). The heavy work is mesh_edit.planeCutSoup (pure, tested);
@@ -910,9 +1052,16 @@ pub fn meshTopoLoopCut() bool {
         groups_buf = g;
     }
 
+    // Per-face part parentage BEFORE the cut, so the fresh group ids the cut mints can
+    // renormalize back into their parts' contiguous ranges after install (req_2644).
+    const base_part = capturePartOfFaces();
+    defer if (base_part) |bp| std.heap.c_allocator.free(bp);
+    const part_count = hostPartCount();
+
     const groups_arg: ?[]const u32 = if (groups_buf) |g| g else null;
     const cut = mesh_edit.planeCutSoup(pos, tri_count, nrm, d, groups_arg) orelse return false;
     defer std.heap.c_allocator.free(cut.positions);
+    defer std.heap.c_allocator.free(cut.src_face);
     defer if (cut.groups) |g| std.heap.c_allocator.free(g);
     if (cut.tri_count <= tri_count) return false; // the plane missed every face → not a cut
 
@@ -944,6 +1093,19 @@ pub fn meshTopoLoopCut() bool {
             model_source.setFaceGroups(g);
             _ = refreshPaintLayout(); // re-island by the fresh grouping (groups land after adopt)
         }
+        // Fold the minted +side groups back into their parts' contiguous ranges: each
+        // output face inherits the part of the input face it came from (req_2644).
+        if (base_part) |bp| {
+            if (std.heap.c_allocator.alloc(u32, cut.tri_count)) |fp| {
+                defer std.heap.c_allocator.free(fp);
+                var i: u32 = 0;
+                while (i < cut.tri_count) : (i += 1) {
+                    const sf = cut.src_face[i];
+                    fp[i] = if (sf < bp.len) bp[sf] else model_source.NO_PART;
+                }
+                renormalizePartRanges(fp, part_count);
+            } else |_| {}
+        }
         mesh_edit.setMode(.edge);
         journalCommit(&snap);
     } else journalDiscard(&snap);
@@ -962,6 +1124,12 @@ const LcSession = struct {
     base_pos: []f32, // positions-only soup at begin (tri_count * 9)
     tri_count: u32,
     base_groups: ?[]u32, // per-tri authored groups at begin (null = ungrouped import)
+    // Part parentage (req_2644): one part index per BASE face at begin, and the same
+    // carried through the LAST installed preview — commit renormalizes the minted
+    // group ids back into contiguous per-part ranges from this.
+    base_face_part: ?[]u32,
+    last_face_part: ?[]u32, // per LAST-preview face; aliases nothing (owned)
+    part_count: u32,
     axes: [2]u8, // the face's two in-plane axes; popup direction 0/1 picks one
     lo: [2]f32, // selected-face extent on each in-plane axis
     hi: [2]f32,
@@ -978,13 +1146,23 @@ const LcSession = struct {
     // session's own dir/cuts, and __mesh_lc_state echoes them back to the popup.
     last_cuts: u32 = 1,
     last_offset_frac: f32 = 0.5,
+    // The handle drag's CONTINUOUS cursor offset (req_2644 QQ): previews install the
+    // SNAPPED frac, so the raw position accumulates here or slow drags could never
+    // cross a whole-unit detent. Every preview re-seeds it (steppers move both).
+    drag_raw_frac: f32 = 0.5,
 };
 var g_lc: ?LcSession = null;
+
+/// One size-unit in world space — the mesh basis (16 u = 1 tile), the loop-cut handle's
+/// default snap increment (req_2644 QQ) and the studio gizmo's own step law.
+const LC_SNAP_WORLD: f32 = 1.0 / 16.0;
 
 fn lcFree() void {
     var s = g_lc orelse return;
     std.heap.c_allocator.free(s.base_pos);
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
+    if (s.base_face_part) |p| std.heap.c_allocator.free(p);
+    if (s.last_face_part) |p| std.heap.c_allocator.free(p);
     journalDiscard(&s.snap);
     g_lc = null;
 }
@@ -1148,6 +1326,9 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
         .base_pos = pos,
         .tri_count = tri_count,
         .base_groups = groups,
+        .base_face_part = capturePartOfFaces(),
+        .last_face_part = null, // no preview yet — commit falls back to the base parts
+        .part_count = hostPartCount(),
         .axes = axes,
         .lo = lo,
         .hi = hi,
@@ -1179,11 +1360,15 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     s.last_plane_count = n_planes;
     s.last_cuts = @min(@max(cuts, 1), 64);
     s.last_offset_frac = std.math.clamp(offset_frac, 0.0, 1.0);
+    s.drag_raw_frac = s.last_offset_frac; // steppers/popup moves re-seed the drag accumulator
 
     // Cut the BASE soup by each plane in turn (planeCutSoup allocs a fresh soup per
-    // plane; intermediates free as we go — only the final result installs).
+    // plane; intermediates free as we go — only the final result installs). Part
+    // parentage rides along (src_face chains per plane) so commit can renormalize the
+    // minted group ids back into contiguous per-part ranges (req_2644).
     var cur_pos: []const f32 = s.base_pos;
     var cur_groups: ?[]const u32 = if (s.base_groups) |g| g else null;
+    var cur_part: ?[]const u32 = if (s.base_face_part) |p| p else null;
     var cur_count: u32 = s.tri_count;
     var owned = false; // false while cur_* still aliases the session base
     var pi: u32 = 0;
@@ -1191,12 +1376,26 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         var nvec: [3]f32 = .{ 0, 0, 0 };
         nvec[axis] = 1;
         const cut = mesh_edit.planeCutSoup(cur_pos, cur_count, nvec, planes[pi], cur_groups) orelse break;
+        var next_part: ?[]const u32 = null;
+        if (cur_part) |cp| {
+            if (std.heap.c_allocator.alloc(u32, cut.tri_count)) |np| {
+                var t: u32 = 0;
+                while (t < cut.tri_count) : (t += 1) {
+                    const sf = cut.src_face[t];
+                    np[t] = if (sf < cp.len) cp[sf] else model_source.NO_PART;
+                }
+                next_part = np;
+            } else |_| {}
+        }
+        std.heap.c_allocator.free(cut.src_face);
         if (owned) {
             std.heap.c_allocator.free(@constCast(cur_pos));
             if (cur_groups) |g| std.heap.c_allocator.free(@constCast(g));
+            if (cur_part) |p| std.heap.c_allocator.free(@constCast(p));
         }
         cur_pos = cut.positions;
         cur_groups = cut.groups;
+        cur_part = next_part;
         cur_count = cut.tri_count;
         owned = true;
     }
@@ -1204,6 +1403,16 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         std.heap.c_allocator.free(@constCast(cur_pos));
         if (cur_groups) |g| std.heap.c_allocator.free(@constCast(g));
     };
+    // Stash the FINAL preview's parentage on the session (commit renormalizes from it).
+    if (s.last_face_part) |p| std.heap.c_allocator.free(p);
+    s.last_face_part = null;
+    if (cur_part) |p| {
+        if (owned) {
+            s.last_face_part = @constCast(p); // ownership moves to the session
+        } else {
+            s.last_face_part = std.heap.c_allocator.dupe(u32, p) catch null; // still the base's
+        }
+    }
     return lcInstallSoup(cur_pos, cur_count, cur_groups);
 }
 
@@ -1216,7 +1425,26 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
     var ok = true;
     if (commit) {
         journalCommit(&s.snap);
+        // Renormalize the minted +side group ids back into their parts' contiguous
+        // ranges (req_2644) — remember a face carrying the clicked face's group FIRST
+        // so the −side re-select below survives the renumber.
+        var keep_face: ?u32 = null;
         if (s.keep_group != model_source.NO_FACE_GROUP) {
+            const fc = g_edit_count / 3;
+            var f: u32 = 0;
+            while (f < fc) : (f += 1) {
+                if (model_source.faceGroupOf(f) == s.keep_group) {
+                    keep_face = f;
+                    break;
+                }
+            }
+        }
+        const fp: ?[]const u32 = if (s.last_face_part) |p| p else if (s.base_face_part) |p| p else null;
+        if (fp) |face_part| renormalizePartRanges(face_part, s.part_count);
+        if (keep_face) |f| {
+            const g = model_source.faceGroupOf(f);
+            if (g != model_source.NO_FACE_GROUP) _ = mesh_edit.selectFacesByGroupRange(g, g + 1, false);
+        } else if (s.keep_group != model_source.NO_FACE_GROUP) {
             _ = mesh_edit.selectFacesByGroupRange(s.keep_group, s.keep_group + 1, false);
         }
         mesh_edit.setMode(.face);
@@ -1227,6 +1455,8 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
     }
     std.heap.c_allocator.free(s.base_pos);
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
+    if (s.base_face_part) |p| std.heap.c_allocator.free(p);
+    if (s.last_face_part) |p| std.heap.c_allocator.free(p);
     journalDiscard(&s.snap); // no-op when committed
     g_lc = null;
     return ok;
@@ -1389,6 +1619,22 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
     const ok = replaceActiveEditMesh(owned, cur_count + new_count);
     if (ok) {
         model_source.setFaceGroups(groups.items);
+        // The appended part joins the host's part-range truth (req_2644): grow the
+        // preserved ranges with its fresh pair so __mesh_part_ranges reads back the
+        // full partition without waiting for a cart push.
+        if (model_source.partRanges()) |pr| {
+            var ranges = std.ArrayListUnmanaged(u32){};
+            defer ranges.deinit(std.heap.c_allocator);
+            var appended = true;
+            ranges.appendSlice(std.heap.c_allocator, pr) catch {
+                appended = false;
+            };
+            if (appended) {
+                ranges.append(std.heap.c_allocator, offset) catch {};
+                ranges.append(std.heap.c_allocator, offset + new_group_span) catch {};
+                if (ranges.items.len == pr.len + 2) model_source.setPartRanges(ranges.items);
+            }
+        }
         _ = refreshPaintLayout();
     }
     return .{ .ok = ok, .lo = offset, .hi = offset + new_group_span, .count = cur_count + new_count };
@@ -1878,6 +2124,19 @@ pub fn meshDetachSelection() AppendResult {
         groups[f] = gop.value_ptr.*;
     }
     model_source.setFaceGroups(groups);
+    // The detached panel becomes a part in the host's range truth too (req_2644), and
+    // the weld must re-key: its faces changed part, so coincident verts along the seam
+    // now belong to two parts and may no longer merge.
+    if (model_source.partRanges()) |pr| {
+        var ranges = std.ArrayListUnmanaged(u32){};
+        defer ranges.deinit(jalloc);
+        if (ranges.appendSlice(jalloc, pr)) |_| {
+            ranges.append(jalloc, offset) catch {};
+            ranges.append(jalloc, next) catch {};
+            if (ranges.items.len == pr.len + 2) model_source.setPartRanges(ranges.items);
+        } else |_| {}
+    }
+    mesh_edit.reset();
     _ = refreshPaintLayout();
     journalCommit(&snap);
     return .{ .ok = true, .lo = offset, .hi = next, .count = g_edit_count };
@@ -1926,6 +2185,29 @@ pub fn meshMergeGroupRanges(a_lo: u32, a_hi: u32, b_lo: u32, b_hi: u32) AppendRe
         return fail;
     }
     model_source.setFaceGroups(groups);
+    // Host range truth (req_2644): the two source ranges collapse into the fused pair.
+    if (model_source.partRanges()) |pr| {
+        var ranges = std.ArrayListUnmanaged(u32){};
+        defer ranges.deinit(jalloc);
+        var i: usize = 0;
+        var copied = true;
+        while (i + 1 < pr.len) : (i += 2) {
+            const keep = !((pr[i] == a_lo and pr[i + 1] == a_hi) or (pr[i] == b_lo and pr[i + 1] == b_hi));
+            if (!keep) continue;
+            ranges.append(jalloc, pr[i]) catch {
+                copied = false;
+            };
+            ranges.append(jalloc, pr[i + 1]) catch {
+                copied = false;
+            };
+        }
+        if (copied) {
+            ranges.append(jalloc, offset) catch {};
+            ranges.append(jalloc, next) catch {};
+            model_source.setPartRanges(ranges.items);
+        }
+    }
+    mesh_edit.reset(); // part membership moved → weld re-keys
     _ = refreshPaintLayout();
     journalCommit(&snap);
     return .{ .ok = true, .lo = offset, .hi = next, .count = g_edit_count };
@@ -2583,19 +2865,24 @@ fn gizmoBasePx(cam: model_paint.Camera, pivot: [3]f32) f32 {
     const r = selectionScreenRadiusPx(cam, pivot);
     return std.math.clamp(r * 0.9 + 26.0, GIZMO_MIN_PX, GIZMO_MAX_PX);
 }
-const GizmoAxisGeom = struct { target_px: f32, world_len: f32 };
+const GizmoAxisGeom = struct { target_px: f32, world_len: f32, grow: f32 };
 /// Per-axis draw geometry: base length grown when the axis lies near-parallel to the
 /// screen plane (side-on precision), world length compensated for foreshortening (floored
 /// at GIZMO_MIN_PERP so a view-aligned axis shortens instead of shooting to the horizon).
+/// `grow` (0..1) is the precision ramp — the draw pass also THICKENS the stroke with it,
+/// because length growth alone read as nothing at the old 0.80-perp onset (req_2644 RR):
+/// in a normal 3/4 orbit every axis sits near perp≈0.8, so the ramp never left zero. The
+/// onset now starts at 0.55, giving a visible length+weight gradient as the view swings
+/// toward side-on. Clamps stay: base ∈ [GIZMO_MIN_PX, GIZMO_MAX_PX], growth ≤ SIDE_GROW×.
 fn gizmoAxisGeom(cam: model_paint.Camera, pivot: [3]f32, axis: i32) GizmoAxisGeom {
     const base = gizmoBasePx(cam, pivot);
     const fwd = vnorm(vsub(cam.target, cam.eye));
     const alignment = @abs(vdot(axisVec(axis), fwd));
     const perp = @sqrt(@max(0.0, 1.0 - alignment * alignment));
-    const t = std.math.clamp((perp - 0.80) / 0.20, 0.0, 1.0);
+    const t = std.math.clamp((perp - 0.55) / 0.45, 0.0, 1.0);
     const target_px = base * (1.0 + (GIZMO_SIDE_GROW - 1.0) * t * t);
     const world_len = worldUnitsPerPixel(cam, pivot) * target_px / @max(perp, GIZMO_MIN_PERP);
-    return .{ .target_px = target_px, .world_len = world_len };
+    return .{ .target_px = target_px, .world_len = world_len, .grow = t };
 }
 fn axisEndpoint(cam: model_paint.Camera, pivot: [3]f32, axis: i32) ?[2][2]f32 {
     const p0 = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return null;
@@ -2686,7 +2973,11 @@ fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
             drawGizmoRing(cam, pivot, axis, ox, oy);
         } else if (axisEndpoint(cam, pivot, axis)) |ep| {
             const c = axisColor(axis);
-            overlayLine(ep[0][0] + ox, ep[0][1] + oy, ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], 4.0);
+            // Precision state must READ (req_2644 RR): a near-screen-parallel axis drags
+            // finer, so it draws longer AND heavier — weight carries the signal even when
+            // the length delta is subtle at a glance.
+            const grow = gizmoAxisGeom(cam, pivot, axis).grow;
+            overlayLine(ep[0][0] + ox, ep[0][1] + oy, ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], 4.0 + 3.5 * grow * grow);
             overlayDot(ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], if (g_gizmo_tool == .scale) GIZMO_DOT_SCALE_PX else GIZMO_DOT_MOVE_PX);
         }
     }
@@ -3037,7 +3328,13 @@ pub fn meshLcHandleHit(mx: f32, my: f32) bool {
 /// 0..1, and re-preview at the session's own dir/cuts. Sign: lcPlanes' shift is
 /// −(offset − size/2), i.e. dPlane/dOffset = −1, so offset moves OPPOSITE the world
 /// delta — that is exactly what keeps the drawn comb following the cursor.
-pub fn meshLcHandleDrag(dx: f32, dy: f32) bool {
+///
+/// SNAP (req_2644 QQ): by default the offset lands on whole size-units — the mesh basis
+/// (16 u to the tile, the studio gizmo's own law) — so a handle drag produces the same
+/// clean authored offsets the popup steppers do. The cursor's RAW (continuous) offset
+/// accumulates on the session so slow drags still cross the detent; `snap = false`
+/// (Shift held in the engine's input loop) frees it to continuous.
+pub fn meshLcHandleDrag(dx: f32, dy: f32, snap: bool) bool {
     const sp: *const LcSession = if (g_lc) |*p| p else return false;
     if (!model_paint.hasTarget()) return false;
     const d: usize = @min(sp.last_dir, 1);
@@ -3060,8 +3357,17 @@ pub fn meshLcHandleDrag(dx: f32, dy: f32) bool {
     }
     const dir = sp.last_dir;
     const cuts = sp.last_cuts;
-    const new_frac = std.math.clamp(sp.last_offset_frac - (px * world_per_px) / span, 0.0, 1.0);
-    return meshLoopCutFacePreview(dir, cuts, new_frac);
+    const raw = std.math.clamp(sp.drag_raw_frac - (px * world_per_px) / span, 0.0, 1.0);
+    var frac = raw;
+    if (snap) {
+        const step = LC_SNAP_WORLD / span; // one size-unit as an offset fraction
+        if (step < 0.5) frac = std.math.clamp(@round(raw / step) * step, 0.0, 1.0);
+    }
+    const ok = meshLoopCutFacePreview(dir, cuts, frac);
+    // The preview mirrored the SNAPPED frac into drag_raw_frac — restore the raw
+    // accumulator so the next motion continues from the cursor, not the detent.
+    if (g_lc) |*p2| p2.drag_raw_frac = raw;
+    return ok;
 }
 
 /// Draw the editor overlay — the modeling stage (tile panels + grid + axes), mode

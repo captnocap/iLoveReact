@@ -932,6 +932,39 @@ fn hostMeshSetPartRanges(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnNumber(info, 1);
 }
 
+/// __mesh_part_ranges() → JSON {"ok":1,"ranges":[[lo,hi],...]} — the HOST's authoritative
+/// per-part authored-group ranges, in ascending-lo (outliner) order. This is the ONE
+/// read-back the cart mirrors after every topology op / undo / redo (req_2644): the host
+/// maintains the ranges through ops that re-number groups (loop cut, extrude, detach,
+/// merge, append), so cart-side lo/hi are never patched incrementally again.
+/// {"ok":0} when the mesh carries no part ranges (plain imports, unparted viewers).
+fn hostMeshPartRanges(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const pr = model_source.partRanges() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf = std.ArrayListUnmanaged(u8){};
+    defer buf.deinit(std.heap.c_allocator);
+    const w = buf.writer(std.heap.c_allocator);
+    w.writeAll("{\"ok\":1,\"ranges\":[") catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var i: usize = 0;
+    while (i + 1 < pr.len) : (i += 2) {
+        w.print("{s}[{d},{d}]", .{ if (i == 0) "" else ",", pr[i], pr[i + 1] }) catch {
+            setReturnString(info, "{\"ok\":0}");
+            return;
+        };
+    }
+    w.writeAll("]}") catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, buf.items);
+}
+
 /// __model_paint_group_range(lo, hi, r, g, b) → face count. Paint every face in the group
 /// range a solid colour — the outliner tints each part its own colour on load.
 fn hostModelPaintGroupRange(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -2203,6 +2236,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_select_group_range", hostMeshEditSelectGroupRange);
     v8_runtime.registerHostFn("__mesh_edit_scope", hostMeshEditScope);
     v8_runtime.registerHostFn("__mesh_set_part_ranges", hostMeshSetPartRanges);
+    v8_runtime.registerHostFn("__mesh_part_ranges", hostMeshPartRanges);
     v8_runtime.registerHostFn("__model_paint_group_range", hostModelPaintGroupRange);
     v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
     v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);

@@ -47,6 +47,9 @@ import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
 import { writeModelArtifacts } from '../data/modelPackageStore';
 import { syntheticKeyEdge } from '../data/keymap';
+// Headless harness only (RJIT_MESHOPS addpart) — builds a primitive's grouped soup so the
+// gesture script can exercise the REAL appendPart path without the outliner UI (req_2644).
+import { primitiveMeshData } from '../data/hmscAssetCatalog';
 
 const host = globalThis as any;
 
@@ -318,6 +321,23 @@ const meshSetPartRanges = (ranges: { lo: number; hi: number }[]) => {
   sorted.forEach((r, i) => { pairs[i * 2] = r.lo; pairs[i * 2 + 1] = r.hi; });
   host.__mesh_set_part_ranges?.(pairs);
 };
+// Host part-range truth (req_2644): after every topology op / undo / redo the cart
+// re-derives its part ranges FROM the host instead of patching lo/hi incrementally —
+// a loop cut renumbers authored group ids (the +side pieces get fresh ids), so any
+// cart-side arithmetic on stale lo/hi selects the wrong slab, tears the mesh on part
+// moves, and mis-ranges appended parts. Returns the host ranges (ascending lo), or
+// null when the mesh carries no part ranges (plain imports / unparted viewers).
+const meshPartRangesRead = (): { lo: number; hi: number }[] | null => {
+  try {
+    const j = host.__mesh_part_ranges?.();
+    if (typeof j !== 'string' || !j) return null;
+    const o = JSON.parse(j);
+    if (!o?.ok || !Array.isArray(o.ranges)) return null;
+    return (o.ranges as [number, number][]).map((p) => ({ lo: p[0] | 0, hi: p[1] | 0 }));
+  } catch {
+    return null;
+  }
+};
 const meshDeleteGroupRange = (lo: number, hi: number) => {
   host.__mesh_edit_select_group_range?.(lo, hi, 0);
   return readTopoResult(host.__mesh_delete_selection?.());
@@ -491,6 +511,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setWire(true);
       setSelInfo(readSelInfo() ?? { mode: 2, verts: 0, edges: 0, sel: 0 });
       setError(null);
+      resyncPartRanges(); // the op may have renumbered groups — mirror the host's ranges (req_2644)
       refreshUvIfLive(); // the op rewrote the atlas layout — the UV panel must follow (req_2625 GG)
     } else {
       setError(fail);
@@ -500,11 +521,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Adopt a host op's new mesh key WITHOUT forcing a select mode (append/hide/delete-part just
   // change the resident mesh; they don't imply an edit mode like the topo ops do).
   // Every adopt re-keys the mesh, which is exactly the "topology/paint layout changed"
-  // signal — the live UV panel refreshes off it (req_2625 GG: no manual refresh click).
+  // signal — the live UV panel refreshes off it (req_2625 GG: no manual refresh click),
+  // and the part-range mirror resyncs from host truth on the same signal (req_2644).
   const adoptMesh = (r: TopoResult | null): boolean => {
     if (r?.ok && typeof r.key === 'string' && typeof r.count === 'number') {
       setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
       setSelInfo(readSelInfo() ?? selInfo);
+      resyncPartRanges();
       refreshUvIfLive();
       return true;
     }
@@ -590,10 +613,26 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     ? (lc.unit === 'percent' ? `${Math.round(lc.offset)}` : `${(lcSpan * lc.offset / 100).toFixed(2)}`)
     : '';
 
-  // The outliner part ranges currently resident in the host mesh — the source for
-  // meshSetPartRanges. Seeded from initialMesh.partColors on load, maintained through
-  // appendPart/deletePartRange (hide leaves geometry, so ranges don't change).
+  // The outliner part ranges currently resident in the host mesh — a MIRROR of the host's
+  // part-range truth (req_2644). Seeded from initialMesh.partColors on load, then re-read
+  // from __mesh_part_ranges after every mesh adopt: the host maintains the ranges through
+  // every topology op (loop cut renumbers groups; append/detach/merge grow/fuse ranges),
+  // so the cart never patches lo/hi incrementally again.
   const partRangesRef = useRef<{ lo: number; hi: number }[]>([]);
+
+  // Re-read the host's part ranges into the mirror; when they moved, tell the shell
+  // (global door — AppFrame re-stamps its outliner rows' lo/hi and re-scopes the active
+  // part). Returns false when the host carries no ranges (unparted mesh) so callers can
+  // fall back to establishing them with a push.
+  const resyncPartRanges = (): boolean => {
+    const ranges = meshPartRangesRead();
+    if (!ranges) return false;
+    const prev = partRangesRef.current;
+    const changed = ranges.length !== prev.length || ranges.some((r, i) => r.lo !== prev[i]?.lo || r.hi !== prev[i]?.hi);
+    partRangesRef.current = ranges;
+    if (changed) (globalThis as any).__modelPartRangesChanged?.(ranges);
+    return true;
+  };
 
   // Only the paint stroke is JS-driven now (and only while in paint mode). Orbit, select,
   // marquee, focus, and zoom are owned entirely by the host's native input loop — there is
@@ -858,14 +897,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     deleteSelection: () => applyTopo(meshDeleteSelection(), 'Nothing selected to delete'),
     // Host-authoritative part ops (the outliner). Append preserves prior edits; hide/delete
     // act on the part's group range. All adopt the new host mesh key without a JS recompose.
-    // Each op re-sends the full part-range list so the weld keeps parts independent.
+    // The HOST maintains the part-range truth through each op (req_2644); adoptMesh resyncs
+    // the mirror from __mesh_part_ranges. The push fallback only fires when the mesh had no
+    // ranges yet (first part op on an unparted mesh — the cart still authors the seed).
     appendPart: (positions, faceGroups, color) => {
       const r = meshAppendGroup(positions, faceGroups);
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
       const [rr, gg, bb] = hexToRgb01(color);
       host.__model_paint_group_range?.(r.lo, r.hi, Math.round(rr * 255), Math.round(gg * 255), Math.round(bb * 255));
-      partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
-      meshSetPartRanges(partRangesRef.current);
+      if (!resyncPartRanges()) {
+        partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
+        meshSetPartRanges(partRangesRef.current);
+      }
       return { lo: r.lo, hi: r.hi };
     },
     setPartHidden: (lo, hi, hidden) => {
@@ -876,35 +919,43 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     deletePartRange: (lo, hi) => {
       const r = meshDeleteGroupRange(lo, hi);
       const ok = adoptMesh(r) && Boolean(r?.ok);
+      // Deleting a PART is a structural change the cart authors: the pair leaves the
+      // range list (the host kept the id-span — its faces are gone, the row follows).
       partRangesRef.current = partRangesRef.current.filter((pr) => pr.lo !== lo || pr.hi !== hi);
       meshSetPartRanges(partRangesRef.current);
       return r ? { ok, count: Math.floor((r.count ?? 0) / 3) } : null;
     },
-    // ── Studio-parity part ops. Each adopts the host's new mesh key and keeps the
-    // part-range mirror true so the weld never bleeds edits across parts. ─────────
+    // ── Studio-parity part ops. Each adopts the host's new mesh key; the host grew or
+    // fused its range truth inside the op, so the mirror resyncs (fallback: seed push).
     duplicatePart: (lo, hi, mirrorAxis) => {
       const r = meshDuplicateRange(lo, hi, mirrorAxis);
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
       // No tint here — the host copied the source part's per-face paint onto the twin.
-      partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
-      meshSetPartRanges(partRangesRef.current);
+      if (!resyncPartRanges()) {
+        partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
+        meshSetPartRanges(partRangesRef.current);
+      }
       return { lo: r.lo, hi: r.hi };
     },
     detachSelection: () => {
       const r = meshDetach();
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
-      partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
-      meshSetPartRanges(partRangesRef.current);
+      if (!resyncPartRanges()) {
+        partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
+        meshSetPartRanges(partRangesRef.current);
+      }
       return { lo: r.lo, hi: r.hi };
     },
     mergeParts: (aLo, aHi, bLo, bHi) => {
       const r = meshMergePartsDoor(aLo, aHi, bLo, bHi);
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
-      partRangesRef.current = [
-        ...partRangesRef.current.filter((pr) => !(pr.lo === aLo && pr.hi === aHi) && !(pr.lo === bLo && pr.hi === bHi)),
-        { lo: r.lo, hi: r.hi },
-      ];
-      meshSetPartRanges(partRangesRef.current);
+      if (!resyncPartRanges()) {
+        partRangesRef.current = [
+          ...partRangesRef.current.filter((pr) => !(pr.lo === aLo && pr.hi === aHi) && !(pr.lo === bLo && pr.hi === bHi)),
+          { lo: r.lo, hi: r.hi },
+        ];
+        meshSetPartRanges(partRangesRef.current);
+      }
       return { lo: r.lo, hi: r.hi };
     },
     mergeFaces: () => adoptMesh(meshMergeFaces()),
@@ -915,8 +966,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
       const [rr, gg, bb] = hexToRgb01(color);
       host.__model_paint_group_range?.(r.lo, r.hi, Math.round(rr * 255), Math.round(gg * 255), Math.round(bb * 255));
-      partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
-      meshSetPartRanges(partRangesRef.current);
+      if (!resyncPartRanges()) {
+        partRangesRef.current = [...partRangesRef.current, { lo: r.lo, hi: r.hi }];
+        meshSetPartRanges(partRangesRef.current);
+      }
       return { lo: r.lo, hi: r.hi };
     },
     undoMesh: () => {
@@ -1260,7 +1313,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // frames so camera-dependent doors (pick/box) act on a drawn viewport. Ops:
     //   mode:N sel:N add:N range:lo,hi pick:x,y pickadd:x,y box:x0,y0,x1,y1 snap revert
     //   clear scope:lo,hi nudge:axis,amt gizmo:N undo redo del grouppaint:lo,hi,r,g,b
-    //   detail:px wait:frames report atlas:/path.png
+    //   detail:px wait:frames report atlas:/path.png parts addpart:kind orbit:dx,dy
     //   lcbegin lcprev:dir,cuts,off lcend:0|1 lcstate  (loop-cut session; off = 0..1 frac)
     const opsText = callHost<string | null>('__env_get', null, 'RJIT_MESHOPS');
     if (opsText) {
@@ -1339,6 +1392,26 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'grouppaint') host.__model_paint_group_range?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
         else if (name === 'detail') applyPaintDetail(num(a[0]));
         else if (name === 'report') console.error(`[meshops] report → ${JSON.stringify(readSelInfo())}`);
+        // parts: log the HOST's part-range truth + a partition audit — every triangle
+        // must be owned by exactly one range (req_2644's contract, headlessly checkable).
+        else if (name === 'parts') {
+          const ranges = meshPartRangesRead();
+          const total = Number(host.__model_face_count?.() ?? 0);
+          let owned = 0;
+          for (const pr of ranges ?? []) owned += Number(host.__mesh_group_face_count?.(pr.lo, pr.hi) ?? 0);
+          console.error(`[meshops] parts → ${JSON.stringify(ranges)} ownedFaces=${owned} totalFaces=${total} partition=${ranges && owned === total ? 'OK' : 'BROKEN'}`);
+        }
+        // addpart:<kind> — append a primitive as a NEW PART through the real appendPart
+        // path (host append + range truth + tint), the headless twin of outliner Add.
+        else if (name === 'addpart') {
+          const kind = (a[0] || 'cube') as Parameters<typeof primitiveMeshData>[0];
+          const geo = primitiveMeshData(kind);
+          const r = toolApiRef.current?.appendPart(geo.positions, geo.faceGroups, '#8fb6c9');
+          console.error(`[meshops] addpart:${kind} → ${JSON.stringify(r)}`);
+        }
+        // orbit:dx,dy — swing the host orbit camera (for POV-dependent shots, e.g. the
+        // gizmo's side-on growth).
+        else if (name === 'orbit') host.__model_orbit_drag?.(num(a[0]), num(a[1]));
         else if (name === 'atlas') dumpAtlasPng(a.join(','));
         else if (name !== 'wait') console.error(`[meshops] unknown op: ${name}`);
       };

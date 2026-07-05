@@ -1267,20 +1267,24 @@ export default function AppFrame() {
   }, []);
   const selectPart = (id: string) => {
     // Focus a part = SCOPE editing to it: only its verts/edges/faces show + select, and the
-    // gizmo drives just it. Clicking the already-focused part toggles back to the whole model.
+    // gizmo drives just it. EXACTLY ONE part is always focused (req_2644): clicking the
+    // already-focused row RE-ASSERTS it — the old toggle-off left a "no part focused"
+    // state whose scope(0,0) made the gizmo drag the WHOLE buffer at once.
     const host = globalThis as any;
     const mid = activePartsModelId(state);
     const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === id) : null;
     const range = part ? partRange(part) : null;
-    const alreadyFocused = state.modelActivePartId === id;
-    if (range && !alreadyFocused) {
+    if (range) {
       host.__mesh_edit_scope?.(range.lo, range.hi);
-      host.__mesh_edit_select_group_range?.(range.lo, range.hi, 0);
-    } else {
-      host.__mesh_edit_scope?.(0, 0); // toggle off → edit the whole model
-      host.__mesh_edit_clear?.();
+      // Selecting the part's faces is a FACE-mode gesture — the host door flips its pick
+      // mode to face. In vertex/edge mode focus only scopes (dots/edges restrict to the
+      // part), so the toolbar's mode and the host's pick mode never diverge (req_2645 SS:
+      // "vertex mode picks faces" after an outliner click).
+      const m = state.modelTool.selMode;
+      if (m === 0 || m === 3) host.__mesh_edit_select_group_range?.(range.lo, range.hi, 0);
+      else host.__mesh_edit_clear?.();
     }
-    setState((prev) => ({ ...prev, modelActivePartId: alreadyFocused ? null : id }));
+    setState((prev) => ({ ...prev, modelActivePartId: id }));
   };
   const toggleVisiblePart = (id: string) => {
     const mid = activePartsModelId(state);
@@ -1557,6 +1561,56 @@ export default function AppFrame() {
     }));
   };
 
+  // ── Host part-range truth → outliner rows (req_2644) ─────────────────────────
+  // The host maintains each part's authored-group range through every topology op
+  // (a loop cut renumbers group ids; append/detach/merge grow or fuse ranges).
+  // __mesh_part_ranges is the ONE read-back; rows re-stamp from it by RANK (rows
+  // ordered by their current lo ↔ host ranges ascending — renumbering preserves
+  // part order), so lo/hi in the outliner is a mirror, never cart arithmetic.
+  const readHostPartRanges = (): { lo: number; hi: number }[] | null => {
+    try {
+      const j = (globalThis as any).__mesh_part_ranges?.();
+      if (typeof j !== 'string' || !j) return null;
+      const o = JSON.parse(j);
+      if (!o?.ok || !Array.isArray(o.ranges)) return null;
+      return (o.ranges as [number, number][]).map((p) => ({ lo: p[0] | 0, hi: p[1] | 0 }));
+    } catch {
+      return null;
+    }
+  };
+  const stampRowsByRank = (rows: ModelPart[], ranges: { lo: number; hi: number }[]): ModelPart[] => {
+    const byLo = rows.map((p, i) => ({ p, i })).sort((x, y) => ((x.p.lo ?? Number.MAX_SAFE_INTEGER) - (y.p.lo ?? Number.MAX_SAFE_INTEGER)) || (x.i - y.i));
+    const sorted = ranges.slice().sort((x, y) => x.lo - y.lo);
+    const stamped = rows.slice();
+    byLo.forEach((e, rank) => {
+      const rg = sorted[rank];
+      if (rg) stamped[e.i] = { ...e.p, lo: rg.lo, hi: rg.hi };
+    });
+    return stamped;
+  };
+  // ModelView announces moved ranges through this global (same pattern as
+  // __meshEditSelChanged) right after any adopt whose resync saw new values.
+  useEffect(() => {
+    (globalThis as any).__modelPartRangesChanged = (ranges: { lo: number; hi: number }[]) => {
+      const s = stateRef.current;
+      const mid = activePartsModelId(s);
+      if (!mid) return;
+      setState((prev) => {
+        const rows = prev.modelParts[mid] ?? [];
+        // A count mismatch means a STRUCTURAL change is mid-flight (append/detach/
+        // delete) — its own handler adds/removes the row with the op's range.
+        if (rows.length === 0 || rows.length !== ranges.length) return prev;
+        const stamped = stampRowsByRank(rows, ranges);
+        // The focused part re-scopes to its refreshed range: the move gizmo must
+        // always drive the ACTIVE part's true faces, never a stale span.
+        const active = stamped.find((p) => p.id === prev.modelActivePartId);
+        if (active && active.lo != null && active.hi != null) (globalThis as any).__mesh_edit_scope?.(active.lo, active.hi);
+        return { ...prev, modelParts: { ...prev.modelParts, [mid]: stamped } };
+      });
+    };
+    return () => { (globalThis as any).__modelPartRangesChanged = undefined; };
+  }, []);
+
   // ── Mesh undo/redo (host journal; req_2520) ──────────────────────────────────
   // Seed meshes by part id, kept for the session so a restored part row regains its
   // seed (the journal note carries part METADATA only — meshes never ride the note).
@@ -1583,13 +1637,24 @@ export default function AppFrame() {
       } catch { /* stale/foreign note — the geometry restored; part rows stay as-is */ }
     }
     if (restored && mid) {
-      api!.setPartRangesMirror(restored.filter((p) => p.lo != null && p.hi != null).map((p) => ({ lo: p.lo!, hi: p.hi! })));
+      // UNDO SAFETY (req_2644): the journal restored the HOST's part ranges along with
+      // the geometry — re-stamp the restored rows' lo/hi from that read-back instead of
+      // trusting only the note (a stale note must never outvote the mesh).
+      const hostRanges = readHostPartRanges();
+      if (hostRanges && hostRanges.length === restored.length) {
+        restored = stampRowsByRank(restored, hostRanges);
+      }
+      api!.setPartRangesMirror((hostRanges ?? restored.filter((p) => p.lo != null && p.hi != null).map((p) => ({ lo: p.lo!, hi: p.hi! }))));
       setState((prev) => {
         const keep = restored!;
+        const nextActive = keep.some((p) => p.id === prev.modelActivePartId) ? prev.modelActivePartId : (keep[0]?.id ?? null);
+        // Keep the gizmo scoped to the focused part's TRUE range across the undo.
+        const activeRow = keep.find((p) => p.id === nextActive);
+        if (activeRow && activeRow.lo != null && activeRow.hi != null) (globalThis as any).__mesh_edit_scope?.(activeRow.lo, activeRow.hi);
         return {
           ...prev,
           modelParts: { ...prev.modelParts, [mid]: keep },
-          modelActivePartId: keep.some((p) => p.id === prev.modelActivePartId) ? prev.modelActivePartId : (keep[0]?.id ?? null),
+          modelActivePartId: nextActive,
           status: `${verb} ${r.label}`,
         };
       });

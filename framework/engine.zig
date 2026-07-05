@@ -420,7 +420,7 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn meshLcHandleHit(_: f32, _: f32) bool {
         return false;
     }
-    pub fn meshLcHandleDrag(_: f32, _: f32) bool {
+    pub fn meshLcHandleDrag(_: f32, _: f32, _: bool) bool {
         return false;
     }
     pub fn setMeshGizmoTool(_: u8) void {}
@@ -4698,7 +4698,10 @@ pub fn run(config_in: AppConfig) !void {
                         if (me_lc_dragging) {
                             // Loop-cut handle drag: the host re-previews internally; the
                             // popup polls __mesh_lc_state to track it (no JS per move).
-                            _ = r3d.meshLcHandleDrag(event.motion.xrel, event.motion.yrel);
+                            // Default SNAPS the offset to whole size-units; a held Shift
+                            // frees it to continuous (req_2644 QQ).
+                            const lc_snap = (c.SDL_GetModState() & c.SDL_KMOD_SHIFT) == 0;
+                            _ = r3d.meshLcHandleDrag(event.motion.xrel, event.motion.yrel, lc_snap);
                             state_mod.markDirty();
                             continue;
                         }
