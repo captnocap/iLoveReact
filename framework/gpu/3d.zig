@@ -21,6 +21,7 @@ const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
 const mesh_edit = @import("mesh_edit.zig");
 const capsules = @import("capsules.zig");
+const polys = @import("polys.zig");
 const Node = layout.Node;
 
 // ════════════════════════════════════════════════════════════════════════
@@ -966,6 +967,13 @@ const LcSession = struct {
     hi: [2]f32,
     keep_group: u32, // clicked face's group id — its −side piece re-selects after commit
     snap: ?JournalEntry,
+    // Overlay visibility (req_2625): the selection's world centroid at begin (anchors the
+    // cut-plane handle) + the LAST previewed comb, so the editor overlay can accent the
+    // freshly cut edges and draw a translate-style handle on the middle cut plane.
+    sel_center: [3]f32 = .{ 0, 0, 0 },
+    last_dir: u32 = 0,
+    last_planes: [64]f32 = undefined,
+    last_plane_count: u32 = 0,
 };
 var g_lc: ?LcSession = null;
 
@@ -1095,9 +1103,12 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
         }
     }
 
-    // The SELECTED faces' extent on each candidate axis (not the whole mesh — req_1006).
+    // The SELECTED faces' extent on each candidate axis (not the whole mesh — req_1006),
+    // plus the selection's world centroid — the anchor for the overlay's cut-plane handle.
     var lo: [2]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32) };
     var hi: [2]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32) };
+    var center: [3]f32 = .{ 0, 0, 0 };
+    var corner_n: f32 = 0;
     {
         var f: u32 = 0;
         while (f < tri_count) : (f += 1) {
@@ -1105,6 +1116,8 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
             var k: u32 = 0;
             while (k < 3) : (k += 1) {
                 const vb = (@as(usize, f) * 3 + k) * 3;
+                center = vadd(center, .{ pos[vb + 0], pos[vb + 1], pos[vb + 2] });
+                corner_n += 1;
                 var d: u8 = 0;
                 while (d < 2) : (d += 1) {
                     const v = pos[vb + axes[d]];
@@ -1114,6 +1127,7 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
             }
         }
     }
+    if (corner_n > 0) center = vmul(center, 1.0 / corner_n);
 
     var groups: ?[]u32 = null;
     if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
@@ -1135,6 +1149,7 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
         .hi = hi,
         .keep_group = keep_group,
         .snap = journalSnapshotCurrent("loop cut"),
+        .sel_center = center,
     };
     return .{ .size0 = hi[0] - lo[0], .size1 = hi[1] - lo[1] };
 }
@@ -1144,7 +1159,7 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
 /// even comb). Zero surviving planes (offset pushed them all out) restores the bare base,
 /// so scrubbing the offset never strands a stale cut on screen.
 pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
-    const s = g_lc orelse return false;
+    const s: *LcSession = if (g_lc) |*sp| sp else return false;
     const d: usize = @min(dir, 1);
     const axis = s.axes[d];
     const lo = s.lo[d];
@@ -1153,6 +1168,11 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     var planes: [64]f32 = undefined; // the studio popup's cut cap
     const offset = std.math.clamp(offset_frac, 0.0, 1.0) * (hi - lo);
     const n_planes = lcPlanes(lo, hi, @min(cuts, 64), offset, &planes);
+    // Remember the previewed comb so the editor overlay can accent the cut edges and
+    // anchor the cut-plane handle while the popup is open (req_2625).
+    s.last_dir = @intCast(d);
+    s.last_planes = planes;
+    s.last_plane_count = n_planes;
 
     // Cut the BASE soup by each plane in turn (planeCutSoup allocs a fresh soup per
     // plane; intermediates free as we go — only the final result installs).
@@ -2384,7 +2404,24 @@ const OV_MARQUEE = [4]f32{ 0.62, 0.78, 1.0, 0.98 };
 const GIZMO_X = [3]f32{ 1.0, 0.18, 0.16 };
 const GIZMO_Y = [3]f32{ 0.28, 0.9, 0.28 };
 const GIZMO_Z = [3]f32{ 0.3, 0.55, 1.0 };
-const GIZMO_AXIS_PX: f32 = 86;
+// ── Gizmo sizing policy (req_2620 gap V / req_2619 gap Q) ──────────────────────────
+// The axis length is no longer one fixed pixel count: it scales with the SELECTION's
+// projected screen extent (a one-face selection gets a compact gizmo instead of three
+// overlapping blobs; a whole-part selection gets a reaching one), clamped to
+// [GIZMO_MIN_PX, GIZMO_MAX_PX]. On top of that, an axis that lies near-PARALLEL to the
+// screen plane (you're viewing it side-on) grows up to GIZMO_SIDE_GROW× — the old
+// studio's precision affordance: a longer drawn handle means fewer world units per
+// dragged pixel along it (meshGizmoDrag maps through the drawn length). An axis that
+// points INTO the screen foreshortens; its world length is boosted to keep the drawn
+// px near target, but only up to 1/GIZMO_MIN_PERP so a view-aligned axis reads short
+// instead of exploding toward the horizon.
+const GIZMO_MIN_PX: f32 = 46;
+const GIZMO_MAX_PX: f32 = 170;
+const GIZMO_SIDE_GROW: f32 = 1.9; // side-on growth cap (× the base length)
+const GIZMO_MIN_PERP: f32 = 0.35; // foreshortening compensation floor
+const GIZMO_DOT_MOVE_PX: f32 = 7; // handle dots small enough to never overlap at MIN_PX
+const GIZMO_DOT_SCALE_PX: f32 = 9;
+const GIZMO_PIVOT_DOT_PX: f32 = 6;
 const GIZMO_HIT_PX: f32 = 13;
 const OV_MAX_VERT_DOTS: u32 = 80000; // beyond this draw only selected dots (wireframe still
 // shows topology) — a generous fps guard, not a data cap.
@@ -2392,6 +2429,34 @@ const OV_EDGE = [3]f32{ 0.62, 0.70, 0.85 }; // unselected boundary edge (real mo
 // Above this boundary-edge count, skip the overlay edge lines (a huge triangle soup with no
 // grouping would flood the pass) — the GPU wireframe toggle still shows topology.
 const OV_MAX_EDGE_LINES: u32 = 40000;
+// ── Face-mode dressing (req_2618 gap B) ────────────────────────────────────────────
+// Face mode must be unmistakable: every front-facing face gets a translucent tint quad
+// and a centroid dot (the old studio's signature look). Drawn as OVERLAY polys/capsules
+// only — never by touching vertex colors or the paint atlas (the bake bugs of
+// req_2611/req_2613 came from tinting atlas pixels; overlay geometry cannot bake).
+const OV_FACE_TINT = [4]f32{ 0.55, 0.66, 0.92, 0.10 }; // unselected face wash
+const OV_FACE_TINT_SEL = [4]f32{ 1.0, 0.52, 0.16, 0.22 }; // selected face wash (over atlas orange)
+const OV_FACE_DOT = [3]f32{ 0.72, 0.79, 0.95 }; // centroid dot fill
+const OV_FACE_DOT_PX: f32 = 3.0;
+const OV_FACE_DOT_SEL_PX: f32 = 5.0;
+const OV_MAX_FACE_TINT: u32 = 20000; // tint/dot pass fps guard (tris)
+// ── Loop-cut session accents (req_2625 gaps CC/DD) ─────────────────────────────────
+const OV_LC_ACCENT = [3]f32{ 0.30, 0.95, 1.0 }; // fresh cut edges while the popup is live
+const OV_LC_HANDLE_PX: f32 = 34; // translate-style handle half-length on the cut plane
+// ── Modeling stage (req_2618 gap A / req_2623): the 3×3 tile floor + world axes ────
+// World basis: 1 game tile = 1 m = 16 u — the SAME Blockbench 16x basis the paint
+// density uses (model_paint: detail is texels per METER, 16x = 16 to the meter) and the
+// studio grid pinned (unitsPerTile 16, tileMeters 1, gridTiles 3, fineDivisions 16).
+// This is tile SPACE, not decoration: a part spanning one panel is one tile in-game.
+const STAGE_TILE_M: f32 = 1.0; // one panel = one game tile = 1 m
+const STAGE_TILES: u32 = 3; // 3×3 panels on the ground plane
+const STAGE_FINE_DIV: u32 = 16; // center panel sub-grid: 1 u = 1/16 m pitch
+const STAGE_AXIS_M: f32 = 1.0; // world axis lines from origin (studio axisLengthMeters)
+const STAGE_PANEL = [4]f32{ 0.30, 0.40, 0.62, 0.09 }; // faint blue-grey tile panel
+const STAGE_PANEL_CENTER = [4]f32{ 0.36, 0.48, 0.72, 0.13 }; // brighter fine center cell
+const STAGE_LINE = [4]f32{ 0.46, 0.56, 0.78, 0.38 }; // tile boundary lines
+const STAGE_FINE_LINE = [4]f32{ 0.46, 0.56, 0.78, 0.16 }; // center sub-grid (dimmer)
+const STAGE_AXIS_ALPHA: f32 = 0.55;
 
 /// A haloed dot: a dark disc, then the bright fill on top — visible on any background.
 fn overlayDot(px: f32, py: f32, r: f32, g: f32, b: f32, size: f32) void {
@@ -2445,10 +2510,74 @@ fn worldUnitsPerPixel(cam: model_paint.Camera, p: [3]f32) f32 {
     const span = 2.0 * z * @tan(cam.fov_deg * std.math.pi / 180.0 * 0.5);
     return if (g_paint_vp_h > 1) span / g_paint_vp_h else 0.01;
 }
+/// The selection's projected screen radius (px): world bbox of every face the current
+/// selection touches (any mode, via buildDeleteMask), projected corner-by-corner around
+/// the pivot. 0 when nothing is selected / projectable. Linear in face count — these
+/// meshes are small, and the gizmo only exists while a selection does.
+fn selectionScreenRadiusPx(cam: model_paint.Camera, pivot: [3]f32) f32 {
+    const pos = model_paint.positions() orelse return 0;
+    const fc = model_paint.faceCount();
+    if (fc == 0) return 0;
+    const mask = std.heap.c_allocator.alloc(bool, fc) catch return 0;
+    defer std.heap.c_allocator.free(mask);
+    if (mesh_edit.buildDeleteMask(mask) == 0) return 0;
+    var mn: [3]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) };
+    var mx: [3]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) };
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        if (!mask[f]) continue;
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const b = (@as(usize, f) * 3 + k) * 3;
+            if (b + 2 >= pos.len) break;
+            var d: u32 = 0;
+            while (d < 3) : (d += 1) {
+                mn[d] = @min(mn[d], pos[b + d]);
+                mx[d] = @max(mx[d], pos[b + d]);
+            }
+        }
+    }
+    if (mn[0] > mx[0]) return 0;
+    const pc = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return 0;
+    var radius: f32 = 0;
+    var c: u32 = 0;
+    while (c < 8) : (c += 1) {
+        const corner: [3]f32 = .{
+            if (c & 1 != 0) mx[0] else mn[0],
+            if (c & 2 != 0) mx[1] else mn[1],
+            if (c & 4 != 0) mx[2] else mn[2],
+        };
+        const sp = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, corner) orelse continue;
+        const dx = sp[0] - pc[0];
+        const dy = sp[1] - pc[1];
+        radius = @max(radius, @sqrt(dx * dx + dy * dy));
+    }
+    return radius;
+}
+/// The gizmo's base screen length (px) for the current selection — selection-scaled,
+/// clamped so a one-face pick stays compact and a whole-part grab doesn't explode.
+fn gizmoBasePx(cam: model_paint.Camera, pivot: [3]f32) f32 {
+    const r = selectionScreenRadiusPx(cam, pivot);
+    return std.math.clamp(r * 0.9 + 26.0, GIZMO_MIN_PX, GIZMO_MAX_PX);
+}
+const GizmoAxisGeom = struct { target_px: f32, world_len: f32 };
+/// Per-axis draw geometry: base length grown when the axis lies near-parallel to the
+/// screen plane (side-on precision), world length compensated for foreshortening (floored
+/// at GIZMO_MIN_PERP so a view-aligned axis shortens instead of shooting to the horizon).
+fn gizmoAxisGeom(cam: model_paint.Camera, pivot: [3]f32, axis: i32) GizmoAxisGeom {
+    const base = gizmoBasePx(cam, pivot);
+    const fwd = vnorm(vsub(cam.target, cam.eye));
+    const alignment = @abs(vdot(axisVec(axis), fwd));
+    const perp = @sqrt(@max(0.0, 1.0 - alignment * alignment));
+    const t = std.math.clamp((perp - 0.80) / 0.20, 0.0, 1.0);
+    const target_px = base * (1.0 + (GIZMO_SIDE_GROW - 1.0) * t * t);
+    const world_len = worldUnitsPerPixel(cam, pivot) * target_px / @max(perp, GIZMO_MIN_PERP);
+    return .{ .target_px = target_px, .world_len = world_len };
+}
 fn axisEndpoint(cam: model_paint.Camera, pivot: [3]f32, axis: i32) ?[2][2]f32 {
     const p0 = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return null;
-    const len = worldUnitsPerPixel(cam, pivot) * GIZMO_AXIS_PX;
-    const p1w = vadd(pivot, vmul(axisVec(axis), len));
+    const geom = gizmoAxisGeom(cam, pivot, axis);
+    const p1w = vadd(pivot, vmul(axisVec(axis), geom.world_len));
     const p1 = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, p1w) orelse return null;
     return .{ p0, p1 };
 }
@@ -2478,11 +2607,16 @@ fn ringBasis(axis: [3]f32) [2][3]f32 {
     const u = vnorm(vcross(axis, ref));
     return .{ u, vnorm(vcross(axis, u)) };
 }
+/// Rotate-ring world radius — shares the selection-scaled base with the axis handles so
+/// draw and hit-test always agree.
+fn gizmoRingWorldR(cam: model_paint.Camera, pivot: [3]f32) f32 {
+    return worldUnitsPerPixel(cam, pivot) * gizmoBasePx(cam, pivot) * 0.82;
+}
 fn drawGizmoRing(cam: model_paint.Camera, pivot: [3]f32, axis: i32, ox: f32, oy: f32) void {
     const col = axisColor(axis);
     const av = axisVec(axis);
     const basis = ringBasis(av);
-    const r = worldUnitsPerPixel(cam, pivot) * GIZMO_AXIS_PX * 0.82;
+    const r = gizmoRingWorldR(cam, pivot);
     const steps: u32 = 48;
     var prev: ?[2]f32 = null;
     var i: u32 = 0;
@@ -2500,7 +2634,7 @@ fn drawGizmoRing(cam: model_paint.Camera, pivot: [3]f32, axis: i32, ox: f32, oy:
 fn ringHitDist2(cam: model_paint.Camera, pivot: [3]f32, axis: i32, mx: f32, my: f32) f32 {
     const av = axisVec(axis);
     const basis = ringBasis(av);
-    const r = worldUnitsPerPixel(cam, pivot) * GIZMO_AXIS_PX * 0.82;
+    const r = gizmoRingWorldR(cam, pivot);
     const steps: u32 = 48;
     var prev: ?[2]f32 = null;
     var best: f32 = 1.0e12;
@@ -2522,15 +2656,15 @@ fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
     if (meshEditModeRaw() == 0) return;
     const pivot = mesh_edit.selectionPivot() orelse return;
     const pc = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return;
-    overlayDot(pc[0] + ox, pc[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 10);
+    overlayDot(pc[0] + ox, pc[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], GIZMO_PIVOT_DOT_PX);
     var axis: i32 = 0;
     while (axis < 3) : (axis += 1) {
         if (g_gizmo_tool == .rotate) {
             drawGizmoRing(cam, pivot, axis, ox, oy);
         } else if (axisEndpoint(cam, pivot, axis)) |ep| {
             const c = axisColor(axis);
-            overlayLine(ep[0][0] + ox, ep[0][1] + oy, ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], 5.0);
-            overlayDot(ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], if (g_gizmo_tool == .scale) 14 else 11);
+            overlayLine(ep[0][0] + ox, ep[0][1] + oy, ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], 4.0);
+            overlayDot(ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], if (g_gizmo_tool == .scale) GIZMO_DOT_SCALE_PX else GIZMO_DOT_MOVE_PX);
         }
     }
 }
@@ -2566,8 +2700,19 @@ pub fn meshGizmoDrag(axis: i32, dx: f32, dy: f32) bool {
     const dir = screenAxisDir(cam, pivot, axis);
     const px = dx * dir[0] + dy * dir[1];
     const av = axisVec(axis);
+    // Move maps through the DRAWN handle: world-units-per-pixel = handle world length /
+    // handle projected px length. A side-on (grown) handle therefore drags FINER — the
+    // studio's precision behavior (req_2620). Degenerate projections (axis into the
+    // screen, handle a few px long) fall back to the depth-based rate.
+    var move_wpp = worldUnitsPerPixel(cam, pivot);
+    if (axisEndpoint(cam, pivot, axis)) |ep| {
+        const hdx = ep[1][0] - ep[0][0];
+        const hdy = ep[1][1] - ep[0][1];
+        const hlen = @sqrt(hdx * hdx + hdy * hdy);
+        if (hlen > 8) move_wpp = gizmoAxisGeom(cam, pivot, axis).world_len / hlen;
+    }
     const m = switch (g_gizmo_tool) {
-        .move => mesh_edit.translateSelection(vmul(av, px * worldUnitsPerPixel(cam, pivot))),
+        .move => mesh_edit.translateSelection(vmul(av, px * move_wpp)),
         .scale => mesh_edit.scaleSelectionAxis(av, pivot, 1.0 + px * 0.012),
         .rotate => mesh_edit.rotateSelectionAxis(av, pivot, px * 0.018),
     };
@@ -2583,51 +2728,294 @@ pub fn meshGizmoNudge(axis: u8, amount: f32) bool {
     return ok;
 }
 
-/// Draw the editor overlay (vertex dots / edge highlights / marquee box) as screen-space
-/// capsules projected with the EXACT last-drawn camera, so every dot sits on the pixel its
-/// raycast shoots back through — pixel-locked at any zoom. Capsules ride the 2D draw-command
-/// z-order, so emitting right after the Scene3D composite lands them on top. (ox,oy) is the
-/// viewport origin (0,0 full-window). Lives here, not in mesh_edit, to keep that GPU-free.
-pub fn drawEditorOverlay(ox: f32, oy: f32) void {
-    if (!g_me_capture) return;
-    // Marquee box (any mode) — four thin capsules forming the rect outline.
-    if (g_mq_active) {
-        const x0 = g_mq[0];
-        const y0 = g_mq[1];
-        const x1 = g_mq[2];
-        const y1 = g_mq[3];
-        overlayLine(x0, y0, x1, y0, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
-        overlayLine(x1, y0, x1, y1, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
-        overlayLine(x1, y1, x0, y1, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
-        overlayLine(x0, y1, x0, y0, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
+/// Project a world point into the pane's window-px space (viewport-local + pane origin).
+fn ovProject(cam: model_paint.Camera, p: [3]f32, ox: f32, oy: f32) ?[2]f32 {
+    const s = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, p) orelse return null;
+    return .{ s[0] + ox, s[1] + oy };
+}
+/// Force a scissor-SEGMENT boundary without changing the clip rect. Within one segment
+/// the pipelines draw in a fixed order (…capsules, THEN polys), so a poly fill emitted
+/// alongside capsules would land ON TOP of them. Breaking the segment puts everything
+/// emitted after this call in a later segment — drawn after (above) everything before it.
+fn overlayLayerBreak(ox: f32, oy: f32) void {
+    core.popScissor();
+    core.pushScissor(ox, oy, g_paint_vp_w, g_paint_vp_h);
+}
+/// Marquee box (any mode) — four thin capsules forming the rect outline (window px).
+fn drawMarqueeOverlay() void {
+    if (!g_mq_active) return;
+    const x0 = g_mq[0];
+    const y0 = g_mq[1];
+    const x1 = g_mq[2];
+    const y1 = g_mq[3];
+    overlayLine(x0, y0, x1, y0, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
+    overlayLine(x1, y0, x1, y1, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
+    overlayLine(x1, y1, x0, y1, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
+    overlayLine(x0, y1, x0, y0, OV_MARQUEE[0], OV_MARQUEE[1], OV_MARQUEE[2], 2.0);
+}
+/// One grid line on the stage floor: a world segment as a single dim capsule (a straight
+/// world line projects to a straight screen line, so two endpoints are exact).
+fn stageLine(cam: model_paint.Camera, a: [3]f32, b: [3]f32, col: [4]f32, w: f32, ox: f32, oy: f32) void {
+    const pa = ovProject(cam, a, ox, oy) orelse return;
+    const pb = ovProject(cam, b, ox, oy) orelse return;
+    capsules.drawCapsule(pa[0], pa[1], pb[0], pb[1], col[0], col[1], col[2], col[3], w);
+}
+/// The 3×3 tile-panel fills on the ground plane — each panel is ONE game tile (1 m); the
+/// center panel (the fine cell) is slightly brighter. Emitted as polys → must sit in its
+/// own segment BELOW the stage lines.
+fn drawStagePanels(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const half = STAGE_TILE_M * @as(f32, @floatFromInt(STAGE_TILES)) * 0.5;
+    var iz: u32 = 0;
+    while (iz < STAGE_TILES) : (iz += 1) {
+        var ix: u32 = 0;
+        while (ix < STAGE_TILES) : (ix += 1) {
+            const x0 = -half + @as(f32, @floatFromInt(ix)) * STAGE_TILE_M;
+            const z0 = -half + @as(f32, @floatFromInt(iz)) * STAGE_TILE_M;
+            const c00 = ovProject(cam, .{ x0, 0, z0 }, ox, oy) orelse continue;
+            const c10 = ovProject(cam, .{ x0 + STAGE_TILE_M, 0, z0 }, ox, oy) orelse continue;
+            const c11 = ovProject(cam, .{ x0 + STAGE_TILE_M, 0, z0 + STAGE_TILE_M }, ox, oy) orelse continue;
+            const c01 = ovProject(cam, .{ x0, 0, z0 + STAGE_TILE_M }, ox, oy) orelse continue;
+            const center = ix == STAGE_TILES / 2 and iz == STAGE_TILES / 2;
+            const col = if (center) STAGE_PANEL_CENTER else STAGE_PANEL;
+            polys.drawTri(c00[0], c00[1], c10[0], c10[1], c11[0], c11[1], col[0], col[1], col[2], col[3]);
+            polys.drawTri(c00[0], c00[1], c11[0], c11[1], c01[0], c01[1], col[0], col[1], col[2], col[3]);
+        }
     }
-    if (!model_paint.hasTarget()) return;
-    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
-    const mode = meshEditModeRaw();
-    // Vertex + edge modes draw the model's BOUNDARY edges as real lines (Blender/Blockbench
-    // style) — the triangulation diagonals stay hidden because they aren't boundary edges.
-    // This is the topology view; the GPU barycentric wireframe (full tris) is a separate
-    // toggle. Skipped for a huge ungrouped soup (cap) where the GPU wire is the better tool.
-    if ((mode == 1 or mode == 2) and mesh_edit.ensureTopologyPub()) {
-        if (mesh_edit.boundaryEdgeCount() <= OV_MAX_EDGE_LINES) {
-            const n = mesh_edit.edgeCount();
-            var e: u32 = 0;
-            while (e < n) : (e += 1) {
-                if (!mesh_edit.edgeIsBoundaryPub(e)) continue;
-                if (!mesh_edit.edgeInScopePub(e)) continue; // only the focused part's edges
-                // In edge mode a selected boundary edge draws bold-orange over the dim base.
-                const sel = mode == 2 and mesh_edit.edgeSelectedPub(e);
-                const ep = mesh_edit.edgeEndpointsPub(e);
-                const a = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(ep[0])) orelse continue;
-                const b = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(ep[1])) orelse continue;
-                if (sel) {
-                    overlayLine(a[0] + ox, a[1] + oy, b[0] + ox, b[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 4.0);
-                } else {
-                    overlayLine(a[0] + ox, a[1] + oy, b[0] + ox, b[1] + oy, OV_EDGE[0], OV_EDGE[1], OV_EDGE[2], 1.6);
+}
+/// Tile-boundary lines, the center panel's 16×16 fine sub-grid (1 u pitch), and the world
+/// axis lines from origin (X red, Y green, Z blue — the axisColor convention).
+fn drawStageLines(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const half = STAGE_TILE_M * @as(f32, @floatFromInt(STAGE_TILES)) * 0.5;
+    var i: u32 = 0;
+    while (i <= STAGE_TILES) : (i += 1) {
+        const t = -half + @as(f32, @floatFromInt(i)) * STAGE_TILE_M;
+        stageLine(cam, .{ t, 0, -half }, .{ t, 0, half }, STAGE_LINE, 1.4, ox, oy);
+        stageLine(cam, .{ -half, 0, t }, .{ half, 0, t }, STAGE_LINE, 1.4, ox, oy);
+    }
+    const ch = STAGE_TILE_M * 0.5; // center panel spans [-ch, ch]
+    const pitch = STAGE_TILE_M / @as(f32, @floatFromInt(STAGE_FINE_DIV));
+    var k: u32 = 1;
+    while (k < STAGE_FINE_DIV) : (k += 1) { // interior lines; the borders ARE tile lines
+        const t = -ch + @as(f32, @floatFromInt(k)) * pitch;
+        stageLine(cam, .{ t, 0, -ch }, .{ t, 0, ch }, STAGE_FINE_LINE, 1.0, ox, oy);
+        stageLine(cam, .{ -ch, 0, t }, .{ ch, 0, t }, STAGE_FINE_LINE, 1.0, ox, oy);
+    }
+    var a: i32 = 0;
+    while (a < 3) : (a += 1) {
+        const c = axisColor(a);
+        stageLine(cam, .{ 0, 0, 0 }, vmul(axisVec(a), STAGE_AXIS_M), .{ c[0], c[1], c[2], STAGE_AXIS_ALPHA }, 1.8, ox, oy);
+    }
+}
+/// Faces the current selection touches (any mode) — alloc'd, caller frees. Null when
+/// nothing is selected (or allocation fails), so callers can skip the lookup entirely.
+fn selectionFaceMaskAlloc(fc: u32) ?[]bool {
+    if (fc == 0) return null;
+    const mask = std.heap.c_allocator.alloc(bool, fc) catch return null;
+    if (mesh_edit.buildDeleteMask(mask) == 0) {
+        std.heap.c_allocator.free(mask);
+        return null;
+    }
+    return mask;
+}
+/// Face-mode wash (req_2618 gap B): every FRONT-facing in-scope triangle gets a subtle
+/// translucent overlay quad (selected faces a stronger orange). Pure overlay polys — the
+/// paint atlas and vertex colors are never touched, so nothing can bake (req_2611/2613).
+fn drawFaceTintOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const pos = model_paint.positions() orelse return;
+    const fc = model_paint.faceCount();
+    if (fc == 0 or fc > OV_MAX_FACE_TINT) return;
+    const mask = selectionFaceMaskAlloc(fc);
+    defer if (mask) |m| std.heap.c_allocator.free(m);
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        if (!mesh_edit.faceInScopePub(f)) continue;
+        const b = @as(usize, f) * 9;
+        if (b + 8 >= pos.len) break;
+        const p0: [3]f32 = .{ pos[b + 0], pos[b + 1], pos[b + 2] };
+        const p1: [3]f32 = .{ pos[b + 3], pos[b + 4], pos[b + 5] };
+        const p2: [3]f32 = .{ pos[b + 6], pos[b + 7], pos[b + 8] };
+        const n = vcross(vsub(p1, p0), vsub(p2, p0));
+        const cen = vmul(vadd(vadd(p0, p1), p2), 1.0 / 3.0);
+        if (vdot(n, vsub(cam.eye, cen)) <= 0) continue; // back-facing
+        const a = ovProject(cam, p0, ox, oy) orelse continue;
+        const bb = ovProject(cam, p1, ox, oy) orelse continue;
+        const cc = ovProject(cam, p2, ox, oy) orelse continue;
+        const selected = if (mask) |m| m[f] else false;
+        const col = if (selected) OV_FACE_TINT_SEL else OV_FACE_TINT;
+        polys.drawTri(a[0], a[1], bb[0], bb[1], cc[0], cc[1], col[0], col[1], col[2], col[3]);
+    }
+}
+const FaceDotAcc = struct { cen: [3]f32, nrm: [3]f32, w: f32, sel: bool };
+/// Face-mode centroid dots — the old studio's signature look: one small dot per AUTHORED
+/// face (a cube face reads as one dot, not two triangle dots), front-facing only.
+fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const pos = model_paint.positions() orelse return;
+    const fc = model_paint.faceCount();
+    if (fc == 0 or fc > OV_MAX_FACE_TINT) return;
+    const mask = selectionFaceMaskAlloc(fc);
+    defer if (mask) |m| std.heap.c_allocator.free(m);
+    var groups = std.AutoHashMapUnmanaged(u32, FaceDotAcc){};
+    defer groups.deinit(std.heap.c_allocator);
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        if (!mesh_edit.faceInScopePub(f)) continue;
+        const b = @as(usize, f) * 9;
+        if (b + 8 >= pos.len) break;
+        const p0: [3]f32 = .{ pos[b + 0], pos[b + 1], pos[b + 2] };
+        const p1: [3]f32 = .{ pos[b + 3], pos[b + 4], pos[b + 5] };
+        const p2: [3]f32 = .{ pos[b + 6], pos[b + 7], pos[b + 8] };
+        const n = vcross(vsub(p1, p0), vsub(p2, p0));
+        const cen = vmul(vadd(vadd(p0, p1), p2), 1.0 / 3.0);
+        const selected = if (mask) |m| m[f] else false;
+        const grp = model_source.faceGroupOf(f);
+        if (grp == model_source.NO_FACE_GROUP) {
+            // Ungrouped soup: a dot per front-facing triangle.
+            if (vdot(n, vsub(cam.eye, cen)) <= 0) continue;
+            const sp = ovProject(cam, cen, ox, oy) orelse continue;
+            if (selected) {
+                overlayDot(sp[0], sp[1], OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], OV_FACE_DOT_SEL_PX);
+            } else {
+                overlayDot(sp[0], sp[1], OV_FACE_DOT[0], OV_FACE_DOT[1], OV_FACE_DOT[2], OV_FACE_DOT_PX);
+            }
+            continue;
+        }
+        // Authored face: accumulate an area-weighted centroid across the group's tris.
+        const w = @sqrt(vdot(n, n)); // 2 × tri area
+        const g = groups.getOrPut(std.heap.c_allocator, grp) catch continue;
+        if (!g.found_existing) g.value_ptr.* = .{ .cen = .{ 0, 0, 0 }, .nrm = .{ 0, 0, 0 }, .w = 0, .sel = false };
+        g.value_ptr.cen = vadd(g.value_ptr.cen, vmul(cen, w));
+        g.value_ptr.nrm = vadd(g.value_ptr.nrm, n);
+        g.value_ptr.w += w;
+        g.value_ptr.sel = g.value_ptr.sel or selected;
+    }
+    var it = groups.iterator();
+    while (it.next()) |entry| {
+        const acc = entry.value_ptr.*;
+        if (acc.w <= 1e-12) continue;
+        const cen = vmul(acc.cen, 1.0 / acc.w);
+        if (vdot(acc.nrm, vsub(cam.eye, cen)) <= 0) continue; // back-facing face
+        const sp = ovProject(cam, cen, ox, oy) orelse continue;
+        if (acc.sel) {
+            overlayDot(sp[0], sp[1], OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], OV_FACE_DOT_SEL_PX);
+        } else {
+            overlayDot(sp[0], sp[1], OV_FACE_DOT[0], OV_FACE_DOT[1], OV_FACE_DOT[2], OV_FACE_DOT_PX);
+        }
+    }
+}
+/// The model's BOUNDARY edges as real lines (Blender/Blockbench style) — triangulation
+/// diagonals stay hidden (req_2367). Vertex/edge modes draw them at full presence; face
+/// mode gets a dimmer pass so authored faces read (and loop-cut previews show, req_2625).
+/// While a loop-cut session is live, edges lying in a previewed cut plane accent bright.
+fn drawEdgeOverlay(cam: model_paint.Camera, mode: u8, ox: f32, oy: f32) void {
+    if (mesh_edit.boundaryEdgeCount() > OV_MAX_EDGE_LINES) return;
+    var lc_axis: i32 = -1;
+    var lc_eps: f32 = 1e-4;
+    var lc_planes: []const f32 = &.{};
+    if (g_lc) |*sp| {
+        if (sp.last_plane_count > 0) {
+            const d: usize = @min(sp.last_dir, 1);
+            lc_axis = sp.axes[d];
+            lc_eps = @max(1e-4, (sp.hi[d] - sp.lo[d]) * 1e-3);
+            lc_planes = sp.last_planes[0..sp.last_plane_count];
+        }
+    }
+    const n = mesh_edit.edgeCount();
+    var e: u32 = 0;
+    while (e < n) : (e += 1) {
+        if (!mesh_edit.edgeIsBoundaryPub(e)) continue;
+        if (!mesh_edit.edgeInScopePub(e)) continue; // only the focused part's edges
+        const ep = mesh_edit.edgeEndpointsPub(e);
+        const wa = mesh_edit.vertPosPub(ep[0]);
+        const wb = mesh_edit.vertPosPub(ep[1]);
+        const a = ovProject(cam, wa, ox, oy) orelse continue;
+        const b = ovProject(cam, wb, ox, oy) orelse continue;
+        // In edge mode a selected boundary edge draws bold-orange over the dim base.
+        if (mode == 2 and mesh_edit.edgeSelectedPub(e)) {
+            overlayLine(a[0], a[1], b[0], b[1], OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 4.0);
+            continue;
+        }
+        if (lc_axis >= 0) {
+            const ai: usize = @intCast(lc_axis);
+            const ca = wa[ai];
+            const cb = wb[ai];
+            if (@abs(ca - cb) <= lc_eps) {
+                var on_plane = false;
+                for (lc_planes) |pl| {
+                    if (@abs(ca - pl) <= lc_eps) {
+                        on_plane = true;
+                        break;
+                    }
+                }
+                if (on_plane) {
+                    overlayLine(a[0], a[1], b[0], b[1], OV_LC_ACCENT[0], OV_LC_ACCENT[1], OV_LC_ACCENT[2], 3.0);
+                    continue;
                 }
             }
         }
+        const w: f32 = if (mode == 3) 1.2 else 1.6;
+        overlayLine(a[0], a[1], b[0], b[1], OV_EDGE[0], OV_EDGE[1], OV_EDGE[2], w);
     }
+}
+/// While a loop-cut popup session is live: a translate-style handle on the MIDDLE cut
+/// plane, anchored at the selection's centroid — the future drag surface for the offset
+/// (drawing only for now; wiring the drag needs the cart-side popup, req_2625 gap DD).
+fn drawLoopCutOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const sp: *const LcSession = if (g_lc) |*p| p else return;
+    if (sp.last_plane_count == 0) return;
+    const d: usize = @min(sp.last_dir, 1);
+    const axis: i32 = sp.axes[d];
+    var p = sp.sel_center;
+    p[@intCast(axis)] = sp.last_planes[sp.last_plane_count / 2];
+    const half_w = worldUnitsPerPixel(cam, p) * OV_LC_HANDLE_PX;
+    const a3 = vadd(p, vmul(axisVec(axis), -half_w));
+    const b3 = vadd(p, vmul(axisVec(axis), half_w));
+    const pa = ovProject(cam, a3, ox, oy) orelse return;
+    const pb = ovProject(cam, b3, ox, oy) orelse return;
+    const c = axisColor(axis);
+    overlayLine(pa[0], pa[1], pb[0], pb[1], c[0], c[1], c[2], 4.0);
+    overlayDot(pa[0], pa[1], c[0], c[1], c[2], 6);
+    overlayDot(pb[0], pb[1], c[0], c[1], c[2], 6);
+    const pc = ovProject(cam, p, ox, oy) orelse return;
+    overlayDot(pc[0], pc[1], OV_LC_ACCENT[0], OV_LC_ACCENT[1], OV_LC_ACCENT[2], 5);
+}
+
+/// Draw the editor overlay — the modeling stage (tile panels + grid + axes), mode
+/// dressing (face wash/centroid dots, edge lines, vertex dots), loop-cut accents, the
+/// gizmo, and the marquee — as screen-space capsules/polys projected with the EXACT
+/// last-drawn camera, so every mark sits on the pixel its raycast shoots back through.
+/// Capsules/polys ride the 2D draw-command z-order, so emitting right after the Scene3D
+/// composite lands them on top; scissor-segment breaks order the fill layers under the
+/// line layers. (ox,oy) is the viewport origin (0,0 full-window). Lives here, not in
+/// mesh_edit, to keep that GPU-free.
+pub fn drawEditorOverlay(ox: f32, oy: f32) void {
+    if (!g_me_capture) return;
+    if (!model_paint.hasTarget() or g_paint_vp_w <= 1 or g_paint_vp_h <= 1) {
+        drawMarqueeOverlay();
+        return;
+    }
+    // Only the pane that HOLDS the edit target gets the furniture: the engine calls this
+    // for every large Scene3D pane, and projecting the target camera through another
+    // pane's origin would smear the stage/dots across it.
+    if (@abs(ox - g_paint_vp_x) > 0.5 or @abs(oy - g_paint_vp_y) > 0.5) return;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const mode = meshEditModeRaw();
+    // Clip everything to the pane, and use segment breaks to layer polys under capsules.
+    core.pushScissor(ox, oy, g_paint_vp_w, g_paint_vp_h);
+    // Layer 1 (polys): the tile-panel fills. Always drawn in the model doc view — the
+    // stage is the scale reference, selection or not (req_2618 A / req_2623).
+    drawStagePanels(cam, ox, oy);
+    overlayLayerBreak(ox, oy);
+    // Layer 2 (capsules): tile grid + fine center sub-grid + world axes.
+    drawStageLines(cam, ox, oy);
+    overlayLayerBreak(ox, oy);
+    // Layer 3 (polys): face-mode translucent wash.
+    if (mode == 3) drawFaceTintOverlay(cam, ox, oy);
+    overlayLayerBreak(ox, oy);
+    // Layer 4 (capsules): edges, dots, loop-cut accents, gizmo, marquee.
+    if ((mode == 1 or mode == 2 or mode == 3) and mesh_edit.ensureTopologyPub()) {
+        drawEdgeOverlay(cam, mode, ox, oy);
+    }
+    if (mode == 3) drawFaceDotsOverlay(cam, ox, oy);
     if (mode == 1) { // vertex: every vert as a haloed dot, selected ones orange + bigger
         const n = mesh_edit.vertCount();
         const draw_all = n <= OV_MAX_VERT_DOTS;
@@ -2636,15 +3024,18 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
             if (!mesh_edit.vertInScopePub(i)) continue; // only the focused part's verts
             const selected = mesh_edit.vertSelectedPub(i);
             if (!selected and !draw_all) continue;
-            const sp = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, mesh_edit.vertPosPub(i)) orelse continue;
+            const sp = ovProject(cam, mesh_edit.vertPosPub(i), ox, oy) orelse continue;
             if (selected) {
-                overlayDot(sp[0] + ox, sp[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 13);
+                overlayDot(sp[0], sp[1], OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 13);
             } else {
-                overlayDot(sp[0] + ox, sp[1] + oy, OV_VERT[0], OV_VERT[1], OV_VERT[2], 8);
+                overlayDot(sp[0], sp[1], OV_VERT[0], OV_VERT[1], OV_VERT[2], 8);
             }
         }
     }
+    drawLoopCutOverlay(cam, ox, oy);
     drawGizmoOverlay(cam, ox, oy);
+    drawMarqueeOverlay();
+    core.popScissor();
 }
 /// Marquee (rubber-band) select every element inside the screen rect (Alt+drag).
 pub fn meshEditBox(x0: f32, y0: f32, x1: f32, y1: f32, additive: bool) i32 {
