@@ -2557,6 +2557,7 @@ fn installJsExpr(comptime expr_fmt: []const u8, id: u32) ?[*:0]const u8 {
 
 fn applyHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
     node.handlers.js_on_press = null;
+    node.handlers.js_on_middle_click = null;
     node.handlers.js_on_mouse_down = null;
     node.handlers.js_on_mouse_move = null;
     node.handlers.js_on_mouse_up = null;
@@ -2576,6 +2577,12 @@ fn applyHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
     }
     if (cmdHasAnyHandlerName(cmd, &.{ "onMouseDown", "onPointerDown", "onPressIn" })) {
         node.handlers.js_on_mouse_down = installJsExpr("__dispatchEvent({d},'onMouseDown')\x00", id);
+    }
+    // Middle button: the engine's SDL_BUTTON_MIDDLE branch dispatches this
+    // directly (it never enters the LEFT-only capture pipeline) — carts that
+    // need a middle-drag poll getMouseButtons() from the handler (req_2704).
+    if (cmdHasHandlerName(cmd, "onMiddleClick")) {
+        node.handlers.js_on_middle_click = installJsExpr("__dispatchEvent({d},'onMiddleClick')\x00", id);
     }
     if (cmdHasAnyHandlerName(cmd, &.{ "onMouseMove", "onPointerMove" })) {
         node.handlers.js_on_mouse_move = installJsExpr("__dispatchEvent({d},'onMouseMove')\x00", id);
