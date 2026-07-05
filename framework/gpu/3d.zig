@@ -4225,7 +4225,13 @@ const GROUND_POOL = 128; // distinct D buffers (≈ max simultaneously-drawn gro
 // Was 16 — a city's worth of painted chunks (one ground mesh each) blew past it and
 // every chunk past the 16th was silently dropped, so roads vanished / stopped at a
 // chunk seam (PERTILEROAD-0814). 128 × 20000 f32 ≈ 10 MB of pooled storage buffers.
-const GROUND_DATA_FLOATS = 20000; // cap per chunk: 130*130 cells + palette + ribbon, ample
+// Cap per chunk, sized to the map engine's D layout v3 worst case (req_2697):
+// 6 header + 3 palettes × 256 × 3 rgb (2304) + 256 bindings × 4 (1024) +
+// 120×120 packed cells (14400) + 120×120 per-cell materials (14400) = 32134.
+// The old 20000 cap silently cut the material tail — paint took on exactly the
+// first band of a chunk and stopped at a perfect line. 128 × 34000 f32 ≈ 17 MB.
+const GROUND_DATA_FLOATS = 34000;
+var g_ground_truncate_warned: bool = false;
 var g_ground_data_buf: [GROUND_POOL]?*wgpu.Buffer = [_]?*wgpu.Buffer{null} ** GROUND_POOL;
 var g_ground_data_bg: [GROUND_POOL]?*wgpu.BindGroup = [_]?*wgpu.BindGroup{null} ** GROUND_POOL;
 // DEDICATED per-instance buffer for the ground-formula pass (GROUNDSTARVE-0622,
@@ -7158,6 +7164,14 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                 if (g_ground_data_buf[pool] == null or g_ground_data_bg[pool] == null) continue;
                 if (child.scene3d_ground_data) |d| {
                     const n = @min(d.len, GROUND_DATA_FLOATS);
+                    // Truncation is LOUD (req_2697): a D stream past the pooled buffer
+                    // cap renders as "paint works up to a perfect line, then defaults" —
+                    // never let that hunt start silently again. Grow GROUND_DATA_FLOATS
+                    // when the map engine's layout grows.
+                    if (d.len > GROUND_DATA_FLOATS and !g_ground_truncate_warned) {
+                        g_ground_truncate_warned = true;
+                        std.debug.print("[r3d-ground] ERROR: ground D stream is {d} floats but the pooled buffer caps at {d} — the tail (per-cell materials) is CUT and painted looks stop at a hard line. Raise GROUND_DATA_FLOATS in 3d.zig.\n", .{ d.len, GROUND_DATA_FLOATS });
+                    }
                     // req_0842: this upload once computed its size as `n * @sizeOf(f32)`
                     // WITHOUT a wide cast — for n=14528 that overflowed to 25344 instead
                     // of 58112, truncating the write so cells past ~6336 read 0 = water =
