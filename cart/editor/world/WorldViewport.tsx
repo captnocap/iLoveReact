@@ -362,9 +362,39 @@ export default function WorldViewport(props: {
     // loop tears down only on real disarm/tool change — not on every unrelated re-render.
   }, [armedHover, resolveSnap]);
 
-  // ── input: left-drag rotates, shift-drag grabs the map, wheel zooms to the
-  // cursor, a click (no travel) places the armed piece. Paint clicks never reach
-  // here — the host claims them while the paint tool is armed.
+  // ── input: middle-drag rotates (matching the mesh studio — req_2704),
+  // shift-drag grabs the map, wheel zooms to the cursor, a click (no travel)
+  // places the armed piece. Paint clicks never reach here — the host claims
+  // LEFT while the paint tool is armed, which is exactly why the rotate lives
+  // on MIDDLE: you can orbit mid-painting without disarming the brush.
+  //
+  // The engine dispatches middle only as a one-shot onMiddleClick (the JS
+  // capture pipeline is LEFT-only), so the drag is a self-terminating ~16ms
+  // poll (the panStep shape): rotate by the cursor's x-travel until the host's
+  // getMouseButtons() mask says the middle button lifted.
+  const MMB_MASK = 2; // SDL button mask bit for the middle button
+  const orbitTimerRef = useRef<any>(null);
+  const orbitLastXRef = useRef(0);
+  const orbitStep = useCallback(() => {
+    const held = (Number(g.getMouseButtons?.() ?? 0) & MMB_MASK) !== 0;
+    if (!held) { orbitTimerRef.current = null; return; }
+    const x = Number(g.getMouseX?.() ?? orbitLastXRef.current);
+    const dx = x - orbitLastXRef.current;
+    if (dx) {
+      orbitLastXRef.current = x;
+      stage.rotateBy(dx * 0.3);
+      pushCamera();
+      reprojectOverlays();
+    }
+    orbitTimerRef.current = setTimeout(orbitStep, 16);
+  }, [stage, pushCamera, reprojectOverlays]);
+  const onMiddleDown = useCallback(() => {
+    orbitLastXRef.current = Number(g.getMouseX?.() ?? 0);
+    if (!orbitTimerRef.current) orbitTimerRef.current = setTimeout(orbitStep, 16);
+  }, [orbitStep]);
+  useEffect(() => () => {
+    if (orbitTimerRef.current) { clearTimeout(orbitTimerRef.current); orbitTimerRef.current = null; }
+  }, []);
   const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; pan: boolean } | null>(null);
   const local = useCallback((e: any) => {
     const r = rectRef.current;
@@ -381,19 +411,20 @@ export default function WorldViewport(props: {
     const d = dragRef.current;
     if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
       d.turned = true;
+      // Rotation moved to middle-drag (req_2704); a plain left drag is inert —
+      // it only marks `turned` so the release isn't mistaken for a click.
       if (d.pan) {
         stage.dragPan(d.x, d.y0, p.x, p.y, rectRef.current);
         d.y0 = p.y;
-      } else {
-        stage.rotateBy((p.x - d.x) * 0.3);
+        d.x = p.x;
+        pushCamera();
+        // Armed → setSnap re-renders (ghost follows). Not armed → force a re-project so the
+        // selection box stays glued to its piece as the camera rotates/pans (req_2555).
+        if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
+        else reprojectOverlays();
+        return;
       }
       d.x = p.x;
-      pushCamera();
-      // Armed → setSnap re-renders (ghost follows). Not armed → force a re-project so the
-      // selection box stays glued to its piece as the camera rotates/pans (req_2555).
-      if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
-      else reprojectOverlays();
-      return;
     }
     if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
   }, [local, stage, pushCamera, resolveSnap, reprojectOverlays]);
@@ -511,6 +542,7 @@ export default function WorldViewport(props: {
         onMouseDown={onDown}
         onMouseMove={onMove}
         onMouseUp={onUp}
+        onMiddleClick={onMiddleDown}
         onScroll={onScroll}
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
       />

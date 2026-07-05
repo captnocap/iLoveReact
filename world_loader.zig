@@ -6939,7 +6939,9 @@ fn paintGroundHitAt(runtime: *Runtime, mx: f32, my: f32) ?[3]f32 {
 // GENUINELY deep cell (≥ SHORE_DEEP) sits within SHORE_R grid steps — the deep
 // body keeps its shoreline margin, isolated barely-negative film drops, and the
 // height-0 contour reads as clean beach. Wet surface = bed + depth; dry cells
-// drop to base (deepest wet bed − tuck) so the skirt closes under the basin.
+// tuck just UNDER the local terrain (bed − tuck) so the sheet edge dives into
+// the bank it meets — one global basin base left a visible gap against raised
+// shores and a floating slab over downhill ground (req_2704).
 const PAINT_SHORE_DEEP_M: f32 = 0.5;
 const PAINT_SHORE_KEEP_M: f32 = 0.5;
 const PAINT_SHORE_R: i32 = 2;
@@ -6981,13 +6983,8 @@ fn paintWaterSurface(raw_depths: []const f32, beds: []const f32, depths: []f32, 
         if (keep) wet = true;
     }
     if (!wet) return false;
-    var deepest: f32 = 0;
     for (depths, 0..) |d, i| {
-        if (d > 0) deepest = @min(deepest, beds[i]);
-    }
-    const base = deepest - PAINT_WATER_TUCK_M;
-    for (depths, 0..) |d, i| {
-        surface[i] = if (d > 0) beds[i] + d else base;
+        surface[i] = if (d > 0) beds[i] + d else beds[i] - PAINT_WATER_TUCK_M;
     }
     return true;
 }
@@ -7102,6 +7099,19 @@ fn applyPaintLayer(runtime: *Runtime) void {
             runtime.paint_hover = paintGroundHitAt(runtime, mx, my);
         } else {
             runtime.paint_hover = null;
+        }
+    } else if (armed and runtime.paint_stroking) {
+        // Mid-stroke, the WORLD can move under a held cursor (WASD pans the
+        // iso camera) without a single motion event — re-stamp from the
+        // per-frame pose so the brush keeps painting along the pan
+        // (req_2704). strokeMove dedups per stamp cell, so a stationary
+        // cursor over a stationary camera deposits nothing new.
+        var mx: f32 = 0;
+        var my: f32 = 0;
+        _ = c.SDL_GetMouseState(&mx, &my);
+        if (paintGroundHitAt(runtime, mx, my)) |hit| {
+            runtime.paint_hover = hit;
+            map_paint.strokeMove(hit[0], hit[2]);
         }
     } else if (!armed) {
         runtime.paint_hover = null;
@@ -7331,8 +7341,45 @@ fn lerpF64(a: f64, b: f64, t: f64) f64 {
 /// scattered blade can sit a metre above that sample and swallow it whole —
 /// the bare-hillside bug (req_2699). The delta keeps any in-row y offset
 /// (flower stems, frond fans) intact.
-fn seatRowOnTerrain(row: *[foliage.STRIDE]f32, cell_top: f64) void {
-    row[1] += map_paint.heightAt(row[0], row[2]) - @as(f32, @floatCast(cell_top));
+fn seatRowOnTerrain(row: *[foliage.STRIDE]f32, cell_top: f64, floor: ?[]const f32, chunk: *const map_chunks.Chunk) void {
+    row[1] += paintGroundY(floor, chunk, row[0], row[2]) - @as(f32, @floatCast(cell_top));
+}
+
+/// Ground height on the surface the painted ground RENDERS — the chunk's
+/// 121-grid abs-max floor downsample (the same grid the collider walks).
+/// heightAt's fine 241-grid bilinear can sit up to half a metre BELOW the
+/// rendered slope, which drowned 0.3 m grass while 1.6 m bush poked through
+/// (req_2704). Falls back to heightAt while the chunk has no mirrored floor.
+fn paintGroundY(floor: ?[]const f32, chunk: *const map_chunks.Chunk, wx: f32, wz: f32) f32 {
+    const f = floor orelse return map_paint.heightAt(wx, wz);
+    const res = map_paint.FLOOR_RES;
+    const cell = map_chunks.CHUNK_METERS / @as(f32, @floatFromInt(res - 1));
+    const max_i: f32 = @floatFromInt(res - 1);
+    const gx = @max(0, @min(max_i, (wx - chunk.minX()) / cell));
+    const gz = @max(0, @min(max_i, (wz - chunk.minZ()) / cell));
+    const x0: usize = @intFromFloat(@floor(gx));
+    const z0: usize = @intFromFloat(@floor(gz));
+    const x1 = @min(x0 + 1, res - 1);
+    const z1 = @min(z0 + 1, res - 1);
+    const tx = gx - @floor(gx);
+    const tz = gz - @floor(gz);
+    const h00 = f[z0 * res + x0];
+    const h10 = f[z0 * res + x1];
+    const h01 = f[z1 * res + x0];
+    const h11 = f[z1 * res + x1];
+    const a = h00 + (h10 - h00) * tx;
+    const b = h01 + (h11 - h01) * tx;
+    return a + (b - a) * tz;
+}
+
+/// The mirrored render-floor slice for a painted chunk, if it has a slot.
+fn paintSlotFloorFor(runtime: *Runtime, cx: i32, cz: i32) ?[]const f32 {
+    for (0..MAX_PAINT_SLOTS) |i| {
+        if (runtime.paint_slot_used[i] and runtime.paint_slot_chunk[i][0] == cx and runtime.paint_slot_chunk[i][1] == cz) {
+            return runtime.paint_slot_floor[i];
+        }
+    }
+    return null;
 }
 
 /// Append one 12-float foliage row; false = family budget full.
@@ -7379,6 +7426,7 @@ fn regenPaintFoliage(runtime: *Runtime) void {
 
     for (map_chunks.slots()) |maybe| {
         const chunk = maybe orelse continue;
+        const slot_floor = paintSlotFloorFor(runtime, chunk.cx, chunk.cz);
         var lz: i32 = 0;
         while (lz < map_chunks.CHUNK_TILES) : (lz += 1) {
             var lx: i32 = 0;
@@ -7391,7 +7439,7 @@ fn regenPaintFoliage(runtime: *Runtime) void {
                     const spec = map_paint.floraSpec(kind) orelse continue;
                     const wx = chunk.minX() + @as(f32, @floatFromInt(lx)) + 0.5;
                     const wz = chunk.minZ() + @as(f32, @floatFromInt(lz)) + 0.5;
-                    const top: f64 = map_paint.heightAt(wx, wz);
+                    const top: f64 = paintGroundY(slot_floor, chunk, wx, wz);
                     const gx = chunk.cx * map_chunks.CHUNK_TILES + lx;
                     const gz = chunk.cz * map_chunks.CHUNK_TILES + lz;
                     const cell_key: u32 = (@as(u32, @bitCast(gx)) *% 0x9E3779B1) ^
@@ -7416,7 +7464,7 @@ fn regenPaintFoliage(runtime: *Runtime) void {
                             const span: f32 = @floatCast(radius / PALM_TRUNK_UNIT_RADIUS);
                             // Trunk + crown ride ONE ground delta (the trunk's
                             // footing) so bark and fronds stay attached on slopes.
-                            const trunk_delta = map_paint.heightAt(@floatCast(px), @floatCast(pz)) - @as(f32, @floatCast(top));
+                            const trunk_delta = paintGroundY(slot_floor, chunk, @floatCast(px), @floatCast(pz)) - @as(f32, @floatCast(top));
                             if (!pushFoliageRow(trunk, &trunk_n, PAINT_TRUNK_ROW_CAP, .{
                                 @floatCast(px),        @as(f32, @floatCast(top)) + trunk_delta, @floatCast(pz),
                                 0,                     @floatCast(lean),          0,
@@ -7436,7 +7484,7 @@ fn regenPaintFoliage(runtime: *Runtime) void {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
                                 var row = foliage.flowerRow(&foliage.FLOWER, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
-                                seatRowOnTerrain(&row, top);
+                                seatRowOnTerrain(&row, top, slot_floor, chunk);
                                 if (!pushFoliageRow(flowers, &flower_n, PAINT_FLOWER_ROW_CAP, row)) flower_full = true;
                             }
                         },
@@ -7444,7 +7492,7 @@ fn regenPaintFoliage(runtime: *Runtime) void {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
                                 var row = foliage.bladeRow(&foliage.BUSH, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
-                                seatRowOnTerrain(&row, top);
+                                seatRowOnTerrain(&row, top, slot_floor, chunk);
                                 if (!pushFoliageRow(bush, &bush_n, PAINT_BUSH_ROW_CAP, row)) bush_full = true;
                             }
                         },
@@ -7452,7 +7500,7 @@ fn regenPaintFoliage(runtime: *Runtime) void {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
                                 var row = foliage.bladeRow(&foliage.GRASS, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
-                                seatRowOnTerrain(&row, top);
+                                seatRowOnTerrain(&row, top, slot_floor, chunk);
                                 if (!pushFoliageRow(grass, &grass_n, PAINT_GRASS_ROW_CAP, row)) grass_full = true;
                             }
                         },

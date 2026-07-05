@@ -943,6 +943,148 @@ fn hostMeshPaintSession(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     state.markDirty();
 }
 
+// ── Stroke journal + paint layers (req_2672) ─────────────────────────────────────────
+
+/// __mesh_paint_stroke_end() → 1 when an open stroke committed as one undo unit, else 0.
+/// The cart calls this on pointer-up/leave; a unit auto-opens on the first recorded dab.
+fn hostMeshPaintStrokeEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, if (scene3d.paintStrokeEnd()) 1 else 0);
+}
+
+/// __mesh_paint_undo() / __mesh_paint_redo() → JSON {"ok","label","undo","redo"} (the
+/// __mesh_undo style). Drops/re-appends one stroke-journal unit and RE-RUNS the stroke
+/// program onto the atlas — geometry never changes, so no mesh key rides the answer.
+fn hostMeshPaintUndoRedo(info: v8.FunctionCallbackInfo, redo: bool) void {
+    const label = if (redo) scene3d.paintRedoLabel() else scene3d.paintUndoLabel();
+    const ok = if (redo) scene3d.paintStrokeRedo() else scene3d.paintStrokeUndo();
+    if (!ok) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    state.markDirty();
+    const depths = scene3d.paintHistoryCounts();
+    var buf: [192]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"label\":\"{s}\",\"undo\":{d},\"redo\":{d}}}", .{ label, depths[0], depths[1] }) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, json);
+}
+fn hostMeshPaintUndo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    hostMeshPaintUndoRedo(v8.FunctionCallbackInfo.initFromV8(info_c), false);
+}
+fn hostMeshPaintRedo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    hostMeshPaintUndoRedo(v8.FunctionCallbackInfo.initFromV8(info_c), true);
+}
+
+/// __mesh_paint_history() → JSON {"undo","redo","live","label","redoLabel"} — the stroke
+/// journal's depths + top labels, and whether the paint SESSION is live (the cart's
+/// undo routing + dock badge read this while painting).
+fn hostMeshPaintHistory(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const depths = scene3d.paintHistoryCounts();
+    var buf: [256]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"undo\":{d},\"redo\":{d},\"live\":{d},\"label\":\"{s}\",\"redoLabel\":\"{s}\"}}", .{
+        depths[0],
+        depths[1],
+        @as(u8, if (scene3d.paintSessionActive()) 1 else 0),
+        scene3d.paintUndoLabel(),
+        scene3d.paintRedoLabel(),
+    }) catch "{\"undo\":0,\"redo\":0,\"live\":0,\"label\":\"\",\"redoLabel\":\"\"}";
+    setReturnString(info, json);
+}
+
+fn appendJsonEscaped(out: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) !void {
+    for (s) |ch| {
+        switch (ch) {
+            '"' => try out.appendSlice(a, "\\\""),
+            '\\' => try out.appendSlice(a, "\\\\"),
+            else => {
+                if (ch < 0x20) continue; // control chars have no place in a layer name
+                try out.append(a, ch);
+            },
+        }
+    }
+}
+
+// The one layer-list serializer: {"ok":1,"active":id,"layers":[{...bottom→top...}]}.
+fn writePaintLayersJson(info: v8.FunctionCallbackInfo) void {
+    const alloc_ = std.heap.c_allocator;
+    if (scene3d.paintLayerCount() == 0) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    var out: std.ArrayList(u8) = .{};
+    defer out.deinit(alloc_);
+    const build = struct {
+        fn run(o: *std.ArrayList(u8), a: std.mem.Allocator) !void {
+            const w = o.writer(a);
+            try w.print("{{\"ok\":1,\"active\":{d},\"layers\":[", .{scene3d.paintActiveLayer()});
+            var i: usize = 0;
+            while (i < scene3d.paintLayerCount()) : (i += 1) {
+                const l = scene3d.paintLayerAt(i);
+                try w.print("{s}{{\"id\":{d},\"name\":\"", .{ if (i == 0) "" else ",", l.id });
+                try appendJsonEscaped(o, a, l.name);
+                try w.print("\",\"visible\":{d},\"strokes\":{d}}}", .{ @as(u8, if (l.visible) 1 else 0), l.strokes });
+            }
+            try w.writeAll("]}");
+        }
+    };
+    build.run(&out, alloc_) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    setReturnString(info, out.items);
+}
+
+/// __mesh_paint_layers() → the layer list JSON above, or {"ok":0} before any painting.
+fn hostMeshPaintLayers(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    writePaintLayersJson(v8.FunctionCallbackInfo.initFromV8(info_c));
+}
+
+/// __mesh_paint_layer_op(op, id, arg) → the refreshed layer list JSON ({"ok":0} on a
+/// refused op). Ops: "add" (id/arg unused) · "delete" id · "up"/"down" id (reorder one
+/// step) · "visible" id arg(0|1) · "active" id · "rename" id arg(name) · "mergedown" id.
+/// Structural ops journal as stroke-journal units; visibility/order/delete/merge re-run
+/// the program (visibility off = skip that layer's strokes — the ruling's replay law).
+fn hostMeshPaintLayerOp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const op = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    defer std.heap.c_allocator.free(op);
+    const id: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
+    var ok = false;
+    if (std.mem.eql(u8, op, "add")) {
+        ok = scene3d.paintLayerAdd() != 0;
+    } else if (std.mem.eql(u8, op, "delete")) {
+        ok = scene3d.paintLayerDelete(id);
+    } else if (std.mem.eql(u8, op, "up")) {
+        ok = scene3d.paintLayerMove(id, true);
+    } else if (std.mem.eql(u8, op, "down")) {
+        ok = scene3d.paintLayerMove(id, false);
+    } else if (std.mem.eql(u8, op, "visible")) {
+        ok = scene3d.paintLayerSetVisible(id, (argToI32(info, 2) orelse 0) != 0);
+    } else if (std.mem.eql(u8, op, "active")) {
+        ok = scene3d.paintLayerSetActive(id);
+    } else if (std.mem.eql(u8, op, "rename")) {
+        if (argToStringAlloc(info, 2)) |name| {
+            defer std.heap.c_allocator.free(name);
+            ok = scene3d.paintLayerRename(id, name);
+        }
+    } else if (std.mem.eql(u8, op, "mergedown")) {
+        ok = scene3d.paintLayerMergeDown(id);
+    }
+    if (!ok) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    state.markDirty();
+    writePaintLayersJson(info);
+}
+
 /// __mesh_set_part_ranges(u32Pairs) → 1|0. Adopt the outliner's PART ranges — flattened
 /// [lo,hi) authored-group pairs, sorted, non-overlapping. The weld keys on (position, part)
 /// so coincident verts in different parts never merge and edits can't bleed across stacked
@@ -1724,6 +1866,14 @@ fn hostGetMouseRightDown(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnNumber(info, if (mouse_state.g_mouse_right_down) 1 else 0);
 }
 
+/// Live SDL button mask (1 left · 2 middle · 4 right) — lets a cart poll a
+/// held middle-drag, which never enters the LEFT-only JS capture pipeline.
+fn hostGetMouseButtons(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const mask = c.SDL_GetMouseState(null, null);
+    setReturnNumber(info, @floatFromInt(mask));
+}
+
 fn hostMouseCapture(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const enabled = (argToI32(info, 0) orelse 0) != 0;
@@ -2279,6 +2429,12 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_scope", hostMeshEditScope);
     v8_runtime.registerHostFn("__mesh_edit_scope_ranges", hostMeshEditScopeRanges);
     v8_runtime.registerHostFn("__mesh_paint_session", hostMeshPaintSession);
+    v8_runtime.registerHostFn("__mesh_paint_stroke_end", hostMeshPaintStrokeEnd);
+    v8_runtime.registerHostFn("__mesh_paint_undo", hostMeshPaintUndo);
+    v8_runtime.registerHostFn("__mesh_paint_redo", hostMeshPaintRedo);
+    v8_runtime.registerHostFn("__mesh_paint_history", hostMeshPaintHistory);
+    v8_runtime.registerHostFn("__mesh_paint_layers", hostMeshPaintLayers);
+    v8_runtime.registerHostFn("__mesh_paint_layer_op", hostMeshPaintLayerOp);
     v8_runtime.registerHostFn("__mesh_set_part_ranges", hostMeshSetPartRanges);
     v8_runtime.registerHostFn("__mesh_part_ranges", hostMeshPartRanges);
     v8_runtime.registerHostFn("__model_paint_group_range", hostModelPaintGroupRange);
@@ -2318,6 +2474,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("getMouseY", hostGetMouseY);
     v8_runtime.registerHostFn("getMouseDown", hostGetMouseDown);
     v8_runtime.registerHostFn("getMouseRightDown", hostGetMouseRightDown);
+    v8_runtime.registerHostFn("getMouseButtons", hostGetMouseButtons);
     v8_runtime.registerHostFn("__mouse_capture", hostMouseCapture);
     v8_runtime.registerHostFn("__mouse_delta", hostMouseDelta);
     v8_runtime.registerHostFn("__input_unfocus", hostInputUnfocus);

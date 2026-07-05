@@ -179,6 +179,7 @@ fn hasHandlers(h: *const EventHandler) bool {
         h.on_scroll != null or
         h.js_on_scroll != null or
         h.on_right_click != null or
+        h.js_on_middle_click != null or
         h.js_on_mouse_down != null or
         h.js_on_mouse_move != null or
         h.js_on_mouse_up != null or
