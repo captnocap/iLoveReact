@@ -1330,6 +1330,42 @@ fn hostModelMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnNumber(info, 1);
 }
 
+/// __model_meshdoc_write(path) → 1 on success. The model DOCUMENT blob (RJMD v1) — the
+/// full editable state of the resident model, so a saved package reopens as the same
+/// multi-part document instead of re-arming its primitive seed (req_2753). Layout:
+/// header u32×6 [magic 'RJMD', version=1, vertCount, faceCount, hasGroups, rangeCount],
+/// then vertCount×8 f32 source verts, then faceCount u32 authored-face-group ids (when
+/// hasGroups=1), then rangeCount×2 u32 flattened [lo,hi) per-part group ranges. All
+/// little-endian, no padding. The editor's meshDoc.ts reader is the format's twin.
+fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
+    defer alloc.free(path);
+    const verts = model_source.verts() orelse return setReturnNumber(info, 0);
+    if (verts.len < 8) return setReturnNumber(info, 0);
+    const vert_count: u32 = @intCast(verts.len / 8);
+    const face_count: u32 = vert_count / 3;
+    const groups = model_source.faceGroups();
+    const ranges = model_source.partRanges();
+    const has_groups: u32 = if (groups != null and groups.?.len == face_count) 1 else 0;
+    const range_count: u32 = if (ranges) |r| @intCast(r.len / 2) else 0;
+    const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
+    defer alloc.free(pathz);
+    const file = std.fs.cwd().createFile(pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
+    defer file.close();
+    const header = [6]u32{ 0x444D4A52, 1, vert_count, face_count, has_groups, range_count };
+    file.writeAll(std.mem.sliceAsBytes(header[0..])) catch return setReturnNumber(info, 0);
+    file.writeAll(std.mem.sliceAsBytes(verts[0 .. @as(usize, vert_count) * 8])) catch return setReturnNumber(info, 0);
+    if (has_groups == 1) {
+        file.writeAll(std.mem.sliceAsBytes(groups.?[0..face_count])) catch return setReturnNumber(info, 0);
+    }
+    if (range_count > 0) {
+        file.writeAll(std.mem.sliceAsBytes(ranges.?)) catch return setReturnNumber(info, 0);
+    }
+    setReturnNumber(info, 1);
+}
+
 /// __model_atlas_base(mode, r, g, b) → 1. Set the atlas base TYPE — 0 Texture Template,
 /// 1 Solid Colour, 2 Blank — and re-lay it on the current unpainted atlas (req_2546).
 fn hostModelAtlasBase(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -2515,6 +2551,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__image_write_png", hostImageWritePng);
     v8_runtime.registerHostFn("__model_mesh_write", hostModelMeshWrite);
+    v8_runtime.registerHostFn("__model_meshdoc_write", hostModelMeshdocWrite);
     v8_runtime.registerHostFn("__model_atlas_base", hostModelAtlasBase);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);
     v8_runtime.registerHostFn("__model_paint_program_read", hostModelPaintProgramRead);

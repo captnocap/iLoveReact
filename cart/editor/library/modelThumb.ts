@@ -3,7 +3,7 @@
 // every model reads like a product shot — a phone booth and a bus both fill the
 // tile instead of one being a speck. The thumbnail itself is a static <Scene3D>
 // (ModelThumbnail.tsx); this module is the pure mesh + framing math it consumes.
-import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData } from '../data/hmscAssetCatalog';
+import { cookedMeshBlobData, cookedMeshRefForAsset, packageMeshDoc, storedModelMeshData } from '../data/hmscAssetCatalog';
 import type { ModelPackage } from '../data/types';
 
 // Cooked/studio meshes are interleaved [px,py,pz, nx,ny,nz, u,v] — 8 floats/vertex.
@@ -25,6 +25,15 @@ export type ThumbView = {
 /** Resolve a model to its resident triangle data, or null when only a file path
  *  / no geometry is available (the caller falls back to the colour swatch). */
 export function resolveModelMesh(model: ModelPackage): ThumbMesh | null {
+  // The package's saved meshdoc first (req_2753) — the tile shows the model as EDITED,
+  // not its primitive seed / colour swatch. The key carries a cheap content fingerprint:
+  // the thumb geometry interns by id (never evicted), so a re-save must mint a new key.
+  const doc = packageMeshDoc(model);
+  if (doc && doc.vertices.length >= STRIDE) {
+    const v = doc.vertices;
+    const stamp = `${v.length}:${Math.round((v[0] ?? 0) * 1e3)}:${Math.round((v[v.length - STRIDE] ?? 0) * 1e3)}`;
+    return { key: `pkgdoc:${model.id}:${stamp}`, vertices: v, count: Math.floor(v.length / STRIDE) };
+  }
   const cookedRef = model.viewerMeshRef
     ?? (model.sourceKind === 'cooked-asset' ? cookedMeshRefForAsset(cookedAssetId(model)) : null);
   if (cookedRef) {

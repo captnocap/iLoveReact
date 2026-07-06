@@ -2,7 +2,7 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
 import ModelView, { type PartRange } from './ModelView';
-import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData, primitiveMeshData, composeModelParts } from '../data/hmscAssetCatalog';
+import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData, primitiveMeshData, composeModelParts, packageMeshDoc } from '../data/hmscAssetCatalog';
 
 // The outliner's part handlers, threaded from AppFrame (which owns state). Split from the
 // live parts/active so Workspace + Stage can carry the stable handlers and Stage supplies
@@ -94,17 +94,36 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
   const composed = outliner ? composeModelParts(outliner.parts) : null;
 
   if (composed) {
+    // The mount SEED prefers the package's saved meshdoc over the parts' seed geometry
+    // (req_2753): parts are metadata + a group range — their .mesh only knows the shape
+    // they SPAWNED as, while every edit since lives in the host mesh, which save/autosave
+    // journals into mesh/doc.blob. Composing seeds on remount was the bug that reopened a
+    // touched-up model as bare primitives (and a restart, whose rows hydrate seedless from
+    // the package, composed to NOTHING). Never-saved docs have no meshdoc and keep the
+    // composed-seed mount. Hidden rows re-sync on the first eye toggle (the doc mounts all
+    // parts visible; visibility is a live host op, not mount state).
+    const doc = packageMeshDoc(model);
+    const mountDoc = doc && doc.vertices.length >= 8 ? doc : null;
     // Each part's group range → its outliner colour, so the viewer tints the parts on load.
-    const partColors = composed.ranges.map((r) => ({ lo: r.lo, hi: r.hi, color: outliner!.parts.find((p) => p.id === r.id)?.color ?? '#8fb6c9' }));
-    // The viewer is keyed on the MODEL id only (stable) — host-authoritative. The composed
-    // mesh is the SEED loaded once on mount; every later part op (add/hide/delete) mutates the
-    // host mesh in place (no remount, no JS recompose), so edits persist. A remount happens
-    // only on a real doc switch, which rebuilds the seed from the parts.
-    const modelView = composed.positions.length > 0 ? (
+    // Meshdoc ranges pair with rows by RANK (both ascend by lo — the parts.json contract).
+    const rowsByLo = outliner!.parts.slice().sort((a, b) => ((a.lo ?? Number.MAX_SAFE_INTEGER) - (b.lo ?? Number.MAX_SAFE_INTEGER)));
+    const partColors = mountDoc
+      ? mountDoc.ranges.map((r, i) => ({ lo: r.lo, hi: r.hi, color: rowsByLo[i]?.color ?? '#8fb6c9' }))
+      : composed.ranges.map((r) => ({ lo: r.lo, hi: r.hi, color: outliner!.parts.find((p) => p.id === r.id)?.color ?? '#8fb6c9' }));
+    // The viewer is keyed on the MODEL id only (stable) — host-authoritative. The seed
+    // (meshdoc or composed parts) is loaded once on mount; every later part op
+    // (add/hide/delete) mutates the host mesh in place (no remount, no JS recompose), so
+    // edits persist. A remount happens only on a real doc switch.
+    const seed = mountDoc
+      ? { key: model.id, name: model.name, vertices: mountDoc.vertices, count: Math.floor(mountDoc.vertices.length / 8), faceGroups: mountDoc.faceGroups ?? undefined, partColors }
+      : composed.positions.length > 0
+        ? { key: model.id, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups, partColors }
+        : null;
+    const modelView = seed ? (
       <ModelView
         key={model.id}
         initialTitle={model.name}
-        initialMesh={{ key: model.id, name: model.name, vertices: composed.positions, count: Math.floor(composed.positions.length / 8), faceGroups: composed.faceGroups, partColors }}
+        initialMesh={seed}
         allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }}
       />
     ) : (
@@ -205,6 +224,12 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
 // A cooked file path, resident cooked mesh, resident studio part, a typed
 // "missing" placeholder, or null (no live viewer → the stored-data doc card).
 function resolveViewer(model: ModelPackage): ViewerSource {
+  // The package's saved model document beats every seed-shaped source (req_2753):
+  // a saved-then-reopened model must show its EDITS, not re-arm its primitive seed.
+  const doc = packageMeshDoc(model);
+  if (doc && doc.vertices.length >= 8) {
+    return { kind: 'mesh', key: model.id, vertices: doc.vertices, faceGroups: doc.faceGroups ?? undefined };
+  }
   // A freshly-authored primitive builds its geometry on the spot (cuboid → grouped soup),
   // keyed by the doc id so each new cube is its own resident mesh.
   if (model.primitive) {

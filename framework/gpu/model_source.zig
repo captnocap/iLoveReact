@@ -94,6 +94,13 @@ pub fn setFaceGroups(m: []const u32) void {
     g_source_face_group = alloc.dupe(u32, m) catch null;
 }
 
+/// The authored-face grouping (one id per SOURCE face), or null when no studio load
+/// set it — the meshdoc writer persists it so a saved model reopens with real n-gon
+/// face selection instead of fan slivers (req_2753).
+pub fn faceGroups() ?[]const u32 {
+    return g_source_face_group;
+}
+
 /// Adopt the per-part group ranges: flattened [lo,hi) pairs, sorted, non-overlapping.
 /// Empty clears (back to position-only welding). The editor cart sends this after every
 /// load/append so the weld knows which authored groups form one independent part.

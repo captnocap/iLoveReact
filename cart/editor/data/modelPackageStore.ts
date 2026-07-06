@@ -28,6 +28,7 @@ import {
   type ModelPackageKind,
 } from './modelPackage';
 import type { ModelPackage } from './types';
+import { invalidateMeshDoc, writeMeshDoc, type MeshDocPartMeta } from './meshDoc';
 
 const host = globalThis as any;
 
@@ -178,6 +179,7 @@ export function materializeSnapshotPackage(pkg: ModelPackage, blobs: PackageBlob
     if (!writeFileBytesAtomic(`${dir}/mesh/base.blob`, bytes)) {
       return { ok: false, id: pkg.id, dir, error: 'write mesh/base.blob failed' };
     }
+    invalidateMeshDoc(dir); // base.blob is the meshdoc reader's legacy fallback
   }
   if (blobs.meshFile) {
     if (!writeFileBase64Atomic(`${dir}/mesh/${blobs.meshFile.name}`, blobs.meshFile.base64)) {
@@ -410,22 +412,27 @@ export function listPackageFiles(pkg: ModelPackage, sub: (typeof MODEL_PACKAGE_S
 // Write the ACTIVE model's own geometry + atlas into its package, so the folders that back
 // its paintings aren't empty: a painting implies a mesh + an atlas, so mesh/ and atlases/
 // must populate too (req_2533). mesh/base.blob = full-res interleaved verts (via the host
-// door); atlases/base.png = the current atlas readback. Best-effort — each piece is skipped
-// when its host door or data is absent (an unpainted model has no atlas yet). Call on any
-// save of the active model.
-export function writeModelArtifacts(pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>): void {
+// door); mesh/doc.blob + mesh/parts.json = the editable model DOCUMENT (verts + face
+// groups + part ranges + row metadata, req_2753 — what makes a reopened package the same
+// multi-part document instead of its primitive seed); atlases/base.png = the current
+// atlas readback. Best-effort — each piece is skipped when its host door or data is
+// absent. Call on any save of the active model. Returns true when the meshdoc landed
+// (callers strip their seed geometry only then — disk truth must exist first).
+export function writeModelArtifacts(pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>, parts?: MeshDocPartMeta[]): boolean {
   const dir = claimPackageDir(pkg);
   const meshDir = `${dir}/mesh`;
   const atlasDir = `${dir}/atlases`;
   mkdir(meshDir);
   mkdir(atlasDir);
   host.__model_mesh_write?.(`${meshDir}/base.blob`);
+  const docWritten = writeMeshDoc(dir, parts);
   try {
     const atlas = JSON.parse(host.__model_atlas_read?.() || '{}');
     if (atlas.data && atlas.w > 0 && atlas.h > 0) {
       host.__image_write_png?.(`${atlasDir}/base.png`, atlas.data, atlas.w, atlas.h);
     }
   } catch { /* no atlas resident yet — leave atlases/ empty, which is honest */ }
+  return docWritten;
 }
 
 // Re-exported so callers get the category mapping without reaching past the store.

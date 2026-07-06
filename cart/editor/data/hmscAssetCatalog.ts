@@ -9,7 +9,8 @@ import { validateDecalDoc } from '../textures/decal';
 import { cuboid, cylinder, cone, pyramid, plane, sphere, icosphere, editMeshToGeometry, type EditMesh } from '../model/editMesh';
 import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, ModelPart, PrimitiveKind } from './types';
 import { MODELS_HOME, MODEL_PACKAGE_SUBDIRS, modelFolderIdFor, modelSlug } from './modelPackage';
-import { isMaterialized, loadMaterializedPackages, materializeSnapshotPackage, type PackageBlobs } from './modelPackageStore';
+import { isMaterialized, loadMaterializedPackages, materializeSnapshotPackage, resolvePackageDir, type PackageBlobs } from './modelPackageStore';
+import { readMeshDoc, readMeshDocParts, type MeshDocPartMeta, type PackageMeshDoc } from './meshDoc';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
 const COOKED_SNAPSHOT = 'cart/hmsc-int/data/domains/cooked-asset/snapshots/cooked-asset.snapshot.json';
@@ -204,6 +205,10 @@ export function storedModelMeshData(modelId: string): Float32Array | null {
 // lives host-side (viewerPath) — the one case JS can't read without the host.
 export function modelPackageMeshData(pkg: ModelPackage): Float32Array | null {
   const ok = (v: Float32Array | null | undefined): v is Float32Array => !!v && v.length >= 8;
+  // 0. the package's own saved model document (req_2753) — SAVED EDITS beat the seed;
+  //    without this, a saved-then-reopened primitive model resolved as its fresh cube.
+  const doc = packageMeshDoc(pkg);
+  if (doc && ok(doc.vertices)) return doc.vertices;
   // 1. primitive — built on the fly (same as the viewer)
   if (pkg.primitive) { const v = primitiveMeshData(pkg.primitive).positions; if (ok(v)) return v; }
   // 2. content-addressed mesh blob (cooked assets + models saved to the library)
@@ -219,6 +224,21 @@ export function modelPackageMeshData(pkg: ModelPackage): Float32Array | null {
 
 export function storedModelFaceGroupData(modelId: string): Uint32Array | null {
   return storedModelFaceGroups[modelId] ?? null;
+}
+
+// ── The package meshdoc, pkg-level (req_2753) ────────────────────────────────────────
+// The saved model DOCUMENT inside a materialized package (mesh/doc.blob + parts.json,
+// legacy base.blob fallback) — the durable form of a studio-authored model's edits.
+// Null for never-saved models; cached per package dir in meshDoc.ts.
+
+export function packageMeshDoc(pkg: Pick<ModelPackage, 'kind' | 'id'>): PackageMeshDoc | null {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  return dir ? readMeshDoc(dir) : null;
+}
+
+export function packageMeshDocParts(pkg: Pick<ModelPackage, 'kind' | 'id'>): MeshDocPartMeta[] | null {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  return dir ? readMeshDocParts(dir) : null;
 }
 
 // A studio model's authored parts as ModelPart[] (bare id, e.g. the 'studio:' prefix

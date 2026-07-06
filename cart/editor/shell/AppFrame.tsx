@@ -43,7 +43,8 @@ import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchEdit } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
-import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, type PrimitiveParams } from '../data/hmscAssetCatalog';
+import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/hmscAssetCatalog';
+import { partsMetaFromRows } from '../data/meshDoc';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
 // Key edges come straight off the ffi bus (not useModifiers.onKeyDown): the active key
@@ -463,7 +464,9 @@ export default function AppFrame() {
       const res = materializeModelPackage(pkgToSave);
       const firstSave = res.ok && !MODEL_PACKAGES.some((m) => m.id === pkg.id);
       if (res.ok) {
-        writeModelArtifacts(pkg); // also write mesh/base.blob + atlases/base.png
+        // mesh/base.blob + mesh/doc.blob + mesh/parts.json + atlases/base.png — the
+        // meshdoc (req_2753) is what makes this package REOPEN as the edited document.
+        writeModelArtifacts(pkg, partsMetaFromRows(state.modelParts[pkg.id] ?? []));
         registerSavedPackage(pkgToSave); // a first save joins the live library roster now, not next boot
         savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
       }
@@ -500,12 +503,17 @@ export default function AppFrame() {
         return;
       }
       const modelId = authoredModelIdForPackage(pkg.id);
-      // Resolve the geometry through the ONE resolver the viewer uses — whatever
-      // form it's stored in (EditMesh parts, a content-addressed blob, a
-      // primitive). Live edited-but-unsaved parts win when held; else the package
-      // resolver. Cache it so the resident builder draws exactly what you see.
+      // Export implies save (req_2753): journal the resident HOST mesh into the package
+      // first (mesh/doc.blob + parts.json + base.blob), so the geometry captured below —
+      // and every future boot — resolves the mesh YOU SEE, never the parts' primitive
+      // seeds. The manifest lands right after (firstMaterialize / placeable patch).
       const liveParts = state.modelParts[pkg.id];
-      const captured = (liveParts ? composeModelParts(liveParts).positions : null) ?? modelPackageMeshData(pkg);
+      const docWritten = writeModelArtifacts(pkg, partsMetaFromRows(liveParts ?? []));
+      // Resolve the geometry through the ONE resolver the viewer uses — the package
+      // meshdoc just written (host truth), else live seed parts, else the package
+      // resolver. Cache it so the resident builder draws exactly what you see.
+      const liveComposed = !docWritten && liveParts ? composeModelParts(liveParts).positions : null;
+      const captured = (liveComposed && liveComposed.length >= 8 ? liveComposed : null) ?? modelPackageMeshData(pkg);
       if (captured && captured.length >= 8) cacheAuthoredMesh(modelId, captured);
       const verts = authoredMeshData(modelId, pkg.id);
       const vcount = verts ? Math.floor(verts.length / 8) : 0;
@@ -524,8 +532,8 @@ export default function AppFrame() {
       const firstMaterialize = !isMaterialized(pkg.kind, pkg.id);
       let disk: string;
       if (firstMaterialize) {
+        // Artifacts (meshdoc/base.blob/atlas) already landed above; this writes the manifest.
         const res = materializeModelPackage(pkgExported);
-        if (res.ok) writeModelArtifacts(pkg);
         disk = res.ok ? `package materialized → ${res.dir}` : `PACKAGE WRITE FAILED (${res.error ?? 'unknown'}) — export is session-only`;
       } else {
         disk = updateManifestPlaceable(pkg.kind, pkg.id, { placeable, skeleton })
@@ -2248,18 +2256,38 @@ export default function AppFrame() {
     const mid = doc?.kind === 'model' ? doc.sourceId : undefined;
     if (!mid) return;
     const existing = state.modelParts[mid];
+    const pkg = modelPackageById(mid);
+    const meshDoc = pkg ? packageMeshDoc(pkg) : null;
     let parts = existing;
     if (!parts) {
-      // Any package whose viewer source is a raw .glb/.obj file (import: packages,
-      // file: opens, content-browser loose files, imported props) is a model OF ONE
-      // PART (the whole file) — outliner-first, like everything else. Its range is
-      // stamped by the viewer after the host parses it.
-      const filePath = modelPackageById(mid)?.viewerPath;
-      if (filePath && isViewerFile(filePath)) {
-        parts = [filePartSeed(filePath, modelPackageById(mid)!.name)];
+      if (meshDoc && meshDoc.ranges.length > 0) {
+        // A materialized package hydrates from its OWN meshdoc (req_2753): rows are
+        // metadata + the SAVED [lo,hi) ranges; the surface mounts the same doc.blob, so
+        // the outliner and the mesh agree by construction — this is what brings the
+        // outliner (and the edits) back after a cold restart. parts.json rows pair with
+        // ranges by rank; a legacy package (base.blob only) recovers as one part.
+        const meta = pkg ? (packageMeshDocParts(pkg) ?? []) : [];
+        parts = meshDoc.ranges.map((r, i) => ({
+          id: `part:doc:${mid}:${i}`,
+          name: meta[i]?.name ?? (meshDoc.ranges.length === 1 ? (pkg?.name ?? 'part 1') : `part ${i + 1}`),
+          kind: meta[i]?.kind as PrimitiveKind | undefined,
+          visible: true, // the doc mounts every part; visibility is a live host op, not mount state
+          color: meta[i]?.color ?? PART_TINTS[i % PART_TINTS.length],
+          lo: r.lo,
+          hi: r.hi,
+        }));
       } else {
-        const bareId = mid.startsWith('studio:') ? mid.slice('studio:'.length) : mid;
-        parts = storedModelParts(bareId) ?? undefined;
+        // Any package whose viewer source is a raw .glb/.obj file (import: packages,
+        // file: opens, content-browser loose files, imported props) is a model OF ONE
+        // PART (the whole file) — outliner-first, like everything else. Its range is
+        // stamped by the viewer after the host parses it.
+        const filePath = pkg?.viewerPath;
+        if (filePath && isViewerFile(filePath)) {
+          parts = [filePartSeed(filePath, pkg!.name)];
+        } else {
+          const bareId = mid.startsWith('studio:') ? mid.slice('studio:'.length) : mid;
+          parts = storedModelParts(bareId) ?? undefined;
+        }
       }
       if (!parts) return;
     }
@@ -2276,8 +2304,22 @@ export default function AppFrame() {
       }
       return;
     }
-    const rangeById = new Map(composeModelParts(parts).ranges.map((r) => [r.id, r]));
-    const withRanges = parts.map((p) => { const r = rangeById.get(p.id); return { ...p, lo: r?.lo, hi: r?.hi }; });
+    // Range stamping. A meshdoc-backed doc mounts the SAVED geometry, so rows stamp from
+    // the saved ranges by rank — a seed recompose can disagree with the saved topology
+    // (loop cuts renumber groups). Only a row-count match stamps; a drifted count leaves
+    // the rows to the host's own re-stamp machinery (req_2644). Seed docs recompose.
+    let withRanges: ModelPart[];
+    if (meshDoc && meshDoc.ranges.length === parts.length) {
+      const ranked = parts.map((p, i) => ({ p, i })).sort((x, y) => ((x.p.lo ?? Number.MAX_SAFE_INTEGER) - (y.p.lo ?? Number.MAX_SAFE_INTEGER)) || (x.i - y.i));
+      const stamped = parts.slice();
+      meshDoc.ranges.forEach((r, rank) => { const row = ranked[rank]!; stamped[row.i] = { ...row.p, lo: r.lo, hi: r.hi }; });
+      withRanges = stamped;
+    } else if (meshDoc) {
+      withRanges = parts;
+    } else {
+      const rangeById = new Map(composeModelParts(parts).ranges.map((r) => [r.id, r]));
+      withRanges = parts.map((p) => { const r = rangeById.get(p.id); return { ...p, lo: r?.lo, hi: r?.hi }; });
+    }
     setState((prev) => ({
       ...prev,
       modelParts: { ...prev.modelParts, [mid]: withRanges },
@@ -2314,7 +2356,10 @@ export default function AppFrame() {
     const pkg = effectiveModelPackage(doc.sourceId, s.modelOverrides, s.modelDupes);
     if (!pkg || !s.modelDirty[pkg.id] || !isMaterialized(pkg.kind, pkg.id)) return null;
     if (!materializeModelPackage(pkg).ok) return null;
-    writeModelArtifacts(pkg);
+    // The meshdoc rides the autosave (req_2753): the doc switch unmounts the viewer and
+    // the NEXT mount seeds from the package, so this write is what edits survive by.
+    writeModelArtifacts(pkg, partsMetaFromRows(s.modelParts[pkg.id] ?? []));
+    savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
     return { id: pkg.id, name: pkg.name };
   };
 
