@@ -8,8 +8,8 @@ import {
 import { validateDecalDoc } from '../textures/decal';
 import { cuboid, cylinder, cone, pyramid, plane, sphere, icosphere, editMeshToGeometry, type EditMesh } from '../model/editMesh';
 import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, ModelPart, PrimitiveKind } from './types';
-import { MODEL_PACKAGE_SUBDIRS, displayPath, modelFolderIdFor, modelSlug, subDir } from './modelPackage';
-import { loadMaterializedPackages, materializeModelPackage } from './modelPackageStore';
+import { MODELS_HOME, MODEL_PACKAGE_SUBDIRS, displayPath, modelFolderIdFor, modelSlug, subDir } from './modelPackage';
+import { isMaterialized, loadMaterializedPackages, materializeModelPackage, materializeSnapshotPackage, type PackageBlobs } from './modelPackageStore';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
 const COOKED_SNAPSHOT = 'cart/hmsc-int/data/domains/cooked-asset/snapshots/cooked-asset.snapshot.json';
@@ -147,6 +147,8 @@ export type CatalogDiagnostics = {
   savedModels: number;
   meshBlobs: number;
   textureBlobs: number;
+  /** Model packages written to disk THIS load (0 once the library is fully materialized). */
+  materialized: number;
   errors: string[];
 };
 
@@ -432,6 +434,11 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
     // clicking one opened another's context menu (req_2523). Derive from the id here.
     .map((model) => ({ ...model, folderId: modelFolderIdFor(model.id) }))
     .sort((a, b) => modelRank(a) - modelRank(b) || a.name.localeCompare(b.name));
+  // Every model the browser shows becomes a real on-disk package (req_2732):
+  // manifest + its actual bytes, written once — already-materialized models
+  // cost one exists() per load. This is what lets the hmsc-int snapshots stop
+  // being the only home for a model's data.
+  const materialized = materializeMissingPackages(modelPackages, cooked, errors);
   const assets = [...materialAssets, ...cookedAssets].sort((a, b) => sourceRank(a) - sourceRank(b) || a.name.localeCompare(b.name));
   const defaultAsset = assets.find((asset) => asset.tab === 'Skins') ?? assets[0];
   const defaultContentFolder = materialAssets.length > 0
@@ -459,9 +466,63 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
       savedModels: Object.keys(models?.state?.models ?? {}).length + viewerModelCount,
       meshBlobs: Object.keys(cooked?.state?.meshBlobs ?? {}).length,
       textureBlobs: Object.keys(cooked?.state?.textureBlobs ?? {}).length,
+      materialized,
       errors,
     },
   };
+}
+
+// ── Materialize the visible catalog to disk (req_2732) ──────────────────────
+// Any roster model with no package directory yet gets one: manifest + its
+// actual bytes. The blob source depends on where the model lives today — a
+// file-backed model copies its .glb/.obj into mesh/, a cooked asset writes its
+// content-addressed mesh blob (+ texture PNG), a studio model writes its baked
+// verts + the authored parts it stays editable from.
+function materializeMissingPackages(models: ModelPackage[], cooked: CookedSnapshot | null, errors: string[]): number {
+  let wrote = 0;
+  for (const pkg of models) {
+    if (isMaterialized(pkg.kind, pkg.id)) continue;
+    const blobs = snapshotPackageBlobs(pkg, cooked);
+    if (blobs.meshFile) {
+      // The copied file is the package's mesh now — manifest and live session both point inside.
+      pkg.viewerPath = `${subDir(pkg.kind, pkg.id, 'mesh')}/${blobs.meshFile.name}`;
+    }
+    const result = materializeSnapshotPackage(pkg, blobs);
+    if (result.ok) wrote += 1;
+    else errors.push(`materialize ${pkg.id}: ${result.error ?? 'failed'}`);
+  }
+  if (wrote > 0) console.warn(`[model-packages] materialized ${wrote} model packages under ${MODELS_HOME}`);
+  return wrote;
+}
+
+function snapshotPackageBlobs(pkg: ModelPackage, cooked: CookedSnapshot | null): PackageBlobs {
+  const blobs: PackageBlobs = {};
+  // File-backed (imported prop / loose source file): the .glb/.obj bytes ARE the mesh.
+  if (pkg.viewerPath && !pkg.viewerPath.startsWith(`${MODELS_HOME}/`) && isViewerFile(pkg.viewerPath)) {
+    const base64 = readFileBase64(pkg.viewerPath);
+    const name = pkg.viewerPath.split('/').pop();
+    if (base64 && name) blobs.meshFile = { name, base64 };
+  }
+  // Cooked asset: content-addressed mesh blob + its texture, straight from the snapshot.
+  if (pkg.viewerMeshRef) {
+    blobs.meshBlob = cookedMeshBlobData(pkg.viewerMeshRef) ?? undefined;
+    const assetId = pkg.id.startsWith('cooked:') ? pkg.id.slice('cooked:'.length) : pkg.id;
+    const texRef = cooked?.state?.assets?.[assetId]?.texRef;
+    const texture = texRef ? cooked?.state?.textureBlobs?.[texRef] : undefined;
+    if (texture) blobs.atlasPngBase64 = stripDataUrlPrefix(texture);
+  }
+  // Studio model: baked verts for the viewer, authored parts for the editor.
+  if (pkg.sourceKind === 'studio-model') {
+    const bareId = pkg.id.startsWith('studio:') ? pkg.id.slice('studio:'.length) : pkg.id;
+    blobs.meshBlob = blobs.meshBlob ?? storedModelMeshData(bareId) ?? undefined;
+    const parts = storedModelParts(bareId);
+    if (parts) blobs.editMeshJson = JSON.stringify({ version: 1, parts });
+  }
+  return blobs;
+}
+
+function stripDataUrlPrefix(base64OrDataUrl: string): string {
+  return base64OrDataUrl.startsWith('data:') ? base64OrDataUrl.slice(base64OrDataUrl.indexOf(',') + 1) : base64OrDataUrl;
 }
 
 function storedModelViewerMeshes(snapshot: ModelSnapshot | null): {

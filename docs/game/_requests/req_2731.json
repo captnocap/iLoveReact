@@ -1,0 +1,28 @@
+{
+  "id": "req_2731",
+  "at": "2026-07-06T01:17:56.929Z",
+  "origin": "session:922efce7",
+  "text": "hey so, i have been under the impression that the current @cart/editor/ has all of its models now saved on disk and not in a database. but when i tree the directory, i dont see pretty much any of the models that i see in the content browser of the app, and so im wondering what is the deal? where are they located if they arnt in here or am i missing them ?",
+  "status": "review",
+  "sessionId": "922efce7-f48c-4350-9978-1334e002b188",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T01:18:03.306Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T01:19:01.477Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered where content-browser models live: only ~20 packages are on-disk under cart/editor/data/models/{props,build,roundtrip}; the rest of what the browser shows still comes from hmsc-int era snapshot stores (model.snapshot.json 7MB, cooked-asset.snapshot.json 26MB, importedProps.data.json, loose files under cart/hmsc-int/) merged in hmscAssetCatalog.ts loadHmscEditorCatalog. The on-disk package system exists and wins name collisions, but the legacy catalog was never migrated into it — no code change, investigation only.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T01:19:01.476Z"
+}

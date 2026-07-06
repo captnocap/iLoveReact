@@ -10,7 +10,7 @@
 // atlas / paint / shader BYTES into the subdirs (so a copied folder is truly
 // self-contained) is the next slice; the subdirs are created now so the shape
 // is visible and the writers have a home.
-import { exists, listDir, mkdir, readFile, readFileBase64, writeFile, writeFileBase64Atomic } from '../../../runtime/hooks/fs';
+import { exists, listDir, mkdir, readFile, readFileBase64, writeFile, writeFileBase64Atomic, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
 import {
   MODELS_HOME,
   MODEL_PACKAGE_SUBDIRS,
@@ -39,11 +39,8 @@ export type MaterializeSummary = { total: number; wrote: number; failed: Materia
 // from the existing manifest when the incoming package doesn't carry it — a
 // plain re-save from a session that never saw the export must not undo it.
 export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
-  const dir = packageDir(pkg.kind, pkg.id);
-  if (!mkdir(dir)) return { ok: false, id: pkg.id, dir, error: 'mkdir package dir failed' };
-  for (const sub of MODEL_PACKAGE_SUBDIRS) {
-    if (!mkdir(`${dir}/${sub}`)) return { ok: false, id: pkg.id, dir, error: `mkdir ${sub} failed` };
-  }
+  const dir = ensurePackageDirs(pkg.kind, pkg.id);
+  if (!dir) return { ok: false, id: pkg.id, dir: packageDir(pkg.kind, pkg.id), error: 'mkdir package dirs failed' };
   const manifest = packageToManifest(pkg);
   if (manifest.placeable === undefined || manifest.skeleton === undefined) {
     const prior = readManifest(pkg.kind, pkg.id);
@@ -55,6 +52,57 @@ export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
   const wrote = writeFile(manifestPath(pkg.kind, pkg.id), serializeManifest(manifest));
   if (!wrote) return { ok: false, id: pkg.id, dir, error: 'write manifest failed' };
   return { ok: true, id: pkg.id, dir };
+}
+
+// The category dir, the model's home dir, and the four blob subdirs — or null
+// when any mkdir fails. Every materialization path starts here.
+function ensurePackageDirs(kind: ModelPackageKind, id: string): string | null {
+  const dir = packageDir(kind, id);
+  if (!mkdir(dir)) return null;
+  for (const sub of MODEL_PACKAGE_SUBDIRS) {
+    if (!mkdir(`${dir}/${sub}`)) return null;
+  }
+  return dir;
+}
+
+// Everything a snapshot-era model needs copied beside its manifest to become a
+// self-contained package (req_2732). The catalog resolves these — it owns the
+// snapshot data; this store only knows how to lay them down in the right subdirs.
+export type PackageBlobs = {
+  /** mesh/base.blob — interleaved verts (8 f32/vert, raw little-endian), the same format __model_mesh_write emits. */
+  meshBlob?: Float32Array;
+  /** mesh/<name> — a copied .glb/.obj source file (base64 bytes). */
+  meshFile?: { name: string; base64: string };
+  /** mesh/editmesh.json — the authored parts, so a studio model stays editable from its package alone. */
+  editMeshJson?: string;
+  /** atlases/base.png — the model's texture atlas (base64 PNG bytes). */
+  atlasPngBase64?: string;
+};
+
+// Materialize a snapshot-derived model into a FULL package: dirs, blob bytes,
+// manifest LAST. The manifest is the commit point — an interrupted run leaves
+// no manifest, so the next catalog load retries instead of trusting a
+// half-written package (isMaterialized keys off the manifest alone).
+export function materializeSnapshotPackage(pkg: ModelPackage, blobs: PackageBlobs): MaterializeResult {
+  const dir = ensurePackageDirs(pkg.kind, pkg.id);
+  if (!dir) return { ok: false, id: pkg.id, dir: packageDir(pkg.kind, pkg.id), error: 'mkdir package dirs failed' };
+  const meshDir = subDir(pkg.kind, pkg.id, 'mesh');
+  if (blobs.meshBlob && blobs.meshBlob.length > 0) {
+    const bytes = new Uint8Array(blobs.meshBlob.buffer, blobs.meshBlob.byteOffset, blobs.meshBlob.byteLength);
+    if (!writeFileBytesAtomic(`${meshDir}/base.blob`, bytes)) {
+      return { ok: false, id: pkg.id, dir, error: 'write mesh/base.blob failed' };
+    }
+  }
+  if (blobs.meshFile && !writeFileBase64Atomic(`${meshDir}/${blobs.meshFile.name}`, blobs.meshFile.base64)) {
+    return { ok: false, id: pkg.id, dir, error: `copy mesh/${blobs.meshFile.name} failed` };
+  }
+  if (blobs.editMeshJson && !writeFile(`${meshDir}/editmesh.json`, blobs.editMeshJson)) {
+    return { ok: false, id: pkg.id, dir, error: 'write mesh/editmesh.json failed' };
+  }
+  if (blobs.atlasPngBase64 && !writeFileBase64Atomic(`${subDir(pkg.kind, pkg.id, 'atlases')}/base.png`, blobs.atlasPngBase64)) {
+    return { ok: false, id: pkg.id, dir, error: 'write atlases/base.png failed' };
+  }
+  return materializeModelPackage(pkg);
 }
 
 // The current on-disk manifest, or null (absent/unreadable — callers treat both
