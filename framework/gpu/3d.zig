@@ -2583,11 +2583,16 @@ fn countUnsafeFaceEdits(before: []const f32, after: []const f32, face_count: u32
         const ac = faceCrossFromPositions(after, f);
         const b2 = vdot(bc, bc);
         const a2 = vdot(ac, ac);
-        if (a2 < @max(@as(f32, 1e-12), b2 * 1e-6)) {
+        // A face that was ALREADY degenerate before the drag isn't something this edit
+        // broke — imported/generated meshes carry zero-area tris, and counting them made
+        // every drag (even a pure translate) re-report the same number (req_2755). Only
+        // a transition INTO degeneracy counts.
+        if (b2 <= 1e-12) continue;
+        if (a2 < b2 * 1e-6) {
             bad += 1;
             continue;
         }
-        if (b2 > 1e-12 and vdot(vnorm(bc), vnorm(ac)) < -0.05 and !faceMovedRigidly(before, after, f)) bad += 1;
+        if (vdot(vnorm(bc), vnorm(ac)) < -0.05 and !faceMovedRigidly(before, after, f)) bad += 1;
     }
     return bad;
 }
