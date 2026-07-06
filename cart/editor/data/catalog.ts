@@ -1,6 +1,7 @@
 // editor/data/catalog.ts - catalog helpers backed by hmsc-int stored data.
 import { HMSC_EDITOR_CATALOG } from './hmscAssetCatalog';
 import type { Asset, AssetOverride, LibraryTab, ModelPackage } from './types';
+import type { MaterialRef } from '../world/pieces';
 
 export const ASSET_PAGE_SIZE = 12;
 export const MATERIAL_PAGE_SIZE = 16;
@@ -49,4 +50,14 @@ export function assetById(id: string, overrides: Record<string, AssetOverride> =
 
 export function assetPageSizeFor(tab: LibraryTab): number {
   return tab === 'Skins' ? MATERIAL_PAGE_SIZE : ASSET_PAGE_SIZE;
+}
+
+/** Resolve a piece slot's MaterialRef to a display label + swatch colour — the ONE
+ *  resolver behind the Inspector's slot rows and the world quick menu (req_2733). */
+export function resolveMaterialRef(ref: MaterialRef, overrides: Record<string, AssetOverride> = {}): { label: string; color: string } {
+  if ('assetId' in ref) {
+    const asset = assetById(ref.assetId, overrides);
+    return { label: asset.name, color: asset.color };
+  }
+  return { label: `${ref.fn}·${ref.variant}`, color: '#7d858d' };
 }

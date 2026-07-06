@@ -31,6 +31,7 @@ export default function Workspace(props: {
   /** World-piece model callbacks (req_2563 Phase 1) — routed down to WorldEditorSurface. */
   onPlacePiece: (piece: PlacedPiece) => void;
   onSelectPiece: (id: string | null) => void;
+  onPieceContext: (id: string, x: number, y: number) => void;
   onArmPiece: (pieceId: string) => void;
   onExitMaterialFocus: () => void;
   onSelectColorStudioMaterial: (specId: string) => void;

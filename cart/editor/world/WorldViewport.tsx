@@ -87,6 +87,10 @@ export default function WorldViewport(props: {
   selectedId: string | null;
   /** report the piece a Select/Move/Focus click hit (null = clicked empty ground) */
   onSelect: (id: string | null) => void;
+  /** a right-click hit a placed piece (req_2733): report it + the WINDOW coords so the
+   *  quick context menu opens at the cursor. Fires in ANY tool mode — the whole point is
+   *  editing the piece under the mouse without disarming the current tool. */
+  onPieceContext: (id: string, x: number, y: number) => void;
   onPlace: (piece: PlacedPiece) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
   floor: number;
@@ -115,6 +119,20 @@ export default function WorldViewport(props: {
   piecesRef.current = props.pieces;
   const onSelectRef = useRef(props.onSelect);
   onSelectRef.current = props.onSelect;
+  const onPieceContextRef = useRef(props.onPieceContext);
+  onPieceContextRef.current = props.onPieceContext;
+
+  // The one placed-piece pick, from PANE-local coords: host raycast for catalog pieces,
+  // JS slab-test for authored (model:) placements, nearest hit wins. Shared by the
+  // Select-click path (onUp) and the right-click context path (req_2733).
+  const pickPieceAt = useCallback((lx: number, ly: number): string | null => {
+    const ray = stage.worldRay(lx, ly, rectRef.current);
+    const hostHit = ray ? pickBuildPieceHostHit(ray, piecesRef.current, 1000) : null;
+    const authoredHit = ray ? pickAuthoredPlacement(ray, piecesRef.current, 1000) : null;
+    const host = hostHit ?? null; // undefined = host binding missing → JS pick only
+    const best = host && authoredHit ? (host.t <= authoredHit.t ? host : authoredHit) : (host ?? authoredHit);
+    return best ? best.piece.id : null;
+  }, [stage]);
 
   // Push the JS-solved iso pose to the native loader. Cheap (8 floats) — the only
   // per-interaction bridge traffic; the host re-applies it every embedded frame.
@@ -454,15 +472,7 @@ export default function WorldViewport(props: {
     // done through a re-render-safe path.)
     const tool = toolRef.current;
     if (tool !== 'place') {
-      const ray = stage.worldRay(d.x0, d.y0, rectRef.current);
-      // Two pickers, nearest wins: the host raycast covers catalog pieces; authored
-      // (model:) placements never reach it — the static catalog can't index them —
-      // so they slab-test in JS against their mesh AABB (req_2601).
-      const hostHit = ray ? pickBuildPieceHostHit(ray, piecesRef.current, 1000) : null;
-      const authoredHit = ray ? pickAuthoredPlacement(ray, piecesRef.current, 1000) : null;
-      const host = hostHit ?? null; // undefined = host binding missing → JS pick only
-      const best = host && authoredHit ? (host.t <= authoredHit.t ? host : authoredHit) : (host ?? authoredHit);
-      onSelectRef.current(best ? best.piece.id : null);
+      onSelectRef.current(pickPieceAt(d.x0, d.y0));
       return;
     }
     if (!armedRef.current) { console.warn('[place] click with nothing armed'); return; }
@@ -474,7 +484,17 @@ export default function WorldViewport(props: {
     if (!target) { console.warn(`[place] VALIDATOR rejected cell at world (${gp.x.toFixed(1)},${gp.z.toFixed(1)})`); return; }
     console.warn(`[place] click -> place ${target.pieceId} at (${target.x},${target.y},${target.z}) yaw ${target.yaw}`);
     props.onPlace({ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw, floor: target.floor });
-  }, [resolveSnap, groundUnder, props.onPlace, local, stage]);
+  }, [resolveSnap, groundUnder, props.onPlace, local, stage, pickPieceAt]);
+
+  // Right-click quick context (req_2733): pick the piece under the cursor in ANY tool
+  // mode and report it up with the WINDOW coords (the root-mounted menu lands at the
+  // cursor). A miss is a no-op — empty ground has no quick verbs, and eating the
+  // click keeps a stray right-click from dropping the current selection.
+  const onRightClick = useCallback((e: any) => {
+    const p = local(e);
+    const id = pickPieceAt(p.x, p.y);
+    if (id) onPieceContextRef.current(id, Number(e?.x ?? 0), Number(e?.y ?? 0));
+  }, [local, pickPieceAt]);
 
   const onScroll = useCallback((e: any) => {
     const dy = Number(e?.deltaY ?? 0);
@@ -556,6 +576,7 @@ export default function WorldViewport(props: {
         onMouseMove={onMove}
         onMouseUp={onUp}
         onMiddleClick={onMiddleDown}
+        onRightClick={onRightClick}
         onScroll={onScroll}
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
       />

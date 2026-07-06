@@ -22,6 +22,7 @@ import Inspector from '../inspector/Inspector';
 import FileExplorerDialog from '../dialogs/FileExplorerDialog';
 import AddChunkDialog from '../dialogs/AddChunkDialog';
 import ModelContextMenu from '../stage/ModelContextMenu';
+import WorldContextMenu from '../stage/WorldContextMenu';
 import RenderProbe from '../../../runtime/render_tracker';
 import PlayRoute from '../PlayRoute';
 import { useRoute } from '../../../runtime/router';
@@ -53,7 +54,7 @@ import { subscribe } from '@reactjit/runtime/ffi';
 // (req_2659) reads shift at press time instead of threading it through every row.
 import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
-import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
+import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor, resolveMaterialRef } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
 import { MODEL_PACKAGES } from '../data/catalog';
 import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage } from '../data/modelPackageStore';
@@ -149,6 +150,16 @@ export default function AppFrame() {
   // (the stage is offset right by the rail + content browser). The trigger spreads
   // onto the model surface deep in the tree.
   const modelMenu = useContextMenu();
+
+  // The WORLD surface's right-click quick menu (req_2733) — same root treatment.
+  // The viewport picks the piece under the cursor and reports it here with the
+  // window coords; opening = select that piece + land the menu at the cursor.
+  // guarded: modal discipline — no quick verbs over an unresolved dialog.
+  const worldMenu = useContextMenu();
+  const openPieceQuickMenu = guarded((id: string, x: number, y: number) => {
+    selectPiece(id);
+    worldMenu.triggerProps.onRightClick({ x, y });
+  });
 
   // Mirror the active view into hot-state so a dev hot reload rehydrates exactly
   // what you were looking at instead of snapping back to defaults.
@@ -373,6 +384,22 @@ export default function AppFrame() {
       }
       setState((prev) => ({ ...prev, status: `${command.name} - ${source}` }));
       return;
+    }
+    // World-piece quick verbs (req_2733): with a placed piece selected on the world
+    // surface, Delete / Copy / Rotate act on THAT piece — the phantom `objects` path
+    // below never sees them. Rotate is piece-only, so without one it refuses honestly.
+    if (command.id === 'delete-selection' || command.id === 'duplicate-selection' || command.id === 'rotate-selection') {
+      const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+      if (doc?.kind === 'world' && state.selectedPieceId) {
+        if (command.id === 'delete-selection') deletePiece(state.selectedPieceId);
+        else if (command.id === 'duplicate-selection') copyPiece(state.selectedPieceId);
+        else rotatePiece(state.selectedPieceId);
+        return;
+      }
+      if (command.id === 'rotate-selection') {
+        setState((prev) => ({ ...prev, status: 'select a placed piece to rotate — click one with the Select tool' }));
+        return;
+      }
     }
     // Delete Selection on a model document deletes the mesh selection (not a world object).
     if (command.id === 'delete-selection') {
@@ -776,7 +803,9 @@ export default function AppFrame() {
   const placePiece = (piece: PlacedPiece) => {
     setState((prev) => {
       const id = `bp_${prev.seq}`;
-      const placed = { ...piece, id };
+      // Copy stamp (req_2733): a copied piece's slots/overrides ride every placement
+      // until the palette re-arms, so Copy drops true clones — not bare kind defaults.
+      const placed = { ...piece, id, ...(prev.armedStamp ?? {}) };
       // Replace anything already occupying this footprint (req_2583): dropping a
       // window wall onto a wall REPLACES it — no two pieces fighting for the same
       // space. Different footprints (a wall vs the floor under it) don't collide.
@@ -805,6 +834,9 @@ export default function AppFrame() {
     setState((prev) => ({
       ...prev,
       armedPieceId: pieceId,
+      // A palette arm drops any copy stamp (req_2733) — you're placing the
+      // DEFINITION again, not the copied instance's materials.
+      armedStamp: null,
       // Arming a piece opens the focus panel on it (Build mode) and clears any
       // placed-piece selection so the panel shows the DEFINITION, not an instance.
       selectedPieceId: null,
@@ -848,19 +880,21 @@ export default function AppFrame() {
     }, `clear override ${path}`));
   };
 
-  // Material-slot assignment (req_2563 Phase 4): binds the CURRENTLY selected
-  // content-browser material into the piece's named slot (piece.slots[role]).
-  // One-click flow — pick a material on the left, click a slot on the right.
-  const assignPieceSlot = (id: string, role: string) => {
+  // Material-slot assignment (req_2563 Phase 4): binds a material asset into the
+  // piece's named slot (piece.slots[role]). Two callers, one write path: the
+  // Inspector binds the content browser's ACTIVE material; the right-click quick
+  // menu (req_2733) binds an EXPLICIT pick from its swatch grid.
+  const assignPieceSlotAsset = (id: string, role: string, assetId: string) => {
     setState((prev) => {
-      const ref: MaterialRef = { assetId: prev.activeAssetId };
+      const ref: MaterialRef = { assetId };
       return recordWorldEdit(prev, {
         ...prev,
         worldPieces: prev.worldPieces.map((p) => (p.id === id ? { ...p, slots: { ...p.slots, [role]: ref } } : p)),
-        status: `slot ${role} ← ${assetById(prev.activeAssetId, prev.assetOverrides).name}`,
+        status: `slot ${role} ← ${assetById(assetId, prev.assetOverrides).name}`,
       }, `slot ${role}`);
     });
   };
+  const assignPieceSlot = (id: string, role: string) => assignPieceSlotAsset(id, role, stateRef.current.activeAssetId);
 
   const clearPieceSlot = (id: string, role: string) => {
     setState((prev) => recordWorldEdit(prev, {
@@ -873,6 +907,56 @@ export default function AppFrame() {
       }),
       status: `slot ${role} cleared`,
     }, `clear slot ${role}`));
+  };
+
+  // ── World-piece quick verbs (req_2733) — Copy / Rotate / Delete ──────────────
+  // One dispatch path: the right-click menu and the keymap (R / Del) both arrive
+  // through runCommand's piece-first routing; these are the write ends.
+  const rotatePiece = (id: string) => {
+    setState((prev) => {
+      const piece = prev.worldPieces.find((p) => p.id === id);
+      if (!piece) return { ...prev, status: 'rotate: that piece is gone' };
+      const yaw = (piece.yawDegrees + 90) % 360;
+      return recordWorldEdit(prev, {
+        ...prev,
+        worldPieces: prev.worldPieces.map((p) => (p.id === id ? { ...p, yawDegrees: yaw } : p)),
+        status: `rotated ${piece.pieceId} → ${yaw}°`,
+      }, `rotate ${piece.pieceId}`);
+    });
+  };
+
+  const deletePiece = (id: string) => {
+    setState((prev) => {
+      const piece = prev.worldPieces.find((p) => p.id === id);
+      if (!piece) return { ...prev, status: 'delete: that piece is gone' };
+      return recordWorldEdit(prev, {
+        ...prev,
+        worldPieces: prev.worldPieces.filter((p) => p.id !== id),
+        selectedPieceId: null,
+        status: `deleted ${piece.pieceId}`,
+      }, `delete ${piece.pieceId}`);
+    });
+  };
+
+  // Copy = pick the piece up into your hand (the Fortnite move): arm its definition
+  // in Place mode and carry its slots/overrides as the stamp placePiece applies, so
+  // every subsequent click drops a true clone. Not a world-undo entry — arming never
+  // is; the placements it produces are. Map paint disarms like any other tool switch.
+  const copyPiece = (id: string) => {
+    setState((prev0) => {
+      const prev = withMapPaintOff(prev0);
+      const piece = prev.worldPieces.find((p) => p.id === id);
+      if (!piece) return { ...prev, status: 'copy: that piece is gone' };
+      return {
+        ...prev,
+        armedPieceId: piece.pieceId,
+        armedStamp: piece.slots || piece.overrides ? { slots: piece.slots, overrides: piece.overrides } : null,
+        selectedPieceId: null,
+        activeCommandId: 'place-piece',
+        actionMenu: 'Build',
+        status: `copied ${piece.pieceId} — click to stamp copies, Esc to put it down`,
+      };
+    });
   };
 
   const selectContentFolder = (contentFolder: ContentFolderId) => {
@@ -2395,6 +2479,15 @@ export default function AppFrame() {
     ? { ...state, mapPaint: { ...state.mapPaint, active: false } }
     : state;
 
+  // World quick-menu payload (req_2733): the LIVE selected piece (yaw/slots track
+  // edits while the menu stays open — Rotate keeps it open) + the material catalog
+  // its slot flyouts pick from. Only materialized while the menu is open; Delete
+  // closes it by construction (the piece leaves state, the gate below goes null).
+  const worldQuickPiece = worldMenu.isOpen ? state.worldPieces.find((p) => p.id === state.selectedPieceId) : undefined;
+  const worldQuickMaterials = worldQuickPiece
+    ? applyAssetOverrides(ASSETS, state.assetOverrides).filter((asset) => asset.tab === 'Skins')
+    : [];
+
   return (
     <C.HW_App>
       <RenderProbe id="Chrome">
@@ -2516,6 +2609,7 @@ export default function AppFrame() {
             onObject={selectObject}
             onPlacePiece={placePiece}
             onSelectPiece={selectPiece}
+            onPieceContext={openPieceQuickMenu}
             onArmPiece={armPiece}
             onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
             onSelectColorStudioMaterial={selectColorStudioMaterial}
@@ -2703,6 +2797,21 @@ export default function AppFrame() {
             onClose={modelMenu.close}
           />
         </modelMenu.ContextMenu>
+      ) : null}
+      {/* World-piece quick menu (req_2733) — same late-root mount as the model menu
+          above. Gated on the live selected piece: gone piece → no menu. */}
+      {worldQuickPiece ? (
+        <worldMenu.ContextMenu>
+          <WorldContextMenu
+            piece={worldQuickPiece}
+            materials={worldQuickMaterials}
+            resolveMaterial={(ref) => resolveMaterialRef(ref, state.assetOverrides)}
+            onAssignSlot={assignPieceSlotAsset}
+            onClearSlot={clearPieceSlot}
+            onCommand={runCommand}
+            onClose={worldMenu.close}
+          />
+        </worldMenu.ContextMenu>
       ) : null}
       </>
       )}

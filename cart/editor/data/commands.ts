@@ -123,6 +123,10 @@ export const COMMANDS: Command[] = [
   { id: 'place-piece', menu: 'Build', name: 'Place Piece', icon: 'Pencil', key: 'B', context: true, native: true, undoable: true, tool: true, scope: 'world' },
   // Move is an armable mode: click a piece to grab it. Not selection-gated — the click selects.
   { id: 'move-selection', menu: 'Build', name: 'Move Selection', icon: 'Move', key: 'V', context: true, native: true, undoable: true, tool: true, scope: 'world' },
+  // Rotate spins the SELECTED placed piece 90° about its point (req_2733). Bare R on the world
+  // surface (the model surface's R is the rotate gizmo — keys resolve per surface); placing a
+  // piece selects it, so B-place → R → R reorients the drop without leaving the mouse.
+  { id: 'rotate-selection', menu: 'Build', name: 'Rotate Piece', icon: 'RotateCw', key: 'R', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
   { id: 'paint-material', menu: 'Build', name: 'Paint Material', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true, scope: 'world', needsSelection: true },
   { id: 'open-color-studio', menu: 'Build', name: 'Open Color Studio', icon: 'Palette', key: 'C', context: true, native: true, undoable: false, tool: true, scope: 'world', needsSelection: true },
   { id: 'sample-material', menu: 'Build', name: 'Sample Material', icon: 'Pipette', key: 'I', context: true, native: true, undoable: false, tool: true, scope: 'world', needsSelection: true },
@@ -311,7 +315,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('delete-selection'), MESH_SUBMENU],
   View: [cmd('toggle-view-mode'), cmd('toggle-minimap'), cmd('focus-selection')],
   Map: [cmd('add-chunk'), cmd('add-trigger'), cmd('set-spawn'), cmd('cycle-floor')],
-  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('paint-material'), cmd('open-color-studio'), cmd('sample-material')],
+  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-material'), cmd('open-color-studio'), cmd('sample-material')],
   Story: [cmd('mission-point'), cmd('author-sequence')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],
   Help: [cmd('show-pipeline')],

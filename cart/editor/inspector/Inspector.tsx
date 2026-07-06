@@ -11,7 +11,7 @@ import { FLOORS, PRESETS, RIGHT_PANES, SNAP_MODES, effectiveModelPackage } from 
 import { missionCounts, objectMetricRows } from '../data/readouts';
 import type { Asset, EditorState, WorldObject } from '../data/types';
 import type { MaterialRef } from '../world/pieces';
-import { assetById } from '../data/catalog';
+import { assetById, resolveMaterialRef } from '../data/catalog';
 import ReadOnlySection from './ReadOnlySection';
 import RigSection from './RigSection';
 import { skeletonToPropRig, type PropRig } from '../../../runtime/skeleton';
@@ -376,13 +376,7 @@ export default function Inspector(props: {
   // `objects` mock. This is what retires the "AC & Vents" ghost header.
   if (activeDocument?.kind === 'world') {
     const selectedPiece = props.state.worldPieces.find((p) => p.id === props.state.selectedPieceId) ?? null;
-    const resolveMaterial = (ref: MaterialRef) => {
-      if ('assetId' in ref) {
-        const a = assetById(ref.assetId, props.state.assetOverrides);
-        return { label: a.name, color: a.color };
-      }
-      return { label: `${ref.fn}·${ref.variant}`, color: '#7d858d' };
-    };
+    const resolveMaterial = (ref: MaterialRef) => resolveMaterialRef(ref, props.state.assetOverrides);
     return (
       <C.HW_RightPanel>
         <C.HW_Inspector>

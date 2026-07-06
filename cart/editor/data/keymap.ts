@@ -45,6 +45,9 @@ const WORLD_KEYS: Record<string, string> = {
   tab: 'toggle-view-mode',
   ']': 'cycle-floor',
   delete: 'delete-selection',
+  // R rotates the selected placed piece 90° (req_2733) — free on the world surface; the model
+  // surface's R (rotate gizmo) lives in MODEL_KEYS and never collides.
+  r: 'rotate-selection',
   // Esc drops back to the neutral Select tool — the modal "put the click down" (req_2550).
   escape: 'select-tool',
 };

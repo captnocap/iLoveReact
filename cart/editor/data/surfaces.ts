@@ -28,10 +28,11 @@ export function activeModelDoc(state: EditorState): WorkspaceDocument | undefine
 }
 
 /** Is there a selection to act on for the given surface? Drives selection-gated commands
- *  (Duplicate/Delete/Move/…): world reads the selected world object, model reads the mesh
- *  editor's live element-selection count. Material has no selection concept → always true. */
+ *  (Duplicate/Delete/Rotate/…): world reads the selected PLACED PIECE first (req_2733), then
+ *  the legacy world object; model reads the mesh editor's live element-selection count.
+ *  Material has no selection concept → always true. */
 export function hasSelection(state: EditorState, surface: Surface): boolean {
   if (surface === 'model') return state.modelTool.sel > 0;
-  if (surface === 'world') return !!state.selectedObjectId;
+  if (surface === 'world') return !!state.selectedPieceId || !!state.selectedObjectId;
   return true;
 }

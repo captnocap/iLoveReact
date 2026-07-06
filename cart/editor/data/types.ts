@@ -469,6 +469,10 @@ export type EditorState = {
   worldPieces: PlacedPiece[];
   selectedPieceId: string | null;
   armedPieceId: string | null;
+  // Copy stamp (req_2733): Copy on a placed piece arms its definition AND carries its
+  // per-instance slots/overrides here, so every subsequent placement drops a true clone
+  // (a copy that loses its materials isn't a copy). Cleared by a palette arm.
+  armedStamp: Pick<PlacedPiece, 'slots' | 'overrides'> | null;
   // Authored placeables (req_2578 build pieces + req_2712 props): meshes exported
   // "as a wall piece" / "as a prop", placeable alongside the catalog. DISK is the
   // source of truth (manifest.placeable, req_2718) — this list is seeded from the
