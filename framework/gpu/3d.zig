@@ -2550,6 +2550,31 @@ fn faceCrossFromPositions(pos: []const f32, face: u32) [3]f32 {
     return vcross(vsub(p1, a), vsub(p2, a));
 }
 
+fn faceEdgeLensSq(pos: []const f32, face: u32) [3]f32 {
+    const b = @as(usize, face) * 9;
+    if (b + 8 >= pos.len) return .{ 0, 0, 0 };
+    const a: [3]f32 = .{ pos[b + 0], pos[b + 1], pos[b + 2] };
+    const p1: [3]f32 = .{ pos[b + 3], pos[b + 4], pos[b + 5] };
+    const p2: [3]f32 = .{ pos[b + 6], pos[b + 7], pos[b + 8] };
+    const e0 = vsub(p1, a);
+    const e1 = vsub(p2, p1);
+    const e2 = vsub(a, p2);
+    return .{ vdot(e0, e0), vdot(e1, e1), vdot(e2, e2) };
+}
+
+/// A triangle whose three edge lengths survived the drag moved RIGIDLY (rotate gizmo,
+/// fully-selected translate) — a proper rigid motion can't flip a face, no matter how
+/// far its normal swung from the original (req_2754). The tolerance absorbs the float
+/// drift of a rotation applied incrementally across hundreds of mouse-move events.
+fn faceMovedRigidly(before: []const f32, after: []const f32, face: u32) bool {
+    const lb = faceEdgeLensSq(before, face);
+    const la = faceEdgeLensSq(after, face);
+    for (0..3) |k| {
+        if (@abs(la[k] - lb[k]) > @max(lb[k], @as(f32, 1e-12)) * 2e-3) return false;
+    }
+    return true;
+}
+
 fn countUnsafeFaceEdits(before: []const f32, after: []const f32, face_count: u32) u32 {
     var bad: u32 = 0;
     var f: u32 = 0;
@@ -2562,7 +2587,7 @@ fn countUnsafeFaceEdits(before: []const f32, after: []const f32, face_count: u32
             bad += 1;
             continue;
         }
-        if (b2 > 1e-12 and vdot(vnorm(bc), vnorm(ac)) < -0.05) bad += 1;
+        if (b2 > 1e-12 and vdot(vnorm(bc), vnorm(ac)) < -0.05 and !faceMovedRigidly(before, after, f)) bad += 1;
     }
     return bad;
 }
