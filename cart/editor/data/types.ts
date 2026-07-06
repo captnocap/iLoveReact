@@ -473,6 +473,10 @@ export type EditorState = {
   // per-instance slots/overrides here, so every subsequent placement drops a true clone
   // (a copy that loses its materials isn't a copy). Cleared by a palette arm.
   armedStamp: Pick<PlacedPiece, 'slots' | 'overrides'> | null;
+  // Recently USED materials (req_2737), most recent first, capped — every slot
+  // assign pushes here, and the quick menu surfaces them as its RECENT row.
+  // Live usage, distinct from the catalog's static `recent` flag.
+  recentMaterialIds: string[];
   // Authored placeables (req_2578 build pieces + req_2712 props): meshes exported
   // "as a wall piece" / "as a prop", placeable alongside the catalog. DISK is the
   // source of truth (manifest.placeable, req_2718) — this list is seeded from the

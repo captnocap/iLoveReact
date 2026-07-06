@@ -31,6 +31,7 @@ import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, M
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, MaterialRef } from '../world/pieces';
 import { placementSlotKey } from '../world/pieces';
+import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
 import type { BuildKind } from '../world/buildCatalog';
@@ -880,33 +881,45 @@ export default function AppFrame() {
     }, `clear override ${path}`));
   };
 
-  // Material-slot assignment (req_2563 Phase 4): binds a material asset into the
-  // piece's named slot (piece.slots[role]). Two callers, one write path: the
-  // Inspector binds the content browser's ACTIVE material; the right-click quick
-  // menu (req_2733) binds an EXPLICIT pick from its swatch grid.
-  const assignPieceSlotAsset = (id: string, role: string, assetId: string) => {
+  // Material-slot assignment (req_2563 Phase 4 → req_2737): binds a material asset
+  // into the piece's named slot(s). One write path, three callers: the Inspector
+  // binds the browser's ACTIVE material to one role; the quick menu binds an
+  // explicit pick to the TARGETED face — or, FacePainter-style, role null paints
+  // EVERY face the piece exposes. Every assign records into the live RECENT row.
+  const assignPieceSlotAsset = (id: string, role: string | null, assetId: string) => {
     setState((prev) => {
       const ref: MaterialRef = { assetId };
-      return recordWorldEdit(prev, {
+      const name = assetById(assetId, prev.assetOverrides).name;
+      const next = recordWorldEdit(prev, {
         ...prev,
-        worldPieces: prev.worldPieces.map((p) => (p.id === id ? { ...p, slots: { ...p.slots, [role]: ref } } : p)),
-        status: `slot ${role} ← ${assetById(assetId, prev.assetOverrides).name}`,
-      }, `slot ${role}`);
+        worldPieces: prev.worldPieces.map((p) => {
+          if (p.id !== id) return p;
+          const roles = role ? [role] : pieceSlotRoles(p.pieceId);
+          const slots = { ...p.slots };
+          for (const r of roles) slots[r] = ref;
+          return { ...p, slots };
+        }),
+        status: role ? `slot ${role} ← ${name}` : `all faces ← ${name}`,
+      }, role ? `slot ${role}` : 'skin all faces');
+      return { ...next, recentMaterialIds: [assetId, ...prev.recentMaterialIds.filter((m) => m !== assetId)].slice(0, 10) };
     });
   };
   const assignPieceSlot = (id: string, role: string) => assignPieceSlotAsset(id, role, stateRef.current.activeAssetId);
 
-  const clearPieceSlot = (id: string, role: string) => {
+  // role null = clear EVERY slot back to the kind default (the quick menu's
+  // untargeted "default" chip); a string clears just that face (req_2737).
+  const clearPieceSlot = (id: string, role: string | null) => {
     setState((prev) => recordWorldEdit(prev, {
       ...prev,
       worldPieces: prev.worldPieces.map((p) => {
         if (p.id !== id) return p;
+        if (!role) return { ...p, slots: undefined };
         const next = { ...p.slots };
         delete next[role];
         return { ...p, slots: Object.keys(next).length ? next : undefined };
       }),
-      status: `slot ${role} cleared`,
-    }, `clear slot ${role}`));
+      status: role ? `slot ${role} cleared` : 'all faces reset to default',
+    }, role ? `clear slot ${role}` : 'clear all faces'));
   };
 
   // ── World-piece quick verbs (req_2733) — Copy / Rotate / Delete ──────────────
@@ -2479,13 +2492,14 @@ export default function AppFrame() {
     ? { ...state, mapPaint: { ...state.mapPaint, active: false } }
     : state;
 
-  // World quick-menu payload (req_2733): the LIVE selected piece (yaw/slots track
-  // edits while the menu stays open — Rotate keeps it open) + the material catalog
-  // its slot flyouts pick from. Only materialized while the menu is open; Delete
+  // World quick-menu payload (req_2733/req_2737): the LIVE selected piece (yaw/slots
+  // track edits while the menu stays open — Rotate keeps it open) + the RANKED
+  // material catalog its picker searches (favorites/recents/used first, the content
+  // browser's own ordering). Only materialized while the menu is open; Delete
   // closes it by construction (the piece leaves state, the gate below goes null).
   const worldQuickPiece = worldMenu.isOpen ? state.worldPieces.find((p) => p.id === state.selectedPieceId) : undefined;
   const worldQuickMaterials = worldQuickPiece
-    ? applyAssetOverrides(ASSETS, state.assetOverrides).filter((asset) => asset.tab === 'Skins')
+    ? applyAssetOverrides(ASSETS, state.assetOverrides).filter((asset) => asset.tab === 'Skins').sort(rankAssets)
     : [];
 
   return (
@@ -2805,6 +2819,7 @@ export default function AppFrame() {
           <WorldContextMenu
             piece={worldQuickPiece}
             materials={worldQuickMaterials}
+            recentIds={state.recentMaterialIds}
             resolveMaterial={(ref) => resolveMaterialRef(ref, state.assetOverrides)}
             onAssignSlot={assignPieceSlotAsset}
             onClearSlot={clearPieceSlot}

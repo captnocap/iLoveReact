@@ -123,6 +123,7 @@ export function initialState(): EditorState {
     // surface always dropped). The Build bar (Phase 2) overwrites this on pick.
     armedPieceId: 'floor.concrete.common',
     armedStamp: null,
+    recentMaterialIds: [],
     authoredBuildPieces: bootAuthoredPieces(),
     modelRigs: {},
     objects: INITIAL_OBJECTS,
