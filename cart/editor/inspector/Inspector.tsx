@@ -239,7 +239,7 @@ function PaintLayersSection({ bridge }: { bridge: ModelFocusBridge | null }) {
               <Pressable
                 style={LAYER_ROW_CONTROL}
                 onPress={() => runOp('visible', layer.id, layer.visible ? 0 : 1)}
-                tooltip={layer.visible ? 'Hide this layer\'s strokes (undoable)' : 'Show this layer\'s strokes'}
+                tooltip={layer.visible ? 'Hide this layer\'s strokes' : 'Show this layer\'s strokes'}
               >
                 <Icon name={layer.visible ? 'Eye' : 'EyeOff'} size={13} color={layer.visible ? '#9db4d0' : '#4a5464'} />
               </Pressable>

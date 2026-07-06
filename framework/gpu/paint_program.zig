@@ -23,6 +23,8 @@
 //!     invisible ones. Delete/reorder/merge are pure program edits + one replay — no
 //!     pixel-layer compositor anywhere. Structural layer ops journal as undo units in
 //!     the same stroke journal, so undoing a layer-delete restores it wholesale.
+//!     Visibility is the exception (req_2752): the eye is VIEW state — never journaled,
+//!     and undo/redo carry the live eye toggles across (see adoptSnapshot).
 //!
 //!   • HIDE-STABLE KEYS — v1 recorded dabs by DISPLAYED face index, which shifts when
 //!     a part hides (a program saved while a part was hidden replayed misindexed).
@@ -376,7 +378,12 @@ fn pushUndo(label: []const u8) void {
 }
 
 /// Adopt a snapshot as the live program state (takes ownership of its allocations).
+/// Visibility is VIEW state, not history (req_2752): a layer that exists on both sides
+/// keeps its LIVE eye toggle — undo/redo restore strokes/structure, never flip the eye.
 fn adoptSnapshot(s: Snapshot) void {
+    for (s.layers) |*l| {
+        if (layerIndexOf(l.id)) |cur| l.visible = g_layers.items[cur].visible;
+    }
     freeLayerList(&g_layers);
     g_layers.appendSlice(alloc, s.layers) catch {
         for (s.layers) |l| alloc.free(l.name);
@@ -691,12 +698,14 @@ pub fn layerMove(id: u32, up: bool) bool {
     return true;
 }
 
-/// Show/hide a layer's strokes. Journaled; replays (visibility IS a composite change).
+/// Show/hide a layer's strokes. NOT journaled (req_2752) — visibility is a VIEW toggle,
+/// not a program edit: no stroke is added or removed, the eye just filters the composite.
+/// Replays (the atlas is derived, so the composite must re-lay), and adoptSnapshot keeps
+/// the live eye state through undo/redo so history never flips what you're looking at.
 pub fn layerSetVisible(id: u32, on: bool) bool {
     _ = endStrokeUnit();
     const idx = layerIndexOf(id) orelse return false;
     if (g_layers.items[idx].visible == on) return true;
-    pushUndo(if (on) "show layer" else "hide layer");
     g_layers.items[idx].visible = on;
     replayAll();
     return true;
