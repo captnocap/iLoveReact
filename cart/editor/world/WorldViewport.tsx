@@ -24,7 +24,7 @@
 // piece MOVE (the drag slice lands next) — each returns as a door-driven slice.
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable } from '@reactjit/primitives';
-import { IsoStage, type Rect } from './isoStage';
+import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
 import { pieceInstanceRows, resolvePlacement, pieceLook, pickAuthoredPlacement, type ArmedPiece, type PlacedPiece } from './pieces';
 import { pieceSkinBoxes } from './pieceSkins';
 import { encodeResidentMeshes, encodeMeshRefs, encodeMeshGhost, type ResidentMesh, type MeshRef } from './meshProps';
@@ -34,6 +34,7 @@ import { pickBuildPieceHostHit } from '../../../runtime/game/build';
 import { ensureMapSeeded } from '../stage/mapPaint';
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import type { WorldTool } from './worldTool';
+import { publishWorldHoverReadout } from '../data/worldHoverReadout';
 
 // `model:`/`prop:` id → stored model id: authoredModelIdOf (authoredRegistry).
 
@@ -44,6 +45,7 @@ const WASD_PAN_PER_TICK = 0.02; // × eye→target distance, metres/tick
 
 // ctrl+wheel camera tilt (req_2711), degrees per wheel notch.
 const WHEEL_PITCH_STEP_DEG = 3;
+const HOVER_READOUT_POLL_MS = 50;
 
 const g: any = globalThis;
 
@@ -321,8 +323,14 @@ export default function WorldViewport(props: {
   const groundUnder = useCallback((px: number, py: number): { x: number; z: number; terrainY: number } | null => {
     const r = rectRef.current;
     const nodeId = Number(loaderRef.current?.id ?? 0);
+    // The active storey lifts the picked surface (req_2744): without levelY the
+    // door intersected the GROUND even on Floor 2+, so the piece (based at
+    // terrainY + floor×3m) projected away from the cursor — perfect at Ground,
+    // one storey's worth of drift per floor up. The door keeps returning the
+    // true terrain height; resolvePlacement adds the storey back.
+    const levelY = props.floor > 0 ? props.floor * METERS_PER_LEVEL : 0;
     if (nodeId && typeof g.__compiled_world_ground_hit === 'function') {
-      const buf = g.__compiled_world_ground_hit(nodeId, r.x + px, r.y + py);
+      const buf = g.__compiled_world_ground_hit(nodeId, r.x + px, r.y + py, levelY);
       if (buf) {
         const hit = new Float32Array(buf);
         if (hit.length >= 3) return { x: hit[0]!, z: hit[2]!, terrainY: hit[1]! };
@@ -330,7 +338,7 @@ export default function WorldViewport(props: {
     }
     const gp = stage.groundPoint(px, py, r);
     return gp ? { x: gp.x, z: gp.z, terrainY: 0 } : null;
-  }, [stage]);
+  }, [stage, props.floor]);
 
   const resolveSnap = useCallback((px: number, py: number): Snap | null => {
     const armed = armedRef.current;
@@ -344,21 +352,33 @@ export default function WorldViewport(props: {
     return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId, yaw: placed.yawDegrees, floor: placed.floor ?? props.floor } : null;
   }, [groundUnder, props.floor]);
 
-  // Free-hover ghost tracking (req_2651 gap VV): the framework delivers
+  const publishHoverAt = useCallback((px: number, py: number): Snap | null => {
+    const snap = props.tool === 'place' && armedRef.current ? resolveSnap(px, py) : null;
+    if (snap) {
+      publishWorldHoverReadout({ x: snap.x, y: snap.y, z: snap.z });
+      return snap;
+    }
+    const gp = groundUnder(px, py);
+    if (!gp) {
+      publishWorldHoverReadout(null);
+      return null;
+    }
+    const levelY = props.floor > 0 ? props.floor * METERS_PER_LEVEL : 0;
+    publishWorldHoverReadout({ x: gp.x, y: gp.terrainY + levelY, z: gp.z });
+    return null;
+  }, [groundUnder, props.floor, props.tool, resolveSnap]);
+
+  // Free-hover tracking (req_2651 gap VV + req_2736 POS readout): the framework delivers
   // onMouseMove ONLY under pointer capture (capture starts at mousedown —
   // nodeWantsPointerCapture, framework/engine.zig), so with no button held the
   // armed ghost froze at its last projection until the camera moved. The host's
-  // paint brush beam is immune because it polls SDL mouse state per frame
-  // (world_loader.zig) — same pattern here: while the Place tool is armed, a
-  // self-terminating ~16ms tick (the panStep shape — setTimeout chain, no idle
-  // timer when disarmed) reads the global mouse, and re-snaps only while the
-  // pointer is inside the pane rect (the ghost clears when it leaves). setSnap
-  // is skipped when the resolved snap is unchanged, so an idle pointer causes
-  // zero re-renders. The onMove path stays — it is still correct during drags.
+  // paint brush beam is immune because it polls SDL mouse state. Same pattern
+  // here: a low-rate poll reads the global mouse so the bottom dock can show the
+  // terrain-aware map point even while map paint owns pointer events. The place
+  // ghost still re-snaps only when armed; the dock store dedupes rounded coords.
   const hoverTimerRef = useRef<any>(null);
   const armedHover = props.tool === 'place' && !!props.armed;
   useEffect(() => {
-    if (!armedHover) return;
     const sameSnap = (a: Snap | null, b: Snap | null): boolean =>
       a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z && a.yaw === b.yaw && a.pieceId === b.pieceId);
     const step = () => {
@@ -367,18 +387,24 @@ export default function WorldViewport(props: {
       const my = Number(g.getMouseY?.() ?? NaN);
       if (Number.isFinite(mx) && Number.isFinite(my)) {
         const inside = mx >= r.x && mx < r.x + r.width && my >= r.y && my < r.y + r.height;
-        const next = inside ? resolveSnap(mx - r.x, my - r.y) : null;
-        setSnap((cur) => (sameSnap(cur, next) ? cur : next));
+        const next = inside ? publishHoverAt(mx - r.x, my - r.y) : null;
+        if (!inside) publishWorldHoverReadout(null);
+        if (armedHover || !inside) setSnap((cur) => (sameSnap(cur, next) ? cur : next));
+      } else {
+        publishWorldHoverReadout(null);
+        if (armedHover) setSnap(null);
       }
-      hoverTimerRef.current = setTimeout(step, 16);
+      hoverTimerRef.current = setTimeout(step, HOVER_READOUT_POLL_MS);
     };
     hoverTimerRef.current = setTimeout(step, 0);
     return () => {
       if (hoverTimerRef.current) { clearTimeout(hoverTimerRef.current); hoverTimerRef.current = null; }
+      setSnap(null);
+      publishWorldHoverReadout(null);
     };
     // armedHover collapses props.armed (a fresh object every parent render) to a boolean, so the
     // loop tears down only on real disarm/tool change — not on every unrelated re-render.
-  }, [armedHover, resolveSnap]);
+  }, [armedHover, publishHoverAt]);
 
   // ── input: middle-drag orbits — x-travel spins the yaw, y-travel tilts the
   // pitch (req_2710) — shift-drag grabs the map, wheel zooms to the cursor

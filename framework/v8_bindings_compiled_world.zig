@@ -282,11 +282,13 @@ fn hostSetHideWalls(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnString(info, "ok");
 }
 
-// __compiled_world_ground_hit(nodeId, px, py) -> ArrayBuffer [x, y, z] | null — the
-// painted-terrain surface point under a WINDOW-space cursor (the same space as
+// __compiled_world_ground_hit(nodeId, px, py, levelY?) -> ArrayBuffer [x, y, z] | null —
+// the painted-terrain surface point under a WINDOW-space cursor (the same space as
 // getMouseX()/SDL_GetMouseState, checked against the pane rect renderEmbedded stored).
 // Resolved on the brush beam's EXACT code path (paintGroundHitAt → map_paint.groundHit)
-// so placement and painting can never disagree about the ground (req_2666). Null on a
+// so placement and painting can never disagree about the ground (req_2666). levelY lifts
+// the intersected surface by the active storey's elevation in metres (req_2744) — the
+// returned y stays the TRUE terrain height; the cart adds the storey back. Null on a
 // bad/unmounted node, a pre-camera boot frame, or a ray that misses every painted chunk
 // — the cart falls back to its analytic flat plane.
 var g_ground_hit_ret: [3]f32 = .{ 0, 0, 0 };
@@ -331,7 +333,10 @@ fn hostGroundHit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnNull(info);
         return;
     };
-    const hit = world_loader.groundHitAt(node_id, @floatCast(px), @floatCast(py)) orelse {
+    // Optional storey elevation in metres (req_2744): the terrain intersection
+    // lifts by this so an upper-floor pick lands under the cursor. Absent = 0.
+    const level_y = argToF64(info, 3) orelse 0;
+    const hit = world_loader.groundHitAt(node_id, @floatCast(px), @floatCast(py), @floatCast(level_y)) orelse {
         setReturnNull(info);
         return;
     };

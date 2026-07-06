@@ -6863,7 +6863,7 @@ pub fn paintPointer(node_id: u32, phase: PaintPhase, mx: f32, my: f32) void {
         }
         return;
     }
-    const hit = paintGroundHitAt(runtime, mx, my) orelse return;
+    const hit = paintGroundHitAt(runtime, mx, my, 0) orelse return;
     runtime.paint_hover = hit;
     switch (phase) {
         .down => {
@@ -6884,17 +6884,30 @@ pub fn paintPointer(node_id: u32, phase: PaintPhase, mx: f32, my: f32) void {
 /// camera isn't the editor's external iso pose, the pane rect isn't live yet,
 /// or the ray misses every painted chunk (off-map — the cart falls back to its
 /// analytic flat plane).
-pub fn groundHitAt(node_id: u32, mx: f32, my: f32) ?[3]f32 {
+///
+/// `level_y` is the active storey's elevation in metres (req_2744): the ray is
+/// intersected with the terrain surface LIFTED by level_y (floor N's slab rides
+/// the terrain), so the returned x/z sit exactly under the cursor once the cart
+/// bases the piece at terrainY + level_y. The returned y stays the TRUE terrain
+/// height at that x/z — the cart owns the storey addition. 0 = ground behavior,
+/// bit-identical to before.
+pub fn groundHitAt(node_id: u32, mx: f32, my: f32, level_y: f32) ?[3]f32 {
     const entry = findMounted(node_id) orelse return null;
     const runtime = entry.runtime orelse return null;
-    return paintGroundHitAt(runtime, mx, my);
+    return paintGroundHitAt(runtime, mx, my, level_y);
 }
 
 /// Screen (window-absolute) → world ray through the external iso camera →
 /// painted-terrain hit. The ray basis mirrors gpu/3d.zig drawScene's
 /// m4perspective(fov_y, aspect) + lookAt(up = +Y) exactly, so the brush lands
 /// under the cursor by construction.
-fn paintGroundHitAt(runtime: *Runtime, mx: f32, my: f32) ?[3]f32 {
+///
+/// `level_y` lifts the intersected surface by that many metres (req_2744) by
+/// LOWERING the ray origin instead — intersecting y = terrain(x,z) + L with a
+/// ray from O is identical to intersecting y = terrain(x,z) from O − (0,L,0),
+/// so the heightfield march itself never learns what a storey is. The brush
+/// paths always pass 0 (painting is a ground affair).
+fn paintGroundHitAt(runtime: *Runtime, mx: f32, my: f32, level_y: f32) ?[3]f32 {
     if (runtime.paint_last_w <= 1 or runtime.paint_last_h <= 1) return null;
     const cam = &runtime.camera;
     if (!cam.external) return null; // painting is an editor-viewport affair
@@ -6931,7 +6944,7 @@ fn paintGroundHitAt(runtime: *Runtime, mx: f32, my: f32) ?[3]f32 {
     dx /= dlen;
     dy /= dlen;
     dz /= dlen;
-    return map_paint.groundHit(cam.ext_pos.x, cam.ext_pos.y, cam.ext_pos.z, dx, dy, dz, 2000);
+    return map_paint.groundHit(cam.ext_pos.x, cam.ext_pos.y - level_y, cam.ext_pos.z, dx, dy, dz, 2000);
 }
 
 // Painted-water surface derivation (chunkFloor.ts floorToWaterBody, req_1840
@@ -7096,7 +7109,7 @@ fn applyPaintLayer(runtime: *Runtime) void {
         if (mx >= runtime.paint_last_x and mx <= runtime.paint_last_x + runtime.paint_last_w and
             my >= runtime.paint_last_y and my <= runtime.paint_last_y + runtime.paint_last_h)
         {
-            runtime.paint_hover = paintGroundHitAt(runtime, mx, my);
+            runtime.paint_hover = paintGroundHitAt(runtime, mx, my, 0);
         } else {
             runtime.paint_hover = null;
         }
@@ -7109,7 +7122,7 @@ fn applyPaintLayer(runtime: *Runtime) void {
         var mx: f32 = 0;
         var my: f32 = 0;
         _ = c.SDL_GetMouseState(&mx, &my);
-        if (paintGroundHitAt(runtime, mx, my)) |hit| {
+        if (paintGroundHitAt(runtime, mx, my, 0)) |hit| {
             runtime.paint_hover = hit;
             map_paint.strokeMove(hit[0], hit[2]);
         }
