@@ -196,7 +196,10 @@ the prompt can. So the capture context line now carries the scope gate:
 
 - **Related to the editor/game building** (the game, its editors, carts,
   framework) → claim it into the pile as ever (`move <id> doing`), board flow
-  unchanged.
+  unchanged — and the same line enforces the ORACLE for both CLIs
+  (V32 SURFACE-0705): consult `tools/oracle "<topic>"` before deciding an
+  approach; its output opens with the ACTIVE SURFACE banner (going-forward
+  work is `cart/editor/`; hmsc-era pointers are flagged as reference).
 - **Unrelated / a one-off** → `tools/request oneoff <id> --by <you>` and just
   answer it. The entry's origin flips to `one-off` (a field-fill; the ask
   text and history are untouched, plus one appended note event naming who

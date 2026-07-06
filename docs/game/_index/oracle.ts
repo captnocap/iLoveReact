@@ -171,6 +171,27 @@ function decisionBlock(d: Decision, score: number): string {
   return lines.join('\n');
 }
 
+// ── era awareness (V32 SURFACE-0705) ─────────────────────────────────────────
+//
+// The corpus was written in the hmsc-int era; the going-forward build surface
+// is cart/editor/. Previous-era records stay served (reference is welcome)
+// but must READ as reference, not as "build here" — the banner says it once
+// per query, the per-record flag says it at the pointer.
+
+const ACTIVE_SURFACE_BANNER =
+  'ACTIVE SURFACE (V32 SURFACE-0705): going-forward work lives in cart/editor/ (+ its /play route). ' +
+  'cart/hmsc-int/ and the labs are the PREVIOUS ERA — pointers into them are reference ("how the last era did it"), never the build site. ' +
+  'Game-design RULINGS below still stand regardless of era.';
+
+const PREV_ERA_RE = /hmsc/i;
+
+/** Flag a record whose pointers land in the previous era. */
+function eraFlag(i: OwnedInterface): string {
+  return PREV_ERA_RE.test(`${i.sourceFile ?? ''} ${i.codeRef ?? ''} ${i.doc}`)
+    ? ' · hmsc era — build in cart/editor (V32)'
+    : '';
+}
+
 /** A record's status can be overridden by a ruling — say so inline. */
 function retiredBy(i: OwnedInterface): string | null {
   const hay = `${i.name} ${i.sourceFile ?? ''} ${i.doc}`.toLowerCase();
@@ -203,7 +224,7 @@ function interfaceLine(i: OwnedInterface, score: number): string {
   const where = i.codeRef ?? i.sourceFile ?? '';
   const retired = retiredBy(i);
   const status = retired ? `${i.status} ⚠ RETIRED by ${retired}` : i.status;
-  return `[${status} · ${fmtScore(score)}] ${i.name} (${i.doc})${where ? ` — ${where}` : ''}\n  ${i.description.slice(0, 200)}`;
+  return `[${status} · ${fmtScore(score)}] ${i.name} (${i.doc})${where ? ` — ${where}` : ''}${eraFlag(i)}\n  ${i.description.slice(0, 200)}`;
 }
 
 function patternLine(p: OwnedPattern, score: number): string {
@@ -247,6 +268,7 @@ export function oracle(query: string): string {
 
   const out: string[] = [];
   out.push(`oracle: "${query}"`);
+  out.push(ACTIVE_SURFACE_BANNER);
   if (ledgerWarning) out.push(ledgerWarning);
 
   if (rulings.length > 0) {

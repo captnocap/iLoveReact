@@ -310,9 +310,11 @@ function cmdHookPrompt(flags: Map<string, string>): void {
     // context line carries the scope gate: editor/game-building work is
     // claimed into the pile as ever; an unrelated ask gets dropped off the
     // board as a one-off (the record stays, the board doesn't carry it).
+    // V32 SURFACE-0705: game/editor asks are ALSO told to consult the oracle
+    // first — enforced for BOTH CLIs here, the one line both of them read.
     const line = result.record.origin === DISPATCH_ORIGIN
       ? `[request-ledger] captured ${result.record.id} (supervisor dispatch — recorded for the durable record; its marker tracks resolution, no board flow required)`
-      : `[request-ledger] captured ${result.record.id} on the board (new). SCOPE GATE first: is this ask about the editor/game building (this repo's game, editors, carts, framework)? IF YES — claim it (tools/request move ${result.record.id} doing --by <you>); when done, move it to REVIEW: tools/request move ${result.record.id} review --by <you> --para "<what was done, why, what changed>" --shas <sha,...|none>. Only the user flips review→done. IF NO — it is a one-off/unrelated: drop it off the board (tools/request oneoff ${result.record.id} --by <you>) and just answer it; no board flow.`;
+      : `[request-ledger] captured ${result.record.id} on the board (new). SCOPE GATE first: is this ask about the editor/game building (this repo's game, editors, carts, framework)? IF YES — claim it (tools/request move ${result.record.id} doing --by <you>) and consult the oracle BEFORE deciding an approach: tools/request move first, then tools/oracle "<topic>" — RULINGS override code; heed the ACTIVE SURFACE banner (going-forward work is cart/editor/, hmsc-era pointers are reference only, V32). When done, move it to REVIEW: tools/request move ${result.record.id} review --by <you> --para "<what was done, why, what changed>" --shas <sha,...|none>. Only the user flips review→done. IF NO — it is a one-off/unrelated: drop it off the board (tools/request oneoff ${result.record.id} --by <you>) and just answer it; no board flow, no oracle.`;
     console.log(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: line },
     }));

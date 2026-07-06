@@ -1145,3 +1145,28 @@ Chunks remain cache/streaming/compile units inside V30's one citywide map, not
 changelevel maps. "Glue together" means manifest assembly through the game-file
 lump/index system, never blind byte concatenation. Details:
 `docs/game/COMPILE_CACHE_ARCHITECTURE.md`.
+
+**V32 — The ACTIVE SURFACE is cart/editor; hmsc-int is previous-era reference
+(SURFACE-0705). (Added 2026-07-05.)**
+
+Everything going forward is specific to `cart/editor/` (the editor + its
+`/play` route — the "Shitty Games" foundation). `cart/hmsc-int/` and the labs
+are the PREVIOUS ERA: they stay in the tree as reference and as the game's
+history, but they are not the build site — a pointer into `cart/hmsc-int/`
+answers "how did the last era do it", never "where does this feature go".
+Game-DESIGN rulings in this constitution (the tile world, the frozen world,
+the map format, the platform/mod split, …) still stand regardless of era —
+they are about the GAME, not about which cart hosts it.
+
+The oracle is enforced for BOTH CLIs (Claude and Codex) and is era-aware:
+every result opens with the ACTIVE SURFACE banner, and any index record whose
+pointers land in the previous era carries an explicit `hmsc era` flag so it
+reads as reference, not as a destination. The user's words, verbatim:
+
+> i have noticed that uh codex still always uses the oracle but claude
+> doesnt. and to be honest the oracle diverts codex a lot because it still at
+> large points at hmsc-int when everything that we are going forward with is
+> now specific to @cart/editor/ so there is something we can do about that,
+> either silence the oracle codex searches or enforce it for both but tidy it
+> up, which the 2nd option i think is better, since claude gets by quite well
+> without it

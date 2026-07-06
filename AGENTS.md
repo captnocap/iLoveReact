@@ -18,8 +18,8 @@ Dynamic content lives in `StringHashMap(Value)` or tagged unions. That's the pat
 
 ## Game work: the oracle comes FIRST
 
-For ANY game-side question or decision (hmsc, hmsc-int, the labs, anything in
-docs/game/'s corpus):
+For ANY game-side question or decision (the editor, hmsc, hmsc-int, the labs,
+anything in docs/game/'s corpus):
 
 ```
 tools/oracle "<query>"        # e.g. tools/oracle "which humanoid"
@@ -31,6 +31,15 @@ elsewhere. The RULINGS section is the user's exact decisions
 the tree — records flagged `⚠ RETIRED by Vn` are dead ends no matter how alive
 they look. Empty RULINGS = the area may be genuinely undecided; check
 DECISIONS.md's open/show-me items before inventing an approach.
+
+**THE ACTIVE SURFACE (V32 SURFACE-0705): going-forward work lives in
+`cart/editor/`** (+ its `/play` route). The oracle's corpus was largely written
+in the hmsc-int era, so its results still cite `cart/hmsc-int/` and the labs —
+every result now opens with the ACTIVE SURFACE banner and flags previous-era
+records `hmsc era`. Read those pointers as REFERENCE ("how the last era did
+it"), never as the build site. Game-DESIGN rulings (tile world, frozen world,
+map format, …) still stand regardless of era — do not dismiss a ruling just
+because its cites are old-cart paths.
 
 Three standing disciplines for all game work:
 

@@ -304,15 +304,22 @@ There are effectively TWO projects in this repo: **reactjit** (the platform) and
 and covers ONLY the game's carts/modules — the 33 documented there ARE the game.
 Do not add app/tui/chat/test carts to it; they are platform-side and unrelated.
 
-- **`tools/oracle "<query>"` — CALL THIS FIRST.** Before grep/bash searching,
-  before considering code or ideas elsewhere, before any game-side decision:
-  `tools/oracle "which humanoid"`, `tools/oracle "player height"`. It returns
-  the USER'S EXACT RULINGS (docs/game/DECISIONS.md, structured) ranked above
-  index records and hazards — even when competing implementations exist in the
-  code, the RULINGS section is the answer and the competitors are history.
-  Records flagged `⚠ RETIRED by Vn` are dead ends regardless of their status.
-  If RULINGS comes back empty, the area may be genuinely undecided — check
-  DECISIONS.md's open/show-me items before inventing an approach.
+- **`tools/oracle "<query>"` — CALL THIS FIRST. This is ENFORCED, not
+  advisory (V32 SURFACE-0705: "enforce it for both").** Before grep/bash
+  searching, before considering code or ideas elsewhere, before any
+  game/editor-side decision: `tools/oracle "which humanoid"`,
+  `tools/oracle "player height"`. It returns the USER'S EXACT RULINGS
+  (docs/game/DECISIONS.md, structured) ranked above index records and hazards
+  — even when competing implementations exist in the code, the RULINGS
+  section is the answer and the competitors are history. Records flagged
+  `⚠ RETIRED by Vn` are dead ends regardless of their status. If RULINGS
+  comes back empty, the area may be genuinely undecided — check DECISIONS.md's
+  open/show-me items before inventing an approach.
+- **THE ACTIVE SURFACE (V32): going-forward work lives in `cart/editor/`**
+  (+ its `/play` route). The oracle's corpus is largely hmsc-int-era; every
+  result opens with the ACTIVE SURFACE banner and flags previous-era records
+  `hmsc era`. Read those pointers as reference ("how the last era did it"),
+  never as the build site. Game-DESIGN rulings still stand regardless of era.
 - `docs/game/DECISIONS.md` — the constitution: 16 verdicts + 6 principles ruled
   by the user. Anything contradicting a verdict is a bug.
 - `docs/game/<cart>.md` — per-cart English audit (mechanism-specific: host fn vs

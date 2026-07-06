@@ -279,4 +279,11 @@ export const DECISIONS: Decision[] = [
     keywords: ['compile cache', 'manifest', 'compile manifest', 'chunk overview', 'chunk hash', 'content addressed chunk', 'validation string', 'local version', 'chunk version', 'version history', 'local version history', 'compiled chunk history', 'restore chunk', 'dirty chunk', 'cache state', 'incremental compile', 'manifest swap', 'merkle', 'chunk artifact', 'global summaries', 'edge signature', 'cache hit', 'rebuild chunk', 'compile button'],
     cites: ['docs/game/COMPILE_CACHE_ARCHITECTURE.md', 'runtime/workspace/rle.ts', 'cart/hmsc-int/chunkFloor.ts'],
   },
+  {
+    id: 'V32', name: 'The ACTIVE SURFACE is cart/editor; hmsc-int is previous-era reference (SURFACE-0705)', status: 'ruled',
+    ruling: 'Everything going forward is specific to cart/editor/ (the editor + its /play route — the "Shitty Games" foundation). cart/hmsc-int/ and the labs are the PREVIOUS ERA: reference and history, not the build site — a pointer into cart/hmsc-int/ answers "how did the last era do it", never "where does this feature go". Game-DESIGN rulings in this constitution (tile world, frozen world, map format, platform/mod split, …) still stand regardless of era — they are about the GAME, not which cart hosts it. The oracle is enforced for BOTH CLIs and is era-aware: every result opens with the ACTIVE SURFACE banner, and index records whose pointers land in the previous era carry an explicit hmsc-era flag.',
+    detail: 'User, verbatim: "codex still always uses the oracle but claude doesnt. and to be honest the oracle diverts codex a lot because it still at large points at hmsc-int when everything that we are going forward with is now specific to @cart/editor/ … either silence the oracle codex searches or enforce it for both but tidy it up, which the 2nd option i think is better, since claude gets by quite well without it".',
+    keywords: ['active surface', 'cart/editor', 'editor cart', 'shitty games', 'hmsc-int era', 'previous era', 'going forward', 'build site', 'where does this go', 'which cart', 'oracle enforced', 'era flag', 'surface'],
+    cites: ['cart/editor/', 'cart/hmsc-int/ (previous era, reference only)', 'docs/game/_index/oracle.ts (the banner + era flag)'],
+  },
 ];
