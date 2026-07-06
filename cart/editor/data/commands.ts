@@ -105,6 +105,9 @@ export const COMMANDS: Command[] = [
   // Focus is an armable viewport MODE (req_2550): arm it, then click a piece to frame it. As a
   // mode it isn't selection-gated (the click provides the target), so no needsSelection.
   { id: 'focus-selection', menu: 'View', name: 'Focus Selection', icon: 'ScanSearch', key: 'F', context: true, native: true, undoable: false, tool: true, scope: 'world' },
+  // Reference images (req_2758 — the old studio's tracing backdrops, req_1280): drop a
+  // blueprint/photo on one of the six cardinal planes behind the model and build over it.
+  { id: 'model-ref-images', menu: 'View', scope: 'model', name: 'Reference Images...', icon: 'Image', key: '', context: true, native: false, undoable: false },
 
   // ── Map (world) ───────────────────────────────────────────────────────────────────────────
   // Grow the world by 120 m chunks from a 2D topology view (req_2703): the dialog
@@ -156,6 +159,11 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-paint', menu: 'Edit', scope: 'model', name: 'Paint Faces', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-focus', menu: 'Edit', scope: 'model', name: 'Focus Pivot', icon: 'Focus', key: 'F', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-wire', menu: 'Edit', scope: 'model', name: 'Wireframe', icon: 'Grid3x3', key: 'W', context: false, native: true, undoable: false, tool: true },
+  // Live mirror editing (req_2758): toggle a symmetry plane — while on, gizmo edits land
+  // reflected on each moved element's twin across that plane (plane at 0; Center first).
+  { id: 'mesh-sym-x', menu: 'Edit', scope: 'model', name: 'Mirror Edit X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-sym-y', menu: 'Edit', scope: 'model', name: 'Mirror Edit Y', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
+  { id: 'mesh-sym-z', menu: 'Edit', scope: 'model', name: 'Mirror Edit Z', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
   // Contextual topology ops — only valid on an edge selection (1 edge → extrude, 2+ → create face).
   { id: 'mesh-extrude', menu: 'Edit', scope: 'model', name: 'Extrude Edge', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-create-face', menu: 'Edit', scope: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
@@ -288,7 +296,7 @@ const MESH_SUBMENU: MenuNode = {
   kind: 'sub', id: 'Mesh', label: 'Mesh', icon: 'Boxes', scope: 'model',
   children: [
     section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'),
-    section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-rotate'), cmd('mesh-focus'), cmd('mesh-wire'),
+    section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'),
     section('Topology'), cmd('mesh-extrude'), cmd('mesh-create-face'), cmd('mesh-loopcut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
@@ -313,7 +321,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
     cmd('compile-rle'),
   ],
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('delete-selection'), MESH_SUBMENU],
-  View: [cmd('toggle-view-mode'), cmd('toggle-minimap'), cmd('focus-selection')],
+  View: [cmd('toggle-view-mode'), cmd('toggle-minimap'), cmd('focus-selection'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('add-trigger'), cmd('set-spawn'), cmd('cycle-floor')],
   Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-material'), cmd('open-color-studio'), cmd('sample-material')],
   Story: [cmd('mission-point'), cmd('author-sequence')],
@@ -332,7 +340,7 @@ export function submenuEnabled(scope: Command['scope'], state: EditorState): boo
 
 // ── Model tool groups (toolbar + context menu; unchanged callers) ──────────────────────────────
 // The always-on model tool group (select / gizmo / toggles), in display order.
-const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-paint', 'mesh-focus', 'mesh-wire'];
+const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-focus', 'mesh-wire'];
 
 export function meshToolCommands(): Command[] {
   return MESH_TOOL_IDS.map(commandById);
@@ -379,8 +387,11 @@ export function isMeshToolCommand(id: string): boolean {
 
 // Is this model tool the active one, given the live tool snapshot? Drives the toolbar/context-menu
 // highlight. Gizmo tools only read active inside a select mode; view/paint/focus are exclusive.
-export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; brushTool?: string; safety?: number; detail?: number }): boolean {
+export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
   switch (id) {
+    case 'mesh-sym-x': return ((tool.mirror ?? 0) & 1) !== 0;
+    case 'mesh-sym-y': return ((tool.mirror ?? 0) & 2) !== 0;
+    case 'mesh-sym-z': return ((tool.mirror ?? 0) & 4) !== 0;
     case 'mesh-vertex': return tool.selMode === 1 && !tool.paint && !tool.focus;
     case 'mesh-edge': return tool.selMode === 2 && !tool.paint && !tool.focus;
     case 'mesh-face': return tool.selMode === 3 && !tool.paint && !tool.focus;

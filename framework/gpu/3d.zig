@@ -2823,6 +2823,13 @@ pub fn meshEditSetMode(m: u8) void {
         else => .none,
     });
 }
+/// Live mirror editing (req_2758): enable/disable the X/Y/Z symmetry planes (bit 0/1/2).
+pub fn meshEditSetMirror(mask: u8) void {
+    mesh_edit.setMirrorMask(mask);
+}
+pub fn meshEditMirrorRaw() u8 {
+    return mesh_edit.mirrorMask();
+}
 // ── Paint session (req_2662: the mode row is ONE exclusive state machine) ───────────
 // While the cart is in paint mode, every edit-selection affordance goes quiet:
 // selection doors are inert (an outliner click mid-paint used to force face mode +
@@ -3154,6 +3161,35 @@ fn ringHitDist2(cam: model_paint.Camera, pivot: [3]f32, axis: i32, mx: f32, my: 
         prev = sp;
     }
     return best;
+}
+
+/// Live mirror planes (req_2758): each enabled symmetry plane draws as an axis-colored
+/// square outline at coordinate 0, sized to the model's orbit radius — the standing
+/// signal that edits on one side land on the other. Edit dressing: paint mode hides it.
+fn drawMirrorPlanesOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const mask = mesh_edit.mirrorMask();
+    if (mask == 0) return;
+    const r = @max(0.6, g_orbit.radius * 1.15);
+    var axis: u3 = 0;
+    while (axis < 3) : (axis += 1) {
+        if (mask & (@as(u8, 1) << axis) == 0) continue;
+        // The plane's rect spans the two OTHER axes; the plane axis stays 0.
+        const b: u3 = if (axis == 0) 1 else 0;
+        const cx: u3 = if (axis == 2) 1 else 2;
+        var corners: [4][3]f32 = .{ .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 } };
+        const signs = [4][2]f32{ .{ -1, -1 }, .{ 1, -1 }, .{ 1, 1 }, .{ -1, 1 } };
+        for (signs, 0..) |s, i| {
+            corners[i][b] = s[0] * r;
+            corners[i][cx] = s[1] * r;
+        }
+        const col = axisColor(@intCast(axis));
+        var i: usize = 0;
+        while (i < 4) : (i += 1) {
+            const pa = ovProject(cam, corners[i], ox, oy) orelse continue;
+            const pb = ovProject(cam, corners[(i + 1) % 4], ox, oy) orelse continue;
+            overlayLine(pa[0], pa[1], pb[0], pb[1], col[0], col[1], col[2], 1.5);
+        }
+    }
 }
 
 fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
@@ -3759,6 +3795,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
         }
     }
     drawLoopCutOverlay(cam, ox, oy);
+    if (mode != 0) drawMirrorPlanesOverlay(cam, ox, oy); // req_2758: edit dressing, quiet in paint/view
     drawGizmoOverlay(cam, ox, oy);
     drawMarqueeOverlay();
     // Layer 5: the orientation compass — always-on view furniture like the stage

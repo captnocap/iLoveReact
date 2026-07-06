@@ -357,6 +357,12 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: 'pick a library model to append as part(s)' }));
       return;
     }
+    // Reference images (req_2758): the viewer owns the tracing backdrops + their panel.
+    if (commandId === 'model-ref-images') {
+      modelToolApiRef.current?.referenceImages();
+      setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: 'reference images — add a blueprint/photo to trace over' }));
+      return;
+    }
     // Model-surface tools route to the viewer's host-native tool api; the viewer
     // owns the state and reports it back, so we don't mutate world state here.
     // Route to the viewer's mesh-tool API — but ONLY for actual mesh TOOLS (all
@@ -376,6 +382,9 @@ export default function AppFrame() {
         else if (commandId === 'mesh-paint') api.paint();
         else if (commandId === 'mesh-focus') api.focus();
         else if (commandId === 'mesh-wire') api.wire();
+        else if (commandId === 'mesh-sym-x') api.toggleMirror(0);
+        else if (commandId === 'mesh-sym-y') api.toggleMirror(1);
+        else if (commandId === 'mesh-sym-z') api.toggleMirror(2);
         else if (commandId === 'mesh-extrude') api.extrudeEdge();
         else if (commandId === 'mesh-create-face') api.createFace();
         else if (commandId === 'mesh-loopcut') api.loopCut();

@@ -72,6 +72,27 @@ var g_scope_edge: ?[]bool = null;
 var g_scope_built: u64 = 0;
 var g_affect_vert: ?[]bool = null; // scratch: logical verts affected by the active selection
 
+// ── Live mirror editing (req_2758 — the Studio's req_1183/1186 symmetric editing, host-native) ──
+// With one or more planes enabled (bit 0 = X, 1 = Y, 2 = Z; plane at coordinate 0, the same
+// convention the mirror-duplicate and the Studio's Center button use), every selection transform
+// also lands on each moved vertex's MIRROR TWIN — the logical vertex sitting at its reflected
+// position. Twins are matched by position ONCE per (topology, mask) into an index table, so a
+// vertex stays paired with its twin through the whole modeling session even mid-drag; per-frame
+// deltas then reflect through plain index lookups, no per-frame hashing. Multiple planes compose:
+// every non-empty subset of the enabled axes is one reflection (X+Y on → the X twin, the Y twin,
+// AND the XY-diagonal twin all follow). A vertex with no counterpart simply doesn't mirror —
+// same honesty as the Studio's mirrorEditAxes.
+const MIRROR_NONE: u32 = 0xffff_ffff;
+/// Twin matching quantization: positions rounded to this many units/metre must coincide.
+/// Deliberately coarser than WELD_Q — mirrored halves come from float-reflected geometry
+/// (the mirror-duplicate op), so exact-bit equality is too strict. 1e-3 m at model scale.
+const MIRROR_Q: f32 = 1000.0;
+var g_mirror_mask: u8 = 0; // enabled planes; survives model reloads (a user mode, not mesh state)
+var g_mirror_twin: ?[]u32 = null; // 7 subsets × vert_count → twin vertex index (MIRROR_NONE = unpaired)
+var g_mirror_built_for: u32 = 0; // vert count the table was built for (0 = stale)
+var g_mirror_built_mask: u8 = 0; // mask the table was built for
+var g_mirror_affect: ?[]bool = null; // scratch: verts written as mirror targets this transform
+
 // ── Selection sets (one per element kind; modes keep their own) ──────────────────────
 var g_sel_vert: ?[]bool = null;
 var g_sel_edge: ?[]bool = null;
@@ -292,6 +313,11 @@ pub fn reset() void {
     if (g_sel_edge) |s| alloc.free(s);
     if (g_sel_face) |s| alloc.free(s);
     if (g_snap) |s| alloc.free(s);
+    if (g_mirror_twin) |t| alloc.free(t);
+    if (g_mirror_affect) |m| alloc.free(m);
+    g_mirror_twin = null;
+    g_mirror_affect = null;
+    g_mirror_built_for = 0; // mask itself survives — it's a user mode, retwinned on next use
     g_snap = null;
     g_verts = null;
     g_corner_vert = null;
@@ -686,6 +712,7 @@ fn ensureTopology() bool {
     g_vert_count = @intCast(g_verts.?.len / 3);
     g_edge_count = @intCast(g_edges.?.len / 2);
     g_built_for = fc;
+    g_mirror_built_for = 0; // fresh weld = fresh vertex identities; retwin on next mirror use
 
     // Classify each edge as boundary vs internal (a triangulation diagonal). An internal
     // edge is shared by exactly two faces of the SAME authored group; everything else is a
@@ -893,6 +920,71 @@ fn transformPoint(kind: TransformKind, p: [3]f32, delta: [3]f32, axis: [3]f32, p
     };
 }
 
+// ── Live mirror editing (req_2758) ────────────────────────────────────────────────
+/// Set the enabled mirror planes (bit 0 = X, 1 = Y, 2 = Z; plane at 0). Toggling forces
+/// a twin-table rebuild so pairing always reflects the mesh as it stands right now.
+pub fn setMirrorMask(mask: u8) void {
+    g_mirror_mask = mask & 7;
+    g_mirror_built_for = 0;
+}
+pub fn mirrorMask() u8 {
+    return g_mirror_mask;
+}
+
+const MirrorKey = struct { x: i32, y: i32, z: i32 };
+fn mirrorKey(p: [3]f32) MirrorKey {
+    return .{
+        .x = @intFromFloat(@round(p[0] * MIRROR_Q)),
+        .y = @intFromFloat(@round(p[1] * MIRROR_Q)),
+        .z = @intFromFloat(@round(p[2] * MIRROR_Q)),
+    };
+}
+fn reflectPoint(p: [3]f32, subset: u8) [3]f32 {
+    var r = p;
+    inline for (0..3) |a| {
+        if (subset & (@as(u8, 1) << @intCast(a)) != 0) r[a] = -r[a];
+    }
+    return r;
+}
+
+/// Build (or reuse) the twin table: for every non-empty subset of ALL three axes, each
+/// vertex's position-matched reflection partner. Built for the full 7 subsets so a mask
+/// change alone can reuse it; rebuilt when the topology (vert count) changes or a toggle
+/// forces it. Returns null when there's no topology or allocation fails.
+fn ensureMirrorTwins() ?[]u32 {
+    if (!ensureTopology()) return null;
+    if (g_mirror_twin != null and g_mirror_built_for == g_vert_count and g_mirror_built_mask == g_mirror_mask) return g_mirror_twin;
+    if (g_mirror_twin) |t| alloc.free(t);
+    g_mirror_twin = null;
+    const total: usize = @as(usize, g_vert_count) * 7;
+    const twins = alloc.alloc(u32, total) catch return null;
+    @memset(twins, MIRROR_NONE);
+    var by_pos = std.AutoHashMapUnmanaged(MirrorKey, u32){};
+    defer by_pos.deinit(alloc);
+    by_pos.ensureTotalCapacity(alloc, g_vert_count) catch {
+        alloc.free(twins);
+        return null;
+    };
+    var i: u32 = 0;
+    while (i < g_vert_count) : (i += 1) {
+        by_pos.put(alloc, mirrorKey(vertPos(i)), i) catch {};
+    }
+    i = 0;
+    while (i < g_vert_count) : (i += 1) {
+        const p = vertPos(i);
+        var s: u8 = 1;
+        while (s <= 7) : (s += 1) {
+            if (by_pos.get(mirrorKey(reflectPoint(p, s)))) |t| {
+                twins[@as(usize, s - 1) * g_vert_count + i] = t;
+            }
+        }
+    }
+    g_mirror_twin = twins;
+    g_mirror_built_for = g_vert_count;
+    g_mirror_built_mask = g_mirror_mask;
+    return twins;
+}
+
 fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [3]f32, scalar: f32) Mutation {
     const mask = fillAffectedVerts() orelse return .{};
     const axis = vecNorm(axis_raw);
@@ -900,6 +992,9 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
     const verts = g_verts orelse return .{};
     const corners = g_corner_vert orelse return .{};
     const pos = model_paint.positionsMutable() orelse return .{};
+    // Twin table must exist BEFORE the move loop — it pairs by position, and a fresh
+    // build against half-moved verts would find nothing on the reflected side.
+    const twins_opt: ?[]u32 = if (g_mirror_mask != 0) ensureMirrorTwins() else null;
 
     var i: u32 = 0;
     while (i < g_vert_count) : (i += 1) {
@@ -911,6 +1006,38 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
         verts[i * 3 + 2] = np[2];
     }
 
+    // MIRROR (req_2758): land the reflected edit on every moved vertex's twin. Reflecting
+    // the vertex's already-transformed NEW position IS the mirrored transform (a mirrored
+    // translate/scale/rotate about the reflected pivot), so one rule covers all three tools.
+    // A twin that is itself selected is skipped — it's being transformed directly.
+    var mmask: ?[]bool = null;
+    if (g_mirror_mask != 0) mirror: {
+        const twins = twins_opt orelse break :mirror;
+        if (g_mirror_affect == null or g_mirror_affect.?.len != g_vert_count) {
+            if (g_mirror_affect) |m| alloc.free(m);
+            g_mirror_affect = alloc.alloc(bool, g_vert_count) catch null;
+        }
+        const mm = g_mirror_affect orelse break :mirror;
+        @memset(mm, false);
+        var v: u32 = 0;
+        while (v < g_vert_count) : (v += 1) {
+            if (!mask[v]) continue;
+            const np: [3]f32 = .{ verts[v * 3 + 0], verts[v * 3 + 1], verts[v * 3 + 2] };
+            var s: u8 = 1;
+            while (s <= 7) : (s += 1) {
+                if ((s & g_mirror_mask) != s) continue; // only subsets of the ENABLED planes
+                const t = twins[@as(usize, s - 1) * g_vert_count + v];
+                if (t == MIRROR_NONE or t == v or t >= g_vert_count or mask[t]) continue;
+                const rp = reflectPoint(np, s);
+                verts[t * 3 + 0] = rp[0];
+                verts[t * 3 + 1] = rp[1];
+                verts[t * 3 + 2] = rp[2];
+                mm[t] = true;
+            }
+        }
+        mmask = mm;
+    }
+
     const fc = model_paint.faceCount();
     var out = Mutation{ .first_face = fc, .last_face = 0 };
     var f: u32 = 0;
@@ -919,7 +1046,8 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
         var k: u32 = 0;
         while (k < 3) : (k += 1) {
             const lv = corners[f * 3 + k];
-            if (lv >= mask.len or !mask[lv]) continue;
+            if (lv >= mask.len) continue;
+            if (!mask[lv] and !(mmask != null and mmask.?[lv])) continue;
             const dst = f * 9 + k * 3;
             const src = lv * 3;
             if (@as(usize, dst) + 2 >= pos.len) continue;
@@ -1801,4 +1929,119 @@ test "multi-face selection clears without baking — overlapping island discs (r
         try testing.expectEqual(base[f][1], c[1]);
         try testing.expectEqual(base[f][2], c[2]);
     }
+}
+
+// ── Live mirror editing (req_2758) ────────────────────────────────────────────────
+
+/// Index of the welded vertex sitting (exactly) at `p`, or null.
+fn findVertAt(p: [3]f32) ?u32 {
+    var i: u32 = 0;
+    while (i < g_vert_count) : (i += 1) {
+        const v = vertPos(i);
+        if (@abs(v[0] - p[0]) < 0.001 and @abs(v[1] - p[1]) < 0.001 and @abs(v[2] - p[2]) < 0.001) return i;
+    }
+    return null;
+}
+
+test "mirror X: translating a vertex drags its position twin to the reflected spot" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&soup);
+    model_paint.setTarget(790, soup[0..], 36);
+    defer {
+        reset();
+        model_paint.clear();
+        setMirrorMask(0);
+    }
+    setMirrorMask(1); // X plane
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    const vi = findVertAt(.{ -0.5, -0.5, -0.5 }).?;
+    const ti = findVertAt(.{ 0.5, -0.5, -0.5 }).?;
+    g_sel_vert.?[vi] = true;
+
+    const m = translateSelection(.{ 0, 0.25, 0 });
+    try testing.expect(m.changed);
+    // The selected vertex moved up…
+    try testing.expectApproxEqAbs(@as(f32, -0.25), vertPos(vi)[1], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(vi)[0], 0.0001);
+    // …and its X-twin followed, reflected (same y/z, opposite x untouched at +0.5).
+    try testing.expectApproxEqAbs(@as(f32, -0.25), vertPos(ti)[1], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.5), vertPos(ti)[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(ti)[2], 0.0001);
+
+    // The displayed soup carries the twin's move too (its faces are in the mutation).
+    const pos = model_paint.positions().?;
+    var found = false;
+    var c: usize = 0;
+    while (c + 2 < pos.len) : (c += 3) {
+        if (@abs(pos[c] - 0.5) < 0.001 and @abs(pos[c + 1] + 0.25) < 0.001 and @abs(pos[c + 2] + 0.5) < 0.001) found = true;
+    }
+    try testing.expect(found);
+}
+
+test "mirror X+Y: a moved corner carries its X, Y, and XY-diagonal twins" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&soup);
+    model_paint.setTarget(791, soup[0..], 36);
+    defer {
+        reset();
+        model_paint.clear();
+        setMirrorMask(0);
+    }
+    setMirrorMask(3); // X and Y planes
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    const vi = findVertAt(.{ -0.5, -0.5, -0.5 }).?;
+    g_sel_vert.?[vi] = true;
+
+    _ = translateSelection(.{ 0, 0, -0.25 });
+    // All four symmetric corners on z=-0.5 slid to z=-0.75.
+    try testing.expect(findVertAt(.{ -0.5, -0.5, -0.75 }) != null);
+    try testing.expect(findVertAt(.{ 0.5, -0.5, -0.75 }) != null); // X twin
+    try testing.expect(findVertAt(.{ -0.5, 0.5, -0.75 }) != null); // Y twin
+    try testing.expect(findVertAt(.{ 0.5, 0.5, -0.75 }) != null); // XY diagonal twin
+    // The far z=+0.5 corners did NOT move (Z mirror is off).
+    try testing.expect(findVertAt(.{ -0.5, -0.5, 0.5 }) != null);
+}
+
+test "mirror off: the twin stays put (no accidental symmetry)" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&soup);
+    model_paint.setTarget(792, soup[0..], 36);
+    defer {
+        reset();
+        model_paint.clear();
+        setMirrorMask(0);
+    }
+    setMirrorMask(0);
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    const vi = findVertAt(.{ -0.5, -0.5, -0.5 }).?;
+    const ti = findVertAt(.{ 0.5, -0.5, -0.5 }).?;
+    g_sel_vert.?[vi] = true;
+    _ = translateSelection(.{ 0, 0.25, 0 });
+    try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(ti)[1], 0.0001);
+}
+
+test "mirror X: a selection containing BOTH twins transforms each directly (no double-write)" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&soup);
+    model_paint.setTarget(793, soup[0..], 36);
+    defer {
+        reset();
+        model_paint.clear();
+        setMirrorMask(0);
+    }
+    setMirrorMask(1);
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    const vi = findVertAt(.{ -0.5, -0.5, -0.5 }).?;
+    const ti = findVertAt(.{ 0.5, -0.5, -0.5 }).?;
+    g_sel_vert.?[vi] = true;
+    g_sel_vert.?[ti] = true;
+    _ = translateSelection(.{ 0.25, 0, 0 });
+    // Both selected verts slid +x as ONE rigid selection — the mirror never re-reflected
+    // a selected twin back over the plane.
+    try testing.expectApproxEqAbs(@as(f32, -0.25), vertPos(vi)[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 0.75), vertPos(ti)[0], 0.0001);
 }

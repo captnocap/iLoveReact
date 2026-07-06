@@ -8,7 +8,10 @@ import MapPaintBar from './MapPaintBar';
 
 // A model document owns the host-native mesh editor — the toolbar becomes the
 // home for its tools (icon-only), with select / gizmo / toggle groups divided.
-const MESH_GROUP_DIVIDER = new Set(['mesh-move', 'mesh-paint']);
+const MESH_GROUP_DIVIDER = new Set(['mesh-move', 'mesh-sym-x', 'mesh-paint']);
+// Live mirror toggles (req_2758) read as their AXIS LETTER — the letter IS the value
+// (which plane), the old studio's X/Y/Z mirror-chip treatment.
+const MESH_SYM_LETTER: Record<string, string> = { 'mesh-sym-x': 'X', 'mesh-sym-y': 'Y', 'mesh-sym-z': 'Z' };
 
 export default function ToolOptions(props: {
   state: EditorState;
@@ -34,11 +37,15 @@ export default function ToolOptions(props: {
         {meshToolCommands().map((command) => {
           const active = meshToolActive(command.id, props.state.modelTool);
           const Btn = active ? C.HW_IconButtonOn : C.HW_IconButton;
+          const symLetter = MESH_SYM_LETTER[command.id];
+          const SymText = active ? C.HW_PillTextOn : C.HW_PillText;
           return (
             <Fragment key={command.id}>
               {MESH_GROUP_DIVIDER.has(command.id) ? <C.HW_OptionDivider /> : null}
-              <Btn tooltip={`${command.name} (${command.key})`} onPress={() => props.onCommand(command.id, 'action bar')}>
-                <Icon name={command.icon} size={14} color={accentFor(active ? 'primary' : 'textDim')} />
+              <Btn tooltip={symLetter ? `${command.name} — edits land mirrored across the ${symLetter} plane` : `${command.name} (${command.key})`} onPress={() => props.onCommand(command.id, 'action bar')}>
+                {symLetter
+                  ? <SymText>{symLetter}</SymText>
+                  : <Icon name={command.icon} size={14} color={accentFor(active ? 'primary' : 'textDim')} />}
               </Btn>
             </Fragment>
           );

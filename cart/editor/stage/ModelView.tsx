@@ -26,6 +26,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Box, Col, Row, Text, Pressable, Slider, Scene3D } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
+import { BackdropsPanel, BackdropSurface, backdropQuad, backdropTexKey, loadBackdrops, saveBackdrops, pickBackdrop, type Backdrop } from './Backdrops';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { callHost } from '@reactjit/runtime/ffi';
 import {
@@ -87,7 +88,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -123,6 +124,10 @@ export type ModelToolApi = {
   createFace: () => void;
   loopCut: () => void;
   deleteSelection: () => void;
+  // Live mirror editing (req_2758): flip one symmetry plane (0 = X, 1 = Y, 2 = Z) on/off.
+  toggleMirror: (axis: number) => void;
+  // Reference images (req_2758 — the studio's tracing backdrops): toggle the setup panel.
+  referenceImages: () => void;
   // Host-authoritative part ops: append a new part (returns its group range), hide/show a
   // part's range, delete a part's range. The host mesh is the source of truth.
   appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string) => { lo: number; hi: number } | null;
@@ -274,6 +279,8 @@ type SelInfo = { mode: number; verts: number; edges: number; sel: number };
 type TopoResult = { ok: number; key?: string; count?: number; lo?: number; hi?: number; label?: string; undo?: number; redo?: number };
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
+// Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at coordinate 0.
+const meshSetMirror = (mask: number) => host.__mesh_edit_mirror?.(mask);
 const meshClearSel = () => host.__mesh_edit_clear?.();
 const meshGizmoTool = (t: number) => host.__mesh_gizmo_tool?.(t);
 const meshSelectEdge = (idx: number, additive = false) => host.__mesh_edit_select_edge?.(idx, additive ? 1 : 0) === 1;
@@ -495,6 +502,26 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
   const [selMode, setSelMode] = useState(0); // 0 view · 1 vertex · 2 edge · 3 face
   const [gizmoTool, setGizmoTool] = useState(0); // 0 move · 1 scale · 2 rotate
+  // Live mirror editing (req_2758): enabled symmetry planes, bit 0/1/2 = X/Y/Z. The host
+  // owns the reflection (mesh_edit.zig twin table); this is the toggle's UI truth.
+  const [mirrorMask, setMirrorMask] = useState(0);
+  // Reference-image backdrops (req_2758 — the studio's req_1280 tracing planes). TWIG:
+  // localstore-backed working state, never model data. bdEpoch is a fresh nonce per
+  // MOUNT folded into texture/geometry keys, so a remount re-bakes the static surfaces
+  // instead of sampling a stale host texture (the studio's req_1541 lesson).
+  const [backdrops, setBackdropsState] = useState<Backdrop[]>(() => loadBackdrops());
+  const setBackdrops = (u: Backdrop[] | ((p: Backdrop[]) => Backdrop[])) =>
+    setBackdropsState((prev) => { const next = typeof u === 'function' ? (u as (p: Backdrop[]) => Backdrop[])(prev) : u; saveBackdrops(next); return next; });
+  const [backdropPanel, setBackdropPanel] = useState(false);
+  const [bdStatus, setBdStatus] = useState<string | null>(null);
+  const bdEpochRef = useRef(Math.floor(Math.random() * 1e6));
+  const addBackdrop = async () => {
+    const r = await pickBackdrop(backdrops.length);
+    if (r == null) return; // picker cancelled
+    if (typeof r === 'string') { setBdStatus(r); return; }
+    setBdStatus(null);
+    setBackdrops((list) => [...list, r]);
+  };
   const [selInfo, setSelInfo] = useState<SelInfo>({ mode: 0, verts: 0, edges: 0, sel: 0 });
   const [guard, setGuard] = useState<GuardInfo | null>(null);
   // Shader-ink bake failure — surfaced LOUD. The old shape discarded the door's
@@ -967,6 +994,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // rebuild the island atlas at the last-chosen density), so the JS mirror deliberately
   // survives model key changes too — no reset-to-1 here.
 
+  // Live mirror editing (req_2758): push the enabled symmetry planes to the host. The
+  // host mask outlives model loads, so unmount clears it — the next viewer must start
+  // with what its toggles show (all off), never an inherited invisible symmetry.
+  useEffect(() => {
+    meshSetMirror(mirrorMask);
+    return () => { if (mirrorMask) meshSetMirror(0); };
+  }, [mirrorMask]);
+
   // ── Editor bridge ──────────────────────────────────────────────────────────
   // Hand the tool handlers out (once) and mirror the live tool state back, so an
   // embedding shell can drive the SAME tools its toolbar/context-menu present.
@@ -988,6 +1023,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       applyTopo(meshLoopCut(), 'Select exactly one edge to loop-cut across');
     },
     deleteSelection: () => applyTopo(meshDeleteSelection(), 'Nothing selected to delete'),
+    toggleMirror: (axis) => setMirrorMask((m) => m ^ (1 << axis)),
+    referenceImages: () => setBackdropPanel((v) => !v),
     // Host-authoritative part ops (the outliner). Append preserves prior edits; hide/delete
     // act on the part's group range. All adopt the new host mesh key without a JS recompose.
     // The HOST maintains the part-range truth through each op (req_2644); adoptMesh resyncs
@@ -1153,8 +1190,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking });
-  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -1481,6 +1518,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'clear') meshClearSel();
         else if (name === 'scope') host.__mesh_edit_scope?.(num(a[0]), num(a[1]));
         else if (name === 'nudge') host.__mesh_gizmo_nudge?.(a[0] === 'y' ? 1 : a[0] === 'z' ? 2 : 0, Number(a[1]) || 0);
+        else if (name === 'mirror') { const m = num(a[0]); setMirrorMask(m); meshSetMirror(m); } // mirror:mask (bit 0/1/2 = X/Y/Z) — pushed immediately so a same-tick nudge reflects
         else if (name === 'gizmo') chooseGizmoTool(num(a[0]));
         // undo/redo adopt like the app's undo (the door returns a NEW mesh key) and LOG the
         // door result + __mesh_history depths — the headless proof the journal moved.
@@ -1661,7 +1699,29 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         {/* White material: all colour comes from the host's per-face paint atlas
             (default grey until painted), so painted colours render true. */}
         {model && <Scene3D.Mesh hostKey={model.key} material="#ffffff" />}
+        {/* Reference backdrops (req_2758): translucent trace planes. White material so the
+            picture (sampled via textureKey) reads true; alpha<1 routes them through the
+            back-to-front transparent pass. The quad is centered at origin and PLACED via
+            `position`, so the panel's sliders move it with no geometry re-bake; the
+            geometry id carries the SHAPE signature (plane/scale/aspect/flip) because the
+            intern cache serves by id and never re-runs generate for a known key. */}
+        {backdrops.filter((b) => b.visible).map((bd, i) => (
+          <Scene3D.Mesh
+            key={`${bd.id}~${bdEpochRef.current}`}
+            geometry={{ id: `editor.bd.${bd.id}.${bdEpochRef.current}.${bd.plane}.${bd.scale.toFixed(1)}.${bd.aspect.toFixed(3)}.${bd.flipU ? 1 : 0}`, generate: () => backdropQuad(bd), defaults: {} }}
+            dynamicKey={`editor.bd${i}~${bd.id}.${bdEpochRef.current}.${bd.plane}.${bd.scale}.${bd.aspect}.${bd.flipU ? 1 : 0}`}
+            material={{ color: '#ffffff', opacity: bd.opacity }}
+            textureKey={backdropTexKey(`${bd.id}.${bdEpochRef.current}`)}
+            position={bd.pos}
+          />
+        ))}
       </Scene3D>
+
+      {/* Backdrop texture bakes — offscreen 2D surfaces the quads sample. Keyed on the
+          mount epoch so a remount re-bakes instead of sampling a stale host texture. */}
+      {backdrops.filter((b) => b.visible).map((b) => (
+        <BackdropSurface key={`${b.id}~${bdEpochRef.current}`} id={`${b.id}.${bdEpochRef.current}`} source={b.source} aspect={b.aspect} />
+      ))}
 
       {/* Paint input surface — mounted ONLY in paint mode. Every other interaction (orbit
           on middle-drag, vertex/edge/face select + marquee on left, wheel zoom, double-click
@@ -1946,6 +2006,20 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           )}
         </Row>
       )}
+
+      {/* Reference Images panel (req_2758) — setup card for the tracing backdrops. The
+          viewport stays live behind it (orbit while you line the trace up); close and
+          the planes stay. Opened from View → Reference Images via the tool api. */}
+      {backdropPanel ? (
+        <BackdropsPanel
+          backdrops={backdrops}
+          status={bdStatus}
+          onAdd={() => { void addBackdrop(); }}
+          onUpdate={(id, patch) => setBackdrops((list) => list.map((b) => (b.id === id ? { ...b, ...patch } : b)))}
+          onRemove={(id) => setBackdrops((list) => list.filter((b) => b.id !== id))}
+          onClose={() => setBackdropPanel(false)}
+        />
+      ) : null}
 
       {/* Loop-cut popup (the studio's Blockbench panel): direction (which in-plane axis),
           cuts, offset along the face's span (size units or percent — req_2625 EE). Every

@@ -493,6 +493,17 @@ fn hostMeshEditMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     state.markDirty();
 }
 
+/// __mesh_edit_mirror(mask) — live mirror editing (req_2758): enable the X/Y/Z symmetry
+/// planes (bit 0 = X, 1 = Y, 2 = Z; plane at coordinate 0). While a plane is on, every
+/// selection transform (gizmo drag / nudge) also lands, reflected, on each moved vertex's
+/// position-matched twin — the Studio's req_1183/1186 symmetric editing, host-native.
+fn hostMeshEditMirror(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const mask: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 7));
+    scene3d.meshEditSetMirror(mask);
+    state.markDirty(); // the plane overlay appears/disappears with the toggle
+}
+
 /// __mesh_edit_pick(x, y, additive) → selected count. Pick the element under the pixel in
 /// the current mode and fold it in (additive≠0 = shift toggle/extend). Returns the new
 /// selected count in this mode, or -1 if there's no mesh. Repaints (face tint).
@@ -2487,6 +2498,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
     v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
     v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);
+    v8_runtime.registerHostFn("__mesh_edit_mirror", hostMeshEditMirror);
     v8_runtime.registerHostFn("__mesh_edit_pick", hostMeshEditPick);
     v8_runtime.registerHostFn("__mesh_edit_clear", hostMeshEditClear);
     v8_runtime.registerHostFn("__mesh_edit_box", hostMeshEditBox);
