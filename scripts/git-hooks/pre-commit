@@ -1,0 +1,28 @@
+#!/bin/bash
+# Oversize-file guard (req_2723). GitHub's pre-receive hook rejects any blob
+# over 100MB — and it does so at PUSH time, after the commit is already baked
+# into history. That is how a 555MB store.db (c0b0cdff3, 2026-06-30) blocked
+# main for 400+ commits and forced a history scrub. This hook checks the
+# STAGED size of every file on every commit, so a tracked file that started
+# small and grew past the limit is caught the moment a commit sweeps it in.
+#
+# Wired via: git config core.hooksPath scripts/git-hooks
+# Emergency bypass (do NOT use casually): git commit --no-verify
+
+hard_limit=$((95 * 1024 * 1024))   # refuse: 95MB, margin under GitHub's 100MB
+warn_limit=$((50 * 1024 * 1024))   # warn: GitHub starts warning at 50MB
+
+blocked=0
+while IFS= read -r -d '' path; do
+  # size of the staged blob (the index copy — what would actually be committed)
+  size=$(git cat-file -s ":$path" 2>/dev/null) || continue
+  if [ "$size" -ge "$hard_limit" ]; then
+    echo "pre-commit BLOCKED: $path is $((size / 1048576))MB staged — GitHub rejects blobs over 100MB and a scrub is the only undo." >&2
+    echo "  If this file is runtime/generated data, untrack it: git rm --cached '$path' && add a .gitignore rule." >&2
+    blocked=1
+  elif [ "$size" -ge "$warn_limit" ]; then
+    echo "pre-commit warning: $path is $((size / 1048576))MB staged — approaching GitHub's 100MB hard limit." >&2
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACM -z)
+
+exit "$blocked"
