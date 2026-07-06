@@ -459,13 +459,18 @@ var g_guard_before: ?[]f32 = null; // pre-gizmo face positions for safety prompt
 var g_guard_pending: bool = false;
 var g_guard_bad_faces: u32 = 0;
 var g_guard_face_count: u32 = 0;
+var g_guard_bad_list: ?[]u32 = null; // indices of the offending tris — Split Quads targets these
+var g_guard_can_split: bool = false; // some offending tri sits in a multi-tri authored group
 
 fn clearMeshGuardSnapshot() void {
     if (g_guard_before) |p| std.heap.c_allocator.free(p);
     g_guard_before = null;
+    if (g_guard_bad_list) |l| std.heap.c_allocator.free(l);
+    g_guard_bad_list = null;
     g_guard_pending = false;
     g_guard_bad_faces = 0;
     g_guard_face_count = 0;
+    g_guard_can_split = false;
 }
 
 fn clearActiveEditMesh() void {
@@ -2575,8 +2580,7 @@ fn faceMovedRigidly(before: []const f32, after: []const f32, face: u32) bool {
     return true;
 }
 
-fn countUnsafeFaceEdits(before: []const f32, after: []const f32, face_count: u32) u32 {
-    var bad: u32 = 0;
+fn collectUnsafeFaceEdits(before: []const f32, after: []const f32, face_count: u32, out: *std.ArrayListUnmanaged(u32)) void {
     var f: u32 = 0;
     while (f < face_count) : (f += 1) {
         const bc = faceCrossFromPositions(before, f);
@@ -2589,12 +2593,105 @@ fn countUnsafeFaceEdits(before: []const f32, after: []const f32, face_count: u32
         // a transition INTO degeneracy counts.
         if (b2 <= 1e-12) continue;
         if (a2 < b2 * 1e-6) {
-            bad += 1;
+            out.append(std.heap.c_allocator, f) catch return;
             continue;
         }
-        if (vdot(vnorm(bc), vnorm(ac)) < -0.05 and !faceMovedRigidly(before, after, f)) bad += 1;
+        if (vdot(vnorm(bc), vnorm(ac)) < -0.05 and !faceMovedRigidly(before, after, f)) {
+            out.append(std.heap.c_allocator, f) catch return;
+        }
     }
-    return bad;
+}
+
+/// True if Split Quads would actually change topology: authored groups exist, the
+/// displayed mesh IS the source (group ids are per source face), and at least one
+/// offending tri sits in a group with 2+ members (splitting a singleton is a no-op).
+fn guardSplitPossible(bad_list: []const u32) bool {
+    if (bad_list.len == 0) return false;
+    if (!model_paint.hasTarget()) return false;
+    if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return false;
+    if (g_edit_count != model_source.count()) return false;
+    const tri_count = g_edit_count / 3;
+    const groups = captureFaceGroups() orelse return false;
+    defer std.heap.c_allocator.free(groups);
+    for (bad_list) |bf| {
+        if (bf >= tri_count) continue;
+        const g = groups[bf];
+        if (g == model_source.NO_FACE_GROUP) continue;
+        var members: u32 = 0;
+        for (groups) |og| {
+            if (og != g) continue;
+            members += 1;
+            if (members >= 2) return true;
+        }
+    }
+    return false;
+}
+
+/// Split Quads (guard action 0, req_2757): every authored group that contains an
+/// offending tri breaks into per-triangle groups, so the fold the drag created becomes
+/// explicit topology instead of a hidden artifact inside a "flat" quad. Pure group
+/// remap — no geometry moves; part membership is preserved by re-deriving it from the
+/// ORIGINAL ids and renormalizing the per-part contiguous ranges after the renumber.
+fn guardSplitQuads() bool {
+    const bad_list = g_guard_bad_list orelse return false;
+    if (!guardSplitPossible(bad_list)) return false;
+    const tri_count = g_edit_count / 3;
+    const groups = captureFaceGroups() orelse return false;
+    defer jalloc.free(groups);
+
+    var affected = std.AutoHashMapUnmanaged(u32, void){};
+    defer affected.deinit(jalloc);
+    for (bad_list) |bf| {
+        if (bf >= tri_count) continue;
+        const g = groups[bf];
+        if (g == model_source.NO_FACE_GROUP) continue;
+        affected.put(jalloc, g, {}) catch return false;
+    }
+    if (affected.count() == 0) return false;
+
+    // Part membership must be read off the ORIGINAL ids before the renumber moves
+    // them past every part range.
+    var face_part: ?[]u32 = null;
+    defer if (face_part) |fp| jalloc.free(fp);
+    var part_count: u32 = 0;
+    if (model_source.partRanges()) |pr| {
+        part_count = @intCast(pr.len / 2);
+        const fp = jalloc.alloc(u32, tri_count) catch return false;
+        for (fp, 0..) |*slot, f| {
+            slot.* = model_source.NO_PART;
+            const g = groups[f];
+            if (g == model_source.NO_FACE_GROUP) continue;
+            var p: u32 = 0;
+            while (p < part_count) : (p += 1) {
+                if (g >= pr[p * 2] and g < pr[p * 2 + 1]) {
+                    slot.* = p;
+                    break;
+                }
+            }
+        }
+        face_part = fp;
+    }
+
+    var snap = journalSnapshotCurrent("split quads");
+    // Selection tint must restore before the paint layout re-islands (detach's rule).
+    mesh_edit.clearSelection();
+    var next: u32 = @intCast(maxGroupId(groups) + 1);
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (groups[f] == model_source.NO_FACE_GROUP) continue;
+        if (!affected.contains(groups[f])) continue;
+        groups[f] = next;
+        next += 1;
+    }
+    model_source.setFaceGroups(groups);
+    if (face_part) |fp| {
+        renormalizePartRanges(fp, part_count);
+    } else {
+        mesh_edit.reset();
+        _ = refreshPaintLayout();
+    }
+    journalCommit(&snap);
+    return true;
 }
 
 pub fn meshGizmoBegin() void {
@@ -2625,24 +2722,29 @@ pub fn meshGizmoFinish() bool {
     // A press that moved nothing leaves no undo step.
     if (std.mem.eql(f32, before, after)) journalDiscard(&g_gizmo_snap) else journalCommit(&g_gizmo_snap);
     const fc: u32 = @intCast(@min(before.len / 9, after.len / 9));
-    const bad = countUnsafeFaceEdits(before, after, fc);
-    if (bad == 0) {
+    var bad_list = std.ArrayListUnmanaged(u32){};
+    collectUnsafeFaceEdits(before, after, fc, &bad_list);
+    if (bad_list.items.len == 0) {
+        bad_list.deinit(std.heap.c_allocator);
         clearMeshGuardSnapshot();
         return false;
     }
     g_guard_pending = true;
-    g_guard_bad_faces = bad;
+    g_guard_bad_faces = @intCast(bad_list.items.len);
     g_guard_face_count = fc;
+    g_guard_bad_list = bad_list.toOwnedSlice(std.heap.c_allocator) catch null;
+    g_guard_can_split = if (g_guard_bad_list) |bl| guardSplitPossible(bl) else false;
     return true;
 }
 
 pub fn meshEditGuardInfo() [4]u32 {
-    return .{ if (g_guard_pending) 1 else 0, g_guard_bad_faces, g_guard_face_count, if (g_guard_pending) 1 else 0 };
+    return .{ if (g_guard_pending) 1 else 0, g_guard_bad_faces, g_guard_face_count, if (g_guard_pending and g_guard_can_split) 1 else 0 };
 }
 
 pub fn meshEditGuardResolve(action: u8) bool {
     if (!g_guard_pending) return false;
     var changed = false;
+    if (action == 0) changed = guardSplitQuads();
     if (action == 2) {
         const before = g_guard_before orelse {
             clearMeshGuardSnapshot();

@@ -590,9 +590,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   };
 
   const closeGuard = (action: number) => {
-    resolveGuard(action);
+    const changed = resolveGuard(action);
     setGuard(null);
     setSelInfo(readSelInfo() ?? selInfo);
+    if (action === 0 && changed) {
+      // The split renumbered groups + part ranges and re-islanded the paint layout —
+      // the outliner mirror and the live UV panel must re-read host truth.
+      resyncPartRanges();
+      refreshUvIfLive();
+    }
   };
 
   // ── Face loop cut popup (the studio treatment): direction picks which of the clicked
@@ -2086,15 +2092,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         >
           <Text style={{ color: '#ffe1bf', fontSize: 13, fontWeight: 700 }}>Unsafe face edit</Text>
           <Text style={{ color: '#b9c4d4', fontSize: 12, marginTop: 6 }}>
-            {`${guard.bad} triangle${guard.bad === 1 ? '' : 's'} collapsed or flipped. Keep the triangulated split, ignore it, or revert.`}
+            {`${guard.bad} triangle${guard.bad === 1 ? '' : 's'} collapsed or flipped. ${guard.canSplit ? 'Split the affected quads, ignore it, or revert.' : 'Ignore it or revert.'}`}
           </Text>
           <Row style={{ marginTop: 12, gap: 8 }}>
+            {guard.canSplit ? (
             <Pressable
               onPress={() => closeGuard(0)}
               style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#244164', borderWidth: 1, borderColor: '#4e75a4' }}
             >
               <Text style={{ color: '#e6f1ff', fontSize: 12, fontWeight: 700 }}>Split Quads</Text>
             </Pressable>
+            ) : null}
             <Pressable
               onPress={() => closeGuard(1)}
               style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: '#303747', borderWidth: 1, borderColor: '#566176' }}
