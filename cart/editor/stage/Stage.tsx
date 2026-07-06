@@ -25,7 +25,7 @@ export default function Stage(props: {
   onStage: () => void;
   onContext: () => void;
   onObject: (id: string) => void;
-  onPlacePiece: (piece: PlacedPiece) => void;
+  onPlacePiece: (pieces: PlacedPiece[]) => void;
   onSelectPiece: (id: string | null) => void;
   onPieceContext: (id: string, x: number, y: number) => void;
   onArmPiece: (pieceId: string) => void;

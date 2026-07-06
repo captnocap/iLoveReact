@@ -201,6 +201,64 @@ export function resolvePlacement(pieceId: string, wx: number, wz: number, floor:
   return { id: '', pieceId, x, y, z, yawDegrees: yaw, floor };
 }
 
+/** The biggest single drag-run (req_2747): 20×20 cells of floor. A drag past
+ *  this truncates LOUDLY (console + the run just stops growing) rather than
+ *  silently stamping thousands of pieces from one wild gesture. */
+export const RUN_PLACEMENT_CAP = 400;
+
+/** Resolve a click→drag RUN into every placement it stamps (req_2747 — the
+ *  reintroduced drag-place): edge kinds (walls, fences, railings, …) lay a
+ *  straight run of edge pieces along the DOMINANT drag axis, on the grid line
+ *  nearest the anchor; plates fill the whole cell rect between anchor and
+ *  cursor. Props and authored meshes stay single-placement at the cursor — a
+ *  bench is not a tiling. Every cell resolves through resolvePlacement, so the
+ *  run gets the same snap, host validation, and storey/terrain basing as a
+ *  single click; validator-rejected cells drop out of the run. The whole run is
+ *  LEVEL at the ANCHOR's terrain height — a dragged wall or floor plate is flat
+ *  by construction, it does not stairstep over terrain bumps mid-run. */
+export function resolveRunPlacements(pieceId: string, ax: number, az: number, bx: number, bz: number, floor: number, terrainY = 0): PlacedPiece[] {
+  const kind = pieceKindOf(pieceId);
+  if (kind === 'prop' || isAuthoredPiece(pieceId)) {
+    const single = resolvePlacement(pieceId, bx, bz, floor, terrainY);
+    return single ? [single] : [];
+  }
+  const M = PIECE_MODULE_METERS;
+  const points: Array<{ x: number; z: number }> = [];
+  if (kind && EDGE_SNAP_KINDS.has(kind)) {
+    if (Math.abs(bx - ax) >= Math.abs(bz - az)) {
+      // Run along X: every piece rides the horizontal grid line nearest the
+      // anchor (fed as the exact line z, which snapToEdge resolves back to it).
+      const zLine = Math.round(az / M) * M;
+      const c0 = Math.floor(Math.min(ax, bx) / M);
+      const c1 = Math.floor(Math.max(ax, bx) / M);
+      for (let c = c0; c <= c1; c++) points.push({ x: c * M + M / 2, z: zLine });
+    } else {
+      const xLine = Math.round(ax / M) * M;
+      const c0 = Math.floor(Math.min(az, bz) / M);
+      const c1 = Math.floor(Math.max(az, bz) / M);
+      for (let c = c0; c <= c1; c++) points.push({ x: xLine, z: c * M + M / 2 });
+    }
+  } else {
+    const cx0 = Math.floor(Math.min(ax, bx) / M);
+    const cx1 = Math.floor(Math.max(ax, bx) / M);
+    const cz0 = Math.floor(Math.min(az, bz) / M);
+    const cz1 = Math.floor(Math.max(az, bz) / M);
+    for (let cz = cz0; cz <= cz1; cz++) {
+      for (let cx = cx0; cx <= cx1; cx++) points.push({ x: cx * M + M / 2, z: cz * M + M / 2 });
+    }
+  }
+  if (points.length > RUN_PLACEMENT_CAP) {
+    console.warn(`[place] run TRUNCATED: ${points.length} cells > cap ${RUN_PLACEMENT_CAP} — only the first ${RUN_PLACEMENT_CAP} stamp`);
+    points.length = RUN_PLACEMENT_CAP;
+  }
+  const out: PlacedPiece[] = [];
+  for (const pt of points) {
+    const placed = resolvePlacement(pieceId, pt.x, pt.z, floor, terrainY);
+    if (placed) out.push(placed);
+  }
+  return out;
+}
+
 /** The placement SLOT a piece occupies — its footprint identity (req_2583). Two
  *  pieces with the same slot key fight for the same space, so a new placement
  *  REPLACES the old one there (place a window wall over a wall → the wall is

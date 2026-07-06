@@ -801,25 +801,30 @@ export default function AppFrame() {
   // EditorState now. WorldEditorSurface reports placements/picks up here; the
   // Inspector reads state.selectedPieceId. This retires the phantom `objects`
   // path as the world surface's selection source.
-  const placePiece = (piece: PlacedPiece) => {
+  const placePieces = (pieces: PlacedPiece[]) => {
+    if (!pieces.length) return;
     setState((prev) => {
-      const id = `bp_${prev.seq}`;
+      // One gesture = ONE journal entry (req_2747): a click arrives as a one-piece
+      // batch, a drag-run as the whole wall run / floor rect — never N entries.
+      let seq = prev.seq;
       // Copy stamp (req_2733): a copied piece's slots/overrides ride every placement
       // until the palette re-arms, so Copy drops true clones — not bare kind defaults.
-      const placed = { ...piece, id, ...(prev.armedStamp ?? {}) };
-      // Replace anything already occupying this footprint (req_2583): dropping a
+      const placed = pieces.map((piece) => ({ ...piece, id: `bp_${seq++}`, ...(prev.armedStamp ?? {}) }));
+      // Replace anything already occupying these footprints (req_2583): dropping a
       // window wall onto a wall REPLACES it — no two pieces fighting for the same
       // space. Different footprints (a wall vs the floor under it) don't collide.
-      const key = placementSlotKey(placed);
-      const kept = prev.worldPieces.filter((p) => placementSlotKey(p) !== key);
-      const replaced = kept.length !== prev.worldPieces.length;
+      const keys = new Set(placed.map(placementSlotKey));
+      const kept = prev.worldPieces.filter((p) => !keys.has(placementSlotKey(p)));
+      const replaced = prev.worldPieces.length - kept.length;
+      const what = placed.length === 1 ? pieces[0]!.pieceId : `${placed.length}× ${pieces[0]!.pieceId}`;
+      const verb = replaced && placed.length === 1 ? 'replaced' : 'placed';
       return recordWorldEdit(prev, {
         ...prev,
-        seq: prev.seq + 1,
-        worldPieces: [...kept, placed],
-        selectedPieceId: id,
-        status: `${replaced ? 'replaced' : 'placed'} ${piece.pieceId}`,
-      }, `${replaced ? 'replace' : 'place'} ${piece.pieceId}`);
+        seq,
+        worldPieces: [...kept, ...placed],
+        selectedPieceId: placed[placed.length - 1]!.id,
+        status: `${verb} ${what}${replaced && placed.length > 1 ? ` (replaced ${replaced})` : ''}`,
+      }, `${verb === 'replaced' ? 'replace' : 'place'} ${what}`);
     });
   };
 
@@ -952,7 +957,7 @@ export default function AppFrame() {
   };
 
   // Copy = pick the piece up into your hand (the Fortnite move): arm its definition
-  // in Place mode and carry its slots/overrides as the stamp placePiece applies, so
+  // in Place mode and carry its slots/overrides as the stamp placePieces applies, so
   // every subsequent click drops a true clone. Not a world-undo entry — arming never
   // is; the placements it produces are. Map paint disarms like any other tool switch.
   const copyPiece = (id: string) => {
@@ -2621,7 +2626,7 @@ export default function AppFrame() {
             onStage={() => runCommand(state.activeCommandId, 'stage')}
             onContext={guarded(() => setState((prev) => ({ ...prev, contextOpen: !prev.contextOpen, openMenu: null, status: prev.contextOpen ? 'context menu closed' : 'context menu opened' })))}
             onObject={selectObject}
-            onPlacePiece={placePiece}
+            onPlacePiece={placePieces}
             onSelectPiece={selectPiece}
             onPieceContext={openPieceQuickMenu}
             onArmPiece={armPiece}

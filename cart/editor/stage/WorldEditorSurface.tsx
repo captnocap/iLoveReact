@@ -34,7 +34,8 @@ export default function WorldEditorSurface(props: {
   selectedId: string | null;
   armedPieceId: string | null;
   authoredPieces: readonly AuthoredBuildPiece[];
-  onPlace: (piece: PlacedPiece) => void;
+  /** one gesture's placements: a click is a one-piece batch, a drag-run (req_2747) is the lot. */
+  onPlace: (pieces: PlacedPiece[]) => void;
   onSelect: (id: string | null) => void;
   /** right-click hit a placed piece → open the quick context menu at window (x,y) (req_2733). */
   onPieceContext: (id: string, x: number, y: number) => void;

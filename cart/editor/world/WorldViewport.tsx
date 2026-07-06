@@ -25,7 +25,7 @@
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable } from '@reactjit/primitives';
 import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
-import { pieceInstanceRows, resolvePlacement, pieceLook, pickAuthoredPlacement, type ArmedPiece, type PlacedPiece } from './pieces';
+import { pieceInstanceRows, resolvePlacement, resolveRunPlacements, pieceKindOf, pieceLook, pickAuthoredPlacement, PIECE_MODULE_METERS, type ArmedPiece, type PlacedPiece } from './pieces';
 import { pieceSkinBoxes } from './pieceSkins';
 import { encodeResidentMeshes, encodeMeshRefs, encodeMeshGhost, type ResidentMesh, type MeshRef } from './meshProps';
 import { isAuthoredPiece, authoredModelIdOf, type AuthoredBuildPiece } from './authoredRegistry';
@@ -93,7 +93,9 @@ export default function WorldViewport(props: {
    *  quick context menu opens at the cursor. Fires in ANY tool mode — the whole point is
    *  editing the piece under the mouse without disarming the current tool. */
   onPieceContext: (id: string, x: number, y: number) => void;
-  onPlace: (piece: PlacedPiece) => void;
+  /** everything ONE gesture placed: a click is a one-piece batch, a drag-run
+   *  (req_2747) is the whole wall run / floor rect — one journal entry either way. */
+  onPlace: (pieces: PlacedPiece[]) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
   floor: number;
   paintActive: boolean;
@@ -104,6 +106,12 @@ export default function WorldViewport(props: {
   if (!stageRef.current) stageRef.current = new IsoStage({ centerX: 0, centerZ: 0 });
   const stage = stageRef.current;
   const [snap, setSnap] = useState<Snap | null>(null);
+  // The click→drag RUN (req_2747 — drag-place is back): mousedown anchors, the
+  // drag extends a wall run / floor rect (resolveRunPlacements), mouseup stamps
+  // it. State drives the multi-ghost overlay; the ref is what mouseup commits
+  // (state written mid-gesture isn't readable in the same event's handlers).
+  const [run, setRun] = useState<PlacedPiece[] | null>(null);
+  const runRef = useRef<PlacedPiece[] | null>(null);
   // Bumped on every camera move (zoom/rotate/pan) to force the overlays to RE-PROJECT. The
   // placement ghost re-renders for free via setSnap, but the selection box has no such trigger
   // when the tool isn't armed — without this it freezes at its last projection while the world
@@ -385,14 +393,18 @@ export default function WorldViewport(props: {
       const r = rectRef.current;
       const mx = Number(g.getMouseX?.() ?? NaN);
       const my = Number(g.getMouseY?.() ?? NaN);
+      // A live drag owns the ghost (req_2747): onMove drives the run overlay and
+      // nulls snap; the poll re-snapping here would resurrect the single ghost
+      // under it every 50ms. The POS readout keeps publishing either way.
+      const dragging = !!dragRef.current?.turned;
       if (Number.isFinite(mx) && Number.isFinite(my)) {
         const inside = mx >= r.x && mx < r.x + r.width && my >= r.y && my < r.y + r.height;
         const next = inside ? publishHoverAt(mx - r.x, my - r.y) : null;
         if (!inside) publishWorldHoverReadout(null);
-        if (armedHover || !inside) setSnap((cur) => (sameSnap(cur, next) ? cur : next));
+        if ((armedHover || !inside) && !dragging) setSnap((cur) => (sameSnap(cur, next) ? cur : next));
       } else {
         publishWorldHoverReadout(null);
-        if (armedHover) setSnap(null);
+        if (armedHover && !dragging) setSnap(null);
       }
       hoverTimerRef.current = setTimeout(step, HOVER_READOUT_POLL_MS);
     };
@@ -446,7 +458,7 @@ export default function WorldViewport(props: {
   useEffect(() => () => {
     if (orbitTimerRef.current) { clearTimeout(orbitTimerRef.current); orbitTimerRef.current = null; }
   }, []);
-  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; pan: boolean } | null>(null);
+  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; pan: boolean; runAnchor: { x: number; z: number; terrainY: number } | null; runCell: { x: number; z: number } | null } | null>(null);
   const local = useCallback((e: any) => {
     const r = rectRef.current;
     return { x: Number(e?.x ?? 0) - r.x, y: Number(e?.y ?? 0) - r.y };
@@ -454,16 +466,25 @@ export default function WorldViewport(props: {
 
   const onDown = useCallback((e: any) => {
     const p = local(e);
-    dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false, pan: !!e?.shiftKey };
-  }, [local]);
+    // Drag-run anchor (req_2747): a left-down on the Place tool with a grid
+    // piece armed remembers the ground point under it — if the gesture turns
+    // into a drag, that point anchors the wall run / floor rect. Props and
+    // authored meshes stay single-placement (a bench is not a tiling), and
+    // shift keeps meaning pan.
+    const armed = armedRef.current;
+    const runnable = !e?.shiftKey && toolRef.current === 'place' && !!armed
+      && !isAuthoredPiece(armed.pieceId) && pieceKindOf(armed.pieceId) !== 'prop';
+    const anchor = runnable ? groundUnder(p.x, p.y) : null;
+    dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false, pan: !!e?.shiftKey, runAnchor: anchor, runCell: null };
+  }, [local, groundUnder]);
 
   const onMove = useCallback((e: any) => {
     const p = local(e);
     const d = dragRef.current;
     if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
       d.turned = true;
-      // Rotation moved to middle-drag (req_2704); a plain left drag is inert —
-      // it only marks `turned` so the release isn't mistaken for a click.
+      // Rotation moved to middle-drag (req_2704); shift-drag pans; a plain left
+      // drag with a grid piece armed extends the placement RUN (req_2747).
       if (d.pan) {
         stage.dragPan(d.x, d.y0, p.x, p.y, rectRef.current);
         d.y0 = p.y;
@@ -476,16 +497,47 @@ export default function WorldViewport(props: {
         return;
       }
       d.x = p.x;
+      const armed = armedRef.current;
+      if (d.runAnchor && armed) {
+        const gp = groundUnder(p.x, p.y);
+        if (gp) {
+          // Re-resolve only when the cursor crosses into a new CELL — a full run
+          // re-validates every piece against the host, and per-pixel mousemoves
+          // would hammer that door for an unchanged result.
+          const cellX = Math.floor(gp.x / PIECE_MODULE_METERS);
+          const cellZ = Math.floor(gp.z / PIECE_MODULE_METERS);
+          if (runRef.current && d.runCell && d.runCell.x === cellX && d.runCell.z === cellZ) return;
+          d.runCell = { x: cellX, z: cellZ };
+          // The run stays LEVEL at the anchor's terrain height (resolveRunPlacements)
+          // — only the anchor ever sampled the ground, so a run across a slope is
+          // one flat wall/plate, not a stairstep.
+          const pieces = resolveRunPlacements(armed.pieceId, d.runAnchor.x, d.runAnchor.z, gp.x, gp.z, props.floor, d.runAnchor.terrainY);
+          runRef.current = pieces;
+          setRun(pieces);
+          setSnap(null); // the run ghosts own the overlay while dragging
+          return;
+        }
+      }
     }
     if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
-  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays]);
+  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, props.floor]);
 
   const onUp = useCallback((e: any) => {
     const d = dragRef.current;
     dragRef.current = null;
+    const runPieces = runRef.current;
+    runRef.current = null;
+    setRun(null);
     if (!d) { console.warn('[place] up with no down — click dropped'); return; }
     // req_2548 diagnostic — every way a click can silently place nothing.
     if (d.turned) {
+      // A drag that grew a run stamps the whole run (req_2747); any other drag
+      // is still inert.
+      if (runPieces && runPieces.length && toolRef.current === 'place') {
+        console.warn(`[place] drag-run -> place ${runPieces.length}× ${runPieces[0]!.pieceId}`);
+        props.onPlace(runPieces);
+        return;
+      }
       const p = local(e);
       console.warn(`[place] click ate as DRAG (travel ${Math.abs(p.x - d.x0).toFixed(0)}+${Math.abs(p.y - d.y0).toFixed(0)}px from down)`);
       return;
@@ -509,7 +561,7 @@ export default function WorldViewport(props: {
     const target = resolveSnap(d.x0, d.y0);
     if (!target) { console.warn(`[place] VALIDATOR rejected cell at world (${gp.x.toFixed(1)},${gp.z.toFixed(1)})`); return; }
     console.warn(`[place] click -> place ${target.pieceId} at (${target.x},${target.y},${target.z}) yaw ${target.yaw}`);
-    props.onPlace({ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw, floor: target.floor });
+    props.onPlace([{ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw, floor: target.floor }]);
   }, [resolveSnap, groundUnder, props.onPlace, local, stage, pickPieceAt]);
 
   // Right-click quick context (req_2733): pick the piece under the cursor in ANY tool
@@ -539,9 +591,10 @@ export default function WorldViewport(props: {
     // The ghost outline is a render-time projection through this stage. Rotate
     // and pan refresh it via onMove's setSnap, but a wheel zoom moves the camera
     // with no render — the loader repaints with the new solve while the overlay
-    // keeps the old one (req_2541). Re-snap at the cursor so it reprojects.
-    if (armedRef.current) setSnap(resolveSnap(mx - r.x, my - r.y));
-    else reprojectOverlays(); // keep the selection box glued through a wheel zoom (req_2555)
+    // keeps the old one (req_2541). Re-snap at the cursor so it reprojects. A
+    // live drag-run owns snap (req_2747) — just force the re-project instead.
+    if (armedRef.current && !dragRef.current?.turned) setSnap(resolveSnap(mx - r.x, my - r.y));
+    else reprojectOverlays(); // keep the selection box / run ghosts glued through a wheel zoom (req_2555)
   }, [stage, pushCamera, resolveSnap, reprojectOverlays]);
 
   // The armed ghost: the piece's box edges projected through the same solve the
@@ -553,6 +606,12 @@ export default function WorldViewport(props: {
   if (snap && props.tool === 'place') {
     const look = pieceLook(snap.pieceId);
     if (look) ghostSegs.push(...boxSegments(stage, rect, snap.x, snap.y, snap.z, look.w, look.h, look.d, snap.yaw));
+  }
+  // Mid-drag, every piece the run would stamp ghosts at once (req_2747) — snap
+  // is nulled while a run is live, so the two never double-draw.
+  if (run && run.length && props.tool === 'place') {
+    const look = pieceLook(run[0]!.pieceId);
+    if (look) for (const rp of run) ghostSegs.push(...boxSegments(stage, rect, rp.x, rp.y, rp.z, look.w, look.h, look.d, rp.yawDegrees));
   }
   // The selection highlight: the same projected box around the selected piece (req_2550), so a
   // Select/Move/Focus click shows what it grabbed. Same overlay technique as the ghost. NOT shown
