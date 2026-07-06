@@ -1,0 +1,36 @@
+{
+  "id": "req_2713",
+  "at": "2026-07-06T00:09:18.679Z",
+  "origin": "session:18de0f93",
+  "text": "yeah and to help with t he vocabulary here, this goes a lot in hand with 'rigging'",
+  "status": "review",
+  "sessionId": "18de0f93-fa0a-42e8-8bca-536e3b73624d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:09:35.057Z",
+      "actor": "fable-props",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T00:09:35.066Z",
+      "actor": "fable-props",
+      "kind": "note",
+      "text": "Vocabulary rider on req_2712: prop exporting = RIGGING. Export carries a rigged skeleton (bones + mounts/contacts/behaviors per SKELETON_OBJECT_MODEL.md), not a bare mesh."
+    },
+    {
+      "at": "2026-07-06T00:43:51.520Z",
+      "actor": "fable-props",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Vocabulary honored throughout req_2712's implementation: prop exporting is RIGGING — the export compiles a rigged skeleton (bones + carried meaning: pockets, placements, seats, grips, locks) per docs/game/SKELETON_OBJECT_MODEL.md, never a bare mesh. The rig vocabulary module (runtime/skeleton/rigs.ts), the Inspector RIG section, and the doc's new 'rig vocabulary' section all carry the term.",
+  "shas": [
+    "bd3137478"
+  ],
+  "resolvedAt": "2026-07-06T00:43:51.520Z"
+}

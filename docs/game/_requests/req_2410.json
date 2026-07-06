@@ -1,0 +1,30 @@
+{
+  "id": "req_2410",
+  "at": "2026-07-01T09:16:42.019Z",
+  "origin": "session:be477f59",
+  "text": "heres one that is taking me for a spin because i missed it on my bingo card is the hidden flavor text that appears here [Image #6] telling me correctly i have 0 selected, thats useful but then i didnt expect the double whammy of the literal highlighted icons meaning edge and move and then it being stated again immediately [Image #7]",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T09:17:26.262Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T09:20:35.851Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the redundant mode+gizmo restatement from the model viewer's viewport status line (cart/editor/stage/ModelView.tsx). It read '<Mode> · <Gizmo> gizmo · N selected' (e.g. 'Edge · Move gizmo · 0 selected') while the mesh toolbar immediately beside it already HIGHLIGHTS the active selection-mode icon and gizmo icon — so 'Edge · Move gizmo' literally restated the two lit icons (SEL_MODES/GIZMO_TOOLS feed those same toolbar buttons at lines 798/818). Kept only what the icons don't convey: the live selection count. Selection mode → 'N selected'; view mode → tris. SEL_MODES/GIZMO_TOOLS still used by the toolbar (no dead consts); parses clean; not shipped (live session).",
+  "shas": [
+    "c6b85b6dc"
+  ],
+  "resolvedAt": "2026-07-01T09:20:35.851Z"
+}

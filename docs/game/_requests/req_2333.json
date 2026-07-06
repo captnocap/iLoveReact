@@ -1,0 +1,24 @@
+{
+  "id": "req_2333",
+  "at": "2026-07-01T04:51:09.538Z",
+  "origin": "session:8cf696c0",
+  "text": "alright so before u get all gung ho on this lets just first start with a few things that actually matter and that actually do not matter. so, while it is true that t he faces of this model are not identical matches, its not so much a problem because the number of models that are worth retaining are generally very low. so i am not going to say go and chase this. However, it does introduce the necessary discovery of mirror edits from the old studio to here. so, thats where we will start. so this is exactly what i need  you to do:\n\n- in the file menu, add a 'new mesh' that has a subnested menu that reads for cube (basic shape to start with) and open that up into a new screen. Next, in the face tools, add loop cut. these two fundamentals should give me enough grounds to do a basic side by side test on the exact same edits from a basic cube. if the faces are the same. we dont have a problem",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T04:51:20.500Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T05:14:36.785Z",
+      "actor": "8cf6",
+      "kind": "note",
+      "text": "DONE (sha 19464011e). Built (1) File→New Mesh→Cube: submenu flyout + primitive:cube:<n> ModelPackage, viewer builds it via cuboid()+editMeshToGeometry (same studio-model path → clean 6 grouped faces). (2) Host-native Loop Cut face tool: pure unit-tested mesh_edit.planeCutSoup + 3d.meshTopoLoopCut + __mesh_topo_loop_cut door; edge-driven (select 1 edge → Extrude|Loop Cut). NOT a JS port of the Studio loopCut. Needs rjit ship editor to take effect (framework change). 12/12 zig tests pass, editor bundles clean."
+    }
+  ]
+}

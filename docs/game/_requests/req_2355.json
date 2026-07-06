@@ -1,0 +1,10 @@
+{
+  "id": "req_2355",
+  "at": "2026-07-01T05:57:47.695Z",
+  "origin": "session:6fbe594d",
+  "text": "hey in the @cart/editor/ why is there such large gaps for the versioning number? it should bump on every single request right /",
+  "status": "new",
+  "sessionId": "6fbe594d-af99-426d-a4a8-dda602f7ee6c",
+  "captureMode": "hook",
+  "events": []
+}

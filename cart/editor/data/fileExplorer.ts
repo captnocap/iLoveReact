@@ -1,20 +1,20 @@
-// editor/data/fileExplorer.ts — the LIVE project file index behind the Project File
-// Explorer dialog (Ctrl+P). This replaced the original fabricated preview shim: every
-// folder, file row, size, and modified time here is a real filesystem read through the
-// fs door (runtime/hooks/fs → __fs_list_json / __fs_stat_json — the same doors the
-// asset catalog and modelPackageStore already use). The index is built lazily on first
-// use and cached; "rescan" drops the cache and re-reads the disk.
+// editor/data/fileExplorer.ts — the LIVE project asset index behind the Project
+// Asset Explorer dialog (Ctrl+P). This replaced the original fabricated preview shim:
+// every folder, file row, size, and modified time here is a real filesystem read
+// through the fs door (runtime/hooks/fs → __fs_list_json / __fs_stat_json — the same
+// doors the asset catalog and modelPackageStore already use). The index is built
+// lazily on first use and cached; "rescan" drops the cache and re-reads the disk.
 //
 // Model files (.glb / .obj) found here are IMPORTABLE: opening one routes through the
 // native host mesh importer (__mesh_load_file) into a model document. .gltf/.fbx are
 // listed but not importable (the host parses self-contained .glb and .obj only).
-import { listDir, stat } from '../../../runtime/hooks/fs';
+import { listDir, stat, type FsStat } from '../../../runtime/hooks/fs';
 
 // Folder ids are strings: 'all' (everything), 'virt:<class>' (import-class filters),
 // or 'dir:<path>' (a real scanned directory).
 export type ExplorerFolderId = string;
 
-export type ExplorerCategory = 'model' | 'texture' | 'audio' | 'source' | 'doc' | 'data';
+export type ExplorerCategory = 'model' | 'texture' | 'audio' | 'doc' | 'data';
 
 export type ExplorerFolder = {
   id: ExplorerFolderId;
@@ -28,7 +28,7 @@ export type ExplorerFile = {
   folder: ExplorerFolderId; // 'dir:<parent dir>'
   path: string;
   name: string;
-  kind: string; // lowercase extension ('glb', 'tsx', ...)
+  kind: string; // lowercase extension ('glb', 'png', ...)
   category: ExplorerCategory;
   importable: boolean; // .glb/.obj → opens through the native mesh importer
   size: number;
@@ -61,9 +61,15 @@ export type ExplorerIndex = {
   truncated: boolean;
 };
 
-// The project surfaces worth indexing: the editor + game carts (where model sources and
-// packages live) and the shared platform trees the editor actually references.
-const SCAN_ROOTS = ['cart/editor', 'cart/hmsc-int', 'runtime', 'framework', 'tools', 'docs'];
+// The product surfaces worth indexing: editor-authored packages only. Deliberately
+// not a repo/source-code scan and not a legacy hmsc-int scan: model and texture
+// imports materialize into cart/editor/data/*, so the explorer reads the editor's
+// own portable on-disk project assets.
+const SCAN_DIRS = [
+  'cart/editor/data/models',
+  'cart/editor/data/textures',
+];
+const TREE_ROOTS = SCAN_DIRS;
 // Machine/state dirs that would drown the index in generated noise (request ledger,
 // session stores, build output). Matched by directory NAME at any depth.
 const SKIP_DIRS = new Set([
@@ -78,9 +84,8 @@ const EXT_CATEGORY: Record<string, ExplorerCategory> = {
   glb: 'model', gltf: 'model', obj: 'model', fbx: 'model',
   png: 'texture', jpg: 'texture', jpeg: 'texture', webp: 'texture',
   wav: 'audio', ogg: 'audio', mp3: 'audio',
-  ts: 'source', tsx: 'source', zig: 'source', wgsl: 'source', js: 'source',
   md: 'doc',
-  json: 'data',
+  json: 'data', map: 'data',
 };
 
 const IMPORTABLE_EXTS = new Set(['glb', 'obj']);
@@ -104,7 +109,7 @@ function buildIndex(): ExplorerIndex {
   const dirsWithFiles = new Set<string>();
   let truncated = false;
   // Breadth-first so a capped scan keeps the shallow (most browsable) files.
-  const queue: { path: string; depth: number }[] = SCAN_ROOTS
+  const queue: { path: string; depth: number }[] = SCAN_DIRS
     .filter((root) => stat(root)?.isDir)
     .map((root) => ({ path: root, depth: 0 }));
   while (queue.length > 0 && !truncated) {
@@ -120,29 +125,40 @@ function buildIndex(): ExplorerIndex {
       }
       const dot = name.lastIndexOf('.');
       const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
-      const category = EXT_CATEGORY[ext];
-      if (!category) continue;
-      if (files.length >= MAX_FILES) {
+      if (!EXT_CATEGORY[ext]) continue;
+      if (!addIndexedFile(files, dirsWithFiles, childPath, info)) {
         truncated = true;
         break;
       }
-      files.push({
-        id: childPath,
-        folder: `dir:${path}`,
-        path: childPath,
-        name,
-        kind: ext,
-        category,
-        importable: IMPORTABLE_EXTS.has(ext),
-        size: info.size,
-        sizeLabel: formatSize(info.size),
-        mtimeMs: info.mtimeMs,
-        modifiedLabel: formatAgo(info.mtimeMs),
-      });
-      dirsWithFiles.add(path);
     }
   }
   return { folders: buildFolderTree(dirsWithFiles), files, truncated };
+}
+
+function addIndexedFile(files: ExplorerFile[], dirsWithFiles: Set<string>, path: string, info: FsStat): boolean {
+  const slash = path.lastIndexOf('/');
+  const name = slash >= 0 ? path.slice(slash + 1) : path;
+  const dir = slash >= 0 ? path.slice(0, slash) : '.';
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  const category = EXT_CATEGORY[ext];
+  if (!category) return true;
+  if (files.length >= MAX_FILES) return false;
+  files.push({
+    id: path,
+    folder: `dir:${dir}`,
+    path,
+    name,
+    kind: ext,
+    category,
+    importable: IMPORTABLE_EXTS.has(ext),
+    size: info.size,
+    sizeLabel: formatSize(info.size),
+    mtimeMs: info.mtimeMs,
+    modifiedLabel: formatAgo(info.mtimeMs),
+  });
+  dirsWithFiles.add(dir);
+  return true;
 }
 
 // The nav tree: an /Imports group of import-class filters, then one node per scanned
@@ -154,7 +170,7 @@ function buildFolderTree(dirsWithFiles: Set<string>): ExplorerFolder[] {
     while (true) {
       allDirs.add(current);
       const parent = current.slice(0, current.lastIndexOf('/'));
-      if (!current.includes('/') || SCAN_ROOTS.includes(current)) break;
+      if (!current.includes('/') || TREE_ROOTS.includes(current)) break;
       current = parent;
     }
   }
@@ -165,7 +181,7 @@ function buildFolderTree(dirsWithFiles: Set<string>): ExplorerFolder[] {
   const roots: ExplorerFolder[] = [];
   for (const dir of [...allDirs].sort()) {
     const node = nodeFor.get(dir)!;
-    if (SCAN_ROOTS.includes(dir)) {
+    if (TREE_ROOTS.includes(dir)) {
       node.label = dir; // roots show their full path
       node.icon = 'FolderOpen';
       roots.push(node);
@@ -178,7 +194,7 @@ function buildFolderTree(dirsWithFiles: Set<string>): ExplorerFolder[] {
   return [
     {
       id: 'all',
-      label: '/project',
+      label: '/Assets',
       icon: 'FolderTree',
       children: [
         {
@@ -217,10 +233,7 @@ export function explorerFileIcon(file: ExplorerFile): string {
   if (file.category === 'model') return 'Box';
   if (file.category === 'texture') return 'Image';
   if (file.category === 'audio') return 'Volume2';
-  if (file.kind === 'tsx') return 'FileCode2';
-  if (file.kind === 'ts' || file.kind === 'js') return 'FileText';
-  if (file.kind === 'zig') return 'Cpu';
-  if (file.kind === 'wgsl') return 'Activity';
+  if (file.kind === 'map') return 'Map';
   if (file.kind === 'md') return 'BookOpen';
   return 'FileJson';
 }

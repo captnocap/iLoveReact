@@ -1,0 +1,24 @@
+{
+  "id": "req_2645",
+  "at": "2026-07-05T02:08:25.097Z",
+  "origin": "session:40eebdf5",
+  "text": "yeah so ok that about does it in this part of the app, the other things not here entirely is again wheres the meta data reads, where is the gizmo for compass, edge and vertex are solid, when the model is right. oh heres another one i just found lmao this says i am in vertex select [Image #83] [Image #84] but that is not a vertex, again, this is on that chopped as fuck model post loop cut, vertex appears on a fresh model. but this is something to look for deeper, why would the loop cut divert this so hard",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T02:08:44.851Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T02:08:44.860Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "CRITIQUE ROUND 3: edge + vertex modes ruled SOLID on healthy models. NEW BUG (SS), same corruption family as req_2644: on the post-loop-cut model, vertex select mode SELECTS FACES (toolbar shows vertex mode active, click lands orange face highlights, no vertex); fresh model vertex select is fine — loop cut diverts element picking. Handed to the live req_2644 agent (same root suspected: post-topo bookkeeping). Re-flagged as still-missing from this surface (already on board, T4): shape metadata readouts (req_2618 gap G) and the viewport compass/nav gizmo + angle readout (req_2643 LL)."
+    }
+  ]
+}

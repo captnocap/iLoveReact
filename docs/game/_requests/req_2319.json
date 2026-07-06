@@ -1,0 +1,18 @@
+{
+  "id": "req_2319",
+  "at": "2026-07-01T02:29:55.490Z",
+  "origin": "session:986b717b",
+  "text": "well ok so i guess the next question then is so the other app has the UV mesh preview and i have t o imagine this is preserved so how is it not transfering over here for the same faces ?",
+  "status": "doing",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T02:32:49.297Z",
+      "actor": "986b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -13,6 +13,12 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-01T01:59:11.938Z",
+      "actor": "opus-editor",
+      "kind": "note",
+      "text": "Committed d329101d0: modelview now drives the ONE brush kit (runtime/paint). Fill=__model_paint_at, free-form=stroke_begin+stamped disc (clip/lock safety + 8/16/32 detail toggles), backed by the model_paint.zig patch atlas. Toolbar owns tool/safety/detail; BrushKit docks in Model Focus panel. model_paint+mesh_edit zig tests pass; carts bundle clean. Zig full build + hand-paint verification pending (can't paint headlessly)."
     }
   ]
 }

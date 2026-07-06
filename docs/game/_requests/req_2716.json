@@ -1,0 +1,28 @@
+{
+  "id": "req_2716",
+  "at": "2026-07-06T00:13:58.137Z",
+  "origin": "codex:019f34c4",
+  "text": "sorry, not that you want to look here cart/editor",
+  "status": "review",
+  "sessionId": "019f34c4-0930-75f1-a8d9-c299a3662843",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:14:14.662Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T00:20:45.455Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Updated cart/editor mesh shader ink pickers to match the world tile texture picker behavior: shader thumbnails are paged in the mesh picker, the armed shader exposes its authored variant/take chips, selecting a variant rebuilds the brush ink data with Color Studio palette overrides, and clicking the same shader preserves the selected take. Added a small shared shaderPick helper for variant data packing/inference used by both toolbar and dock pickers.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T00:20:45.455Z"
+}

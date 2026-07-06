@@ -1,0 +1,10 @@
+{
+  "id": "req_2461",
+  "at": "2026-07-01T12:42:21.241Z",
+  "origin": "session:bf2eaad9",
+  "text": "and that is a 12 face cube, after painted, and gone thru the whole paint and data rle pipeline, is 12mb in memory on expanded or 12mb in rle storage ? both numbers seem insanely blown out of scale tho i will say 512x512 is that big or what am i missing here",
+  "status": "new",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": []
+}

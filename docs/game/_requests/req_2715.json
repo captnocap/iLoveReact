@@ -1,0 +1,28 @@
+{
+  "id": "req_2715",
+  "at": "2026-07-06T00:13:16.884Z",
+  "origin": "codex:019f34c4",
+  "text": "hey in the cart/editor if you look at the painting color picking tools for the mesh editor versus t he world editor you will find two different approaches which kinda blows now that im aware of it, the one in the mesh editor doesnt let you pick between the variations the same that the one in the terrain tile painter does thats on the world editor portion. can you close the gap between those and bring the better part of the shader picker from the tile painter to the one that is for the mesh editor",
+  "status": "review",
+  "sessionId": "019f34c4-0930-75f1-a8d9-c299a3662843",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:13:30.778Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T00:20:45.476Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Superseded by req_2716's correction to look specifically in cart/editor; fulfilled by the same editor-only mesh shader picker update, with no separate hmsc-int changes.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T00:20:45.476Z"
+}

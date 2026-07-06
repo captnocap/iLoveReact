@@ -1,0 +1,24 @@
+{
+  "id": "req_2567",
+  "at": "2026-07-04T06:02:33.834Z",
+  "origin": "session:1ccd61f7",
+  "text": "ok nice. now another one for ya, and this one might take some elbow grease, but hop back to the world editor with me and notice we have layer control, ground, level 1 level 2 etc. well, lets say i place some walls and floors on like level 2 or 3, and then i want to come back and edit the interior of level 1, effectively im shit out of luck because i cant hide the floors above me, so i just see effectively nothing for the floor im placing on, so there needs to be effectively a default for this behavior, show me the floor im on, and then also let me disable the walls for my same floor, so i can place props correctly without needing to build everything from this extremely specific one way, as it stands to do anything like make a building, i would need to: place ground -> place props -> place stairs -> place walls -> go up a floor -> repeat and stepping out of that order at all would make it so the entire floor is fucked",
+  "status": "doing",
+  "sessionId": "1ccd61f7-1753-4038-a146-209701d9708e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T06:03:28.004Z",
+      "actor": "1ccd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T06:08:21.098Z",
+      "actor": "1ccd",
+      "kind": "note",
+      "text": "Built the Sims-style storey cutaway as the DEFAULT world-editor view: visibleStoreyPieces (world/pieces.ts) hides every piece on storeys above the active floor (floors below stay as context), and a WALLS Up/Down pill next to the floor control additionally hides the active floor's walls for interior/prop editing. WorldEditorSurface derives the visible list from the full authored list per floor/walls change and hands the viewport only that, so live overlay, picking, and selection agree with the screen; the full list stays authoritative for placements. New EditorState.wallsDown + action-bar toggle per the FLOORCTL home. Commit 1eedda256, hot-reloads — verify: place floors on Ground and Level 2, drop to Level 1: Level 2 pieces vanish; toggle WALLS Down on a floor with walls: they hide."
+    }
+  ]
+}

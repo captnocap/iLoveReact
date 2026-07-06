@@ -1,0 +1,30 @@
+{
+  "id": "req_2493",
+  "at": "2026-07-02T01:41:12.431Z",
+  "origin": "session:2b166540",
+  "text": "aalso [loader] no instance buffer — extruded 0 tile boxes\n[loader] built 0 mesh instances (0 placed pieces)\n[loader] empty world — rendering sky/model over void\n[loader] built 0 physics rects + 0 oriented physics rects + 0 heightfields\n[loader] spawn x=0.00 y=0.35 z=0.00 (terrain=-999.00 fields=0)\n[loader] no player model lump — camera target only\n[dev 6:38:08 PM] rebuilt - pushed 'editor'\n[loader] no game file at zig-out/game/editor/world.gamefile — BLANK world (paint-first canvas)\n[loader] no instance buffer — extruded 0 tile boxes\n[loader] built 0 mesh instances (0 placed pieces)\n[loader] empty world — rendering sky/model over void\n[loader] built 0 physics rects + 0 oriented physics rects + 0 heightfields\n[loader] spawn x=0.00 y=0.35 z=0.00 (terrain=-999.00 fields=0)\n[loader] no player model lump — camera target only\n\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n!!!  CRASH: SIGSEGV (null ptr / bad memory access)  !!!\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\nfault address: 0x74d6bcb34000\ninstruction ptr: 0x9ad0250\nRebuild with --debug for symbols, then:\n  addr2line -e zig-out/bin/APP 0xADDRESS\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n\n\n\n\n\n\n",
+  "status": "review",
+  "sessionId": "2b166540-f213-42f7-ba61-c71ee4889378",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T01:46:16.611Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T01:46:16.619Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The pasted crash log is the same defect as req_2492 (ground-formula use-after-free on the hot-reload re-arm) — fixed in be05ccb56 together with the boot-camera retry and the restored-arm gap; see req_2492 for the full para. One fix, one rebuild.",
+  "shas": [
+    "be05ccb56"
+  ],
+  "resolvedAt": "2026-07-02T01:46:16.618Z"
+}

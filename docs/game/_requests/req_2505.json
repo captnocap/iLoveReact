@@ -1,0 +1,10 @@
+{
+  "id": "req_2505",
+  "at": "2026-07-02T04:20:11.821Z",
+  "origin": "session:4c74e97e",
+  "text": "nice that is working uh so i guess the only thing i wonder is like so painting in this editor still doesnt make much sense to me. it doesnt treat it by the face it is treating it by the triangle and so a cube of 6 faces breaks into 12 and so doing one clean face makes the texture have a very clear line right through it and then the texture going to different ways on the same face",
+  "status": "new",
+  "sessionId": "4c74e97e-ef7b-426c-9636-2a0b67ccfa52",
+  "captureMode": "hook",
+  "events": []
+}

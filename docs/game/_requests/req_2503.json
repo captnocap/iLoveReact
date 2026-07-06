@@ -1,0 +1,18 @@
+{
+  "id": "req_2503",
+  "at": "2026-07-02T03:55:45.116Z",
+  "origin": "session:4c74e97e",
+  "text": "so im testing out the shader painting capability and it isnt one. its just from what it seems picking one color from the shader and using that as the paint color. which is not what we want",
+  "status": "doing",
+  "sessionId": "4c74e97e-ef7b-426c-9636-2a0b67ccfa52",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T03:56:18.619Z",
+      "actor": "session-4c74",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

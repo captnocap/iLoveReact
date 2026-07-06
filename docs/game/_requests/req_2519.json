@@ -1,0 +1,18 @@
+{
+  "id": "req_2519",
+  "at": "2026-07-02T07:00:05.414Z",
+  "origin": "session:69672c0b",
+  "text": "do this but also how the hell do i save a model i make in here is it really t he save materialized snapshot? the wording just feels wrong lol i have no idea if when i import a model if that is then stored or what i see the name Bus of the Bus i imported earlier but when i click on it, it shows me a menu for a bunch of other models instead so i have no idea what is going on lol",
+  "status": "doing",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T07:00:18.722Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

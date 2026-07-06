@@ -14,9 +14,18 @@
 // format; worldParity keeps them in lockstep. When an encoder layout changes, the
 // matching decoder here changes with it.
 
-import { bytesText, findLump, MAP_LUMP, readLumpContainer, type LumpRecord } from '@reactjit/workspace';
-import { INSTANCE_STRIDE, MATERIALS_DOC_TAIL_MAGIC } from '../../../compile/worldGeometry';
+import { bytesText, findLump, MAP_LUMP, readLumpContainer, type LumpRecord } from '@reactjit/workspace/lumps';
 import type { Heightfield } from '@game';
+
+const INSTANCE_STRIDE = 13;
+const MATERIALS_DOC_TAIL_MAGIC = 0x53434f44; // "DOCS", little-endian
+const GAME_LUMP = {
+  STREAM_LOGIC: 16,
+  STREAM_MAP: 17,
+  STREAM_SKINS: 18,
+  ASSET_MANIFEST: 19,
+  ASSET_BLOB: 20,
+} as const;
 
 // ── decoded shapes (the JS analogue of constructor.zig's Scene) ──────────────
 
@@ -119,6 +128,51 @@ export interface LoadedScene {
 
 function dvOf(bytes: Uint8Array): DataView {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+export interface LoadedGameStream {
+  refs: Uint32Array;
+  data: Uint8Array;
+}
+
+export interface LoadedGameFile {
+  logic: LoadedGameStream;
+  map: LoadedGameStream;
+  skins: LoadedGameStream;
+}
+
+/** Top-level game-file stream: u32 refCount | u32[refCount] | u32 dataLen | data.
+ *  Mirrors runtime/workspace/gamefile.ts encodeStream and framework/world/gamefile.zig. */
+function decodeGameStream(bytes: Uint8Array): LoadedGameStream {
+  if (bytes.byteLength < 8) throw new Error('game stream too small');
+  const view = dvOf(bytes);
+  const refCount = view.getUint32(0, true);
+  const refsEnd = 4 + refCount * 4;
+  if (refsEnd + 4 > bytes.byteLength) throw new Error('game stream refs truncated');
+  const refs = new Uint32Array(refCount);
+  for (let i = 0; i < refCount; i += 1) refs[i] = view.getUint32(4 + i * 4, true);
+  const dataLen = view.getUint32(refsEnd, true);
+  const dataStart = refsEnd + 4;
+  if (dataStart + dataLen > bytes.byteLength) throw new Error('game stream data truncated');
+  return { refs, data: bytes.slice(dataStart, dataStart + dataLen) };
+}
+
+/** Decode the top-level platform game-file enough to expose its three streams.
+ *  Asset installation/validation remains the native loader's responsibility; TS
+ *  consumers use this to reach the STREAM_MAP container without inventing a side
+ *  format for experiments like the Three.js loader. */
+export function loadGameFileStreams(bytes: Uint8Array): LoadedGameFile {
+  const records = readLumpContainer(bytes, { knownTypes: new Set(Object.values(GAME_LUMP)) });
+  const lump = (type: number): LumpRecord => {
+    const found = findLump(records, type);
+    if (!found) throw new Error(`gamefile missing lump ${type}`);
+    return found;
+  };
+  return {
+    logic: decodeGameStream(lump(GAME_LUMP.STREAM_LOGIC).data),
+    map: decodeGameStream(lump(GAME_LUMP.STREAM_MAP).data),
+    skins: decodeGameStream(lump(GAME_LUMP.STREAM_SKINS).data),
+  };
 }
 
 /** INSTANCES: u32 count | u32 stride | u32 pieceCount | f32[count*stride].
@@ -375,4 +429,11 @@ export function loadSceneFromMapContainer(bytes: Uint8Array): LoadedScene {
     flora: floraLump ? decodeFlora(floraLump.data) : null,
     environment: envLump ? decodeEnvironment(envLump.data) : null,
   };
+}
+
+/** Decode the same scene from the shipped platform game-file wrapper. This is
+ *  the actual compiled-data shape (`zig-out/game/hmsc.gamefile`): top-level
+ *  GAME_LUMP streams, with STREAM_MAP containing the nested RJMP map container. */
+export function loadSceneFromGameFile(bytes: Uint8Array): LoadedScene {
+  return loadSceneFromMapContainer(loadGameFileStreams(bytes).map.data);
 }

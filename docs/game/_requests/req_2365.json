@@ -1,0 +1,10 @@
+{
+  "id": "req_2365",
+  "at": "2026-07-01T06:42:07.880Z",
+  "origin": "session:a7549dd9",
+  "text": "ok this slides but it is taking my frame rate straight into the ground from 240fps to 0",
+  "status": "new",
+  "sessionId": "a7549dd9-ae3e-4dce-8ecd-0b127ef6eaff",
+  "captureMode": "hook",
+  "events": []
+}

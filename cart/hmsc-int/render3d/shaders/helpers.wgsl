@@ -252,3 +252,34 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
   }
   return sat3(out_col);
 }
+
+// ── surface modes (Part 2: DESIGN_INTAKE.md "Surface modes") — the declarative
+// blend + factor vocabulary a layered surface composes with. A base + N
+// overlays, each blended by one of 5 fixed modes with a factor that is a
+// constant, a uv gradient, or a U.time pulse. Consumed by generated composite
+// shaders (render3d/shaders/surfaceCompose.ts) — never referenced directly by
+// a single material fn.
+
+// factor kinds: 0 const, 1 gradientY, 2 gradientX, 3 timePulse
+fn surface_factor(kind: i32, value: f32, uv: vec2f, time: f32) -> f32 {
+  if (kind == 1) { return sat(value * uv.y); }
+  if (kind == 2) { return sat(value * uv.x); }
+  if (kind == 3) { return sat(value * (0.5 + 0.5 * sin(time))); }
+  return sat(value);
+}
+
+// blend modes — one-liners over two already-evaluated fill_pick colors.
+fn blend_over(base: vec3f, over: vec3f, f: f32) -> vec3f { return mix(base, over, f); }
+fn blend_add(base: vec3f, over: vec3f, f: f32) -> vec3f { return base + over * f; }
+fn blend_multiply(base: vec3f, over: vec3f, f: f32) -> vec3f { return mix(base, base * over, f); }
+fn blend_screen(base: vec3f, over: vec3f, f: f32) -> vec3f { return vec3f(1.0, 1.0, 1.0) - (vec3f(1.0, 1.0, 1.0) - base) * (vec3f(1.0, 1.0, 1.0) - over * f); }
+
+// blend kinds: 0 over, 1 add, 2 multiply, 3 screen, 4 mask (same math as
+// over — "mask" is an authoring-intent alias: pair it with a spatial factor
+// kind so f itself gates where the overlay shows, per DESIGN_INTAKE.md).
+fn surface_blend(kind: i32, base: vec3f, over: vec3f, f: f32) -> vec3f {
+  if (kind == 1) { return blend_add(base, over, f); }
+  if (kind == 2) { return blend_multiply(base, over, f); }
+  if (kind == 3) { return blend_screen(base, over, f); }
+  return blend_over(base, over, f);
+}

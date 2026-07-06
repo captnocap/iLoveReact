@@ -1,0 +1,30 @@
+{
+  "id": "req_2627",
+  "at": "2026-07-05T00:15:06.903Z",
+  "origin": "session:40eebdf5",
+  "text": "yeah i would honestly feel better if we could take our ui, break it out into some primitively named areas like literally just section A section B etc.... and each of these sections, are clearly fixed areas on the ui. im talking like the window chrome, the action bar, the focus panel, the content browser panel, these are all fixed size panels, they dont shift around, the content inside of them though is ALWAYS shifting, it could be layers for outliners in here or it could be the piece i have in focus when authoring the map in the right panel. doesnt change the fact that the panel is some fixed width and some fixed height, and that therefore everything that ever placed inside of it, cant figure out from a chain of dedcution, the state of the app, and what is in render, and how much space is or isnt used. Right. Like. we can just start with this same area right here and go alright we know this panel literally never changes [Image #61] only the content inside of it, look [Image #62]and as we bring in more of the data i just griped about for the first few messages, is exactly the reason why validating the use of space is making the most of it is absolutely paramount. i dont want to scroll on these menus, i want nested scrolling inside of them if needed, i want paged assets instead of scrolling overall. but these are all design decisions that dont actually change how the app itself fundamentally works under the hood, but they sure as hell increase my quality of life using them",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T00:15:45.261Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T00:15:45.269Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LAYOUT RULING — fixed named regions: break the editor UI into primitively-named sections (Section A/B/C... — window chrome, action bar, focus panel, content browser, viewport, status bar). Each region is a FIXED-size panel: fixed width, fixed height, never shifts, never reflows with app state. ONLY the content inside swaps (outliner layers one moment, armed world piece the next). Consequence: anything rendered inside a region knows its exact available space as a CONSTANT — no component ever deduces free space from a chain of app-state reasoning. Content rules per region: (1) NO whole-panel scrolling; (2) nested scrolling inside sub-areas when needed; (3) paged assets instead of long scroll (the content browser already pages 1-1/1 style — that is the pattern); (4) content must VALIDATE its use of the fixed space — Image 62 shows a sparse readout floating in a huge dead panel; as the T4 metadata/rig/UV/slots data lands, budgeting that fixed height is paramount. User: these are design decisions that dont change how the app works under the hood but massively raise quality of life. IMPLEMENTATION SHAPE: one region-contract module (beside workspace.cls.ts) declaring each named region's dimensions as exported constants; panels mount into regions; content components import the region constants instead of measuring; T1-T5 UI work lands INTO this frame, so the region contract is step zero of the UI campaign, paired with the req_2626 laws (modal gate + control grid)."
+    },
+    {
+      "at": "2026-07-05T00:38:04.532Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LANDED (wave 1, region agent): fixed-region contract committed as e2a4d1158. New cart/editor/shell/regions.ts = single source of truth (chrome h37, action bar h36, left rail w48, content browser w350/inner329, focus panel w326/body285/inner265, status h31, viewport = the one elastic region) + shared control grid (label 82, stepper 20, value 40, reset 18, rowH 21). workspace.cls.ts now reads REGIONS everywhere; never-wrap law baked in (numberOfLines:1 + loud ellipsis). ModelPaintVariants rebuilt on the grid (two-line Update chip GONE, header no longer wraps, bounded nested ScrollView for variants); ModelOutliner fixed 27px rows + capped nested scroll; MODEL FOCUS body no longer whole-panel-scrolls. Verified via rjit shot (regions_3/4.png PASS). Follow-ups queued for wave 2: ReadOnlySection end-spacer for exact right-edge parity, ModelDetailBody ATLAS SETS bounded list, world-branch focus panel still whole-panel-scrolls (needs budgeting/paging), dead HW_StatusBar deletion."
+    }
+  ]
+}

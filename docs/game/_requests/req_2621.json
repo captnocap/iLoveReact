@@ -1,0 +1,24 @@
+{
+  "id": "req_2621",
+  "at": "2026-07-04T23:43:39.385Z",
+  "origin": "session:40eebdf5",
+  "text": "great. that about does it for the mesh editor for as it stands. so lets look at the main event here. the actual game world. and for the most part, most of these capabilities are 'ported' but not setup correctly. so \n\nheres the old interafce at face value [Image #36] instantly there is a lot going on here we got the map, and on the left we got a focus[Image #37] first of all this focus panel right here, it was always fucked, ignore it. whats juicy is below it [Image #38] and we have this... and i wont say the old approach is coherent all the way through, but it was more coherent. alright so how does any of this relate to anything at all. lets see so look at this wall setup, nothing selected [Image #39] and now select a piece [Image #40] ok thats our 'focus' for it, and it exposes [Image #41] alright so lets just not click on anything but brick isntantly here is the changes [Image #42] all 3 slots filled and more importantly i INSTANTLY see this [Image #43] alright lets go thru this builds menu [Image #44] we can see that we can see the actual shapes of these pieces and its not just some name to remember them by and same extends  to props [Image #45] \n\nnow, CAVEAT!! a lot of these old props are exactly what we are trying to ditch, the \"7 different ways to make a 3d model\" and its all folded into the one studio editor, but you can see also, this old menu exposes those just the same [Image #46] so the same idea translates just end to end on that same system with cutting out the old prop typescript file approach now we folded the 2d tile map which u see here [Image #47] into a 3d editor space in the current cart/editor, you will see, but even that has problems. like look at the old approach, i have chunk control, i get to declare when adding new chuunks and where they attach at which is lacking entirely still.",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T23:44:09.641Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T23:45:22.348Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Round 5 — WORLD editor gaps (old hmsc-int world editor vs cart/editor world surface). User caveat honored: old prop-TS-file system is NOT to be ported — studio models are the one prop source; what ports is the BROWSING/APPLY UX. (X) PIECE SKIN FLOW: old = select placed piece -> FACES panel w/ per-face thumbnail slots (front/back/sides) + inline skin thumbnail grid + search + palette pages + hex; ONE click on a skin fills ALL face slots AND the viewport updates instantly; 'copy skin -> brush' button. New = pieceSlots/PieceBody slot rows exist (req_2563 Ph4) + live skin boxes render (pieceSkins req_2575 B) BUT: two-step indirect flow (pick material in content browser THEN click slot row), no inline skin thumbnails, no one-click-all-faces, no copy-skin-to-brush. Also wall slots pared to front/back (old had sides); per-face six-slot granularity deferred. Also pieceSkins only handles shader materials — image-texture skins unclear. (Y) BUILD PALETTE THUMBNAILS: old build menu shows actual piece GEOMETRY thumbs (28 walls incl authored glass_door_retail etc) + props tab w/ search, tags, and 'related' results. New BuildBar = color chip + text label only — while modelThumb.ts (ported railThumbGrid pipeline) already renders 3D thumbs in the library; not wired into BuildBar. No prop browser w/ search/tags/related in world surface at all. (Z) PLACED AUTHORED MESHES DRAW UNTEXTURED — meshProps.ts writes mesh-only lumps, painted atlas 'a later slice': placed studio models lose their paint in the world editor. (AA) CHUNK CONTROL: old 2D tile map had chunk rail (A0/B0/...) + declare-new-chunk + attachment point. New editor only seeds chunk 0,0 via mapGrowChunk(0,0) when empty (mapPaint.ts:138) — the HOST DOOR EXISTS (mapGrowChunk x,y), zero UI to grow/attach chunks. (BB) Old-world PROPERTIES tile-focus panel ruled IGNORE by user ('it was always fucked') — do not port."
+    }
+  ]
+}

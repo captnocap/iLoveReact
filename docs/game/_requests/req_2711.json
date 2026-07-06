@@ -1,0 +1,30 @@
+{
+  "id": "req_2711",
+  "at": "2026-07-05T21:17:09.573Z",
+  "origin": "session:a71ff6e3",
+  "text": "or you can also do maybe ctrl + scroll wheel to change this?",
+  "status": "review",
+  "sessionId": "a71ff6e3-8b84-45fa-b0da-3e926d36a3d4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T21:17:21.139Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T21:21:27.466Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The ctrl+scroll variant of the camera tilt ask, shipped together with req_2710 in 8e42779fc: in the map editor viewport ctrl+wheel now tilts the iso camera 3° per notch (wheel up climbs toward a plan view, wheel down levels toward the horizon) while plain wheel keeps the existing zoom-to-cursor; vertical middle-drag does the same tilt continuously. Pitch is clamped 12°-80° in IsoStage so picking, painting and the ghost overlay projection stay stable at every angle. TS-only change, hot reload picks it up.",
+  "shas": [
+    "8e42779fc"
+  ],
+  "resolvedAt": "2026-07-05T21:21:27.466Z"
+}

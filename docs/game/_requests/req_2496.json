@@ -1,0 +1,30 @@
+{
+  "id": "req_2496",
+  "at": "2026-07-02T01:48:58.765Z",
+  "origin": "session:2b166540",
+  "text": "ok so some of these to drop off the face of the earth because they are irrelevant, wall painting, door painting. this is all from the actual building tools and was always a problem with the tile approach. the spawn point, save point painting, these are so arbitrarily disconnected from how any system would ever treat these types of nodes to begin with that i cant understand how they ever were made into a painting tile, vehicle spawns. all these sorts of things. these are not terrain painting tools",
+  "status": "review",
+  "sessionId": "2b166540-f213-42f7-ba61-c71ee4889378",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T01:49:33.491Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T01:51:03.469Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The Map Paint tile palette is terrain surfaces ONLY (hot-pushed, no rebuild). wall/door/bush/spawn/save/vehicleSpawn/marker are gone from the swatches — they were tile-era flattening artifacts, not terrain: walls/doors belong to the building piece tools, bush to the flora channel, and the spawn/save/vehicle-spawn/marker family are semantic overlay NODES per the V24 ruling (they'll return as a marker overlay tool, never as ground paint). The filter is placement-driven off the kind taxonomy (placement === 'surface') rather than a name blacklist so future kinds sort themselves; road-grammar kinds remain the road stroke compiler's output and water remains its own channel. The palette now reads: road, asphalt, sidewalk, mud, sand, grass, parking, parkingCross.",
+  "shas": [
+    "77771ac6d"
+  ],
+  "resolvedAt": "2026-07-02T01:51:03.469Z"
+}

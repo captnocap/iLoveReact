@@ -7069,14 +7069,17 @@ ${digest.stderr || digest.stdout}`);
       ]
     },
     tui: {
-      summary: "compatibility alias for dev --tui",
-      usage: ["rjit tui <cart-name>"],
+      summary: "run a TUI cart in the foreground terminal",
+      usage: ["rjit tui [cart-name|entry.tsx] [-- app-args...]"],
       detail: [
-        "Equivalent to:",
-        "  rjit dev <cart-name> --tui",
+        "Bundles the cart through tui/entry.tsx, builds a headless native",
+        "binary, then execs it with the current terminal attached. This is",
+        "the interactive path: alt-screen painting, raw input, mouse reporting,",
+        "and Ctrl-C all belong to the TUI app.",
         "",
-        "Kept for muscle memory during the migration; the canonical command is",
-        "rjit dev <cart-name> --tui."
+        "Use `rjit dev <cart-name> --tui` only for the experimental persistent",
+        "TUI dev host. That path is log/socket-oriented and is not the same as",
+        "foreground terminal execution."
       ]
     },
     "ship-tui": {
@@ -7239,7 +7242,7 @@ ${digest.stderr || digest.stdout}`);
     }
     const doc = SUBCOMMAND_DOC[name];
     const lines = [`rjit ${name} - ${doc.summary}`, "", "Usage:"];
-    for (const usage7 of doc.usage) lines.push(`  ${usage7}`);
+    for (const usage8 of doc.usage) lines.push(`  ${usage8}`);
     if (doc.detail.length) {
       lines.push("");
       lines.push(...doc.detail);
@@ -9132,7 +9135,176 @@ __ARCHIVE__
     run: () => run25
   });
   async function run25(argv) {
-    return run10([...argv, "--tui"]);
+    const parsed = parseTuiArgs(argv);
+    if (typeof parsed === "number") return parsed;
+    const cartRoot = __cwd();
+    const rjitHome = __env("RJIT_HOME") || cartRoot;
+    const cart = resolveTarget2(cartRoot, parsed.target);
+    if (!cart) {
+      return fail10(`[tui] not found: ${parsed.target} (expected cart/<name>/index.tsx, cart/<name>.tsx, or an entry path)`, 1);
+    }
+    runFixReactImports4(rjitHome, cartRoot);
+    const bundleOut = `${cartRoot}/.cache/tui-bundle-${cart.name}.js`;
+    fsMkdir(`${cartRoot}/.cache`);
+    const term = terminalSize3();
+    out(`[tui] bundling ${cart.entry} -> ${bundleOut}`);
+    const bundle2 = bundleCart({
+      rjitHome,
+      cartEntry: cart.entry,
+      outFile: bundleOut,
+      mode: "tui-host",
+      termCols: term.cols,
+      termRows: term.rows
+    });
+    writeSpawnOutput7(bundle2);
+    if (bundle2.code !== 0) return bundle2.code || 1;
+    const bin = `${rjitHome}/zig-out/bin/${cart.name}`;
+    const built = buildTuiBinary(rjitHome, cartRoot, cart.name, bundleOut, bin);
+    if (built !== 0) return built;
+    out(`[tui] running ${bin}`);
+    return runForeground(cart, bin, parsed.appArgs);
+  }
+  function parseTuiArgs(argv) {
+    let target = "";
+    let appArgs = [];
+    for (let i = 0; i < argv.length; i += 1) {
+      const arg = argv[i];
+      if (arg === "--help" || arg === "-h") return usage7(0);
+      if (arg === "--") {
+        appArgs = argv.slice(i + 1);
+        break;
+      }
+      if (arg.startsWith("--")) {
+        err(`[tui] unknown flag: ${arg}`);
+        return usage7(1);
+      }
+      if (target) {
+        err(`[tui] unexpected positional arg: ${arg}`);
+        return usage7(1);
+      }
+      target = arg;
+    }
+    return { target: target || "tui/examples/counter.tsx", appArgs };
+  }
+  function usage7(code = 1) {
+    err("Usage: rjit tui [cart-name|entry.tsx] [-- app-args...]");
+    err("  Builds a TUI bundle and execs the headless app in the foreground terminal.");
+    err("  Use `rjit dev <cart-name> --tui` for the experimental persistent TUI dev host.");
+    return code;
+  }
+  function resolveTarget2(root, target) {
+    const direct = ensureAbs2(root, target);
+    if (fsExists(direct)) return cartFromEntry(direct);
+    const dirEntry = `${root}/cart/${target}/index.tsx`;
+    if (fsExists(dirEntry)) return { name: target, entry: dirEntry, dir: dirname8(dirEntry) };
+    const fileEntry = `${root}/cart/${target}.tsx`;
+    if (fsExists(fileEntry)) return { name: target, entry: fileEntry, dir: dirname8(fileEntry) };
+    return null;
+  }
+  function cartFromEntry(entry) {
+    let name = basenameNoExt(entry);
+    const dir = dirname8(entry);
+    if (name === "index") name = basename4(dir);
+    return { name: sanitizeName2(name), entry, dir };
+  }
+  function buildTuiBinary(rjitHome, cartRoot, name, bundlePath, bin) {
+    const zig = resolveZig4(rjitHome);
+    const args = [
+      "build",
+      "app",
+      "-p",
+      `${rjitHome}/zig-out`,
+      `-Dapp-name=${name}`,
+      "-Dapp-source=v8_app.zig",
+      `-Dbundle-path=${bundlePath}`,
+      ...legacyTuiFlags(),
+      "-Dhas-gpu=false",
+      "-Doptimize=ReleaseFast"
+    ];
+    out(`[tui] compiling native binary (${bin}, ReleaseFast)...`);
+    const cmd = cartRoot === rjitHome ? zig : "env";
+    const finalArgs = cartRoot === rjitHome ? args : [`ZIG_GLOBAL_CACHE_DIR=${rjitHome}/tools/zig/cache`, zig, ...args];
+    const build = spawnSync(cmd, finalArgs);
+    writeSpawnOutput7(build);
+    if (build.code !== 0) return build.code || 1;
+    trimZigCacheIfOversized(rjitHome);
+    if (!fsExists(bin)) return fail10(`[tui] build produced no binary: ${bin}`, 1);
+    return 0;
+  }
+  function legacyTuiFlags() {
+    return [
+      "-Duse-v8=true",
+      "-Dhas-terminal=true",
+      "-Dhas-httpsrv=true",
+      "-Dhas-wssrv=true",
+      "-Dhas-process=true",
+      "-Dhas-net=true",
+      "-Dhas-sdk=true",
+      "-Dhas-fs=true"
+    ];
+  }
+  function runForeground(cart, bin, appArgs) {
+    const shell = 'if [ -r /dev/tty ] && [ -w /dev/tty ]; then exec < /dev/tty > /dev/tty 2>&1; fi; exec "$@"';
+    const result = spawnSync("sh", [
+      "-c",
+      shell,
+      "rjit-tui",
+      "env",
+      `RJIT_DEV_CART_DIR=${cart.dir}`,
+      bin,
+      ...appArgs
+    ]);
+    writeSpawnOutput7(result);
+    return result.code === 0 ? 0 : result.code || 1;
+  }
+  function runFixReactImports4(rjitHome, cartRoot) {
+    const script = `${rjitHome}/scripts/fix-react-imports`;
+    if (!fsExists(script)) return;
+    const result = spawnSync("env", [`RJIT_HOME=${rjitHome}`, `CART_ROOT=${cartRoot}`, script]);
+    writeSpawnOutput7(result);
+    if (result.code !== 0) throw new Error(`fix-react-imports exited ${result.code}`);
+  }
+  function terminalSize3() {
+    try {
+      const parsed = JSON.parse(__termSize());
+      return { cols: parsed[0] || 80, rows: parsed[1] || 24 };
+    } catch {
+      return { cols: 80, rows: 24 };
+    }
+  }
+  function resolveZig4(rjitHome) {
+    const bundled = __env("REACTJIT_ZIG") || `${rjitHome}/tools/zig/zig`;
+    if (fsExists(bundled)) return bundled;
+    return "zig";
+  }
+  function ensureAbs2(root, path) {
+    if (path.startsWith("/")) return path;
+    const trimmed = path.startsWith("./") ? path.slice(2) : path;
+    return `${root}/${trimmed}`;
+  }
+  function dirname8(path) {
+    const idx = path.lastIndexOf("/");
+    return idx <= 0 ? "/" : path.slice(0, idx);
+  }
+  function basename4(path) {
+    const idx = path.lastIndexOf("/");
+    return idx < 0 ? path : path.slice(idx + 1);
+  }
+  function basenameNoExt(path) {
+    const name = basename4(path);
+    const idx = name.lastIndexOf(".");
+    return idx < 0 ? name : name.slice(0, idx);
+  }
+  function sanitizeName2(name) {
+    return name.replace(/[^A-Za-z0-9_.-]/g, "_");
+  }
+  function writeSpawnOutput7(result) {
+    if (result.stdout) __writeStdout(result.stdout);
+    if (result.stderr) __writeStderr(result.stderr);
+  }
+  function fail10(message, code) {
+    err(message);
+    return code;
   }
 
   // cli/commands/watch-and-push.ts

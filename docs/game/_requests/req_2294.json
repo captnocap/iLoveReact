@@ -1,0 +1,18 @@
+{
+  "id": "req_2294",
+  "at": "2026-07-01T01:32:44.905Z",
+  "origin": "session:986b717b",
+  "text": "why do most of my things show up twice? for the same thing ? [Image #5]",
+  "status": "doing",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T01:33:29.419Z",
+      "actor": "986b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

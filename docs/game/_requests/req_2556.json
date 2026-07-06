@@ -1,0 +1,10 @@
+{
+  "id": "req_2556",
+  "at": "2026-07-04T05:24:14.944Z",
+  "origin": "session:5fc01965",
+  "text": "ah that makes a lot more sense, when u said it was a react re-rendering problem that explains now why the build piece wireframe is not keeping up. and i can prove it by moving the camera around at the same time make it a live wireframe when placing but if the camera doesnt move at all it will never update it",
+  "status": "new",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": []
+}

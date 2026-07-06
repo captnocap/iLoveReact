@@ -1,0 +1,18 @@
+{
+  "id": "req_2728",
+  "at": "2026-07-06T00:47:23.274Z",
+  "origin": "session:30dc2d20",
+  "text": "oh also, i have noticed that uh codex still always uses the oracle but claude doesnt. and to be honest the oracle diverts codex a lot because it still at large points at hmsc-int when everything that we are going forward with is now specific to @cart/editor/ so there is something we can do about that, either silence the oracle codex searches or enforce it for both but tidy it up, which the 2nd option i think is better, since claude gets by quite well without it",
+  "status": "doing",
+  "sessionId": "30dc2d20-de97-4df4-a961-88585ef24c13",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:47:48.879Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

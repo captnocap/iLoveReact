@@ -1,0 +1,28 @@
+{
+  "id": "req_2431",
+  "at": "2026-07-01T10:57:34.430Z",
+  "origin": "session:985ec847",
+  "text": "what is this error ? +- compile exe reactjit-dev ReleaseFast native 1 errors\nframework/events/editor_bus.zig:38:24: error: no module named 'sqlite' available within module 'root'\nconst sqlite = @import(\"sqlite\");\n                 lol",
+  "status": "review",
+  "sessionId": "985ec847-8ff6-4df0-8e0f-2e94c7fb091e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T10:58:56.162Z",
+      "actor": "985e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T10:59:16.404Z",
+      "actor": "985e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed and fixed the 'no module named sqlite available within module root' compile error. framework/events/editor_bus.zig:38 imports sqlite as a NAMED module (deliberate, so it can be built in isolation for its unit test). build.zig wired that name only on the isolated test module (editor_bus_mod_t.addImport), but the host build reaches editor_bus.zig via a relative-import chain (v8_ingredients -> v8_bindings_editor_bus -> editor_bus.zig), compiling it into root_mod, which never had a 'sqlite' named module registered. Fix: created editor_sqlite_root_mod from framework/storage/sqlite.zig and registered it via root_mod.addImport(\"sqlite\", ...) right after the zluajit import, so both build paths resolve the name. No source change to editor_bus.zig; sqlite.zig dlopens libsqlite3 with no link-time dep. Needs a fresh ship to verify (build.zig change, not hot-reload covered).",
+  "shas": [],
+  "resolvedAt": "2026-07-01T10:59:16.403Z"
+}

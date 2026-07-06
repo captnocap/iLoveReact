@@ -1,0 +1,24 @@
+{
+  "id": "req_2560",
+  "at": "2026-07-04T05:45:41.314Z",
+  "origin": "session:1ccd61f7",
+  "text": "ok the next one is, \n\n'new mesh -> cube -> see it in the outliners -> click delete -> workspace says no visible parts -> click add cube -> confirm a size ->  empty workspace still + outliners is empty also",
+  "status": "doing",
+  "sessionId": "1ccd61f7-1753-4038-a146-209701d9708e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T05:46:03.832Z",
+      "actor": "1ccd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T05:49:07.321Z",
+      "actor": "1ccd",
+      "kind": "note",
+      "text": "Root cause was a split-brain around the empty model: host refuses to empty a mesh, so deleting the last part failed host-side while the outliner emptied anyway; the empty compose unmounts ModelView (dropping the host mesh), and the subsequent Add went through the stale ModelView api into that dead mesh, failed, and never added the part to state. Fixed in AppFrame: delete of the last visible part skips the host op (unmount drops the mesh; status says 'model is now empty'), and addPrimitivePart seeds the part as the new base when the composed model is empty so the viewer remounts fresh, same as a new document. Hot-reloads — verify: new cube, delete it, add cube, it should appear in both workspace and outliner."
+    }
+  ]
+}

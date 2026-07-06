@@ -1,0 +1,18 @@
+{
+  "id": "req_2320",
+  "at": "2026-07-01T02:33:20.723Z",
+  "origin": "session:a7549dd9",
+  "text": "alright so this needs work. this the first ive seen it but it is broken clearly [Image #4]",
+  "status": "doing",
+  "sessionId": "a7549dd9-ae3e-4dce-8ecd-0b127ef6eaff",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T02:33:36.604Z",
+      "actor": "opus-editor",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

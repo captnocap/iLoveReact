@@ -1,0 +1,36 @@
+{
+  "id": "req_2511",
+  "at": "2026-07-02T05:22:11.341Z",
+  "origin": "session:69672c0b",
+  "text": "hey the sliders for the painting tools in the @cart/editor/ are like literally fucking impossible to find the correct spot to get it to do anything",
+  "status": "review",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T05:22:17.068Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T05:26:00.725Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-02T07:50:59.958Z",
+      "actor": "session-6967",
+      "kind": "note",
+      "text": "Root cause found + fixed (394a1f309): while painting a model, meshEditCapturing() made the mesh-editor eat the LEFT click before the slider grab (meHitIsChrome/layout.hitTest disagreed with hitTestSlider). Now yields to hitTestSlider/hitTestScrollbar. Added per-click [click] logging (ON SLIDER/GRABBED/SKIPPED). Earlier TSX height bump (eef8a4d) was cosmetic only. Zig change — needs a rebuild to take effect."
+    }
+  ],
+  "resolution": "The paint sliders were nearly impossible to grab because the Slider primitive defaults to 14px tall and the editor's paint controls never overrode it. Sitting inside a 40px toolbar row (alignItems:center), only a thin 14px band in the vertical middle registered as the slider — the engine's hitTestSlider requires my within [r.y, r.y+r.h), so any click above or below that band did nothing, which is exactly the 'can't find the correct spot' symptom. Fixed by giving the editor sliders a real vertical target: PaintToolbar size/flow sliders are now 30px tall and the brush-panel scalar sliders 24px; the PAINT BUCKET shader-param and tiles sliders in ModelShaderBucket are now 24px. The host paints the track as a 5px centered line and caps the knob at 16px square, so the sliders look identical but present a much larger grab zone. Click-to-jump and drag already worked host-side, so no engine change was needed. cart/ TSX edits hot-reload in the running dev host.",
+  "shas": [
+    "eef8a4d4f"
+  ],
+  "resolvedAt": "2026-07-02T05:26:00.725Z"
+}

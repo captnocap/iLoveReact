@@ -1,0 +1,18 @@
+{
+  "id": "req_2286",
+  "at": "2026-07-01T01:06:56.448Z",
+  "origin": "session:986b717b",
+  "text": "haha oh yes it does it looks actually annoying as fuck lmao uh damn did i really have that many named new_mesh_* LMAO my bad also tho the list is so long and doesnt have a scroll container that i cant get to the bottom of it",
+  "status": "doing",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T01:07:51.000Z",
+      "actor": "986b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

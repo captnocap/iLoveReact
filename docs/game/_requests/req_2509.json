@@ -1,0 +1,24 @@
+{
+  "id": "req_2509",
+  "at": "2026-07-02T05:04:36.114Z",
+  "origin": "session:ea3ce9ce",
+  "text": "ok so this is again one thing im confused by. this is saying NxN texels / face and then showing 12 faces on my cube which has 6 faces. so then its not by face or ? its all incoherent because sure there are 12 triangles but that is not the same as 12 faces",
+  "status": "doing",
+  "sessionId": "ea3ce9ce-d0ad-468f-a469-a95242ec571e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T05:05:24.659Z",
+      "actor": "ea3c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T05:09:27.167Z",
+      "actor": "ea3c",
+      "kind": "note",
+      "text": "Fixed (3d815935b): prompt reads authored faces vs triangles separately (cube = '6 faces (12 triangles)'), atlas patches described as per-TRIANGLE, and every 'texels/face' label that meant triangle patches now says triangle (menu, tooltips, status). Cart-only, hot reloads."
+    }
+  ]
+}

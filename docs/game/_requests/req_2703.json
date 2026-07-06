@@ -1,0 +1,30 @@
+{
+  "id": "req_2703",
+  "at": "2026-07-05T20:16:14.563Z",
+  "origin": "session:bb4508c8",
+  "text": "ok great :D now speaking of chunk size and chunking. as this was the next in line thing i want to address is, i think none of the 'add chunk' feature might have landed in the port from the old editor, or if it has, i dont really know where to find it lol. can you take a peek at that and if there is no obvious way to add chunks, i would like for you to treat it inside of the file menus, so maybe something like map -> add chunk -> dialog window that shows something similar to the old editor for reference (which, would show a topology 2d view where at the ends you could click a plus button and it would append a chunk at that end so you could go in length and height of the map size)",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T20:16:29.660Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T20:26:03.048Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the add-chunk feature never landed in the port — mapGrowChunk's only call site was the boot seed at (0,0). Rebuilt the old editor's topology grow view: Map -> Add Chunk... opens a blocking dialog (Esc cancels; other input refuses honestly per modal discipline) that draws the map's chunk occupancy as a 2D grid — filled squares are grown chunks, and every empty slot 4-adjacent to one renders a '+' (clamped to the engine's 153x9 address window), so you can extend the map in length and height exactly like the old editor. Pressing + grows the chunk through the existing __map_grow_chunk door, saves the painting so the new ground survives a restart, and the live viewport mirrors the fresh chunk next frame (no reload). Added one host door, __map_chunk_list() -> [maxCol, maxRow, count, cx,cz...], since nothing exposed chunk coords; the dialog shows honest messages when the map host isn't built in or the binary predates the door. Dialog/menu hot-reload; the door needs a Zig rebuild.",
+  "shas": [
+    "8b9cccdf4"
+  ],
+  "resolvedAt": "2026-07-05T20:26:03.047Z"
+}

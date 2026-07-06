@@ -1,0 +1,18 @@
+{
+  "id": "req_2376",
+  "at": "2026-07-01T07:30:50.129Z",
+  "origin": "session:8cf696c0",
+  "text": "what do u mean exactly. like ? idk look at t he old studio approach and just copy that same concept",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T07:30:59.327Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

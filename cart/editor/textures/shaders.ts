@@ -452,8 +452,20 @@ export const HMSC_BROWSE_SHADER_PRESETS: ShaderTexturePreset[] = HMSC_SHADER_PRE
   return spec.id === 'road' || preset.id.endsWith('--std');
 });
 
+// ── Imported specs (dynamic) ─────────────────────────────────────────────────
+// Imported textures (data/texturePackage.ts) register here at load so they are
+// first-class materials: shaderSpec() resolves them, shaderGroups() shelves
+// them, which makes them ink-pickable, bakeable, and replayable with zero
+// special-casing downstream. Re-registering replaces the whole set (idempotent
+// on reload).
+let IMPORTED_SPECS: ShaderSpec[] = [];
+
+export function registerImportedSpecs(specs: ShaderSpec[]): void {
+  IMPORTED_SPECS = specs;
+}
+
 export function shaderSpec(id: string): ShaderSpec | undefined {
-  return HMSC_SHADERS.find((s) => s.id === id);
+  return HMSC_SHADERS.find((s) => s.id === id) ?? IMPORTED_SPECS.find((s) => s.id === id);
 }
 
 export function shaderTexturePreset(id: string): ShaderTexturePreset | undefined {
@@ -464,7 +476,7 @@ export function shaderTexturePreset(id: string): ShaderTexturePreset | undefined
 // (TEXTURE_CATEGORIES), with any stragglers appended in first-seen order.
 export function shaderGroups(): { group: string; specs: ShaderSpec[] }[] {
   const out: { group: string; specs: ShaderSpec[] }[] = [];
-  for (const spec of HMSC_SHADERS) {
+  for (const spec of [...HMSC_SHADERS, ...IMPORTED_SPECS]) {
     const g = out.find((x) => x.group === spec.group);
     if (g) g.specs.push(spec); else out.push({ group: spec.group, specs: [spec] });
   }

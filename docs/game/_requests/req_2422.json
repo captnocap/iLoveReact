@@ -1,0 +1,30 @@
+{
+  "id": "req_2422",
+  "at": "2026-07-01T09:46:20.778Z",
+  "origin": "session:be477f59",
+  "text": "holy fuck i just opened pandoras fucking box brace yourself when u read this one [Image #11] 1 in-memory events. 0 undoable. 0 redo. Eventbus Review. target: empty map placement ~= fully authored rich map placement (what? are we having a fucking stroke?), eventbus host: not wired (thats fucking awesome at least its honest?) review surface only - editor canvas keeps its height. again, what the fuck does that even mean",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T09:46:45.032Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T09:49:49.333Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Gutted the Eventbus Review popover's fabricated performance dashboard, kept the honest event log. The popover dressed a real in-memory edit stream in theater: (1) four 0.0ms perf tiles — 'rich map delta' was structurally always +0.0ms because AppFrame sets emptyMs === richMs === editMs (the empty-vs-rich placement distinction is admitted-never-measured), so the tile could never report anything else; avg/p95/latest were dev micro-telemetry of React reducer time misplaced in a user-facing popover, and real frame/gpu/bridge telemetry already has its own home in the Performance popover. (2) 'AUTHORING COST TRACE' sparkline + the sentence 'target: empty map placement ~= fully authored rich map placement' — a raw design goal leaked into the UI (the user: 'are we having a fucking stroke?'). (3) 'review surface only - editor canvas keeps its height' — a layout implementation note meaningless to a user. (4) per-event 'empty 0.0ms rich 0.0ms' — the same real editMs printed twice under a distinction that doesn't exist. Kept everything real: the {N} in-memory events / {U} undoable / {R} redo counts, the honest 'eventbus host: not wired · session-local, in-memory' status the user explicitly approved, and the actual event log rows (verb · target · meta · undoable/checkpoint). This is the surface-vs-fabrication split: the event-log surface stays and is now honest; the fake perf framing built on a non-existent metric is gone. File: cart/editor/shell/EventBusPopover.tsx (removed editTelemetry/formatMs imports, still used by BuildDock/PerformancePopover). Parses clean via esbuild transform; not shipped (live session).",
+  "shas": [
+    "c925f838a"
+  ],
+  "resolvedAt": "2026-07-01T09:49:49.333Z"
+}

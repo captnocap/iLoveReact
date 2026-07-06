@@ -1,0 +1,28 @@
+{
+  "id": "req_2694",
+  "at": "2026-07-05T19:14:17.760Z",
+  "origin": "codex:019f339c",
+  "text": "these are really good, is it possible to extend it so they brush different? for example, here is a single dab from each one [Image #1]",
+  "status": "review",
+  "sessionId": "019f339c-dfb5-7570-9e4e-edb32912bc4d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T19:14:30.007Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T19:23:30.014Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extended the map-paint brush gizmo selector from preview-only chrome into actual dab behavior. The five styles now paint differently: beam is a hard solid footprint, decal is a filled/feathered projected footprint, rings stamps center/inner/outer bands, profile preserves the selected falloff profile, and handles stamps center/axis/cardinal pads. The same style weights now drive terrain height, smooth, water coverage, and tile/flora/zone cell footprints, with profile as the default normal brush. Added Zig unit coverage for the new dab masks and preserved old profile sculpt behavior by default. Also made a minimal compatibility fix for the concurrent map store v2/material binding changes so validation could compile: engine save/load now passes tile bindings and store tests use the new undercoat/load signatures. Verified with zig build test-game-map and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-05T19:23:30.014Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2450",
+  "at": "2026-07-01T12:03:00.437Z",
+  "origin": "session:bf2eaad9",
+  "text": "oh you know what that reminds me thanks for that so u said some shit about a texel. some claude earlier was barking up my tree about it. i said idk dude why dont u just give me the option to decide like inside of the god damn file menus in here like a normal fucking app would and this also in part had me saying oh also when i add a outliner to anything at all it needs to prompt me upfront like exactly how the studio mesh editor in the old app did and then so all being said leets talk about what the fuck 32x32 means, and if claude ever exposed that fn for me or not and also he certainly said fuck doing the what size of a outlier do u want when u add it notion so thats cool i guess. but in the last app, i could paint test or this shit sucks on the side of a default cube size so why cant i here",
+  "status": "review",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T12:04:09.039Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T12:14:26.084Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Addressed together with req_2452 (same work, sha c30beaa08): explained that 32x32 = the per-face texel patch and that the cap was artificial, then blasted the ceiling to 512 and exposed the full resolution range as a nested File -> Paint Resolution menu — answering both 'what does 32x32 mean' and 'was the control ever exposed' (it wasn't, in the editor). The separate idea of prompting for parameters upfront when adding an outliner primitive (like the old studio mesh editor's add dialog) is noted and NOT yet built — a valid follow-on a prior session had dismissed.",
+  "shas": [
+    "c30beaa08"
+  ],
+  "resolvedAt": "2026-07-01T12:14:26.084Z"
+}

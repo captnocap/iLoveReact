@@ -1,0 +1,30 @@
+{
+  "id": "req_2701",
+  "at": "2026-07-05T20:08:14.331Z",
+  "origin": "session:a71ff6e3",
+  "text": "oh, i guess this is relevant also, but if you look at the water painting tool. im pretty sure if i remember correctly, it requres that you have to have a negative heightfield to then be able to paint in water. but as it stands, the heightfield tool is only allowed to do positive. now, i kinda also think this is kinda a bad hack if you ask me, and that the water tool should do its own negative depth on any terrain, that way you know for example you could put a river flowing down a hill. also, we are working inside of the @cart/editor/ and not hmsc-int so dont be confused :) i see you searching in the one location so just to keep it on track",
+  "status": "review",
+  "sessionId": "a71ff6e3-8b84-45fa-b0da-3e926d36a3d4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T20:08:28.598Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T20:16:13.581Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Water brush now carves its own bed instead of only filling pre-dug sub-zero basins: each covered sample digs depth×brushweight below the pre-stroke surface and fills exactly the carved volume, so the water surface sits at the original grade and FOLLOWS terrain — a river painted down a hill flows downhill. Wet samples reconstruct their pre-stroke surface as bed+depth, making re-drags idempotent (no runaway trenching); erase still drains without re-filling the carve. Water channel gained a DEPTH stepper (1-64m) in the map paint bar; engine test rewritten and all 39 pass. Needs a dev-host rebuild.",
+  "shas": [
+    "497ee5ec9"
+  ],
+  "resolvedAt": "2026-07-05T20:16:13.581Z"
+}

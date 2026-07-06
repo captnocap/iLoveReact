@@ -1,0 +1,30 @@
+{
+  "id": "req_2693",
+  "at": "2026-07-05T19:07:04.978Z",
+  "origin": "session:bb4508c8",
+  "text": "Cool here is one more thing with shaders for you to touch on for me. two things really, the first is so inside of the map painting tools, the tile painter, [Image #92] has texture mapping, for some reason, this menu and not the one in the mesh painting portion of the app, literally locks up the app for like 10-15s when selecting a new shader. and then secondly, uh one thing that is actually really annoying is so alright here is some painting i have that has this shader. and then if i change it, in hopes to paint a new shader next to it [Image #93] it just updates the shader for all of them ;_; so i basically like am kinda fucked if you ask me, the current approach basically says that every single sidewalk has to be the same which we all know that isnt reality at all",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T19:09:58.545Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T19:36:02.397Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Both tile-painter complaints traced to one root: the ground formula baked the kind→material tables INTO its WGSL, so each texture pick regenerated the ~700KB composed shader and recompiled it cold on the render thread (the 10-15s lockup — the mesh painter never had it because it bakes through the shared, never-changing effect megashader), and the binding was per-KIND so every sidewalk changed together. Rebuilt it data-driven: the formula is now STATIC (one compile per run); the map owns a tile-binding table (persisted in the RMAP, v2) and every painted cell stamps its own binding index, so picking a material ARMS the brush — new strokes deposit the new look, already-painted tiles keep theirs, and any number of sidewalk looks coexist. Zig: chunks materials grid, engine binding table + bind_idx tool + D-stream v3 + undercoat carries (tile,material), store v2 with v1 back-compat, __map_set/get_tile_bindings doors, tool pack f32[18]. Cart: static groundFormula with per-cell dispatch, picker/bar arm-a-binding semantics, host→chrome table mirror on arm. The req_2692 compile heartbeat moved to gpu/compile_progress.zig and now narrates the ground pipeline's cold boot compile too. test-game-map green; editor bundle resolves. Needs Zig rebuild.",
+  "shas": [
+    "33493c724"
+  ],
+  "resolvedAt": "2026-07-05T19:36:02.397Z"
+}

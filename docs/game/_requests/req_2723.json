@@ -1,0 +1,17 @@
+{
+  "id": "req_2723",
+  "at": "2026-07-06T00:33:43.266Z",
+  "origin": "one-off",
+  "text": "cool uh well the only other thing then is can u make it so that files over size cant creep in, for future proofing or is that just the nature of it. the one thing i think that was hard with the db was it was in nthe correct file size range and then obviously exceeded it and then failed",
+  "status": "new",
+  "sessionId": "946c6729-d313-4564-be06-7b2021c12c44",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:33:59.849Z",
+      "actor": "946c",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

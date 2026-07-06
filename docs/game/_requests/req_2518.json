@@ -1,0 +1,24 @@
+{
+  "id": "req_2518",
+  "at": "2026-07-02T06:53:23.570Z",
+  "origin": "session:8879defb",
+  "text": "ok... still no where near the fidelity of the previous, whats the deal is the mesh size smaller or what? this is 1px brush size [Image #11]",
+  "status": "doing",
+  "sessionId": "8879defb-5d05-41d8-a5f0-3099c8e431cc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T06:53:55.272Z",
+      "actor": "8879",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T07:07:16.444Z",
+      "actor": "8879",
+      "kind": "note",
+      "text": "Root cause: density did what 16x means (16 texels/m → 16 texels on a 1m cube face); the OLD painter's fidelity came from fitting the whole model into a fixed 1024² paint atlas (paintAtlasTexels, req_1299) → ~330 texels/m on a lone cube. Ported that law (bf1602123): prompt now picks the atlas budget (1024² recommended) and the density derives from model size. Needs rebuild + repaint check."
+    }
+  ]
+}

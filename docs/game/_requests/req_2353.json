@@ -1,0 +1,18 @@
+{
+  "id": "req_2353",
+  "at": "2026-07-01T05:52:42.661Z",
+  "origin": "session:8cf696c0",
+  "text": "uh yeah theres a real problem i can select only 1 edge of the entire cube. face select is on the face. and vertex shows 2 vertexes being the one edge i can select so something is genuinely broken [Image #18]",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T05:54:06.033Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

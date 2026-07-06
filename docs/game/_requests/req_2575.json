@@ -1,0 +1,18 @@
+{
+  "id": "req_2575",
+  "at": "2026-07-04T07:02:00.551Z",
+  "origin": "session:66d63b15",
+  "text": "yes. they do, however, and this is a bigger problem, is the current map building is placing extremely basic geometry, which is actually unhelpful, because of a few things:\n1) i cant see if the wall is facing the correct direction for a window wall\n2) i cant even see a window in a wall \n3) when it comes t o textures, applying them is applying a very primitive color and not the texture, so there is no real ability to see whats going on\n\nlook back here @cart/hmsc-int/ at the build tooling, notice how the map is getting real 3d geomgetry and real live edits of texture slotting, etc.",
+  "status": "doing",
+  "sessionId": "66d63b15-80a6-4696-8453-bdc2ef7ccb5d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T07:02:35.218Z",
+      "actor": "66d6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

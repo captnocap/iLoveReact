@@ -1,0 +1,24 @@
+{
+  "id": "req_2622",
+  "at": "2026-07-04T23:47:18.271Z",
+  "origin": "session:40eebdf5",
+  "text": "yeah so thats actually about it. for which it stands, that is all that was to be 'ported' into the new architecture that, you can see a lot of it may have landed in one way or another but not brought together in any sense.",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T23:48:01.460Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T23:48:01.468Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "CAPSTONE — user confirms the dump is complete: this (req_2618-2622) is the FULL port surface from hmsc-int studio+world into cart/editor. User's own verdict: 'a lot of it may have landed in one way or another but not brought together in any sense' — matches every trace: data models ported (editMesh rig/slots/mirror), host doors built (__mesh_undo/__mesh_history/mapGrowChunk/skin boxes/modelThumb pipeline), but the UI/wiring layer that makes them ONE editor never landed. CONSOLIDATED THEMES across the five reqs: T1 Zig viewport furniture — stage 9-grid+fine center+axes, face-mode tint+center dots, edge overlay, gizmo sizing policy (fixed-px blob + view-angle precision growth), in gpu/3d.zig. T2 Undo truth — replace placebo undoLocal/redoLocal with real routing (mesh journal on model docs incl toolbar buttons, real world undo, __mesh_history-driven history UI). T3 Durable identity — model name field, manifest as disk truth, rename->manifest, save visibility/dirty/autosave, content identity out of hotstate view layer. T4 Model inspector parity over EXISTING data — rig panel (pivot/joints/anchors), texture-slot UI, per-part UV w/ labeled islands, shape metadata card, symmetrize/mirror toggles, part rename+row verbs, save-a-copy, add-shape/import-part parity, reference backdrops, mannequin. T5 World bring-together — one-click skin flow w/ inline thumbnails + copy-skin->brush + sides slot + image-texture skins, BuildBar 3D thumbs via existing modelThumb, prop browse UX (search/tags/related) fed from model library (old prop-TS system stays dead per user caveat), painted atlas on placed authored meshes (load-bearing engineering slice), chunk grow/attach UI over mapGrowChunk. BUGS: paint-atlas dialog under wireframe (z-order), UV panel no metadata. PROPOSED STRIKE ORDER: T2 (trust) -> T3 (stop losing work) -> T1 (the modeling stage) -> T4 -> T5. Awaiting user ordering ruling."
+    }
+  ]
+}

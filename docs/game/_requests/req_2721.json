@@ -1,0 +1,17 @@
+{
+  "id": "req_2721",
+  "at": "2026-07-06T00:28:29.659Z",
+  "origin": "one-off",
+  "text": "is it going to wipe the commit history and we have to recommit in one huge one again? or do they get preserved? i dont really care but thats the only thing that agents would go wtf.jpg",
+  "status": "new",
+  "sessionId": "946c6729-d313-4564-be06-7b2021c12c44",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:28:37.619Z",
+      "actor": "946c",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

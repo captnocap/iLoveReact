@@ -1,0 +1,18 @@
+{
+  "id": "req_2453",
+  "at": "2026-07-01T12:12:52.991Z",
+  "origin": "session:8cf696c0",
+  "text": "clutch dude nice so uh with that is also the delete button and yeah that one is pretty straight forward. needs to like u know delete what i have selected ideally and nothing more or less",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T12:14:23.156Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

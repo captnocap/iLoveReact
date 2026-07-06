@@ -1,0 +1,30 @@
+{
+  "id": "req_2452",
+  "at": "2026-07-01T12:09:30.037Z",
+  "origin": "session:bf2eaad9",
+  "text": "dude im trying to paint the fucking taj mahal on a grain of rice dude when the context of a size limit comes into play and i say jump you dont ask how high, you just blast that shit because thats just what you do theres no actual reason and if it sucks ass il complain about it later and we fix it but to be more precise on that matter. the real answer is dude literally just like put in a nested file menu up in the file menus that is un necessairily hard to find but has full control surface of this and will let me do whatever the hell i want. that way it feels like you know a real editor and not some slop shithole",
+  "status": "review",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T12:14:34.625Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T12:14:34.635Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Blasted the model paint-resolution ceiling and gave it a nested File menu, per the directive that when a size limit is the only reason, just raise it. Root cause of 'can't paint text on a cube like the old app': per-face texel detail was hard-capped at 32 (snapPatch) and the only control lived in the standalone brush panel the editor hides, so there was no way to change it in the editor. Host (model_paint.zig, needs rebuild): snapPatch now 8/16/32/64/128/256/512 and ATLAS_BUDGET 64MB->256MB; a cube's ~12 faces at 512 is a few MB so it fits real text while the budget clamps dense meshes and the host reports the detail that took. Editor (hot-reloads): ModelToolApi.changeDetail(px); File -> Paint Resolution submenu (commands.ts PAINT_RESOLUTIONS 16..512, handled in AppFrame.runCommand); brush entry now defaults to detail 64 not 16. Verified zig ast-check + esbuild; menu shows immediately but picks above 32 need the framework rebuild.",
+  "shas": [
+    "c30beaa08"
+  ],
+  "resolvedAt": "2026-07-01T12:14:34.635Z"
+}

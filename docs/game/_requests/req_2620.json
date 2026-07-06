@@ -1,0 +1,42 @@
+{
+  "id": "req_2620",
+  "at": "2026-07-04T23:26:33.697Z",
+  "origin": "session:40eebdf5",
+  "text": "thats what i suspected also. some problems im really having with the current editor is there is no clear way that when i create something of how to store it with a real name or anything like that. from what it seems its all ephemeral and just in memory",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T23:26:48.718Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T23:30:19.918Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Round 3 — persistence/naming audit, user report 'everything feels ephemeral' CONFIRMED with code trace: (S) A save path EXISTS but is invisible: File>Save / Ctrl+S ('save-snapshot', AppFrame.tsx ~283, req_2523) materializes cart/editor/data/models/<kind>/<slug>/ + manifest + mesh/base.blob + atlases/base.png. Confirmation is one status-bar line; no save prompt at creation, no dirty indicator, no autosave for models (old studio had autosaving chip + inline name field at top of MODEL panel). (T) NAMING IS BROKEN END-TO-END: new primitive doc = synthesized 'primitive:<kind>:<n>' named 'Model N' (content.ts primitiveModelPackage). Rename exists ONLY as library right-click -> state.modelOverrides (AppFrame.tsx:1683) which is (a) NEVER persisted — persistView.ts mirrors view state to hotstate which by design dies on cold restart; modelOverrides/modelDupes ride in it, so renames AND duplicates evaporate on relaunch; (b) NOT applied by the save path — modelPackageById() synthesizes fresh, so Ctrl+S writes the manifest with the generic 'Model N' even after a rename. Content identity (name/favorite/hidden/dupes) must move OUT of the view-persistence layer into the package manifest / a durable store. (U) The studio_mdl-* dirs on disk are old-studio stored models surfaced via hmscAssetCatalog.ts:866 (studio:<storedId>), slugged machine ids — correct behavior but reads as garbage names; manifest name should drive display. FIX SHAPE: name field in model focus, rename writes the manifest, Save applies overrides, autosave or save-on-close + dirty chip, overrides folded into manifest so the library reads disk as truth."
+    },
+    {
+      "at": "2026-07-04T23:33:07.365Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Round 4 (mid-turn adds): (V) GIZMO SIZE — 1-face selection shows XYZ handle dots so large they overlap into a blob (unusable at small selections); handle geometry drawn at fixed pixel radii in gpu/3d.zig overlay (overlayDot 11/14px + fixed-length axes) with no scaling by selection extent or view angle; pairs with (Q) view-angle precision scaling — the whole gizmo sizing policy needs doing. (W) UNDO/REDO — user reports zero undo anywhere; trace shows THREE layers: (1) host mesh journal in gpu/3d.zig is FULLY BUILT — journalSnapshotCurrent covers transform (gizmo drag), nudge, loop cut, extrude edge, create face, delete selection, dup/mirror part, merge faces/parts, add/hide part, solidify, detach, glass; __mesh_undo/__mesh_redo/__mesh_history doors registered. (2) keyboard path wired on paper: keymap ctrl+z -> undo-local -> AppFrame runCommand routes model docs to meshUndoRedo -> host.__mesh_undo; commandEnabled passes (global scope). Needs live verification why user sees nothing (focus/useModifiers suspect). (3) THE VISIBLE UNDO UI IS A PLACEBO: BuildDock toolbar undo/redo arrows call undoLocal/redoLocal (AppFrame:1857) which ONLY splice the 8-deep history FEED — they revert NOTHING and never route to the mesh journal even on model docs. World surface has no real undo at all. __mesh_history (journal depths, built for menu-enable/history UI) is never called by any cart code. User verdict 'built but not connected' is exactly right."
+    },
+    {
+      "at": "2026-07-05T00:58:01.864Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LANDED gap W (wave 1, undo agent, 81309f7b0): ROOT CAUSE of dead undo was double — (1) runtime key-shape mismatch: useIFTTT's key bridge wins at boot but emits no mods object, so useModifiers stayed all-false and every ctrl chord arrived as its bare key (kills chords in EVERY cart; cart-side normalization landed, durable runtime/hooks/useIFTTT.ts one-liner being applied by supervisor); (2) the placebo undoLocal. Now: dock arrows route through the same command path as ctrl+z; __mesh_history drives menu gating + count-annotated labels ('Undo (3 mesh)') + dock badge (2Hz poll on model docs); world undo is REAL — bounded 32-entry before/after slice stacks over worldPieces/objects/authored pieces/selection wired into place/override/slot/world-commands; map paint strokes excluded loudly. Headless-verified end-to-end incl real SDL key edges (nudge_only vs nudge_undone PNGs, place->undo->redo cycle). Gaps S/T/U (persistence) go to wave 2."
+    },
+    {
+      "at": "2026-07-05T01:20:41.491Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LANDED gaps S/T/U (wave 2, persistence agent, 970cdf99d): manifest is disk truth — rename writes through to manifest.json live (or rides pending until first save); save-snapshot resolves through effectiveModelPackage so the manifest carries the REAL name; favorites/hidden persisted in manifest; duplicate = whole-package-dir copy on disk. MODEL FOCUS gains an editable name field (on the REGIONS grid) + loud save-state chips (NOT ON DISK / UNSAVED EDITS / ON DISK) + a Save verb; dirty tracked off the mesh-journal depth vs per-model last-save baseline. Autosave on doc switch/close for previously-saved models only; brand-new docs never silently saved. Cold-restart survival PROVEN headlessly: RJIT_EDNAME rename + ctrl,s via key harness -> manifest.json reads 'Durable Crate Mk2'; fresh-process boot shows the disk package. Follow-ups: quit-autosave needs a host quit-signal door (only __exit exists); reopening a saved primitive cold still rebuilds seed geometry (mesh/base.blob readback = later slice, pre-existing); doc-tab dirty dot (Workspace.tsx) small follow-up; two test package dirs under data/models/props are harness artifacts."
+    }
+  ]
+}

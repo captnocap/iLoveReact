@@ -1,0 +1,28 @@
+{
+  "id": "req_2639",
+  "at": "2026-07-05T01:15:09.597Z",
+  "origin": "codex:019f2fbd",
+  "text": "dude lmao wait if  its just data, then i could decode it into 2d ascii and view in a terminal  thats... wait i have the ability to use shaders in tuis through reactjit. oh damn that could be a really cool way to show 'decode it anywhere'; make that next",
+  "status": "review",
+  "sessionId": "019f2fbd-a86d-7153-ad17-040c589a4278",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T01:15:20.737Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T01:20:55.705Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a decode-anywhere terminal proof: a pure ASCII adapter for LoadedScene/gamefile bytes, focused adapter tests, and a ReactJIT TUI cart with a shader strip that reads zig-out/game/hmsc.gamefile (or HMSC_GAMEFILE) and renders the compiled city as an ASCII map. Verified byte tests and a 120x42 headless TUI snapshot.",
+  "shas": [],
+  "resolvedAt": "2026-07-05T01:20:55.704Z"
+}

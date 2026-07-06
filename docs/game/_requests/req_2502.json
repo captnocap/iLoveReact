@@ -1,0 +1,24 @@
+{
+  "id": "req_2502",
+  "at": "2026-07-02T03:51:00.939Z",
+  "origin": "session:ea3ce9ce",
+  "text": "so i chcecked in on the model importing and so ok i imported in a bus, but it doesnt show me it as an outlier like it should, so the model is effectively being treated like just something to view and nothing past that",
+  "status": "doing",
+  "sessionId": "ea3ce9ce-d0ad-468f-a469-a95242ec571e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T03:52:22.005Z",
+      "actor": "ea3c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T04:03:19.683Z",
+      "actor": "ea3c",
+      "kind": "note",
+      "text": "Imported models are outliner parts now (6bb63c705): file-backed ModelPart.sourcePath, host parses the file, per-tri groups + part range, viewer stamps lo/hi back; add/hide/delete/focus + doc-switch replay all work. Cart-only change — hot reload picks it up."
+    }
+  ]
+}

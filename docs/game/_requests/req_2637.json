@@ -1,0 +1,28 @@
+{
+  "id": "req_2637",
+  "at": "2026-07-05T01:06:58.136Z",
+  "origin": "codex:019f2fbd",
+  "text": "kinda sick. imagine a cli that you fuck around in for a bit, put in some parameters or whatever, all built around the library and then it throws down a live server and its there in the browser to check out. idk anything that does that honestly, you could do procedural cities, etc. i mean even to the extent you pass in your own models, they decode into assets, and then are populated from some script someone would setup is wild.",
+  "status": "review",
+  "sessionId": "019f2fbd-a86d-7153-ad17-040c589a4278",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T01:07:05.022Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T01:07:10.428Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Captured the CLI/live-browser authoring idea as an SDK implication of the existing ruled architecture: a parameter/script-driven CLI can call the semantic authoring library, import/decode user models into content-addressed assets, bake a gamefile, and serve the browser loader for immediate preview. Noted the boundary: user scripts are authoring/compile-time generators, while runtime behavior still comes from engine capabilities parameterized by data.",
+  "shas": [],
+  "resolvedAt": "2026-07-05T01:07:10.428Z"
+}

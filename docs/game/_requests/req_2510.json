@@ -1,0 +1,24 @@
+{
+  "id": "req_2510",
+  "at": "2026-07-02T05:19:45.786Z",
+  "origin": "session:ea3ce9ce",
+  "text": "can you make it show the UV layout when you move into paint because i have huge problems with how this is laying out and i want to show you exactly comparison for the same model in the other studio we have made where i made it by hand and it doesnt align at all",
+  "status": "doing",
+  "sessionId": "ea3ce9ce-d0ad-468f-a469-a95242ec571e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T05:20:58.010Z",
+      "actor": "ea3c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T05:25:30.340Z",
+      "actor": "ea3c",
+      "kind": "note",
+      "text": "UV atlas inspector shipped (see commit): paint mode shows the live atlas image with dims + px/tri, refresh button, 32MB loud cap. Hot reloads."
+    }
+  ]
+}

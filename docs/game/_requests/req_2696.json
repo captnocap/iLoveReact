@@ -1,0 +1,30 @@
+{
+  "id": "req_2696",
+  "at": "2026-07-05T19:54:45.061Z",
+  "origin": "session:bb4508c8",
+  "text": "i tried the painting again, and the lock up between selecting one to the other is all gone, but it is not updating the paint to it either, [Image #94] [Image #95]",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T19:55:19.814Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T19:58:21.080Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The picked material not showing on painted tiles (then showing on only a sliver) was the pooled ground D buffer in framework/gpu/3d.zig: the layout-v3 stream grew to ~29-32k floats per chunk (packed cells + the new 14400-float per-cell material tail) but r3d_ground_data buffers and bind groups were sized at GROUND_DATA_FLOATS=20000, so the upload clamped at the cap and the material tail was cut — cells past the cut read binding 0 = kind default, which is exactly the perfect-line split in the screenshot. Raised the cap to 34000 (documented worst-case breakdown: 6 header + 2304 palette + 1024 bindings + 14400 cells + 14400 materials = 32134) and made overflow a LOUD one-shot error so the next layout growth can never silently truncate again. Needs a Zig rebuild.",
+  "shas": [
+    "aedd40840"
+  ],
+  "resolvedAt": "2026-07-05T19:58:21.080Z"
+}

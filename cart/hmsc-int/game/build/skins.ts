@@ -44,7 +44,17 @@ export function faceSlotLabels(kind: BuildPieceKind): Record<BuildFaceSlot, stri
 
 export type BuildFaceSkin =
   | { kind: 'color'; value: string }
-  | { kind: 'material'; id: string };
+  | { kind: 'material'; id: string; spanGroup?: BuildSpanGroup };
+
+/** SURFACE MODES (DESIGN_INTAKE.md Part 2): when a material id resolves to a
+ *  SURFACE source (game/textures/materials.ts CustomTexture.mode === 'span'),
+ *  this placement's own (gx, gy) slice of the shared (w, h) grid — several
+ *  pieces sharing one `id` string reassemble into one continuous field
+ *  instead of each repeating the pattern independently. Absent = tile (each
+ *  piece renders the material fresh, today's behavior). Lives on the
+ *  PLACEMENT, not the material record, since the same material can span
+ *  differently across different buildings. */
+export type BuildSpanGroup = { id: string; gx: number; gy: number; w: number; h: number };
 
 /** a piece's (or a type's) per-face assignment; absent slot = inherit */
 export type BuildSkinSet = Partial<Record<BuildFaceSlot, BuildFaceSkin>>;

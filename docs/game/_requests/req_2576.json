@@ -1,0 +1,18 @@
+{
+  "id": "req_2576",
+  "at": "2026-07-04T07:36:47.597Z",
+  "origin": "session:66d63b15",
+  "text": "ok this in part landed, the one call out i will say and this is probably exactly the problem is that you likely went and said something in the code along the lines of 'this is what a double window wall should look like' in the placement rather than evaluate from the parameters of what it is for the placement logic. idk how to say that properly but here is why i have the hunch: the single window and double window wall now look like walls with windows, but the open doorway wall for example, is not anything different than what a window wall is fundamentally. think about it. a doorway that is cutout is just cuts in the geometry. a window in a wall is the same. so the idea that the open doorway wall is still rendering as a full wall with no cutout, says the approach isnt in the right lens (as i see it at least)",
+  "status": "doing",
+  "sessionId": "66d63b15-80a6-4696-8453-bdc2ef7ccb5d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T07:37:35.130Z",
+      "actor": "66d6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

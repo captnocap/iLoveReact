@@ -1,0 +1,18 @@
+{
+  "id": "req_2648",
+  "at": "2026-07-05T02:20:47.345Z",
+  "origin": "session:40eebdf5",
+  "text": "hey one thing u can search for me real fast, in this painter [Image #86] notice im blasting it with trees and now some trees have no tops. this is a instance cap getting blown out. but we largely solved this a few days ago with a commit that drastically cut out memory footprint and let us blow up scenes with no cap problem. so, just can u surface this commit for me real fast to ground what im saying but also how is this current 'painter' doing it? same footprint? because if so, then we just have a real exposed problem that didnt show before but curious how it is only in the 3d iso editor and want to have some footing behind me going into this next shit list",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T02:21:20.480Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

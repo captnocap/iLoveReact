@@ -23,12 +23,14 @@ import { BrushIcon } from '../../../runtime/paint/controls';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import ColorLibraryPanel from '../stage/ColorLibraryPanel';
 import type { ColorSpineHandlers } from '../inspector/ModelBrushDock';
-import { shaderGroups, defaultShaderData, shaderSpec, withPalette, type ShaderSpec } from '../textures/shaders';
+import { shaderGroups, shaderSpec, type ShaderSpec } from '../textures/shaders';
+import { shaderVariantData, shaderVariantIndex } from '../textures/shaderPick';
 import type { Rgb } from '../data/types';
 
 const BAR = '#131519', LINE = '#242a33', TEXT = '#e8edf6', DIM = '#8b93a3', ACCENT = '#6ea8fe', TRACK = '#0d0f13', POP = '#17181b';
 
 export type PaintPopover = 'ink' | 'brush' | null;
+type ShaderInk = Extract<Brush['ink'], { kind: 'shader' }>;
 
 // The color/ink data + handlers both the bar and the popovers need.
 type Ink = {
@@ -153,9 +155,9 @@ export function PaintPopovers(props: Ink & { popover: PaintPopover; onClose: () 
   const patch = (b: Partial<Brush>) => props.onBrush({ ...brush, ...b });
   const shaderInk = brush.ink.kind === 'shader' ? brush.ink : null;
 
-  const pickShader = (spec: ShaderSpec) => {
-    // Fold in the user's Color Studio slot overrides (variant 0 = the default take).
-    const data = withPalette(defaultShaderData(spec), props.paletteFor?.(spec.id, 0) ?? null);
+  const pickShader = (spec: ShaderSpec, variantIndex = 0) => {
+    // Fold in the user's Color Studio slot overrides for the selected take.
+    const data = shaderVariantData(spec, variantIndex, props.paletteFor);
     props.onBrush({ ...brush, ink: { kind: 'shader', surface: spec.id, data, tiles: shaderInk?.tiles ?? 1 } });
   };
 
@@ -183,7 +185,7 @@ export function PaintPopovers(props: Ink & { popover: PaintPopover; onClose: () 
 // 240fps → ~50fps. The library panel's pager is the proven answer — same move here.
 const SHADER_PAGE_SIZE = 15;
 
-function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; pickColor: (c: OklchColor) => void; shaderInk: { surface: string } | null }) {
+function InkPanel(props: Ink & { pickShader: (s: ShaderSpec, variantIndex?: number) => void; pickColor: (c: OklchColor) => void; shaderInk: ShaderInk | null }) {
   // Which section is showing — seeded from the current ink, but freely switchable so you can
   // browse shaders even while a color is active (and back).
   const [tab, setTab] = useState<'color' | 'shader'>(props.shaderInk ? 'shader' : 'color');
@@ -219,8 +221,31 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; pickColor:
           const pageItems = flat.slice(page * SHADER_PAGE_SIZE, page * SHADER_PAGE_SIZE + SHADER_PAGE_SIZE);
           const first = flat.length === 0 ? 0 : page * SHADER_PAGE_SIZE + 1;
           const last = Math.min(flat.length, first + pageItems.length - 1);
+          const activeSpec = props.shaderInk ? shaderSpec(props.shaderInk.surface) : null;
+          const activeVariant = activeSpec ? shaderVariantIndex(activeSpec, props.shaderInk?.data) : 0;
           return (
             <Col style={{ gap: 8 }}>
+              {activeSpec ? (
+                <Col style={{ gap: 5 }}>
+                  <Row style={{ alignItems: 'center', gap: 7 }}>
+                    <Text style={{ color: TEXT, fontSize: 11, fontWeight: '700' }}>{activeSpec.label}</Text>
+                    <Text style={{ color: DIM, fontSize: 10 }}>{activeSpec.group}</Text>
+                  </Row>
+                  {activeSpec.variants.length > 1 ? (
+                    <Row style={{ flexWrap: 'wrap', gap: 4 }}>
+                      {activeSpec.variants.map((variant, index) => {
+                        const on = index === activeVariant;
+                        return (
+                          <Pressable key={variant.id} onPress={() => props.pickShader(activeSpec, index)}
+                            style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: 7, backgroundColor: on ? '#e8e8ea' : '#141518' }}>
+                            <Text style={{ color: on ? '#0d0e10' : DIM, fontSize: 10, fontWeight: '700' }}>{variant.label}</Text>
+                          </Pressable>
+                        );
+                      })}
+                    </Row>
+                  ) : null}
+                </Col>
+              ) : null}
               <Row style={{ alignItems: 'center', gap: 8 }}>
                 <Pressable onPress={() => setShaderPage(Math.max(0, page - 1))}
                   style={{ width: 24, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: LINE }}>
@@ -246,10 +271,11 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec) => void; pickColor:
                     <Row style={{ flexWrap: 'wrap', gap: 6 }}>
                       {shelf.specs.map((spec) => {
                         const on = spec.id === props.shaderInk?.surface;
+                        const variantIndex = on ? activeVariant : 0;
                         return (
-                          <Pressable key={spec.id} tooltip={spec.label} onPress={() => props.pickShader(spec)}
+                          <Pressable key={spec.id} tooltip={spec.label} onPress={() => props.pickShader(spec, variantIndex)}
                             style={{ padding: 2, borderRadius: 8, borderWidth: 2, borderColor: on ? ACCENT : 'transparent' }}>
-                            <ShaderThumb shader={spec.shader} data={defaultShaderData(spec)} size={44} />
+                            <ShaderThumb shader={spec.shader} data={shaderVariantData(spec, variantIndex, props.paletteFor)} size={44} />
                           </Pressable>
                         );
                       })}

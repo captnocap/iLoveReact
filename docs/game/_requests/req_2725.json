@@ -1,0 +1,28 @@
+{
+  "id": "req_2725",
+  "at": "2026-07-06T00:42:43.065Z",
+  "origin": "codex:019f34da",
+  "text": "and then in the preview it has on the side, can you like when it says its an image file show the image or if its a model you can show the model in a quick little render window that can let me spin it around, and then also make sure for me that the import from disk can handle image importing as that will be important for an upcoming request",
+  "status": "review",
+  "sessionId": "019f34da-bc30-71e2-a571-d554cad411f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:42:58.513Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T00:56:32.569Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added explorer preview behavior for images and models: image files render through the host Image primitive and can start the image import flow, while GLB/OBJ files load through a preview-only native mesh host function and render in a small orbitable Scene3D viewport.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T00:56:32.569Z"
+}

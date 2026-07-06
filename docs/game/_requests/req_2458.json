@@ -1,0 +1,30 @@
+{
+  "id": "req_2458",
+  "at": "2026-07-01T12:32:29.219Z",
+  "origin": "session:be477f59",
+  "text": "so uh what does this fucking event bus do again? lmao after we spoke about it i have not seen it report jack shit its arguably worse now its just an empty fucking panel at least before it had something in it",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T12:33:49.211Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T12:38:16.837Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the empty Eventbus Review panel — a regression from my own req_2424 change. That change switched the popover from reading the always-populated state.history to reading the bus via since()/head(); but the bus starts EMPTY and only fills from edits dispatched after boarding (AppFrame baselines state.seq on mount specifically so a restored session's prior history is NOT re-emitted onto the durable log), and the in-process fallback log resets on every JS hot reload. Net: unless you'd just made a fresh recorded edit since the last load, the panel showed nothing — worse than before. Verified the plumbing is otherwise sound: ffi emit() loops back to JS subscribers synchronously, the AppFrame per-edit dispatch effect is intact, and the host binding is registered (needs the user's rebuild to go durable). Fix (EventBusPopover.tsx, self-contained): prefer the real bus when since() returns events, else render the session's local edit log (state.history) — so the review always reflects your edits and upgrades to the durable seq-ordered stream the moment events flow. Purely presentational: no seeding or mutation of the bus, robust whether or not the host round-trip is compiled into the running binary. The count pill and undoable/redo stay honest. Parses clean via esbuild transform; not shipped (live session). Sha 4c784660c.",
+  "shas": [
+    "4c784660c"
+  ],
+  "resolvedAt": "2026-07-01T12:38:16.836Z"
+}

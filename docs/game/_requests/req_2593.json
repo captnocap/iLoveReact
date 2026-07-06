@@ -1,0 +1,18 @@
+{
+  "id": "req_2593",
+  "at": "2026-07-04T09:05:17.864Z",
+  "origin": "session:66d63b15",
+  "text": "kinda works. so lets dive in: \nhere is a model i made called vault_door before and then a model called wall_with_cover_double[Image #13] alright im going to export both as wall pieces. and now lets go place them. \n\nlooks like the vault_door places and shows a model, but the other, the wall_with_cover_double is not rendering anything [Image #16]",
+  "status": "doing",
+  "sessionId": "66d63b15-80a6-4696-8453-bdc2ef7ccb5d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T09:05:54.634Z",
+      "actor": "66d6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "req_2667",
+  "at": "2026-07-05T03:52:34.873Z",
+  "origin": "session:a29bdf2b",
+  "text": "it is pretty though, and coming together i will give u that [Image #24]",
+  "status": "doing",
+  "sessionId": "a29bdf2b-cd53-4650-be3f-08a38fb3ab80",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T03:52:57.112Z",
+      "actor": "fable-world",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T03:52:57.120Z",
+      "actor": "fable-world",
+      "kind": "note",
+      "text": "USER CHECKPOINT (Image 24, verbatim: 'it is pretty though, and coming together i will give u that'): live scene proves the wave-1 landings in anger — painted ground MATERIALS render on sculpted relief (grass/sand/sidewalk tile texture on terrain, gap UU fix 7ee89e86d+2ff07c418), palms at forest density ALL have crowns (gap TT caps 612267e4b), flora sits on the painted heightfield, 240 FPS with UNDO 32 live. Remaining visible rough edges this shot: unpainted chunk edges read as dark void with grid (chunk-boundary presentation — related to req_2621 gap AA chunk control), terrain skirt/cliff walls show the tile texture stretched vertically. Not griped yet; noted for the pile."
+    }
+  ]
+}

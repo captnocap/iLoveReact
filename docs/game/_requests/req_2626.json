@@ -1,0 +1,30 @@
+{
+  "id": "req_2626",
+  "at": "2026-07-05T00:08:35.702Z",
+  "origin": "session:40eebdf5",
+  "text": "other things also huge RED FLAGS: DIALOGS OPEN AND OPENING MORE DIALOGS AND NOTHING RESOLVED BUT LETTING ME 'PUSH THROUGH'; heres the perfect example [Image #58] how the fuck can i be in the middle of a loop cut confirmation and then also just freely switch up to paint, or i can add a cube, or infact, i can literally just made other general edits to the mesh and never resolve that dialog. WRONG!!!!!\n\nyaeh i want to say, and this is paramount the nit picks that, allow for things to still 'work' but the interface is a fuck fest. evaluate this edge for me here on this dialog [Image #57] this is the shit that keeps me up at night. not that a feature half ass landed but that somehow the basics of how you just build a ui seem to go out the fucking left field in some areas. lets evaluate all the areas that are a real what the fuck moment here  starting wit hthat edge and how the buttons are on none of the same axis at all\nor this like why the FUCK are we acting like we are bartering for ui space here? [Image #59] seriously what the FUCK look at it dude [Image #60] yeah its that bad",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T00:09:13.060Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T00:09:46.003Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "RED FLAG round — two LAWS ruled by the user, both violated today: (HH) MODAL DISCIPLINE: an unresolved confirm/session gates EVERYTHING. Image 58 = Create Paint Atlas dialog opened ON TOP of a live loop-cut session; user can also switch to paint mode, add cubes, or edit the mesh mid-session. Mechanics: ModelView's lc session state only listens to Esc; the mode row/toolbar/atlas flow (createAtlasAndPaint) never check lc != null; AppFrame's hotkey gate checks openMenu/newMeshPrompt/fileExplorer/buildDialog but NOT the loop-cut session or ModelView-local dialogs. The lc session holds a captured base mesh host-side while other ops mutate the live mesh — stacked unresolved state, undefined interactions. LAW: while a session/dialog awaits resolution, every other surface is inert (or opening X auto-resolves/cancels Y explicitly). (II) CONTROL-GRID DISCIPLINE ('bartering for UI space'): Image 57 loop-cut popup edge — close/stepper/Apply controls on no shared axis (per-control ad hoc padding 8 vs 9, popup can sit clipped at screen edge, Apply cut off); Image 59/60 MODEL FOCUS paint-variants card — 'Update Painting 1' wraps to two lines inside a chip, PAINT VARIANTS header wraps, controls crammed against + New, rows compress below content. LAW: dialogs/panels lay controls on a shared column grid (steppers in fixed-width columns, one right edge, one baseline per row), button labels never wrap, popups clamp fully on-screen, rows reserve their space instead of squeezing. These are ACCEPTANCE CRITERIA folded into every theme T1-T5, not a separate polish-later bucket — user: 'not that a feature half ass landed but that the basics of how you build a ui went out the left field'."
+    },
+    {
+      "at": "2026-07-05T00:58:01.872Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LANDED HH+II for the flagged surfaces (81309f7b0 + e2a4d1158): blocking predicate lifts lc-session/atlas-prompt/import dialogs through one gate — commandEnabled grays with 'resolve X first', runCommand refuses loudly, hotkeys/menus/mode-row/dock/outliner guarded, Esc resolves innermost first; verified headlessly (key:1/key:p inert during lc session). Loop-cut popup on fixed 26/64/26 column grid, bottom-center 8px-inset clamp; atlas-dialog-under-wireframe z-order FIXED via scissor-segment isolation (capsules flush after rects within a segment — overflow:hidden starts a fresh segment). Control grid now also enforced across focus panel (region agent)."
+    }
+  ]
+}

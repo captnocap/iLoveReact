@@ -1,0 +1,30 @@
+{
+  "id": "req_2484",
+  "at": "2026-07-02T00:37:41.601Z",
+  "origin": "session:2b166540",
+  "text": "cool i restarted the app with rebuild, i see what looks to be the start of what you did, but its behind a very annoying ui. [Image #1] lets do better here. zoom out for a second from just the actual world itself and this is where react becomes useful. you have this entire toolbar right above the map editor space to use and i can tell you didnt take any advantage of it [Image #3]",
+  "status": "review",
+  "sessionId": "2b166540-f213-42f7-ba61-c71ee4889378",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T00:38:31.973Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T00:46:05.201Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Map Paint's chrome moved out of the viewport and into the workspace action bar it was ignoring (cfffcd7da, hot-pushed live). The bar follows the toolbar's own conventions: PAINT toggle at the left of the world toolset; while painting the tool owns the row as a modal bar (the model-document branch precedent) — six channel pills, cycling SHAPE/PROF pills (the SNAP pattern), compact steppers, swatch-only tile/flora/zone palettes with tooltip labels, road lane steppers + COMMIT/CANCEL + draft readout, SAVE at the right; PAINT off restores the build controls. State lifted to the editor's real pattern: EditorState.mapPaint (the modelTool mirror) patched via AppFrame, with stage/mapPaint.ts as the one controller mirroring every change into the host tool; it now persists across hot reloads with the rest of the view. The floating dock is deleted — the viewport is clean (the loader's Ground chip is unobstructed again) and the brush beam is the only in-world chrome. No framework changes; pure hot-reload chrome.",
+  "shas": [
+    "cfffcd7da"
+  ],
+  "resolvedAt": "2026-07-02T00:46:05.201Z"
+}

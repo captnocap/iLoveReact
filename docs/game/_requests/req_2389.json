@@ -1,0 +1,10 @@
+{
+  "id": "req_2389",
+  "at": "2026-07-01T08:05:01.514Z",
+  "origin": "session:a7549dd9",
+  "text": "nice ok this is a better menu but i hate to say it the button still dont do shit even when they are in a correctly hidden and hard to find location. what do oh haha i should have just looked. shit code is t he problem  not a function TypeError: modelToolApiRef.current?.toggleLight is not a function\n    at onToggleLight (<anonymous>:93729:60)\n    at onPress (<anonymous>:92180:24)\n    at dispatchAliases (<anonymous>:94040:9)\n    at globalThis.__dispatchEvent (<anonymous>:94087:7)\n    at <anonymous>:1:1\n[js.err] [dispatch] error id=2012 type=onClick: modelToolApiRef.current?.toggleLight is not a function TypeError: modelToolApiRef.current?.toggleLight is not a function\n    at onToggleLight (<anonymous>:93729:60)\n    at onPress (<anonymous>:92180:24)\n    at dispatchAliases (<anonymous>:94040:9)\n    at globalThis.__dispatchEvent (<anonymous>:94087:7)\n    at <anonymous>:1:1",
+  "status": "new",
+  "sessionId": "a7549dd9-ae3e-4dce-8ecd-0b127ef6eaff",
+  "captureMode": "hook",
+  "events": []
+}

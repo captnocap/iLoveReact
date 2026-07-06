@@ -1,0 +1,30 @@
+{
+  "id": "req_2433",
+  "at": "2026-07-01T11:09:47.025Z",
+  "origin": "session:bf2eaad9",
+  "text": "the thing is that is load bearing is i effectively cant author anything with the painting tools if this is going to be the approach otherwise all the data goes to shit so like im not just saying it because it sounds cool",
+  "status": "review",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T11:13:04.603Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T11:26:24.885Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the model painting's durable form the STROKE PROGRAM instead of the rasterized atlas — the load-bearing storage change the user said the paint tools need before real authoring (rasterized pixels corrupt authored data by design; a dither brush is the worst case for RLE and bloats PNG). New framework/gpu/paint_program.zig records every authoring dab/fill as a resolution-independent op (face + barycentric, so it's camera-free and survives detail changes); colour inks are inline and shader inks embed their WGSL + params so the serialized blob is self-contained and replay re-bakes the material with no catalog. Recording is hooked into 3d.zig's authoring entries (paintStampAt/paintAt); replay (paint_program.apply) calls model_paint directly and suppresses recording so it never re-records, with model_paint.clearAtlas giving it a blank canvas and the caller setting the program's detail first (a mesh re-upload) so dabs land at the right resolution. Doors __model_paint_program_read/_apply expose it as base64, and the material door registers its recipe into the program. On the JS side PaintVariant now stores format:'program' (the stroke program) instead of base64 RGBA; save reads the program and load replays it, while legacy atlas variants still load — the atlas is now a pure derived cache. Verified: zig ast-check on all four host files, esbuild transform on both cart files, and all std.ArrayList API usage matches in-tree precedent (mesh_import.zig). Needs the user's framework rebuild to activate; animation as a frame-timings payload rides the same op stream next.",
+  "shas": [
+    "897edebd7"
+  ],
+  "resolvedAt": "2026-07-01T11:26:24.885Z"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_2479",
+  "at": "2026-07-01T23:39:29.541Z",
+  "origin": "session:ea3ce9ce",
+  "text": "i dont really trust to run commands because git only cares about files that are tracked in its history from my experience and so if there is work on disk that is not tracked which there has been pretty much all the time then it just wipes it",
+  "status": "new",
+  "sessionId": "ea3ce9ce-d0ad-468f-a469-a95242ec571e",
+  "captureMode": "hook",
+  "events": []
+}

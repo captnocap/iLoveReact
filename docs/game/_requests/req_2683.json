@@ -1,0 +1,10 @@
+{
+  "id": "req_2683",
+  "at": "2026-07-05T05:06:00.316Z",
+  "origin": "session:389c8d11",
+  "text": "Check on shader sweatshop Wave A (workflow wf_502779b3-ab8) and the flora pipeline Explore agent; continue the plan: validate + build-shaders + categories + commit, launch Wave B, then design the flora tree/bush expansion for req_2679.",
+  "status": "new",
+  "sessionId": "389c8d11-80b1-41cc-9a9d-2b042c1b6b18",
+  "captureMode": "hook",
+  "events": []
+}

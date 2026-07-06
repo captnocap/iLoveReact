@@ -1,0 +1,28 @@
+{
+  "id": "req_2684",
+  "at": "2026-07-05T05:35:27.707Z",
+  "origin": "codex:019f30c5",
+  "text": "evaluate the shaders inside of /home/siah/creative/reactjit/cart/editor/render3d/shaders/materials and then expand on the set with dozens of variety more, following the same principle as every existing file",
+  "status": "review",
+  "sessionId": "019f30c5-00c6-7d90-997c-b510e6f96983",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T05:35:32.165Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T05:39:16.485Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Expanded shader material set with 36 additional WGSL materials under cart/editor/render3d/shaders/materials and fixed syntax/build issues in existing files; regenerated _generated/dispatch.ts and registry.ts.",
+  "shas": [],
+  "resolvedAt": "2026-07-05T05:39:16.485Z"
+}

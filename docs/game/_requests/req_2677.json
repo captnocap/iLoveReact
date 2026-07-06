@@ -1,0 +1,24 @@
+{
+  "id": "req_2677",
+  "at": "2026-07-05T04:32:48.866Z",
+  "origin": "session:a29bdf2b",
+  "text": "awhich speaking of floors,  it currently lets me go to floor 8 as a max and that is not high enough we need upwards of 128. literal burj khalifa levels of floors",
+  "status": "doing",
+  "sessionId": "a29bdf2b-cd53-4650-be3f-08a38fb3ab80",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T04:33:14.854Z",
+      "actor": "fable-world",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T04:38:51.195Z",
+      "actor": "fable-world",
+      "kind": "note",
+      "text": "LANDED (4a359ffd2): MAX_FLOOR 8→128 (AppFrame.tsx:74; consumers = ']' cycle wrap + stepper clamp, both in-file). Hidden-cap audit CLEAN downstream: isoStage setLevel clamps ground-only (camera lifts 384m pure math), visibleStoreyPieces integer filter uncapped, build.zig validatePlacement (:693) checks catalog/edit-kind/finiteness only — no Zig storey cap. Headless proof: RJIT_EDKEYS ']'x10 with 1100 capture frames → floor pill reads 'Floor 10' past the old cap (scratchpad/floor128.png). UX note: ']' cycle now wraps through 129 storeys — long ride, stepper is primary, semantics left alone. Shared-file note: commit swept another lane's uncommitted req_2672 paint-undo work in AppFrame per the no-hedge rule, cited in the message. Hot-reloads."
+    }
+  ]
+}

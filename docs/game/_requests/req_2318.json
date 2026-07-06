@@ -1,0 +1,10 @@
+{
+  "id": "req_2318",
+  "at": "2026-07-01T02:27:15.259Z",
+  "origin": "session:986b717b",
+  "text": "well. the selection is fixed. and verts but the face is still broken up. doesnt really matter since il paint over this one anyways but it just definitely is not the same thing carried over as much as the code says it might be [Image #12] also actually look at that image. you can t ell its lying to itself. those verts dont even fucking line up with the model. how the hell is it going to have 2 verts when the thing isnt just a 2d plane (look at the top near the ears, its just 2 verts for each set) but the model is literally 3d [Image #13] erm actually so now looking at it the verts are right, those are the same verts from the other editor but the face is wrong. so somewhere its fufcking up and the thing that makes no sense still is the faces do not align with the verts here or maybe they do? [Image #14] idk lmao also wait look now at this shot! the faces SHIFTED [Image #15]",
+  "status": "new",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": []
+}

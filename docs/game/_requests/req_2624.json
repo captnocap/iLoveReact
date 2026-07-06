@@ -1,0 +1,30 @@
+{
+  "id": "req_2624",
+  "at": "2026-07-04T23:51:46.891Z",
+  "origin": "session:40eebdf5",
+  "text": "yep and this ties into the dialog when just adding a mesh in general, it currenly i think is just entirely decoupled from reality here in the new approach",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T23:51:54.436Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T23:52:19.291Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Add-mesh dialog unit decoupling (extends gap D + the req_2623 tile-space ruling): NewMeshDialog.tsx renders PRIMITIVE_FIELDS sliders labeled bare 'Size'/'Diameter'/'Height' ranging 0.1-50 in UNDECLARED units (hmscAssetCatalog.ts:266-272) — no unit suffix, no tile/meter equivalence, no conversion readout. Old studio dialog was anchored to the world basis: 'Units: 16 = 1 tile (1 m). Same basis as per-face UV. The grid is unchanged.', -/+ steppers on exact integer u values, live '= 1.00 tile x 1.00 tile' conversion line. Also missing vs old: the From-build-piece seed row (Wall/Half Wall/Window Wall/Door Wall/Garage Door/Floor/Stairs/Ramp) and the Lattice kind. FIX SHAPE: the dialog must speak the SAME 16u=1tile=1m basis constant as the T1 stage grid and per-face UV density — fields in u with steppers + tile conversion readout, so what you type is what spans the stage panels and what the paint-atlas texel math sees. Part of T4 but must land WITH T1 so dialog numbers and stage panels agree from day one."
+    },
+    {
+      "at": "2026-07-05T03:26:06.459Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LANDED (637f12e9d): New Mesh dialog anchored to the world basis — header 'Units: 16 u = 1 tile (1 m). Same basis as per-face UV.', integer u steppers [-16][-1][N u][+1][+16] on the REGIONS control grid (coarse step = one tile; count fields reserve blank coarse cells so every value shares one right edge), live '= X.XX tile x Y.YY tile' conversion readout, ONE boundary conversion u/16 -> generator meters (ground truth verified: generators speak meters centered at origin, 1.0 = one stage tile panel). Gap KK also landed same sha: restOnGround() lifts authored meshes so min-Y=0 inside primitiveEditMesh — BOTH fresh-doc and add-part paths rest on the floor; verified with a below-ground-plane shot (spawn_side3.png: y=0 axes cross exactly at the cube's bottom face). Still open from req_2624 scope: from-build-piece seed row + Lattice kind (T4 add-shape parity)."
+    }
+  ]
+}

@@ -542,8 +542,8 @@ export default function AppFrame() {
         // Import search = jump straight to the Models import-class folder.
         fileExplorerFolder: command.id === 'find-import-source' ? 'virt:models' : prev.fileExplorerFolder,
         status: command.id === 'find-import-source'
-          ? 'file explorer opened on importable models'
-          : 'file explorer opened',
+          ? 'asset explorer opened on importable models'
+          : 'asset explorer opened',
       }));
       return;
     }
@@ -954,7 +954,7 @@ export default function AppFrame() {
           ...prev.fileExplorerDirectoryHistory.filter((entry) => entry.folderId !== fileExplorerFolder),
         ].slice(0, 4),
         seq: prev.seq + 1,
-        status: `file explorer folder: ${explorerFolderLabel(fileExplorerFolder)}`,
+        status: `asset explorer folder: ${explorerFolderLabel(fileExplorerFolder)}`,
       };
     });
   };
@@ -963,7 +963,7 @@ export default function AppFrame() {
     setState((prev) => ({
       ...prev,
       fileExplorerExpanded: { ...prev.fileExplorerExpanded, [folder]: !prev.fileExplorerExpanded[folder] },
-      status: `${prev.fileExplorerExpanded[folder] ? 'collapsed' : 'expanded'} file folder ${explorerFolderLabel(folder)}`,
+      status: `${prev.fileExplorerExpanded[folder] ? 'collapsed' : 'expanded'} asset folder ${explorerFolderLabel(folder)}`,
     }));
   };
 
@@ -1024,9 +1024,13 @@ export default function AppFrame() {
       };
     });
     // Model files actually OPEN: into a model document on the stage via the native
-    // importer. Everything else just records (pin/history) — there is no text-file
-    // document surface yet.
+    // importer. Image files run through the same image-import decision flow as the
+    // OS picker. Everything else just records (pin/history).
     if (file.importable && action === 'opened') openModelFileDocument(file.path);
+    if (file.category === 'texture' && action === 'imported') {
+      setState((prev) => ({ ...prev, fileExplorerOpen: false, status: `import image: ${file.name}` }));
+      probeImageImport(file.path);
+    }
   };
 
   // File → Import Model: the OS picker (zenity) for a .glb/.obj anywhere on disk,
@@ -1095,6 +1099,7 @@ export default function AppFrame() {
       return;
     }
     reloadImportedTextures();
+    refreshExplorerIndex();
     setState((prev) => ({
       ...prev,
       status: `imported ${manifest.name} as ${form === 'pixel' ? `pixel texture (${manifest.colors} colors)` : 'exact image'} → ${manifest.id}`,
@@ -1105,7 +1110,7 @@ export default function AppFrame() {
     const index = refreshExplorerIndex();
     setState((prev) => ({
       ...prev,
-      status: `file index rescanned: ${index.files.length} files${index.truncated ? ' (CAPPED — deeper files not listed)' : ''}`,
+      status: `asset index rescanned: ${index.files.length} assets${index.truncated ? ' (CAPPED — deeper files not listed)' : ''}`,
     }));
   };
 
@@ -2032,7 +2037,7 @@ export default function AppFrame() {
     if (block) {
       if (key === 'escape') {
         if (block.id === 'new-mesh') setState((prev) => ({ ...prev, newMeshPrompt: null, status: `${prev.newMeshPrompt?.mode === 'add' ? 'add' : 'new'} mesh cancelled` }));
-        else if (block.id === 'file-explorer') setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'file explorer closed' }));
+        else if (block.id === 'file-explorer') setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'asset explorer closed' }));
         else if (block.id === 'build-journal') setState((prev) => ({ ...prev, buildDialogOpen: false, status: 'build journal closed' }));
         else if (block.id === 'add-chunk') setState((prev) => ({ ...prev, addChunkOpen: false, status: 'add chunk closed' }));
         else if (block.id === 'import-image') setImportPlan(null);
@@ -2618,7 +2623,7 @@ export default function AppFrame() {
         </RenderProbe>
       ) : null}
       {state.fileExplorerOpen ? (
-        <RenderProbe id="File Explorer Dialog">
+        <RenderProbe id="Asset Explorer Dialog">
           <FileExplorerDialog
             query={state.fileExplorerQuery}
             selectedFolder={state.fileExplorerFolder}
@@ -2633,7 +2638,7 @@ export default function AppFrame() {
             onOpenFile={openExplorerFile}
             onImportFromDisk={() => { void importModelFromDisk(); }}
             onRescan={rescanExplorerIndex}
-            onClose={() => setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'file explorer closed' }))}
+            onClose={() => setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'asset explorer closed' }))}
           />
         </RenderProbe>
       ) : null}

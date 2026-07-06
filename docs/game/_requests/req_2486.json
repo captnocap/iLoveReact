@@ -1,0 +1,30 @@
+{
+  "id": "req_2486",
+  "at": "2026-07-02T00:56:11.797Z",
+  "origin": "session:2b166540",
+  "text": "also, and im going to harp on this some more because i sure has hell hope you didnt just write a bunch of work into the wrong directory, but look at how much of the editor app is importing from cross cart files. none of it but this iso3d editor. and what is all the work that was just done meant to acheive, to escape bad practices and disconnects. so why are we still importing this file from outside of the editor directory when effectively i want to just straight up delete the previous directory so that it doesnt continue to plague grep searches.",
+  "status": "review",
+  "sessionId": "2b166540-f213-42f7-ba61-c71ee4889378",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T00:56:48.460Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T01:11:24.841Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "cart/editor imports NOTHING from cart/hmsc-int anymore (0a6e87ff7, hot-pushed live). The seam was LoaderIsoView, whose closure is 661 files/83k lines welded through GAME_BUILD to the 435 prop recipes — so instead of moving or cloning it, the editor got its OWN thin viewport: cart/editor/world/WorldViewport.tsx rides host doors only (WorldLoader primitive renders, __compiled_world_set_camera carries the iso pose, the req_2349 Zig build brain validates placements via __game_build_validate — live since your rebuild — live pieces + map-paint arming through the compiled-world doors). isoStage cloned with the ./game barrel weld replaced by @reactjit/cameras direct; pieces.ts is the editor-owned minimal piece model (grid snap, host validate, live-row packing, floor/wall looks verbatim). Left-drag rotate, shift-drag pan, wheel zoom-to-cursor, click places with a projected ghost. Verified: zero hmsc-int import lines in cart/editor; zero LoaderIsoView/propRecipes symbols in the built bundle. Dropped with the old pane (unwired in this cart's UI, each returns as a door slice): selection/move, prefabs, skins, cooked residency, wall edge-snap, WASD pan. hmsc-int deletion itself still waits on the mesh-editor/tile-shape/ticker salvage tracks.",
+  "shas": [
+    "0a6e87ff7"
+  ],
+  "resolvedAt": "2026-07-02T01:11:24.841Z"
+}

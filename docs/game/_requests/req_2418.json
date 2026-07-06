@@ -1,0 +1,30 @@
+{
+  "id": "req_2418",
+  "at": "2026-07-01T09:36:21.232Z",
+  "origin": "session:be477f59",
+  "text": "yes the but mesh health validator surfaces a contextual alert saying u done fucked up cuz are u gonna live with it or revert it right now. so its not like if u live iwth it, that the counter going up by one is breaking grounds for something to be warned about.",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T09:36:38.830Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T09:38:03.667Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same task as req_2417 — the user's clarification that the mesh-health validator is a momentary contextual guard (live-with-it-or-revert-now), NOT a source that should feed a persistent ERR/WARN counter, so the counter has nothing legitimate to count and must be removed rather than wired. Acted on exactly that: deleted the fake ERR/WARN dock badge + its hardcoded validationReadout stub/type. Fix committed 308d04e39.",
+  "shas": [
+    "308d04e39"
+  ],
+  "resolvedAt": "2026-07-01T09:38:03.667Z"
+}

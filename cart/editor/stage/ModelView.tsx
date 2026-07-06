@@ -1439,9 +1439,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     //   clear scope:lo,hi nudge:axis,amt gizmo:N undo redo del grouppaint:lo,hi,r,g,b
     //   detail:px wait:frames report atlas:/path.png parts addpart:kind orbit:dx,dy
     //   lcbegin lcprev:dir,cuts,off lcend:0|1 lcstate  (loop-cut session; off = 0..1 frac)
+    //   paintend paintundo paintredo painthist layers layerop:op,id[,arg] progread
+    //   progapply  (stroke journal + paint layers, req_2672)
     const opsText = callHost<string | null>('__env_get', null, 'RJIT_MESHOPS');
     if (opsText) {
       const num = (s: string | undefined) => Number(s ?? 0) || 0;
+      // progread stashes the serialized stroke program here; progapply replays it —
+      // the in-session round-trip proof for the layer-carrying blob (req_2672).
+      const progRef = { current: null as string | null };
       const dumpAtlasPng = (path: string) => {
         const j = host.__model_atlas_read?.();
         if (typeof j !== 'string' || !j) { console.error('[meshops] atlas: no atlas'); return; }
@@ -1532,6 +1537,38 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'stamp') {
           const hit = host.__model_paint_stamp?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]), Number(a[5]) || 4, Number(a[6]) || 1);
           console.error(`[meshops] stamp @${a[0]},${a[1]} → face ${hit}`);
+        }
+        // ── Stroke journal + paint layers (req_2672) ────────────────────────────────
+        // paintend commits the open stroke as ONE undo unit (the pointer-up twin);
+        // paintundo/paintredo drive the STROKE journal (program replay, not the mesh
+        // journal); painthist/layers log the door JSON; layerop:<op>,<id>[,<arg>] runs
+        // one layer verb through the real door (add/delete/up/down/visible/active/
+        // rename/mergedown) and logs the refreshed table.
+        else if (name === 'paintend') console.error(`[meshops] paintend → ${host.__mesh_paint_stroke_end?.() ?? 'n/a'}`);
+        else if (name === 'paintundo') console.error(`[meshops] paintundo → ${host.__mesh_paint_undo?.() ?? 'n/a'} hist=${host.__mesh_paint_history?.() ?? 'n/a'}`);
+        else if (name === 'paintredo') console.error(`[meshops] paintredo → ${host.__mesh_paint_redo?.() ?? 'n/a'} hist=${host.__mesh_paint_history?.() ?? 'n/a'}`);
+        else if (name === 'painthist') console.error(`[meshops] painthist → ${host.__mesh_paint_history?.() ?? 'n/a'}`);
+        else if (name === 'layers') console.error(`[meshops] layers → ${host.__mesh_paint_layers?.() ?? 'n/a'}`);
+        else if (name === 'layerop') {
+          const argRaw = a.slice(2).join(','); // rename args may carry commas
+          const arg: string | number = a[0] === 'rename' ? argRaw : num(a[2]);
+          console.error(`[meshops] layerop:${a[0]},${a[1]} → ${host.__mesh_paint_layer_op?.(a[0] ?? '', num(a[1]), arg) ?? 'n/a'}`);
+        }
+        // progread/progapply — round-trip the serialized stroke program through the
+        // real save/load doors (the persistence-coherence proof without disk state).
+        // progsave:/path / progload:/path do the same THROUGH A FILE, so a second
+        // process (RJIT restart) can prove layers survive a real reload.
+        else if (name === 'progread') { progRef.current = host.__model_paint_program_read?.() || null; console.error(`[meshops] progread → ${progRef.current ? `${progRef.current.length} b64 chars` : 'EMPTY'}`); }
+        else if (name === 'progapply') console.error(`[meshops] progapply → ${progRef.current ? host.__model_paint_program_apply?.(progRef.current) : 'no stored program'} layers=${host.__mesh_paint_layers?.() ?? 'n/a'}`);
+        else if (name === 'progsave') {
+          const prog = host.__model_paint_program_read?.() || '';
+          const ok = prog ? host.__fs_write?.(a.join(','), prog) : false;
+          console.error(`[meshops] progsave → ${prog ? `${prog.length} b64 chars` : 'EMPTY'} write=${ok}`);
+        }
+        else if (name === 'progload') {
+          const prog = host.__fs_read?.(a.join(',')) || '';
+          const ok = prog ? host.__model_paint_program_apply?.(prog) : 0;
+          console.error(`[meshops] progload → apply=${ok} layers=${host.__mesh_paint_layers?.() ?? 'n/a'}`);
         }
         // rangeadd:lo,hi — ADDITIVE group-range select (the outliner's shift-click, host
         // side); scopes:lo,hi[,lo,hi…] — the multi-range union scope door (req_2659).
@@ -1653,10 +1690,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             }
             lastPtRef.current = { x, y };
           }}
-          // Stroke END refreshes the live UV panel (req_2625 GG) — once per stroke, never
-          // per dab (a read+encode per dab would drag the brush).
-          onMouseUp={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) refreshUvIfLive(); }}
-          onMouseLeave={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) refreshUvIfLive(); }}
+          // Stroke END: commit the gesture as ONE stroke-journal undo unit (req_2672 —
+          // pointer-down→up is one stroke, fills included), then refresh the live UV
+          // panel (req_2625 GG) — once per stroke, never per dab (a read+encode per dab
+          // would drag the brush).
+          onMouseUp={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) { host.__mesh_paint_stroke_end?.(); refreshUvIfLive(); } }}
+          onMouseLeave={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) { host.__mesh_paint_stroke_end?.(); refreshUvIfLive(); } }}
           onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
         />

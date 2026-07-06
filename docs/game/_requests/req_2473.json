@@ -1,0 +1,54 @@
+{
+  "id": "req_2473",
+  "at": "2026-07-01T23:00:41.922Z",
+  "origin": "session:2b166540",
+  "text": "create a plan to capture the fundamentals of the 2d tile map painter from @cart/hmsc-int/ and the end goal is to revise the exact same capability into a unified approach that lives in harmony of the newest iso3d editor that lives inside of @cart/editor/ ; the guiding light here is to think of the editor exactly the same as build mode in the sims, with the full control of being able to paint heightfields, ground textures, road systems, water, and build buildings from the already existing capabilties of the iso3d editor. the underlying code from the old system we are migrating from are heavily in typescript, and the ideal approach moving forward is to give this entirely all native capabilties. leave react out of the loop of game authoring. react is here for building a stateful ui and a modern one but putting react into the focal point for tooling is going to be against the grain.",
+  "status": "review",
+  "sessionId": "2b166540-f213-42f7-ba61-c71ee4889378",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T23:15:10.049Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T23:30:52.095Z",
+      "actor": "session-2b16",
+      "kind": "note",
+      "text": "Phase 1 landed (5e5f00d3d): native map-paint engine at framework/game/map/ — chunks (sparse 120x120 grid, centered chunks, shared border samples), stamps (brush/ramp/slope/smooth verbatim from heightData.ts), engine (stroke lifecycle, global-frame routing, water basins, tile/flora/zone channels, per-stroke dedup). 18 zig tests green via 'zig build test-game-map'. __map_* doors + -Dhas-game-map gate + runtime/game/map.ts door. Also fixed the missing has-game-build option declaration from req_2349. Next: Phase 2 terrain vertical (native input in the loader viewport, THPS brush beam, live heightfield render + collider)."
+    },
+    {
+      "at": "2026-07-01T23:51:33.076Z",
+      "actor": "session-2b16",
+      "kind": "note",
+      "text": "Phase 2 landed (5b1835e9f): terrain sculpting live in the iso3D viewport. Native input (armed paint claims LEFT over the loader, zero JS per dab), THPS brush beam (translucent column, tool-tinted), host terrain mirror (painted chunks -> ~hf~paint nodes + game_physics colliders, dirty-coalesced 121x121 downsample), screen->ray->terrain picking off the ext iso camera. Chrome: MapPaintDock floating in the viewport, hot-pushed live. NOTE: needs a framework rebuild (-Dhas-game-map flips via runtime/game/map.ts import) before strokes do anything on the running dev binary — Zig side is ast-checked + map-engine tests green, full compile check rides the next rebuild. Phase 3 (ground texture channel) starting."
+    },
+    {
+      "at": "2026-07-02T00:20:52.258Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-02T00:23:01.251Z",
+      "actor": "session-2b16",
+      "kind": "note",
+      "text": "NOTE: git push to GitHub is blocked for the WHOLE repo (296 unpushed commits) — commit 76ac516a4 (June, req_1816 'track live authoring stores') put cart/hmsc-int/data/domains/model/store.db (555MB) into history, over GitHub's 100MB limit. Fixing needs a history rewrite or LFS; not doing that unilaterally. All req_2473 work is committed on local main."
+    }
+  ],
+  "resolution": "The 2D tile map painter's fundamentals are captured and rebuilt native-first inside the iso3D editor (Sims-build-mode, per plan + your three answers). framework/game/map/ is the host-owned authoring engine ported from hmsc-int: chunks.zig (sparse 120x120 grid, centered chunks, seam-free shared border samples), stamps.zig (brush/ramp/slope/smooth verbatim), roads.zig (the RULED stroke grammar: 3-tile lanes, sidewalks, median, fillet r=5, junction boxes + crosswalks — 15 tests), engine.zig (stroke lifecycle, all six channels, ground-look D-stream, undercoat restamp), store.zig (row-RLE save/load, roads as recipes). Painting happens IN the viewport: engine.zig routes the left button host-side when armed (zero JS per dab), with a THPS-style translucent brush beam; painted chunks mirror live into ~hf~paint nodes + game_physics colliders (121x121 downsample), water on the ~water~ pipeline with the shore rule, tiles/flora/zones through the ground formula (packed D v2 with authoring tints). Chrome is React-only: MapPaintDock floats in the viewport (all six channels, road COMMIT/CANCEL, zone minting, SAVE), auto-loads painted-map.rmap on arm. NEEDS A FRAMEWORK REBUILD to go live (-Dhas-game-map flips from the runtime/game/map.ts import; also fixed the missing has-game-build declaration from req_2349). Deferred + noted: undo/redo stroke journal, Compile-to-gamefile lumps for /play, intersection controls/props, dashed-median marking WGSL. 37+22 zig tests green (test-game-map); JS hot-pushed to the dev session throughout.",
+  "shas": [
+    "5e5f00d3d",
+    "5b1835e9f",
+    "36cbe0670",
+    "4d3767f8d",
+    "46a7bbf74",
+    "8ef5bb890",
+    "ff2877737"
+  ],
+  "resolvedAt": "2026-07-02T00:20:52.258Z"
+}

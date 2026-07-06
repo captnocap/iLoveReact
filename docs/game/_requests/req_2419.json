@@ -1,0 +1,30 @@
+{
+  "id": "req_2419",
+  "at": "2026-07-01T09:38:40.461Z",
+  "origin": "session:be477f59",
+  "text": "here is one that almost got past me and i lost it there for a bit ngl cuz it only shows on some things but this one right here. thats a classic stinker if i ever knew one. what the fuck good does saying 12 fixed slots to me in a 12 slot paged list do when it also says 1-12 lmao  [Image #10]",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T09:38:53.021Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T09:40:42.144Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the redundant 'N fixed slots' / 'fixed rows' page-footer flavor. The content-browser pager (LibraryPanel.tsx:111) read '1-12 / 28 - 12 fixed slots' — the '12 fixed slots' is the page size, which the '1-12' range already conveys, and there is also a '1/3' page-of-pages pill immediately beside it, so it was doubly redundant. 'fixed slots' is a layout implementation detail (the list pre-allocates a fixed number of row slots to dodge MAX_CHILDREN eviction), not user-facing information. Cut the suffix → '1-12 / 28'. Found and fixed the same leaky jargon in the File Explorer results head (FileExplorerDialog.tsx:92, '12 / 28 visible fixed rows'); since slots = files.slice(0, RESULT_SLOTS) it's an honest showing-N-of-M, so reworded to '12 of 28' and dropped 'visible fixed rows'. pageSize is still used by the paging math (no dead const); both files parse clean via esbuild transform; not shipped (live session).",
+  "shas": [
+    "0120ca014"
+  ],
+  "resolvedAt": "2026-07-01T09:40:42.144Z"
+}

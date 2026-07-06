@@ -1,0 +1,18 @@
+{
+  "id": "req_2549",
+  "at": "2026-07-04T04:45:36.468Z",
+  "origin": "session:5fc01965",
+  "text": "ok so uh i need like a print out of all the hotkeys so i can verify if they are true or not, like for example i was just going through the alphabet, and c opens up the color studio from the world editor. So, i assume that is all expected, but would help to read it and then verify against it all",
+  "status": "doing",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T04:46:51.756Z",
+      "actor": "5fc0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

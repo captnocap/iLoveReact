@@ -1,0 +1,18 @@
+{
+  "id": "req_2537",
+  "at": "2026-07-04T03:42:32.552Z",
+  "origin": "session:69672c0b",
+  "text": "so lets look at that atlas pipeline because it should behave like that of one that makes more coherent sense than this one is. il use blockbench for reference and our old app also, so, in block bench, i go to 'paint' mode (well, here, they make you 'create texture' first before you can just paint, which makes sense); it brings up this menu [Image #10] and lets just click confirm without changing anything we can see it created this [Image #11] and we also can see this is what happened to the grey model [Image #12] it took on the uv colors for distinction. we also see that there is the texture here [Image #13] so i saved it, and here is what i get [Image #14] alright, now lets look at the old studio so i click texturize [Image #15], brings up the menu, i click confirm and then i see this on the side [Image #16] which is exactly the same principle as before from blockbench. and i can export this and look at what we get [Image #17] now lets just move over to our pipeline and take a look. so for one, we have no texturizing pipeline that behaves the same, there is one, ok, but it also creates a uv atlas like this [Image #18] which has no tone to it, and therefore is no real... purpose/help this is bringing to the table if that makes sense",
+  "status": "doing",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T03:43:21.764Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

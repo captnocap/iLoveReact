@@ -1,0 +1,30 @@
+{
+  "id": "req_2459",
+  "at": "2026-07-01T12:33:59.019Z",
+  "origin": "session:bf2eaad9",
+  "text": "i rebuilt. i know because i can actually do a finer line meaning its not the 32x32 anymore and thats where it was clamped before, meaning i wouldnt have even seen the change beyond it. so thats not it.",
+  "status": "review",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T12:36:28.948Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T12:40:35.356Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made the atlas-budget clamp on paint resolution visible instead of silent. After the rebuild the old 32 cap is gone, but a denser mesh can exceed the paint-atlas memory budget at high detail (detail costs texels squared per face), and the host was holding at the last level that fit without telling anyone — reading as a brush plateau at high detail. changeDetail now returns the level the host actually applied and the File -> Paint Resolution handler surfaces 'N clamped -> M (atlas budget)' when the pick didn't take. Cart-only, hot-reloads. Diagnostic for the deeper architecture question (per-face detail doesn't scale to the high-poly models this editor targets); sha 897bf0078.",
+  "shas": [
+    "897bf0078"
+  ],
+  "resolvedAt": "2026-07-01T12:40:35.356Z"
+}

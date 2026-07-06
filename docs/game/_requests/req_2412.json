@@ -1,0 +1,30 @@
+{
+  "id": "req_2412",
+  "at": "2026-07-01T09:21:28.401Z",
+  "origin": "session:be477f59",
+  "text": "wait wat. no that doesnt change the deshittification i just pointed out those shit flavor texts still live just not in the same apartment u once knew they lived",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T09:22:07.419Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T09:24:14.133Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarification/confirmation of the same fix as req_2410/2411: the 'Edge · Move gizmo · 0 selected' flavor text did NOT die with the deleted root cart/modelview.tsx twin — it lived in the surviving editor copy cart/editor/stage/ModelView.tsx (the viewport title strip, line 684), which is exactly where I cut it. Verified it is the SOLE source of that visible string: the mesh toolbar (ToolOptions.tsx) renders icon buttons with hover-only tooltips, no printed status, so 'Edge'+'Move gizmo' were a literal restatement of the two highlighted toolbar icons sitting beside the text. Now the strip shows only what the icons can't: selection mode → 'N selected', view mode → tris. Also swept ToolOptions' remaining pills (SNAP/TOOL/FLOOR/SAFE/DETAIL) — those surface state not otherwise on screen, so they are legit readouts, not icon-restatements; nothing else to remove. Fix already committed c6b85b6dc; if a running editor still shows the old string it is a reload behind, the source no longer emits it.",
+  "shas": [
+    "c6b85b6dc"
+  ],
+  "resolvedAt": "2026-07-01T09:24:14.133Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_2669",
+  "at": "2026-07-05T03:55:08.475Z",
+  "origin": "codex:019f2fbd",
+  "text": "hm. its not running for me siah@busiah ~/creative/reactjit $ tools/rjit tui hmsc_ascii_tui\n[dev] bundling /home/siah/creative/reactjit/cart/hmsc_ascii_tui/index.tsx -> /home/siah/creative/reactjit/.cache/bundle-hmsc_ascii_tui.js\n[dev] dev host inputs newer than binary - rebuilding...\n[dev] compiling dev binary (/home/siah/creative/reactjit/zig-out/bin/reactjit-dev-tui, tui, ReleaseFast)...\n-Duse-v8=true -Ddev-mode=true -Dhas-window=true -Dhas-audio=true -Dhas-midi=true -Dhas-terminal=true -Dhas-physics=true -Dhas-sqlite=true -Dhas-privacy=true -Dhas-process=true -Dhas-httpsrv=true -Dhas-wssrv=true -Dhas-net=true -Dhas-tor=true -Dhas-websocket=true -Dhas-fs=true -Dhas-telemetry=true -Dhas-zigcall=true -Dhas-sdk=true -Dhas-voice=true -Dhas-audio-input=true -Dhas-paintable=true -Dhas-onnx=true -Dhas-physics-lab=true -Dhas-game-physics=true -Dhas-game-build=true -Dhas-game-map=true -Dhas-game-pathing=true -Dhas-game-camera=true -Dhas-compiled-world=true -Dhas-pg=true -Dhas-embed=true -Dhas-doom=true -Dhas-capture=true -Dhas-imageops=true\n[sdk-dependency-resolve] dev: dropping has-whisper (conflicts with has-embed; both bundle ggml)\n[dev] host child=1 - run 'rjit dev <other>' from another terminal to add tabs\n[dev] watching /home/siah/creative/reactjit/cart/hmsc_ascii_tui/index.tsx - edits rebuild + push automatically (ctrl-c to stop)\n[watch] build finished, watching for changes...\n[flush-bytes] +17KB → total 0.0MB (#1, 174 cmd)\n^C it just says its pushing to some host that doesnt exist",
+  "status": "doing",
+  "sessionId": "019f2fbd-a86d-7153-ad17-040c589a4278",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T03:55:21.402Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

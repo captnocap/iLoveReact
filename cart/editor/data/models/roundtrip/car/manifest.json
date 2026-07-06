@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "name": "car",
+  "source": "cart/hmsc-int/car.obj",
+  "sourceTris": 180,
+  "radius": 1.396367077678717,
+  "bakes": [
+    {
+      "grid": 48,
+      "path": "cart/editor/data/models/roundtrip/car/car_48.obj",
+      "tris": 592
+    },
+    {
+      "grid": 80,
+      "path": "cart/editor/data/models/roundtrip/car/car_80.obj",
+      "tris": 676
+    }
+  ],
+  "generator": "scripts/sdf-roundtrip.js"
+}

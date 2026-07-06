@@ -1,0 +1,30 @@
+{
+  "id": "req_2676",
+  "at": "2026-07-05T04:30:05.889Z",
+  "origin": "session:a29bdf2b",
+  "text": "I found the problem a bit my own problem but a bit confusing. so the pieces DO land up on the hill. the problem is t hat i have to go up a floor or two to get them to show",
+  "status": "doing",
+  "sessionId": "a29bdf2b-cd53-4650-be3f-08a38fb3ab80",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T04:30:23.491Z",
+      "actor": "fable-world",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T04:31:22.348Z",
+      "actor": "fable-world",
+      "kind": "note",
+      "text": "GAP AAA (ROOT-CAUSED — user found the symptom: 'pieces DO land up on the hill, i have to go up a floor or two to get them to show'): the storey cutaway conflates TERRAIN HEIGHT with STOREY. pieceFloorOf = Math.round(piece.y / METERS_PER_LEVEL) (pieces.ts:205-207); a Ground placement on a 6m mesa computes storey 2, and visibleStoreyPieces (pieces.ts:218-225, req_2567) hides storey > activeFloor — so terrain-lifted pieces vanish until the user climbs the floor control. Placement itself is CORRECT (a2e1e47f4 confirmed working by the user). Fix: PlacedPiece records its storey explicitly at placement (floor index chosen in the action bar), pieceFloorOf reads the recorded storey with the y-derived legacy fallback; cutaway becomes terrain-independent."
+    },
+    {
+      "at": "2026-07-05T04:40:44.070Z",
+      "actor": "fable-world",
+      "kind": "note",
+      "text": "AAA LANDED (647e18ea7): storey is RECORDED at placement, never derived from altitude. PlacedPiece.floor?: number (pieces.ts:45-51); resolvePlacement takes the integer floor INDEX (computes levelY internally — y math unchanged) and stamps it (:184-195); pieceFloorOf = piece.floor ?? round(y/3) so pre-existing flat saves behave bit-identically (:213-219); Snap carries floor, onPlace threads it, AppFrame spreads it into state untouched. Callers audit: only two storey readers, both via pieceFloorOf — visibleStoreyPieces (cutaway now terrain-independent) and the Inspector's floor row (PieceBody.tsx:88, inherits the recorded storey for FREE, no inspector edit). Ship clean; boot shot aaa_storey.png verified (seeded grid + armed build bar, zero errors); mesa case verified by fallback-identity argument (headless can't click), user's live round is acceptance. Hot-reloads. Round 3 complete: 647e18ea7 (storey) + 29ba27b68 (icons) + 4a359ffd2 (128 floors)."
+    }
+  ]
+}

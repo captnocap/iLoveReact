@@ -1,0 +1,30 @@
+{
+  "id": "req_2449",
+  "at": "2026-07-01T11:58:23.366Z",
+  "origin": "session:be477f59",
+  "text": "also lmao bruh whose side u on i thought we were here to kill flavor text what in tarnation  is this [Image #14]",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T11:59:03.145Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T12:00:32.854Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the 'on the editor bus · durable, seq-ordered' status line from EventBusPopover — flavor text I myself introduced in req_2424. It's a permanently-green 'all good' narration, the exact same theater as the ERR/WARN badge we already killed, just dressed in fancier engineer words ('durable, seq-ordered'). The '{total} events' pill already proves the bus is live, and the durable-vs-local-fallback distinction is internal plumbing that doesn't affect the user's work (their authoring state persists via persistView independently of the bus log). Removed the whole HW_EventSummary status block for BOTH states (the healthy narration and the fallback jargon) plus the now-dead isHostBacked() import and  var; the popover now shows the event count, undoable/redo, and the event rows — nothing narrated. accentFor stays (header icon). Parses clean via esbuild transform; not shipped (live session). Sha 5ea4406ca.",
+  "shas": [
+    "5ea4406ca"
+  ],
+  "resolvedAt": "2026-07-01T12:00:32.854Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_2285",
+  "at": "2026-07-01T01:05:51.508Z",
+  "origin": "session:0a30633d",
+  "text": "explore it and lets get it done now as one package",
+  "status": "doing",
+  "sessionId": "0a30633d-7576-4069-96cf-0da5100a969a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T01:06:11.590Z",
+      "actor": "session-0a30",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

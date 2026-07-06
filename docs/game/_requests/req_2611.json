@@ -1,0 +1,30 @@
+{
+  "id": "req_2611",
+  "at": "2026-07-04T16:12:40.422Z",
+  "origin": "session:09f49bea",
+  "text": "in this face selection in the @cart/editor/ its completely broken in the sense that it is very easy to 'break' and it starts lying about what is selected. so heres the model. nothing selected [Image #27] oh and here is the model again with nothing selected [Image #28] oh and again for you here it is one more time not selected [Image #29] alright lets select a face [Image #30] can  you tell that anything changed.",
+  "status": "review",
+  "sessionId": "09f49bea-d556-4723-b539-65736fb19fb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T16:12:53.425Z",
+      "actor": "fable-face-select",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T16:27:43.577Z",
+      "actor": "fable-face-select",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the lying face selection: the highlight tints the paint atlas orange and restores a saved base patch on deselect, but every island-layout rebuild (density/fit change, groups refresh, atlas base/apply, stroke-program replay) carried each face's LIVE atlas colour — baking the orange into the paint while the old-layout base patches silently failed to restore. Fix: mesh_edit gained depth-counted suspendFaceTint/resumeFaceTint; every atlas rebuild/overwrite/paint/read door in 3d.zig (and __model_atlas_read persistence) now lifts the tint to true paint and re-tints from the new atlas after. Also fixed the HUD conflating tris with faces: face-mode selCount now counts AUTHORED faces, so clicking one cube face reads '1 selected' not '2'. Unit tests added (zig build test-mesh-edit passes). Needs a framework rebuild to take effect. Note: models whose saved paint already has the orange baked in were corrupted by the old bug and need repainting.",
+  "shas": [
+    "485cdbe94"
+  ],
+  "resolvedAt": "2026-07-04T16:27:43.577Z"
+}

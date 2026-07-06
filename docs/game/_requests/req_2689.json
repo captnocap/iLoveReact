@@ -1,0 +1,30 @@
+{
+  "id": "req_2689",
+  "at": "2026-07-05T18:39:51.928Z",
+  "origin": "session:bb4508c8",
+  "text": "hey so im not really sure what we can do about it but every shader menu that has previews of the shaders, has extreme delay in render / response time, like going from one page to another especially. Got any idea how we can make it instant without sacrificing the previews of the shaders [Image #91] this and there is another that is in the painting color picker that also has the problem. it will be a full 1-1.5s to page from one to another, and doing one big list is not the answer, and i dont really know if reducing it down from 12 will help but 12 also i feel is a baseline minimum otherwise it becomes literally just menu grinding",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T18:50:19.740Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T18:52:49.406Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the 1-1.5s shader-picker page stall: framework/gpu/effects.zig created a wgpu shader module + render pipeline PER Effect instance (the comment claiming pipelines were shared via gpu_shader_hash was false). All 400+ material thumbs share ONE generated fill megashader (~700KB of WGSL), and every page flip mounted 16 new Effect instances, each re-running createShaderModule's synchronous parse/validate over that source (~60-90ms each). Added a process-wide pipeline cache keyed by WGSL-source hash + bind-group-layout kind; instances addRef cached pipelines, the cache releases at cart teardown. Page flips now reuse one compiled pipeline — cost drops to bind-group/buffer creation, effectively instant. Needs a Zig rebuild of the dev host to take effect.",
+  "shas": [
+    "3a648d752"
+  ],
+  "resolvedAt": "2026-07-05T18:52:49.406Z"
+}

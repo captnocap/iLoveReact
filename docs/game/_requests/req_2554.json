@@ -1,0 +1,18 @@
+{
+  "id": "req_2554",
+  "at": "2026-07-04T05:16:21.868Z",
+  "origin": "session:5fc01965",
+  "text": "weird, that seemed to work how we wanted it to but also break the behavior of what gets the outline, so now in focus mode, im clicking on 1 tile in this 4 tile quad and look at where the outline sits [Image #1] just outside of the tile clicked also, if i click, get this bad outline, then press f again, it then outlines the correct piece",
+  "status": "doing",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T05:18:43.370Z",
+      "actor": "5fc0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

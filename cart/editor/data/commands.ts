@@ -190,7 +190,7 @@ export function blockingOverlay(state: EditorState): BlockingOverlay | null {
   if (mv === 'paint-atlas') return { id: 'paint-atlas', label: 'Create Paint Atlas' };
   if (mv === 'face-guard') return { id: 'face-guard', label: 'Unsafe Face Edit' };
   if (state.newMeshPrompt) return { id: 'new-mesh', label: state.newMeshPrompt.mode === 'add' ? 'Add Mesh' : 'New Mesh' };
-  if (state.fileExplorerOpen) return { id: 'file-explorer', label: 'File Explorer' };
+  if (state.fileExplorerOpen) return { id: 'file-explorer', label: 'Asset Explorer' };
   if (state.buildDialogOpen) return { id: 'build-journal', label: 'Build Journal', closerCommandId: 'toggle-build-journal' };
   if (state.addChunkOpen) return { id: 'add-chunk', label: 'Add Chunk' };
   return null;

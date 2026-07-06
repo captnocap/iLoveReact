@@ -1,0 +1,30 @@
+{
+  "id": "req_2692",
+  "at": "2026-07-05T18:59:28.623Z",
+  "origin": "session:bb4508c8",
+  "text": "in the startup, when it ever needs to compile shaders, will you make it report that with live % in the stdout because when it happened the last time i almost thought it was something broke catastrophically before i had considered it was shader compiling",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T19:00:39.069Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T19:03:08.441Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Slow effect-shader compiles now narrate to stdout instead of looking like a hang. A watchdog thread wraps the pipeline-cache miss path in framework/gpu/effects.zig: silent for the first second (so cached/fast compiles never log), then a line every 2 seconds. When a previous slow compile on this machine left a duration baseline (persisted to ~/.cache/reactjit-effect-compile-baseline and scaled by WGSL module size), the line shows a live percentage; on a true first compile there is no baseline, so it shows elapsed seconds plus an explicit note that the driver is building its shader cache and can take minutes. Every slow compile ends with a 'compiled in X.Ys' line and refreshes the baseline, so the NEXT catalog growth shows a climbing % instead of silence. Needs a Zig rebuild.",
+  "shas": [
+    "b8173efa0"
+  ],
+  "resolvedAt": "2026-07-05T19:03:08.441Z"
+}

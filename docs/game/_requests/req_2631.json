@@ -1,0 +1,28 @@
+{
+  "id": "req_2631",
+  "at": "2026-07-05T00:47:59.678Z",
+  "origin": "codex:019f2fbd",
+  "text": "hey here is an experiment to see if it holds up end to end, so the thesis is: because the game is data, and just needs a loader to run the compiled game source, then effectively anythingn that can write a loader can be a way to play, so naturally, make a threejs loader for the compiled game data.",
+  "status": "review",
+  "sessionId": "019f2fbd-a86d-7153-ad17-040c589a4278",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T00:48:08.967Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T00:56:21.682Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed the Three.js loader experiment end to end as reusable loader code plus an HTML demo: added gamefile stream decoding, a Three adapter over LoadedScene, and a browser bundle that consumes the compiled gamefile data rather than inventing a parallel format. Fresh rjit game bake produced zig-out/game/hmsc.gamefile for the demo.",
+  "shas": [],
+  "resolvedAt": "2026-07-05T00:56:21.682Z"
+}

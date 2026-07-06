@@ -1,0 +1,30 @@
+{
+  "id": "req_2448",
+  "at": "2026-07-01T11:55:13.465Z",
+  "origin": "session:be477f59",
+  "text": "yeah so back on that thread this thing what the fuck am i looking at here what is that triple beam nightmare on the end of t his thing [Image #13]",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T11:55:57.774Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T11:56:57.692Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the 'triple beam' icon column from the menu-bar dropdown rows (DropdownMenu.tsx MenuRow). Every row ended with three cryptic unlabeled ~9px icon dots driven by command flags — context (MousePointerClick icon), native (Cpu icon), and undoable (History icon) — i.e. raw engineer-facing command metadata dumped onto a user-facing File/Edit/View menu. To someone opening a menu, three mystery indicators after each shortcut convey nothing; whether a command is context-sensitive, host-native, or undoable is implementation detail the code consumes, not menu copy. A menu item is now just its icon + name + right-aligned shortcut. The context/native/undoable flags remain on the Command records in data/commands.ts (the logic still uses them for undo, context menus, behavior) — only their cryptic per-row visualization was cut. HW_CheckCell/HW_CheckCellOff are now unused but left in workspace.cls (harmless style entries). This also resolves the earlier 'inline keybinding pow-wow' confusion: there was no rebind mechanism in the menu — these read-only metadata badges were what read as a clownshow. Parses clean via esbuild transform; not shipped (live session). Sha 1d48d6b91.",
+  "shas": [
+    "1d48d6b91"
+  ],
+  "resolvedAt": "2026-07-01T11:56:57.692Z"
+}

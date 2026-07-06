@@ -1,0 +1,10 @@
+{
+  "id": "req_2354",
+  "at": "2026-07-01T05:55:48.855Z",
+  "origin": "session:8cf696c0",
+  "text": "now. uh again, let me be clear on where im coming from with all of this. so uh about 24 hours ago we made the @cart/modelview.tsx and this expressed, with no problem not even one time, that we could load a 400k+ tris glb model and render every edge and face and vert perfectly but we cant do a fucking cube is blowing me away right now",
+  "status": "new",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": []
+}

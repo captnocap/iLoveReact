@@ -1,0 +1,10 @@
+{
+  "id": "req_2457",
+  "at": "2026-07-01T12:29:49.216Z",
+  "origin": "session:bf2eaad9",
+  "text": "ok this is better though i will ask shouldnt it still always continue to scale no matter tha model size? like, my 1px stroke is the same size at the 128-512 but it was genuinely different at levels before this",
+  "status": "new",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": []
+}

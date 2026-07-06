@@ -1,0 +1,28 @@
+{
+  "id": "req_2687",
+  "at": "2026-07-05T05:42:58.551Z",
+  "origin": "codex:019f30c5",
+  "text": "scan over all the shaders and find to patch next Shader 'effect_gpu_shader' parsing error: name `static` is a reserved keyword\n     ┌─ wgsl:5535:7\n     │\n5535 │   let static = speckle(px, 2.0, seed + 3.0, 0.96) * 0.22;\n     │       ^^^^^^ definition of `static`\n\n\n      name `static` is a reserved keyword",
+  "status": "review",
+  "sessionId": "019f30c5-00c6-7d90-997c-b510e6f96983",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T05:43:11.798Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T05:48:44.065Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Scanned the editor render3d material shaders for the next WGSL reserved-name blockers, fixed static in aurora_fracture and ref in plasma_glass, corrected scalar blotch helper shape arguments across affected materials, regenerated the editor shader registry and dispatch, and validated the fully assembled editor fill shader with naga. No commit made.",
+  "shas": [],
+  "resolvedAt": "2026-07-05T05:48:44.064Z"
+}

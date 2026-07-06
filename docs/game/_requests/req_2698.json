@@ -1,0 +1,30 @@
+{
+  "id": "req_2698",
+  "at": "2026-07-05T19:56:23.356Z",
+  "origin": "session:bb4508c8",
+  "text": "ok here is what is happening [Image #96] notice how it just splits right there with a perfect line. seems to be for whatever reason only some of the map can take on the change",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T19:58:33.571Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T19:58:33.580Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Duplicate capture of the same report as req_2696/req_2697 (the perfect-line split screenshot). One bug, one fix: the pooled ground D buffer cap (GROUND_DATA_FLOATS=20000) truncated the layout-v3 stream's per-cell material tail, so only the first band of each chunk took the picked material. Fixed in aedd40840 — cap raised to the documented v3 worst case (34000) with a loud one-shot error on any future overflow. Verify after a Zig rebuild: paint with a picked material should now cover every stroked tile across the whole chunk.",
+  "shas": [
+    "aedd40840"
+  ],
+  "resolvedAt": "2026-07-05T19:58:33.580Z"
+}

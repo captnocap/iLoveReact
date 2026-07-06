@@ -1,0 +1,30 @@
+{
+  "id": "req_2587",
+  "at": "2026-07-04T08:18:17.304Z",
+  "origin": "session:ab0454f7",
+  "text": "nice this is much better good shit its got way more tris than i anticipated but its also a really good model. [Image #14]",
+  "status": "review",
+  "sessionId": "ab0454f7-d06a-4a6e-8ba7-fa5b786a5824",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T08:18:57.515Z",
+      "actor": "ab04",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T08:23:39.236Z",
+      "actor": "ab04",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User approved the fixed nug in the viewer; follow-through on their tri-count observation: added a --grid N knob to scripts/nug-gen.js (88 default/hero at 27-43k tris, 56 ~= 11k tris and still reads well, 44 for jar-filler density) and fixed the reason CLI args never worked — v8cli's __argv is a function returning a JSON-encoded string, which the script now parses like classify.js does. Verified end to end with a throwaway seed at --grid 56 (11,176 tris, winding audit 99.6% outward), test package removed after. Editor-refreshed base.blob/atlas for nug_63fc8dc5 committed alongside.",
+  "shas": [
+    "8f48d71e6"
+  ],
+  "resolvedAt": "2026-07-04T08:23:39.236Z"
+}

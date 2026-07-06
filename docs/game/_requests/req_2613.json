@@ -1,0 +1,31 @@
+{
+  "id": "req_2613",
+  "at": "2026-07-04T16:28:37.478Z",
+  "origin": "session:09f49bea",
+  "text": "i rebuilt, it is still the same problem [Image #31]",
+  "status": "review",
+  "sessionId": "09f49bea-d556-4723-b539-65736fb19fb8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T16:29:17.987Z",
+      "actor": "fable-face-select",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T17:03:17.058Z",
+      "actor": "fable-face-select",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reproduced the surviving bug HEADLESSLY (new harness: RJIT_MODELDOC boots a cube model doc, RJIT_MESHOPS replays real gestures through the host doors, ZIGOS_SCREENSHOT captures — zero desktop access) and found the true live bake my first fix missed: applyFaceHighlight interleaved save/tint per face, and at low density both halves of a quad degenerate to overlapping centroid discs, so a later face's saved patch embedded an earlier face's tint; deselect wrote it back as paint. Single clicks never hit it — any MULTI-face selection (marquee, select-all, additive, outliner part select) baked, which matches the user's easy break exactly. Fix: reconcile now restores all then saves EVERY selected patch from the clean atlas BEFORE the first tint, so restore order is irrelevant. Verified headless: marquee/select-all/additive+clear all end orange-free, held selections still tint, undo restores colors; unit regression added (zig build test-mesh-edit passes). Needs a rebuild. Commits 485cdbe94 (atlas-rebuild bake paths + honest authored-face count) and 667235ba3 (the multi-face bake + harness).",
+  "shas": [
+    "667235ba3",
+    "485cdbe94"
+  ],
+  "resolvedAt": "2026-07-04T17:03:17.058Z"
+}

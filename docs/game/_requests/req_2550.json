@@ -1,0 +1,18 @@
+{
+  "id": "req_2550",
+  "at": "2026-07-04T04:49:19.347Z",
+  "origin": "session:5fc01965",
+  "text": "ok, so this is in part working but its also got a real disconnect still, so im sure you would agree that turnning on a mode like focus should prevent there being the capability to place an object, maybe not. but thats how i would read it as. and so currently on the map, pressing F, i then click on an existing piece, and it is in focus now, but if i click anywhere else, it starts placing pieces, while keeping that one in focus still.",
+  "status": "doing",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T04:49:44.723Z",
+      "actor": "5fc0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

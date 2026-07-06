@@ -1,0 +1,30 @@
+{
+  "id": "req_2436",
+  "at": "2026-07-01T11:18:29.858Z",
+  "origin": "session:be477f59",
+  "text": "huh maybe im high as fuck i dont know to tell u the truth right now lmao my shit wont compile :V ng to only one module\nframework/diag/event_bus.zig:42:24: note: file is imported here\nconst sqlite = @import(\"../storage/sqlite.zig\");\n                       ^~~~~~~~~~~~~~~~~~~~~~~\nv8_app.zig:161:27: note: which is imported here by the root of module 'root'\nconst event_bus = @import(\"framework/diag/event_bus.zig\");\n                          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\nframework/events/editor_bus.zig:1:1: note: file is the root of module 'sqlite'\nerror: the following command failed with 1 compilation errors:",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T11:19:32.117Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T11:23:52.520Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Unbroke the host build I broke in req_2424. Registering editor_bus into the root module surfaced a Zig 'file exists in multiple modules' error: framework/events/editor_bus.zig imported sqlite as a NAMED module (@import(\"sqlite\")) rather than relatively, so once it compiled into root, framework/storage/sqlite.zig was pulled into TWO modules at once — the named 'sqlite' module and root, where its sibling framework/diag/event_bus.zig (and others) relative-import the same file — which Zig rejects. Root-cause fix: changed editor_bus.zig to import sqlite relatively (../storage/sqlite.zig), uniform with diag/event_bus.zig; the relative path resolves from the file's own location in both the host build and the isolated unit test, so the named 'sqlite' module is unnecessary and sqlite.zig is only ever in root. editor_bus was the ONLY named-sqlite importer (grep-confirmed). Deliberately did NOT touch build.zig: another active session (bf2e) has it checked out with an uncommitted root_mod.addImport(\"sqlite\", …) block it added to satisfy the old named import — that line is now dead (nothing imports 'sqlite' by name) and harmless (Zig analyzes module edges lazily, so an untraversed edge is never analyzed), and can be dropped whenever build.zig next settles. This keeps the req_2424 host registration intact (durable bus still lands on rebuild) rather than reverting it. Sha 444b80d96. User should re-run their build to confirm green.",
+  "shas": [
+    "444b80d96"
+  ],
+  "resolvedAt": "2026-07-01T11:23:52.520Z"
+}

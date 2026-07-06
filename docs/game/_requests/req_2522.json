@@ -1,0 +1,18 @@
+{
+  "id": "req_2522",
+  "at": "2026-07-02T07:24:25.913Z",
+  "origin": "session:69672c0b",
+  "text": "yeah but we cant be storing everything in a db because thats exactly why git cant push right now i hope thats clear",
+  "status": "doing",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T07:24:54.573Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

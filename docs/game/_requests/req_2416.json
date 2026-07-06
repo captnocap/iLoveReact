@@ -1,0 +1,30 @@
+{
+  "id": "req_2416",
+  "at": "2026-07-01T09:29:03.679Z",
+  "origin": "session:be477f59",
+  "text": "alright heres the next one for you. and this one is back to the same fucking spot we just came from lmao alright i see the words parts on here 4 times. i see the source location two times, i see Saved Studio Geometry as a flavor te xt which means fuck all now. i see studio-model which again means fuck all. and then to make matters worse all the part text is referencing the fucking outliners which are the actual parts so this one is really doing numbers [Image #8]",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T09:29:32.457Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T09:33:36.600Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cleaned up the studio-model Model Focus detail card, which was fabricating metadata and restating the Outliner. The card showed 'parts' 4× (header part-count, FOLDER CONTRACT manifest 'N parts', a fake ATLAS SETS row labeled 'parts', and that row's 'N parts' resolution), the source location twice (a synthetic /Game/Models/Saved Studio/<name> header path plus the real source in FOLDER CONTRACT), and pure flavor that means nothing to a user ('saved Studio geometry', 'studio-model', '0 seat faces') — and every 'parts' duplicated the OUTLINER directly below it, which already lists the parts and shows its own count. Fix, in ModelDetailBody.tsx: header now shows name + stage + real triangle count only (dropped the synthetic path, the partCount restatement, and the sourceKind label; removed the partCount prop, Inspector no longer passes it). FOLDER CONTRACT is gated to rows with real values via a hasValue guard — empty slots are hidden instead of shown as dashes, so a studio model keeps just its one real source; the section drops entirely when nothing is real and for primitives. ATLAS SETS renders only when there are real texture atlases. In hmscAssetCatalog.ts: storedModelAtlases no longer fabricates the geometry 'parts' atlas (a paintless model now has no atlas set), the studio package's rig is honest-empty ('-') unless a real seat rig exists, and the fabricated 'N parts' manifest is dropped to '-'. Net on the card: 'parts' 4→0 (the Outliner owns it), source location 2→1, flavor gone. Files: cart/editor/library/ModelDetailBody.tsx, cart/editor/inspector/Inspector.tsx, cart/editor/data/hmscAssetCatalog.ts. All parse clean via esbuild transform; not shipped (live session).",
+  "shas": [
+    "5d524a9bc"
+  ],
+  "resolvedAt": "2026-07-01T09:33:36.599Z"
+}

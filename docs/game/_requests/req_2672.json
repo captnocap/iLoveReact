@@ -1,0 +1,24 @@
+{
+  "id": "req_2672",
+  "at": "2026-07-05T04:06:24.237Z",
+  "origin": "session:40eebdf5",
+  "text": "great[Image #90] but heres some more problems to close in on, undo history doesnt exist inside of the painter. it effectively is a go-fuck-yourself ordeal right now, and then lets build on this, I hate painting when i dont have layer control. the reason is i want to write some stupid shit like i like it first and then fuck off everything behind it, and this pipeline is restrictive to that idea",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T04:07:45.346Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T04:07:45.356Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "CRITIQUE round 7 — PAINTER: (a) NO UNDO inside paint mode ('go-fuck-yourself ordeal') — strokes are unjournaled (mesh journal covers topo/transform only; ctrl+z in paint hits nothing or the wrong journal). (b) NO LAYER CONTROL — user wants to write over a base then 'fuck off everything behind it'; pipeline is restrictive. ARCHITECTURE NOTE (load-bearing): paint is RULED as a stroke PROGRAM (strokes+dither, NEVER pixels — project_paint_stored_as_stroke_program; old studio had paint layers, deferred at parity port: project_mesh_painter_layers). Both asks fall out of that architecture naturally: paint undo = pop last stroke + re-run the program (or checkpointed atlas replay for cost); layers = ordered stroke GROUPS with visibility/reorder/delete = re-run program minus the group; per-layer rows in the focus panel (region grid, row verbs eye/reorder/delete/merge-down). Do NOT invent a pixel-layer compositor — the stroke program IS the layer system. QUEUED behind the live state-model agent (owns ModelView/3d.zig/model_paint) — paint undo should ALSO integrate with the ctrl+z routing from 81309f7b0 (paint mode routes undo to the STROKE journal, not the mesh journal — count-annotated 'Undo (3 strokes)')."
+    }
+  ]
+}

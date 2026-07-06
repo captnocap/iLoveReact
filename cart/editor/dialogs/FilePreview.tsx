@@ -29,6 +29,8 @@ export default function FilePreview(props: {
         <C.HW_FilePathBlock>{file.path}</C.HW_FilePathBlock>
         {file.category === 'model' ? (
           <ModelImportPreview file={file} />
+        ) : file.category === 'texture' ? (
+          <ImageFilePreview file={file} />
         ) : (
           <C.HW_FileMetaGrid>
             <C.HW_StatCell>
@@ -51,6 +53,10 @@ export default function FilePreview(props: {
             <C.HW_SmallButton onPress={() => props.onOpenFile(file.id, 'opened')}>
               <C.HW_FormValue>open in mesh editor</C.HW_FormValue>
             </C.HW_SmallButton>
+          ) : file.category === 'texture' ? (
+            <C.HW_SmallButton onPress={() => props.onOpenFile(file.id, 'imported')}>
+              <C.HW_FormValue>import image</C.HW_FormValue>
+            </C.HW_SmallButton>
           ) : (
             <C.HW_SmallButton onPress={() => props.onOpenFile(file.id, 'pinned')}>
               <C.HW_FormValue>pin to history</C.HW_FormValue>
@@ -59,5 +65,24 @@ export default function FilePreview(props: {
         </C.HW_ButtonRow>
       </C.HW_FilePreviewBody>
     </C.HW_FilePreview>
+  );
+}
+
+function ImageFilePreview(props: { file: ExplorerFile }) {
+  return (
+    <C.HW_FileImageViewport>
+      <C.HW_ModelViewportTop>
+        <C.HW_KeyText>IMAGE PREVIEW</C.HW_KeyText>
+        <C.HW_Spacer />
+        <C.HW_FileStat>{props.file.kind.toUpperCase()}</C.HW_FileStat>
+      </C.HW_ModelViewportTop>
+      <C.HW_FileImageStage>
+        <C.HW_FileImagePreview source={props.file.path} />
+      </C.HW_FileImageStage>
+      <C.HW_ModelViewportFoot>
+        <C.HW_FileStat>{props.file.sizeLabel}</C.HW_FileStat>
+        <C.HW_FileStat>{props.file.modifiedLabel}</C.HW_FileStat>
+      </C.HW_ModelViewportFoot>
+    </C.HW_FileImageViewport>
   );
 }

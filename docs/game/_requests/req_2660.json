@@ -1,0 +1,30 @@
+{
+  "id": "req_2660",
+  "at": "2026-07-05T03:24:26.609Z",
+  "origin": "session:40eebdf5",
+  "text": "also: in painting mode -> two meshes -> 'hide one' (eye ball on the outliner) -> paint the other -> unhide -> paint wipes, also, sitll not seperate uvs either but that is still coming [Image #88] and then again this not in the focus panel and not live (refresh button)",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T03:24:53.058Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T03:24:53.066Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "DATA-LOSS BUG (critique round 5): PAINT WIPES ON UNHIDE. Repro: paint mode -> two parts -> hide one via outliner eye -> paint the visible part -> unhide -> the new paint is WIPED. Hypothesis (grounded in known behavior, verify): hide/show journals a full snapshot host-side (journalSnapshotCurrent 'hide part'/'show part', gpu/3d.zig) AND/OR the shared whole-model atlas re-lays when the visible face set changes (same re-layout class as addpart shuffling islands, gap PP) — strokes painted against the hidden-state layout are dropped or land on stale coords when unhide re-lays. Same disease family as the req_2611/2613 tint-bake fixes (suspend/resume discipline around atlas rebuild/overwrite). Priority: HIGH — silent loss of user work. QUEUED as lead item of the next wave (with req_2659 multi-select): ModelView and 3d.zig are owned by live cleanup agents right now. ALSO user re-notes: UV panel still floating + manual refresh in current build — that is agent-in-flight (OO relocation + live-scoped UV), expected to land this wave; verify the live-refresh signal also fires on hide/show when it lands."
+    },
+    {
+      "at": "2026-07-05T04:15:48.400Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "FIXED (9b3d1f878). Real root cause: hide/show -> replaceActiveEditMesh -> setPaintTarget -> model_paint.setTarget -> clear() destroyed the atlas BEFORE refreshPaintLayout ran; the rebuild only carried per-face centroid color, so every sub-face stroke wiped on EVERY eye toggle. Fix: island-level texel carry surviving the mid-op clear (snapshotAtlasForCarry/consumeAtlasCarry in model_paint.zig, blit old-rect->new-rect per matched authored group, nearest-resample on density change). PIL-verified: 288 red + 24288 green px exactly preserved across hide->paint->unhide with atlas re-layout 132x196 -> 198x262. UV panel refreshes on hide/show. LEFT OPEN (queued to painter wave): loop cut/extrude/detach still lose strokes (same carry could extend); paint_program dabs are face-indexed and shift across hides — program SAVED while hidden replays misindexed."
+    }
+  ]
+}

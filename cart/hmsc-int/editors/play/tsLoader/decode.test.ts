@@ -6,11 +6,12 @@
 
 import { assert, assertClose, assertEqual, finish, test } from '../../../game/_testkit';
 import { MAP_LUMP, writeLumpContainer, type LumpInput } from '@reactjit/workspace';
+import { writeGameFile } from '@reactjit/workspace/gamefile';
 import { encodeEnvironmentLump, DEFAULT_SCENE_ENVIRONMENT } from '../../../compile/sceneEnv';
 import { encodeInstanceLump, encodeMaterials, encodeMaterialRefs, INSTANCE_STRIDE } from '../../../compile/worldGeometry';
 import { encodeCollidersLump, encodePhysicsConfigLump, type BakedColliders, type BakedPhysicsConfig } from '../../../compile/worldColliders';
 import type { Heightfield } from '@game';
-import { loadSceneFromMapContainer } from './decode';
+import { loadGameFileStreams, loadSceneFromGameFile, loadSceneFromMapContainer } from './decode';
 
 function ramp(): Heightfield {
   return {
@@ -140,6 +141,30 @@ test('absent lumps decode to empty/null, never throw', () => {
   assertEqual(scene.physicsConfig, null, 'no physics config');
   assertEqual(scene.flora, null, 'no flora');
   assertEqual(scene.environment, null, 'no environment');
+});
+
+test('platform game-file wrapper exposes STREAM_MAP and decodes the same scene', () => {
+  const rows = new Float32Array([
+    1, 2, 3, 0, 90, 0, 4, 5, 6, 0.1, 0.2, 0.3, 4,
+  ]);
+  const map = container([
+    { type: MAP_LUMP.INSTANCES, encoding: 'raw', data: encodeInstanceLump(rows, 1, INSTANCE_STRIDE) },
+  ]);
+  const file = writeGameFile({
+    logic: { refs: [], data: new Uint8Array([1, 2, 3]) },
+    map: { refs: [2001], data: map },
+    skins: { refs: [], data: new Uint8Array(0) },
+    assets: [{ key: 2001, kind: 9, bytes: new Uint8Array([9, 8, 7]), embed: true }],
+  });
+
+  const streams = loadGameFileStreams(file);
+  assertEqual(streams.map.refs.length, 1, 'map stream ref count');
+  assertEqual(streams.map.refs[0], 2001, 'map stream ref value');
+  assertEqual(streams.map.data.byteLength, map.byteLength, 'map stream contains nested map container');
+
+  const scene = loadSceneFromGameFile(file);
+  assertEqual(scene.instanceCount, 1, 'gamefile scene instance count');
+  assertClose(scene.instances[12], 4, 1e-6, 'shape id survives through gamefile wrapper');
 });
 
 finish('tsLoader/decode');

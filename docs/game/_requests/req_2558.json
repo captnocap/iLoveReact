@@ -1,0 +1,18 @@
+{
+  "id": "req_2558",
+  "at": "2026-07-04T05:31:48.419Z",
+  "origin": "session:5fc01965",
+  "text": "ok, now for other keybindings and this 3d map editor, one thing that use to happen with it and im not sure where or why it ever dropped off, but wasd is suppose to be for camera panning, and as it stands it doesnt do that, but it use to do that, like a few days ago, infact i would say when the data for the map itself switched over to a blank surface is when it went away., also discovered when i am over here pressing d trying to wasd around i see it spamming duplications of something but heres where the total disconnect is: it is duplicating a tile named AC & Vents but.... thats not a tile, and AC & Vents just happens to be the first texture in the entire texture dictionary, but its not applied to the building piece so what is it even duplicating because i end up with AC & Vents copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy copy",
+  "status": "doing",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T05:33:19.161Z",
+      "actor": "5fc0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

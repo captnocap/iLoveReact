@@ -1,0 +1,18 @@
+{
+  "id": "req_2456",
+  "at": "2026-07-01T12:26:19.461Z",
+  "origin": "session:8cf696c0",
+  "text": "good start, the thing you missed is that it fails to clean up outliners that are entirely removed from a delete.",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T12:28:38.205Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

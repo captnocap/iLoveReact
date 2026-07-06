@@ -1,0 +1,28 @@
+{
+  "id": "req_2691",
+  "at": "2026-07-05T18:52:03.936Z",
+  "origin": "codex:019f339c",
+  "text": "inside of the cart/editor there is a paint mode for the 3d world that has this 'beam' for a paint brush. here is the screenshot of it [Image #1] now, i had some concept art generated to get some ideas for brush examples and il share them with you now. the reason why this matters is because the current approach is that block, but that block is not a strong representation of what it is actually about to paint. [Image #2] so, heres the plan. before anything is actually painting the surface, go and make a number of these and then populate them into the editor with no actual capabilities yet and we can review them",
+  "status": "review",
+  "sessionId": "019f339c-dfb5-7570-9e4e-edb32912bc4d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T18:52:17.955Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T19:04:11.388Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added preview-only map-paint brush gizmo variants in cart/editor so the in-world brush can be reviewed before changing paint behavior. The action bar now exposes five selectable preview styles (legacy beam, decal, rings, falloff profile, handles), state is pushed through a new __map_set_brush_gizmo host door, and world_loader swaps one translucent preview mesh on the existing ground-hit path. Stroke math, saved map data, and actual painting capability are unchanged. Verified with zig build test-game-map and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-05T19:04:11.388Z"
+}

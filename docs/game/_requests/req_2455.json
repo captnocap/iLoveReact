@@ -1,0 +1,30 @@
+{
+  "id": "req_2455",
+  "at": "2026-07-01T12:21:30.608Z",
+  "origin": "session:be477f59",
+  "text": "holy shit lmao the ai sloppification just leaked in the word color with a u. damn that one was not on my bingo card",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T12:21:45.163Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T12:23:27.019Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the 'colour' British-spelling leak in the UI. The paint-bucket's back-to-flat-paint button (cart/editor/inspector/ModelShaderBucket.tsx) rendered the literal text 'colour' — an AI-slop spelling that clashes with the codebase's consistent American 'color' (Color Studio, colorSpine, colorStudio, etc.). Changed the visible <Text>colour</Text> to 'color' and made the file internally consistent (backToColour → backToColor at both its definition and call site, plus the 'Colour'/'colour' in the header comment). Grep confirmed line 169 was the ONLY user-FACING 'colour' in the whole editor cart; the other ~15 hits are all code COMMENTS (dev-facing, in files like ModelView.tsx / hmscAssetCatalog.ts / ModelBrushDock.tsx that other sessions are currently editing), so I left those for a later janitor sweep rather than risk colliding. Parses clean via esbuild transform; not shipped (live session). Sha 6805e7425.",
+  "shas": [
+    "6805e7425"
+  ],
+  "resolvedAt": "2026-07-01T12:23:27.019Z"
+}

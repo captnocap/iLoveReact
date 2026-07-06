@@ -1,0 +1,30 @@
+{
+  "id": "req_2586",
+  "at": "2026-07-04T08:13:17.044Z",
+  "origin": "session:ab0454f7",
+  "text": "huh ok... interesting. idk how to explain it best but uh hm... i can like see through it, if that makes sense. like the face that is facing me is actually inverted/ or something like this",
+  "status": "review",
+  "sessionId": "ab0454f7-d06a-4a6e-8ba7-fa5b786a5824",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T08:13:46.197Z",
+      "actor": "ab04",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T08:15:37.526Z",
+      "actor": "ab04",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "See-through nugs diagnosed and fixed: the surface-nets mesher wound triangles clockwise-from-outside while the scene3d pipeline culls backfaces with front_face=ccw (framework/gpu/3d.zig:3378), so camera-facing triangles were discarded — the user was seeing the interior of the far shell. Flipped the quad emission order in scripts/nug-gen.js and added a per-bake winding audit (triangle geometric normal dotted with the SDF gradient at the centroid; bake hard-fails under 99% outward). All four packages regenerated at 99.8% outward and recommitted.",
+  "shas": [
+    "e62ced74e"
+  ],
+  "resolvedAt": "2026-07-04T08:15:37.525Z"
+}

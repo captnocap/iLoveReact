@@ -1,0 +1,30 @@
+{
+  "id": "req_2710",
+  "at": "2026-07-05T21:16:19.507Z",
+  "origin": "session:a71ff6e3",
+  "text": "uh ok so camera, we have spinny mode and we have move around mode but no angle(?) mode? like uh, hm, i want to be able to like level out my view, if that makes sense. [Image #31] like get less of a birds-eye view or more of a birds eye view (both ways)",
+  "status": "review",
+  "sessionId": "a71ff6e3-8b84-45fa-b0da-3e926d36a3d4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T21:16:34.454Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T21:21:24.271Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added camera tilt to the map editor's iso view: the framework Isometric camera rig gained an optional pitch parameter (omitting it keeps the true-iso 35.264° lock, so no other consumer changes), and the editor's IsoStage now carries pitch in its pose with a pitchBy() clamped to 12°-80° — low enough to nearly level out with the horizon, high enough for a near-plan bird's-eye, but shy of straight-down where the yaw basis degenerates and the host brush ray bails. Driven two ways: vertical middle-drag tilts while horizontal still spins yaw (one orbit gesture, matching mesh-studio feel), and ctrl+wheel steps 3° per notch (req_2711's ask) while plain wheel keeps zoom-to-cursor. All TS-side — hot reload picks it up, no rebuild.",
+  "shas": [
+    "8e42779fc"
+  ],
+  "resolvedAt": "2026-07-05T21:21:24.271Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2429",
+  "at": "2026-07-01T10:25:36.816Z",
+  "origin": "session:bf2eaad9",
+  "text": "yeah uh some things about this color studio tho i will have to put in on and give my two sense but after the fact they are more things like actually i think the location for it is horse shit now and completely unrelated to its capability you are going to build but just keep that in mind alright have fun",
+  "status": "review",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T10:26:09.624Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T10:44:16.460Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the paint-with-a-shader capability: a brush can now dip into a 'bucket of shader code' and paint that material onto a low-poly model instead of only flat colour. The model paint atlas is CPU-side and paintStamp already blends arbitrary RGBA per texel, so the host renders a shader recipe (WGSL + tuned data[]) to a texture, reads it back to CPU RGBA (material_tex.bakePixels over the existing readbackStaticSurface), and model_paint samples that image per texel while stamping/filling (stampInner/paintStampTex/paintFaceTex, tiled per face). New doors __model_paint_material/_clear bake+set the active ink; ModelView syncs it on brush-ink change only (never per dab, so the GPU bake stays off the hot path) with a per-param cache key. The shader PaintInk now carries its tuned params so a bucket is self-contained, and ModelShaderBucket (mounted beside the Color Studio in ModelBrushDock) is the picker: the grouped shader catalog plus every ShaderSpec knob as a release-committed slider — which also delivers the 'change everything about a shader without touching code' unlock for the selected bucket. JS transforms clean and all four edited Zig files pass ast-check; the framework needs a rebuild to activate the host side.",
+  "shas": [
+    "ffd44b4f5"
+  ],
+  "resolvedAt": "2026-07-01T10:44:16.460Z"
+}

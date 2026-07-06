@@ -1,0 +1,10 @@
+{
+  "id": "req_2681",
+  "at": "2026-07-05T04:43:54.946Z",
+  "origin": "session:40eebdf5",
+  "text": "<task-notification>\n<task-id>a296094df4e3c2a92</task-id>\n<tool-use-id>toolu_01BqnwRwDhXgdN1h9jAHASD7</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f/tasks/a296094df4e3c2a92.output</output-file>\n<status>failed</status>\n<summary>Agent \"Paint stroke undo + layers\" failed: Agent terminated early due to an API error: You're out of usage credits. Run /usage-credits to keep using Fable 5 or /model to switch models.</summary>\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>\n<result>The build will notify on completion. Meanwhile, review what's changed for the commit.</result>\n</task-notification>",
+  "status": "new",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2675",
+  "at": "2026-07-05T04:27:20.550Z",
+  "origin": "session:a29bdf2b",
+  "text": "hm yeah still not getting the floors on raised terrain fix if that was put in for, but the build vs paint toggle landed. and let me now digress into a little shit nit pick. so first and foremost i fucking hate it when we are using names for buttons and not icons. but lets also deshitifiy this. look here, it says, PAINT and then it says again MODE PAINT and step out of paint there is literally a paint brush, and more paint adajcent tools and a build button but the PAINT is there like a sore thumb. also funny part is that it clearly shows my piece on the raised ground but doesnt respect it when placing it [Image #25]",
+  "status": "doing",
+  "sessionId": "a29bdf2b-cd53-4650-be3f-08a38fb3ab80",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T04:28:01.233Z",
+      "actor": "fable-world",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T04:31:22.356Z",
+      "actor": "fable-world",
+      "kind": "note",
+      "text": "GAP BBB (UI LAW, user verbatim: 'i fucking hate it when we are using names for buttons and not icons'): editor bars use TEXT buttons where icons belong — MapPaintBar's PAINT toggle sits like 'a sore thumb' next to icon tools, and the bar echoes the mode twice (PAINT toggle + MODE PAINT pill). Law recorded in memory (feedback_icons_over_text_buttons): verbs/mode-toggles = SDF icons + tooltip; TEXT reserved for value readouts (SNAP surface+edge, SIZE 4m stay); never render a mode name twice in one bar. Target: MapPaintBar.tsx (+ ToolOptions.tsx as the shared row)."
+    },
+    {
+      "at": "2026-07-05T04:40:28.189Z",
+      "actor": "fable-world",
+      "kind": "note",
+      "text": "BBB LANDED (29ba27b68, MapPaintBar.tsx only): PAINT text pill → Paintbrush icon toggle (deliberately distinct glyph from the Build group's Brush — the exact collision the user flagged); MODE PAINT echo KILLED (one Eraser icon toggle: off=paint, accent=erase); channels iconified Mountain/Grid3x3/Waves/Leaf/LandPlot/Route; terrain tools Brush/TriangleRight/MoveUpRight/Blend; Save/Check/X/Footprints/Plus for the remaining verbs. All glyphs membership-checked against the baked SDF atlas (runtime/icons/baked-names.ts) — no tofu possible. Value readouts stayed text per the law (SHAPE/PROF/SIZE/HEIGHT/LANES/TEXTURE/stats); RAISE/DIG became the DIR RAISE|DIG labeled cycle readout (a brush VALUE, not a mode — and arrow glyphs would lie next to the floor steppers). Shot-verified: Paintbrush toggle renders crisp in the bar, zero PAINT text. Agent's honest note: the floor ▼ button hugs the SNAP pill tightly in the crop — pre-existing ToolOptions spacing, untouched, noted for a future bar-layout pass. Hot-reloads."
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2385",
+  "at": "2026-07-01T07:58:12.212Z",
+  "origin": "session:be477f59",
+  "text": "alright some more deshittification here is some famous LLM flavor text. this is one u always want to have on ur bingo card take notes [Image #2] but none of this shit is useful. everyone is going to find that out in under 30 seconds of using the thing",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T07:58:21.270Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T08:00:36.518Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the obvious-controls flavor text from the model viewer status bar in both ModelView twins (cart/editor/stage/ModelView.tsx — the clone the editor actually renders — and cart/modelview.tsx standalone). The footer was padding a genuine readout with mouse-tutorial clauses across every mode: 'middle-drag orbits · wheel zoom · double-click recenter' in view, 'click a face to fill · drag to paint · middle-drag orbits' in paint, 'drag to pan focus · double-click to recenter' in focus, and 'click · shift-click adds · drag = box · middle-drag orbits' in select. That's the classic LLM tell — narrating controls a user discovers in seconds. Collapsed the whole conditional to keep ONLY the real information: when a sub-object selection mode is active, show '<mode> · <gizmo> gizmo · <n> selected'; otherwise the triangle count. paintMode/focusMode still drive their actual behavior elsewhere, they just no longer print tutorials. Both files parse clean via esbuild transform; not shipped (live session).",
+  "shas": [
+    "1d3bf30c9"
+  ],
+  "resolvedAt": "2026-07-01T08:00:36.518Z"
+}

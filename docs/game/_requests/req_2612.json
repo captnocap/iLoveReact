@@ -1,0 +1,10 @@
+{
+  "id": "req_2612",
+  "at": "2026-07-04T16:17:34.177Z",
+  "origin": "session:bf578c72",
+  "text": "is there any part of it that is larger than 256? this is... getting there, if there was a way to refine it by hand maybe it would be there, but the part of it that is rough is like the hands and the front of the hair which makes the face get some weird ass artifacts infront of it. is it not possible to generate a density that would get a near perfect render and then decimate it in a sense. idk if that is really nay different than just using a lower end though. but like, ok if you had 512/1024 and then after its generated decimate it down to say 64, would that render differently than just a raw 64",
+  "status": "new",
+  "sessionId": "bf578c72-3717-49e0-8e8a-64761048423d",
+  "captureMode": "hook",
+  "events": []
+}

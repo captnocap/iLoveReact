@@ -1,0 +1,18 @@
+{
+  "id": "req_2441",
+  "at": "2026-07-01T11:33:47.795Z",
+  "origin": "session:1ed2545c",
+  "text": "so it literally is just that single file over there like a runaway. well too fucking bad get that biece of shit over here",
+  "status": "doing",
+  "sessionId": "1ed2545c-8195-4baf-b87d-57559c359642",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T11:33:54.781Z",
+      "actor": "session-1ed2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

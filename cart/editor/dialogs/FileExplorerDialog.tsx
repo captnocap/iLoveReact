@@ -65,8 +65,8 @@ export default function FileExplorerDialog(props: Props) {
       <C.HW_FileExplorerDialog>
         <C.HW_FileExplorerHead>
           <Icon name="FolderSearch" size={16} color={accentFor('primary')} />
-          <C.HW_HeadTitle>Project File Explorer</C.HW_HeadTitle>
-          <C.HW_PillOn><C.HW_PillTextOn>{index.files.length} files indexed</C.HW_PillTextOn></C.HW_PillOn>
+          <C.HW_HeadTitle>Project Asset Explorer</C.HW_HeadTitle>
+          <C.HW_PillOn><C.HW_PillTextOn>{index.files.length} assets indexed</C.HW_PillTextOn></C.HW_PillOn>
           {index.truncated ? (
             <C.HW_Pill><C.HW_PillText>INDEX CAPPED — deeper files not listed</C.HW_PillText></C.HW_Pill>
           ) : null}
@@ -77,7 +77,7 @@ export default function FileExplorerDialog(props: Props) {
         </C.HW_FileExplorerHead>
         <C.HW_FileExplorerSearchRow>
           <Icon name="SearchCode" size={13} color={accentFor('textDim')} />
-          <C.HW_FileSearch placeholder="search project files by name or path..." value={props.query} onChange={props.onQuery} />
+          <C.HW_FileSearch placeholder="search project assets by name or path..." value={props.query} onChange={props.onQuery} />
           <C.HW_Pill onPress={() => props.onFolder('virt:models')}><C.HW_PillText>models</C.HW_PillText></C.HW_Pill>
           <C.HW_Pill onPress={() => props.onFolder('virt:textures')}><C.HW_PillText>textures</C.HW_PillText></C.HW_Pill>
           <C.HW_PillOn onPress={props.onImportFromDisk}><C.HW_PillTextOn>import from disk...</C.HW_PillTextOn></C.HW_PillOn>
@@ -86,7 +86,7 @@ export default function FileExplorerDialog(props: Props) {
           <C.HW_FileExplorerNav>
             <C.HW_GroupTitle>
               <Icon name="FolderTree" size={12} color={accentFor('primary')} />
-              <C.HW_GroupText>PROJECT</C.HW_GroupText>
+              <C.HW_GroupText>ASSETS</C.HW_GroupText>
             </C.HW_GroupTitle>
             <ExplorerTree {...props} />
             <DirectoryMemory history={props.folderHistory} selectedFolder={props.selectedFolder} onFolder={props.onFolder} />
@@ -109,7 +109,7 @@ export default function FileExplorerDialog(props: Props) {
             ))}
             {slots.length === 0 ? (
               <C.HW_FileResultEmpty>
-                <C.HW_StatusText>no files match — clear the search or rescan</C.HW_StatusText>
+                <C.HW_StatusText>no assets match — clear the search or rescan</C.HW_StatusText>
               </C.HW_FileResultEmpty>
             ) : null}
           </C.HW_FileResults>

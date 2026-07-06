@@ -295,6 +295,64 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnString(info, buf.items);
 }
 
+/// __mesh_preview_file(path) → JSON {"key","count","radius"} | "" on failure.
+/// Preview-only GLB/OBJ load: parse and stash a renderable host mesh without adopting
+/// it as the active edit/paint target. The project asset explorer uses this for its
+/// side preview so hovering/opening a file there cannot clobber an already-open model
+/// document's mesh journal, selections, paint target, or source geometry.
+fn hostMeshPreviewFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const path = argToStringAlloc(info, 0) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    defer std.heap.c_allocator.free(path);
+    if (path.len == 0) {
+        setReturnString(info, "");
+        return;
+    }
+
+    var mesh = mesh_import.loadFile(std.heap.c_allocator, path) catch |e| {
+        std.log.warn("[mesh-preview] {s}: {}", .{ path, e });
+        setReturnString(info, "");
+        return;
+    };
+    defer mesh.deinit(std.heap.c_allocator);
+
+    const key = std.fmt.allocPrint(std.heap.c_allocator, "preview:{s}", .{path}) catch {
+        setReturnString(info, "");
+        return;
+    };
+    defer std.heap.c_allocator.free(key);
+    if (!scene3d.stashHostMesh(key, mesh.verts, mesh.vert_count)) {
+        setReturnString(info, "");
+        return;
+    }
+    scene3d.orbitFrame(mesh.center, mesh.radius);
+    state.markDirty();
+
+    var buf: std.ArrayList(u8) = .{};
+    defer buf.deinit(std.heap.c_allocator);
+    const w = buf.writer(std.heap.c_allocator);
+    w.writeAll("{\"key\":\"") catch {
+        setReturnString(info, "");
+        return;
+    };
+    for (key) |ch| {
+        switch (ch) {
+            '"' => w.writeAll("\\\"") catch return,
+            '\\' => w.writeAll("\\\\") catch return,
+            0...8, 9...10, 11...31 => w.print("\\u{x:0>4}", .{ch}) catch return,
+            else => w.writeByte(ch) catch return,
+        }
+    }
+    w.print("\",\"count\":{d},\"radius\":{d:.6}}}", .{ mesh.vert_count, mesh.radius }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, buf.items);
+}
+
 /// __mesh_load_vertices(key, float32Verts, vertCount?) → JSON {"key","count","radius"} | "".
 /// Adopt already-cooked scene3d triangle data into the same resident model-viewer path
 /// as OBJ/GLB file imports. Once a model is installed into the editor, its source file
@@ -2385,6 +2443,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__hostUploadFloatBuffer", hostUploadFloatBuffer);
     v8_runtime.registerHostFn("__scene3d_patch_dyn", hostScene3DPatchDyn);
     v8_runtime.registerHostFn("__mesh_load_file", hostMeshLoadFile);
+    v8_runtime.registerHostFn("__mesh_preview_file", hostMeshPreviewFile);
     v8_runtime.registerHostFn("__mesh_load_vertices", hostMeshLoadVertices);
     v8_runtime.registerHostFn("__mesh_set_face_groups", hostMeshSetFaceGroups);
     v8_runtime.registerHostFn("__model_orbit_drag", hostModelOrbitDrag);

@@ -1,0 +1,18 @@
+{
+  "id": "req_2409",
+  "at": "2026-07-01T09:14:49.396Z",
+  "origin": "session:8cf696c0",
+  "text": "ok so uh excuse my french but what the fuck is a outliner versus a part. because im looking at a model that says it has 5 parts but then there is no outliners on it at all actully the plot thickens. lets look deeper. it says at the same time there are 5 parts and also 0 parts [Image #21]",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T09:15:27.043Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -686,6 +686,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/physics_lab.flag", if (has_physics_lab) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/game_physics.flag", if (has_game_physics) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/game_pathing.flag", if (has_game_pathing) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/pathing.flag", if (has_game_pathing) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/game_camera.flag", if (has_game_camera) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/game_build.flag", if (has_game_build) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/game_map.flag", if (has_game_map) "1\n" else "0\n");

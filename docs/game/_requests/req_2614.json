@@ -1,0 +1,10 @@
+{
+  "id": "req_2614",
+  "at": "2026-07-04T16:50:09.312Z",
+  "origin": "session:09f49bea",
+  "text": "<task-notification>\n<task-id>bwtswhssq</task-id>\n<tool-use-id>toolu_01GVkQ8rWQhbpKqkHcHK1pdM</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/0f02d048-6266-4c5d-affe-6131b0e17f55/tasks/bwtswhssq.output</output-file>\n<status>completed</status>\n<summary>Background command \"Rebuild editor cart binary\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "09f49bea-d556-4723-b539-65736fb19fb8",
+  "captureMode": "hook",
+  "events": []
+}

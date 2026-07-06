@@ -1,0 +1,24 @@
+{
+  "id": "req_2307",
+  "at": "2026-07-01T02:00:02.956Z",
+  "origin": "session:a7549dd9",
+  "text": "ok so first thing im going to bring up is when i am on this model right now, and i have vertex mode enabled, what the hell is going on here with this paint variants garbage [Image #2]",
+  "status": "doing",
+  "sessionId": "a7549dd9-ae3e-4dce-8ecd-0b127ef6eaff",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T02:00:22.781Z",
+      "actor": "opus-editor",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T02:12:25.058Z",
+      "actor": "opus-editor",
+      "kind": "note",
+      "text": "Committed 46dae8ac4. The 'PAINT VARIANTS' garbage (palette colour-slots mislabeled as variants, 'palette v0' noise, char-wrapped cramped row) is gone. Replaced with REAL variants: a variant is a whole saved painting of the model, captured from the live paint atlas (Zig __model_atlas_read/apply doors) and stored in the editor's own localstore per model. Save/Load/Delete + honest-empty until you save one. Also removed the fabricated '{n} paints' atlas stat + dead cls. Editor bundles clean, model_paint zig tests pass; needs a Zig rebuild to run."
+    }
+  ]
+}

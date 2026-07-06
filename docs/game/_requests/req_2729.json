@@ -1,0 +1,17 @@
+{
+  "id": "req_2729",
+  "at": "2026-07-06T00:59:01.279Z",
+  "origin": "one-off",
+  "text": "ok its all ready. the clone is inside of /home/siah/creative/reactjit-safe-backup-0507",
+  "status": "new",
+  "sessionId": "946c6729-d313-4564-be06-7b2021c12c44",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:59:51.908Z",
+      "actor": "946c",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

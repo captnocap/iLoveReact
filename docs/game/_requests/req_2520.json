@@ -1,0 +1,30 @@
+{
+  "id": "req_2520",
+  "at": "2026-07-02T07:08:01.316Z",
+  "origin": "session:e15defd5",
+  "text": "im going to have you pick up this /tmp/handoff-20260702-020902-native-map-painter-in-cart-editor-review-fixes-remaining-sli.md but also im going to have you implement the remaining features that are lacking from the mesh editing experience from the previous studio. identify them for me but here is a rough list to help, there is no ability to detach, to copy a piece, no mirror capability, and also lacking ability to cross import or reuse a model multiple times over, undo and redo history also. check in with the current in focus model viewer inside of @cart/editor/ and compare with that of the @hmsc-int/editors/model/studio * related code",
+  "status": "review",
+  "sessionId": "e15defd5-caa8-4fed-99e8-a04eddf6a541",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T07:08:28.769Z",
+      "actor": "session-e15d",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T07:57:00.029Z",
+      "actor": "session-e15d",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ported the old studio's missing part-editing toolset into cart/editor's host-native model editor, all as Zig host functions per the ruling. Shipped: (1) a full mesh-edit JOURNAL — every committed op (gizmo release, extrude/create-face/loop-cut, delete, part add, hide/show, and all the new ops) snapshots verts+groups+part-ranges+colors+hidden-stash pre-op; Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y now undo/redo on a model document (geometry, parts, per-face paint, even the outliner rows restore via a journal note the cart mirrors in), while the world surface keeps its old local history; (2) DUPLICATE and MIRROR X/Y/Z — outliner rows carry a duplicate verb, the right-click menu carries mirror; the twin keeps the source's paint and lands as its own part; (3) DETACH faces into a new part (face-mode selection, right-click or action bar — pure group remap, paint stays); (4) MERGE — merge faces (2+ faces fuse into one authored face) and merge part down (fold the focused part into the one above it); (5) GLASS faces — per-face translucency drawn through the real transparent pass (trailing-run split of the resident mesh), toggle to un-glass; (6) SOLIDIFY — inner skin + rim walls; (7) CROSS-IMPORT/REUSE — '+ library' in the outliner / 'Add From Library' opens a picker; studio models import per authored part, cooked assets by blob, .glb/.obj via a new host append door; pick the same model repeatedly to reuse it. Bonus fixes: selection-tint no longer bakes into carried colors on topology ops, and the world_loader stub gained the map-paint members (carts without the compiled world failed to compile since the painter's phase 2). Identified but deliberately deferred with reasons: texture SLOTS (their only consumer is the Compile/cook lane, itself a deferred slice) and paint LAYERS + per-stroke paint undo (belongs to the paint-as-program lane). Verified: mesh-edit + model-paint zig test suites green, editor ships (SHIP_RUN_PACKAGE=0), rjit shot editor PASS, all new doors present in the live dev bundle. NOTE: framework changes need your usual host rebuild (rjit dev editor) to go live.",
+  "shas": [
+    "d5ac11ab4"
+  ],
+  "resolvedAt": "2026-07-02T07:57:00.029Z"
+}

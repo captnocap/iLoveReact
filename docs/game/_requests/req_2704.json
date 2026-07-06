@@ -1,0 +1,30 @@
+{
+  "id": "req_2704",
+  "at": "2026-07-05T20:25:07.406Z",
+  "origin": "session:a71ff6e3",
+  "text": "hell yeah water worked, grass on the slopes of terrain still kinda not doing anything though ;/  oh nevermind, BUSH on the side of slopes works great. normal grass dont do shit tho. also something else i can ask you to do on this pass is that so uh in the mesh editing studio the camera rotates from the middle mouse button. in here, it rotates from clicking on the canvas and dragging around, kinda hate the back and forth, so can we switch this to middle mouse also. and then, the camera also pans with wasd in here, and id like to have it so where i can click down with a brush, and then wasd around the map and paint with it before i lift, but it currently seems that the moment i start to wasd around the brush halts >:V which is annoying. but yeah here is grass on the side of a hill vs the bush flora [Image #27] [Image #28] \n\nand THEN with water, haha this is kinda gonna be a fun one i think to try and nail... but ok so \n\nnotice how this water and the land have a gap on the edge? [Image #29] do you know if it is possible to close that gap? or do you think i just need to do some better smoothing of my terrain to not make it so 'fall off the face of a cliff' ? and the inverse of this i just tried on a hill which works but the water is kinda sitting above the land from it seems? [Image #30]",
+  "status": "review",
+  "sessionId": "a71ff6e3-8b84-45fa-b0da-3e926d36a3d4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T20:26:04.417Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T20:39:32.258Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Four map-painter fixes: (1) grass-on-slopes root cause — foliage was seated on heightAt's fine 241-grid but the ground RENDERS a 121-grid abs-max downsample that sits up to ~0.5m higher on slopes, drowning 0.3-0.5m grass while 1.6m bush poked through; foliage now seats on the same rendered floor grid (paintGroundY). (2) Water/land edge gap + floating-sheet-on-hill: the water skirt's dry cells now tuck just under the LOCAL terrain (bed - 0.3m) instead of dropping to one global basin base, so the sheet edge dives into whatever bank it meets. (3) Brush halting on WASD: the host now re-stamps mid-stroke from the per-frame pose, so panning with the button held keeps painting; strokeMove dedups so a stationary cursor deposits nothing. (4) Iso rotate moved to middle-drag matching the mesh studio — wired the dead onMiddleClick handler end-to-end plus a getMouseButtons() host global for the hold-poll; plain left drag is inert, shift-drag still pans, and you can now orbit mid-paint without disarming. Needs a dev-host rebuild.",
+  "shas": [
+    "9c2b22d47"
+  ],
+  "resolvedAt": "2026-07-05T20:39:32.257Z"
+}

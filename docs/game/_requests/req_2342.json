@@ -1,0 +1,10 @@
+{
+  "id": "req_2342",
+  "at": "2026-07-01T05:27:38.232Z",
+  "origin": "session:cc188b8e",
+  "text": "so you are saying the loader is the root of the entire app structure effectively? what?",
+  "status": "new",
+  "sessionId": "cc188b8e-254f-4f48-b4c4-9dc3aad1d366",
+  "captureMode": "hook",
+  "events": []
+}

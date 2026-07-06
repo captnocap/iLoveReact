@@ -1,0 +1,10 @@
+{
+  "id": "req_2608",
+  "at": "2026-07-04T14:08:50.987Z",
+  "origin": "session:bf578c72",
+  "text": "if i could put a name on it, it looks honestly just like vertex mode is enabled and faces are disabled or something like that like its not filling in the shape at all its just finding points but i also see u doing some sort of '4/4 loaded' when i can see jliterally only 1 example. meaning only one is loaded. so instead of trying to laod all 4 at once, make a button that loads one at a time",
+  "status": "new",
+  "sessionId": "bf578c72-3717-49e0-8e8a-64761048423d",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_2293",
+  "at": "2026-07-01T01:29:59.400Z",
+  "origin": "session:986b717b",
+  "text": "oh ok i see. ok so right click then, u added it? and if so, uh its not showing up anything like the other context menus on the main window in the middle but idk mayube im doing it wrong. oh i see its down in the actual preview. thats fine also add the same thing in the content browser right above it",
+  "status": "doing",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T01:30:14.664Z",
+      "actor": "986b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

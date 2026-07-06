@@ -33,12 +33,15 @@ export default function BuildDock({
   // stacks. The buttons render faint at zero and the count is always the live journal —
   // never the old history-FEED length, which reverted nothing.
   const isModelDoc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId)?.kind === 'model';
+  // While the paint session is live the STROKE journal is the badge's truth (req_2672)
+  // — same 2Hz poll, different door: strokes land host-side per gesture with no render.
+  const painting = isModelDoc && state.modelTool.paint;
   const [meshDepths, setMeshDepths] = useState({ undo: 0, redo: 0 });
   useEffect(() => {
     if (!isModelDoc) return;
     const read = () => {
       try {
-        const j = (globalThis as any).__mesh_history?.();
+        const j = painting ? (globalThis as any).__mesh_paint_history?.() : (globalThis as any).__mesh_history?.();
         if (typeof j === 'string' && j) {
           const o = JSON.parse(j);
           const next = { undo: (o.undo ?? 0) | 0, redo: (o.redo ?? 0) | 0 };
@@ -49,7 +52,7 @@ export default function BuildDock({
     read();
     const t = setInterval(read, 500);
     return () => clearInterval(t);
-  }, [isModelDoc]);
+  }, [isModelDoc, painting]);
   const undoCount = isModelDoc ? meshDepths.undo : state.worldUndo.length;
   const redoCount = isModelDoc ? meshDepths.redo : state.worldRedo.length;
   // The SELECTED world piece, or null — the dock shows dashes over phantom zeros.
@@ -90,12 +93,12 @@ export default function BuildDock({
         <C.HW_DockLabel>BUS</C.HW_DockLabel>
         <C.HW_DockValue>{state.history.length}</C.HW_DockValue>
       </C.HW_DockBuild>
-      <C.HW_DockBuild onPress={onUndo} tooltip={isModelDoc ? 'Undo (host mesh journal)' : 'Undo (world edits)'}>
+      <C.HW_DockBuild onPress={onUndo} tooltip={painting ? 'Undo (paint strokes)' : isModelDoc ? 'Undo (host mesh journal)' : 'Undo (world edits)'}>
         <Icon name="Undo2" size={12} color={accentFor(undoCount > 0 ? 'textSecondary' : 'textFaint')} />
         <C.HW_DockLabel>UNDO</C.HW_DockLabel>
         <C.HW_DockValue>{undoCount}</C.HW_DockValue>
       </C.HW_DockBuild>
-      <C.HW_DockBuild onPress={onRedo} tooltip={isModelDoc ? 'Redo (host mesh journal)' : 'Redo (world edits)'}>
+      <C.HW_DockBuild onPress={onRedo} tooltip={painting ? 'Redo (paint strokes)' : isModelDoc ? 'Redo (host mesh journal)' : 'Redo (world edits)'}>
         <Icon name="Redo2" size={12} color={accentFor(redoCount > 0 ? 'textSecondary' : 'textFaint')} />
         <C.HW_DockLabel>REDO</C.HW_DockLabel>
         <C.HW_DockValue>{redoCount}</C.HW_DockValue>

@@ -1,0 +1,24 @@
+{
+  "id": "req_2529",
+  "at": "2026-07-04T03:04:41.666Z",
+  "origin": "session:69672c0b",
+  "text": "ok cool. now, to push t his one step further, i went ahead and painted some more, and saved this one as painting 2, so now i have painting 1 and painting 2, now the interesting part is so painting 1 lets say painted face C, painting 2 was made with painting 1 loaded into memory, and then painting 2 also painted face B. on reload though, it loads up painting 2 with only face b painted, not acknowledging that it was painted from having painting 1 in memory, so none of it is actually applied.",
+  "status": "doing",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T03:05:10.177Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T03:07:50.885Z",
+      "actor": "session-6967",
+      "kind": "note",
+      "text": "Fixed (d92e91ba7, needs rebuild). Root cause: paint_program.apply() replayed a loaded program onto the atlas with recording suppressed and never adopted its ops into g_ops — so painting on top of a loaded painting recorded only the NEW strokes. 'Load Painting 1 (C), paint B, save Painting 2' captured only B. apply() now adopts the loaded program as the live baseline (materials copied in order to keep op indices valid), so further strokes append and serialize returns cumulative. CAVEAT: already-saved Painting 2 on disk is incomplete (only B); after rebuild, re-do (load P1, paint B, save) once to capture C+B."
+    }
+  ]
+}

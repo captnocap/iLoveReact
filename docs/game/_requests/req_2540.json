@@ -1,0 +1,18 @@
+{
+  "id": "req_2540",
+  "at": "2026-07-04T04:04:17.091Z",
+  "origin": "session:5fc01965",
+  "text": "I need you to evaluate the file menus (file, edit, view help etc) inside of the @cart/editor/ app, and we need to get this up to speed with real commands and not placeholder, and get things into the right place. Things are very out of touch with the total capabilities that are present in the app and that breaks the whole @cart/hmsc-workspace-mock/DESIGN_INTAKE.md take. some things that need to be taken into account are what is loaded in view, and what is present in the file menus. they dont just translate end to end all the time. another is placement, for example paint resolution is inside of the file menu and it affects painting inside of the mesh editor and the app loads up the world, so its not even relevant for one but also in the wrong space for two. now, im not saying to hide everything until necessary, you just do exactly what any other sane app does, and put it behind an inaccessible click because of the current state of the app. Theres a lot of places to touch on here. and taking advantage of nested menus are the only way that this works coherently. And because this also is linked to keybindings, that means the audit needs to take into account if the key binding for the current in-view state is relevant end to end",
+  "status": "doing",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T04:04:27.997Z",
+      "actor": "5fc0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

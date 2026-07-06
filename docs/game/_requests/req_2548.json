@@ -1,0 +1,24 @@
+{
+  "id": "req_2548",
+  "at": "2026-07-04T04:35:04.002Z",
+  "origin": "session:1ccd61f7",
+  "text": "ok the other thing with this that was present before (though was hard to tell if it was just a problem of the zooming or not) is there is some delay of sync between this at intervals that dont really make any sense. sometimes i place a piece and i see the wireframe outline instantly, sometimes i place 7 pieces before i finally see it again on the 8th piece",
+  "status": "doing",
+  "sessionId": "1ccd61f7-1753-4038-a146-209701d9708e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T04:35:26.806Z",
+      "actor": "1ccd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T04:43:37.123Z",
+      "actor": "1ccd",
+      "kind": "note",
+      "text": "Statically verified the placement chain end-to-end: validator only rejects unknown/non-finite (never a floor on a grid cell), the pieces effect fires per placement (new array identity each time), setLivePieces bumps gen per push, applyPendingLive re-uploads on gen change every painted frame, Polyline points apply on UPDATE. So the erratic 'place 7 before one shows' must die in one of the SILENT click exits: (1) click classified as rotate-drag on >4px down-to-up wiggle — top suspect at working speed; (2) ground-ray miss via stale pane rect; (3) validator rejection; (4) live-push effect skipped (node id 0). Instrumented all four plus success logs in 95d82f590 (hot-reloads); one placement session will convict. Also noted: world_loader pending-live/cam slot tables (8 slots) never free on unmount — a remount-leak candidate to fix once convicted."
+    }
+  ]
+}

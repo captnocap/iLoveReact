@@ -1,0 +1,30 @@
+{
+  "id": "req_2492",
+  "at": "2026-07-02T01:40:35.742Z",
+  "origin": "session:2b166540",
+  "text": "ok i now have a blue skybox and from what it seems empty. i thought maybe i just start painting and it works. but thats not the case. there is no ground here. so how do i create some. oh never mind its not empty im just so far zoomed out that i cant see anything on load",
+  "status": "review",
+  "sessionId": "2b166540-f213-42f7-ba61-c71ee4889378",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T01:43:12.836Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T01:46:16.602Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the SIGSEGV: engine.setGroundLook freed the previous ground-formula string on every push, while the loader's painted-chunk nodes hold that slice and the GPU ground pipeline reads it EVERY frame — the hot-reload re-arm re-pushed the look, the superseded allocation's page unmapped, and the next frame faulted (the page-aligned fault address + the crash landing right after the dev push both match). Fixed (be05ccb56, needs a rebuild): identical re-pushes keep the existing allocation; a real content change deliberately leaks the superseded copy instead of freeing under a live node, and applyPaintLayer migrates nodes to the new bytes by pointer identity next frame (cleared look → tint fallback). Two boot bugs fixed with it (JS, already hot-pushed): the viewport's camera push was a single 16ms shot that missed when the loader node landed late — the 'zoomed out into nothing' boot — now it retries until it lands; and a hot-restored ACTIVE paint tool never re-armed the host (the controller only fired on patches) so strokes silently no-oped after a reload — AppFrame re-runs the arm effects on boot. map tests green.",
+  "shas": [
+    "be05ccb56"
+  ],
+  "resolvedAt": "2026-07-02T01:46:16.602Z"
+}

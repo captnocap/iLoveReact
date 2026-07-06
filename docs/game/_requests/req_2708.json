@@ -1,0 +1,30 @@
+{
+  "id": "req_2708",
+  "at": "2026-07-05T21:07:13.952Z",
+  "origin": "session:bb4508c8",
+  "text": "ok cool and uh hah again another one... so we ran into that issue with how when painting the textures it would hit some point and then stop, well, the same thing kinda happens with trees and terrain height, just in a different manner. the textures had a literal hard line where it would just fall back, but these both seem to have an instance cap that is.... remarkably low or something, as i just did a thin outline of one chunk in both terrain first, then went to cross it like an x, and half way thru the first X stroke it stopped painting terrain and no longer will paint it anywhere. and then the same thing when i was passing back over it with trees, but for trees what happens is it hits the inflection point and then the fronds disappear, the trunks still seem to render.",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T21:07:39.421Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T21:19:56.791Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Terrain-stops-painting root-caused and fixed: sculpting grows the heightfield mesh's vert count a little every stroke frame, and the dyn-region allocator re-allocated an exact-fit GPU region on every growth while the old region leaked (bump tail never evicts) — the 4.7M-vert tail filled mid-stroke, after which every re-bake silently drew the stale mesh. The paint DATA and colliders were always fine (hence build pieces riding invisible hills, req_2709). dynEnsureRegion now takes a growth hint: a heightfield reserves its grid's worst case (~89k verts) on FIRST growth so a sculpted chunk re-allocates at most once ever, while flat untouched chunks still cost ~30 verts; live-edit meshes reserve count*2. For the palm fronds: the disappearance rides the instance-pool degrade chain (static retain refusal -> per-frame pool overflow) which was silent at every step — all four degrade points now print loud one-shot diagnostics naming what dropped and which constant to raise. If fronds still vanish after the rebuild, the terminal now says exactly why — report the [r3d] line. Needs a Zig rebuild.",
+  "shas": [
+    "23711c570"
+  ],
+  "resolvedAt": "2026-07-05T21:19:56.791Z"
+}

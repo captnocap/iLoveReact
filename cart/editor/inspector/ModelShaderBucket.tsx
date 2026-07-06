@@ -7,12 +7,15 @@
 // GPU re-bake never runs mid-drag). Sibling of the Color Studio in ModelBrushDock: picking a
 // bucket switches to shader-paint, "Color" hands painting back to the studio's current color.
 import { useState } from 'react';
-import { Col, Row, Text, Pressable, ScrollView, Slider } from '../../../runtime/primitives';
+import { Box, Col, Row, Text, Pressable, Slider } from '../../../runtime/primitives';
+import { Icon } from '../../../runtime/icons/Icon';
 import { DARK_THEME, type Brush } from '@reactjit/runtime/paint';
 import {
   shaderSpec, shaderGroups, paramDefaults, withPalette,
   type ShaderSpec, type ShaderParam,
 } from '../textures/shaders';
+import { shaderVariantData, shaderVariantIndex } from '../textures/shaderPick';
+import { ShaderThumb } from '../shell/PaintToolbar';
 import type { Rgb } from '../data/types';
 
 // The live editing state for the active bucket: which spec, which variant (take), and every
@@ -25,13 +28,19 @@ type Editing = {
   tiles: number;
 };
 
-function seedEditing(spec: ShaderSpec): Editing {
+const PAGE_SIZE = 15;
+const LINE = '#2a2c31';
+const ACCENT = '#6ea8fe';
+
+function seedEditing(spec: ShaderSpec, variantIndex = 0, tiles = 1): Editing {
+  const idx = Math.max(0, Math.min(spec.variants.length - 1, variantIndex));
+  const variant = spec.variants[idx] ?? spec.variants[0]!;
   return {
     spec,
-    variant: 0,
+    variant: idx,
     base: paramDefaults(spec.base),
-    overlay: paramDefaults(spec.variants[0].params),
-    tiles: 1,
+    overlay: paramDefaults(variant.params),
+    tiles,
   };
 }
 
@@ -53,7 +62,12 @@ export default function ModelShaderBucket(props: {
   const [editing, setEditing] = useState<Editing | null>(() => {
     if (ink.kind !== 'shader') return null;
     const spec = shaderSpec(ink.surface);
-    return spec ? seedEditing(spec) : null;
+    return spec ? seedEditing(spec, shaderVariantIndex(spec, ink.data), ink.tiles ?? 1) : null;
+  });
+  const [page, setPage] = useState(() => {
+    const flat = shaderGroups().flatMap((g) => g.specs);
+    const at = activeSurface ? flat.findIndex((spec) => spec.id === activeSurface) : -1;
+    return at === -1 ? 0 : Math.floor(at / PAGE_SIZE);
   });
   const [showList, setShowList] = useState(activeSurface == null);
 
@@ -68,8 +82,8 @@ export default function ModelShaderBucket(props: {
     props.onBrush({ ...props.brush, ink: { kind: 'shader', surface: e.spec.id, data, tiles: e.tiles } });
   };
 
-  const pickBucket = (spec: ShaderSpec) => {
-    const e = seedEditing(spec);
+  const pickBucket = (spec: ShaderSpec, variantIndex = 0) => {
+    const e = seedEditing(spec, variantIndex, editing?.tiles ?? 1);
     setEditing(e);
     setShowList(false);
     commit(e);
@@ -127,6 +141,16 @@ export default function ModelShaderBucket(props: {
 
   // ── The bucket browser (grouped catalog) ───────────────────────────────────────────
   if (showList || !editing) {
+    const flat = shaderGroups().flatMap((g) => g.specs.map((spec) => ({ group: g.group, spec })));
+    const maxPage = Math.max(0, Math.ceil(flat.length / PAGE_SIZE) - 1);
+    const p = Math.min(page, maxPage);
+    const pageItems = flat.slice(p * PAGE_SIZE, p * PAGE_SIZE + PAGE_SIZE);
+    const shelves = pageItems.reduce<Array<{ group: string; specs: ShaderSpec[] }>>((out, item) => {
+      const tail = out[out.length - 1];
+      if (tail && tail.group === item.group) tail.specs.push(item.spec);
+      else out.push({ group: item.group, specs: [item.spec] });
+      return out;
+    }, []);
     return (
       <Col style={{ gap: 8, paddingTop: 10, marginTop: 10, borderTopWidth: 1, borderColor: DARK_THEME.frame }}>
         <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
@@ -138,29 +162,59 @@ export default function ModelShaderBucket(props: {
           ) : null}
         </Row>
         <Text style={{ color: DARK_THEME.dim, fontSize: 10 }}>Dip the brush into a shader and paint it onto the model.</Text>
-        <ScrollView style={{ height: 210 }}>
-          <Col style={{ gap: 8 }}>
-            {shaderGroups().map((g) => (
-              <Col key={g.group} style={{ gap: 4 }}>
-                {label(g.group.toUpperCase())}
-                <Row style={{ flexWrap: 'wrap', gap: 4 }}>
-                  {g.specs.map((spec) => {
-                    const on = spec.id === activeSurface;
-                    return (
-                      <Pressable key={spec.id} onPress={() => pickBucket(spec)}>
-                        <Text style={{
-                          color: on ? '#0d0e10' : DARK_THEME.text, backgroundColor: on ? '#e8e8ea' : '#141518',
-                          fontSize: 10, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4,
-                          borderRadius: 7, borderWidth: 1, borderColor: on ? '#e8e8ea' : '#2a2c31',
-                        }}>{spec.label}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </Row>
-              </Col>
-            ))}
+        {editing ? (
+          <Col style={{ gap: 5 }}>
+            <Row style={{ alignItems: 'center', gap: 7 }}>
+              <Text style={{ color: DARK_THEME.text, fontSize: 11, fontWeight: '700' }}>{editing.spec.label}</Text>
+              <Text style={{ color: DARK_THEME.dim, fontSize: 10 }}>{editing.spec.group}</Text>
+            </Row>
+            {editing.spec.variants.length > 1 ? (
+              <Row style={{ flexWrap: 'wrap', gap: 4 }}>
+                {editing.spec.variants.map((variant, index) => {
+                  const on = index === editing.variant;
+                  return (
+                    <Pressable key={variant.id} onPress={() => pickBucket(editing.spec, index)}
+                      style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, borderRadius: 7, backgroundColor: on ? '#e8e8ea' : '#141518' }}>
+                      <Text style={{ color: on ? '#0d0e10' : DARK_THEME.dim, fontSize: 10, fontWeight: '700' }}>{variant.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </Row>
+            ) : null}
           </Col>
-        </ScrollView>
+        ) : null}
+        <Row style={{ alignItems: 'center', gap: 8 }}>
+          <Pressable onPress={() => setPage(Math.max(0, p - 1))}
+            style={{ width: 24, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: LINE }}>
+            <Icon name="ChevronLeft" size={11} color={DARK_THEME.dim} />
+          </Pressable>
+          <Text style={{ color: DARK_THEME.dim, fontSize: 10, fontFamily: 'ui-monospace' }}>{p + 1}/{maxPage + 1}</Text>
+          <Text style={{ color: DARK_THEME.dim, fontSize: 10, fontFamily: 'ui-monospace' }}>{flat.length} shaders</Text>
+          <Box style={{ flexGrow: 1 }} />
+          <Pressable onPress={() => setPage(Math.min(maxPage, p + 1))}
+            style={{ width: 24, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: LINE }}>
+            <Icon name="ChevronRight" size={11} color={DARK_THEME.dim} />
+          </Pressable>
+        </Row>
+        <Col style={{ gap: 8, minHeight: 204 }}>
+          {shelves.map((shelf) => (
+            <Col key={shelf.group} style={{ gap: 5 }}>
+              {label(shelf.group.toUpperCase())}
+              <Row style={{ flexWrap: 'wrap', gap: 6 }}>
+                {shelf.specs.map((spec) => {
+                  const on = spec.id === editing?.spec.id;
+                  const variantIndex = on ? editing?.variant ?? 0 : 0;
+                  return (
+                    <Pressable key={spec.id} tooltip={`${spec.label} (${spec.group})`} onPress={() => pickBucket(spec, variantIndex)}
+                      style={{ padding: 2, borderRadius: 8, borderWidth: 2, borderColor: on ? ACCENT : 'transparent' }}>
+                      <ShaderThumb shader={spec.shader} data={shaderVariantData(spec, variantIndex, props.paletteFor)} size={44} />
+                    </Pressable>
+                  );
+                })}
+              </Row>
+            </Col>
+          ))}
+        </Col>
       </Col>
     );
   }

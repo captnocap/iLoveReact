@@ -1,0 +1,17 @@
+{
+  "id": "req_2647",
+  "at": "2026-07-05T02:17:12.915Z",
+  "origin": "session:40eebdf5",
+  "text": "here not as a means for this thread to end but how about you write a /hand-over i can pass in another terminal to a new agent and u can prep them to go thru the same flow we are doing here with the mesh editor portion, but for the world editor. il give them a real shit list of things to address and we can keep this thread isolated on the one editor",
+  "status": "new",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T02:19:41.512Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Handoff brief written for the WORLD-editor campaign session: /tmp/handoff-20260705-021752-world-editor-critique-fix-campaign.md (original_conversation_id 40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f). Brief carries: the campaign flow to replicate (gap ledger -> themes -> parallel agents -> critique loop), the existing req_2621 world inventory (gaps X/Y/Z/AA/BB + the no-prop-TS caveat), the two UI laws + region contract, surface split so the two sessions never collide on files (mesh side stays here incl. possibly-live req_2644 agent in AppFrame), all house rules (ship/shot/harness/git/board), and letter sequence continuation from TT. New session waits for the user's shit list before building — T5 hold honored."
+    }
+  ]
+}

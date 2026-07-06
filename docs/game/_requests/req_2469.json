@@ -1,0 +1,30 @@
+{
+  "id": "req_2469",
+  "at": "2026-07-01T22:41:38.289Z",
+  "origin": "session:bf2eaad9",
+  "text": "oh lets move that around, i like  your idea i hate that it causes the whole ui to shift. lay it inside of the container space for the actual mesh rather than above the toolbar. like right in here [Image #2]",
+  "status": "review",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T22:42:45.675Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T22:47:19.926Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Floated the paint bar inside the mesh viewport instead of pushing the whole UI down. It was an in-flow strip under the menu bar, so entering paint mode shifted the entire editor; now it's a rounded floating pill rendered as a LATE overlay (this layout paints in tree order, so it must be a late root child to sit over the 3D view), absolutely positioned just inside the viewport (left 410 = past the fixed rail 48 + content panel 350, top 78 = below the model title strip). Its popovers drop from it (repositioned to match). Nothing in the layout shifts anymore. Cart-only, hot-reloads; transforms clean. Sha 6e71c2bf0. The left/top anchor is currently constant (relies on the fixed rail+panel widths) — if the content panel ever collapses or the exact y is off, it's a one-line nudge or a follow-up to anchor it relative to the viewport container itself.",
+  "shas": [
+    "6e71c2bf0"
+  ],
+  "resolvedAt": "2026-07-01T22:47:19.926Z"
+}

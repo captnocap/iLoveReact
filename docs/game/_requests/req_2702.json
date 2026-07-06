@@ -1,0 +1,28 @@
+{
+  "id": "req_2702",
+  "at": "2026-07-05T20:11:40.256Z",
+  "origin": "session:bb4508c8",
+  "text": "34,000 floats, what scale does that expand to. im curious because as it stands the current editor has a terrain size that is what i would say is.... maybe 1/32th of what it will expand to in scale",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T20:12:37.538Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T20:12:37.546Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Informational — answered the scale question. The 34000-float cap is PER CHUNK (a fixed 120m×120m / 120×120-tile record: header + palettes + binding table + two cell grids); it does not scale with terrain size at all — a bigger map adds more chunks, each with its own pooled buffer. The real scale walls documented for a ~32x world: MAX_PAINT_SLOTS=64 in world_loader.zig (only 64 painted chunks get live render nodes/colliders — first wall, ~0.92 km2 painted, warns LIVE MIRROR FULL; proper fix at that point is camera-radius slot recycling, not a bigger constant), GROUND_POOL=128 drawn chunks/frame (culling keeps this fine), and the chunk address window 153x9 (18.4km x 1.1km strip — MAX_CHUNK_ROW=8 needs a ruling if the world should grow both directions). No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-05T20:12:37.546Z"
+}

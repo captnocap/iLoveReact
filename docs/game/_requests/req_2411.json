@@ -1,0 +1,30 @@
+{
+  "id": "req_2411",
+  "at": "2026-07-01T09:19:27.406Z",
+  "origin": "session:be477f59",
+  "text": "ya its gone. that should have been in the pamplet at the door that said all your cross cart imports and exports get taken out back with a 22 gauge after hours. its gone. its not coming back. but dont be sad it left its counterpart to infest inside of the editor cart directory instead",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T09:20:35.860Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T09:20:35.869Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same work as req_2410 (one task split across two prompts): the '22 gauge after hours' confirmation that the root cart/modelview.tsx twin is gone for good (deleted commit 6c112022b, req_2403/2404) and only the editor's cart/editor/stage/ModelView.tsx copy survives. Verified the deletion, so the status-text dedup fix (drop the 'Edge · Move gizmo' restatement of the highlighted toolbar icons, keep 'N selected') needed editing ONLY the surviving editor copy — no cross-cart sync. Fix committed in c6b85b6dc.",
+  "shas": [
+    "c6b85b6dc"
+  ],
+  "resolvedAt": "2026-07-01T09:20:35.869Z"
+}

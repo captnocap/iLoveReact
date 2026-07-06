@@ -1,0 +1,48 @@
+{
+  "id": "req_2625",
+  "at": "2026-07-04T23:59:07.048Z",
+  "origin": "session:40eebdf5",
+  "text": "oh one more thing, how could i forget. loop cuts. lets look at this old editor on a basic cube. ok so i selected a face and loop cut this is the instant result so far before confirm [Image #48] notice how the gizmo is on it, i can literally see where the cut is, and because that gizmo is there u bet ur sweet ass that i can drag it[Image #49] alright now look below, me dragging it changes the offset. and also important, im in size units. lets add some cuts [Image #50] and u can see where this is going [Image #51] and then +1 on direction and whoop [Image #52] there it is. also notice how it makes this uv INSTANTLY [Image #53] infact this is one thing we also lack is this uv in here is fucking instant on updates and ours is a refresh button for the birds.  now lets look at our loop cut in the editor for a cube\n\nfirst of all, this is the loop cut interface so we are off to a fucking immaculate start here i dont even know how you can fuck up a ui that bad but its actually impressive [Image #54] but the bigger problem here. what the FUCK am i cutting? where is the cut? what the FUCK am i lookingn at? [Image #55] oh hey and btw this screenshot now is in the other direction with 6 cuts. can you tell [Image #56] ?",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T23:59:26.980Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T00:00:11.202Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LOOP CUT round — the microcosm gap. Host session (req_2588-2590, f215df4a9) is FULLY BUILT AND WIRED: popup stepper changes call __mesh_lc_preview (live re-cut from captured base, markDirty repaint), commit journals ONE entry, cancel restores exactly. The user's cuts ARE happening — they are INVISIBLE because new cut edges on a flat-shaded uniform cube draw nothing (gap B face/edge dressing is what makes loop cut unusable — B is structural, not cosmetic). Missing vs old studio treatment: (CC) CUT VISIBILITY — old shows every cut line + per-face center dots instantly during preview; new shows a blank cube (both Image 55/56 look identical at 1-cut-dir0 vs 6-cuts-dir1). (DD) DRAGGABLE CUT GIZMO — old plants the translate gizmo ON the cut plane; dragging it drives the offset live. New offset is popup steppers only; no handle in the viewport. lc_begin already returns size0/size1 so the host knows the cut frame. (EE) SIZE-UNITS OFFSET — old popup has unit toggle [Size Units | Percent], user works in size units (offset 8 = 8u); new popup is hardcoded 'offset %'. The sizes ARE captured in cart state (lc state .sizes from lc_begin) and unused — pure UI. (FF) INSTANT UV — old UV panel re-lays-out live DURING the session (Image 53: 18 faces appear as you cut); new UV atlas panel updates via a manual refresh button ('for the birds') — UV panel must subscribe to topo changes (adoptMesh already knows every re-key). (GG) popup presentation: floats detached mid-void; old anchors bottom-center w/ labeled fields. Loop cut ships as part of T1(B visibility + DD gizmo) + T4(EE units, FF live UV, GG anchor)."
+    },
+    {
+      "at": "2026-07-05T00:42:30.302Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LANDED partial (c81d79403): CC cut visibility — lc-preview cut-plane edges accented cyan in the edge overlay; DD — translate-style handle drawn on the middle cut plane (LcSession records sel_center + comb). Cut loop verified visible headlessly (t7_loopcut.png, TRI 12->28). REMAINING cart-side: wire drag on the lc handle to offset, size-units toggle EE, live UV FF, popup anchor GG (undo/modal agent has EE/FF/GG in brief); plus add lcbegin/lcprev/lcend ops to ModelView's RJIT_MESHOPS harness so lc sessions are headlessly testable. Gizmo policy (req_2620 V / 2619 Q) also landed in same sha: selection-extent-scaled axes clamped 46-170px, per-axis 1.9x growth when screen-parallel, handles 7/9px non-overlapping, drag maps world-units-per-pixel through the drawn handle."
+    },
+    {
+      "at": "2026-07-05T00:58:01.881Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LANDED EE/FF/GG (81309f7b0): [Size|%] unit toggle defaulting to size units (lc sizes finally consumed, door still fed 0..1 frac); UV panel auto-refreshes off adoptMesh/applyTopo/stroke-end — manual refresh dependency gone; popup anchored+clamped. Remaining: drag-on-cut-handle wiring + lcbegin/lcprev/lcend harness ops (wave 2)."
+    },
+    {
+      "at": "2026-07-05T01:08:44.249Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Wave 2 cleanup landed (17fa648c4): lc harness ops (lcbegin/lcprev/lcend) — lc sessions now headlessly testable (lc_harness.png: 3 cyan cuts + handle + popup values matching; lc_commit.png: commit keeps cut TRI 12->52, one journal entry). Gap DD (drag the cut handle) is HOST-BLOCKED with an exact spec documented in-code at ModelView.tsx:520-532: host input loop owns all presses during mesh capture so cart-side drag is impossible; needs (1) LcSession record last_cuts/last_offset_frac, (2) meshLcHandleHit/meshLcHandleDrag in 3d.zig + engine.zig press/motion routing BEFORE meshGizmoHit while lc live (today a handle click falls through to a face pick and mutates selection mid-session), (3) one read-back door __mesh_lc_state() -> {ok,dir,cuts,offsetFrac,key,count}; then ~15 lines of ModelView polling. Launching a dedicated agent for that vertical now. Also landed: ReadOnlySection right-edge parity + ModelDetailBody ATLAS SETS bounded list (req_2627 follow-ups 1+2 done; remaining follow-ups: world-branch focus panel budgeting, dead HW_StatusBar)."
+    },
+    {
+      "at": "2026-07-05T01:23:18.112Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "GAP DD COMPLETE (ef770e7db) — loop-cut handle drag wired end to end: LcSession records last_cuts/last_offset_frac; lcHandleGeom() factored so draw + hit share one geometry source (cannot disagree); meshLcHandleHit checked BEFORE meshGizmoHit while a session is live and the press branch is fully modal (no face-pick fall-through, empty clicks inert — matches the req_2626 law); meshLcHandleDrag maps pixel delta through the drawn handle length (same precision rule as the gizmo) and re-previews host-side; ONE read-back door __mesh_lc_state -> {ok,dir,cuts,offsetFrac,key,count}; ModelView polls it at 250ms while the popup is open, adopts changed keys via the same adoptMesh path, mirrors values through the Size/% toggle. Verified: door echoes exact lcprev params + live key headlessly; handle overlay confirmed visually (lc_handle_top.png — first shot picked the bottom face whose handle hid behind the popup); hit/drag arithmetic verified by code-path reasoning (no mouse harness exists) — flagged honestly. ALL req_2625 gaps CC/DD/EE/FF/GG now landed across c81d79403 + 81309f7b0 + 17fa648c4 + ef770e7db."
+    }
+  ]
+}

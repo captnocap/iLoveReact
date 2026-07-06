@@ -1,0 +1,30 @@
+{
+  "id": "req_2300",
+  "at": "2026-07-01T01:44:58.690Z",
+  "origin": "session:be477f59",
+  "text": "here is a performance problem for you to chase right now. the quality slider in the context menu make the entire app eat fucking shit. its probably a javascript slider. if so, i shouldnt have to say any more and the fix should be obvious. if there are others that exist inside of the @cart/editor/ cart specifically better fix them before i find them",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T01:45:04.296Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T01:48:11.711Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the Quality slider perf meltdown. Root cause: the slider fired host.__model_set_quality — a full mesh re-decimation from the retained full-res source — on EVERY onChange frame (~60x/sec throttled to 16ms) while dragging. Since the host Slider (SLIDER-0611) already owns the thumb during a drag and ignores sliderValue echoes mid-drag, onChange gave zero UX benefit and only produced a re-mesh storm that melted the app. Fix: dropped onChange from both quality sliders (cart/editor/stage/ModelContextMenu.tsx and the standalone cart/modelview.tsx strip) and kept onCommit, so decimation runs exactly once on release. Thumb still scrubs smoothly host-side; the tris readout settles on release. Audited every other slider/onChange in cart/editor: the rest are cheap text inputs (search/rename) and MaterialFocus quality is discrete onPress buttons — no other per-frame heavy handlers exist.",
+  "shas": [
+    "9bd1a3652"
+  ],
+  "resolvedAt": "2026-07-01T01:48:11.711Z"
+}

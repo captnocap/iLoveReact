@@ -1,0 +1,10 @@
+{
+  "id": "req_2290",
+  "at": "2026-07-01T01:27:31.022Z",
+  "origin": "session:986b717b",
+  "text": "sorry when u say editor state what does that mean exactly. from my understanding that means while it looks like there is a file structure like you would find on disk its actually all contained in a database",
+  "status": "new",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_2527",
+  "at": "2026-07-04T02:52:33.033Z",
+  "origin": "session:69672c0b",
+  "text": "ok right, but i see there is also clearly on the side a 'save' button for paint variants, so, i should be more clear, my flow was this:\n\nak47 -> click paint -> atlas size -> painting -> save button -> quit -> restart -> ak47 -> paint button -> atlas size again, but i also can see in the side Painting 1 826x1059 985px on the atlas set paint/7d09cc62",
+  "status": "new",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_2700",
+  "at": "2026-07-05T20:07:37.683Z",
+  "origin": "session:a71ff6e3",
+  "text": "oh, i guess this is relevant also, but if you look at the water painting tool. im pretty sure if i remember correctly, it requres that you have to have a negative heightfield to then be able to paint in water. but as it stands, the heightfield tool is only allowed to do positive. now, i kinda also think this is kinda a bad hack if you ask me, and that the water tool should do its own negative depth on any terrain, that way you know for example you could put a river flowing down a hill.",
+  "status": "new",
+  "sessionId": "a71ff6e3-8b84-45fa-b0da-3e926d36a3d4",
+  "captureMode": "hook",
+  "events": []
+}

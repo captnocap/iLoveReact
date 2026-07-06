@@ -1,0 +1,18 @@
+{
+  "id": "req_2561",
+  "at": "2026-07-04T05:48:29.114Z",
+  "origin": "session:5fc01965",
+  "text": "ok now in terms of build, uh, you will have to tell me how much of it has been carried over or not, but this currently defaults to floor, with no current registry of other types to place as basics without even getting into the authored build pieces. like, where is wall? has it even made it in to this editor yet?",
+  "status": "doing",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T05:48:53.867Z",
+      "actor": "5fc0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

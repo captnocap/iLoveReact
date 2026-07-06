@@ -1,0 +1,24 @@
+{
+  "id": "req_2539",
+  "at": "2026-07-04T03:57:38.069Z",
+  "origin": "session:1ccd61f7",
+  "text": "cool. heres another bug for you to fix for me. so in the editor im looking at this bus, [Image #15] and im going to make an illegal edit to it (one that breaks and wants to ask me to split quads or ignore or revert)[Image #16] and so im going to click revert [Image #17] and we can see the model restored but the verts are still all fucked",
+  "status": "doing",
+  "sessionId": "1ccd61f7-1753-4038-a146-209701d9708e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T03:57:54.470Z",
+      "actor": "1ccd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T04:01:04.920Z",
+      "actor": "1ccd",
+      "kind": "note",
+      "text": "Root cause: guard Revert memcpy-restores model_paint positions directly, bypassing mesh_edit's mutation path — the welded unique-vert positions that drive the overlay dots/edges, gizmo pivot, and picking were never resynced, so they kept the stretched drag while the shaded mesh restored. Fix: new mesh_edit.refreshPositionsFromSoup() re-reads positions through the corner->vert weld map (topology/selection/scope survive), called from meshEditGuardResolve action 2. Commit pending rebuild to verify visually."
+    }
+  ]
+}

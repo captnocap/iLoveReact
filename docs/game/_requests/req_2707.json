@@ -1,0 +1,36 @@
+{
+  "id": "req_2707",
+  "at": "2026-07-05T21:01:39.562Z",
+  "origin": "session:bb4508c8",
+  "text": "i see it now, for whatever reason i get hover tooltips and all that jazz but i click it and nothing happens. also clicking done does nothing so i have to think its being absorbed by the editor that its rendering above? if you peek at how the shaders are picked from the tile painter, it also renders on top of this, so if it has some specific way to pass the hit that is what id start with, if not, then idk D:",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T21:02:00.232Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T21:03:19.319Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-05T21:03:27.987Z",
+      "actor": "fable-effects",
+      "kind": "note",
+      "text": "Correction: the fix sha is 7e72606af (the review paragraph cited a placeholder hash)."
+    }
+  ],
+  "resolution": "Clicks on the Add Chunk dialog did nothing (while tooltips worked) because the armed Map Paint tool makes the HOST claim every pointer press inside the loader pane before JS hit-testing — the exact bug the texture picker hit in req_2666 gap ZZ, and the picker's fix (a derived workspaceState that shows paint as inactive so the host releases the claim) only covered the picker popover. Generalized that release to every BLOCKING dialog via blockingOverlay(state): while Add Chunk / file explorer / build journal / new-mesh is unresolved the host claim is released, and resolving the dialog restores it on the next render — modal discipline now gates the host pointer claim, not just JS input. Pure TSX, hot-reloads; verified the editor bundle resolves. The same fix inherently repairs click-through for the other blocking dialogs opened mid-paint, which had the identical latent bug.",
+  "shas": [
+    "34724a2d1"
+  ],
+  "resolvedAt": "2026-07-05T21:03:19.319Z"
+}

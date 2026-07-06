@@ -1,0 +1,10 @@
+{
+  "id": "req_2603",
+  "at": "2026-07-04T13:32:29.181Z",
+  "origin": "session:bf578c72",
+  "text": "yeah now there is one thing i was thinkg about for player models and so you know how this is like a fixed model getting imported, ok but what if, you can take all the values that are g etting passed through from the selection of faces like i was demonstrating, this gives you effectively the rough 'shape' to fill in, and then a model becomes effectively like a system of a skeleton where the geometry is more or less like a formula for sdf rather than it is a geometry. this would, effectively (i think) let us take the shape and only need to ever really animate the bones without ever splitting quads or shit",
+  "status": "new",
+  "sessionId": "bf578c72-3717-49e0-8e8a-64761048423d",
+  "captureMode": "hook",
+  "events": []
+}

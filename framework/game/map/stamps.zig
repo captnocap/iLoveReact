@@ -25,6 +25,28 @@ pub const FieldView = struct {
 /// square Chebyshev, diamond Manhattan.
 pub const BrushShape = enum(u8) { circle = 0, square = 1, diamond = 2 };
 
+/// The editor's visible brush gizmo is also the dab style. Values match the TS
+/// host-door enum and the loader preview switch.
+pub const BrushStyle = enum(u8) { beam = 0, decal = 1, rings = 2, profile = 3, handles = 4 };
+
+pub const BrushStyleTuning = struct {
+    decal_feather_start_t: f32 = 0.72,
+    decal_cell_min_weight: f32 = 0.45,
+    rings_center_t: f32 = 0.18,
+    rings_inner_min_t: f32 = 0.42,
+    rings_inner_max_t: f32 = 0.52,
+    rings_outer_min_t: f32 = 0.82,
+    rings_outer_max_t: f32 = 1.0,
+    handles_center_t: f32 = 0.16,
+    handles_axis_half_width_t: f32 = 0.055,
+    handles_axis_min_t: f32 = 0.24,
+    handles_handle_center_t: f32 = 0.82,
+    handles_handle_radius_t: f32 = 0.13,
+    profile_cell_min_weight: f32 = 0.35,
+};
+
+pub const BRUSH_STYLE_TUNING = BrushStyleTuning{};
+
 pub fn footprintDistance(shape: BrushShape, dx: f32, dy: f32) f32 {
     const ax = @abs(dx);
     const ay = @abs(dy);
@@ -32,6 +54,16 @@ pub fn footprintDistance(shape: BrushShape, dx: f32, dy: f32) f32 {
         .square => @max(ax, ay),
         .diamond => ax + ay,
         .circle => std.math.hypot(dx, dy),
+    };
+}
+
+pub fn footprintDistanceM(shape: BrushShape, dx_m: f32, dy_m: f32) f32 {
+    const ax = @abs(dx_m);
+    const ay = @abs(dy_m);
+    return switch (shape) {
+        .square => @max(ax, ay),
+        .diamond => ax + ay,
+        .circle => std.math.hypot(dx_m, dy_m),
     };
 }
 
@@ -50,6 +82,66 @@ pub fn brushProfile(profile: BrushProfile, t: f32) f32 {
     };
 }
 
+fn decalWeight(t: f32) f32 {
+    const edge = BRUSH_STYLE_TUNING.decal_feather_start_t;
+    if (t <= edge) return 1;
+    if (edge >= 1) return 0;
+    return @max(0, @min(1, (1 - t) / (1 - edge)));
+}
+
+fn ringsWeight(t: f32) f32 {
+    const k = BRUSH_STYLE_TUNING;
+    if (t <= k.rings_center_t) return 1;
+    if (t >= k.rings_inner_min_t and t <= k.rings_inner_max_t) return 0.85;
+    if (t >= k.rings_outer_min_t and t <= k.rings_outer_max_t) return 1;
+    return 0;
+}
+
+fn handlesWeight(dx_m: f32, dy_m: f32, radius_m: f32) f32 {
+    const k = BRUSH_STYLE_TUNING;
+    const nx = dx_m / radius_m;
+    const ny = dy_m / radius_m;
+    const ax = @abs(nx);
+    const ay = @abs(ny);
+    const radial = std.math.hypot(nx, ny);
+    if (radial <= k.handles_center_t) return 1;
+
+    const axis_near = @min(ax, ay);
+    const axis_far = @max(ax, ay);
+    if (axis_near <= k.handles_axis_half_width_t and axis_far >= k.handles_axis_min_t and axis_far <= 1) return 0.75;
+
+    const h = k.handles_handle_center_t;
+    const r = k.handles_handle_radius_t;
+    if (std.math.hypot(nx - h, ny) <= r) return 1;
+    if (std.math.hypot(nx + h, ny) <= r) return 1;
+    if (std.math.hypot(nx, ny - h) <= r) return 1;
+    if (std.math.hypot(nx, ny + h) <= r) return 1;
+    return 0;
+}
+
+pub fn brushStyleWeight(style: BrushStyle, shape: BrushShape, profile: BrushProfile, dx_m: f32, dy_m: f32, radius_m: f32) f32 {
+    const radius = @max(DOT_M, radius_m);
+    const t = footprintDistanceM(shape, dx_m, dy_m) / radius;
+    if (t > 1) return 0;
+    return switch (style) {
+        .beam => 1,
+        .decal => decalWeight(t),
+        .rings => ringsWeight(t),
+        .profile => @max(0, brushProfile(profile, t)),
+        .handles => handlesWeight(dx_m, dy_m, radius),
+    };
+}
+
+pub fn brushStyleCoversCell(style: BrushStyle, shape: BrushShape, profile: BrushProfile, dx_m: f32, dy_m: f32, radius_m: f32) bool {
+    const weight = brushStyleWeight(style, shape, profile, dx_m, dy_m, radius_m);
+    if (weight <= 0) return false;
+    return switch (style) {
+        .decal => weight >= BRUSH_STYLE_TUNING.decal_cell_min_weight,
+        .profile => weight >= BRUSH_STYLE_TUNING.profile_cell_min_weight,
+        else => true,
+    };
+}
+
 pub fn clampHeight(z: f32) f32 {
     return @max(-HEIGHT_LIMIT, @min(HEIGHT_LIMIT, z));
 }
@@ -61,6 +153,7 @@ pub const StampOpts = struct {
     radiusM: f32,
     shape: BrushShape,
     profile: BrushProfile,
+    style: BrushStyle = .profile,
     /// pull cells in range to 0 instead of stamping
     erase: bool = false,
 };
@@ -83,12 +176,14 @@ pub fn stampBrush(f: FieldView, cix: i32, ciy: i32, opts: StampOpts) void {
             if (jx < 0 or jx >= f.cols) continue;
             const dm = footprintDistance(opts.shape, @floatFromInt(dx), @floatFromInt(dy)) * DOT_M;
             if (dm > radiusM) continue;
+            const weight = brushStyleWeight(opts.style, opts.shape, opts.profile, @as(f32, @floatFromInt(dx)) * DOT_M, @as(f32, @floatFromInt(dy)) * DOT_M, radiusM);
+            if (weight <= 0) continue;
             const idx = @as(usize, @intCast(jy)) * f.cols + @as(usize, @intCast(jx));
             if (opts.erase) {
                 f.z[idx] = 0;
                 continue;
             }
-            const mag = peak * brushProfile(opts.profile, dm / radiusM);
+            const mag = peak * weight;
             if (mag <= 0) continue;
             // Raise toward the signed target: re-stamping / overlap never climbs
             // past centerZ (heightData.ts:106).
@@ -246,6 +341,19 @@ test "footprint metrics match the three shapes" {
     try std.testing.expectApproxEqAbs(@as(f32, 7), footprintDistance(.diamond, 3, 4), 0.0001);
 }
 
+test "brush style weights distinguish the five dab families" {
+    const r: f32 = 4;
+    try std.testing.expectApproxEqAbs(@as(f32, 1), brushStyleWeight(.beam, .circle, .cone, 3, 0, r), 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 1), brushStyleWeight(.decal, .circle, .cone, 0, 0, r), 0.0001);
+    try std.testing.expect(brushStyleWeight(.decal, .circle, .cone, 3.5, 0, r) > 0);
+    try std.testing.expect(brushStyleWeight(.decal, .circle, .cone, 3.5, 0, r) < 1);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), brushStyleWeight(.rings, .circle, .cone, 2.6, 0, r), 0.0001);
+    try std.testing.expect(brushStyleWeight(.rings, .circle, .cone, 3.5, 0, r) > 0);
+    try std.testing.expect(brushStyleWeight(.profile, .circle, .cone, 2, 0, r) < brushStyleWeight(.profile, .circle, .cone, 0, 0, r));
+    try std.testing.expect(brushStyleWeight(.handles, .circle, .cone, 3.3, 0, r) > 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), brushStyleWeight(.handles, .circle, .cone, 2.4, 2.4, r), 0.0001);
+}
+
 test "stampBrush raises toward the profile, never sums" {
     var buf: [21 * 21]f32 = undefined;
     const f = testField(21, &buf);
@@ -263,6 +371,15 @@ test "stampBrush raises toward the profile, never sums" {
     erase_opts.erase = true;
     stampBrush(f, 10, 10, erase_opts);
     try std.testing.expectApproxEqAbs(@as(f32, 0), f.z[10 * 21 + 10], 0.0001);
+}
+
+test "ring style stamps center and bands while leaving gaps" {
+    var buf: [41 * 41]f32 = undefined;
+    const f = testField(41, &buf);
+    stampBrush(f, 20, 20, .{ .centerZ = 8, .radiusM = 4, .shape = .circle, .profile = .cone, .style = .rings });
+    try std.testing.expectApproxEqAbs(@as(f32, 8), f.z[20 * 41 + 20], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), f.z[20 * 41 + 25], 0.0001);
+    try std.testing.expect(f.z[20 * 41 + 27] > 0);
 }
 
 test "stampBrush digs with negative centerZ via signed min" {

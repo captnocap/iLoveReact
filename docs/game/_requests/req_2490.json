@@ -1,0 +1,30 @@
+{
+  "id": "req_2490",
+  "at": "2026-07-02T01:24:16.657Z",
+  "origin": "session:2b166540",
+  "text": "alright cool now im pretty sure we said at the top of this that the map data was farts and dicks, i can clearly see that you have a new blank chunk but its rendering in clash with the loaded world that was there previously and so its all a mishmash of shit, so i still cant really evaluate the tool",
+  "status": "review",
+  "sessionId": "2b166540-f213-42f7-ba61-c71ee4889378",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T01:31:07.718Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T01:31:07.727Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The mishmash was the editor's viewport mounting zig-out/game/editor/main.gamefile — the condemned hmsc sandbox bake — under the new painted chunk. Fixed both ends (910961f15): world_loader now BLANK-BOOTS when the game file is MISSING (constructor.blankScene: empty slices, null optionals, default env — the world is exactly the live layers: painted map + placed pieces + brush beam over nothing; a corrupt file still fails loudly), and cart/editor points at its OWN fresh path (world.gamefile, doesn't exist yet), leaving the old junk on disk but unmounted; the future compile lane writes the new path. NEEDS A FRAMEWORK REBUILD (loader+constructor are host-side); world gamefile/mapfile test steps green. Note: the painted-map.rmap you stroked during testing still auto-loads on arm — delete zig-out/game/editor/painted-map.rmap if you want the canvas fully virgin.",
+  "shas": [
+    "910961f15"
+  ],
+  "resolvedAt": "2026-07-02T01:31:07.727Z"
+}

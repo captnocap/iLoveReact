@@ -1,9 +1,10 @@
 {
-  "seq": 1,
+  "seq": 2,
   "threads": [
     {
       "stableId": "thread_0001",
       "semanticName": "dont_introduce_old_shit",
+      "description": "when agents think  its totally safe to just reuse old systems",
       "aliases": [
         "req_2246"
       ],
@@ -15,7 +16,32 @@
       ],
       "linkedBuilds": [
         "1.0.0.2246"
-      ]
+      ],
+      "ratings": {
+        "req_2246": 1
+      },
+      "gospel": ""
+    },
+    {
+      "stableId": "thread_0002",
+      "semanticName": "240 fps to 2 fps",
+      "description": "when performance eats a plate of dicks for breakfast",
+      "aliases": [
+        "req_2300"
+      ],
+      "tags": [],
+      "searchTokens": [],
+      "attachedCaptures": [],
+      "linkedRequests": [
+        "req_2300"
+      ],
+      "linkedBuilds": [
+        "1.0.0.2300"
+      ],
+      "ratings": {
+        "req_2300": 10
+      },
+      "gospel": "req_2300"
     }
   ],
   "captures": [

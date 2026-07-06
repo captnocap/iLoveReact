@@ -1,0 +1,18 @@
+{
+  "id": "req_2588",
+  "at": "2026-07-04T08:25:33.145Z",
+  "origin": "session:06ca5239",
+  "text": "in the @cart/editor/ mesh editor did we ever get loop cuts on faces? im not seeing it at all",
+  "status": "doing",
+  "sessionId": "06ca5239-c87d-4092-bf63-d092c4bbbbed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T08:29:09.393Z",
+      "actor": "06ca",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

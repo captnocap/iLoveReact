@@ -1,0 +1,18 @@
+{
+  "id": "req_2405",
+  "at": "2026-07-01T08:42:02.711Z",
+  "origin": "session:be477f59",
+  "text": "alright did u have this one on ur bingo cards bucko, heres part of the interface when i have added a cone mesh. also this is not specific t o cone mesh so just a mesh in general.  alright lets count how many words reoccur and how many of them are actually useful. i see cone on here 4 times[Image #5] but some have merrit! so, we have the Cone 1 in the trab at the bottom, which also.. says cone. so wait 5 cones. alright next we have the model focus which says cone 1 and then primitive/cone and then cone primitive all in the same fucking card. that one gets a +2 because i didnt even count how many cones was in it so really scratch the 4 we are up to 6 uses of the word cone on the interface right now. and if u were paying attention at home folks u would catch that it also says primitive 3 times fast. dont do that while looking in a mirror",
+  "status": "doing",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T08:42:23.577Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_2415",
+  "at": "2026-07-01T09:26:34.807Z",
+  "origin": "session:8cf696c0",
+  "text": "ok so next the outliner is giving me the coloring for each part of it that would be in respect to what the model would show, however im getting a fully blank white model with 5 outliner colors [Image #22]; also, if i have a outliner selected, and t hen i say turn on edges or faces or any of that, im seeing them for every outliner, not the scoped in focus one and then also it doesnt scope me to selecting any of t hem for any outliner even if its not my in focus one",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T09:29:05.077Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

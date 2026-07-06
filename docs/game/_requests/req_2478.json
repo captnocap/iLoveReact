@@ -1,0 +1,10 @@
+{
+  "id": "req_2478",
+  "at": "2026-07-01T23:36:00.538Z",
+  "origin": "session:ea3ce9ce",
+  "text": "well. so and this is a major part in why i really wanted to when setting up the whole new model system was extract them all from the database because its going to explode and never be able to upload and il never be able to use the repo across machines so the reason everything goes up on gh is because i need to have the same assets for example when i load it up on my macbook, which, was last like 3-4 days ago that was done so its not like an anomoly that happens also tho 300 commits since then sounds a bit strange also",
+  "status": "new",
+  "sessionId": "ea3ce9ce-d0ad-468f-a469-a95242ec571e",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2724",
+  "at": "2026-07-06T00:37:18.653Z",
+  "origin": "codex:019f34da",
+  "text": "inside of the cart/editor there is a 'project file explorer' but it currently is tracking literal tsx and ts files which is confusing as hell since its completely unrelated to what the app is for so can you shape that up more correctly to not do that",
+  "status": "review",
+  "sessionId": "019f34da-bc30-71e2-a571-d554cad411f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:37:33.128Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T00:56:29.156Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the editor file explorer into a Project Asset Explorer: it indexes editor-owned on-disk assets under cart/editor/data/models and cart/editor/data/textures, drops TS/TSX/source-file categories, and updates the visible UI/status copy to assets instead of repo files.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T00:56:29.156Z"
+}

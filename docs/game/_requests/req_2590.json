@@ -1,0 +1,18 @@
+{
+  "id": "req_2590",
+  "at": "2026-07-04T08:27:39.455Z",
+  "origin": "session:06ca5239",
+  "text": "look at how the last stuido treated it @cart/hmsc-int/",
+  "status": "doing",
+  "sessionId": "06ca5239-c87d-4092-bf63-d092c4bbbbed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T08:29:09.409Z",
+      "actor": "06ca",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

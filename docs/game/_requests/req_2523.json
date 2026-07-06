@@ -1,0 +1,30 @@
+{
+  "id": "req_2523",
+  "at": "2026-07-02T07:31:11.488Z",
+  "origin": "session:69672c0b",
+  "text": "let me give you a better mental model to think about it from so its done right the first time. so inside of the app there is the content browser. it looks like this for me [Image #1] and when i click on lets say the ak47 it does this [Image #2] it opens a little menu below and shows a model. ok also it shows the ak47 expanded and it says -mesh -atlases -paints -shaders yet, however if i click into any of these like mesh for example, it says nno mdels [Image #3] and this is the whole way through. now, i am hoping you see where this is going. everything instead of storing inside of a database stores on disk, and the appropriate files are populated into the model directory. each model getting its own directory. meshes contain the decimations stored for LoD, atlas stores the uv in an actual file format, paints store variations of paint on the atlas so that many can be stored, and all the like. when i click on ak47 in the future, my hopes are this: i click on the model diretory name, it shows me the base model, and then shows me the model with every paint variation on it as a preview right away, it shows me the base atlas, and then for each variation of it the actual painted atlas files. clicking into any one of these would expose it into the proper editing window in app",
+  "status": "doing",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T07:31:51.531Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T07:50:59.967Z",
+      "actor": "session-6967",
+      "kind": "note",
+      "text": "Plan approved (concurrent-strolling-snowglobe.md): finish deferred 'Slice 2' = real on-disk model packages. DONE: per-model folderId fix so clicking Bus targets Bus not another model (cd2c5502); subfolder file reader so mesh/atlases/paints/shaders show real files not 'no models' (04572a12). REMAINING: Phase A writer (Save writes atlas/paint-substrate/shaders now; mesh LoDs need new __model_mesh_bytes Zig door), Phase C static previews (replaces live-Scene3D thumbnails, also fixes 124 vs 248), Phase D click-to-edit. Phase A/D live in AppFrame.tsx which another session is editing — coordinate. Paints = strokes(game export) + atlas PNG(editing substrate). Git remediation deferred by user."
+    },
+    {
+      "at": "2026-07-03T20:00:54.649Z",
+      "actor": "session-6967",
+      "kind": "note",
+      "text": "Phase A done (b325b2377): the BIG find — paint variants were saved to localstore (a db), the exact storage the user rejected. Migrated to on-disk: paints/paint_N.json (stroke program, game form) + paints/paint_N.png (rasterized atlas substrate/preview, edit form). New __image_write_png Zig door (reuses stbi_write_png). Dead save-snapshot command now materializes the active model package + renamed 'Save Model to Library'. Needs rebuild for the PNG door; stroke-json saves work pre-rebuild. NOTE: paints/ files are untracked + not gitignored (git handling deferred by user). Remaining: mesh LoD export door (__model_mesh_bytes), static previews (Phase C), click-to-edit (Phase D)."
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_2386",
+  "at": "2026-07-01T08:01:27.323Z",
+  "origin": "session:cc188b8e",
+  "text": "well the 'ts fallback' doesnt exist in the editor cart as it stands while this loads the world into the view none of the actual capability of using it has existed in this app yet. so no there wont be any ts fallback. and to go further i rebuilt, loaded the app, clicked on a existing placed piece, and i dont have any feedback i have it selected; maybe i do, i cant actually tell at this point",
+  "status": "new",
+  "sessionId": "cc188b8e-254f-4f48-b4c4-9dc3aad1d366",
+  "captureMode": "hook",
+  "events": []
+}

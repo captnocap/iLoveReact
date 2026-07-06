@@ -1,0 +1,18 @@
+{
+  "id": "req_2533",
+  "at": "2026-07-04T03:18:37.166Z",
+  "origin": "session:69672c0b",
+  "text": "ok and then just one other thing to ask before we move forward, is, again looking at the ak47, and stop me if we have not made it this far yet, but ok click on ak47, see this menu [Image #5] ok [Image #6] \n\nnow click on mesh, and its empty, but isnt that the mesh from the first image? so why does the mesh itself load empty values, and same for the atlases, [Image #7] [Image #8] but then i go to paints and [Image #9] they are filling, but the paints are only possible when we have an atlas, and the atlas isnt populating, so technically these should not be valid by that idea.",
+  "status": "doing",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T03:19:40.671Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

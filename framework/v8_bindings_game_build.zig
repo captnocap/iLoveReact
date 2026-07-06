@@ -18,6 +18,10 @@
 //!     bitmask: 0 = valid, 1 unknown_piece, 2 kind_accepts_no_edits,
 //!     4 position_not_finite.
 //!   __game_build_catalog_count() -> f64   (BUILD_CATALOG.len; palette bootstrap)
+//!   __game_build_catalog_rows() -> JSON string of every BUILD_CATALOG row
+//!     ({id,label,kind,material,theme,snap,w,h,d,r,g,b,opacity}) — the editor's
+//!     build-piece palette/metadata readback (req_2563); buildCatalog.ts prefers
+//!     it over its hand-mirror when the door is live.
 //!
 //! Gated ingredient (V18): registered only when the metafile gate flips
 //! -Dhas-game-build (see sdk/dependency-registry.json `game-build` and
@@ -59,6 +63,10 @@ fn setReturnNull(info: v8.FunctionCallbackInfo) void {
 
 fn setReturnF64(info: v8.FunctionCallbackInfo, value: f64) void {
     info.getReturnValue().set(v8.Number.init(info.getIsolate(), value));
+}
+
+fn setReturnString(info: v8.FunctionCallbackInfo, value: []const u8) void {
+    info.getReturnValue().set(v8.String.initUtf8(info.getIsolate(), value));
 }
 
 fn noopBackingStoreDeleter(_: ?*anyopaque, _: usize, _: ?*anyopaque) callconv(.c) void {}
@@ -206,8 +214,73 @@ fn hostCatalogCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnF64(info, @floatFromInt(build.BUILD_CATALOG.len));
 }
 
+// Representative display tint per material (0..1), verbatim from the editor's
+// MATERIAL_LOOK (cart/hmsc-int/editors/build/pieceShapes.ts) so the readback and
+// the JS fallback mirror agree. Gameplay truth stays in the tags.
+inline fn u8f(v: u8) f32 {
+    return @as(f32, @floatFromInt(v)) / 255.0;
+}
+fn materialRgb(m: build.BuildMaterial) [3]f32 {
+    return switch (m) {
+        .concrete => .{ u8f(0x9a), u8f(0xa3), u8f(0xad) },
+        .brick => .{ u8f(0x8a), u8f(0x4a), u8f(0x3a) },
+        .stucco => .{ u8f(0xd8), u8f(0xcd), u8f(0xb8) },
+        .wood => .{ u8f(0x8a), u8f(0x6a), u8f(0x45) },
+        .metal => .{ u8f(0x7d), u8f(0x85), u8f(0x8d) },
+        .glass => .{ u8f(0xcf), u8f(0xe6), u8f(0xf2) },
+        .chainlink => .{ u8f(0xb9), u8f(0xc2), u8f(0xc9) },
+    };
+}
+
+fn materialOpacity(m: build.BuildMaterial) f32 {
+    return switch (m) {
+        .glass => 0.3,
+        .chainlink => 0.45,
+        else => 1.0,
+    };
+}
+
+// __game_build_catalog_rows() -> JSON string. One object per BUILD_CATALOG row:
+// { id, label, kind, material, theme, snap, w, h, d, r, g, b, opacity }. This is
+// the source-of-truth readback the editor's buildCatalog.ts prefers over its
+// hand-mirror (req_2563 Phase 0). Labels/ids carry no quotes/backslashes, so no
+// JSON escaping is needed. Single-threaded isolate ⇒ a static scratch buffer is
+// safe; V8 copies the bytes on initUtf8.
+var catalog_json_buf: [24576]u8 = undefined;
+
+fn hostCatalogRows(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var stream = std.io.fixedBufferStream(&catalog_json_buf);
+    const w = stream.writer();
+    w.writeByte('[') catch return setReturnString(info, "[]");
+    for (build.BUILD_CATALOG, 0..) |e, i| {
+        if (i != 0) w.writeByte(',') catch return setReturnString(info, "[]");
+        const rgb = materialRgb(e.material);
+        const edit_tag: []const u8 = if (e.defaultEdit) |ed| @tagName(ed) else "";
+        w.print("{{\"id\":\"{s}\",\"label\":\"{s}\",\"kind\":\"{s}\",\"material\":\"{s}\",\"theme\":\"{s}\",\"snap\":\"{s}\",\"edit\":\"{s}\",\"w\":{d:.3},\"h\":{d:.3},\"d\":{d:.3},\"r\":{d:.4},\"g\":{d:.4},\"b\":{d:.4},\"opacity\":{d:.3}}}", .{
+            e.id, // "id"
+            e.label, // "label"
+            @tagName(e.kind), // "kind"
+            @tagName(e.material), // "material"
+            @tagName(e.theme), // "theme"
+            @tagName(e.snap), // "snap"
+            edit_tag, // "edit" ("" = plain wall)
+            e.size.widthMeters, // "w"
+            e.size.heightMeters, // "h"
+            e.size.depthMeters, // "d"
+            rgb[0], // "r"
+            rgb[1], // "g"
+            rgb[2], // "b"
+            materialOpacity(e.material), // "opacity"
+        }) catch return setReturnString(info, "[]");
+    }
+    w.writeByte(']') catch return setReturnString(info, "[]");
+    setReturnString(info, stream.getWritten());
+}
+
 pub fn registerGameBuild(_: anytype) void {
     v8_runtime.registerHostFn("__game_build_raycast", hostRaycast);
     v8_runtime.registerHostFn("__game_build_validate", hostValidate);
     v8_runtime.registerHostFn("__game_build_catalog_count", hostCatalogCount);
+    v8_runtime.registerHostFn("__game_build_catalog_rows", hostCatalogRows);
 }

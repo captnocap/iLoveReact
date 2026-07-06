@@ -1,0 +1,30 @@
+{
+  "id": "req_2528",
+  "at": "2026-07-04T03:00:56.735Z",
+  "origin": "session:1ccd61f7",
+  "text": "[loader] no player model lump — camera target only\n[click] (174,205) not on a slider (meshEdit=false)\n[click] (110,1036) not on a slider (meshEdit=false)\n[apptick-split] total=46.1ms | jsTick(+microtasks)=44.6 (of which GC=4.0ms x4) tickDrain=0.0 drainFlush=1.1 dirty(snap=0.1+rebuild=0.3)\n[click] (639,57) not on a slider (meshEdit=true)\n[slider] PROP slot=2302 0.000 -> 32.000 (React write)\n[slider] PROP slot=2307 0.000 -> 1.000 (React write)\n[click] (824,96) ON SLIDER id=2302 slot=2302 rect=(749,83 92x30) val=32.000 meshEdit=true\n[js.warn] [slider] JS change id=2302 val=112 handlers=onCommit\n[click]   -> GRABBED slider slot=2302 newval=112.000\n[slider] COMMIT slot=2302 val=32.000 -> dispatching to JS\n[js.warn] [slider] JS commit id=2302 val=32 handlers=onCommit\n[js.warn] [slider] toolbar size onCommit v=32\n[js.warn] [slider] onBrush -> ModelView.setBrush size=32 flow=1\n[js.warn] [slider] ModelView.setBrush size=32 flow=1\n",
+  "status": "doing",
+  "sessionId": "1ccd61f7-1753-4038-a146-209701d9708e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T03:01:41.924Z",
+      "actor": "1ccd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T03:04:11.761Z",
+      "actor": "1ccd",
+      "kind": "note",
+      "text": "ROOT CAUSE FOUND from the user's one-click log: GRABBED newval=112 followed by COMMIT val=32 with zero React writes between = the engine's write doesn't survive the frame. rebuildTree re-clones every rendered node from the stable host node each dirty frame; syncRenderedNodeState only carried scroll_x/scroll_y back. Slider grab writes the RENDERED copy and marks dirty, so the next rebuild resurrected the stale prop value; the applyProp mid-drag guard was dead too (checked the never-touched stable node). Fixed by syncing slider_dragging always + slider_value across the drag window in syncRenderedNodeState (v8_app.zig). Commit cced413c2. Needs a rebuild to take effect; diagnostic logs from req_2525 still in place to verify the round-trip end-to-end."
+    },
+    {
+      "at": "2026-07-04T03:11:53.560Z",
+      "actor": "1ccd",
+      "kind": "note",
+      "text": "User confirmed: sliders move perfectly after the rebuild. Diagnostic logging from both hunt rounds (req_2511 click logs, req_2525 commit-chain logs) stripped in 688f1c6b4; the syncRenderedNodeState fix (cced413c2) stays. Verified zig ast-check + editor bundle clean after removal."
+    }
+  ]
+}

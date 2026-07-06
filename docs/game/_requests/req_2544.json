@@ -1,0 +1,18 @@
+{
+  "id": "req_2544",
+  "at": "2026-07-04T04:23:19.388Z",
+  "origin": "session:69672c0b",
+  "text": "how is it pre-template and what does that mean exactly? because i thought we had to pick the template before we can start to paint, and so thats what i thought i was doing at least, was i click paint -> it asked me for the texture size -> i clicked one -> and then now i see the uv and its still just all the same color",
+  "status": "doing",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T04:23:52.261Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

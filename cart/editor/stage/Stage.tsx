@@ -1,5 +1,6 @@
 import { C } from '../workspace.cls';
 import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
+import type { PlacedPiece } from '../world/pieces';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import { modelPackageById } from '../data/content';
 import { modelDocument } from '../data/documents';
@@ -8,6 +9,8 @@ import MaterialFocusSurface from './MaterialFocusSurface';
 import ModelDocumentSurface, { type OutlinerHandlers } from './ModelDocumentSurface';
 import StageTabs from './StageTabs';
 import WorldEditorSurface from './WorldEditorSurface';
+import BuildBar from './BuildBar';
+import { worldToolFor } from '../world/worldTool';
 
 export default function Stage(props: {
   state: EditorState;
@@ -22,6 +25,9 @@ export default function Stage(props: {
   onStage: () => void;
   onContext: () => void;
   onObject: (id: string) => void;
+  onPlacePiece: (piece: PlacedPiece) => void;
+  onSelectPiece: (id: string | null) => void;
+  onArmPiece: (pieceId: string) => void;
   onExitMaterialFocus: () => void;
   onSelectColorStudioMaterial: (specId: string) => void;
   onColorStudioVariant: (variant: number) => void;
@@ -61,7 +67,18 @@ export default function Stage(props: {
       <C.HW_StageViewport>
         {activeDocument.kind === 'world' || activeDocument.kind === 'model' ? null : <C.HW_CanvasGrid />}
         {activeDocument.kind === 'world' ? (
-          <WorldEditorSurface paintActive={props.state.mapPaint.active} floor={props.state.floorIndex} wallsDown={props.state.wallsDown} activeCommandId={props.state.activeCommandId} />
+          <WorldEditorSurface
+            paintActive={props.state.mapPaint.active}
+            floor={props.state.floorIndex}
+            wallsDown={props.state.wallsDown}
+            activeCommandId={props.state.activeCommandId}
+            pieces={props.state.worldPieces}
+            selectedId={props.state.selectedPieceId}
+            armedPieceId={props.state.armedPieceId}
+            authoredPieces={props.state.authoredBuildPieces}
+            onPlace={props.onPlacePiece}
+            onSelect={props.onSelectPiece}
+          />
         ) : activeDocument.kind === 'model' ? (
           <ModelDocumentSurface
             model={activeModel}
@@ -91,6 +108,12 @@ export default function Stage(props: {
           />
         )}
         {activeDocument.kind === 'material' && props.state.contextOpen ? <ContextMenu state={props.state} onCommand={props.onCommand} /> : null}
+        {/* Sims build bar (req_2563) — overlays the bottom of the viewport in
+            Build (Place) mode. Last child so it paints + hit-tests over the
+            world surface's pointer-capture Pressable. */}
+        {activeDocument.kind === 'world' && worldToolFor(props.state.activeCommandId) === 'place' ? (
+          <BuildBar armedPieceId={props.state.armedPieceId} onArm={props.onArmPiece} />
+        ) : null}
       </C.HW_StageViewport>
       <StageTabs
         documents={tabDocuments}

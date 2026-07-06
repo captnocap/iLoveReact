@@ -1,0 +1,18 @@
+{
+  "id": "req_2583",
+  "at": "2026-07-04T08:00:51.066Z",
+  "origin": "session:66d63b15",
+  "text": "hey another thing you can also fix while your in there is the problem of double placement. meaning i have a wall placed, and then i place a window wall over the same position, it clearly shows both of them fighting for the render and it shouldnt but lets look at this new feature u added. so im clicking on file, and im clicking on export ans build piece and im not getting any further dialog from there or any errors so i cant evaluate this any further also, lets not keep it the way you have structured it. we are going to end up exporting to many different things, so making your dialog a export build piece is narrow, we need it to be export -> build piece -> wall for example",
+  "status": "doing",
+  "sessionId": "66d63b15-80a6-4696-8453-bdc2ef7ccb5d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T08:01:25.779Z",
+      "actor": "66d6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -23,10 +23,16 @@ export function selectionPosition(state: EditorState, object: WorldObject = sele
   };
 }
 
-export function snapReadout(state: EditorState) {
+/** The dock POS/ANG readout — the SELECTED world piece, or null when nothing is
+ *  selected (the dock renders dashes; phantom zeros read as data). */
+export function selectedPieceReadout(state: EditorState) {
+  const piece = state.worldPieces.find((p) => p.id === state.selectedPieceId);
+  if (!piece) return null;
   return {
-    gridMeters: state.snapGridMeters,
-    angleDegrees: state.snapAngleDegrees,
+    x: Math.round(piece.x),
+    y: Math.round(piece.y),
+    z: Math.round(piece.z),
+    yawDegrees: Math.round(piece.yawDegrees),
   };
 }
 

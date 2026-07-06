@@ -1,6 +1,6 @@
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { activeMenuFor, MENUS } from '../data/commands';
+import { activeMenuFor, commandById, commandEnabled, MENUS } from '../data/commands';
 import RouteToggle from '../RouteToggle';
 import type { Command, Menu, EditorState } from '../data/types';
 
@@ -11,6 +11,9 @@ export default function Chrome(props: {
   onCommand: (id: string, source: string) => void;
 }) {
   const activeMenu = activeMenuFor(props.state);
+  // The Compile pill mirrors the File → Compile command's state — grayed + inert while the RLE
+  // pipeline isn't wired (available: false), instead of firing a "compile unavailable" no-op.
+  const compile = commandEnabled(commandById('compile-rle'), props.state);
   return (
     <C.HW_Chrome>
       <C.HW_Brand>
@@ -29,8 +32,11 @@ export default function Chrome(props: {
         })}
       </C.HW_MenuBar>
       <C.HW_Spacer />
-      <C.HW_Compile onPress={() => props.onCommand('compile-rle', 'chrome')}>
-        <Icon name="Download" size={13} color={accentFor('primary')} />
+      <C.HW_Compile
+        {...(compile.on ? { onPress: () => props.onCommand('compile-rle', 'chrome') } : { style: { opacity: 0.4 } })}
+        tooltip={compile.on ? 'Compile RLE game data' : `Compile — ${compile.reason}`}
+      >
+        <Icon name="Download" size={13} color={accentFor(compile.on ? 'primary' : 'textDim')} />
         <C.HW_PillTextOn>Compile</C.HW_PillTextOn>
       </C.HW_Compile>
       <RouteToggle />

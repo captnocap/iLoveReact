@@ -1,0 +1,18 @@
+{
+  "id": "req_2467",
+  "at": "2026-07-01T13:14:51.755Z",
+  "origin": "session:8cf696c0",
+  "text": "sorry so from what ur saying is if i delete some parts of a mesh, add a new mesh, the mesh just restores itself. yes? and if so, then why are we waiting to do the obvious thing and fix it and if thats not it then i dont know what u mean really",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T13:19:01.199Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

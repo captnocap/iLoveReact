@@ -1,0 +1,10 @@
+{
+  "id": "req_2330",
+  "at": "2026-07-01T03:25:13.967Z",
+  "origin": "session:a7549dd9",
+  "text": "i dont know of any sensitive offset handling from displacement at all. this is news t o me. so that means its not really a thing something else is the problem. eitherway, lock in a fix for it the last one was not it",
+  "status": "new",
+  "sessionId": "a7549dd9-ae3e-4dce-8ecd-0b127ef6eaff",
+  "captureMode": "hook",
+  "events": []
+}

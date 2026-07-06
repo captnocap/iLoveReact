@@ -1,0 +1,24 @@
+{
+  "id": "req_2623",
+  "at": "2026-07-04T23:50:26.009Z",
+  "origin": "session:40eebdf5",
+  "text": "yeah and u will find a lot of that isnt random also like if u look at the stage for the mesh how it has the grid below it, that grid space is literally tile space in the game, 1 tile is one of those squares, and the only reason the most inner is then a sub grid is for seeing sub-tile scale when editing",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T23:50:45.942Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T23:50:45.951Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "DESIGN RULING for T1 (modeling stage, req_2618 gap A): the stage grid is NOT decoration — it is GAME TILE SPACE rendered under the mesh. Each of the 9 coarse panels = exactly 1 game tile (1 tile = 1 m = 16 u, the same basis the Add Shape dialog and studio scale line declare: '16 u = 1 tile = 1 m'). The center panel's finer sub-grid exists specifically to read SUB-TILE scale while editing (16 subdivisions = 1 u each). So the grid doubles as the scale/direction reference the user flagged missing: a wall part visibly spanning one panel IS one tile wide in the world, the mannequin (1.65m) reads against it, backdrops size in the same meters ('1 m = 1 tile' in the backdrop dialog). Implementation constraint: build the stage in gpu/3d.zig in world units off the same 16u basis constant the mesh ops use — not an arbitrary cosmetic grid; center 3x3m fine cell at 1u pitch, coarse lines at 1m (tile) pitch. This makes model-editor space and world-editor tile space the SAME space, which is why the old editor's models dropped into the map at correct scale with zero fitting."
+    }
+  ]
+}

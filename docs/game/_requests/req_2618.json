@@ -1,0 +1,36 @@
+{
+  "id": "req_2618",
+  "at": "2026-07-04T23:14:02.789Z",
+  "origin": "session:40eebdf5",
+  "text": "hey im going to just spew off shit that exists today inside of the old @cart/hmsc-int/ studio editor that the shape of it never landed in the new @cart/editor/ and they are a mix of small things that make all the difference and then somethings that will require real engineering but lets look right away at this interface [Image #1] before anything is there we see the gizmo on the canvas, there is a 9 panel grid and the center of it is the only one with a finer grid. ok there is a button that spawns a player model for reference [Image #4] here is the dialog when adding a part [Image #5] which we have in part, [Image #6] import from another model save a copy [Image #7] metadata on shapes [Image #17] UV that is actually legible [Image #18]  symmetry [Image #8] and mirror edit toggles [Image #9] backdrops [Image #10] and manipulating them [Image #11] and then more specifically, and this one i am going to drive into the ground. look at the actual models themselves when in face mode [Image #12] [Image #13] [Image #14] what do these all have in common, the way it looks. you can VERY CLEARLY see the faces, you can see there is a center point for every single one of them. ok lets do edges [Image #15] [Image #16] clean as hell. now, lets just translate any of this to the current editor and brace yourself: [Image #19] alright so first of all i have to add a cube to even start somewhere so i cant show you a blank space, off to a bad start already. next face mode can you tell that this is face mode versus what i was just showing you in the last screenshot [Image #20] me either, alright so then edges [Image #21] decent, better than faces for damn fucking sure but some key things are missing here still first and overall foremost is the entire stage for modeling. there is no ability to know scale reference against jack for shit or direction. but i digress, lets get thru this, so ok paint to get a uv atlas and while i would say this is a fucking awesome UI hack to somehow capture for anything but this example [Image #22] because the box behind it looks sick as fuck i wont lie but this is clearly broken alright lets finish out the dialog ok so i get this atlas [Image #24] but past this there is dick for metadata presented [Image #25] and then looking at the build pieces to start from also, i cant rename my outliners >:V do u want me to keep piling them on",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T23:14:33.948Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T23:15:44.065Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Gap inventory (old hmsc-int studio vs new cart/editor model focus), grounded in code: (A) STAGE: new editor model view has NO ground grid/axes/scale reference (old: 9-panel grid w/ finer center cell + gizmo visible on empty scene). Rendering is host-native (framework/gpu/3d.zig) so the stage lives in Zig. (B) FACE/EDGE MODE LOOK: old studio face mode = translucent per-face tint + center dot per face; edge mode = crisp edge overlay. New editor face mode is visually indistinguishable from object mode. Zig work in gpu/3d.zig mesh-edit overlay path. (C) Player reference mannequin (1.65m) spawn button. (D) Add Shape dialog parity: cylinder/cone/pyramid/plane/sphere/icosphere/lattice + from-build-piece + 16u=1tile steppers (partially exists). (E) Import part from another model (dialogs/ImportPartDialog.tsx exists — verify parity: shape/UV/mounts/pivot copy, paint redone). (F) Save a Copy. (G) Shape metadata readouts: verts/faces/edges/uv'd/mounts + source/groups/fields. (H) Legible UV panel: per-face labeled islands (old 16x16 layout view); new one shows colored rects w/ no metadata. (I) Symmetrize (keep +X/-X, symmetric X) + mirror-edit XYZ toggles — editMesh.ts has mirrorMesh/mirrorMount but no UI toggles in model view. (J) Reference backdrops: drop PNG/JPEG on 6 planes, size/opacity/flip/move gizmo. (K) BUG: Create Paint Atlas dialog renders UNDER the mesh wireframe overlay (z-order). (L) Outliner part rows not renameable (library models have rename; parts dont). User is still enumerating; more to come."
+    },
+    {
+      "at": "2026-07-05T00:42:30.294Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LANDED (wave 1, Zig agent, c81d79403): gap A stage grid — 3x3 one-tile panels (1 tile=1m=16u basis shared with model_paint texels-per-meter), 16x16 fine center sub-grid, RGB world axes, always on in model doc view (framework/gpu/3d.zig ~L2420-2810). Gap B face/edge/vertex dressing — translucent per-face wash + authored-face centroid dots + all-edges overlay (selected bold orange), pure overlay drawing so the req_2611/2613 tint-bake class is impossible; also fixed overlay layering + pane clipping. Headless-verified via ship + shot (t1_grid_base/t2_facemode/t3_edgemode/t4_vertmode PNGs confirmed). Gap K (atlas dialog z-order) still with the undo/modal agent."
+    },
+    {
+      "at": "2026-07-05T01:40:21.652Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Critique-pass clarification: the BLANK model doc entry (old studio: empty stage w/ grid+gizmo, then '+ add a mesh') still does not exist in cart/editor — File->New Mesh-><kind> is the only entry and the doc is born with its first part. This was the user's original 'i cant show you a blank space, off to a bad start' gripe; fold an 'empty doc' entry (New Model -> blank stage -> + part) into the T4 add-shape parity slice."
+    }
+  ]
+}

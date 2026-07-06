@@ -1,0 +1,18 @@
+{
+  "id": "req_2595",
+  "at": "2026-07-04T09:40:55.948Z",
+  "origin": "session:66d63b15",
+  "text": "so is there something wrong with my mesh ? or whats the problem, look here. here is same problem new model (showing it happens to many models, not just the one model)\n[Image #17] this is wall_with_cover, ok nice mesh, export it to wall ok now i see it here [Image #18] so its in the pieces, click to place it and its blank. i dont see anything. place a normal concrete wall, and i see it.",
+  "status": "doing",
+  "sessionId": "66d63b15-80a6-4696-8453-bdc2ef7ccb5d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T09:42:26.105Z",
+      "actor": "66d6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

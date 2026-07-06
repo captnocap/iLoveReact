@@ -1,0 +1,18 @@
+{
+  "id": "req_2515",
+  "at": "2026-07-02T05:42:41.005Z",
+  "origin": "session:ea3ce9ce",
+  "text": "this still is not making any sense for me man sorry to say. why is it showing up like this [Image #4] when the other one shows up like this [Image #5] further i can now confirm that 16x16 was clearly good enough previously but the thing i cant wrap my head around at all is in the previous painter i can write words cleanly on the face of this model and here i cant paint fucking shit without it just being a big ass blob at this same resolution so like what the hell is the difference and whatever it is the other approach beats this one by 10 miles look. this is me just trying to paint the word hi. at 1 px brush size. it looks like fucking dogshit and you cant disagree[Image #6] now compare it to a model i painted in the other studio and [Image #7] [Image #9] [Image #10] and there is no denying that this studio painter we have right in here wont ever even come close to doing these even if i wanted to.",
+  "status": "doing",
+  "sessionId": "ea3ce9ce-d0ad-468f-a469-a95242ec571e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T05:43:45.883Z",
+      "actor": "ea3c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

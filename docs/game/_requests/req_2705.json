@@ -1,0 +1,36 @@
+{
+  "id": "req_2705",
+  "at": "2026-07-05T20:54:50.595Z",
+  "origin": "session:bb4508c8",
+  "text": "hm. im looking in the map menu right now and i just see this [Image #97] (after a rebuild)",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T20:55:12.709Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T20:56:28.586Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-05T20:56:37.683Z",
+      "actor": "fable-effects",
+      "kind": "note",
+      "text": "Correction: the fix sha is 69fda5624 (the review paragraph cited a wrong hash)."
+    }
+  ],
+  "resolution": "The Add Chunk entry was missing from the Map menu because the editor's dropdowns render from the explicit MENU_TREE structure in data/commands.ts, not from the command registry — 8b9cccdf4 registered the command, dispatch, blocking rule and dialog but never placed cmd('add-chunk') into MENU_TREE.Map, so the menu showed only the three pre-existing rows. Fixed with the one-line tree insertion (Add Chunk... now leads the Map menu). This part hot-reloads instantly — no rebuild needed; the dialog's chunk grid itself still wants the __map_chunk_list door from the 8b9cccdf4 rebuild.",
+  "shas": [
+    "07a48c85e"
+  ],
+  "resolvedAt": "2026-07-05T20:56:28.586Z"
+}

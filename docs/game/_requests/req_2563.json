@@ -1,0 +1,18 @@
+{
+  "id": "req_2563",
+  "at": "2026-07-04T05:58:07.821Z",
+  "origin": "session:5fc01965",
+  "text": "yeah now, if you want to clear this whole feature into one clean fold, this is what i would reccommend, follow along:\n\nso here is t he interface we are working with [Image #8] \nlets start by just breaking this out into some zones. we have the left which is the content browser and below that it has a preview of whatever content is in question from the browser, then we have the actual map editor space, and above it has a small action bar that can indicate you know focus and build mode right, then to the right there is a focus panel. so, this currently has some problems, like, where are we going to display those 36 build pieces, and so heres my thoughts\n\non the bottom of the actual editor space, when in build mode, spawn a sims-like builder [Image #9] so notice how this screenshot of the sims 4 keeps a clean bottom action bar of pieces. this is exactly how we can slot in our 36 and growing build pieces, and we can even do a bit what they do, and have a preview that declares things like 'wall' 'floor' 'prop' so then that exposes the correct menus when building and then so ok, lets say you click on a piece like some wall, then the focus panel should open up to show that piece, and its texture slots, and other relevant metadata. right. and this same panel does the same thing when you are in focus/select mode so that you can place a bunch of blanks first, then come back, focus one, and edit its properties. you can see how the last editor had a panel for this same behavior, you effectively are to bring that into the focus panel so that i place some walls, then come back, click a wall, can set its texture slots and everything flows together nicely",
+  "status": "doing",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T05:59:06.179Z",
+      "actor": "5fc0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

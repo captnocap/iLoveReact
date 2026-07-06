@@ -1,0 +1,24 @@
+{
+  "id": "req_2534",
+  "at": "2026-07-04T03:21:06.736Z",
+  "origin": "session:1ccd61f7",
+  "text": "ok the other thing and bit unrelated but why does every build chew away at disk space. and where the hell do u clean it out in, because its like 500mb or something every build from how fast it chews through it so it seems",
+  "status": "doing",
+  "sessionId": "1ccd61f7-1753-4038-a146-209701d9708e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T03:21:15.710Z",
+      "actor": "1ccd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T03:27:33.021Z",
+      "actor": "1ccd",
+      "kind": "note",
+      "text": "Root cause: zig NEVER evicts .zig-cache/o entries and every build embeds a fresh bundle.js -> new content hash -> new multi-hundred-MB cache entry. Cache had grown to 756GB (3,947 entries, disk 100% full at 2.3GB free). Pruned everything older than June 30: freed 679GB (disk now 81%, cache 79GB). Permanent guard shipped in 9a4b29cbb: ship+dev auto-prune entries older than 7 days after every successful build (RJIT_CACHE_PRUNE_DAYS overrides, 0 disables), plus a manual 'rjit clean [--days N | --all]' command with size report; prune runs under the ship flock so it can't race an in-flight build. rjit.js rebundled+committed. zig-out/bin (15GB of old shipped cart binaries) left untouched."
+    }
+  ]
+}

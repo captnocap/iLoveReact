@@ -1,0 +1,24 @@
+{
+  "id": "req_2646",
+  "at": "2026-07-05T02:12:36.313Z",
+  "origin": "session:40eebdf5",
+  "text": "on the world builder. so uh ok im having a real hard time trying to understand why all these buttons are here now on the map editor... [Image #85]? for cube, cone, meshes.... ? why are we putting these here. and another thing when was it ever said this was needed to be added, it exists already in 2 ways where it needs. infact, this whole ui needs a more focused look i have a handful of things id want to go over for overall functionality / flow and for it to make fucking sense. but yeah from as it seems, i would say dont look at the world in this pass, i can gear you up with a real shit list for it but nothing to critique in this pass other than the fact that all those buttons showed up for no reason at all and yeah",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T02:13:09.897Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T02:14:45.379Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "FIXED inline by supervisor (see sha in git log): ToolOptions world action bar mirrored ALL commands of the active menu; the new save/rename flows set actionMenu:'File', so File's submenu commands (New Mesh x7 primitives + explorer/import rows) rendered as bare icons on the map bar — 'showed up for no reason' exactly right, side effect not a decision. Fix: action bar filters out submenu-nested commands (they live in their menus + outliner add). WORLD PASS OTHERWISE DEFERRED by user ruling this round — user will deliver a dedicated world shit list; T5 work holds until then."
+    }
+  ]
+}

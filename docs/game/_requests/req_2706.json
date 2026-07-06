@@ -1,0 +1,30 @@
+{
+  "id": "req_2706",
+  "at": "2026-07-05T20:57:28.607Z",
+  "origin": "session:a71ff6e3",
+  "text": "huh, ok the WASD and painting landed great but the rotate camera from mouse wheel didnt seem to land at all for some reason",
+  "status": "review",
+  "sessionId": "a71ff6e3-8b84-45fa-b0da-3e926d36a3d4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T20:58:20.097Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T21:02:03.432Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Middle-drag rotate didn't land because the onMiddleClick handler install went into host_props.applyMouseHandlerFlags, which only serves TUI/pop-out windows — the main GPU shell installs v8_app.zig's own parallel applyHandlerFlags copy, so the editor viewport's Pressable never got its js_on_middle_click expression and the engine's middle-button dispatch found nothing to call. Added the same onMiddleClick install (plus the null-reset) to v8_app.zig's copy. WASD-paint and the other req_2704 fixes were host-side and unaffected. Needs a dev-host rebuild to take effect.",
+  "shas": [
+    "7c816d49d"
+  ],
+  "resolvedAt": "2026-07-05T21:02:03.432Z"
+}

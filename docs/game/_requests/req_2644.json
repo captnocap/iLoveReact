@@ -1,0 +1,30 @@
+{
+  "id": "req_2644",
+  "at": "2026-07-05T02:01:31.890Z",
+  "origin": "session:40eebdf5",
+  "text": "loop cut drag handle is good, though i do remember it being in steps, and then freehand can be from a modifier, which this is just free handing it with no stepping when dragging it, which could be improved on. gizmo sizing is unaffected by PoV and actually lets retract our steps here a bit found a real problem as i was talking to you. so uh let me back this up a bit but \n\nlook at this scene. [Image #73] let me expand that a bit actually so u can see the outliners. [Image #74] alright\n\nnow first and foremost of all things i want to start by saying how we got here was literally the dialog that i have been saying this whole time, nothing resetting. so that is then: new cube -> loop cuts on it -> add cube -> now we are here with 2 cubes right. \n\nso the first concerning thing is this, if i have none of the outliners 'focused' then the model looks liek this [Image #75] \nlets isolate one of them, outliner 1[Image #76] \nok lets physically move this up so we can get it out of this mix [Image #77] \nand now lets go to cube 2[Image #78] weird, its not the rest of the entire cube? lets move it down [Image #79] \nwell... thats not suppose to happen. so then what the fuck happens when i somehow unfocus all the outliners (which, btw, shouldnt be possible) [Image #80] huh... ok.. [Image #81] [Image #82] yeah so they all move in one model and there is ALL the faces. \n\nunfuck that one",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T02:02:34.185Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T02:02:34.194Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "CRITIQUE ROUND 2 — PART-RANGE CORRUPTION (the 'unfuck that one' order). Repro: new cube -> loop cuts applied -> add second cube part -> outliner scoping is garbage: focusing Cube 1 highlights ONLY the thin loop-cut middle band (not the cube); focusing Cube 2 highlights a chunk overlapping the ORIGINAL cube's lower half; moving each part tears the mesh apart along those wrong ranges; unfocusing ALL parts (which should not even be possible) selects/moves EVERYTHING as one and shows all faces. Diagnosis hypothesis (strong): parts are tracked as {lo,hi} vertex ranges; topo ops (loop cut) insert verts and the cart patches the ACTIVE part's range from the op's returned lo/hi (= just the newly created band) instead of re-deriving ALL part ranges from the host's authoritative face-group mapping; subsequent appended parts then land on shifted offsets. Fix contract: after EVERY topo op/undo/redo, all part ranges re-derived from host truth (read-back door if needed); moves scope to the ACTIVE part always; zero-focused-parts state eliminated (one part always active). ALSO this round: (QQ) lc handle drag WORKS but is freehand-only — should STEP in size units by default (snap to u ticks), freehand on a held modifier; (RR) gizmo view-angle precision growth imperceptible — tune or fix (user: 'unaffected by PoV')."
+    },
+    {
+      "at": "2026-07-05T02:41:08.535Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "FIXED (7c08b2a7c). Root cause was FOUR breaks, all verified: (1) plane-cut mints fresh authored-group ids past max (mesh_edit.zig planeCutSoup) — a cut cube's 6 groups become 18 but the cart kept [0,6) and NOTHING re-derived ranges from the host (pre-fix headless proof: range 0,6 selected 5/18 faces = the one slab the user saw); (2) model_source.retain() cleared part ranges on EVERY edit replace, and extrude/create-face dropped face grouping entirely; (3) zero-focus was the outliner row toggling active off -> scope(0,0) = whole-buffer drags; (4) req_2645 SS: outliner row click called selectFacesByGroupRange which FORCES host pick mode to face — vertex toolbar, face picking. Fix contract delivered: host maintains part ranges through every topo op (renormalizePartRanges + per-face parentage chained through lc previews), ONE read-back door __mesh_part_ranges, cart resyncs after every op/undo/redo and never patches lo/hi; no zero-focus; vertex/edge focus no longer flips pick mode. Partition audits headless: pre-cut [0,6) 12/12, post-cut [0,18) 84/84, +addpart [0,18)+[18,24) 96/96, undo/redo both OK; move isolation PNG shows whole cut part moving as one; post-cut vertex pick selects a VERTEX. QQ landed (lc drag snaps 1/16-world-u, Shift=freehand — needs live sanity check, no headless mouse driver). RR landed (growth onset 0.55, thicker stroke side-on, measured 273px/4px vs 288px/7px in shots). Left open: object-mode focus still face-flips (intentional highlight UX), decimation still clears ranges (pre-existing, documented pre-paint step)."
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2662",
+  "at": "2026-07-05T03:26:25.045Z",
+  "origin": "session:40eebdf5",
+  "text": "also i dont know how i got here genuinely but somwhow i have this gizmo showing for a face select whiel also in paint mode [Image #89]",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T03:26:51.485Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T03:26:51.493Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "CRITIQUE round 6: MODE-STATE LEAK — rotate gizmo rings + face-selection tint (whole part orange) rendering WHILE paint mode is active ('i dont know how i got here genuinely' = reachable through normal use, likely mode switch with a live selection + rotate tool armed). Invariant to enforce host+cart: entering paint mode suspends/clears the edit-selection overlay and gizmo (drawGizmoOverlay gates on meshEditModeRaw!=0 but paint evidently coexists with a nonzero edit scope); leaving paint restores or resets cleanly; the mode row = ONE exclusive state machine, no residue across transitions. Same family as the modal-discipline law (unresolved state bleeding across surfaces). QUEUED for next wave (ModelView + 3d.zig owned by live agents): fix alongside req_2660 paint-wipe + req_2659 multi-select — all three are the selection/mode state model."
+    },
+    {
+      "at": "2026-07-05T04:15:48.408Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "FIXED (9b3d1f878). Root cause: AppFrame.selectPart called __mesh_edit_select_group_range during paint (paint reports selMode 0) — that door hard-sets face mode, tinting + waking the armed rotate rings. Fix: real host paint SESSION (__mesh_paint_session): entry clears selection+mode, selection/gizmo doors inert while live, overlay treats mode as 0 (stage+compass stay); cart mirrors paintMode through one effect incl. unmount; other mode transitions audited. Shots: control shows rings+tint, paint entry shows clean cube."
+    }
+  ]
+}

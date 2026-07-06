@@ -1,0 +1,18 @@
+{
+  "id": "req_2387",
+  "at": "2026-07-01T08:03:13.537Z",
+  "origin": "session:8cf696c0",
+  "text": "alright that is the worst location ive seen today but i wont blame it all on you, u had the weirder bug to start with. so the panel that is the Model Focus one, uh, this is where you need to house that bad boy",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T08:03:33.927Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2709",
+  "at": "2026-07-05T21:09:01.063Z",
+  "origin": "session:bb4508c8",
+  "text": "oh, ok and this changes things a bit, so i can tell the heightfields that are not appearing are actually there, because when i go to place some build pieces, you can tell they are very clearly getting raised because of some invisible hill under it",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T21:20:05.787Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T21:20:05.795Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The invisible-hill observation was the confirming evidence for req_2708's diagnosis: physics colliders are registered from the raw height grid (world_loader registerHeightfield) on a separate path from the render mesh, so when the dyn geometry tail filled and the render re-bake silently drew the stale mesh, the heights and colliders kept updating — build pieces seat on terrain you cannot see. Fixed by the same 23711c570 change: sculpted heightfields reserve their worst-case region once instead of leaking a region per stroke frame, so render and collider stay in step. Needs a Zig rebuild.",
+  "shas": [
+    "23711c570"
+  ],
+  "resolvedAt": "2026-07-05T21:20:05.795Z"
+}

@@ -1,29 +1,45 @@
 import { useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { COMMANDS, MENU_DROPDOWN_WIDTH, menuDropdownLeft } from '../data/commands';
-import type { Command, EditorState, LightId } from '../data/types';
+import {
+  commandById, commandEnabled, menuNodes, submenuEnabled,
+  MENU_DROPDOWN_WIDTH, menuDropdownLeft, type MenuNode,
+} from '../data/commands';
+import { activeSurface } from '../data/surfaces';
+import type { EditorState, LightId } from '../data/types';
 
-// The viewer light-rig switches, hosted under View → Lighting. The model shader supports one
-// directional + ambient, so these are the switches that actually change the render: Flat = even
-// paint-true light; Key = the directional; Fill = lift the dark side (raises ambient).
+// The viewer light-rig switches, hosted under View → Lighting when a model is open. The model
+// shader supports one directional + ambient: Flat = even paint-true light; Key = the directional;
+// Fill = lift the dark side (raises ambient).
 const LIGHT_MENU: { id: LightId; label: string; field: 'litFlat' | 'litKey' | 'litFill' }[] = [
   { id: 'flat', label: 'Flat (even, paint-true)', field: 'litFlat' },
   { id: 'key', label: 'Key light', field: 'litKey' },
   { id: 'fill', label: 'Fill (lift shadows)', field: 'litFill' },
 ];
 
-// Dropdown for the active top-bar menu. Mounted at the app root (see AppFrame)
-// so it paints over the body and hit-tests correctly; positioned under its
-// menu-bar button via menuDropdownLeft. Rows tagged with a `submenu` fold under an
-// expandable parent flyout (File → New Mesh → Cube); everything else is top-level.
+// Dropdown for the active top-bar menu. Mounted at the app root (see AppFrame) so it paints over
+// the body and hit-tests correctly; positioned under its menu-bar button via menuDropdownLeft.
+// The rows come from the declarative menu tree (commands.menuNodes): command rows, non-interactive
+// section headers, and inline-expandable submenus that can nest (File → New Mesh, Edit → Mesh →
+// Paint Resolution). Every command/submenu grays-with-reason off its surface — never hidden.
 
-function MenuRow({ command, indent, onCommand }: { command: Command; indent?: boolean; onCommand: (id: string, source: string) => void }) {
-  // NOTE: never pass style={undefined} — the classifier merge (mergeUserProps) treats a
-  // present `style` key as an override, so undefined WIPES the class default (flexDirection
-  // row → the row collapses to a column). Only include the prop when we actually indent.
+const rowIndent = (depth: number) => (depth > 0 ? { style: { paddingLeft: 12 + depth * 18 } } : {});
+
+function CommandRow({ id, depth, state, onCommand }: { id: string; depth: number; state: EditorState; onCommand: (id: string, source: string) => void }) {
+  const command = commandById(id);
+  const en = commandEnabled(command, state);
+  if (!en.on) {
+    return (
+      <C.HW_MenuDropRowOff {...rowIndent(depth)}>
+        <Icon name={command.icon} size={13} color={accentFor('textDim')} />
+        <C.HW_MenuDropTextOff>{command.name}</C.HW_MenuDropTextOff>
+        <C.HW_Spacer />
+        <C.HW_MenuDropReason>{en.reason}</C.HW_MenuDropReason>
+      </C.HW_MenuDropRowOff>
+    );
+  }
   return (
-    <C.HW_MenuDropRow onPress={() => onCommand(command.id, 'menu')} {...(indent ? { style: { paddingLeft: 30 } } : {})}>
+    <C.HW_MenuDropRow onPress={() => onCommand(command.id, 'menu')} {...rowIndent(depth)}>
       <Icon name={command.icon} size={13} color={accentFor(command.native ? 'primary' : 'textDim')} />
       <C.HW_MenuDropText>{command.name}</C.HW_MenuDropText>
       <C.HW_Spacer />
@@ -33,44 +49,63 @@ function MenuRow({ command, indent, onCommand }: { command: Command; indent?: bo
 }
 
 export default function DropdownMenu({ state, onCommand, onToggleLight }: { state: EditorState; onCommand: (id: string, source: string) => void; onToggleLight: (which: LightId) => void }) {
-  // Which submenu group is expanded (e.g. 'New Mesh'). Null = none open.
-  const [openSub, setOpenSub] = useState<string | null>(null);
-  // Model-surface tools live on the stage toolbar + context menu, not the menu bar.
-  const all = COMMANDS.filter((command) => command.menu === state.openMenu && command.surface !== 'model');
-  const topLevel = all.filter((command) => !command.submenu);
-  const groups: string[] = [];
-  for (const command of all) {
-    if (command.submenu && !groups.includes(command.submenu)) groups.push(command.submenu);
-  }
+  // Which submenu ids are expanded. A Set (not one id) so nested flyouts can be open together
+  // (Edit → Mesh open, and Paint Resolution open within it).
+  const [openSubs, setOpenSubs] = useState<Set<string>>(() => new Set());
+  const toggleSub = (id: string) => setOpenSubs((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
-  const rows: JSX.Element[] = topLevel.map((command) => (
-    <MenuRow key={command.id} command={command} onCommand={onCommand} />
-  ));
-  for (const group of groups) {
-    const open = openSub === group;
-    rows.push(
-      <C.HW_MenuDropRow key={`sub:${group}`} onPress={() => setOpenSub(open ? null : group)}>
-        <Icon name="Boxes" size={13} color={accentFor('primary')} />
-        <C.HW_MenuDropText>{group}</C.HW_MenuDropText>
-        <C.HW_Spacer />
-        <Icon name={open ? 'ChevronDown' : 'ChevronRight'} size={12} color={accentFor('textDim')} />
-      </C.HW_MenuDropRow>,
-    );
-    if (open) {
-      for (const command of all.filter((c) => c.submenu === group)) {
-        rows.push(<MenuRow key={command.id} command={command} indent onCommand={onCommand} />);
+  const renderNodes = (nodes: MenuNode[], depth: number): JSX.Element[] => {
+    const rows: JSX.Element[] = [];
+    for (const node of nodes) {
+      if (node.kind === 'section') {
+        rows.push(
+          <C.HW_MenuSectionRow key={`sec:${node.label}:${depth}`} {...rowIndent(depth)}>
+            <C.HW_MenuSectionText>{node.label}</C.HW_MenuSectionText>
+          </C.HW_MenuSectionRow>,
+        );
+      } else if (node.kind === 'cmd') {
+        rows.push(<CommandRow key={node.id} id={node.id} depth={depth} state={state} onCommand={onCommand} />);
+      } else {
+        const enabled = submenuEnabled(node.scope, state);
+        const open = enabled && openSubs.has(node.id);
+        if (!enabled) {
+          rows.push(
+            <C.HW_MenuDropRowOff key={`sub:${node.id}`} {...rowIndent(depth)}>
+              <Icon name={node.icon} size={13} color={accentFor('textDim')} />
+              <C.HW_MenuDropTextOff>{node.label}</C.HW_MenuDropTextOff>
+              <C.HW_Spacer />
+              <C.HW_MenuDropReason>only in the {node.scope} editor</C.HW_MenuDropReason>
+            </C.HW_MenuDropRowOff>,
+          );
+        } else {
+          rows.push(
+            <C.HW_MenuDropRow key={`sub:${node.id}`} onPress={() => toggleSub(node.id)} {...rowIndent(depth)}>
+              <Icon name={node.icon} size={13} color={accentFor('primary')} />
+              <C.HW_MenuDropText>{node.label}</C.HW_MenuDropText>
+              <C.HW_Spacer />
+              <Icon name={open ? 'ChevronDown' : 'ChevronRight'} size={12} color={accentFor('textDim')} />
+            </C.HW_MenuDropRow>,
+          );
+          if (open) rows.push(...renderNodes(node.children, depth + 1));
+        }
       }
     }
-  }
+    return rows;
+  };
 
-  // Lighting lives under View when a model document is open — a nested, collapsible group so it's
-  // findable but tucked away (never a flat wall). Custom stateful rows: the generic MenuRow is
-  // command-driven and can't show a live toggle's on/off. Toggling keeps the dropdown open.
-  const activeDoc = state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId);
-  if (state.openMenu === 'View' && activeDoc?.kind === 'model') {
-    const open = openSub === 'Lighting';
+  const menu = state.openMenu;
+  const rows = menu ? renderNodes(menuNodes(menu), 0) : [];
+
+  // Lighting: live toggles (the generic CommandRow can't show an on/off state), so it stays a
+  // hand-rolled group. Only meaningful with a model in view — appended under View there.
+  if (menu === 'View' && activeSurface(state) === 'model') {
+    const open = openSubs.has('Lighting');
     rows.push(
-      <C.HW_MenuDropRow key="sub:Lighting" onPress={() => setOpenSub(open ? null : 'Lighting')}>
+      <C.HW_MenuDropRow key="sub:Lighting" onPress={() => toggleSub('Lighting')}>
         <Icon name="Sun" size={13} color={accentFor('primary')} />
         <C.HW_MenuDropText>Lighting</C.HW_MenuDropText>
         <C.HW_Spacer />

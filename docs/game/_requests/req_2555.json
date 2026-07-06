@@ -1,0 +1,18 @@
+{
+  "id": "req_2555",
+  "at": "2026-07-04T05:22:05.335Z",
+  "origin": "session:5fc01965",
+  "text": "focus is also getting the zoom bug, [Image #5] [Image #6] [Image #7]",
+  "status": "doing",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T05:23:03.478Z",
+      "actor": "5fc0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

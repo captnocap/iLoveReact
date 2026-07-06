@@ -1,0 +1,10 @@
+{
+  "id": "req_2610",
+  "at": "2026-07-04T14:20:20.080Z",
+  "origin": "session:bf578c72",
+  "text": "very interesting. so check this out, as the number gets higher, the model becomes more.... bumpy, but it also can actually capture more of the detail of like the hand or face. but its not smooth [Image #29] [Image #30] now compare just that to 64 and [Image #31] its smooth but there is no hands [Image #32]",
+  "status": "new",
+  "sessionId": "bf578c72-3717-49e0-8e8a-64761048423d",
+  "captureMode": "hook",
+  "events": []
+}

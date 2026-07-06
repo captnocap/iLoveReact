@@ -1,0 +1,30 @@
+{
+  "id": "req_2406",
+  "at": "2026-07-01T08:45:12.035Z",
+  "origin": "session:be477f59",
+  "text": "yeahy so lets just think about this for a second. so the outliner is justified. its effectively a layer. which means the cone 1 up in the top corner of the editor itself is either the name of the model, or its referring to the outliner, im going with model name because then it says Cone in the tab but lets explain why this cone in the tab is also just wrong, if i add a cube to this now what the fuck is up hoodlum. yeah thats what i thought. you dont have an answer for that. now with that all being said, does it make more sense where the problem actually is",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T08:45:46.469Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T09:03:41.240Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the real problem behind the 'cone x6, primitive x3' repetition: the editor conflated a model CONTAINER with the single primitive it was seeded from. A model is a bag of parts (the Outliner is that list, correctly scoped per-object), but its identity — tab title, tab subtitle, top-left viewport header, and the whole detail card (name/path/semanticKind/sourceKind/FOLDER CONTRACT) — was all derived from the seed primitive and frozen at creation. So every 'cone'/'primitive' on screen was ONE fact echoed, and worse, it becomes a lie the instant you addPart('cube') to a cone-seeded model: the container still calls itself Cone 1 / cone / primitive/cone / cone primitive. Fix targets the identity source, not the labels: (1) primitiveModelPackage now names the container generically ('Model N') instead of after the seed kind — the seed kind survives only as filter/search data (semanticKind/primitive/path), and the seed's own name appears exactly once as the first Outliner part; (2) modelDocument drops the seed-kind tab subtitle that goes stale on the second part; (3) ModelDetailBody describes the container — shows part count (passed from Inspector via modelParts length) instead of a path + kind restated three ways, and gates the FOLDER CONTRACT section to real imports (primitives have no provenance); (4) Stage derives tab titles LIVE from modelPackageById(sourceId) via modelDocument() rather than the doc's frozen snapshot, so an already-open persisted 'Cone 1' tab follows the new naming instead of showing a stale seed name across a reload. Net on screen for a cone+cube model: 'cone' appears once (Outliner part Cone 1), 'primitive' zero times; tab/header/card read 'Model N'. Files: data/content.ts, data/documents.ts, inspector/Inspector.tsx, library/ModelDetailBody.tsx, stage/Stage.tsx. All parse clean via esbuild transform; not shipped (live session).",
+  "shas": [
+    "c5990e70c"
+  ],
+  "resolvedAt": "2026-07-01T09:03:41.240Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2636",
+  "at": "2026-07-05T01:03:13.886Z",
+  "origin": "codex:019f2fbd",
+  "text": "huh which is funny because that also means effectively as long as you know this data shape, like say, make it into a library for example, you can let someone create their own interface entirely for authoring what would load into the game, which is actually an interesting thought if anything.",
+  "status": "review",
+  "sessionId": "019f2fbd-a86d-7153-ad17-040c589a4278",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T01:03:34.922Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T01:04:00.866Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the implication from the ruled game-data architecture: once the data shape is stable and wrapped as a library, alternate authoring interfaces can generate valid game input for the same loader. Framed the boundary as semantic authoring API + validation/compiler, not raw lump hand-authoring; new behavior still requires engine capability rather than per-game script.",
+  "shas": [],
+  "resolvedAt": "2026-07-05T01:04:00.865Z"
+}

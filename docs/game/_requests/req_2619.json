@@ -1,0 +1,24 @@
+{
+  "id": "req_2619",
+  "at": "2026-07-04T23:23:58.513Z",
+  "origin": "session:40eebdf5",
+  "text": "ok lets push on it then, so look at some more 'developed' models, [Image #27] this has anchors (mounts), or this door [Image #28] it has door leaf explicit in the outliners and also has a pivot for rotation origin; notice this wall_with_cover_double.... has texture slots on just the one outliner alone, if i expand this, the entire model actually has 12 total texture slots. or this one wall_covered_double_advertisements.... has a texture slot for ever single one of these 'flyers' that live on the wall itself [Image #29] another thing look at how key it is that the uv is per outliner here. you can see this mesh has a small handful of outliners, and uv corresponds to each one individually [Image #30] also just notice when i go and move this model sideways for example the gizmo explodes in size, giving me a very precise ability to tune it vs head on [Image #31] [Image #32]",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T23:24:17.068Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T23:25:08.359Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Round 2 gaps (developed models): (M) RIG PANEL — pivot (rotation origin, placed with gizmo), joints (+ joint, drag onto model), anchors w/ roles driver/passenger/cargo/mount + face direction (+X..-Z) + fixed pos readout. KEY FINDING: editMesh.ts ALREADY has the full data model ported (JOINT_TYPES, ANCHOR_ROLES, MountPoint socket/plug, mirrorMount) — ModelView.tsx exposes NONE of it. UI-only work over an existing data layer. (N) Named outliner parts w/ semantic names (Door Leaf / Doorway Wall) + per-row controls (rename/eye/dup/reorder/delete) — ties into (L). (O) TEXTURE SLOTS per part — TextureSlot type EXISTS in editMesh.ts (req_1542) but no UI; old studio: wall_with_cover_double has 12 slots across parts, one slot per flyer on advertisement walls. PieceBody.tsx material slots are world-piece slots, NOT model-part slots — dont conflate. (P) PER-OUTLINER UV — UV panel scoped to selected part; each part gets its own island layout w/ face labels. New editor atlas panel is whole-model, no part correspondence. (Q) GIZMO VIEW-ANGLE SCALING — old studio grows the translate gizmo dramatically when the drag axis is near-perpendicular to camera (moving sideways vs head-on) = precise tuning. Host-side gizmo behavior (Zig). (R) Model-level ops seen in shots: center button, clean toggle, merge->part, all-parts toggle, per-part dims readout (x4 y4 z4 u), SHAPE encoded-bytes + copy/show-json."
+    }
+  ]
+}

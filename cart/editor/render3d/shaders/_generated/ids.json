@@ -40,6 +40,251 @@
     "index": 7
   },
   {
+    "fn": "autumn_leaves",
+    "board": 0,
+    "index": 8
+  },
+  {
+    "fn": "birch_bark",
+    "board": 0,
+    "index": 9
+  },
+  {
+    "fn": "cactus_skin",
+    "board": 0,
+    "index": 10
+  },
+  {
+    "fn": "clover_patch",
+    "board": 0,
+    "index": 11
+  },
+  {
+    "fn": "dew_grass",
+    "board": 0,
+    "index": 12
+  },
+  {
+    "fn": "fern_bed",
+    "board": 0,
+    "index": 13
+  },
+  {
+    "fn": "flower_meadow",
+    "board": 0,
+    "index": 14
+  },
+  {
+    "fn": "fog_bank",
+    "board": 0,
+    "index": 15
+  },
+  {
+    "fn": "frost_ferns",
+    "board": 0,
+    "index": 16
+  },
+  {
+    "fn": "frozen_silt",
+    "board": 0,
+    "index": 17
+  },
+  {
+    "fn": "geyser_steam",
+    "board": 0,
+    "index": 18
+  },
+  {
+    "fn": "glacier_blue",
+    "board": 0,
+    "index": 19
+  },
+  {
+    "fn": "hailstone_bed",
+    "board": 0,
+    "index": 20
+  },
+  {
+    "fn": "hedge_trimmed",
+    "board": 0,
+    "index": 21
+  },
+  {
+    "fn": "hot_spring",
+    "board": 0,
+    "index": 22
+  },
+  {
+    "fn": "icicle_row",
+    "board": 0,
+    "index": 23
+  },
+  {
+    "fn": "ivy_wall",
+    "board": 0,
+    "index": 24
+  },
+  {
+    "fn": "lavender_rows",
+    "board": 0,
+    "index": 25
+  },
+  {
+    "fn": "lightning_fork",
+    "board": 0,
+    "index": 26
+  },
+  {
+    "fn": "lily_pond",
+    "board": 0,
+    "index": 27
+  },
+  {
+    "fn": "monsoon_sheets",
+    "board": 0,
+    "index": 28
+  },
+  {
+    "fn": "oak_bark",
+    "board": 0,
+    "index": 29
+  },
+  {
+    "fn": "ocean_foam",
+    "board": 0,
+    "index": 30
+  },
+  {
+    "fn": "ocean_swell",
+    "board": 0,
+    "index": 31
+  },
+  {
+    "fn": "oil_slick",
+    "board": 0,
+    "index": 32
+  },
+  {
+    "fn": "packed_snow",
+    "board": 0,
+    "index": 33
+  },
+  {
+    "fn": "pine_needles",
+    "board": 0,
+    "index": 34
+  },
+  {
+    "fn": "puddle_mirror",
+    "board": 0,
+    "index": 35
+  },
+  {
+    "fn": "rain_glass",
+    "board": 0,
+    "index": 36
+  },
+  {
+    "fn": "reed_marsh",
+    "board": 0,
+    "index": 37
+  },
+  {
+    "fn": "rice_paddy",
+    "board": 0,
+    "index": 38
+  },
+  {
+    "fn": "ripple_rings",
+    "board": 0,
+    "index": 39
+  },
+  {
+    "fn": "river_rapids",
+    "board": 0,
+    "index": 40
+  },
+  {
+    "fn": "sleet_streaks",
+    "board": 0,
+    "index": 41
+  },
+  {
+    "fn": "slush_gray",
+    "board": 0,
+    "index": 42
+  },
+  {
+    "fn": "snow_drift",
+    "board": 0,
+    "index": 43
+  },
+  {
+    "fn": "storm_shear",
+    "board": 0,
+    "index": 44
+  },
+  {
+    "fn": "succulent_tray",
+    "board": 0,
+    "index": 45
+  },
+  {
+    "fn": "sunflower_field",
+    "board": 0,
+    "index": 46
+  },
+  {
+    "fn": "swamp_scum",
+    "board": 0,
+    "index": 47
+  },
+  {
+    "fn": "thunderhead",
+    "board": 0,
+    "index": 48
+  },
+  {
+    "fn": "tide_pool",
+    "board": 0,
+    "index": 49
+  },
+  {
+    "fn": "waterfall_veil",
+    "board": 0,
+    "index": 50
+  },
+  {
+    "fn": "wheat_field",
+    "board": 0,
+    "index": 51
+  },
+  {
+    "fn": "whitecap_chop",
+    "board": 0,
+    "index": 52
+  },
+  {
+    "fn": "willow_curtain",
+    "board": 0,
+    "index": 53
+  },
+  {
+    "fn": "dusk_tarmac",
+    "board": 0,
+    "index": 54
+  },
+  {
+    "fn": "fern_carbon",
+    "board": 0,
+    "index": 55
+  },
+  {
+    "fn": "glacier_tide",
+    "board": 0,
+    "index": 56
+  },
+  {
     "fn": "mold_wall",
     "board": 1,
     "index": 0
@@ -75,6 +320,21 @@
     "index": 6
   },
   {
+    "fn": "salted_mold",
+    "board": 1,
+    "index": 7
+  },
+  {
+    "fn": "spalling_plaster",
+    "board": 1,
+    "index": 8
+  },
+  {
+    "fn": "ember_silt",
+    "board": 1,
+    "index": 9
+  },
+  {
     "fn": "blade_steel",
     "board": 2,
     "index": 0
@@ -108,6 +368,241 @@
     "fn": "skin_fill",
     "board": 2,
     "index": 6
+  },
+  {
+    "fn": "baguette_slash",
+    "board": 2,
+    "index": 7
+  },
+  {
+    "fn": "boba_tea",
+    "board": 2,
+    "index": 8
+  },
+  {
+    "fn": "bread_crust",
+    "board": 2,
+    "index": 9
+  },
+  {
+    "fn": "butterfly_wing",
+    "board": 2,
+    "index": 10
+  },
+  {
+    "fn": "candy_cane",
+    "board": 2,
+    "index": 11
+  },
+  {
+    "fn": "candy_corn",
+    "board": 2,
+    "index": 12
+  },
+  {
+    "fn": "chocolate_bar",
+    "board": 2,
+    "index": 13
+  },
+  {
+    "fn": "coffee_crema",
+    "board": 2,
+    "index": 14
+  },
+  {
+    "fn": "cow_hide",
+    "board": 2,
+    "index": 15
+  },
+  {
+    "fn": "croc_hide",
+    "board": 2,
+    "index": 16
+  },
+  {
+    "fn": "dalmatian_spots",
+    "board": 2,
+    "index": 17
+  },
+  {
+    "fn": "dragon_scales",
+    "board": 2,
+    "index": 18
+  },
+  {
+    "fn": "dragonfruit_flesh",
+    "board": 2,
+    "index": 19
+  },
+  {
+    "fn": "fish_silver",
+    "board": 2,
+    "index": 20
+  },
+  {
+    "fn": "frayed_plastic",
+    "board": 2,
+    "index": 21
+  },
+  {
+    "fn": "giraffe_patch",
+    "board": 2,
+    "index": 22
+  },
+  {
+    "fn": "gumdrop_field",
+    "board": 2,
+    "index": 23
+  },
+  {
+    "fn": "honeycomb_drip",
+    "board": 2,
+    "index": 24
+  },
+  {
+    "fn": "jam_toast",
+    "board": 2,
+    "index": 25
+  },
+  {
+    "fn": "kiwi_slice",
+    "board": 2,
+    "index": 26
+  },
+  {
+    "fn": "koi_scales",
+    "board": 2,
+    "index": 27
+  },
+  {
+    "fn": "ladybug_shell",
+    "board": 2,
+    "index": 28
+  },
+  {
+    "fn": "latte_art",
+    "board": 2,
+    "index": 29
+  },
+  {
+    "fn": "leopard_spots",
+    "board": 2,
+    "index": 30
+  },
+  {
+    "fn": "licorice_allsorts",
+    "board": 2,
+    "index": 31
+  },
+  {
+    "fn": "lizard_beads",
+    "board": 2,
+    "index": 32
+  },
+  {
+    "fn": "mermaid_scales",
+    "board": 2,
+    "index": 33
+  },
+  {
+    "fn": "nori_sheet",
+    "board": 2,
+    "index": 34
+  },
+  {
+    "fn": "orange_peel",
+    "board": 2,
+    "index": 35
+  },
+  {
+    "fn": "pancake_stack",
+    "board": 2,
+    "index": 36
+  },
+  {
+    "fn": "peacock_eye",
+    "board": 2,
+    "index": 37
+  },
+  {
+    "fn": "peppermint_swirl",
+    "board": 2,
+    "index": 38
+  },
+  {
+    "fn": "pepperoni_pizza",
+    "board": 2,
+    "index": 39
+  },
+  {
+    "fn": "python_diamond",
+    "board": 2,
+    "index": 40
+  },
+  {
+    "fn": "ramen_bowl",
+    "board": 2,
+    "index": 41
+  },
+  {
+    "fn": "snake_scales",
+    "board": 2,
+    "index": 42
+  },
+  {
+    "fn": "sprinkles_donut",
+    "board": 2,
+    "index": 43
+  },
+  {
+    "fn": "sushi_roll",
+    "board": 2,
+    "index": 44
+  },
+  {
+    "fn": "swiss_cheese",
+    "board": 2,
+    "index": 45
+  },
+  {
+    "fn": "tiger_stripes",
+    "board": 2,
+    "index": 46
+  },
+  {
+    "fn": "tortoise_shell",
+    "board": 2,
+    "index": 47
+  },
+  {
+    "fn": "waffle_grid",
+    "board": 2,
+    "index": 48
+  },
+  {
+    "fn": "watermelon_flesh",
+    "board": 2,
+    "index": 49
+  },
+  {
+    "fn": "woven_lace",
+    "board": 2,
+    "index": 50
+  },
+  {
+    "fn": "zebra_hide",
+    "board": 2,
+    "index": 51
+  },
+  {
+    "fn": "biolight_vane",
+    "board": 2,
+    "index": 52
+  },
+  {
+    "fn": "ember_filament",
+    "board": 2,
+    "index": 53
   },
   {
     "fn": "peel_wallpaper_vice",
@@ -150,6 +645,26 @@
     "index": 7
   },
   {
+    "fn": "acid_membrane",
+    "board": 3,
+    "index": 8
+  },
+  {
+    "fn": "signage_decay",
+    "board": 3,
+    "index": 9
+  },
+  {
+    "fn": "aurora_fracture",
+    "board": 3,
+    "index": 10
+  },
+  {
+    "fn": "radio_waves",
+    "board": 3,
+    "index": 11
+  },
+  {
     "fn": "stucco_facade",
     "board": 4,
     "index": 0
@@ -183,6 +698,261 @@
     "fn": "palm_canopy",
     "board": 4,
     "index": 6
+  },
+  {
+    "fn": "abalone_shell",
+    "board": 4,
+    "index": 7
+  },
+  {
+    "fn": "alien_alloy",
+    "board": 4,
+    "index": 8
+  },
+  {
+    "fn": "amethyst_geode",
+    "board": 4,
+    "index": 9
+  },
+  {
+    "fn": "ammolite_shift",
+    "board": 4,
+    "index": 10
+  },
+  {
+    "fn": "biomech_ribs",
+    "board": 4,
+    "index": 11
+  },
+  {
+    "fn": "black_opal",
+    "board": 4,
+    "index": 12
+  },
+  {
+    "fn": "circuit_board",
+    "board": 4,
+    "index": 13
+  },
+  {
+    "fn": "citrine_glow",
+    "board": 4,
+    "index": 14
+  },
+  {
+    "fn": "cockpit_console",
+    "board": 4,
+    "index": 15
+  },
+  {
+    "fn": "cryo_pod",
+    "board": 4,
+    "index": 16
+  },
+  {
+    "fn": "data_stream",
+    "board": 4,
+    "index": 17
+  },
+  {
+    "fn": "diamond_pave",
+    "board": 4,
+    "index": 18
+  },
+  {
+    "fn": "emerald_facets",
+    "board": 4,
+    "index": 19
+  },
+  {
+    "fn": "force_field",
+    "board": 4,
+    "index": 20
+  },
+  {
+    "fn": "garnet_cluster",
+    "board": 4,
+    "index": 21
+  },
+  {
+    "fn": "gold_leaf",
+    "board": 4,
+    "index": 22
+  },
+  {
+    "fn": "hex_shield",
+    "board": 4,
+    "index": 23
+  },
+  {
+    "fn": "holo_ink",
+    "board": 4,
+    "index": 24
+  },
+  {
+    "fn": "hologram_grid",
+    "board": 4,
+    "index": 25
+  },
+  {
+    "fn": "hull_plating",
+    "board": 4,
+    "index": 26
+  },
+  {
+    "fn": "jade_polished",
+    "board": 4,
+    "index": 27
+  },
+  {
+    "fn": "labradorite_flash",
+    "board": 4,
+    "index": 28
+  },
+  {
+    "fn": "lapis_lazuli",
+    "board": 4,
+    "index": 29
+  },
+  {
+    "fn": "malachite_bands",
+    "board": 4,
+    "index": 30
+  },
+  {
+    "fn": "moonstone_glow",
+    "board": 4,
+    "index": 31
+  },
+  {
+    "fn": "mother_of_pearl",
+    "board": 4,
+    "index": 32
+  },
+  {
+    "fn": "motherboard_traces",
+    "board": 4,
+    "index": 33
+  },
+  {
+    "fn": "nanite_swarm",
+    "board": 4,
+    "index": 34
+  },
+  {
+    "fn": "opal_fire",
+    "board": 4,
+    "index": 35
+  },
+  {
+    "fn": "plasma_conduit",
+    "board": 4,
+    "index": 36
+  },
+  {
+    "fn": "plasma_glass",
+    "board": 4,
+    "index": 37
+  },
+  {
+    "fn": "platinum_brushed",
+    "board": 4,
+    "index": 38
+  },
+  {
+    "fn": "pyrite_cubes",
+    "board": 4,
+    "index": 39
+  },
+  {
+    "fn": "radar_scope",
+    "board": 4,
+    "index": 40
+  },
+  {
+    "fn": "reactor_core",
+    "board": 4,
+    "index": 41
+  },
+  {
+    "fn": "rose_gold",
+    "board": 4,
+    "index": 42
+  },
+  {
+    "fn": "rose_quartz",
+    "board": 4,
+    "index": 43
+  },
+  {
+    "fn": "ruby_facets",
+    "board": 4,
+    "index": 44
+  },
+  {
+    "fn": "sapphire_facets",
+    "board": 4,
+    "index": 45
+  },
+  {
+    "fn": "server_rack",
+    "board": 4,
+    "index": 46
+  },
+  {
+    "fn": "solar_panel",
+    "board": 4,
+    "index": 47
+  },
+  {
+    "fn": "starship_vents",
+    "board": 4,
+    "index": 48
+  },
+  {
+    "fn": "thruster_burn",
+    "board": 4,
+    "index": 49
+  },
+  {
+    "fn": "tigers_eye",
+    "board": 4,
+    "index": 50
+  },
+  {
+    "fn": "turquoise_matrix",
+    "board": 4,
+    "index": 51
+  },
+  {
+    "fn": "warp_coil",
+    "board": 4,
+    "index": 52
+  },
+  {
+    "fn": "cobalt_rim",
+    "board": 4,
+    "index": 53
+  },
+  {
+    "fn": "cobalt_veil",
+    "board": 4,
+    "index": 54
+  },
+  {
+    "fn": "neon_trellis",
+    "board": 4,
+    "index": 55
+  },
+  {
+    "fn": "plasma_rim",
+    "board": 4,
+    "index": 56
+  },
+  {
+    "fn": "tungsten_glaze",
+    "board": 4,
+    "index": 57
   },
   {
     "fn": "cash_stack",
@@ -220,6 +990,26 @@
     "index": 6
   },
   {
+    "fn": "black_mail",
+    "board": 5,
+    "index": 7
+  },
+  {
+    "fn": "smuggled_wrap",
+    "board": 5,
+    "index": 8
+  },
+  {
+    "fn": "algae_rust",
+    "board": 5,
+    "index": 9
+  },
+  {
+    "fn": "prism_rust",
+    "board": 5,
+    "index": 10
+  },
+  {
     "fn": "fogged_mirror",
     "board": 6,
     "index": 0
@@ -253,6 +1043,96 @@
     "fn": "stained_glass",
     "board": 6,
     "index": 6
+  },
+  {
+    "fn": "beadboard_wainscot",
+    "board": 6,
+    "index": 7
+  },
+  {
+    "fn": "brick_fireplace",
+    "board": 6,
+    "index": 8
+  },
+  {
+    "fn": "crown_molding_wall",
+    "board": 6,
+    "index": 9
+  },
+  {
+    "fn": "exposed_joists",
+    "board": 6,
+    "index": 10
+  },
+  {
+    "fn": "frosted_shower",
+    "board": 6,
+    "index": 11
+  },
+  {
+    "fn": "laminate_counter",
+    "board": 6,
+    "index": 12
+  },
+  {
+    "fn": "phase_cracks",
+    "board": 6,
+    "index": 13
+  },
+  {
+    "fn": "popcorn_ceiling",
+    "board": 6,
+    "index": 14
+  },
+  {
+    "fn": "quartz_counter",
+    "board": 6,
+    "index": 15
+  },
+  {
+    "fn": "radiator_ribs",
+    "board": 6,
+    "index": 16
+  },
+  {
+    "fn": "saltillo_floor",
+    "board": 6,
+    "index": 17
+  },
+  {
+    "fn": "slate_hearth",
+    "board": 6,
+    "index": 18
+  },
+  {
+    "fn": "threshold_mist",
+    "board": 6,
+    "index": 19
+  },
+  {
+    "fn": "tin_ceiling",
+    "board": 6,
+    "index": 20
+  },
+  {
+    "fn": "window_blinds",
+    "board": 6,
+    "index": 21
+  },
+  {
+    "fn": "graphite_sheen",
+    "board": 6,
+    "index": 22
+  },
+  {
+    "fn": "rust_wave",
+    "board": 6,
+    "index": 23
+  },
+  {
+    "fn": "salt_bloom",
+    "board": 6,
+    "index": 24
   },
   {
     "fn": "asphalt",
@@ -290,6 +1170,26 @@
     "index": 6
   },
   {
+    "fn": "ghost_scanlines",
+    "board": 7,
+    "index": 7
+  },
+  {
+    "fn": "mirror_drift",
+    "board": 7,
+    "index": 8
+  },
+  {
+    "fn": "glass_sand",
+    "board": 7,
+    "index": 9
+  },
+  {
+    "fn": "static_vinyl",
+    "board": 7,
+    "index": 10
+  },
+  {
     "fn": "brick_facade",
     "board": 8,
     "index": 0
@@ -320,6 +1220,21 @@
     "index": 5
   },
   {
+    "fn": "parapet_rift",
+    "board": 8,
+    "index": 6
+  },
+  {
+    "fn": "veneer_lace",
+    "board": 8,
+    "index": 7
+  },
+  {
+    "fn": "mirror_shards",
+    "board": 8,
+    "index": 8
+  },
+  {
     "fn": "wall_flag",
     "board": 9,
     "index": 0
@@ -343,6 +1258,31 @@
     "fn": "wall_ac",
     "board": 9,
     "index": 4
+  },
+  {
+    "fn": "pegboard_grid",
+    "board": 9,
+    "index": 5
+  },
+  {
+    "fn": "poster_strips",
+    "board": 9,
+    "index": 6
+  },
+  {
+    "fn": "cobalt_sheet",
+    "board": 9,
+    "index": 7
+  },
+  {
+    "fn": "coral_vault",
+    "board": 9,
+    "index": 8
+  },
+  {
+    "fn": "tungsten_gauze",
+    "board": 9,
+    "index": 9
   },
   {
     "fn": "sidewalk_grid",
@@ -380,6 +1320,31 @@
     "index": 6
   },
   {
+    "fn": "asphalt_crime",
+    "board": 10,
+    "index": 7
+  },
+  {
+    "fn": "tar_ripple",
+    "board": 10,
+    "index": 8
+  },
+  {
+    "fn": "basalt_skin",
+    "board": 10,
+    "index": 9
+  },
+  {
+    "fn": "ceramic_scale",
+    "board": 10,
+    "index": 10
+  },
+  {
+    "fn": "copper_rain",
+    "board": 10,
+    "index": 11
+  },
+  {
     "fn": "plywood_sheet",
     "board": 11,
     "index": 0
@@ -415,6 +1380,186 @@
     "index": 6
   },
   {
+    "fn": "azulejo_blue",
+    "board": 11,
+    "index": 7
+  },
+  {
+    "fn": "basalt_columns",
+    "board": 11,
+    "index": 8
+  },
+  {
+    "fn": "chalk_cliff",
+    "board": 11,
+    "index": 9
+  },
+  {
+    "fn": "checkerboard_marble",
+    "board": 11,
+    "index": 10
+  },
+  {
+    "fn": "conglomerate_mix",
+    "board": 11,
+    "index": 11
+  },
+  {
+    "fn": "encaustic_tile",
+    "board": 11,
+    "index": 12
+  },
+  {
+    "fn": "flint_nodules",
+    "board": 11,
+    "index": 13
+  },
+  {
+    "fn": "gneiss_folded",
+    "board": 11,
+    "index": 14
+  },
+  {
+    "fn": "granite_polished",
+    "board": 11,
+    "index": 15
+  },
+  {
+    "fn": "granite_rough",
+    "board": 11,
+    "index": 16
+  },
+  {
+    "fn": "greek_key_border",
+    "board": 11,
+    "index": 17
+  },
+  {
+    "fn": "hex_tile",
+    "board": 11,
+    "index": 18
+  },
+  {
+    "fn": "lava_rock",
+    "board": 11,
+    "index": 19
+  },
+  {
+    "fn": "limestone_fossil",
+    "board": 11,
+    "index": 20
+  },
+  {
+    "fn": "obsidian_flow",
+    "board": 11,
+    "index": 21
+  },
+  {
+    "fn": "onyx_banded",
+    "board": 11,
+    "index": 22
+  },
+  {
+    "fn": "pebble_mosaic",
+    "board": 11,
+    "index": 23
+  },
+  {
+    "fn": "penrose_tiling",
+    "board": 11,
+    "index": 24
+  },
+  {
+    "fn": "petrified_wood",
+    "board": 11,
+    "index": 25
+  },
+  {
+    "fn": "pumice_pocked",
+    "board": 11,
+    "index": 26
+  },
+  {
+    "fn": "quartzite_sparkle",
+    "board": 11,
+    "index": 27
+  },
+  {
+    "fn": "river_skirting",
+    "board": 11,
+    "index": 28
+  },
+  {
+    "fn": "roman_mosaic",
+    "board": 11,
+    "index": 29
+  },
+  {
+    "fn": "sandstone_strata",
+    "board": 11,
+    "index": 30
+  },
+  {
+    "fn": "serpentine_green",
+    "board": 11,
+    "index": 31
+  },
+  {
+    "fn": "shale_layers",
+    "board": 11,
+    "index": 32
+  },
+  {
+    "fn": "slate_cleft",
+    "board": 11,
+    "index": 33
+  },
+  {
+    "fn": "soapstone_smooth",
+    "board": 11,
+    "index": 34
+  },
+  {
+    "fn": "subway_tile",
+    "board": 11,
+    "index": 35
+  },
+  {
+    "fn": "terrazzo_confetti",
+    "board": 11,
+    "index": 36
+  },
+  {
+    "fn": "timber_fossil",
+    "board": 11,
+    "index": 37
+  },
+  {
+    "fn": "travertine_bands",
+    "board": 11,
+    "index": 38
+  },
+  {
+    "fn": "zellige_star",
+    "board": 11,
+    "index": 39
+  },
+  {
+    "fn": "ash_lattice",
+    "board": 11,
+    "index": 40
+  },
+  {
+    "fn": "basalt_crush",
+    "board": 11,
+    "index": 41
+  },
+  {
+    "fn": "pearl_bark",
+    "board": 11,
+    "index": 42
+  },
+  {
     "fn": "corrugated_metal",
     "board": 12,
     "index": 0
@@ -448,6 +1593,106 @@
     "fn": "copper_patina",
     "board": 12,
     "index": 6
+  },
+  {
+    "fn": "boiler_plate",
+    "board": 12,
+    "index": 7
+  },
+  {
+    "fn": "cable_tray",
+    "board": 12,
+    "index": 8
+  },
+  {
+    "fn": "cargo_container",
+    "board": 12,
+    "index": 9
+  },
+  {
+    "fn": "chain_drive",
+    "board": 12,
+    "index": 10
+  },
+  {
+    "fn": "coil_weld",
+    "board": 12,
+    "index": 11
+  },
+  {
+    "fn": "cooling_fins",
+    "board": 12,
+    "index": 12
+  },
+  {
+    "fn": "exhaust_manifold",
+    "board": 12,
+    "index": 13
+  },
+  {
+    "fn": "gauge_cluster",
+    "board": 12,
+    "index": 14
+  },
+  {
+    "fn": "gear_train",
+    "board": 12,
+    "index": 15
+  },
+  {
+    "fn": "hydraulic_ram",
+    "board": 12,
+    "index": 16
+  },
+  {
+    "fn": "oxide_flood",
+    "board": 12,
+    "index": 17
+  },
+  {
+    "fn": "pipe_bundle",
+    "board": 12,
+    "index": 18
+  },
+  {
+    "fn": "radiator_core",
+    "board": 12,
+    "index": 19
+  },
+  {
+    "fn": "rivet_field",
+    "board": 12,
+    "index": 20
+  },
+  {
+    "fn": "turbine_blades",
+    "board": 12,
+    "index": 21
+  },
+  {
+    "fn": "vent_grille",
+    "board": 12,
+    "index": 22
+  },
+  {
+    "fn": "warning_chevrons",
+    "board": 12,
+    "index": 23
+  },
+  {
+    "fn": "carbon_veneer",
+    "board": 12,
+    "index": 24
+  },
+  {
+    "fn": "ionic_lattice",
+    "board": 12,
+    "index": 25
+  },
+  {
+    "fn": "rusted_bolt",
+    "board": 12,
+    "index": 26
   },
   {
     "fn": "floral_wallpaper",
@@ -530,6 +1775,131 @@
     "index": 15
   },
   {
+    "fn": "airmail_border",
+    "board": 13,
+    "index": 16
+  },
+  {
+    "fn": "bingo_card",
+    "board": 13,
+    "index": 17
+  },
+  {
+    "fn": "blueprint_grid",
+    "board": 13,
+    "index": 18
+  },
+  {
+    "fn": "cardboard_corrugated",
+    "board": 13,
+    "index": 19
+  },
+  {
+    "fn": "coffee_stained_letter",
+    "board": 13,
+    "index": 20
+  },
+  {
+    "fn": "comic_halftone",
+    "board": 13,
+    "index": 21
+  },
+  {
+    "fn": "crossword_grid",
+    "board": 13,
+    "index": 22
+  },
+  {
+    "fn": "graph_paper",
+    "board": 13,
+    "index": 23
+  },
+  {
+    "fn": "kraft_paper",
+    "board": 13,
+    "index": 24
+  },
+  {
+    "fn": "legal_pad",
+    "board": 13,
+    "index": 25
+  },
+  {
+    "fn": "newsprint_columns",
+    "board": 13,
+    "index": 26
+  },
+  {
+    "fn": "origami_fold",
+    "board": 13,
+    "index": 27
+  },
+  {
+    "fn": "pixel_paper",
+    "board": 13,
+    "index": 28
+  },
+  {
+    "fn": "postage_stamps",
+    "board": 13,
+    "index": 29
+  },
+  {
+    "fn": "ruled_notebook",
+    "board": 13,
+    "index": 30
+  },
+  {
+    "fn": "security_envelope",
+    "board": 13,
+    "index": 31
+  },
+  {
+    "fn": "sheet_music",
+    "board": 13,
+    "index": 32
+  },
+  {
+    "fn": "sudoku_page",
+    "board": 13,
+    "index": 33
+  },
+  {
+    "fn": "threaded_grid",
+    "board": 13,
+    "index": 34
+  },
+  {
+    "fn": "ticket_stubs",
+    "board": 13,
+    "index": 35
+  },
+  {
+    "fn": "torn_notebook",
+    "board": 13,
+    "index": 36
+  },
+  {
+    "fn": "typewriter_page",
+    "board": 13,
+    "index": 37
+  },
+  {
+    "fn": "paper_radiance",
+    "board": 13,
+    "index": 38
+  },
+  {
+    "fn": "quartz_threads",
+    "board": 13,
+    "index": 39
+  },
+  {
+    "fn": "resin_sheet",
+    "board": 13,
+    "index": 40
+  },
+  {
     "fn": "sunset_gradient",
     "board": 14,
     "index": 0
@@ -563,5 +1933,115 @@
     "fn": "grime_gradient",
     "board": 14,
     "index": 6
+  },
+  {
+    "fn": "aurora_sky",
+    "board": 14,
+    "index": 7
+  },
+  {
+    "fn": "black_hole",
+    "board": 14,
+    "index": 8
+  },
+  {
+    "fn": "comet_tail",
+    "board": 14,
+    "index": 9
+  },
+  {
+    "fn": "dawn_blush",
+    "board": 14,
+    "index": 10
+  },
+  {
+    "fn": "eclipse_corona",
+    "board": 14,
+    "index": 11
+  },
+  {
+    "fn": "galaxy_spiral",
+    "board": 14,
+    "index": 12
+  },
+  {
+    "fn": "golden_hour",
+    "board": 14,
+    "index": 13
+  },
+  {
+    "fn": "high_noon",
+    "board": 14,
+    "index": 14
+  },
+  {
+    "fn": "mars_surface",
+    "board": 14,
+    "index": 15
+  },
+  {
+    "fn": "meteor_shower",
+    "board": 14,
+    "index": 16
+  },
+  {
+    "fn": "milky_way",
+    "board": 14,
+    "index": 17
+  },
+  {
+    "fn": "moon_surface",
+    "board": 14,
+    "index": 18
+  },
+  {
+    "fn": "nebula_cloud",
+    "board": 14,
+    "index": 19
+  },
+  {
+    "fn": "pulsar_beams",
+    "board": 14,
+    "index": 20
+  },
+  {
+    "fn": "saturn_rings",
+    "board": 14,
+    "index": 21
+  },
+  {
+    "fn": "star_cluster",
+    "board": 14,
+    "index": 22
+  },
+  {
+    "fn": "starfield_deep",
+    "board": 14,
+    "index": 23
+  },
+  {
+    "fn": "supernova_shell",
+    "board": 14,
+    "index": 24
+  },
+  {
+    "fn": "twilight_band",
+    "board": 14,
+    "index": 25
+  },
+  {
+    "fn": "cobalt_frost",
+    "board": 14,
+    "index": 26
+  },
+  {
+    "fn": "mercury_pool",
+    "board": 14,
+    "index": 27
+  },
+  {
+    "fn": "quartz_rain",
+    "board": 14,
+    "index": 28
   }
 ]

@@ -1,0 +1,30 @@
+{
+  "id": "req_2690",
+  "at": "2026-07-05T18:41:28.470Z",
+  "origin": "session:bb4508c8",
+  "text": "oh and speaking of that 'wgsl compiles' i will say, so we just went from like 103 -> 400+ of them, and the very first startup after the massive increase was no shit like 2 minutes before i ever got a window. I have to assume, during that time, it was compiling all the shaders. because its now back to instant startups, but doesnt explain the possible re-compiling if that is the case",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T18:50:19.750Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T18:52:49.414Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The 2-minute first boot after the 103->400 shader jump was the GPU driver compiling the single generated fill megashader (all 400+ material functions live in ONE ~700KB WGSL module) on first pipeline creation; Mesa's on-disk shader cache absorbs that on later boots, which is why startups went back to instant. The recurring per-page cost was NOT driver recompilation but wgpu's synchronous WGSL parse/validate in createShaderModule, which effects.zig re-ran for every Effect instance because pipelines were never actually shared. Fixed by the process-wide pipeline cache in 3a648d752: the megashader is parsed once per source change per run, then every thumb/picker mount reuses the cached pipeline.",
+  "shas": [
+    "3a648d752"
+  ],
+  "resolvedAt": "2026-07-05T18:52:49.414Z"
+}

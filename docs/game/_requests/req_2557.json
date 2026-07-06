@@ -1,0 +1,18 @@
+{
+  "id": "req_2557",
+  "at": "2026-07-04T05:27:04.521Z",
+  "origin": "session:5fc01965",
+  "text": "for what its worth, the bandaid doesnt even fix it so you really only have one option",
+  "status": "doing",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T05:27:30.371Z",
+      "actor": "5fc0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

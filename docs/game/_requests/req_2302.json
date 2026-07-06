@@ -1,0 +1,18 @@
+{
+  "id": "req_2302",
+  "at": "2026-07-01T01:50:19.046Z",
+  "origin": "session:986b717b",
+  "text": "alright this could be relatively simple or this could bend us over the table haha but follow me and look at what happens here. so here is the previous, hmsc-int studio mesh editor and here is pepe. [Image #7] and if i open up faces i can see pepe has a clean face [Image #8] and here is the uv [Image #9] alright now lets open that same model in the new editor [Image #10] and boy that looks off :? lmao",
+  "status": "doing",
+  "sessionId": "986b717b-095c-4856-ad9d-85724875f382",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T01:51:23.864Z",
+      "actor": "986b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

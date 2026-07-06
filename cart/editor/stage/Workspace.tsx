@@ -1,13 +1,13 @@
 import { C } from '../workspace.cls';
-import type { Asset, Command, EditorState, ModelToolApi, ModelToolSnapshot, Rgb, ViewMode } from '../data/types';
+import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb, ViewMode } from '../data/types';
 import type { OutlinerHandlers } from './ModelDocumentSurface';
 import type { OklchColor } from '../../../runtime/paint/colors';
+import type { PlacedPiece } from '../world/pieces';
 import ToolOptions from './ToolOptions';
 import Stage from './Stage';
 
 export default function Workspace(props: {
   state: EditorState;
-  activeCommand: Command;
   activeAsset: Asset;
   onCommand: (id: string, source: string) => void;
   onModelToolApi: (api: ModelToolApi) => void;
@@ -28,6 +28,10 @@ export default function Workspace(props: {
   onStage: () => void;
   onContext: () => void;
   onObject: (id: string) => void;
+  /** World-piece model callbacks (req_2563 Phase 1) — routed down to WorldEditorSurface. */
+  onPlacePiece: (piece: PlacedPiece) => void;
+  onSelectPiece: (id: string | null) => void;
+  onArmPiece: (pieceId: string) => void;
   onExitMaterialFocus: () => void;
   onSelectColorStudioMaterial: (specId: string) => void;
   onColorStudioVariant: (variant: number) => void;

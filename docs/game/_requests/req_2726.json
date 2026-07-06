@@ -1,0 +1,28 @@
+{
+  "id": "req_2726",
+  "at": "2026-07-06T00:44:01.191Z",
+  "origin": "codex:019f34da",
+  "text": "oh also it currently tracks assets from hmsc-int but to my understanding everything we needed to carry over, is now inside of the editor cart itself, and is on disk and not in a database",
+  "status": "review",
+  "sessionId": "019f34da-bc30-71e2-a571-d554cad411f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:44:39.868Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T00:56:35.887Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the existing Import from Disk path already accepts png/jpg/jpeg/webp images and routes them through ImportImageDialog; wired explorer texture rows into the same probe/import path and refresh the asset index after image import.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T00:56:35.887Z"
+}

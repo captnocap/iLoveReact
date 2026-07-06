@@ -1,0 +1,36 @@
+{
+  "id": "req_2718",
+  "at": "2026-07-06T00:18:40.994Z",
+  "origin": "session:18de0f93",
+  "text": "ok. so, how i would then ask for the shape to be is that the on-disk file is the entire source of truth, meaning, it somewhere in its data package, declares its a prop or a build piece, and its not just based on a local store, the local store can effectively read the disk or we could have a scan button to run over them and index for faster reads but storing them indefinitely that way i think is a downfall dont you think",
+  "status": "review",
+  "sessionId": "18de0f93-fa0a-42e8-8bca-536e3b73624d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:19:02.599Z",
+      "actor": "fable-props",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T00:19:02.607Z",
+      "actor": "fable-props",
+      "kind": "note",
+      "text": "USER RULING for the prop/piece export slice (rides req_2712): the on-disk model package is the ENTIRE source of truth — the package itself declares prop vs build piece (placeable status + rig in manifest). Localstore never stores this indefinitely; it may only act as a derived cache/index rebuilt by reading the disk (boot scan or scan button)."
+    },
+    {
+      "at": "2026-07-06T00:43:51.529Z",
+      "actor": "fable-props",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ruling implemented: the on-disk model package is the ENTIRE source of truth for placeability. The manifest now carries placeable ({as:'build-piece',kind}|{as:'prop'}) + the exported skeleton; the palette boot-derives from scanning materialized manifests (bootAuthoredPieces); localstore is a rebuildable cache only — legacy cache-only exports backfill their manifests on mount, and entries whose package is gone drop instead of resurrecting. materializeModelPackage preserves an existing manifest's export declaration so a stale-session re-save can never clobber it.",
+  "shas": [
+    "bd3137478"
+  ],
+  "resolvedAt": "2026-07-06T00:43:51.529Z"
+}

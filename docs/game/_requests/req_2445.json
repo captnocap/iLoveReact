@@ -1,0 +1,24 @@
+{
+  "id": "req_2445",
+  "at": "2026-07-01T11:49:13.710Z",
+  "origin": "session:1ed2545c",
+  "text": "no fuck that just break it fast and see what happens gut that shit and slap it in here and sit back and watch the world burn",
+  "status": "doing",
+  "sessionId": "1ed2545c-8195-4baf-b87d-57559c359642",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T11:49:56.883Z",
+      "actor": "session-1ed2",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T11:57:04.627Z",
+      "actor": "session-1ed2",
+      "kind": "note",
+      "text": "Attempted to gut LoaderIsoView into cart/editor. Naive copy is DEAD: GAME_BUILD (the wall/floor placement brain) is transitively welded to 435 propRecipes/* files — even narrow-importing from game/build/index.ts drags all 435. Copying = duplicating the science project into the editor. LoaderIsoView uses GAME_BUILD.catalog/.placed(x20)/.prefabs. Ported Zig doors (runtime/game/build.ts, req_2349) cover picking+validation+catalog-IDs but NOT .placed/.prefabs/full-catalog-rows. So deleting hmsc-int is gated on finishing the Zig build-door port (extend framework/game/build.zig + v8_bindings_game_build.zig to expose placement geometry). Reverted the copy experiment; cart/editor back to buildable with original 4-line seam."
+    }
+  ]
+}

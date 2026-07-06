@@ -1,0 +1,30 @@
+{
+  "id": "req_2697",
+  "at": "2026-07-05T19:55:35.238Z",
+  "origin": "session:bb4508c8",
+  "text": "oh wtf. nevermind. i just got a sliver of it to work. holdon.",
+  "status": "review",
+  "sessionId": "bb4508c8-7982-477c-b746-eeca2de549ce",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T19:56:47.950Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T19:58:21.089Z",
+      "actor": "fable-effects",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same root cause and fix as req_2696 (the two reports are one bug): the perfect-line split where only part of the map takes the picked material is the ground D stream truncating at the pooled buffer cap — the per-cell material tail rides at the END of the v3 stream, so exactly the first ~5.5k of 14.4k cells got their binding and the rest fell to the kind default. Fixed in aedd40840 by sizing GROUND_DATA_FLOATS to the v3 worst case (34000) and logging a loud one-shot error on any future overflow. After a Zig rebuild the picked material should apply across the whole chunk.",
+  "shas": [
+    "aedd40840"
+  ],
+  "resolvedAt": "2026-07-05T19:58:21.089Z"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_2598",
+  "at": "2026-07-04T09:46:17.414Z",
+  "origin": "session:66d63b15",
+  "text": "What the hell is the difference between cookedMeshBlobData and whatever you were editing ? like what is the difference between that and whatever makes the outliners fill in ? because genuinely it should be 0, they are both just meshes, one isnt special",
+  "status": "new",
+  "sessionId": "66d63b15-80a6-4696-8453-bdc2ef7ccb5d",
+  "captureMode": "hook",
+  "events": []
+}

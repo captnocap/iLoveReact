@@ -1,0 +1,24 @@
+{
+  "id": "req_2541",
+  "at": "2026-07-04T04:06:43.293Z",
+  "origin": "session:1ccd61f7",
+  "text": "Nice that worked. Ok the next thing, is on the world editor, i click to place something, lets say its just a floor, and so you see the floor placed, and there is a green outline [Image #18] but the moment i zoom in or out [Image #19] now this outline doesnt correspond with the grid space at all until the next stateful update of placing something",
+  "status": "doing",
+  "sessionId": "1ccd61f7-1753-4038-a146-209701d9708e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T04:07:03.114Z",
+      "actor": "1ccd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T04:08:38.259Z",
+      "actor": "1ccd",
+      "kind": "note",
+      "text": "Root cause: the ghost outline is projected through the JS IsoStage at render time; wheel zoom mutates the stage + pushes the host camera imperatively with no React render, so the overlay kept the stale projection while the loader repainted (rotate/pan were fine — onMove's setSnap re-renders). Fix: onScroll re-snaps at the cursor after pushCamera, reprojecting the ghost with the fresh solve. One-line TSX change, hot-reloads. Commit in tree."
+    }
+  ]
+}

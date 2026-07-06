@@ -1,0 +1,30 @@
+{
+  "id": "req_2381",
+  "at": "2026-07-01T07:44:47.448Z",
+  "origin": "session:be477f59",
+  "text": "I see so the problem is then if it lives there i press play now i have no way home. shitty idea just put the whole chrome in the bag bro",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T07:45:16.943Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T07:51:13.221Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Collapsed the three misaligned chrome axes into one row and made the chrome persist across both routes. Root cause: the Editor/Play toggle was an absolutely-positioned floating overlay rendered at the router level (sibling of the routes), parked in a hardcoded paddingRight:150 gap on the chrome bar — it only approximately aligned with the brand/menus/Compile that live in the real flex row, and it floated at router level precisely so it survived the /play route. Simply folding it into Chrome would have stranded /play with no way home. Fix: AppFrame is now the persistent shell for BOTH routes — it mounts once directly under <Router> (index.tsx no longer swaps AppFrame vs PlayRoute via <Route>), reads useRoute(), and swaps only its body (editor panels on /editor, host-native WorldLoader/PlayRoute on /play). The top chrome is always mounted, so /play keeps the Editor/Play toggle and editor state survives the round trip. RouteToggle lost position:absolute and became a real inline member of the chrome row (Chrome.tsx, after Compile), sharing the bar's single alignItems:center centerline; removed the paddingRight:150 reservation. Files: index.tsx, shell/AppFrame.tsx, shell/Chrome.tsx, RouteToggle.tsx, editor.cls.ts (ED_RouteToggle inline), workspace.cls.ts (HW_Chrome padding + HW_PlayBody). Verified all four TSX parse clean via esbuild transform; did not ship (live session).",
+  "shas": [
+    "cdf82f77e"
+  ],
+  "resolvedAt": "2026-07-01T07:51:13.221Z"
+}

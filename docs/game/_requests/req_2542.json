@@ -1,0 +1,18 @@
+{
+  "id": "req_2542",
+  "at": "2026-07-04T04:12:04.978Z",
+  "origin": "session:5fc01965",
+  "text": "well, so currently the 'file -> new mesh' takes whatever is loaded into view and adds a new mesh to it, so if its empty, its truly a 'new mesh' but it also currently acts like an 'add mesh' which is completely different than 'new'",
+  "status": "doing",
+  "sessionId": "5fc01965-fc32-4fb5-931f-ad03d02ff7b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T04:21:54.916Z",
+      "actor": "5fc0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

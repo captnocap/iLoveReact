@@ -1,0 +1,10 @@
+{
+  "id": "req_2327",
+  "at": "2026-07-01T03:16:28.895Z",
+  "origin": "session:cc188b8e",
+  "text": "yeah but so some of that is still a bit scuffed. for example, the event bus landed and ive got now some painting functions but that doesnt trigger anything. or also i deleted some models and that didnt send out an event. so its more like a cool thought that no one wants to actually follow the constraints for, the cross cart i can take fault for not being the right thread but its genuinely an important one",
+  "status": "new",
+  "sessionId": "cc188b8e-254f-4f48-b4c4-9dc3aad1d366",
+  "captureMode": "hook",
+  "events": []
+}

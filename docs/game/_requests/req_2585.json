@@ -1,0 +1,18 @@
+{
+  "id": "req_2585",
+  "at": "2026-07-04T08:08:59.626Z",
+  "origin": "session:66d63b15",
+  "text": "ok so i was able to go down the line export -> build piece -> wall and i click wall, the menu stays open so it gives me the impression that it didnt work, and further it also doesnt have any confirmation elsewhere, but ok lets just take it for a second and go back to the world editor, and open wall, and nope not there either",
+  "status": "doing",
+  "sessionId": "66d63b15-80a6-4696-8453-bdc2ef7ccb5d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T08:09:38.711Z",
+      "actor": "66d6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

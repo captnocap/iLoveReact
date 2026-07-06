@@ -1,0 +1,31 @@
+{
+  "id": "req_2465",
+  "at": "2026-07-01T12:58:48.245Z",
+  "origin": "session:bf2eaad9",
+  "text": "world size meaning what like the scale of things or like the actual size of the world being made still lost me there also if loop cutting currently changes the memory of the paint erm or i yeah ok so idk from what it sounds all i can say is who actually uses the approach we are doing because it sounds like its for dick eaters how do u expect me to bring in a model that has 400k tris, and every face expands to 1mb. thats literally never going to load in memory but at the same rate i also cant say either like really one thing from the other lol honestly all i can really say is that before i had a very clear difference between 1px brush to 2px to 3px all the way up. and now this whole texel shit is news to me and i dont really understand it but also i cant write the word test on a cube like i could before and thats a real like uh so whats the problem here buddy moment also the free brush is not free at all it just effectively is doing a choppy version of a face fill or some shit idk i cant get a straight fucking line to save my god damn life [Image #1]",
+  "status": "review",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T13:00:49.220Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T13:04:18.770Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The free brush painted hard-edged binary discs, so strokes were staircased piles of aliased blobs (the jagged 'TesT' screenshot) — not a smooth line to be found. Two fixes: (1) paintStamp now antialiases each dab — full coverage inside the disc, ramping to zero across a 1-texel boundary, blended into flow — so a stroke reads as a smooth line instead of a hard staircase (framework, needs rebuild). (2) Entering the brush auto-picks a paint resolution from the model's tri count (cube/low-poly -> 256 for crisp text, dense meshes stay coarse; host still clamps to the atlas budget) so painting is usable without touching the resolution menu — a stopgap approximating the real texels-per-area density knob. Shas: fd3b1b9c2 (AA, framework), 63279d13b (auto-detail, cart hot-reload). The architecture density rework (per-face -> per-area) is discussed but parked as a someday; it is NOT blocking usable painting now.",
+  "shas": [
+    "fd3b1b9c2",
+    "63279d13b"
+  ],
+  "resolvedAt": "2026-07-01T13:04:18.770Z"
+}

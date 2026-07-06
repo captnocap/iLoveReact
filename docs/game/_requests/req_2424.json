@@ -1,0 +1,30 @@
+{
+  "id": "req_2424",
+  "at": "2026-07-01T10:14:40.207Z",
+  "origin": "session:be477f59",
+  "text": "wow so the bus is already here then well we better hot drop into Useful Userinterfaces for the dub",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T10:14:58.661Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T10:22:03.148Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wired the editor onto the authoring eventbus that was already fully built and just never boarded. framework/events/editor_bus.zig (append-only, durable SQLite at ~/.cache/reactjit/editor-events.db, authoritative monotonic seq, multiplayer-shaped origin) had a written-but-unregistered v8 binding (v8_bindings_editor_bus.zig) and a runtime/editorbus TS door with a local fallback; the editor kept edits in a throwaway React array (state.history) and the 'Eventbus Review' popover reviewed that array while hardcoding 'eventbus host: not wired'. Changes: (1) framework/v8_ingredients.zig — registered the binding (import + one always-on INGREDIENTS row, matching the sibling eventbus/editor_diag buses; registerEditorBus() calls editor_bus.init() and installs the __ffiEmit broadcaster, so no separate boot line). THIS NEEDS A REBUILD to take effect. (2) cart/editor/data/editorEvents.ts (new) — defines one 'editor.edit' event type via defineEventType and a dispatchEdit(history) helper onto the door. (3) AppFrame — a single useEffect on state.seq (which bumps exactly once per recorded edit; undo/redo don't bump it) dispatches history[0] onto the bus as edits happen, with a first-run baseline so a hot-restored session's prior history isn't re-emitted onto the durable log; state.history stays the local undo model, the bus is the durable source of truth. (4) EventBusPopover — now reads the REAL bus via since()/head(), subscribes via onEvent() for a live tail, and reports honest wiring from isHostBacked() ('on the editor bus · durable, seq-ordered' vs 'local fallback · host bus not built into this binary') instead of the fake 'not wired' line. Until the rebuild lands the binding the door's in-process fallback runs and the popover says so plainly; after the rebuild the identical JS path is durable + seq-ordered with zero further change. All JS/TS parse clean via esbuild transform and editorbus exports resolve; the Zig edit is the minimal registration documented in the binding file's own header. NOT shipped (live session) — needs the user's rebuild to go host-backed.",
+  "shas": [
+    "83870cf96"
+  ],
+  "resolvedAt": "2026-07-01T10:22:03.148Z"
+}

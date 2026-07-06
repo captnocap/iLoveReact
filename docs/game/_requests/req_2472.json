@@ -1,0 +1,30 @@
+{
+  "id": "req_2472",
+  "at": "2026-07-01T22:51:06.494Z",
+  "origin": "session:ea3ce9ce",
+  "text": "read /tmp/handoff-20260701-224548-parts-weld-together-edits-bleed-across-coincident-parts.md and then to stack up onto this task is to hoist in the glb/obj imports through the project file explorer menu as well as clearing out this project file explorer from mocked data/hookup and giving it real functionality. All of these tasks are straight forward some requiring more attention to detail than others all equally as important",
+  "status": "review",
+  "sessionId": "ea3ce9ce-d0ad-468f-a469-a95242ec571e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T22:51:12.684Z",
+      "actor": "ea3c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T23:11:32.785Z",
+      "actor": "ea3c",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Project File Explorer de-mocked and given real functionality: the dialog now runs on a live disk index (listDir/stat over cart/editor, cart/hmsc-int, runtime, framework, tools, docs; loud 800-file cap; rescan button), and GLB/OBJ import is hoisted through it — opening a .glb/.obj row opens a real model document through the native __mesh_load_file importer, plus a new File > Import Model (Ctrl+I) zenity picker for files anywhere on disk. Fabricated file records, seed history, and invented preview stats are gone; previews show real size/modified/format.",
+  "shas": [
+    "22fc83e32"
+  ],
+  "resolvedAt": "2026-07-01T23:11:32.784Z"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_2395",
+  "at": "2026-07-01T08:20:41.670Z",
+  "origin": "session:cc188b8e",
+  "text": "yeah thats what i thought. now genuinely the editor doesnt have to be the same data loading approach as the actual game engine itself but at the time it made sense because it loaded and t he other one fucking didnt. however, genuinely if u think about what the fuck is happening to get a 'live update' on the edits you have to either A) split the authoring side from the compiled side, but also in sync. otherwise u never will see a placement show up until the map recompiles, and if u sit thru every peice needing to recompile the map il fucking die before i can build my own grave in the game but going another more sensible approach is also like hey thats a real thing to do buddy. now, lets get down to the brass tax of it all. the old editor has this 2d tile map painting bullshit that fucking blows ass. so the plan was to effectively mend all that same capability into the isometric 3d editor. but now this all is on the table. you can weigh in",
+  "status": "new",
+  "sessionId": "cc188b8e-254f-4f48-b4c4-9dc3aad1d366",
+  "captureMode": "hook",
+  "events": []
+}

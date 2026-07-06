@@ -1,0 +1,18 @@
+{
+  "id": "req_2670",
+  "at": "2026-07-05T03:56:39.131Z",
+  "origin": "codex:019f2fbd",
+  "text": "weird the tui command use to work fine. trace it down it should just open in the same terminal process ready to run",
+  "status": "doing",
+  "sessionId": "019f2fbd-a86d-7153-ad17-040c589a4278",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T03:56:51.245Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

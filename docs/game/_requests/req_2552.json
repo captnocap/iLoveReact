@@ -1,0 +1,24 @@
+{
+  "id": "req_2552",
+  "at": "2026-07-04T04:56:50.294Z",
+  "origin": "session:8879defb",
+  "text": "sorry, and this would really help to nail down 'what toolbar' im talking about, because this has been a problem before, but where the paint button or vertex button or show wireframe button is, what is the name of that 'toolbar' ? because you put them in the 'file menu toolbar' but with howmany horizontal gutters this app has, i can see where that is a fuck fest of 'toolbars' to judge from",
+  "status": "doing",
+  "sessionId": "8879defb-5d05-41d8-a5f0-3099c8e431cc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T04:57:10.636Z",
+      "actor": "8879",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T05:03:27.179Z",
+      "actor": "8879",
+      "kind": "note",
+      "text": "Named: the Paint/Vertex/wireframe row is ToolOptions — the ACTION BAR (its buttons literally report 'action bar' as source), top of the Workspace column. Paint segment moved there (chrome children slot reverted); dup fill/brush icons + DETAIL pill removed; SAFE pill kept; popovers drop from the action bar. TSX-only — hot reload shows it."
+    }
+  ]
+}

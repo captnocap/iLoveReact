@@ -1,0 +1,30 @@
+{
+  "id": "req_2699",
+  "at": "2026-07-05T20:04:28.246Z",
+  "origin": "session:a71ff6e3",
+  "text": "Hey so i was using the map painter, and so here is something im wondering if you might have a solution for, but if i do even a height field of 2 and then i am placing some flora around it, im getting this problem here that i really dont like [Image #26] notice how this side of the hill is bare. well i have tried to drown it in flora and it just stays bare D:",
+  "status": "review",
+  "sessionId": "a71ff6e3-8b84-45fa-b0da-3e926d36a3d4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T20:04:41.041Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T20:16:10.169Z",
+      "actor": "a71f",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the bare-hillside flora bug: regenPaintFoliage sampled terrain height ONCE at each painted cell's centre and planted every blade/flower/bush/palm at that single height, while blades scatter up to half a cell away — on a slope the ground rises past the 0.26-0.55m blade height and swallows them, so drowning the slope in paint changed nothing. Now every foliage row is re-seated on the terrain under its OWN x/z (seatRowOnTerrain in world_loader.zig; palms move trunk+crown by one shared footing delta so bark and fronds stay attached). Needs a dev-host rebuild (Zig change) to see it.",
+  "shas": [
+    "51b8b6b30"
+  ],
+  "resolvedAt": "2026-07-05T20:16:10.169Z"
+}

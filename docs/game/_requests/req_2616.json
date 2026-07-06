@@ -1,0 +1,10 @@
+{
+  "id": "req_2616",
+  "at": "2026-07-04T17:02:21.740Z",
+  "origin": "session:09f49bea",
+  "text": "<task-notification>\n<task-id>bin6mwoi4</task-id>\n<tool-use-id>toolu_01NZP4TSbe3G5WUHASyTn5Gv</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/0f02d048-6266-4c5d-affe-6131b0e17f55/tasks/bin6mwoi4.output</output-file>\n<status>completed</status>\n<summary>Background command \"Re-ship editor with fixed harness undo op\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "09f49bea-d556-4723-b539-65736fb19fb8",
+  "captureMode": "hook",
+  "events": []
+}

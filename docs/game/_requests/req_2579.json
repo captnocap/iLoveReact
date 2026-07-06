@@ -1,0 +1,18 @@
+{
+  "id": "req_2579",
+  "at": "2026-07-04T07:46:18.644Z",
+  "origin": "session:66d63b15",
+  "text": "i would treat it as this: \n\nso any one of these, are just the mesh, all the same as anything else. we dont have the current export pipeline setup yet but this is the perfect opportunity for it, effectively i can open up a preexisting mesh (like the airconditionr_wall) and then export it (again) as a wall piece and that can then populate into our slots",
+  "status": "doing",
+  "sessionId": "66d63b15-80a6-4696-8453-bdc2ef7ccb5d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T07:47:42.763Z",
+      "actor": "66d6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

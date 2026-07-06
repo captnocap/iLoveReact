@@ -1,0 +1,24 @@
+{
+  "id": "req_2559",
+  "at": "2026-07-04T05:39:49.088Z",
+  "origin": "session:1ccd61f7",
+  "text": "ok next problem, um. so ok \n\nso in the mesh editor, lets say i have a cube[Image #20] \nand i enable faces mode amd then click a face[Image #21] \nthen press delete button [Image #22] \ndeleted whole face. ok now instead of doing face select lets just drag and select multiple faces to delete\nso new model and u can see i have hit the face from selecting [Image #23] and lets press delete again [Image #24] \nnotice what happened here. it deleted a triangle of the face and then also moved the selection to the other side",
+  "status": "doing",
+  "sessionId": "1ccd61f7-1753-4038-a146-209701d9708e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T05:40:24.298Z",
+      "actor": "1ccd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T05:43:02.643Z",
+      "actor": "1ccd",
+      "kind": "note",
+      "text": "Two root causes: (1) mesh_edit.boxSelect face mode marked triangle centroids only — no authored-group expansion like click's setFaceGroup, so a marquee grabbed half a quad and delete cut a triangle; fixed by expanding centroid-hit tris to their full face groups after the rect pass. (2) meshDeleteSelection compacted the mesh with the selection tint still baked in the atlas (per-face saved patches keyed by current indices), so the post-replace restore painted orange onto whichever faces inherited the old indices; fixed by mesh_edit.clearSelection() before the rebuild — the same order detach/glass already use. Both Zig — needs rebuild to verify."
+    }
+  ]
+}

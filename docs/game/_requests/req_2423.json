@@ -1,0 +1,10 @@
+{
+  "id": "req_2423",
+  "at": "2026-07-01T09:53:20.874Z",
+  "origin": "session:be477f59",
+  "text": "Right. but ok so where the hell is the eventbus coming from then. if the host is zig (which im not that retarded actually i have learned that over the vibe coded months) and we have @framework/events/editor_bus.zig and @framework/diag/event_bus.zig then what bus hasnt showed up? are we taking the battle bus drop in to the burj khalifa funded by MBS? what bus are we missing at the station",
+  "status": "new",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": []
+}

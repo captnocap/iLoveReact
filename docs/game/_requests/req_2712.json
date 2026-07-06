@@ -1,0 +1,42 @@
+{
+  "id": "req_2712",
+  "at": "2026-07-06T00:07:17.606Z",
+  "origin": "session:18de0f93",
+  "text": "hello. we have been closing in on a lot of the features of the @cart/editor/ carried on from the previous @cart/hmsc-int/ ; im going to pass you the next slice that touches on one key feature and some of it is in part setup already, but we need to introduce prop exporting and then prop build placements. we have already build piece exporting in and working, so this is the next piece. one thing i want to touch on is that the old editor had props in a few ways, one of them was from typescript files, and one of them was exported meshed from the editor. well, we are now only going to do the exported from the editor, which means we have to instrument our prop exporting to carry the same plausible shapes that could occur in the previous prop files. meaning, some of them had searchable slots, some of them had keys/locks, and etc. Now, here is also where something changes a bit because my thought process was to treat props (and other authored pieces) through this @framework/skeleton/ approach, and here is just a rough draft of that idea. the prop shape itself is quite small because im not sure how much more we need to maybe append to it or not, so thats one thing you can investigate first but skeleton for body\nhead mouth(lips, teeth?) hair eyes(left, right) nose chest shoulder(left, right) upper_arm(left, right) elbow(left, right) lower_arm(left, right) hand(left, right) wrist(left, right) fingers?(left, right) chest breast? abdomen hips(left, right) crotch? butt upper_leg(left, right) knee(left, right) lower_leg(left, right) feet(left, right) toes?(left, right)\n\nskeleton for car\nbumper(front, back) door(driver, passenger) hood wheel(front_left, front_right, back_left, back_right) trunk lights(front, back) gas windshield window seat(driver, passenger)\n\nskeleton for props\npockets?(slot #)[can this thing hold items / is it searchable] placements?[can this thing have items placed ontop of it like a tabletop, where is the table top(s)]\n\nskeleton for items\ngrip(left? right?)[where does the player model grab this thing at and with which hand?] ammo?[the place where ammo is reloaded] projectile?[the area it shoots a bullet out of] physical?[the area that makes contact with another model, think slashing with a knife, the blade is the physical]\n\n",
+  "status": "review",
+  "sessionId": "18de0f93-fa0a-42e8-8bca-536e3b73624d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:07:38.961Z",
+      "actor": "fable-props",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T00:09:35.075Z",
+      "actor": "fable-props",
+      "kind": "note",
+      "text": "User clarified vocabulary (req_2713): this slice goes hand in hand with rigging — treat prop export as rigging the exported model onto the skeleton object model."
+    },
+    {
+      "at": "2026-07-06T00:19:02.652Z",
+      "actor": "fable-props",
+      "kind": "note",
+      "text": "Design locked via req_2718: manifest-declared placeability, disk-derived palette, retrofit authoredBuildPieces off localstore-as-truth."
+    },
+    {
+      "at": "2026-07-06T00:43:51.511Z",
+      "actor": "fable-props",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the full prop-export + placement slice on the skeleton object model. NEW runtime/skeleton/rigs.ts: the canonical rig vocabulary — pocket_<n>/placement_<n>/seat_<n>/grip contacts, ammo/projectile mounts, container(loot,open/locked/keyed,keyId,searchSeconds,fill)/seat/cover/door/dynamics capability params mirroring every load-bearing shape from the old hmsc-int prop table, plus body/car formation templates from the user's draft; PropRig draft ⇄ Skeleton mapping with 7 passing contract tests. Editor: Inspector gains a RIG section (pockets/placements/seats/cover/kickable steppers on the shared control grid), File → Export → Prop compiles the draft into the package manifest (placeable + skeleton — disk truth per req_2718 ruling), props free-place under the cursor with ghost/undo/persist and render via the existing resident-mesh bridge under a new Props palette category, and the focus panel shows an armed/selected prop's model + rig. Build-piece export retrofitted onto the same manifest-declared path with boot scan + localstore backfill. Bundle verified clean.",
+  "shas": [
+    "bd3137478"
+  ],
+  "resolvedAt": "2026-07-06T00:43:51.511Z"
+}

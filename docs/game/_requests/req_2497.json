@@ -1,0 +1,30 @@
+{
+  "id": "req_2497",
+  "at": "2026-07-02T01:53:41.573Z",
+  "origin": "session:2b166540",
+  "text": "Ok. Now the terrain heightfield is pretty good. i am not so much a fan of the shape of the tool but thats irrelevant. im having real problems though the moment i go to flora, where is the flora? if you thought the goal was to paint 2d tiles in 3d space the the entire ball was missed, i want to see it paint literal trees the same way its painting literal hills when i am in terrain mode",
+  "status": "review",
+  "sessionId": "2b166540-f213-42f7-ba61-c71ee4889378",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T01:54:48.517Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T02:06:14.526Z",
+      "actor": "session-2b16",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Flora now paints LITERAL foliage live in the viewport (518f4d550, NEEDS A REBUILD): stroking grass/bush/flower/palm kinds grows real 3D populations the moment you paint, exactly like terrain paints real hills — the tint-only overlay was the miss. The loader gained a live-foliage preview: five family draw nodes (grass blades, flower heads, bush clumps on the ~grass~ wind pipeline; palm fronds on ~frond~; lit palm trunks) regenerated straight off the painted lanes through the SAME foliage.zig generators the baked FLORA recipe expands with, so preview and bake never drift. Blades sit on the painted relief and regrow when you re-sculpt under them. The population contract stays cart content (per-kind family/rows/spawn-chance pushed via the new __map_set_flora_specs door), with values verbatim from the hmsc population configs — including the palm grove density gates (sparse 0.08 / med 0.22 / dense 0.7, most palm cells stay bare, that is the grove look; trunk and crown roll the same per-cell hash chain so bark and fronds agree). Preview budgets (64k blades/16k bushes/16k flowers/24k fronds/2k trunks) truncate LOUDLY to the log; Compile grows the full population.",
+  "shas": [
+    "518f4d550"
+  ],
+  "resolvedAt": "2026-07-02T02:06:14.526Z"
+}

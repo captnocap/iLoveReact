@@ -1,0 +1,30 @@
+{
+  "id": "req_2695",
+  "at": "2026-07-05T19:52:17.093Z",
+  "origin": "session:30dc2d20",
+  "text": "hey the current hook system effectively treats all requests between both claude and codex as game-based requests, which, for the last month or more has been correct, but there has been intermittent requests that are totally unrelated, so im wondering if we can change the system where the hook would prompt that if it is related to the editor/game building that then the request can be picked up and forwarded into the pile otherwise to drop it off as one offs/unrelated",
+  "status": "review",
+  "sessionId": "30dc2d20-de97-4df4-a961-88585ef24c13",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T19:52:23.456Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T20:02:39.882Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the REQSCOPE-0705 scope gate end to end. Capture stays blanket (the hook cannot judge scope), but the capture context line now instructs the receiving session to gate first: if the ask is about the editor/game building, claim it into the pile exactly as before; if it is unrelated, run the new 'tools/request oneoff <id> --by <you>' which flips the entry's origin to 'one-off' — the verbatim ask, history, and oracle-searchability are all kept, but the board columns, list --open, the stop nudge, and --since activity stop carrying it (the same exemption fold supervisor dispatches use, now shared via isOffBoard()). The workbench requests surface gained a 'one-offs' view (records, not jobs — no board verbs) and the secretary still tags them. REQUESTS.md, the index record, and the CLAUDE.md worker contract document the gate; both P4 suites extended and passing (27/27 ledger, 17/17 workbench), plus a live end-to-end smoke of hook-prompt → oneoff → board/list/show against a scratch ledger.",
+  "shas": [
+    "aac786dc2"
+  ],
+  "resolvedAt": "2026-07-05T20:02:39.881Z"
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_2357",
+  "at": "2026-07-01T06:09:09.372Z",
+  "origin": "session:6fbe594d",
+  "text": "well what is a 'note' in your proposal because im confused. it was, and to my knowledge is, a system that, i send a prompt like this one right now, it immediately is being recorded. and that gets stored in an ongoing log. i never 'reviewed' them so i said the 'in review' thing was really stupid because theres nothing for me to really review on a previous prompt when my review is quite literally always the follow up message to the claude im talking to, so you see why the review thing was stupid. now that doesnt change the fact that over thousands of prompts and the dozens of times the same bug has reintroduced itself from thin air and having to relearn all over again the same mistakes as before is exactly the reasaon why you the dude who can type really fast, can bullshit their way through a bug fix as a conclusion and i can continue to say its broken and then when i know its annoying enough to need a name i can start collecting them in threads but i cant collect them in threads if there is nothing to show here but there should be for every time i send a message even as stupid as it sounds because it certainly becomes a fuck fest of just messages like this but hey thats the beauty of using ai i guess",
+  "status": "new",
+  "sessionId": "6fbe594d-af99-426d-a4a8-dda602f7ee6c",
+  "captureMode": "hook",
+  "events": []
+}

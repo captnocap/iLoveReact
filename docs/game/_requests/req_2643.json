@@ -1,0 +1,36 @@
+{
+  "id": "req_2643",
+  "at": "2026-07-05T01:51:09.414Z",
+  "origin": "session:40eebdf5",
+  "text": "ok so lets go through it then. file -> new -> cube and i get this dialog: [Image #63] still what is 1.0, no connect to reality. but ok step further [Image #64] nice. this looks better from afar, lets tear it apart. first thing is the cube is spawned half way into the ground, i dont know if this is a standard procedure of editors or not but not how the last one behaved, so just feels wrong. [Image #65] lets go face mode looks good. i lifted it out of the mud there. but all in all. face mode looking better at this step. good and more importantly. [Image #66] ctrl z got me back here. great. now lets look at the scene a bit. no gizmo for the compass, i dont have any way to fix my orientation, or see its angle in real time in the corner. loop cut, thank god i can sleep tonight. [Image #67] this is much better, but still bad. look at how much dead space is there. more importantly, think about direciton already, its a 0 or 1 value, meaning that string is never going to fill that container space. it looks bad. but the fact that its all in the same card ? amazing. also, looking at the cut [Image #68] looks nice and more importantly again i cant just do some other shit while this dialog is up. which is huge ok i can clearly rename this so i now have [Image #69] fun_cube and now this dialog. [Image #70] this is the same problem as i said before with ui shit. that 'recommended' blows OUT that entire size picker and further this interface is just genuinely shittier than it could be. but ok now also this uv atlas location is genuinely dogshit. put it on the god damn side model focus [Image #71] not on the ui but not in my original gripe, just fundamentals of reuse. now lets add another cube to this mix. annnnnd [Image #72] there it is our atlas has no shit the bed. they are two different outliners and sharing the same atlas >:V \n\nhows that for the first set. what did i miss on that interface",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T01:51:55.336Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T01:51:55.346Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "CRITIQUE ROUND 1 (user live-tested wave 1+2). CONFIRMED WINS: stage grid, face mode dressing, ctrl+z undo, loop-cut visibility + cyan cuts + handle, modal gate (cannot do other shit mid-session — 'huge'), rename + ON DISK chip flow (fun_cube), lc popup on one card w/ Size/% toggle. NEW/REMAINING FINDINGS: (JJ) New Cube dialog STILL unitless sliders '1.0' (req_2624 unimplemented — confirmed). (KK) NEW: primitive spawns HALF-SUNK into the ground (centered at origin); old studio rested pieces ON the floor — spawn with min-Y at ground plane. (LL) NEW: no viewport orientation compass — old editor had the corner nav ball (XYZ orbit gizmo) + live angle/fov readout; new editor has nothing to fix orientation with. (MM) Loop-cut popup: right card, bad interior — dead space, 'direction' is a 0/1 value that never fills its wide container; compact the card, direction wants a two-state toggle not a stepper. (NN) Create Paint Atlas dialog: 'recommended' chip blows out the size-picker row (columns inconsistent) — needs the control-grid treatment (req_2626 II applies; dialog otherwise unreworked). (OO) UV ATLAS floating panel location 'genuinely dogshit' — RELOCATE into MODEL FOCUS side panel as a section (old studio has UV as a left-panel section; fundamentals of reuse). (PP) CONFIRMED CRITICAL (= req_2619 gap P instance): adding a second cube part RE-LAYS the shared whole-model atlas — islands shuffle/gray out across parts ('two different outliners sharing the same atlas'); UV must be per-outliner-part correspondence w/ stable islands per part."
+    },
+    {
+      "at": "2026-07-05T03:32:05.444Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Gap LL LANDED (fc911637c + 3d.zig half swept into parallel session's 2ff07c418 — shared-tree timing, code intact, split documented in fc911637c's message): corner compass ball bottom-left of the model viewport — rotation-only world-basis projection, positive ends solid labeled dots / negatives hollow dim, axisColor convention, painter-sorted; LIVE readout 'yaw N° pitch N° fov N°' host-drawn (drawTextLine works from the overlay pass — no door, no cart follow-up needed); CLICK-TO-SNAP included (axis dot snaps orbit, ball body consumes the press so nothing selects through the furniture; press check runs AFTER the loop-cut modal gate per the inert-press law). Verified: compass_a/compass_b shots show the ball rotating with an orbit op and readout matching the exact camera angles. Gaps KK+JJ landed earlier (637f12e9d). Remaining open this round: MM/NN/OO/G with the in-flight focus-panel agent."
+    },
+    {
+      "at": "2026-07-05T03:38:26.150Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "Gaps MM/NN/OO LANDED + req_2618 G LANDED (3e7f8ad9e): floating UV card REMOVED, UV now a MODEL FOCUS section (header w/ dims+density readout, preview scaled to focusPanel innerWidth, auto-refresh kept, honest-empty until first atlas); header labels the ACTIVE part (UV · CUBE 1). Per-part island FILTERING blocked by one host gap: __model_atlas_read serializes islands as x,y,w,h WITHOUT the group id paint_islands.zig already carries — needs the 5-tuple; queued into next wave. Loop-cut card compacted (direction = two-state U/V toggle labeled with real spans, card width = sum of grid columns, one right edge). Atlas dialog on fixed columns w/ always-reserved recommended-chip column. SHAPE section landed: verts/faces/edges/uvd/mounts strip + bounds, all honest values (— until host topology builds, mounts honest 0). Bridge = __modelFocusBridge global, zero AppFrame edits. All shot-verified."
+    }
+  ]
+}

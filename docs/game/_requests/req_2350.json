@@ -1,0 +1,18 @@
+{
+  "id": "req_2350",
+  "at": "2026-07-01T05:47:15.934Z",
+  "origin": "session:8cf696c0",
+  "text": "alright well that validated it fucking instantly i didnt even have to do anything but just turn on edge mode. lmao. [Image #17] those are not the edges of a cube",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T05:47:59.258Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

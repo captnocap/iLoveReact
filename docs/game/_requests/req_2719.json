@@ -1,0 +1,17 @@
+{
+  "id": "req_2719",
+  "at": "2026-07-06T00:23:22.622Z",
+  "origin": "one-off",
+  "text": "hey so there is a commit that tried to commit a file too large like 300+ commits ago now and this happened once before. uh, before we didnt have the command or whatever i guess that 'makes it safe to fix' and some agent ran some other command and lost a ton of work. then it of course happened again and then that time, i didnt trust that it wouldnt happen so i copied the entire repo on disk into another folder, they reset, and then we copied everything back in and did one huge commit (which can be found in the history months ago); uh, so yeah we need to handle the problem. i still dont really believe the command we had to install(?) is going to save our ass so im going to clone everything on disk into another directory anyways but uh yeah basically after this other agent 18de is done doing what they are doing i will clone it and then u can restore it or whatever it is",
+  "status": "new",
+  "sessionId": "946c6729-d313-4564-be06-7b2021c12c44",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:23:39.740Z",
+      "actor": "946c",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

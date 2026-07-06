@@ -1,0 +1,17 @@
+{
+  "id": "req_2720",
+  "at": "2026-07-06T00:25:52.664Z",
+  "origin": "one-off",
+  "text": "oh and btw u might be wondering well what are we going to do with the data in the db and the answer is it doesnt really matter it can be deleted actually that is why we migrated everything in the new editor to be actual on-disk files so that the problem wouldnt happen again",
+  "status": "new",
+  "sessionId": "946c6729-d313-4564-be06-7b2021c12c44",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T00:26:24.077Z",
+      "actor": "946c",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

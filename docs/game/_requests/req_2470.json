@@ -1,0 +1,10 @@
+{
+  "id": "req_2470",
+  "at": "2026-07-01T22:47:59.100Z",
+  "origin": "session:7f712f89",
+  "text": "<task-notification>\n<task-id>bone4otuq</task-id>\n<tool-use-id>toolu_01LQYj1rHGB7kkrhcyoHh7Tm</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/a1184b2f-c069-43ed-8498-a7655b477140/tasks/bone4otuq.output</output-file>\n<status>killed</status>\n<summary>Background command \"Wait for file menu agent\" was stopped</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "7f712f89-69e2-4eb1-8dca-383169d0dee5",
+  "captureMode": "hook",
+  "events": []
+}

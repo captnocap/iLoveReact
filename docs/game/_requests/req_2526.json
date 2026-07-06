@@ -1,0 +1,24 @@
+{
+  "id": "req_2526",
+  "at": "2026-07-04T02:48:50.269Z",
+  "origin": "session:69672c0b",
+  "text": "uh one thing im a bit confused about, so, i am testing the ak47, i click to paint it, it asks me for an atlas size, i click on the recommended, i start painting, i leave the app, come back, go to the ak47, and click paint again, and its asking me again for an atlas size. but shouldnt that already be covered now ?",
+  "status": "doing",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T02:49:11.498Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T02:56:15.378Z",
+      "actor": "session-6967",
+      "kind": "note",
+      "text": "Fixed (76d0404c6, hot-reload). Root cause: the Create Paint Atlas gate (atlasReadyRef) resets on every model mount, so a model WITH a saved painting still re-prompted for atlas size and never restored. Now entering paint on a model that has saved variants on disk restores the latest (changeDetail to its resolution + __model_paint_program_apply) and skips the prompt; only unpainted models prompt. Threaded paintTarget={kind,id} from ModelDocumentSurface into ModelView so it can find its own paints/. User's flow (paint->Save->quit->reopen->paint) now restores Painting 1 instead of re-prompting. Note: restore fires on paint-entry, not model-open — matches their click-paint flow."
+    }
+  ]
+}

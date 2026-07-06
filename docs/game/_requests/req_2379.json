@@ -1,0 +1,18 @@
+{
+  "id": "req_2379",
+  "at": "2026-07-01T07:42:27.119Z",
+  "origin": "session:be477f59",
+  "text": "nice ok next thing right next to it how the fuck do we have 3 horizontal axis on the same damn window chrome bar. the shittygames/file menus are on one, then the compile is on another and then editor / play is on another. none of these align horizontally well maybe compile and the file / shittygames logo but so far apart its hard to say",
+  "status": "doing",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T07:42:50.476Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

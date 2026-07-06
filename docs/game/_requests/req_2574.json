@@ -1,0 +1,18 @@
+{
+  "id": "req_2574",
+  "at": "2026-07-04T06:54:18.193Z",
+  "origin": "session:66d63b15",
+  "text": "oom=true -Dhas-capture=true -Dhas-imageops=true\n[sdk-dependency-resolve] dev: dropping has-whisper (conflicts with has-embed; both bundle ggml)\napp\n+- install reactjit-dev\n   +- compile exe reactjit-dev ReleaseFast native 1 errors\nframework/v8_bindings_game_build.zig:222:30: error: ambiguous coercion of division operands 'comptime_int' and 'comptime_float'; non-zero remainder '154'\n        .concrete => .{ 0x9a / 255.0, 0xa3 / 255.0, 0xad / 255.0 },\n                        ~~~~~^~~~~~~\nreferenced by:\n    hostCatalogRows: framework/v8_bindings_game_build.zig:255:32\n    registerGameBuild__anon_44942: framework/v8_bindings_game_build.zig:280:60\n    14 reference(s) hidden; use '-freference-trace=16' to see all references\nerror: the following command failed with 1 compilation errors:",
+  "status": "doing",
+  "sessionId": "66d63b15-80a6-4696-8453-bdc2ef7ccb5d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T06:54:37.089Z",
+      "actor": "66d6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

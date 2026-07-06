@@ -1,0 +1,18 @@
+{
+  "id": "req_2580",
+  "at": "2026-07-04T07:53:05.617Z",
+  "origin": "session:89435474",
+  "text": "time to run another round of deshitification. il point out things that are just ai slop and you fix them. get your bingo card ready",
+  "status": "doing",
+  "sessionId": "89435474-95a3-4158-b05e-77cde046e73e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T07:53:14.679Z",
+      "actor": "session-8943",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

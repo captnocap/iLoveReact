@@ -1,0 +1,18 @@
+{
+  "id": "req_2482",
+  "at": "2026-07-02T00:13:12.596Z",
+  "origin": "session:4c74e97e",
+  "text": "yeah you said it better than i could have because i barely even used it. i know that from the small use it seemed to be a start in the right direction but that it didnt really feel like it was complete at all. and so just t he other thing i want to try and fold into this all because its all relevant, so, we are refactoring, this new app is the direction, with a lot of the bad code and lessons learned from the other editor. there are a few things that unifiy into this whole behavior of textures and color for the game assets and so the few things i wanted to also touch base on was ok so first of all, right away, i start up the app, and immediately this is one of the first things i see [Image #1] which is not a bad thing. but it currently doesnt do anything yet other than just display this preview. i click on it and i see this small menu under it [Image #2] right like oil spots, trash stains, patchwork. but i dont even know what the hell i am looking at because there is no actual expansion into any actual like page yet to start to manipulate any of these or what not. and in this state i am also not like trying to say set any of these on a wall piece or something and even if i were this wouldnt be the correct panel anyways to show them in because its not the focus panel. so the intention here is saying like hey open these up and edit them or do something but all i get is that small little panel under it and i dont even know what the outcome of any of those modifiers i see ther even are. and to make matters worse, thats not even the thing we have in question right now LMAO. because the thing we have in question looks like this right now [Image #3] and it doesnt even paint the shader anyways lol it just does a white face fill. also the menu here is extremely under performance sending me from 240fps to ~50fps because its loading in like what a hundred or so of these previews all at once when the other panel took a much smarter approach of paging them since virtual scrolling is not really any actual benefit in this framework anyways. so theres that and then with that there is also just the ability to be able to upload an image and use that as a texture that is not yet added in here yet but i still want to have. and i want to have it in a much more not so retarded fashion. the last approach just didnt give a shit where the image was on disk and pulled from an arbitrary path which is very sloppy and then to fix that problem it tried to just solve it with a button that would 'collect' the assets for when i needed to move from one machine to another which then just ends up being double the image storage on my actual disk for no good reason. and i dont know how to code the shaders and i dont really want to either but i can obviously tell that if code can generate what clearly looks like something i would have always considered to be just a normal image then the ability to manipulate it is very strong but only if its setup to do so",
+  "status": "doing",
+  "sessionId": "4c74e97e-ef7b-426c-9636-2a0b67ccfa52",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T00:14:19.956Z",
+      "actor": "session-4c74",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

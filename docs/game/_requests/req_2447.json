@@ -1,0 +1,30 @@
+{
+  "id": "req_2447",
+  "at": "2026-07-01T11:52:58.571Z",
+  "origin": "session:bf2eaad9",
+  "text": "well first gripe honestly is how the hell is a brush with size 1 px and size 9px painting the same damn size. i have face fill off. im trying to write the word test on a cube and it looks like i have cerebal palsy because there is no fine motor tuning of the pixel size for some reason but the slider on the side gives me other ideas that it should be",
+  "status": "review",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T11:53:55.966Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T11:56:20.261Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the free-form brush size doing nothing: sizes 1 and 9 painted the same ~1-texel dab because brushRadius was max(0.6,(size/96)*detail), which treats brush size as a fraction of a whole face — so the entire small end of the 1..512 log slider collapsed onto the 0.6 floor and there was no fine-motor control for writing text. Changed it to radius = max(0.5, size/2): brush size is now a direct texel diameter (size N paints an N-texel-wide dab), detail-independent, so size 1 is a single texel and 9 is a 9-texel blob, and higher detail simply gives more texels per face so the same size paints finer. Cart-only change (hot-reloads, no rebuild); transforms clean via esbuild. Note for the follow-on gripe: legible text on a big flat face is still limited by the per-face texel ceiling (detail maxes at 32, so a cube face is 32x32 texels total) — the size mapping is fixed but the resolution ceiling is the next limit.",
+  "shas": [
+    "2c1dbd70b"
+  ],
+  "resolvedAt": "2026-07-01T11:56:20.261Z"
+}

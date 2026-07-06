@@ -1,0 +1,18 @@
+{
+  "id": "req_2370",
+  "at": "2026-07-01T07:24:01.448Z",
+  "origin": "session:8cf696c0",
+  "text": "ok that was fast as fuck next is layers on any given model in view",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T07:24:30.092Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

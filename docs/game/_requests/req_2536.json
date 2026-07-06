@@ -1,0 +1,10 @@
+{
+  "id": "req_2536",
+  "at": "2026-07-04T03:34:36.068Z",
+  "origin": "session:1ccd61f7",
+  "text": "lets stop adding to git until its actually fixed. siah@busiah ~/creative/reactjit $ tools/rjit dev modelview[dev] not found: /home/siah/creative/reactjit/cart/modelview/index.tsx or /home/siah/creative/reactjit/cart/modelview.tsx\nsiah@busiah ~/creative/reactjit $ tools/rjit dev modelview[dev] not found: /home/siah/creative/reactjit/cart/modelview/index.tsx or /home/siah/creative/reactjit/cart/modelview.tsx\nsiah@busiah ~/creative/reactjit $ tools/rjit dev modelview[dev] not found: /home/siah/creative/reactjit/cart/modelview/index.tsx or /home/siah/creative/reactjit/cart/modelview.tsx\nsiah@busiah ~/creative/reactjit $ ",
+  "status": "new",
+  "sessionId": "1ccd61f7-1753-4038-a146-209701d9708e",
+  "captureMode": "hook",
+  "events": []
+}

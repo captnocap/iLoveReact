@@ -1,0 +1,18 @@
+{
+  "id": "req_2460",
+  "at": "2026-07-01T12:38:50.482Z",
+  "origin": "session:bf2eaad9",
+  "text": "so im just curious like more how do any of these budgets like matter because were about to go from painting like 1k tris little shrimp dicks to 400k tris giga ninjas and well thats literally the reason why this entire editor was made beyond the previous studio. the previous studio couldnt load a 6mb model. this eats 40mb models for breakfast maybe not paint tho the paint is sounding like its a bit chopped",
+  "status": "doing",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T12:40:35.364Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

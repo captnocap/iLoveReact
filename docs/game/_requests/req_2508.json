@@ -1,0 +1,24 @@
+{
+  "id": "req_2508",
+  "at": "2026-07-02T04:28:19.321Z",
+  "origin": "session:ea3ce9ce",
+  "text": "oh also, and this could be a real helper that goes with this or not idk honestly but every other program i have used when switching from modeling to painting its not like you can just immediately step into it, they always prompt first about some form of a texture atlas creation and only then after that is created and is stored can you paint but we seem to just completely not do any of that",
+  "status": "doing",
+  "sessionId": "ea3ce9ce-d0ad-468f-a469-a95242ec571e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T04:29:13.859Z",
+      "actor": "ea3c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T04:36:59.948Z",
+      "actor": "ea3c",
+      "kind": "note",
+      "text": "Built (05ebb2091): Create Paint Atlas prompt gates first paint entry per model — resolution options with real WxH/MB cost, GPU-limit options disabled, recommended level marked; fresh loads drop paint mode and re-arm the prompt. Cart-only, hot reloads."
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "id": "req_2666",
+  "at": "2026-07-05T03:45:06.641Z",
+  "origin": "session:a29bdf2b",
+  "text": "Great we are getting somewhere. some big problems let me bring them to you right away so here is the world and now we have a ground good. i raised the terrain and flattened it. [Image #20] lets put some build pieces [Image #21] and notice they do not place on the raised ground. the mouse ghost cursor is in great shape tho here",
+  "status": "doing",
+  "sessionId": "a29bdf2b-cd53-4650-be3f-08a38fb3ab80",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T03:45:36.537Z",
+      "actor": "fable-world",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T03:46:38.976Z",
+      "actor": "fable-world",
+      "kind": "note",
+      "text": "GAP YY — pieces ignore painted terrain height. Ghost tracks hover great (VV fix confirmed by user) but placement lands at the flat storey plane: resolvePlacement returns y: levelY (cart/editor/world/pieces.ts:181, levelY = floor*3m, 0 on Ground) and IsoStage.groundPoint (isoStage.ts:128) intersects the y=level plane analytically — neither samples the painted height channel. The brush places strokes on the mesa correctly because the HOST raycasts its own paint heightfields (paintGroundHitAt, world_loader.zig:6870; terrainSurfaceAt :2403) — that exact math needs a door: __compiled_world_ground_hit(nodeId, px, py) -> terrain hit, consumed by resolveSnap so ghost+placement+validation all use the surface Y (see-it == place-it). Flat-plane fallback when no field under the cursor. USER RULING same round: paint mode and build mode may NEVER be active together — 'only one at a time' (gap WW promoted from wave-2 hold to NOW)."
+    },
+    {
+      "at": "2026-07-05T03:48:59.224Z",
+      "actor": "fable-world",
+      "kind": "note",
+      "text": "GAP ZZ — tile TEXTURE picker popover is click-through: MapTexturePicker (stage/MapTexturePicker.tsx:51-53, absolute popover at left 410/top 122, rendered late at AppFrame root ~2309 with working Pressables) overlaps the viewport pane, and while paint is armed the HOST claims every pointer event inside the loader pane rect (__compiled_world_set_paint_mode → paintPointer, world_loader.zig) BEFORE JS hit-testing — the host knows nothing of JS overlays, so picker clicks stroke the map instead ('passes through to the editor'). JS-side paint order is fine (root-late child). Fix: modal-discipline gate (req_2626 law) — while texturePickerOpen (or any overlay above the pane), release the host pointer claim: gate the paintActive prop AppFrame feeds WorldEditorSurface with !texturePickerOpen. Dispatched as addendum to the WW mode-arbitration agent (same file, same law)."
+    },
+    {
+      "at": "2026-07-05T03:54:38.934Z",
+      "actor": "fable-world",
+      "kind": "note",
+      "text": "YY LANDED (a2e1e47f4): __compiled_world_ground_hit door (v8_bindings_compiled_world.zig:285-340, registered :443) calls paintGroundHitAt directly (world_loader.zig:6758-6769 groundHitAt) — placement rides the brush beam's exact heightfield raycast, same window-space coords, same pane rect. Cart side: WorldViewport groundUnder() door-first with flat-plane fallback (:297-316), resolveSnap + onUp click-place share it (:318-326, :430-438); pieces.ts resolvePlacement(..., terrainY=0) → y = terrainY + levelY (hillside Ground ON the hill, Floor 1 = hill+3m), validator sees real y; ghost inherits snap.y. Verified: ship clean with -Dhas-compiled-world; boot shot yy_terrain.png shows the seeded slab meeting the sky with zero shader/loader errors; edkeys 'b' arms Place (no headless click exists, so raised placement is verified by code-path IDENTITY with the user-confirmed brush, stated honestly). NEEDS REBUILD in the user's dev host (framework change). WW+ZZ agent still in flight."
+    },
+    {
+      "at": "2026-07-05T03:58:28.356Z",
+      "actor": "fable-world",
+      "kind": "note",
+      "text": "ROUND 2 CLOSED — WW+ZZ landed (27794a62c, AppFrame.tsx only): withMapPaintOff() is the ONE paint-exit door (AppFrame:258-271); runCommand's tool branch (:499-517) + the action-bar onTool (:2152-2158) both swap paint off before arming (status narrates 'one mode at a time'); patchMapPaint arming paint neutralizes activeCommandId→select-tool + clears armedPieceId (:1946-1961) which closes the Build tray via worldToolFor derivation. ZZ picker gate = DERIVED workspaceState with paint inactive while texturePickerOpen (:2073-2086) — real patch would unmount the picker itself and applyMapPaintEffects doesn't drive the claim anyway (it's WorldViewport's paintActive effect); backdrop close restores the claim. Shot-verified single-mode build state (ww_modes.png); paint→build swap direction verified by code-path (no paint key exists headless) — user's live round is acceptance. KNOWN COSMETIC: while picker is open the action bar behind it briefly shows non-paint controls (not interactable — backdrop owns clicks); proper fix needs a Stage/ToolOptions state split, deferred (both files dirty with other lanes). Full round-2 set: a2e1e47f4 (terrain placement door — REBUILD NEEDED) + 27794a62c (hot-reloads)."
+    }
+  ]
+}

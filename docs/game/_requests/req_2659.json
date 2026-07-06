@@ -1,0 +1,30 @@
+{
+  "id": "req_2659",
+  "at": "2026-07-05T03:20:34.861Z",
+  "origin": "session:40eebdf5",
+  "text": "heres one also i was unaware of: i cant multi select outliners, so for example if i want to move multiple layers at the same time, or something, i cant. need shift to put multiple into focus[Image #87]",
+  "status": "doing",
+  "sessionId": "40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T03:21:02.436Z",
+      "actor": "fable-studio-gaps",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T03:21:02.445Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "NEW GAP (critique round 4): OUTLINER MULTI-SELECT — shift-click cannot put multiple parts into focus; no group move/ops across layers. Old studio supported it (user expectation: 'move multiple layers at the same time'). Scope of work is NOT just UI: the whole part-scoping path is single-range — AppFrame modelActivePartId is singular, ModelView scopes one contiguous [lo,hi), host selectFacesByGroupRange/scope take ONE range, gizmo drags operate on that one range (and 7c08b2a7c's resync contract assumes one active part). Multi-select needs: shift-click accumulation in the outliner rows (AppFrame), a multi-range scope host-side (3d.zig — scope as a set of ranges or a face mask; gizmo/nudge/move over the union; selection pivot = union centroid), duplicate/delete/hide row verbs acting on the selection set, and the UV/SHAPE sections defining behavior for multi-focus (union or primary-part view). QUEUED for the wave AFTER the current cleanup wave — the live agents own ModelView/Inspector and 3d.zig right now; firing this in parallel would collide. Rides naturally with the T4 rig/slots batch since both rework the focus-panel selection model."
+    },
+    {
+      "at": "2026-07-05T04:15:48.418Z",
+      "actor": "fable-studio-gaps",
+      "kind": "note",
+      "text": "LANDED (9b3d1f878): shift-click multi-select — selectedPartIds set w/ primary part, never-empty; host multi-range scope (setEditScopeRanges + __mesh_edit_scope_ranges, union pivot, loud truncation at 64 ranges); row verbs eye/dup/delete act on the set (one journal entry PER part — honest, no faked atomicity); UV header 'CUBE 1 +N'; partition audits hold under group ops; RJIT_PARTOPS harness added. req_2619 island-groups door also landed same sha: __model_atlas_read emits parallel groups array; UV section dims non-active-part islands 0.35 w/ honest scope readout."
+    }
+  ]
+}

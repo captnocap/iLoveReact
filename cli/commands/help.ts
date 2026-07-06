@@ -71,14 +71,17 @@ const SUBCOMMAND_DOC: Record<HelpCommand, { summary: string; usage: string[]; de
     ],
   },
   tui: {
-    summary: 'compatibility alias for dev --tui',
-    usage: ['rjit tui <cart-name>'],
+    summary: 'run a TUI cart in the foreground terminal',
+    usage: ['rjit tui [cart-name|entry.tsx] [-- app-args...]'],
     detail: [
-      'Equivalent to:',
-      '  rjit dev <cart-name> --tui',
+      'Bundles the cart through tui/entry.tsx, builds a headless native',
+      'binary, then execs it with the current terminal attached. This is',
+      'the interactive path: alt-screen painting, raw input, mouse reporting,',
+      'and Ctrl-C all belong to the TUI app.',
       '',
-      'Kept for muscle memory during the migration; the canonical command is',
-      'rjit dev <cart-name> --tui.',
+      'Use `rjit dev <cart-name> --tui` only for the experimental persistent',
+      'TUI dev host. That path is log/socket-oriented and is not the same as',
+      'foreground terminal execution.',
     ],
   },
   'ship-tui': {

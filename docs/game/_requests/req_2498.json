@@ -1,0 +1,18 @@
+{
+  "id": "req_2498",
+  "at": "2026-07-02T02:04:33.028Z",
+  "origin": "session:4c74e97e",
+  "text": "this color studio setup i am now looking at. things immediately jump out that are driving me through the r oof is we got text wrapping and escaping its containers because the strings are longer than the allotted space so they wrap, but the allotted space is probably doing a fixed width and not one based on percent because there is a ton of available space for the text to sit and it still wraps [Image #4] here are the worst offenders [Image #5]",
+  "status": "doing",
+  "sessionId": "4c74e97e-ef7b-426c-9636-2a0b67ccfa52",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T02:05:04.885Z",
+      "actor": "session-4c74",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

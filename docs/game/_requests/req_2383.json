@@ -1,0 +1,18 @@
+{
+  "id": "req_2383",
+  "at": "2026-07-01T07:50:46.746Z",
+  "origin": "session:a7549dd9",
+  "text": "why do i only have the ability to control the light when painting thats horrible ux also nevermind i cant even control the light its all just buttons that dont do anything also again am i saying the wrong fucking word what is a file menu vs a context menu because if everything goes into a context menu then rightclicking is going to be fucking aids also the 3 light bulb buttons for light control thinking they have as much priority as a state toggle for things that live at the importance of vert/face/edge paint modes is pushing it. What i was more thinking was you press idk like edit or view or something and then you have a light area and that expands and now there are finally some controls. yes, fuck all out of the way and a pain in the ass as it sounds right now but when this has 100 more other features it wont be so stupid",
+  "status": "doing",
+  "sessionId": "a7549dd9-ae3e-4dce-8ecd-0b127ef6eaff",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T07:52:12.753Z",
+      "actor": "opus-editor",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

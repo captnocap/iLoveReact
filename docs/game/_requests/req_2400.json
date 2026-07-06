@@ -1,0 +1,10 @@
+{
+  "id": "req_2400",
+  "at": "2026-07-01T08:29:06.313Z",
+  "origin": "session:a7549dd9",
+  "text": "hm. uh so either ur shit is not landing or my build is out of sync or something idk im too stupid to know how to check i just know that the dev server is suppose to catch all changes by hash at startup  and force a rebuild when it occurs and it usually does pretty damn good",
+  "status": "new",
+  "sessionId": "a7549dd9-ae3e-4dce-8ecd-0b127ef6eaff",
+  "captureMode": "hook",
+  "events": []
+}

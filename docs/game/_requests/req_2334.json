@@ -1,0 +1,24 @@
+{
+  "id": "req_2334",
+  "at": "2026-07-01T04:53:37.233Z",
+  "origin": "session:8cf696c0",
+  "text": "also, when you are creating these feature requests, you arnt to take some express route with a half baked js approach",
+  "status": "doing",
+  "sessionId": "8cf696c0-030b-4f93-b89f-33a6fefc5cc8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T04:54:47.062Z",
+      "actor": "8cf6",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T04:54:47.071Z",
+      "actor": "8cf6",
+      "kind": "note",
+      "text": "Guidance on req_2333: cube primitive + loop cut must be HOST (Zig mesh_edit) ops exposed via v8 doors, not a JS port of the old studio EditMesh loopCut. New editor keeps no JS EditMesh."
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_2513",
+  "at": "2026-07-02T05:31:02.759Z",
+  "origin": "session:69672c0b",
+  "text": "also im having some real disconnect on numbers of triangles here literally half or double im not sure which is which but the model i have in view is showing 124 tris and then down in the performance metrics is showing me 248",
+  "status": "doing",
+  "sessionId": "69672c0b-5fc8-461a-ad8b-af46e334e1ed",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T05:31:12.297Z",
+      "actor": "session-6967",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "id": "req_2516",
+  "at": "2026-07-02T05:47:54.522Z",
+  "origin": "session:ea3ce9ce",
+  "text": "Yeah. that was always the ruling. thats why its frustraiting to be in this position because never once did i say that the painting approach was wrong or the modeling approach was wrong. the problem was that i couldnt load an 8mb imported model into view without crashing react and thats an unsolvable problem until now, but that solution has came with a complete disconnect of the system because of it",
+  "status": "doing",
+  "sessionId": "ea3ce9ce-d0ad-468f-a469-a95242ec571e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T05:48:43.298Z",
+      "actor": "ea3c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-02T06:38:34.235Z",
+      "actor": "8879",
+      "kind": "note",
+      "text": "Stage 2 landed (570ab480d): model_paint rewired onto paint_islands — authored-face islands, texels-per-meter density, dabs cross the diagonal in one continuous space (anti-shredding test proves contiguity). Density picker prompt + island UV panel in ModelView. Awaiting the user's rebuild + clean-stroke check before anything moves."
+    }
+  ]
+}

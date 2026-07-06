@@ -1,0 +1,30 @@
+{
+  "id": "req_2454",
+  "at": "2026-07-01T12:17:58.376Z",
+  "origin": "session:bf2eaad9",
+  "text": "the object prompt first because i have opinions about the painting and color tools but its not necessary to weave into things that are fundamentally more important first. nothing to paint on properly if we cant add any model size. so thats the next step",
+  "status": "review",
+  "sessionId": "bf2eaad9-f987-4c1a-b11b-3e910af59c97",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T12:18:24.132Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T12:26:07.372Z",
+      "actor": "bf2e",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Adding a mesh now prompts upfront for its size + resolution, like the old studio mesh editor — the foundational fix, since a fixed unit cube gave nothing properly-sized to paint on. File → New Mesh → <kind> and the outliner + button both open a NewMeshDialog before the primitive drops in; you set the dimensions and it builds at those params. hmscAssetCatalog: primitiveEditMesh/primitivePartMesh now take PrimitiveParams (size/height/resolution) — the underlying generators (cuboid/cylinder/sphere/icosphere) already accepted them — and PRIMITIVE_FIELDS declares each kind's exposed knobs (cube: Size+Height; cylinder/cone: Diameter+Height+Segments; sphere: Diameter+Segments; icosphere: Diameter+Subdivisions; plane/pyramid) so the dialog is per-kind with zero per-kind UI code. AppFrame routes both add entry points through a newMeshPrompt state and a shared createPrimitive that keeps the part-vs-new-model split. Cart-only (hot-reloads, no rebuild); all changed files pass esbuild transform. Higher resolution = more faces = more paint surface, pairing with the raised paint-detail ceiling from req_2452.",
+  "shas": [
+    "4b52fff80"
+  ],
+  "resolvedAt": "2026-07-01T12:26:07.371Z"
+}

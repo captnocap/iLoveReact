@@ -1,0 +1,30 @@
+{
+  "id": "req_2417",
+  "at": "2026-07-01T09:34:15.656Z",
+  "origin": "session:be477f59",
+  "text": "alright now here is what we call a real slimey son of a bitch because at face value it looks like it is there to serve a real purpose but when you fundamentally think about it and then acctually uncover beneath it, it all collapses. [Image #9] but this reporting 0 err and 0 warning. thats fantastic everything is running perfectly. except what the fuck surfaces an err or a warning",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T09:34:28.528Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T09:38:03.658Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the bottom-dock 'ERR 0 · WARN 0' badge — a slimy fake-health readout. Investigation: validationReadout() in data/readouts.ts was a hardcoded { errors: 0, warnings: 0 } stub (its own comment: 'No compile/validation run is wired into this cart yet'), so the badge could NEVER show anything but 0 regardless of state — a permanent all-clear with no input path. Per the user's ruling, the one real validator (meshHealth / the mesh-edit guard) is a contextual, resolve-now alert ('you fucked up — live with it or revert now'), and choosing to live with an issue is not grounds to bump a persistent counter; there is nothing legitimate for a standing ERR/WARN tally to accumulate. So this is a fake abstraction, not an unwired-but-real surface — removed the two dock groups (BuildDock.tsx), the leftover divider, the validationReadout() stub and ValidationReadout type (readouts.ts). Dock now reads Build → POS with a single divider. Parses clean; not shipped (live session).",
+  "shas": [
+    "308d04e39"
+  ],
+  "resolvedAt": "2026-07-01T09:38:03.658Z"
+}

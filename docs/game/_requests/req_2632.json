@@ -1,0 +1,28 @@
+{
+  "id": "req_2632",
+  "at": "2026-07-05T00:52:20.712Z",
+  "origin": "codex:019f2fbd",
+  "text": "you can build a html demo that loads it up would be nice",
+  "status": "review",
+  "sessionId": "019f2fbd-a86d-7153-ad17-040c589a4278",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-05T00:52:34.526Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-05T00:56:21.577Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built and served a browser Three.js demo for the compiled HMSC game data. The page loads the baked zig-out/game/hmsc.gamefile by default, unwraps the platform gamefile to the map stream, decodes the RJMP scene, and renders it through an injected Three.js adapter with instanced meshes, heightfields, stats, and file/path loading controls. Started a local static server on 127.0.0.1:8765 for user review.",
+  "shas": [],
+  "resolvedAt": "2026-07-05T00:56:21.577Z"
+}

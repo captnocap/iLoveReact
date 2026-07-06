@@ -1,0 +1,18 @@
+{
+  "id": "req_2483",
+  "at": "2026-07-02T00:33:06.693Z",
+  "origin": "session:4c74e97e",
+  "text": "ya now you can also, really depending on the image, which if its a texture image then is applicable, but exactly what @docs/game/_archive/pixel_icon_demo.md and its gallery counterpart did for images at least take the technique to evaluate if storing an image as this sort of format is better or for example i could pick because for textures at low poly its less important but i clearly wouldnt want to store like an image with text on it that way probably",
+  "status": "doing",
+  "sessionId": "4c74e97e-ef7b-426c-9636-2a0b67ccfa52",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-02T00:33:32.477Z",
+      "actor": "session-4c74",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

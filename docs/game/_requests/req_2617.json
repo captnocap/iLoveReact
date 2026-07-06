@@ -1,0 +1,10 @@
+{
+  "id": "req_2617",
+  "at": "2026-07-04T17:27:00.376Z",
+  "origin": "session:09f49bea",
+  "text": "Check background build bin6mwoi4, then verify the undo sequences (n2singleundo, v7undo with adoptMesh-fixed ops) render tan again, then commit the phase-split fix + harness, and move req_2613 to review with the verification evidence.",
+  "status": "new",
+  "sessionId": "09f49bea-d556-4723-b539-65736fb19fb8",
+  "captureMode": "hook",
+  "events": []
+}

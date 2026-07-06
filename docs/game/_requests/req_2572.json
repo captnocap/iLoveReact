@@ -1,0 +1,28 @@
+{
+  "id": "req_2572",
+  "at": "2026-07-04T06:26:18.118Z",
+  "origin": "session:ab0454f7",
+  "text": "oh damn before we go further there is actually another part of this site that is genuinely interesting, and im wondering if there is something worth capturing here about how we treat mesh authoring for an item in general. https://noahsprerogative.com/hashform?h=09120c16 check this one out, its doing  this [Image #10] [Image #11] [Image #12] [Image #13] now  how does this translate, well, for example, say you make like a very basic cube mesh, and then a few cylinders, they all are very basic meshes, and then you can revist them, and give it some procedural shape from the primitive shape, use this to cycle through  outcomes and see what it genererates. store them if we like it. not something you would use in the actual runtime but when authoring, say you make like a flash light, that shape, you can then take and get some different flashlight like shapes out of it (hopefully, would be the goal) its a neat idea atleast, im curious how they do it at all",
+  "status": "review",
+  "sessionId": "ab0454f7-d06a-4a6e-8ba7-fa5b786a5824",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-04T06:29:39.293Z",
+      "actor": "ab04",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-04T06:46:05.827Z",
+      "actor": "ab04",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigation answered in-session: pulled and deobfuscated all eight hashform scripts and explained the architecture (semantic parametric grammar per component, hierarchical sub-seeds via hashToSeed(parent+suffix), loft geometry = cross-section SDF x radius envelope, features solved onto the surface, twin renderers over one recipe). Captured the authoring insight the user asked about: primitive parts are secretly parametric lofts, so a part-variator with seeded knob rolls + lock-a-part re-rolls is the editor translation; no code shipped for this yet by design.",
+  "shas": [],
+  "resolvedAt": "2026-07-04T06:46:05.827Z"
+}

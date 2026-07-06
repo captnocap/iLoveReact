@@ -1,0 +1,10 @@
+{
+  "id": "req_2471",
+  "at": "2026-07-01T22:47:59.164Z",
+  "origin": "session:7f712f89",
+  "text": "<task-notification>\n<task-id>blztbogqk</task-id>\n<tool-use-id>toolu_017urE3g29nD1bo2DQLZzs3D</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/a1184b2f-c069-43ed-8498-a7655b477140/tasks/blztbogqk.output</output-file>\n<status>killed</status>\n<summary>Background command \"Wait for remaining two agents\" was stopped</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "7f712f89-69e2-4eb1-8dca-383169d0dee5",
+  "captureMode": "hook",
+  "events": []
+}

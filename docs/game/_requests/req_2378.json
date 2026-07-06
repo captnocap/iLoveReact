@@ -1,0 +1,30 @@
+{
+  "id": "req_2378",
+  "at": "2026-07-01T07:40:08.675Z",
+  "origin": "session:be477f59",
+  "text": "nice now im going to just give u some real janitor work because i keep somehow unveiling shit that i never asked for and somehow exists and this fucking app isnt even more than 24 hours old lmao. what the fuck is this performance thing up here doing [Image #1] why the hell is it there when at the bottom of the app we have literally a suite of performance metrics on deck",
+  "status": "review",
+  "sessionId": "be477f59-3765-4917-812b-d3e6b41da95f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-01T07:40:16.286Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-01T07:42:50.466Z",
+      "actor": "be47",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the redundant 'shell 0.7ms' status pill from the top window chrome (cart/editor/shell/Chrome.tsx). It duplicated a single metric (app_tick_us) that the bottom BuildDock already surfaces as part of its full perf suite (avg/p95/frame/gpu), and whose PerformancePopover breaks out explicitly as 'app tick'. Having a lone perf number floating in the titlebar while a whole metrics dock lives at the bottom was pure redundancy. Also removed the now-dead telemetry wiring (useTelemetry + formatMs imports, the frame poll, the shellMs derivation). The HW_StatusText cls is used widely elsewhere so it stays.",
+  "shas": [
+    "66b50ae87"
+  ],
+  "resolvedAt": "2026-07-01T07:42:50.466Z"
+}
