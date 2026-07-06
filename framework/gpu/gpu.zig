@@ -858,17 +858,63 @@ fn findStaticEntry(hash: u64, key_len: usize) ?usize {
     return null;
 }
 
+// ── Deferred release graveyard (req_2743) ────────────────────────────────────
+// A static-surface entry's resources may be released MID-PAINT: ensureStaticEntry
+// hits the resize path when the SAME key is requested at a new size (two mounts of
+// one staticKey at different pixel sizes — e.g. a cached preview drawn in a panel
+// and again in a popover). Image quads queued EARLIER in that same frame still
+// hold the entry's old bind-group pointer (images.zig stores raw pointers), so an
+// immediate release meant wgpu panicked at render: "BindGroup is no longer alive".
+// Releases park here instead and drain in frame() AFTER queue.submit — the same
+// point scene3d frees its deferred render targets.
+const DeferredGpuRelease = union(enum) {
+    bind_group: *wgpu.BindGroup,
+    buffer: *wgpu.Buffer,
+    sampler: *wgpu.Sampler,
+    view: *wgpu.TextureView,
+    texture: *wgpu.Texture,
+};
+const MAX_DEFERRED_RELEASES = 4096;
+var g_deferred_releases: [MAX_DEFERRED_RELEASES]DeferredGpuRelease = undefined;
+var g_deferred_release_count: usize = 0;
+
+fn releaseDeferredItem(item: DeferredGpuRelease) void {
+    switch (item) {
+        .bind_group => |bg| bg.release(),
+        .buffer => |buf| buf.release(),
+        .sampler => |s| s.release(),
+        .view => |v| v.release(),
+        .texture => |t| t.release(),
+    }
+}
+
+fn deferRelease(item: DeferredGpuRelease) void {
+    if (g_deferred_release_count >= MAX_DEFERRED_RELEASES) {
+        // Graveyard full — 4096 releases in one frame means something upstream is
+        // thrashing; release now (accepting the rare mid-frame risk) over leaking.
+        releaseDeferredItem(item);
+        return;
+    }
+    g_deferred_releases[g_deferred_release_count] = item;
+    g_deferred_release_count += 1;
+}
+
+fn drainDeferredReleases() void {
+    for (g_deferred_releases[0..g_deferred_release_count]) |item| releaseDeferredItem(item);
+    g_deferred_release_count = 0;
+}
+
 fn releaseStaticResources(entry: *StaticSurfaceEntry) void {
-    if (entry.filter_bind_group) |bg| bg.release();
-    if (entry.filter_uniform_buf) |buf| buf.release();
-    if (entry.bind_group_3d) |bg| bg.release();
-    if (entry.bind_group) |bg| bg.release();
-    if (entry.sampler) |sampler| sampler.release();
+    if (entry.filter_bind_group) |bg| deferRelease(.{ .bind_group = bg });
+    if (entry.filter_uniform_buf) |buf| deferRelease(.{ .buffer = buf });
+    if (entry.bind_group_3d) |bg| deferRelease(.{ .bind_group = bg });
+    if (entry.bind_group) |bg| deferRelease(.{ .bind_group = bg });
+    if (entry.sampler) |sampler| deferRelease(.{ .sampler = sampler });
     // A borrowed view/texture is owned elsewhere (effects' material instance) —
     // free only the resources this entry created (sampler + bind groups above).
     if (!entry.borrowed) {
-        if (entry.view) |view| view.release();
-        if (entry.texture) |texture| texture.release();
+        if (entry.view) |view| deferRelease(.{ .view = view });
+        if (entry.texture) |texture| deferRelease(.{ .texture = texture });
     }
     entry.filter_bind_group = null;
     entry.filter_uniform_buf = null;
@@ -887,6 +933,8 @@ fn deinitStaticSurfaces() void {
         entry.* = .{};
     }
     g_static_capture_count = 0;
+    // Teardown: no next frame() will drain the graveyard — flush it now.
+    drainDeferredReleases();
 }
 
 fn ensureStaticEntry(key: []const u8, hash: u64, key_len: usize, width: u32, height: u32) ?usize {
@@ -2496,6 +2544,10 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
 
     // Release deferred 3D render targets after image compositing, before reset
     scene3d.frameCleanup();
+    // Drain the static-surface release graveyard (req_2743): everything parked
+    // during this frame's paint was still referenced by the just-submitted
+    // command buffer — now it's safe to let go.
+    drainDeferredReleases();
 
     // Reset for next frame
     rects.reset();

@@ -67,7 +67,9 @@ function SkinTile({ asset, active, onPick }: { asset: Asset; active: boolean; on
     <Pressable tooltip={asset.name} onPress={() => onPick(asset.id)}>
       <Box style={{ width: TILE_W, gap: 2 }}>
         <Box style={{ width: TILE_W, height: TILE_H, borderRadius: 4, borderWidth: active ? 2 : 1, borderColor: active ? accentFor('primary') : TILE_EDGE, backgroundColor: EMPTY_SLOT_BG, overflow: 'hidden' }}>
-          <AssetPreview asset={asset} />
+          {/* live (uncached) previews — see AssetPreview's `live` doc (req_2743):
+              sharing the library's staticKeys from a popover crashed the GPU. */}
+          <AssetPreview asset={asset} live />
         </Box>
         <C.HW_KeyText numberOfLines={1} style={{ width: TILE_W, color: active ? accentFor('primary') : undefined }}>{asset.name}</C.HW_KeyText>
       </Box>
@@ -152,7 +154,7 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
                 <Pressable key={role} tooltip={tip} onPress={() => setTargetRole((cur) => (cur === role ? null : role))}>
                   <Box style={{ width: TILE_W, gap: 2 }}>
                     <Box style={{ width: TILE_W, height: TILE_H, borderRadius: 4, borderWidth: active ? 2 : 1, borderColor: active ? accentFor('primary') : '#2a3442', backgroundColor: bound && !wornAsset ? bound.color : EMPTY_SLOT_BG, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
-                      {wornAsset ? <AssetPreview asset={wornAsset} /> : !bound ? <C.HW_KeyText>default</C.HW_KeyText> : null}
+                      {wornAsset ? <AssetPreview asset={wornAsset} live /> : !bound ? <C.HW_KeyText>default</C.HW_KeyText> : null}
                     </Box>
                     <C.HW_KeyText style={{ color: active ? accentFor('primary') : undefined }}>{role}</C.HW_KeyText>
                   </Box>
