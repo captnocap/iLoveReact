@@ -26,15 +26,16 @@ import RenderProbe from '../../../runtime/render_tracker';
 import PlayRoute from '../PlayRoute';
 import { useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
-import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices } from '../data/types';
+import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, MaterialRef } from '../world/pieces';
 import { placementSlotKey } from '../world/pieces';
-import { setAuthoredPieces, authoredIdFor, type AuthoredBuildPiece } from '../world/authoredRegistry';
-import { cacheAuthoredMesh, authoredMeshData } from '../world/authoredMesh';
+import { setAuthoredPieces, authoredIdFor, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
+import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
 import type { BuildKind } from '../world/buildCatalog';
 import { loadPersistedState, persistState } from '../data/persistView';
-import { saveAuthoredPieces } from '../data/initialState';
+import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
+import { propRigToSkeleton, skeletonToPropRig, describePropRig, type PropRig } from '../../../runtime/skeleton';
 import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchEdit } from '../data/editorEvents';
@@ -53,9 +54,9 @@ import { subscribe } from '@reactjit/runtime/ffi';
 import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
 import { MODEL_PACKAGES } from '../data/catalog';
-import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, copyModelPackage } from '../data/modelPackageStore';
+import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage } from '../data/modelPackageStore';
 import { colorStudioSpec, colorStudioOverrideKey, paletteForSpecVariant, rgbToCss } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
 import { image as imageOps, quantize as quantizeImage } from '../../../runtime/image';
@@ -177,13 +178,30 @@ export default function AppFrame() {
     if (latest) dispatchEdit(latest);
   }, [state.seq]);
 
-  // Mirror the authored build pieces into the module registry (req_2578) so the
-  // pure placement/render helpers resolve them without prop threading, AND persist
-  // the list to DISK so exports survive a cold restart (req_2594).
+  // Mirror the authored placeables into the module registry (req_2578) so the
+  // pure placement/render helpers resolve them without prop threading. The
+  // localstore write is a CACHE only (req_2718) — boot truth is the manifest
+  // scan (bootAuthoredPieces).
   useEffect(() => {
     setAuthoredPieces(state.authoredBuildPieces);
     saveAuthoredPieces(state.authoredBuildPieces);
   }, [state.authoredBuildPieces]);
+
+  // One-time legacy backfill (req_2718): any placeable that boot-merged from the
+  // localstore cache but whose on-disk manifest lacks the export declaration
+  // gets it written through now — from the next boot on, the disk scan carries
+  // it and the cache entry is redundant. LOUD when a manifest refuses the write.
+  useEffect(() => {
+    for (const p of state.authoredBuildPieces) {
+      const pkg = modelPackageById(p.pkgId);
+      if (!pkg || !isMaterialized(pkg.kind, pkg.id)) continue;
+      if (readManifest(pkg.kind, pkg.id)?.placeable) continue;
+      const placeable: ModelPlaceable = p.kind === 'prop' ? { as: 'prop' } : { as: 'build-piece', kind: p.kind };
+      if (!updateManifestPlaceable(pkg.kind, pkg.id, { placeable })) {
+        console.warn(`[export] placeable backfill FAILED for ${p.pkgId} — manifest not writable; this export stays localstore-only`);
+      }
+    }
+  }, []);
 
   // Publish the LIVE undo/redo depths (model → the host mesh journal via __mesh_history;
   // world → the real worldUndo/worldRedo stacks) so the Edit-menu rows count-annotate and
@@ -404,11 +422,21 @@ export default function AppFrame() {
         setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Open a model first — Save writes the ACTIVE model to the library.' }));
         return;
       }
-      const res = materializeModelPackage(pkg);
+      // A live RIG draft saves WITH the model (req_2712): compile it onto the
+      // package so the manifest skeleton matches what the Rig section shows —
+      // that's what lets setModelRig honestly mark the model dirty. Bounds come
+      // off the real mesh; a mesh-less model keeps its stored skeleton.
+      const rigDraft = state.modelRigs[pkg.id];
+      const rigModelId = authoredModelIdForPackage(pkg.id);
+      const rigBounds = rigDraft ? authoredMeshBounds(rigModelId, pkg.id) : null;
+      const pkgToSave: ModelPackage = rigDraft && rigBounds
+        ? { ...pkg, skeleton: propRigToSkeleton(rigModelId, rigModelId, rigDraft, rigBounds) }
+        : pkg;
+      const res = materializeModelPackage(pkgToSave);
       const firstSave = res.ok && !MODEL_PACKAGES.some((m) => m.id === pkg.id);
       if (res.ok) {
         writeModelArtifacts(pkg); // also write mesh/base.blob + atlases/base.png
-        registerSavedPackage(pkg); // a first save joins the live library roster now, not next boot
+        registerSavedPackage(pkgToSave); // a first save joins the live library roster now, not next boot
         savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
       }
       setState((prev) => ({
@@ -420,26 +448,30 @@ export default function AppFrame() {
         // First save also lands in modelDupes: the visible-model memo keys off it,
         // so the gallery/tree pick the new package up THIS render (the roster push
         // above is invisible to React). visibleModelPackages dedupes by id.
-        modelDupes: firstSave && !prev.modelDupes.some((m) => m.id === pkg.id) ? [...prev.modelDupes, pkg] : prev.modelDupes,
+        modelDupes: firstSave && !prev.modelDupes.some((m) => m.id === pkg.id) ? [...prev.modelDupes, pkgToSave] : prev.modelDupes,
         status: res.ok ? `Saved "${pkg.name}" to the library → ${res.dir}` : `Save failed: ${res.error ?? 'unknown error'}`,
       }));
       return;
     }
-    if (command.id.startsWith('export-build-piece-')) {
-      // Export → Build Piece → <kind> (req_2583): register the OPEN model as a
-      // placeable build piece of the chosen base kind (its snap affinity) and arm
-      // it. The mesh key is the bare stored-model id (storedModelMeshData key),
-      // stripped of the 'studio:' package prefix so residency + refs agree. The
-      // status ALWAYS reports — a silent no-op is what made this feel dead before.
-      const kind = command.id.slice('export-build-piece-'.length) as BuildKind;
+    if (command.id.startsWith('export-build-piece-') || command.id === 'export-prop') {
+      // Export → Build Piece → <kind> (req_2583) / Export → Prop (req_2712):
+      // register the OPEN model as a placeable and arm it. THE MANIFEST IS THE
+      // RECORD (USER RULING req_2718): the export writes `placeable` (+ the
+      // compiled RIG skeleton for props) into the model's own package on disk,
+      // and every boot re-derives the palette from that scan — localstore only
+      // caches. The mesh key is the bare stored-model id (storedModelMeshData
+      // key), stripped of the 'studio:' package prefix so residency + refs
+      // agree. The status ALWAYS reports — a silent no-op is what made this
+      // feel dead before.
+      const kind: PlaceableKind = command.id === 'export-prop' ? 'prop' : (command.id.slice('export-build-piece-'.length) as BuildKind);
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
       // Effective package: the exported piece's label carries the renamed name (req_2620 S).
       const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
       if (!pkg) {
-        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export needs a MODEL open — open one from Models, then Export → Build Piece.' }));
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export needs a MODEL open — open one from Models, then File → Export.' }));
         return;
       }
-      const modelId = pkg.id.startsWith('studio:') ? pkg.id.slice('studio:'.length) : pkg.id;
+      const modelId = authoredModelIdForPackage(pkg.id);
       // Resolve the geometry through the ONE resolver the viewer uses — whatever
       // form it's stored in (EditMesh parts, a content-addressed blob, a
       // primitive). Live edited-but-unsaved parts win when held; else the package
@@ -449,16 +481,47 @@ export default function AppFrame() {
       if (captured && captured.length >= 8) cacheAuthoredMesh(modelId, captured);
       const verts = authoredMeshData(modelId, pkg.id);
       const vcount = verts ? Math.floor(verts.length / 8) : 0;
-      const piece: AuthoredBuildPiece = { id: authoredIdFor(modelId), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color };
+      // The export declaration + rig. A prop compiles its rig draft (the
+      // Inspector's Rig section; else the stored skeleton re-projected) into the
+      // exported skeleton — contact positions measured off the REAL mesh bounds,
+      // never hand-typed. A build piece keeps whatever skeleton it already has.
+      const placeable: ModelPlaceable = kind === 'prop' ? { as: 'prop' } : { as: 'build-piece', kind };
+      const bounds = authoredMeshBounds(modelId, pkg.id);
+      const rig = state.modelRigs[pkg.id] ?? (pkg.skeleton ? skeletonToPropRig(pkg.skeleton) : {});
+      const skeleton = kind === 'prop' && bounds ? propRigToSkeleton(modelId, modelId, rig, bounds) : pkg.skeleton;
+      const pkgExported: ModelPackage = { ...pkg, placeable, skeleton };
+      // DISK TRUTH: write the declaration into the package. A never-saved model
+      // materializes first (export implies save — the mesh blob must be on disk
+      // for any other machine to render this placeable at all).
+      const firstMaterialize = !isMaterialized(pkg.kind, pkg.id);
+      let disk: string;
+      if (firstMaterialize) {
+        const res = materializeModelPackage(pkgExported);
+        if (res.ok) writeModelArtifacts(pkg);
+        disk = res.ok ? `package materialized → ${res.dir}` : `PACKAGE WRITE FAILED (${res.error ?? 'unknown'}) — export is session-only`;
+      } else {
+        disk = updateManifestPlaceable(pkg.kind, pkg.id, { placeable, skeleton })
+          ? 'manifest updated'
+          : 'MANIFEST WRITE FAILED — export is session-only';
+      }
+      upsertSavedPackage(pkgExported); // the live roster carries the declaration this session
+      const piece: AuthoredBuildPiece = { id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color };
+      const kindLabel = kind === 'prop' ? `prop [${describePropRig(rig)}]` : `${kind} build piece`;
       setState((prev) => ({
         ...prev,
         openMenu: null,
         actionMenu: 'Build',
         authoredBuildPieces: [...prev.authoredBuildPieces.filter((p) => p.id !== piece.id), piece],
         armedPieceId: piece.id,
+        // The gallery/tree memo keys off modelDupes: a first materialize joins it
+        // (same move as Save); an existing dupe refreshes so it carries the
+        // export declaration instead of shadowing the roster with a stale copy.
+        modelDupes: prev.modelDupes.some((m) => m.id === pkg.id)
+          ? prev.modelDupes.map((m) => (m.id === pkg.id ? pkgExported : m))
+          : firstMaterialize ? [...prev.modelDupes, pkgExported] : prev.modelDupes,
         status: vcount > 0
-          ? `Exported "${pkg.name}" as a ${kind} build piece (${vcount} verts) — armed. Enter Build (B) to place it.`
-          : `Exported "${pkg.name}" as a ${kind} piece, but its geometry isn't reachable (0 verts). Open it in the model editor and Save Model to Library, then re-export. (${modelId})`,
+          ? `Exported "${pkg.name}" as a ${kindLabel} (${vcount} verts) — ${disk}. Armed; enter Build (B) to place it.`
+          : `Exported "${pkg.name}" as a ${kindLabel}, but its geometry isn't reachable (0 verts). Open it in the model editor and Save Model to Library, then re-export. (${modelId})`,
       }));
       return;
     }
@@ -746,6 +809,18 @@ export default function AppFrame() {
       // placed-piece selection so the panel shows the DEFINITION, not an instance.
       selectedPieceId: null,
       status: `armed ${pieceId}`,
+    }));
+  };
+
+  // RIG draft edits (req_2712/2713): the Inspector's Rig section patches the
+  // whole draft per package id. Marks the model dirty — Save/Export both compile
+  // the draft into the manifest skeleton, so the save chip tells the truth.
+  const setModelRig = (pkgId: string, rig: PropRig) => {
+    setState((prev) => ({
+      ...prev,
+      modelRigs: { ...prev.modelRigs, [pkgId]: rig },
+      modelDirty: { ...prev.modelDirty, [pkgId]: true },
+      status: `rig: ${describePropRig(rig)}`,
     }));
   };
 
@@ -2469,6 +2544,7 @@ export default function AppFrame() {
             onRenameModel={renameModel}
             onSaveModel={() => runCommand('save-snapshot', 'focus-panel')}
             modelOnDisk={activeModelOnDisk}
+            onSetModelRig={setModelRig}
             onSetPieceOverride={setPieceOverride}
             onClearPieceOverride={clearPieceOverride}
             onAssignSlot={assignPieceSlot}
@@ -2550,7 +2626,7 @@ export default function AppFrame() {
             selectedFileId={state.fileExplorerSelectedId}
             history={state.fileExplorerHistory}
             folderHistory={state.fileExplorerDirectoryHistory}
-            onQuery={(fileExplorerQuery) => setState((prev) => ({ ...prev, fileExplorerQuery, status: `file search: ${fileExplorerQuery || 'all indexed files'}` }))}
+            onQuery={(fileExplorerQuery) => setState((prev) => ({ ...prev, fileExplorerQuery, status: `asset search: ${fileExplorerQuery || 'all indexed assets'}` }))}
             onFolder={selectExplorerFolder}
             onToggleFolder={toggleExplorerFolder}
             onSelectFile={(fileExplorerSelectedId) => setState((prev) => ({ ...prev, fileExplorerSelectedId, status: `selected file ${explorerFileById(fileExplorerSelectedId)?.path ?? fileExplorerSelectedId}` }))}

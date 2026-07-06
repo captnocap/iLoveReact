@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Box, Col, Pressable, Row, ScrollView, Text } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 // Fixed-region contract (req_2627): the UV preview sizes itself from the focus
@@ -12,6 +13,8 @@ import type { Asset, EditorState, WorldObject } from '../data/types';
 import type { MaterialRef } from '../world/pieces';
 import { assetById } from '../data/catalog';
 import ReadOnlySection from './ReadOnlySection';
+import RigSection from './RigSection';
+import { skeletonToPropRig, type PropRig } from '../../../runtime/skeleton';
 import PieceBody from './PieceBody';
 import PresetSection from './PresetSection';
 import MissionSection from './MissionSection';
@@ -136,6 +139,152 @@ function UvSection({ bridge, partName, extraCount }: { bridge: ModelFocusBridge 
   );
 }
 
+// ── PAINT LAYERS (req_2672) ─────────────────────────────────────────────────────────
+// The stroke program's LAYER table (host truth: __mesh_paint_layers). A layer is an
+// ordered stroke GROUP — visibility/reorder/delete/merge are program edits + one host
+// replay, never a pixel compositor. Shown whenever the doc HAS paint (the host reports
+// layers once anything recorded), not only during paint mode. Rows sit on the regions
+// grid: fixed height, eye column, flexing name (the ACTIVE row's name is the rename
+// input — the existing rename-input pattern), fixed verb columns at the right edge.
+// The list is a bounded nested scroll capped at LAYER_ROWS_VISIBLE rows (req_2627).
+const LAYER_ROW_HEIGHT = 27;
+const LAYER_ROWS_VISIBLE = 5;
+
+const LAYER_ROW_CONTROL = {
+  width: REGIONS.grid.stepBtn, height: LAYER_ROW_HEIGHT,
+  alignItems: 'center', justifyContent: 'center',
+} as const;
+
+type PaintLayerRow = { id: number; name: string; visible: number; strokes: number };
+type PaintLayersSnap = { active: number; layers: PaintLayerRow[] };
+
+function readPaintLayers(): PaintLayersSnap | null {
+  try {
+    const j = (globalThis as any).__mesh_paint_layers?.();
+    if (typeof j !== 'string' || !j) return null;
+    const o = JSON.parse(j);
+    if (o?.ok !== 1 || !Array.isArray(o.layers)) return null;
+    return { active: (o.active ?? 0) | 0, layers: o.layers as PaintLayerRow[] };
+  } catch { return null; }
+}
+
+function PaintLayersSection({ bridge }: { bridge: ModelFocusBridge | null }) {
+  const [snap, setSnap] = useState<PaintLayersSnap | null>(() => readPaintLayers());
+  const [hint, setHint] = useState<string | null>(null);
+  // Host-driven state (strokes/undo land without a React render) — poll at 1Hz like the
+  // dock's journal badge, plus a re-read on every focus-bridge ping (stroke end).
+  useEffect(() => {
+    const read = () => {
+      const next = readPaintLayers();
+      setSnap((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+    };
+    read();
+    const t = setInterval(read, 1000);
+    return () => clearInterval(t);
+  }, [bridge]);
+  // One door for every verb; the op returns the refreshed table so the panel updates in
+  // the same call. A refused op re-reads (honest state, never a stale optimistic row).
+  const runOp = (op: string, id: number, arg?: string | number): boolean => {
+    try {
+      const j = (globalThis as any).__mesh_paint_layer_op?.(op, id, arg ?? 0);
+      if (typeof j === 'string' && j) {
+        const o = JSON.parse(j);
+        if (o?.ok === 1 && Array.isArray(o.layers)) {
+          setSnap({ active: (o.active ?? 0) | 0, layers: o.layers as PaintLayerRow[] });
+          return true;
+        }
+      }
+    } catch { /* fall through to the honest re-read */ }
+    setSnap(readPaintLayers());
+    return false;
+  };
+  if (!snap || snap.layers.length === 0) return null; // no paint yet — honest-empty, no section
+  // Host order is bottom→top (composite order); the panel draws top layer FIRST, the
+  // convention every layer panel shares.
+  const rows = [...snap.layers].reverse();
+  const listHeight = Math.min(rows.length, LAYER_ROWS_VISIBLE) * LAYER_ROW_HEIGHT;
+  return (
+    <Col
+      style={{
+        width: '100%', marginTop: 10,
+        backgroundColor: 'rgba(12,14,20,0.55)', borderWidth: 1, borderColor: '#1d2330',
+        borderRadius: 8, overflow: 'hidden',
+      }}
+    >
+      <Row style={{ alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 8, height: 30, backgroundColor: 'rgba(20,24,34,0.9)', borderBottomWidth: 1, borderColor: '#1d2330' }}>
+        <Icon name="Layers" size={13} color="#8fb6c9" />
+        <Text noWrap numberOfLines={1} style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>PAINT LAYERS</Text>
+        <Box style={{ flexGrow: 1 }} />
+        <Pressable
+          onPress={() => { if (runOp('add', 0)) setHint('New layer added on top — new strokes land on it.'); }}
+          tooltip="Add a layer on top (new strokes land on it)"
+          style={{ height: 20, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 5, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
+        >
+          <Icon name="Plus" size={11} color="#cfe0f5" />
+          <Text noWrap style={{ color: '#cfe0f5', fontSize: 10, fontWeight: 700 }}>layer</Text>
+        </Pressable>
+      </Row>
+      <ScrollView style={{ height: listHeight }} contentContainerStyle={{ flexDirection: 'column' }}>
+        {rows.map((layer) => {
+          const active = layer.id === snap.active;
+          return (
+            <Row
+              key={layer.id}
+              style={{
+                alignItems: 'center', gap: 4, paddingLeft: 5, paddingRight: 5, height: LAYER_ROW_HEIGHT,
+                backgroundColor: active ? '#2a466e' : 'transparent',
+                borderBottomWidth: 1, borderColor: '#161b26',
+              }}
+            >
+              <Pressable
+                style={LAYER_ROW_CONTROL}
+                onPress={() => runOp('visible', layer.id, layer.visible ? 0 : 1)}
+                tooltip={layer.visible ? 'Hide this layer\'s strokes (undoable)' : 'Show this layer\'s strokes'}
+              >
+                <Icon name={layer.visible ? 'Eye' : 'EyeOff'} size={13} color={layer.visible ? '#9db4d0' : '#4a5464'} />
+              </Pressable>
+              {active ? (
+                // The ACTIVE layer renames in place — the rename-input pattern (req_2620 S).
+                <C.HW_RenameInput value={layer.name} onChange={(name: string) => runOp('rename', layer.id, name)} />
+              ) : (
+                <Pressable onPress={() => runOp('active', layer.id)} tooltip="Make this the active layer (new strokes land here)" style={{ flexGrow: 1, minWidth: 0, height: LAYER_ROW_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text numberOfLines={1} noWrap style={{ color: layer.visible ? '#cfe0f5' : '#6b7686', fontSize: 12, fontWeight: 500 }}>{layer.name}</Text>
+                </Pressable>
+              )}
+              <Text noWrap style={{ color: '#5d6878', fontSize: 10, fontFamily: 'monospace' }}>{String(layer.strokes)}</Text>
+              <Pressable style={LAYER_ROW_CONTROL} onPress={() => runOp('up', layer.id)} tooltip="Move layer up (composites over)">
+                <Icon name="ChevronUp" size={12} color="#6f8296" />
+              </Pressable>
+              <Pressable style={LAYER_ROW_CONTROL} onPress={() => runOp('down', layer.id)} tooltip="Move layer down (composites under)">
+                <Icon name="ChevronDown" size={12} color="#6f8296" />
+              </Pressable>
+              <Pressable
+                style={LAYER_ROW_CONTROL}
+                onPress={() => { if (runOp('mergedown', layer.id)) setHint(`Merged ${layer.name} into the layer below (one undo step).`); else setHint('Nothing below to merge into.'); }}
+                tooltip="Merge this layer's strokes into the layer below (undoable)"
+              >
+                <Icon name="GitMerge" size={12} color="#6f8296" />
+              </Pressable>
+              <Pressable
+                style={LAYER_ROW_CONTROL}
+                onPress={() => { if (runOp('delete', layer.id)) setHint(`Deleted ${layer.name} (${layer.strokes} strokes) — Ctrl+Z in paint restores it.`); }}
+                tooltip="Delete this layer AND its strokes (one undoable step)"
+              >
+                <Icon name="Trash2" size={12} color="#7d5a5a" />
+              </Pressable>
+            </Row>
+          );
+        })}
+      </ScrollView>
+      {hint ? (
+        <Row style={{ alignItems: 'center', paddingLeft: 10, paddingRight: 10, paddingTop: 3, paddingBottom: 3, backgroundColor: 'rgba(18,22,31,0.9)', borderTopWidth: 1, borderColor: '#1d2330' }}>
+          <Text numberOfLines={1} noWrap style={{ color: '#8b97a8', fontSize: 9, fontFamily: 'monospace' }}>{hint}</Text>
+        </Row>
+      ) : null}
+    </Col>
+  );
+}
+
 // The FOCUS PANEL's pane-switch rail — the fixed 40px icon column on the
 // panel's right edge (REGIONS.focusPanel.railWidth). One component, every
 // branch: the rail is part of the region, not of any one panel mode.
@@ -169,6 +318,9 @@ export default function Inspector(props: {
   onRenameModel: (id: string, name: string) => void;
   onSaveModel: () => void;
   modelOnDisk: boolean;
+  // The RIG editor (req_2712/2713): pockets/placements/seats/cover/dynamics on
+  // the open model; export compiles the draft into the manifest skeleton.
+  onSetModelRig: (pkgId: string, rig: PropRig) => void;
   // World-piece focus-panel edits (req_2563 Phase 3/4).
   onSetPieceOverride: (id: string, path: string, value: number | boolean) => void;
   onClearPieceOverride: (id: string, path: string) => void;
@@ -306,6 +458,14 @@ export default function Inspector(props: {
             {/* SHAPE — the studio count strip + bounds line (req_2618 G), fed by the
                 model-focus bridge; honest-empty until the viewer publishes. */}
             <ShapeSection shape={focusBridge?.shape ?? null} />
+            {/* RIG (req_2712/2713) — what this model's bones MEAN when exported:
+                searchable pockets, placement surfaces, seats, cover, dynamics.
+                The draft edits live; Export → Prop / Save compile it into the
+                package manifest's skeleton (disk truth, req_2718). */}
+            <RigSection
+              rig={props.state.modelRigs[activeModel.id] ?? (activeModel.skeleton ? skeletonToPropRig(activeModel.skeleton) : {})}
+              onChange={(rig) => props.onSetModelRig(activeModel.id, rig)}
+            />
             {/* The OUTLINER — parts of this multi-part model (add / select / hide / delete).
                 Only primitive-authored models carry parts state. */}
             {modelParts ? (
@@ -326,6 +486,9 @@ export default function Inspector(props: {
                 (req_2619 P). Sits below the outliner so a tall preview can never crowd
                 the part list out of the non-scrolling body. */}
             <UvSection bridge={focusBridge} partName={uvPartName} extraCount={uvExtraCount} />
+            {/* PAINT LAYERS (req_2672) — the stroke program's layer table, live whenever
+                the doc has paint (host truth; hidden honest-empty before any painting). */}
+            <PaintLayersSection bridge={focusBridge} />
             {/* Brush controls moved OUT of this corner dock to the top PaintToolbar (req_2466):
                 paint controls belong at the top as icons, not a bottom-right text-pill panel.
                 The Inspector now stays focused on selection/material inspection. */}

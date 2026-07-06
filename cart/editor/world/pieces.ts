@@ -17,14 +17,14 @@ import { buildCatalogIndex, validateBuildPlacement } from '@reactjit/runtime/gam
 import { catalogRowFor, rowHex, type BuildKind } from './buildCatalog';
 import { primarySlotRole } from './pieceSlots';
 import { pieceVisualShapes } from './pieceShapes';
-import { authoredPieceFor, isAuthoredPiece } from './authoredRegistry';
+import { authoredPieceFor, isAuthoredPiece, type PlaceableKind } from './authoredRegistry';
 import { authoredMeshBounds, type MeshBounds } from './authoredMesh';
 import { assetById } from '../data/catalog';
 import { METERS_PER_LEVEL } from './isoStage';
 
-/** The base kind of any placeable: an authored piece's affinity, or a catalog
- *  row's kind. Drives snap mode + storey rules for authored + catalog pieces alike. */
-export function pieceKindOf(pieceId: string): BuildKind | undefined {
+/** The base kind of any placeable: an authored piece's affinity (or 'prop'), or
+ *  a catalog row's kind. Drives snap mode + storey rules for all placeables. */
+export function pieceKindOf(pieceId: string): PlaceableKind | undefined {
   const authored = authoredPieceFor(pieceId);
   if (authored) return authored.kind;
   return catalogRowFor(pieceId)?.kind;
@@ -184,10 +184,16 @@ function snapToEdge(wx: number, wz: number): { x: number; z: number; yaw: number
 export function resolvePlacement(pieceId: string, wx: number, wz: number, floor: number, terrainY = 0): PlacedPiece | null {
   const catalogIndex = buildCatalogIndex(pieceId);
   const kind = pieceKindOf(pieceId);
-  const edge = kind ? EDGE_SNAP_KINDS.has(kind) : false;
-  const { x, z, yaw } = edge ? snapToEdge(wx, wz) : { x: snapToModule(wx), z: snapToModule(wz), yaw: 0 };
   const levelY = floor > 0 ? floor * METERS_PER_LEVEL : 0;
   const y = terrainY + levelY;
+  // Props FREE-place (req_2712): they land exactly under the cursor, grounded on
+  // the terrain/storey — a bench is not a 3m plate. No host validate either (the
+  // build validator indexes only the catalog grid pieces).
+  if (kind === 'prop') {
+    return { id: '', pieceId, x: wx, y, z: wz, yawDegrees: 0, floor };
+  }
+  const edge = kind ? EDGE_SNAP_KINDS.has(kind) : false;
+  const { x, z, yaw } = edge ? snapToEdge(wx, wz) : { x: snapToModule(wx), z: snapToModule(wz), yaw: 0 };
   if (catalogIndex >= 0) {
     const v = validateBuildPlacement(catalogIndex, x, y, z, yaw);
     if (!v.valid) return null;
@@ -205,6 +211,10 @@ export function placementSlotKey(piece: PlacedPiece): string {
   const kind = pieceKindOf(piece.pieceId);
   const edge = kind ? EDGE_SNAP_KINDS.has(kind) : false;
   const q = (n: number): number => Math.round(n * 100) / 100;
+  // Props free-place, so they never contest a grid cell: their slot is their own
+  // exact spot (two drops on the same centimetre replace; anywhere else stacks a
+  // NEW prop — a table and six chairs share a cell on purpose).
+  if (kind === 'prop') return `prop:${q(piece.x)},${q(piece.y)},${q(piece.z)}`;
   return edge
     ? `edge:${q(piece.x)},${q(piece.y)},${q(piece.z)},${Math.round(piece.yawDegrees)}`
     : `grid:${q(piece.x)},${q(piece.y)},${q(piece.z)}`;

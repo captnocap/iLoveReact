@@ -35,15 +35,38 @@ export type MaterializeSummary = { total: number; wrote: number; failed: Materia
 
 // Write one model's package directory: the category + model dirs, the four blob
 // subdirs, and manifest.json. Idempotent — mkdir/writeFile overwrite in place.
+// The EXPORT declaration (placeable/skeleton, req_2718 disk truth) is preserved
+// from the existing manifest when the incoming package doesn't carry it — a
+// plain re-save from a session that never saw the export must not undo it.
 export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
   const dir = packageDir(pkg.kind, pkg.id);
   if (!mkdir(dir)) return { ok: false, id: pkg.id, dir, error: 'mkdir package dir failed' };
   for (const sub of MODEL_PACKAGE_SUBDIRS) {
     if (!mkdir(`${dir}/${sub}`)) return { ok: false, id: pkg.id, dir, error: `mkdir ${sub} failed` };
   }
-  const wrote = writeFile(manifestPath(pkg.kind, pkg.id), serializeManifest(packageToManifest(pkg)));
+  const manifest = packageToManifest(pkg);
+  if (manifest.placeable === undefined || manifest.skeleton === undefined) {
+    const prior = readManifest(pkg.kind, pkg.id);
+    if (prior) {
+      manifest.placeable = manifest.placeable ?? prior.placeable;
+      manifest.skeleton = manifest.skeleton ?? prior.skeleton;
+    }
+  }
+  const wrote = writeFile(manifestPath(pkg.kind, pkg.id), serializeManifest(manifest));
   if (!wrote) return { ok: false, id: pkg.id, dir, error: 'write manifest failed' };
   return { ok: true, id: pkg.id, dir };
+}
+
+// The current on-disk manifest, or null (absent/unreadable — callers treat both
+// as "no durable record yet").
+export function readManifest(kind: ModelPackageKind, id: string): ModelManifest | null {
+  const text = readFile(manifestPath(kind, id));
+  if (!text) return null;
+  try {
+    return parseManifest(text);
+  } catch {
+    return null;
+  }
 }
 
 // Materialize a whole catalog. Used to seed the package home from the current
@@ -77,6 +100,24 @@ export function updateManifestIdentity(
   id: string,
   patch: Partial<Pick<ModelManifest, 'name' | 'favorite' | 'hidden'>>,
 ): boolean {
+  return patchManifest(kind, id, patch);
+}
+
+// Write the EXPORT declaration into an existing on-disk manifest: what the model
+// places as + the rig it exports with (req_2712/2718 — the package itself says
+// "I am a prop / a wall piece"; the palette derives from disk, localstore only
+// caches). Same read-merge-write discipline as the identity patch.
+export function updateManifestPlaceable(
+  kind: ModelPackageKind,
+  id: string,
+  patch: Partial<Pick<ModelManifest, 'placeable' | 'skeleton'>>,
+): boolean {
+  return patchManifest(kind, id, patch);
+}
+
+// The ONE manifest read-merge-write: preserves fields a newer writer added,
+// refuses to clobber an unreadable manifest, false when not materialized yet.
+function patchManifest(kind: ModelPackageKind, id: string, patch: Partial<ModelManifest>): boolean {
   const file = manifestPath(kind, id);
   const text = readFile(file);
   if (!text) return false;

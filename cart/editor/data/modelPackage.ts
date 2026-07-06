@@ -24,7 +24,8 @@
 // (mesh/atlas/paint/shader bytes into the subdirs) is the next slice. path and
 // source are DERIVED from the package location on load — they intentionally
 // point at the package home, not the old hmsc-int snapshot.
-import type { ContentFolderId, ModelAtlas, ModelPackage, ModelPaintVariant } from './types';
+import type { ContentFolderId, ModelAtlas, ModelPackage, ModelPaintVariant, ModelPlaceable } from './types';
+import type { Skeleton } from '../../../runtime/skeleton';
 
 export const MODELS_HOME = 'cart/editor/data/models';
 export const MODEL_MANIFEST_VERSION = 1;
@@ -60,6 +61,11 @@ export type ModelManifest = {
   decompositions: string[];
   atlases: ModelAtlas[];
   paints: ModelPaintVariant[];
+  // Exported-as declaration + the exported RIG (req_2712/2718). The manifest is
+  // the ENTIRE source of truth for "this model is a placeable prop/build piece";
+  // the palette derives from these on boot — localstore only caches.
+  placeable?: ModelPlaceable;
+  skeleton?: Skeleton;
 };
 
 // kind -> category directory. One category folder groups its models, matching
@@ -128,6 +134,8 @@ export function packageToManifest(pkg: ModelPackage): ModelManifest {
     decompositions: pkg.decompositions,
     atlases: pkg.atlases,
     paints: pkg.paints,
+    placeable: pkg.placeable,
+    skeleton: pkg.skeleton,
   };
 }
 
@@ -156,6 +164,8 @@ export function manifestToPackage(manifest: ModelManifest): ModelPackage {
     paints: manifest.paints,
     sourceKind: manifest.sourceKind,
     semanticKind: manifest.semanticKind,
+    placeable: manifest.placeable,
+    skeleton: manifest.skeleton,
     // A saved primitive package re-arms its generator on load (semanticKind IS the
     // seed kind), so reopening it from disk still builds viewable geometry — the
     // manifest carries identity; mesh-blob readback is a later slice.

@@ -124,6 +124,27 @@ loading from scratch — it generalizes it.
 - The framework validates "is this a valid formation of bones + resolvable carried
   data" and accepts it. It never enumerates thing-types.
 
+## The rig vocabulary (req_2712/2713, 2026-07-05)
+
+`runtime/skeleton/rigs.ts` is the canonical VOCABULARY layer on the schema — the
+shared names the editor's rig panel, the export writer, and the game's ingest
+agree on. Contacts: `pocket_<n>` (searchable slot), `placement_<n>` (tabletop),
+`seat_<n>`, `grip_left`/`grip_right`, `physical`. Mounts: `ammo`, `projectile`.
+Behaviors: `container` (lootCategory, open/locked/keyed access + keyId,
+searchSeconds, spawnFillChance), `seat`, `cover`, `door`; `dynamics` rides as
+the physics capability. These mirror the load-bearing gameplay fields of the
+retired hmsc-int prop table, so everything the old TS prop files could express,
+an editor-exported rig can carry. Formation templates (`bodyRigBones`,
+`carRigBones`) encode the user's body/car bone drafts as starting content.
+
+**The export path**: cart/editor's Export → Prop compiles the Inspector's
+PropRig draft into a `Skeleton` (`propRigToSkeleton`, contact positions measured
+off the real mesh bounds) and writes it — with the `placeable` declaration —
+into the model package's own manifest (USER RULING req_2718: the on-disk package
+is the ENTIRE source of truth; localstore only caches). `skeletonToPropRig`
+re-projects the stored skeleton back into the editable draft, so the manifest
+stores exactly one record.
+
 ## Build slices
 
 1. **The schema + validator** (this foundation pass): the carried-data schema

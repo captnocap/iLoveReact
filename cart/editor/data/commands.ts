@@ -55,6 +55,14 @@ const EXPORT_BUILD_COMMANDS: Command[] = KIND_ORDER.map((k) => ({
   key: '', context: false, native: true, undoable: false, scope: 'model',
 }));
 
+// Export → Prop (req_2712): export the OPEN model as a free-placing PROP,
+// carrying its rig (pockets/placements/seats — the Inspector's Rig section) in
+// the package manifest. One leaf — props have no snap-affinity flyout.
+const EXPORT_PROP_COMMAND: Command = {
+  id: 'export-prop', menu: 'File', submenu: 'Export', name: 'Prop', icon: 'Armchair',
+  key: '', context: false, native: true, undoable: false, scope: 'model',
+};
+
 // Menu-bar geometry, derived from the Chrome styles (workspace.cls HW_*). The dropdown is mounted
 // at the app root, so these are window-relative pixels: the first menu item begins after the chrome
 // padding + brand block + chrome gap.
@@ -69,7 +77,7 @@ export const COMMANDS: Command[] = [
   { id: 'new-map', menu: 'File', name: 'New Map Workspace', icon: 'FilePlus2', key: 'Ctrl+N', context: false, native: true, undoable: false, scope: 'global' },
   ...NEW_MESH_COMMANDS,
   { id: 'open-map', menu: 'File', name: 'Open Workspace', icon: 'FolderOpen', key: 'Ctrl+O', context: false, native: true, undoable: false, scope: 'global' },
-  { id: 'open-file-explorer', menu: 'File', name: 'Open Project File Explorer', icon: 'FolderSearch', key: 'Ctrl+P', context: false, native: true, undoable: false, scope: 'global' },
+  { id: 'open-file-explorer', menu: 'File', name: 'Open Project Asset Explorer', icon: 'FolderSearch', key: 'Ctrl+P', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'find-import-source', menu: 'File', name: 'Find Import Source', icon: 'SearchCode', key: 'Ctrl+Shift+P', context: false, native: true, undoable: false, scope: 'global' },
   // Import a .glb/.obj from anywhere on disk via the OS picker — the same native mesh importer
   // (__mesh_load_file) the explorer's in-project model rows open through.
@@ -77,6 +85,7 @@ export const COMMANDS: Command[] = [
   // Save writes the ACTIVE model to the library → only meaningful on a model surface.
   { id: 'save-snapshot', menu: 'File', name: 'Save Model to Library', icon: 'Save', key: 'Ctrl+S', context: false, native: true, undoable: false, scope: 'model' },
   ...EXPORT_BUILD_COMMANDS,
+  EXPORT_PROP_COMMAND,
   // Compile bakes the WORLD to RLE game data; the pipeline isn't wired yet (returns 0/0).
   { id: 'compile-rle', menu: 'File', name: 'Compile RLE Game Data', icon: 'PackageCheck', key: 'F9', context: false, native: true, undoable: false, scope: 'world', available: false },
 
@@ -294,6 +303,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
     {
       kind: 'sub', id: 'Export', label: 'Export', icon: 'Upload', scope: 'model', children: [
         { kind: 'sub', id: 'Export Build Piece', label: 'Build Piece', icon: 'PackagePlus', scope: 'model', children: EXPORT_BUILD_COMMANDS.map((c) => cmd(c.id)) },
+        cmd('export-prop'),
       ],
     },
     cmd('compile-rle'),

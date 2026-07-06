@@ -11,6 +11,10 @@ import { C, accentFor } from '../workspace.cls';
 import { catalogRowFor, rowHex } from '../world/buildCatalog';
 import { pieceFloorOf, type MaterialRef, type PlacedPiece } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
+import { authoredPieceFor } from '../world/authoredRegistry';
+import { authoredMeshBounds } from '../world/authoredMesh';
+import { modelPackageById } from '../data/content';
+import { skeletonToPropRig, describePropRig } from '../../../runtime/skeleton';
 import { overridableGroups } from './overridables';
 import OverrideField from './OverrideField';
 import ReadOnlySection from './ReadOnlySection';
@@ -36,6 +40,49 @@ export default function PieceBody(props: {
   const sel = props.selected;
   const isInstance = !!sel;
   const roles = pieceId ? pieceSlotRoles(pieceId) : [];
+
+  // AUTHORED placeable (req_2577 pieces / req_2712 props): a `model:`/`prop:` id
+  // never has a catalog row — show the real exported model: its label, measured
+  // mesh size, and (for props) the rig its manifest skeleton carries.
+  const authored = pieceId && !row ? authoredPieceFor(pieceId) : null;
+  if (authored && pieceId) {
+    const bounds = authoredMeshBounds(authored.modelId, authored.pkgId);
+    const dims = bounds
+      ? `${(bounds.maxX - bounds.minX).toFixed(1)}×${(bounds.maxZ - bounds.minZ).toFixed(1)}×${(bounds.maxY - bounds.minY).toFixed(1)}m`
+      : 'mesh not resident';
+    const skeleton = modelPackageById(authored.pkgId)?.skeleton;
+    return (
+      <>
+        <C.HW_ObjectHead>
+          <C.HW_Tag><C.HW_TagText>{authored.kind.toUpperCase()}</C.HW_TagText></C.HW_Tag>
+          <C.HW_ObjectTitle>{authored.label}</C.HW_ObjectTitle>
+          <C.HW_Spacer />
+          <C.HW_Swatch style={{ backgroundColor: authored.hex }} />
+        </C.HW_ObjectHead>
+        <ReadOnlySection title={isInstance ? 'EXPORTED MODEL' : 'EXPORTED MODEL (armed)'} color="primary" rows={[
+          ['model', authored.modelId],
+          ['size', dims],
+          ['places', authored.kind === 'prop' ? 'free (under cursor)' : `${authored.kind} snap`],
+        ]} />
+        {authored.kind === 'prop' ? (
+          <ReadOnlySection title="RIG" color="warning" rows={[
+            ['carries', skeleton ? describePropRig(skeletonToPropRig(skeleton)) : 'no rig on the manifest'],
+          ]} />
+        ) : null}
+        {isInstance && sel ? (
+          <ReadOnlySection title="PLACEMENT" color="primary" rows={[
+            ['at', `${sel.x.toFixed(1)}, ${sel.z.toFixed(1)}`],
+            ['floor', floorLabel(pieceFloorOf(sel))],
+            ['yaw', `${sel.yawDegrees}°`],
+          ]} />
+        ) : (
+          <ReadOnlySection title="PLACE" color="textDim" rows={[
+            ['arm', 'click the map to place'],
+          ]} />
+        )}
+      </>
+    );
+  }
 
   if (!row || !pieceId) {
     return (

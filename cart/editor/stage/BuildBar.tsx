@@ -15,8 +15,7 @@
 import { useMemo, useState } from 'react';
 import { Scene3D } from '@reactjit/primitives';
 import { C } from '../workspace.cls';
-import { type BuildKind } from '../world/buildCatalog';
-import { placeablesByKind, placeableKind, authoredPieceFor, type PlaceableEntry } from '../world/authoredRegistry';
+import { placeablesByKind, placeableKind, authoredPieceFor, type PlaceableEntry, type PlaceableKind } from '../world/authoredRegistry';
 import { catalogPieceThumbParts } from '../world/pieceThumbMesh';
 import { authoredMeshData } from '../world/authoredMesh';
 import { buildPartsThumbView, type PartsThumbView } from '../library/modelThumb';
@@ -82,7 +81,7 @@ export default function BuildBar(props: { armedPieceId: string | null; onArm: (p
   // lands on what you last armed), else the first group. Local state — switching
   // categories is pure browsing; only clicking a PIECE arms (writes EditorState).
   const armedKind = props.armedPieceId ? placeableKind(props.armedPieceId) : undefined;
-  const [activeKind, setActiveKind] = useState<BuildKind>(armedKind ?? groups[0]?.kind ?? 'wall');
+  const [activeKind, setActiveKind] = useState<PlaceableKind>(armedKind ?? groups[0]?.kind ?? 'wall');
   const active = groups.find((g) => g.kind === activeKind) ?? groups[0];
 
   return (

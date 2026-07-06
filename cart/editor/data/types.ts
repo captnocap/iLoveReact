@@ -14,6 +14,8 @@ import type { EditMesh } from '../model/editMesh';
 import type { MapPaintState } from '../stage/mapPaint';
 import type { PlacedPiece } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
+import type { BuildKind } from '../world/buildCatalog';
+import type { Skeleton, PropRig } from '../../../runtime/skeleton';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Window' | 'Help';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
@@ -305,6 +307,12 @@ export type ModelPaintVariant = {
 // real model-store writes arrive with package materialization (Slice 2).
 export type ModelOverride = { name?: string; favorite?: boolean; hidden?: boolean };
 
+// What a model is EXPORTED AS — declared in its own on-disk manifest (USER
+// RULING req_2718: the package is the ENTIRE source of truth for placeability;
+// localstore is only ever a rebuildable cache). A build piece carries its snap
+// affinity; a prop free-places.
+export type ModelPlaceable = { as: 'build-piece'; kind: BuildKind } | { as: 'prop' };
+
 export type ModelPackage = {
   id: string;
   folderId: ContentFolderId;
@@ -329,6 +337,11 @@ export type ModelPackage = {
   paints: ModelPaintVariant[];
   sourceKind?: 'cooked-asset' | 'studio-model' | 'imported-prop' | 'source-file' | 'primitive';
   semanticKind?: string;
+  // Exported-as declaration + the RIG (req_2712/2713): what the model places as,
+  // and the skeleton (bones + pockets/placements/seats/grips carried data) it
+  // exports with. Both live in the manifest — disk truth (req_2718).
+  placeable?: ModelPlaceable;
+  skeleton?: Skeleton;
   // A freshly-authored primitive (File → New Mesh → …). The viewer builds the geometry
   // from the in-cart EditMesh generators (cuboid/cylinder/…, via editMeshToGeometry), the
   // same path studio models take, so it opens as clean grouped faces and edits in the host.
@@ -456,9 +469,17 @@ export type EditorState = {
   worldPieces: PlacedPiece[];
   selectedPieceId: string | null;
   armedPieceId: string | null;
-  // Authored build pieces (req_2578): meshes exported "as a wall piece" (etc.),
-  // placeable alongside the catalog. Persisted; mirrored into authoredRegistry.
+  // Authored placeables (req_2578 build pieces + req_2712 props): meshes exported
+  // "as a wall piece" / "as a prop", placeable alongside the catalog. DISK is the
+  // source of truth (manifest.placeable, req_2718) — this list is seeded from the
+  // boot scan of materialized packages and mirrored into authoredRegistry;
+  // localstore only caches it.
   authoredBuildPieces: AuthoredBuildPiece[];
+  // Per-model RIG drafts (req_2712/2713) keyed by package id — the Inspector's
+  // Rig section edits these (pockets/placements/seats/cover/dynamics); export
+  // compiles the draft into the manifest's skeleton. Session-live projection:
+  // the manifest skeleton is the durable record (skeletonToPropRig re-projects).
+  modelRigs: Record<string, PropRig>;
   objects: WorldObject[];
   assetOverrides: Record<string, AssetOverride>;
   modelOverrides: Record<string, ModelOverride>;

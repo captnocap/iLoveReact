@@ -28,17 +28,14 @@ import { IsoStage, type Rect } from './isoStage';
 import { pieceInstanceRows, resolvePlacement, pieceLook, pickAuthoredPlacement, type ArmedPiece, type PlacedPiece } from './pieces';
 import { pieceSkinBoxes } from './pieceSkins';
 import { encodeResidentMeshes, encodeMeshRefs, encodeMeshGhost, type ResidentMesh, type MeshRef } from './meshProps';
-import { isAuthoredPiece, type AuthoredBuildPiece } from './authoredRegistry';
+import { isAuthoredPiece, authoredModelIdOf, type AuthoredBuildPiece } from './authoredRegistry';
 import { authoredMeshData } from './authoredMesh';
 import { pickBuildPieceHostHit } from '../../../runtime/game/build';
 import { ensureMapSeeded } from '../stage/mapPaint';
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import type { WorldTool } from './worldTool';
 
-/** `model:<modelId>` → the stored model id (the resident-mesh + ref key). */
-function modelIdOf(pieceId: string): string {
-  return pieceId.slice('model:'.length);
-}
+// `model:`/`prop:` id → stored model id: authoredModelIdOf (authoredRegistry).
 
 // WASD camera pan. Distance-scaled so a keypress crosses the same fraction of the view whether
 // you're surveying a district or detailing a wall (matches the drag-pan feel). Per ~16ms tick.
@@ -242,7 +239,7 @@ export default function WorldViewport(props: {
       const refs: MeshRef[] = [];
       for (const piece of props.pieces) {
         if (!isAuthoredPiece(piece.pieceId)) continue;
-        refs.push({ key: modelIdOf(piece.pieceId), x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees });
+        refs.push({ key: authoredModelIdOf(piece.pieceId), x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees });
       }
       g.__compiled_world_set_live_mesh_props(nodeId, encodeMeshRefs(refs));
     }
@@ -281,7 +278,7 @@ export default function WorldViewport(props: {
     const armed = props.armed;
     const show = armed && isAuthoredPiece(armed.pieceId) && props.tool === 'place' && snap;
     if (show && typeof g.__compiled_world_set_live_mesh_ghost === 'function') {
-      g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({ key: modelIdOf(armed.pieceId), x: snap!.x, y: snap!.y, z: snap!.z, yaw: snap!.yaw }));
+      g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({ key: authoredModelIdOf(armed.pieceId), x: snap!.x, y: snap!.y, z: snap!.z, yaw: snap!.yaw }));
     } else if (typeof g.__compiled_world_clear_live_mesh_ghost === 'function') {
       g.__compiled_world_clear_live_mesh_ghost(nodeId);
     }

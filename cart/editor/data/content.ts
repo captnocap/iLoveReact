@@ -249,6 +249,15 @@ export function registerSavedPackage(pkg: ModelPackage): void {
   if (!MODEL_PACKAGES.some((model) => model.id === pkg.id)) MODEL_PACKAGES.push(pkg);
 }
 
+// Replace-or-push: the export path re-registers the package WITH its export
+// declaration (placeable/skeleton) so the live roster matches the manifest it
+// just wrote — a later save from this session can't regress it (req_2718).
+export function upsertSavedPackage(pkg: ModelPackage): void {
+  const at = MODEL_PACKAGES.findIndex((model) => model.id === pkg.id);
+  if (at >= 0) MODEL_PACKAGES[at] = pkg;
+  else MODEL_PACKAGES.push(pkg);
+}
+
 export function exactModelForFolder(folder: ContentFolderId): ModelPackage | null {
   return MODEL_PACKAGES.find((model) => model.folderId === folder) ?? null;
 }

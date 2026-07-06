@@ -1,16 +1,17 @@
 // editor/data/initialState.ts - seed world objects, seed history, initial state.
-import { CATALOG_DIAGNOSTICS, DEFAULT_ASSET_ID, DEFAULT_CONTENT_FOLDER, MATERIAL_ASSET_COUNT, MODEL_PACKAGE_COUNT } from './catalog';
+import { CATALOG_DIAGNOSTICS, DEFAULT_ASSET_ID, DEFAULT_CONTENT_FOLDER, MATERIAL_ASSET_COUNT, MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
 import { WORLD_DOCUMENT, WORLD_DOCUMENT_ID } from './documents';
 import type { EditorState, ModelToolSnapshot, WorldObject } from './types';
 import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
 import { DEFAULT_BRUSH, defaultPalette } from '../../../runtime/paint/model';
 import { defaultMapPaint } from '../stage/mapPaint';
 import { nsGet, nsSet } from '../../../runtime/hooks/localstore';
-import type { AuthoredBuildPiece } from '../world/authoredRegistry';
+import { authoredIdFor, type AuthoredBuildPiece } from '../world/authoredRegistry';
 
-// Authored build pieces persist to DISK (localstore) so an export survives a COLD
-// restart, not just a hot reload (req_2594). Metadata only — the geometry is
-// re-resolved from the model store on load (authoredMesh).
+// Authored placeables: the ON-DISK MANIFEST is the source of truth (USER RULING
+// req_2718 — the package declares "I am a prop / a wall piece"); localstore is
+// only the legacy cache. Geometry is re-resolved from the model store on load
+// (authoredMesh); this list is metadata.
 const AUTHORED_STORE = { ns: 'editor', key: 'authoredBuildPieces' };
 export function loadAuthoredPieces(): AuthoredBuildPiece[] {
   try {
@@ -23,6 +24,30 @@ export function loadAuthoredPieces(): AuthoredBuildPiece[] {
 }
 export function saveAuthoredPieces(list: readonly AuthoredBuildPiece[]): void {
   try { nsSet(AUTHORED_STORE.ns, AUTHORED_STORE.key, JSON.stringify(list)); } catch { /* non-fatal */ }
+}
+
+/** The model id an authored placeable renders by (the resident-mesh key) — the
+ *  package id minus its `studio:` source prefix. */
+export function authoredModelIdForPackage(pkgId: string): string {
+  return pkgId.startsWith('studio:') ? pkgId.slice('studio:'.length) : pkgId;
+}
+
+// The boot scan (req_2718): derive the placeable list from the DISK-loaded
+// package roster (manifest.placeable). Legacy localstore-only entries whose
+// package still exists merge in behind the disk records — AppFrame backfills
+// their manifests on mount so next boot they're disk-derived too. Entries whose
+// package is GONE drop: the cache never resurrects a deleted export.
+export function bootAuthoredPieces(): AuthoredBuildPiece[] {
+  const fromDisk: AuthoredBuildPiece[] = [];
+  for (const pkg of MODEL_PACKAGES) {
+    if (!pkg.placeable) continue;
+    const kind = pkg.placeable.as === 'prop' ? ('prop' as const) : pkg.placeable.kind;
+    const modelId = authoredModelIdForPackage(pkg.id);
+    fromDisk.push({ id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color });
+  }
+  const seen = new Set(fromDisk.map((p) => p.id));
+  const legacy = loadAuthoredPieces().filter((p) => !seen.has(p.id) && MODEL_PACKAGES.some((m) => m.id === p.pkgId));
+  return [...fromDisk, ...legacy];
 }
 
 export const INITIAL_OBJECTS: WorldObject[] = [
@@ -97,7 +122,8 @@ export function initialState(): EditorState {
     // Default armed piece = a concrete floor (the placeholder Place piece the
     // surface always dropped). The Build bar (Phase 2) overwrites this on pick.
     armedPieceId: 'floor.concrete.common',
-    authoredBuildPieces: loadAuthoredPieces(),
+    authoredBuildPieces: bootAuthoredPieces(),
+    modelRigs: {},
     objects: INITIAL_OBJECTS,
     assetOverrides: {},
     modelOverrides: {},
