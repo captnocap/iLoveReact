@@ -1092,15 +1092,38 @@ export const Boxxx: any = ({ boxes, children, ...rest }: any) =>
 //   Mid-drag sliderValue echoes are ignored host-side, so a controlled
 //   `value` never fights the thumb. Track tint = style.backgroundColor,
 //   fill tint = style.color; knob is engine chrome.
-export const Slider: any = ({ value = 0, min = 0, max = 1, step = 0, onChange, onCommit, style, ...rest }: any) =>
+//
+// Media scrubber (MEDIASLIDER-0705):
+// <Slider media={videoSrc} hoverLatch="key" hoverWidth={64} hoverStep={1}
+//         onHoverValue={(sec) => ...} onCommit={...} />
+//   `media` binds the slider to a playing <Video> by src — the engine then
+//   owns value AND range end to end (follows mpv time-pos when idle,
+//   streams keyframe seeks while dragging, exact seek + settle on release);
+//   value/min/max props are ignored. `hoverLatch` names a latch the engine
+//   writes the tooltip left-position to on every hover/drag motion — bind a
+//   sibling Box's left to 'latch:<hoverLatch>' for a zero-React tooltip
+//   (hoverWidth = tooltip width for the centering clamp). `onHoverValue`
+//   fires only when the pointer crosses into a new `hoverStep`-sized bucket
+//   (quantize-by-meaning), and once with -1 when the pointer leaves.
+export const Slider: any = ({ value = 0, min = 0, max = 1, step = 0, media, hoverLatch, hoverWidth = 0, hoverStep = 1, onChange, onCommit, onHoverValue, style, ...rest }: any) =>
   h('Slider', {
     ...rest,
-    sliderValue: value,
-    sliderMin: min,
-    sliderMax: max,
+    // sliderMedia must precede sliderValue/Min/Max: v8_app's ownership
+    // guard checks the binding while applying props in key order.
+    ...(media
+      ? { sliderMedia: media }
+      : { sliderValue: value, sliderMin: min, sliderMax: max }),
     sliderStep: step,
+    ...(media || hoverLatch || onHoverValue
+      ? {
+          sliderHover: true,
+          sliderHoverStep: hoverStep,
+          ...(hoverLatch ? { sliderHoverLatch: hoverLatch, sliderHoverWidth: hoverWidth } : {}),
+        }
+      : {}),
     onChange: onChange ? (e: any) => onChange(typeof e === 'number' ? e : e?.value ?? 0) : undefined,
     onCommit: onCommit ? (e: any) => onCommit(typeof e === 'number' ? e : e?.value ?? 0) : undefined,
+    onHoverValue: onHoverValue ? (e: any) => onHoverValue(typeof e === 'number' ? e : e?.value ?? -1) : undefined,
     style: { height: 14, ...style },
   }, null);
 

@@ -695,6 +695,21 @@ pub const Node = struct {
     slider_max: f32 = 1,
     slider_step: f32 = 0, // 0 = continuous
     slider_value: f32 = 0,
+    // Media scrubber extension (MEDIASLIDER-0705): bind the slider to a
+    // videos.zig entry by src. The ENGINE then owns value + range end to
+    // end — follows mpv time-pos when idle, issues throttled keyframe
+    // seeks during a drag and one exact seek on release. sliderValue/Min/
+    // Max props are ignored while bound; range auto-sets to [0,duration].
+    slider_media_src: ?[]const u8 = null,
+    // Hover pointer-value (the vidstack value/pointerValue split, host-
+    // side): while the cursor is over the slider the engine writes the
+    // tooltip left-position latch every motion (zero JS) and dispatches
+    // __dispatchSliderHover only when the QUANTIZED bucket changes
+    // (slider_hover_step seconds per bucket; -1 on leave).
+    slider_hover: bool = false,
+    slider_hover_latch_key: ?[]const u8 = null,
+    slider_hover_w: f32 = 0, // tooltip width for centering clamp; 0 = raw x
+    slider_hover_step: f32 = 1, // bucket granularity in value units
     // Graph.Polyline — flat point array {x0, y0, x1, y1, …} parsed ONCE at
     // CREATE/UPDATE from the cart's `points` prop. Engine paint emits one
     // capsule-SDF line per segment, batched. Bypasses the SVG d-string

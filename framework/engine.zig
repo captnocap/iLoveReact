@@ -42,6 +42,8 @@ const system_signals = @import("ifttt/system_signals.zig");
 const ifttt_zig = @import("ifttt/ifttt.zig");
 const sim = @import("sim/root.zig");
 const input = @import("primitive/input.zig");
+const slider_math = @import("primitive/slider_math.zig");
+const latches = @import("state/latches.zig");
 const crashlog = @import("diag/crashlog.zig");
 const watchdog = @import("diag/watchdog.zig");
 // ── Build-option-gated imports (lean tier omits these) ──────────────────
@@ -307,6 +309,19 @@ const videos = if (HAS_VIDEO) @import("render/videos.zig") else struct {
     }
     pub fn paintVideo(_: ?[]const u8, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
         return false;
+    }
+    // Media-slider surface (MEDIASLIDER-0705) — no-video builds keep the
+    // scrubber code compiling; a bound slider just never follows/seeks.
+    pub fn getCurrentTime(_: []const u8) ?f64 {
+        return null;
+    }
+    pub fn getDuration(_: []const u8) ?f64 {
+        return null;
+    }
+    pub fn seek(_: []const u8, _: f64) void {}
+    pub fn seekExact(_: []const u8, _: f64) void {}
+    pub fn videoCount() usize {
+        return 0;
     }
 };
 const render_surfaces = if (HAS_RENDER_SURFACES) @import("render/render_surfaces.zig") else struct {
@@ -848,6 +863,20 @@ fn meHitIsChrome(hit: ?*Node) bool {
 var slider_drag_slot: u32 = 0;
 var slider_drag_last_dispatch_ms: u32 = 0;
 var slider_drag_last_sent: f32 = std.math.nan(f32);
+// Media scrubber (MEDIASLIDER-0705) — keyframe seeks stream at most every
+// SLIDER_MEDIA_SEEK_MS while dragging; release issues ONE exact seek and
+// opens a settle window so the thumb holds the target instead of snapping
+// back to the stale time-pos while mpv's demuxer catches up.
+const SLIDER_MEDIA_SEEK_MS: u32 = 100;
+const SLIDER_MEDIA_SETTLE_MS: u32 = 500;
+var slider_media_last_seek_ms: u32 = 0;
+var slider_media_settle_slot: u32 = 0;
+var slider_media_settle_target: f32 = 0;
+var slider_media_settle_until_ms: u32 = 0;
+// Hover pointer-value: which slider the cursor is over and the last
+// QUANTIZED bucket dispatched — JS only hears bucket transitions.
+var slider_hover_slot: u32 = 0;
+var slider_hover_last_bucket: i64 = std.math.minInt(i64);
 
 fn findNodeByScrollSlot(node: *Node, slot: u32) ?*Node {
     if (slot == 0) return null;
@@ -1042,17 +1071,11 @@ fn hitTestSlider(node: *Node, mx: f32, my: f32) ?*Node {
 // height (capped), and the value span is the track minus one knob width so
 // the knob center maps [min..max] without overhanging the rect.
 fn sliderKnobW(r: layout.LayoutRect) f32 {
-    return @min(@max(r.h, 8.0), 16.0);
+    return slider_math.knobW(r.h);
 }
 
 fn sliderSnap(node: *Node, raw: f32) f32 {
-    var v = raw;
-    if (node.slider_step > 0) {
-        v = node.slider_min + @round((v - node.slider_min) / node.slider_step) * node.slider_step;
-    }
-    const lo = @min(node.slider_min, node.slider_max);
-    const hi = @max(node.slider_min, node.slider_max);
-    return @max(lo, @min(v, hi));
+    return slider_math.snap(node.slider_min, node.slider_max, node.slider_step, raw);
 }
 
 fn dispatchSliderJs(comptime fmt: []const u8, slot: u32, value: f32) void {
@@ -1064,25 +1087,79 @@ fn dispatchSliderJs(comptime fmt: []const u8, slot: u32, value: f32) void {
     } else |_| {}
 }
 
+// Pointer-value plumbing shared by hover and drag (MEDIASLIDER-0705): write
+// the tooltip-left latch every move (zero JS — the cart binds it via
+// left:'latch:KEY'), dispatch __dispatchSliderHover ONLY when the quantized
+// bucket changes. Quantize-by-meaning, not throttle-by-time.
+fn updateSliderPointerValue(node: *Node, slot: u32, mx: f32, value: f32) void {
+    if (!node.slider_hover) return;
+    const r = node.computed;
+    if (node.slider_hover_latch_key) |key| {
+        latches.set(key, slider_math.tooltipLeft(mx - r.x, r.w, node.slider_hover_w));
+    }
+    if (slot != slider_hover_slot) {
+        slider_hover_slot = slot;
+        slider_hover_last_bucket = std.math.minInt(i64);
+    }
+    const bucket = slider_math.hoverBucket(value, node.slider_hover_step);
+    if (bucket != slider_hover_last_bucket) {
+        slider_hover_last_bucket = bucket;
+        dispatchSliderJs("__dispatchSliderHover({d},{d})", slot, slider_math.bucketValue(bucket, node.slider_hover_step));
+    }
+}
+
+// Cursor moved without a slider drag active: track hover enter/move/leave.
+// Leave dispatches value -1 once so the cart can hide its tooltip.
+fn updateSliderHover(root: *Node, mx: f32, my: f32) void {
+    const hit = hitTestSlider(root, mx, my);
+    if (hit == null or !hit.?.slider_hover or hit.?.scroll_persist_slot == 0) {
+        if (slider_hover_slot != 0) {
+            const slot = slider_hover_slot;
+            slider_hover_slot = 0;
+            slider_hover_last_bucket = std.math.minInt(i64);
+            dispatchSliderJs("__dispatchSliderHover({d},{d})", slot, -1.0);
+        }
+        return;
+    }
+    const node = hit.?;
+    const r = node.computed;
+    const knob_w = sliderKnobW(r);
+    const frac = slider_math.fracFromMouse(mx, r.x, r.w, knob_w);
+    const value = sliderSnap(node, node.slider_min + frac * (node.slider_max - node.slider_min));
+    updateSliderPointerValue(node, node.scroll_persist_slot, mx, value);
+}
+
 fn updateSliderDrag(root: *Node, mx: f32) void {
     if (slider_drag_slot == 0) return;
     const node = findNodeByScrollSlot(root, slider_drag_slot) orelse return;
     const r = node.computed;
     const knob_w = sliderKnobW(r);
-    const span = @max(1.0, r.w - knob_w);
-    const frac = @max(0.0, @min((mx - r.x - knob_w * 0.5) / span, 1.0));
+    const frac = slider_math.fracFromMouse(mx, r.x, r.w, knob_w);
     const next = sliderSnap(node, node.slider_min + frac * (node.slider_max - node.slider_min));
     node.slider_value = next;
     state_mod.markDirty();
 
+    const now_ms: u32 = @intCast(c.SDL_GetTicks() & 0xFFFFFFFF);
+
     // Stream the value (throttled + change-deduped) so the cart can mirror
     // it live; the AUTHORITATIVE write is the commit dispatch on release.
-    const now_ms: u32 = @intCast(c.SDL_GetTicks() & 0xFFFFFFFF);
     if (next != slider_drag_last_sent and now_ms -% slider_drag_last_dispatch_ms >= 16) {
         slider_drag_last_dispatch_ms = now_ms;
         slider_drag_last_sent = next;
         dispatchSliderJs("__dispatchSliderChange({d},{d})", slider_drag_slot, next);
     }
+
+    // Media-bound scrub (MEDIASLIDER-0705): stream cheap keyframe seeks so
+    // the video chases the thumb; the exact seek happens once on release.
+    if (node.slider_media_src) |src| {
+        if (now_ms -% slider_media_last_seek_ms >= SLIDER_MEDIA_SEEK_MS) {
+            slider_media_last_seek_ms = now_ms;
+            videos.seek(src, next);
+        }
+    }
+
+    // The drag thumb IS the pointer value — tooltip follows it.
+    updateSliderPointerValue(node, slider_drag_slot, mx, next);
 }
 
 fn endSliderDrag(root: *Node) void {
@@ -1091,7 +1168,61 @@ fn endSliderDrag(root: *Node) void {
     slider_drag_slot = 0;
     if (findNodeByScrollSlot(root, slot)) |node| {
         node.slider_dragging = false;
+        // Media-bound settle: ONE frame-accurate seek, then hold the
+        // displayed value at the target until mpv converges (or the
+        // window expires) so the thumb never snaps back mid-seek.
+        if (node.slider_media_src) |src| {
+            videos.seekExact(src, node.slider_value);
+            slider_media_settle_slot = slot;
+            slider_media_settle_target = node.slider_value;
+            slider_media_settle_until_ms = @as(u32, @intCast(c.SDL_GetTicks() & 0xFFFFFFFF)) +% SLIDER_MEDIA_SETTLE_MS;
+        }
         dispatchSliderJs("__dispatchSliderCommit({d},{d})", slot, node.slider_value);
+        state_mod.markDirty();
+    }
+}
+
+// Per-frame follow for media-bound sliders (MEDIASLIDER-0705): the engine
+// owns value + range end to end. Range auto-sets to [0, duration] once mpv
+// reports it; when idle the value tracks time-pos with zero JS anywhere in
+// the loop. Called right after videos.update(); gated on any video existing
+// so carts without media pay nothing.
+fn tickMediaSliders(node: *Node) void {
+    if (node.slider) {
+        if (node.slider_media_src) |src| followMediaSlider(node, src);
+    }
+    for (node.children) |*child| tickMediaSliders(child);
+}
+
+fn followMediaSlider(node: *Node, src: []const u8) void {
+    if (videos.getDuration(src)) |dur| {
+        const dur_f: f32 = @floatCast(dur);
+        if (dur_f > 0 and node.slider_max != dur_f) {
+            node.slider_min = 0;
+            node.slider_max = dur_f;
+            state_mod.markDirty();
+        }
+    }
+    if (node.slider_dragging) return;
+
+    const slot = node.scroll_persist_slot;
+    if (slider_media_settle_slot != 0 and slider_media_settle_slot == slot) {
+        const now_ms: u32 = @intCast(c.SDL_GetTicks() & 0xFFFFFFFF);
+        const t = videos.getCurrentTime(src) orelse slider_media_settle_target;
+        if (slider_math.settleHold(now_ms, slider_media_settle_until_ms, t, slider_media_settle_target)) {
+            if (node.slider_value != slider_media_settle_target) {
+                node.slider_value = slider_media_settle_target;
+                state_mod.markDirty();
+            }
+            return;
+        }
+        slider_media_settle_slot = 0;
+    }
+
+    const t = videos.getCurrentTime(src) orelse return;
+    const next: f32 = @floatCast(t);
+    if (@abs(next - node.slider_value) > 0.005) {
+        node.slider_value = next;
         state_mod.markDirty();
     }
 }
@@ -4799,6 +4930,10 @@ pub fn run(config_in: AppConfig) !void {
                         updateSliderDrag(config.root, mx);
                         continue;
                     }
+                    // <Slider> hover pointer-value (MEDIASLIDER-0705) — non-
+                    // consuming: tracks enter/move/leave for hover-enabled
+                    // sliders (tooltip latch + quantized bucket dispatch).
+                    updateSliderHover(config.root, mx, my);
                     // Physics drag update
                     if (physics2d.isDragging()) {
                         physics2d.updateDrag(mx, my);
@@ -5508,6 +5643,10 @@ pub fn run(config_in: AppConfig) !void {
 
         // Video update — poll mpv for new frames before paint
         videos.update();
+
+        // Media-bound sliders follow mpv time-pos (MEDIASLIDER-0705).
+        // Gated on a video existing so media-free carts skip the walk.
+        if (videos.videoCount() > 0) tickMediaSliders(config.root);
 
         // Render surfaces update — poll XShm/FFmpeg/VNC for new frames
         render_surfaces.update();

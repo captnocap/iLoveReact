@@ -972,6 +972,20 @@ pub fn seek(src: []const u8, time: f64) void {
     }
 }
 
+/// Frame-accurate seek (mpv "absolute+exact"). Slower than the keyframe
+/// `seek` above — use it for the authoritative settle on scrub release,
+/// never for the per-motion stream while dragging (MEDIASLIDER-0705).
+pub fn seekExact(src: []const u8, time: f64) void {
+    const e = findEntry(src) orelse return;
+    if (e.handle) |h| {
+        var buf: [32]u8 = undefined;
+        const time_str = std.fmt.bufPrint(&buf, "{d:.3}", .{time}) catch return;
+        buf[time_str.len] = 0;
+        const cmd = [_]?[*:0]const u8{ "seek", buf[0..time_str.len :0], "absolute+exact", null };
+        _ = mpv_fns.command(h, &cmd);
+    }
+}
+
 pub fn getCurrentTime(src: []const u8) ?f64 {
     const e = findEntry(src) orelse return null;
     if (e.handle) |h| return getMpvDouble(h, "time-pos");

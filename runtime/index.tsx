@@ -609,6 +609,17 @@ if (typeof registerDispatch === 'function') {
   }
 };
 
+// Slider hover pointer-value (MEDIASLIDER-0705): fires only when the pointer
+// crosses into a new hoverStep-sized bucket, and once with -1 on leave —
+// quantized-by-meaning, so wiring setState here is cheap by construction.
+(globalThis as any).__dispatchSliderHover = (id: number, value: number) => {
+  try {
+    dispatchAliases(id, ['onHoverValue', 'onHover'], { targetId: id, value });
+  } catch (e) {
+    // swallow — host prints nothing for eval exceptions except via QJS itself
+  }
+};
+
 // Effect render dispatch. Host calls this once per frame per Effect node with
 // a zero-copy ArrayBuffer view of the pixel buffer. We build (or reuse) a
 // context object and invoke the user's onRender handler with it. The handler

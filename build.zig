@@ -981,6 +981,26 @@ pub fn build(b: *std.Build) void {
     const layout_wrap_test_step = b.step("test-layout-wrap", "Run the layout wrap unit tests");
     layout_wrap_test_step.dependOn(&run_layout_wrap_test.step);
 
+    // ── slider math unit tests (SLIDER-0611 / MEDIASLIDER-0705) ─────
+    const slider_math_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/slider_math.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    slider_math_test_mod.addImport("slider_math", b.createModule(.{
+        .root_source_file = b.path("framework/primitive/slider_math.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
+    const slider_math_test = b.addTest(.{
+        .name = "slider-math-test",
+        .root_module = slider_math_test_mod,
+    });
+    const run_slider_math_test = b.addRunArtifact(slider_math_test);
+    const slider_math_test_step = b.step("test-slider-math", "Run the slider math unit tests");
+    slider_math_test_step.dependOn(&run_slider_math_test.step);
+
     // ── system memory telemetry unit tests ──────────────────────────
     const system_memory_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/system_memory.zig"),

@@ -2244,16 +2244,38 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
         } else if (std.mem.eql(u8, k, "sliderValue")) {
             // Controlled value — but the ENGINE owns the thumb while the
             // button is down (SLIDER-0611): a React echo arriving mid-drag
-            // must never fight the pool-resident drag value.
-            if (!node.slider_dragging) {
+            // must never fight the pool-resident drag value. Media-bound
+            // sliders (MEDIASLIDER-0705) are engine-owned ALWAYS.
+            if (!node.slider_dragging and node.slider_media_src == null) {
                 if (jsonFloat(v)) |f| node.slider_value = f;
             }
         } else if (std.mem.eql(u8, k, "sliderMin")) {
-            if (jsonFloat(v)) |f| node.slider_min = f;
+            if (node.slider_media_src == null) {
+                if (jsonFloat(v)) |f| node.slider_min = f;
+            }
         } else if (std.mem.eql(u8, k, "sliderMax")) {
-            if (jsonFloat(v)) |f| node.slider_max = f;
+            if (node.slider_media_src == null) {
+                if (jsonFloat(v)) |f| node.slider_max = f;
+            }
         } else if (std.mem.eql(u8, k, "sliderStep")) {
             if (jsonFloat(v)) |f| node.slider_step = @max(0, f);
+        } else if (std.mem.eql(u8, k, "sliderMedia")) {
+            // Bind the slider to a videos.zig entry by src (MEDIASLIDER-0705).
+            // The engine then owns value + range: time-pos follow when idle,
+            // keyframe seeks while dragging, exact seek + settle on release.
+            // NOTE: runtime/primitives.tsx emits this key BEFORE sliderValue/
+            // Min/Max so the ownership guard above sees it on CREATE.
+            if (dupJsonText(v)) |s| node.slider_media_src = s;
+        } else if (std.mem.eql(u8, k, "sliderHover")) {
+            if (jsonBool(v)) |b| node.slider_hover = b;
+        } else if (std.mem.eql(u8, k, "sliderHoverLatch")) {
+            // Latch key the engine writes the tooltip left-position to on
+            // every hover/drag motion — the cart binds left:'latch:KEY'.
+            if (dupJsonText(v)) |s| node.slider_hover_latch_key = s;
+        } else if (std.mem.eql(u8, k, "sliderHoverWidth")) {
+            if (jsonFloat(v)) |f| node.slider_hover_w = @max(0, f);
+        } else if (std.mem.eql(u8, k, "sliderHoverStep")) {
+            if (jsonFloat(v)) |f| node.slider_hover_step = @max(0.01, f);
         } else if (std.mem.eql(u8, k, "showScrollbar")) {
             if (jsonBool(v)) |b| node.show_scrollbar = b;
         } else if (std.mem.eql(u8, k, "scrollbarSide")) {
@@ -3030,6 +3052,15 @@ fn syncRenderedNodeState(node: *const Node) void {
                 if (node.slider_dragging or stable.slider_dragging)
                     stable.slider_value = node.slider_value;
                 stable.slider_dragging = node.slider_dragging;
+                // Media-bound (MEDIASLIDER-0705): the engine owns value AND
+                // range continuously (time-pos follow + duration auto-set),
+                // not just across the drag window — carry both back so a
+                // rebuild never resurrects the pre-bind 0..1 range.
+                if (node.slider_media_src != null) {
+                    stable.slider_value = node.slider_value;
+                    stable.slider_min = node.slider_min;
+                    stable.slider_max = node.slider_max;
+                }
             }
         }
     }
