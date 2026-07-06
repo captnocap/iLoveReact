@@ -2696,6 +2696,7 @@ fn guardSplitQuads() bool {
 
 pub fn meshGizmoBegin() void {
     clearMeshGuardSnapshot();
+    gizmoDragReset(); // stepped drags (req_2759): fresh accumulator + frozen pivot per grab
     // Pre-drag journal snapshot — committed at release only if the drag moved something.
     journalDiscard(&g_gizmo_snap);
     g_gizmo_snap = journalSnapshotCurrent("transform");
@@ -2705,6 +2706,8 @@ pub fn meshGizmoBegin() void {
 }
 
 pub fn meshGizmoFinish() bool {
+    g_gizmo_readout_len = 0; // the drag is ending — drop the live step readout
+    g_gizmo_pivot0 = null;
     const before = g_guard_before orelse {
         journalDiscard(&g_gizmo_snap);
         return false;
@@ -3212,6 +3215,15 @@ fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
             overlayDot(ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], if (g_gizmo_tool == .scale) GIZMO_DOT_SCALE_PX else GIZMO_DOT_MOVE_PX);
         }
     }
+    // Live step readout (req_2759): the drag's current SNAPPED value beside the pivot —
+    // "+3.00u" / "+15°" / "×1.20" — so the grid the drag clicks along can be read off.
+    if (g_gizmo_readout_len > 0) {
+        const line = g_gizmo_readout[0..g_gizmo_readout_len];
+        const tx = pc[0] + ox + 16;
+        const ty = pc[1] + oy - 22;
+        core.drawTextLine(line, tx + 1, ty + 1, 12, 0.02, 0.03, 0.07, 0.9); // shadow
+        core.drawTextLine(line, tx, ty, 12, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 1.0);
+    }
 }
 
 pub fn meshGizmoHit(mx: f32, my: f32) i32 {
@@ -3239,9 +3251,52 @@ pub fn meshGizmoHit(mx: f32, my: f32) i32 {
     return best_axis;
 }
 
-pub fn meshGizmoDrag(axis: i32, dx: f32, dy: f32) bool {
+// ── Stepped gizmo drags (req_2759; the studio's req_1023 USER RULING, host-native) ────
+// Every gizmo drag is STEPPED by default: the drag accumulates a RAW cumulative value
+// from grab, the cumulative target snaps to the step grid, and only the difference to
+// what's already applied lands on the mesh — so the mesh clicks between grid values
+// instead of drifting freeform. Shift = the fine grid; Ctrl (or Alt, the old studio's
+// key) = freeform. The pivot is FROZEN at grab so cumulative rotate/scale stay exact.
+const GIZMO_STEP_M: f32 = STAGE_TILE_M / 16.0; // 1 modeling unit — the stage's fine sub-grid pitch
+const GIZMO_STEP_FINE_M: f32 = STAGE_TILE_M / 64.0; // Shift: a quarter unit
+const GIZMO_STEP_ROT: f32 = 15.0 * std.math.pi / 180.0;
+const GIZMO_STEP_ROT_FINE: f32 = 1.0 * std.math.pi / 180.0;
+const GIZMO_STEP_SCALE: f32 = 0.1;
+const GIZMO_STEP_SCALE_FINE: f32 = 0.05;
+var g_gizmo_raw: f32 = 0; // cumulative RAW drag since grab (m / rad / linear factor offset)
+var g_gizmo_applied: f32 = 0; // the stepped value already ON the mesh (scale: the factor, init 1)
+var g_gizmo_pivot0: ?[3]f32 = null; // pivot frozen at grab
+var g_gizmo_readout: [24]u8 = undefined; // live drag readout ("+3u" / "+15°" / "×1.20")
+var g_gizmo_readout_len: usize = 0;
+
+fn snapStep(value: f32, step: f32, fine: f32, shift: bool, free: bool) f32 {
+    if (free) return value;
+    const s = if (shift) fine else step;
+    if (s <= 0) return value;
+    return @round(value / s) * s;
+}
+
+fn setGizmoReadout(comptime fmt: []const u8, args: anytype) void {
+    const line = std.fmt.bufPrint(&g_gizmo_readout, fmt, args) catch {
+        g_gizmo_readout_len = 0;
+        return;
+    };
+    g_gizmo_readout_len = line.len;
+}
+
+/// Reset the stepped-drag accumulator — the grab site (meshGizmoBegin) calls this.
+fn gizmoDragReset() void {
+    g_gizmo_raw = 0;
+    g_gizmo_applied = if (g_gizmo_tool == .scale) 1.0 else 0.0;
+    g_gizmo_pivot0 = mesh_edit.selectionPivot();
+    g_gizmo_readout_len = 0;
+}
+
+pub fn meshGizmoDrag(axis: i32, dx: f32, dy: f32, shift: bool, free: bool) bool {
     if (axis < 0 or axis > 2 or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
-    const pivot = mesh_edit.selectionPivot() orelse return false;
+    // The FROZEN grab pivot keeps cumulative rotate/scale exact (each step re-derives
+    // from the same origin); the live pivot is only a fallback for a lost grab.
+    const pivot = g_gizmo_pivot0 orelse (mesh_edit.selectionPivot() orelse return false);
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const dir = screenAxisDir(cam, pivot, axis);
     const px = dx * dir[0] + dy * dir[1];
@@ -3257,12 +3312,45 @@ pub fn meshGizmoDrag(axis: i32, dx: f32, dy: f32) bool {
         const hlen = @sqrt(hdx * hdx + hdy * hdy);
         if (hlen > 8) move_wpp = gizmoAxisGeom(cam, pivot, axis).world_len / hlen;
     }
-    const m = switch (g_gizmo_tool) {
-        .move => mesh_edit.translateSelection(vmul(av, px * move_wpp)),
-        .scale => mesh_edit.scaleSelectionAxis(av, pivot, 1.0 + px * 0.012),
-        .rotate => mesh_edit.rotateSelectionAxis(av, pivot, px * 0.018),
-    };
-    return applyMeshMutation(m);
+    switch (g_gizmo_tool) {
+        .move => {
+            g_gizmo_raw += px * move_wpp;
+            const target = snapStep(g_gizmo_raw, GIZMO_STEP_M, GIZMO_STEP_FINE_M, shift, free);
+            const units = target / GIZMO_STEP_M;
+            setGizmoReadout("{s}{d:.2}u", .{ if (units < 0) "-" else "+", @abs(units) });
+            const d = target - g_gizmo_applied;
+            if (@abs(d) < 1e-7) return false;
+            const m = mesh_edit.translateSelection(vmul(av, d));
+            if (!applyMeshMutation(m)) return false;
+            g_gizmo_applied = target;
+            return true;
+        },
+        .rotate => {
+            g_gizmo_raw += px * 0.018;
+            const target = snapStep(g_gizmo_raw, GIZMO_STEP_ROT, GIZMO_STEP_ROT_FINE, shift, free);
+            const deg = target * 180.0 / std.math.pi;
+            setGizmoReadout("{s}{d:.0}\u{00B0}", .{ if (deg < 0) "-" else "+", @abs(deg) });
+            const d = target - g_gizmo_applied;
+            if (@abs(d) < 1e-7) return false;
+            const m = mesh_edit.rotateSelectionAxis(av, pivot, d);
+            if (!applyMeshMutation(m)) return false;
+            g_gizmo_applied = target;
+            return true;
+        },
+        .scale => {
+            g_gizmo_raw += px * 0.012;
+            const target = std.math.clamp(1.0 + snapStep(g_gizmo_raw, GIZMO_STEP_SCALE, GIZMO_STEP_SCALE_FINE, shift, free), 0.02, 50.0);
+            setGizmoReadout("\u{00D7}{d:.2}", .{target});
+            // Multiplicative bookkeeping: applying target/applied lands the mesh exactly
+            // at the cumulative factor, whatever path the drag wandered.
+            const rel = target / g_gizmo_applied;
+            if (@abs(rel - 1.0) < 1e-6) return false;
+            const m = mesh_edit.scaleSelectionAxis(av, pivot, rel);
+            if (!applyMeshMutation(m)) return false;
+            g_gizmo_applied = target;
+            return true;
+        },
+    }
 }
 
 pub fn meshGizmoNudge(axis: u8, amount: f32) bool {

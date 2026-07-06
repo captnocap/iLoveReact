@@ -420,7 +420,7 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
         return -1;
     }
     pub fn meshGizmoBegin() void {}
-    pub fn meshGizmoDrag(_: i32, _: f32, _: f32) bool {
+    pub fn meshGizmoDrag(_: i32, _: f32, _: f32, _: bool, _: bool) bool {
         return false;
     }
     pub fn meshGizmoFinish() bool {
@@ -4839,7 +4839,16 @@ pub fn run(config_in: AppConfig) !void {
                             continue;
                         }
                         if (me_gizmo_dragging) {
-                            _ = r3d.meshGizmoDrag(me_gizmo_axis, event.motion.xrel, event.motion.yrel);
+                            // Stepped drags (req_2759): no modifier = whole modeling units,
+                            // Shift = the fine grid, Ctrl (or Alt, the old studio's key) = freeform.
+                            const gmod = c.SDL_GetModState();
+                            _ = r3d.meshGizmoDrag(
+                                me_gizmo_axis,
+                                event.motion.xrel,
+                                event.motion.yrel,
+                                (gmod & c.SDL_KMOD_SHIFT) != 0,
+                                (gmod & (c.SDL_KMOD_CTRL | c.SDL_KMOD_ALT)) != 0,
+                            );
                             state_mod.markDirty();
                             continue;
                         }
