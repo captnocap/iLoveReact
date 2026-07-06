@@ -6,19 +6,20 @@
 // editor host, which exposes the fs hooks (runtime/hooks/fs) — there is no path
 // confinement, so every path here comes from modelPackage.ts, never ad hoc.
 //
-// This slice materializes the MANIFEST + directory skeleton. Copying the mesh /
-// atlas / paint / shader BYTES into the subdirs (so a copied folder is truly
-// self-contained) is the next slice; the subdirs are created now so the shape
-// is visible and the writers have a home.
-import { exists, listDir, mkdir, readFile, readFileBase64, writeFile, writeFileBase64Atomic, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+// FOLDER NAME = MODEL NAME (req_2735): a package's directory is named after the
+// model's NAME (props/weiner/), not its internal store id
+// (props/studio_mdl-mqy4h5yb-enm/). The id stays the KEY — it lives inside
+// manifest.json — so the store resolves id → dir by scanning manifests (the
+// same walk loadMaterializedPackages already does), cached in a module map.
+// Renaming a model MOVES its folder to match; a name collision suffixes _2/_3.
+import { exists, listDir, mkdir, readFile, readFileBase64, remove, writeFile, writeFileBase64Atomic, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
 import {
   MODELS_HOME,
   MODEL_PACKAGE_SUBDIRS,
   categoryDir,
-  manifestPath,
   modelFolderIdFor,
   packageDir,
-  subDir,
+  packageDirForName,
   packageToManifest,
   parseManifest,
   manifestToPackage,
@@ -33,14 +34,109 @@ const host = globalThis as any;
 export type MaterializeResult = { ok: boolean; id: string; dir: string; error?: string };
 export type MaterializeSummary = { total: number; wrote: number; failed: MaterializeResult[] };
 
-// Write one model's package directory: the category + model dirs, the four blob
-// subdirs, and manifest.json. Idempotent — mkdir/writeFile overwrite in place.
-// The EXPORT declaration (placeable/skeleton, req_2718 disk truth) is preserved
-// from the existing manifest when the incoming package doesn't carry it — a
-// plain re-save from a session that never saw the export must not undo it.
+// ── Package directory resolution (id → real on-disk home) ───────────────────
+
+const dirById = new Map<string, string>();
+let dirIndexBuilt = false;
+
+const dirKey = (kind: ModelPackageKind, id: string) => `${kind}:${id}`;
+
+function indexPackageDir(kind: ModelPackageKind, id: string, dir: string): void {
+  dirById.set(dirKey(kind, id), dir);
+}
+
+// Walk every category dir once and index manifest ids. The kind in the key
+// comes from the MANIFEST (disk truth), not the category folder — a package
+// parked in an off-category home (models/roundtrip/…) still resolves.
+function ensureDirIndex(): void {
+  if (dirIndexBuilt) return;
+  dirIndexBuilt = true;
+  if (!exists(MODELS_HOME)) return;
+  for (const category of listDir(MODELS_HOME)) {
+    const categoryPath = `${MODELS_HOME}/${category}`;
+    for (const leaf of listDir(categoryPath)) {
+      const dir = `${categoryPath}/${leaf}`;
+      const text = readFile(`${dir}/manifest.json`);
+      if (!text) continue;
+      try {
+        const manifest = parseManifest(text);
+        indexPackageDir(manifest.kind, manifest.id, dir);
+      } catch { /* not a manifest — ignore the directory */ }
+    }
+  }
+}
+
+// The pre-req_2735 id-slug home, accepted only when its manifest really is this
+// model's (a name-slug dir of another model could shadow an id-slug path).
+function legacyPackageDir(kind: ModelPackageKind, id: string): string | null {
+  const dir = packageDir(kind, id);
+  const text = readFile(`${dir}/manifest.json`);
+  if (!text) return null;
+  try {
+    if (parseManifest(text).id === id) return dir;
+  } catch { /* unreadable — not a resolvable home */ }
+  return null;
+}
+
+// The on-disk home of an EXISTING package, or null when it isn't materialized.
+export function resolvePackageDir(kind: ModelPackageKind, id: string): string | null {
+  const hit = dirById.get(dirKey(kind, id));
+  if (hit && exists(`${hit}/manifest.json`)) return hit;
+  const legacy = legacyPackageDir(kind, id);
+  if (legacy) {
+    indexPackageDir(kind, id, legacy);
+    return legacy;
+  }
+  ensureDirIndex();
+  return dirById.get(dirKey(kind, id)) ?? null;
+}
+
+// The name-slug home this model may WRITE into: its own dir when it already
+// owns one under that name, otherwise the first free _2/_3-suffixed slot —
+// a different model squatting the name never gets clobbered.
+function nameDirFor(kind: ModelPackageKind, id: string, name: string): string {
+  const base = packageDirForName(kind, name);
+  let dir = base;
+  for (let n = 2; exists(`${dir}/manifest.json`); n += 1) {
+    try {
+      if (parseManifest(readFile(`${dir}/manifest.json`) ?? '').id === id) return dir;
+    } catch { /* unreadable squatter — step past it */ }
+    dir = `${base}_${n}`;
+  }
+  return dir;
+}
+
+// Where a materialization writes: the existing home if the package has one,
+// else a claimed name-slug dir (registered in the index immediately so every
+// write in the same pass agrees on the home). Exported for the package-file
+// writers that live outside this store (paintVariants) — never for readers.
+export function claimPackageDir(pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>): string {
+  const existing = resolvePackageDir(pkg.kind, pkg.id);
+  if (existing) return existing;
+  const dir = nameDirFor(pkg.kind, pkg.id, pkg.name);
+  indexPackageDir(pkg.kind, pkg.id, dir);
+  return dir;
+}
+
+// The model's home dir plus the four blob subdirs — or null when a mkdir fails.
+function ensurePackageDirs(dir: string): boolean {
+  if (!mkdir(dir)) return false;
+  for (const sub of MODEL_PACKAGE_SUBDIRS) {
+    if (!mkdir(`${dir}/${sub}`)) return false;
+  }
+  return true;
+}
+
+// ── Writers ──────────────────────────────────────────────────────────────────
+
+// Write one model's package directory: the home dir, the four blob subdirs, and
+// manifest.json. Idempotent — mkdir/writeFile overwrite in place. The EXPORT
+// declaration (placeable/skeleton, req_2718 disk truth) is preserved from the
+// existing manifest when the incoming package doesn't carry it — a plain
+// re-save from a session that never saw the export must not undo it.
 export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
-  const dir = ensurePackageDirs(pkg.kind, pkg.id);
-  if (!dir) return { ok: false, id: pkg.id, dir: packageDir(pkg.kind, pkg.id), error: 'mkdir package dirs failed' };
+  const dir = claimPackageDir(pkg);
+  if (!ensurePackageDirs(dir)) return { ok: false, id: pkg.id, dir, error: 'mkdir package dirs failed' };
   const manifest = packageToManifest(pkg);
   if (manifest.placeable === undefined || manifest.skeleton === undefined) {
     const prior = readManifest(pkg.kind, pkg.id);
@@ -49,20 +145,9 @@ export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
       manifest.skeleton = manifest.skeleton ?? prior.skeleton;
     }
   }
-  const wrote = writeFile(manifestPath(pkg.kind, pkg.id), serializeManifest(manifest));
+  const wrote = writeFile(`${dir}/manifest.json`, serializeManifest(manifest));
   if (!wrote) return { ok: false, id: pkg.id, dir, error: 'write manifest failed' };
   return { ok: true, id: pkg.id, dir };
-}
-
-// The category dir, the model's home dir, and the four blob subdirs — or null
-// when any mkdir fails. Every materialization path starts here.
-function ensurePackageDirs(kind: ModelPackageKind, id: string): string | null {
-  const dir = packageDir(kind, id);
-  if (!mkdir(dir)) return null;
-  for (const sub of MODEL_PACKAGE_SUBDIRS) {
-    if (!mkdir(`${dir}/${sub}`)) return null;
-  }
-  return dir;
 }
 
 // Everything a snapshot-era model needs copied beside its manifest to become a
@@ -83,23 +168,27 @@ export type PackageBlobs = {
 // manifest LAST. The manifest is the commit point — an interrupted run leaves
 // no manifest, so the next catalog load retries instead of trusting a
 // half-written package (isMaterialized keys off the manifest alone).
+// MUTATES pkg when a mesh file is copied in: viewerPath is repointed at the
+// package's own copy, so the manifest AND the live roster entry agree.
 export function materializeSnapshotPackage(pkg: ModelPackage, blobs: PackageBlobs): MaterializeResult {
-  const dir = ensurePackageDirs(pkg.kind, pkg.id);
-  if (!dir) return { ok: false, id: pkg.id, dir: packageDir(pkg.kind, pkg.id), error: 'mkdir package dirs failed' };
-  const meshDir = subDir(pkg.kind, pkg.id, 'mesh');
+  const dir = claimPackageDir(pkg);
+  if (!ensurePackageDirs(dir)) return { ok: false, id: pkg.id, dir, error: 'mkdir package dirs failed' };
   if (blobs.meshBlob && blobs.meshBlob.length > 0) {
     const bytes = new Uint8Array(blobs.meshBlob.buffer, blobs.meshBlob.byteOffset, blobs.meshBlob.byteLength);
-    if (!writeFileBytesAtomic(`${meshDir}/base.blob`, bytes)) {
+    if (!writeFileBytesAtomic(`${dir}/mesh/base.blob`, bytes)) {
       return { ok: false, id: pkg.id, dir, error: 'write mesh/base.blob failed' };
     }
   }
-  if (blobs.meshFile && !writeFileBase64Atomic(`${meshDir}/${blobs.meshFile.name}`, blobs.meshFile.base64)) {
-    return { ok: false, id: pkg.id, dir, error: `copy mesh/${blobs.meshFile.name} failed` };
+  if (blobs.meshFile) {
+    if (!writeFileBase64Atomic(`${dir}/mesh/${blobs.meshFile.name}`, blobs.meshFile.base64)) {
+      return { ok: false, id: pkg.id, dir, error: `copy mesh/${blobs.meshFile.name} failed` };
+    }
+    pkg.viewerPath = `${dir}/mesh/${blobs.meshFile.name}`;
   }
-  if (blobs.editMeshJson && !writeFile(`${meshDir}/editmesh.json`, blobs.editMeshJson)) {
+  if (blobs.editMeshJson && !writeFile(`${dir}/mesh/editmesh.json`, blobs.editMeshJson)) {
     return { ok: false, id: pkg.id, dir, error: 'write mesh/editmesh.json failed' };
   }
-  if (blobs.atlasPngBase64 && !writeFileBase64Atomic(`${subDir(pkg.kind, pkg.id, 'atlases')}/base.png`, blobs.atlasPngBase64)) {
+  if (blobs.atlasPngBase64 && !writeFileBase64Atomic(`${dir}/atlases/base.png`, blobs.atlasPngBase64)) {
     return { ok: false, id: pkg.id, dir, error: 'write atlases/base.png failed' };
   }
   return materializeModelPackage(pkg);
@@ -108,7 +197,9 @@ export function materializeSnapshotPackage(pkg: ModelPackage, blobs: PackageBlob
 // The current on-disk manifest, or null (absent/unreadable — callers treat both
 // as "no durable record yet").
 export function readManifest(kind: ModelPackageKind, id: string): ModelManifest | null {
-  const text = readFile(manifestPath(kind, id));
+  const dir = resolvePackageDir(kind, id);
+  if (!dir) return null;
+  const text = readFile(`${dir}/manifest.json`);
   if (!text) return null;
   try {
     return parseManifest(text);
@@ -134,15 +225,14 @@ export function materializeCatalog(pkgs: ModelPackage[]): MaterializeSummary {
 // durable-identity gate (req_2620 S/T/U): rename/favorite/delete write through
 // to the manifest only when it exists; autosave only covers materialized models.
 export function isMaterialized(kind: ModelPackageKind, id: string): boolean {
-  return exists(manifestPath(kind, id));
+  return resolvePackageDir(kind, id) !== null;
 }
 
 // Patch the durable-identity fields of an EXISTING on-disk manifest in place
 // (rename / favorite / hidden write-through — req_2620 S/U). MANIFEST IS DISK
 // TRUTH: the session's modelOverrides mirror these live; this is what makes
-// them survive a cold restart. Reads-merges-writes the real file so fields a
-// newer writer added are preserved. False when the package isn't on disk yet
-// (callers keep the pending override and let the FIRST save write it).
+// them survive a cold restart. A rename also MOVES the package folder so the
+// directory keeps reading as the model's name (req_2735).
 export function updateManifestIdentity(
   kind: ModelPackageKind,
   id: string,
@@ -165,16 +255,62 @@ export function updateManifestPlaceable(
 
 // The ONE manifest read-merge-write: preserves fields a newer writer added,
 // refuses to clobber an unreadable manifest, false when not materialized yet.
+// A name patch finishes with a folder move (rename-follow); a failed move is
+// LOUD but non-fatal — the package stays valid under its stale-named dir.
 function patchManifest(kind: ModelPackageKind, id: string, patch: Partial<ModelManifest>): boolean {
-  const file = manifestPath(kind, id);
-  const text = readFile(file);
+  const dir = resolvePackageDir(kind, id);
+  if (!dir) return false;
+  const text = readFile(`${dir}/manifest.json`);
   if (!text) return false;
   try {
-    const manifest = parseManifest(text);
-    return writeFile(file, serializeManifest({ ...manifest, ...patch }));
+    const manifest = { ...parseManifest(text), ...patch };
+    if (!writeFile(`${dir}/manifest.json`, serializeManifest(manifest))) return false;
+    if (typeof patch.name === 'string') {
+      const want = nameDirFor(kind, id, manifest.name);
+      if (want !== dir && !movePackageDir(manifest, dir, want)) {
+        console.error(`[model-packages] rename wrote through but moving ${dir} -> ${want} failed; package intact under the old folder name`);
+      }
+    }
+    return true;
   } catch {
     return false; // unreadable manifest — never clobber it with a guess
   }
+}
+
+// Move a package directory to a new home (rename-follow). There is no host
+// rename door, so this is copy-then-delete: the four subdirs' leaves, the root
+// leaves (manifest.json, preview.png, …), a viewerPath rewrite when the mesh
+// source lives inside the package, and only then removal of the old home.
+function movePackageDir(manifest: ModelManifest, fromDir: string, toDir: string): boolean {
+  if (!ensurePackageDirs(toDir)) return false;
+  const copyLeaves = (from: string, to: string): boolean => {
+    if (!exists(from)) return true;
+    for (const name of listDir(from)) {
+      if (!name || name.startsWith('.')) continue;
+      const bytes = readFileBase64(`${from}/${name}`);
+      if (bytes === null) continue; // nested dir or unreadable leaf — skip
+      if (!writeFileBase64Atomic(`${to}/${name}`, bytes)) return false;
+    }
+    return true;
+  };
+  for (const sub of MODEL_PACKAGE_SUBDIRS) {
+    if (!copyLeaves(`${fromDir}/${sub}`, `${toDir}/${sub}`)) return false;
+  }
+  if (!copyLeaves(fromDir, toDir)) return false;
+  if (manifest.mesh.viewerPath?.startsWith(`${fromDir}/`)) {
+    const moved = { ...manifest, mesh: { ...manifest.mesh, viewerPath: `${toDir}${manifest.mesh.viewerPath.slice(fromDir.length)}` } };
+    if (!writeFile(`${toDir}/manifest.json`, serializeManifest(moved))) return false;
+  }
+  // Every byte landed — now retire the old home.
+  for (const sub of MODEL_PACKAGE_SUBDIRS) {
+    if (!exists(`${fromDir}/${sub}`)) continue;
+    for (const name of listDir(`${fromDir}/${sub}`)) remove(`${fromDir}/${sub}/${name}`);
+    remove(`${fromDir}/${sub}`);
+  }
+  for (const name of listDir(fromDir)) remove(`${fromDir}/${name}`);
+  remove(fromDir);
+  indexPackageDir(manifest.kind, manifest.id, toDir);
+  return true;
 }
 
 // Copy a materialized package directory wholesale into a NEW package (the
@@ -184,9 +320,9 @@ function patchManifest(kind: ModelPackageKind, id: string, patch: Partial<ModelM
 // its own manifest — not a session phantom. Returns the new ModelPackage, or
 // null when the source isn't on disk / any write fails.
 export function copyModelPackage(src: ModelPackage, newId: string, newName: string): ModelPackage | null {
-  if (!isMaterialized(src.kind, src.id)) return null;
-  const srcDir = packageDir(src.kind, src.id);
-  const destDir = packageDir(src.kind, newId);
+  const srcDir = resolvePackageDir(src.kind, src.id);
+  if (!srcDir) return null;
+  const destDir = nameDirFor(src.kind, newId, newName);
   const manifest = packageToManifest({
     ...src,
     id: newId,
@@ -212,8 +348,9 @@ export function copyModelPackage(src: ModelPackage, newId: string, newName: stri
       if (!writeFileBase64Atomic(`${destDir}/${sub}/${name}`, bytes)) return null;
     }
   }
-  if (!writeFile(manifestPath(src.kind, newId), serializeManifest(manifest))) return null;
-  return manifestToPackage(manifest);
+  if (!writeFile(`${destDir}/manifest.json`, serializeManifest(manifest))) return null;
+  indexPackageDir(src.kind, newId, destDir);
+  return manifestToPackage(manifest, destDir);
 }
 
 // True once at least one materialized package exists on disk. Lets callers
@@ -228,19 +365,23 @@ export function hasMaterializedPackages(): boolean {
 
 // Read every materialized package back into ModelPackage[]. Skips any directory
 // without a readable manifest instead of throwing, so one bad package can't
-// blank the roster (a lesson already paid for in paint-blob storage).
+// blank the roster (a lesson already paid for in paint-blob storage). This walk
+// IS the dir index build — every manifest it parses registers its real home.
 export function loadMaterializedPackages(): ModelPackage[] {
+  dirIndexBuilt = true;
   if (!exists(MODELS_HOME)) return [];
   const out: ModelPackage[] = [];
   for (const category of listDir(MODELS_HOME)) {
     const categoryPath = `${MODELS_HOME}/${category}`;
     if (!exists(categoryPath)) continue;
-    for (const slug of listDir(categoryPath)) {
-      const file = `${categoryPath}/${slug}/manifest.json`;
-      const text = readFile(file);
+    for (const leaf of listDir(categoryPath)) {
+      const dir = `${categoryPath}/${leaf}`;
+      const text = readFile(`${dir}/manifest.json`);
       if (!text) continue;
       try {
-        out.push(manifestToPackage(parseManifest(text)));
+        const manifest = parseManifest(text);
+        indexPackageDir(manifest.kind, manifest.id, dir);
+        out.push(manifestToPackage(manifest, dir));
       } catch {
         // Not a valid manifest — skip this directory, keep the roster intact.
       }
@@ -257,7 +398,9 @@ export type PackageFile = { name: string; path: string; sub: (typeof MODEL_PACKA
 // Empty until the Save writer populates them — the browser shows an honest empty
 // state, not a phantom "no models". Skips nested dirs; leaves only.
 export function listPackageFiles(pkg: ModelPackage, sub: (typeof MODEL_PACKAGE_SUBDIRS)[number]): PackageFile[] {
-  const dir = `${packageDir(pkg.kind, pkg.id)}/${sub}`;
+  const home = resolvePackageDir(pkg.kind, pkg.id);
+  if (!home) return [];
+  const dir = `${home}/${sub}`;
   if (!exists(dir)) return [];
   return listDir(dir)
     .filter((name) => name && !name.startsWith('.'))
@@ -270,9 +413,10 @@ export function listPackageFiles(pkg: ModelPackage, sub: (typeof MODEL_PACKAGE_S
 // door); atlases/base.png = the current atlas readback. Best-effort — each piece is skipped
 // when its host door or data is absent (an unpainted model has no atlas yet). Call on any
 // save of the active model.
-export function writeModelArtifacts(pkg: Pick<ModelPackage, 'kind' | 'id'>): void {
-  const meshDir = subDir(pkg.kind, pkg.id, 'mesh');
-  const atlasDir = subDir(pkg.kind, pkg.id, 'atlases');
+export function writeModelArtifacts(pkg: Pick<ModelPackage, 'kind' | 'id' | 'name'>): void {
+  const dir = claimPackageDir(pkg);
+  const meshDir = `${dir}/mesh`;
+  const atlasDir = `${dir}/atlases`;
   mkdir(meshDir);
   mkdir(atlasDir);
   host.__model_mesh_write?.(`${meshDir}/base.blob`);

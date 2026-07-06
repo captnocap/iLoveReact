@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "id": "nug:c2554ea5",
-  "name": "Nug c2554ea5",
+  "id": "nug:b24275a1",
+  "name": "Nug b24275a1",
   "kind": "prop",
   "stage": "ready",
   "folderId": "props",
@@ -9,17 +9,17 @@
   "sourceKind": "generated",
   "color": "#7da878",
   "rig": "seeded SDF bake",
-  "data": "file nug_c2554ea5.obj",
-  "triangles": 35700,
+  "data": "file nug_b24275a1.obj",
+  "triangles": 31160,
   "lods": 0,
   "mesh": {
-    "viewerPath": "cart/editor/data/models/props/nug_c2554ea5/mesh/nug_c2554ea5.obj"
+    "viewerPath": "cart/editor/data/models/props/Nug_b24275a1/mesh/nug_b24275a1.obj"
   },
   "decompositions": [
     "semantic:prop",
     "format:obj",
     "generator:scripts/nug-gen.js",
-    "seed:c2554ea5"
+    "seed:b24275a1"
   ],
   "atlases": [],
   "paints": []

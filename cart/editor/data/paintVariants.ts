@@ -12,13 +12,15 @@
 //   paints/paint_<id>.png   — the rasterized atlas, the EDITING SUBSTRATE / preview (what
 //                             you see). Written from the live atlas via __image_write_png.
 import { exists, listDir, mkdir, readFile, remove, writeFile } from '../../../runtime/hooks/fs';
-import { subDir } from './modelPackage';
+import { claimPackageDir } from './modelPackageStore';
 import type { ModelPackage } from './types';
 
 const host = globalThis as any;
 
-// Only the package identity is needed to locate the on-disk paints/ dir.
-export type PaintTarget = Pick<ModelPackage, 'kind' | 'id'>;
+// Package identity + name: the store resolves the package's REAL home by id and
+// claims a name-slug dir for a model saved for the first time (req_2735), so
+// paints always land beside the manifest they belong to.
+export type PaintTarget = Pick<ModelPackage, 'kind' | 'id' | 'name'>;
 
 export type PaintVariant = {
   id: string; // stable + unique within the model (a monotonic sequence)
@@ -31,7 +33,7 @@ export type PaintVariant = {
   png?: string; // on-disk path of the rasterized substrate, when one was written
 };
 
-function paintsDir(pkg: PaintTarget): string { return subDir(pkg.kind, pkg.id, 'paints'); }
+function paintsDir(pkg: PaintTarget): string { return `${claimPackageDir(pkg)}/paints`; }
 function jsonPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.json`; }
 function pngPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.png`; }
 

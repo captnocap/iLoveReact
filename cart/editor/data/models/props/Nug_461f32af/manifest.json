@@ -13,7 +13,7 @@
   "triangles": 42572,
   "lods": 0,
   "mesh": {
-    "viewerPath": "cart/editor/data/models/props/nug_461f32af/mesh/nug_461f32af.obj"
+    "viewerPath": "cart/editor/data/models/props/Nug_461f32af/mesh/nug_461f32af.obj"
   },
   "decompositions": [
     "semantic:prop",

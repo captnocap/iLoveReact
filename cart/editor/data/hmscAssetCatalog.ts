@@ -1,4 +1,4 @@
-import { exists, listDir, readFile, readFileBase64, stat, writeFileBase64Atomic } from '../../../runtime/hooks/fs';
+import { listDir, readFile, readFileBase64, stat } from '../../../runtime/hooks/fs';
 import {
   HMSC_BROWSE_SHADER_PRESETS,
   HMSC_SHADERS,
@@ -8,8 +8,8 @@ import {
 import { validateDecalDoc } from '../textures/decal';
 import { cuboid, cylinder, cone, pyramid, plane, sphere, icosphere, editMeshToGeometry, type EditMesh } from '../model/editMesh';
 import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, ModelPart, PrimitiveKind } from './types';
-import { MODELS_HOME, MODEL_PACKAGE_SUBDIRS, displayPath, modelFolderIdFor, modelSlug, subDir } from './modelPackage';
-import { isMaterialized, loadMaterializedPackages, materializeModelPackage, materializeSnapshotPackage, type PackageBlobs } from './modelPackageStore';
+import { MODELS_HOME, MODEL_PACKAGE_SUBDIRS, modelFolderIdFor, modelSlug } from './modelPackage';
+import { isMaterialized, loadMaterializedPackages, materializeSnapshotPackage, type PackageBlobs } from './modelPackageStore';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
 const COOKED_SNAPSHOT = 'cart/hmsc-int/data/domains/cooked-asset/snapshots/cooked-asset.snapshot.json';
@@ -483,10 +483,8 @@ function materializeMissingPackages(models: ModelPackage[], cooked: CookedSnapsh
   for (const pkg of models) {
     if (isMaterialized(pkg.kind, pkg.id)) continue;
     const blobs = snapshotPackageBlobs(pkg, cooked);
-    if (blobs.meshFile) {
-      // The copied file is the package's mesh now — manifest and live session both point inside.
-      pkg.viewerPath = `${subDir(pkg.kind, pkg.id, 'mesh')}/${blobs.meshFile.name}`;
-    }
+    // A copied mesh file repoints pkg.viewerPath inside the package (the store
+    // mutates pkg), so the manifest and the live roster entry agree.
     const result = materializeSnapshotPackage(pkg, blobs);
     if (result.ok) wrote += 1;
     else errors.push(`materialize ${pkg.id}: ${result.error ?? 'failed'}`);
@@ -723,21 +721,19 @@ export function importModelFilePackage(sourcePath: string): ModelPackage | null 
   const registered = HMSC_EDITOR_CATALOG.modelPackages.find((m) => m.id === id);
   if (registered) return registered;
   const probe = fileModelPackage(sourcePath);
-  const meshDest = `${subDir(probe.kind, id, 'mesh')}/${filename}`;
+  const base64 = readFileBase64(sourcePath);
+  if (!base64) return null;
   const pkg: ModelPackage = {
     ...probe,
     id,
-    path: displayPath(probe.kind, id),
     source: sourcePath,
-    viewerPath: meshDest,
     decompositions: [...probe.decompositions.filter((d) => d !== 'source:file-explorer'), `imported-from:${sourcePath}`],
   };
-  // Directory skeleton + manifest first (creates the mesh/ subdir), then the bytes.
-  if (!materializeModelPackage(pkg).ok) return null;
-  if (!exists(meshDest)) {
-    const bytes = readFileBase64(sourcePath);
-    if (!bytes || !writeFileBase64Atomic(meshDest, bytes)) return null;
-  }
+  // The store claims the name-slug home, copies the bytes into mesh/, repoints
+  // pkg.viewerPath at the package's own copy, and writes the manifest last.
+  const res = materializeSnapshotPackage(pkg, { meshFile: { name: filename, base64 } });
+  if (!res.ok) return null;
+  pkg.path = `/${res.dir}`;
   // Register for THIS session too — the catalog array is the live roster the content
   // browser reads; next boot loadMaterializedPackages() picks the package up from disk.
   HMSC_EDITOR_CATALOG.modelPackages.push(pkg);

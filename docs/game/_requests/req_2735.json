@@ -1,0 +1,18 @@
+{
+  "id": "req_2735",
+  "at": "2026-07-06T01:33:04.284Z",
+  "origin": "session:922efce7",
+  "text": "could we really not give them their actual names ? why is it all studiomdl",
+  "status": "doing",
+  "sessionId": "922efce7-f48c-4350-9978-1334e002b188",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T01:33:45.399Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

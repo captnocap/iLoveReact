@@ -1,24 +1,24 @@
 {
   "version": 1,
-  "id": "import:nude_girl",
-  "name": "Nude Girl",
+  "id": "import:bus",
+  "name": "Bus",
   "kind": "prop",
   "stage": "ready",
   "folderId": "props",
   "semanticKind": "prop",
   "sourceKind": "source-file",
-  "color": "#a34373",
+  "color": "#a143a3",
   "rig": "source model file",
-  "data": "file nude_girl.glb",
+  "data": "file bus.glb",
   "triangles": 0,
   "lods": 0,
   "mesh": {
-    "viewerPath": "cart/editor/data/models/props/import_nude_girl/mesh/nude_girl.glb"
+    "viewerPath": "cart/editor/data/models/props/Bus/mesh/bus.glb"
   },
   "decompositions": [
     "semantic:prop",
     "format:glb",
-    "imported-from:/home/siah/Downloads/nude_girl.glb"
+    "imported-from:/home/siah/Downloads/bus.glb"
   ],
   "atlases": [],
   "paints": []

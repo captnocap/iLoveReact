@@ -1,24 +1,24 @@
 {
   "version": 1,
-  "id": "import:bus",
-  "name": "Bus",
+  "id": "import:joyful_run",
+  "name": "Joyful Run",
   "kind": "prop",
   "stage": "ready",
   "folderId": "props",
   "semanticKind": "prop",
   "sourceKind": "source-file",
-  "color": "#a143a3",
+  "color": "#4fa343",
   "rig": "source model file",
-  "data": "file bus.glb",
+  "data": "file joyful_run.glb",
   "triangles": 0,
   "lods": 0,
   "mesh": {
-    "viewerPath": "cart/editor/data/models/props/import_bus/mesh/bus.glb"
+    "viewerPath": "cart/editor/data/models/props/Joyful_Run/mesh/joyful_run.glb"
   },
   "decompositions": [
     "semantic:prop",
     "format:glb",
-    "imported-from:/home/siah/Downloads/bus.glb"
+    "imported-from:/home/siah/Downloads/joyful_run.glb"
   ],
   "atlases": [],
   "paints": []

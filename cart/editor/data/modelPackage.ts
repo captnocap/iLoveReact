@@ -80,11 +80,19 @@ export function categoryDir(kind: ModelPackageKind): string {
   }
 }
 
-// Model ids carry a source prefix with a colon (e.g. "studio:truck"), which is
-// not a safe directory leaf. Slugify for the folder name; the raw id is always
-// preserved inside the manifest, so this is display-only and never the key.
+// Names and ids carry characters that aren't safe directory leaves (colons,
+// spaces). Slugify for the folder name; the raw id is always preserved inside
+// the manifest, so the slug is display-only and never the key.
 export function modelSlug(id: string): string {
   return id.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+// A package's PREFERRED home: named after the MODEL'S NAME (props/weiner/), not
+// its internal store id (props/studio_mdl-mqy4h5yb-enm/) — req_2735: the folder
+// a person browses should read as the model they named. Collisions and renames
+// are the store's problem (suffixing / rename-follow); this is just the path.
+export function packageDirForName(kind: ModelPackageKind, name: string): string {
+  return `${MODELS_HOME}/${categoryDir(kind)}/${modelSlug(name)}`;
 }
 
 // The canonical content-tree folder id for a model. Derived from the model's
@@ -95,22 +103,15 @@ export function modelFolderIdFor(id: string): `model-${string}` {
   return `model-${modelSlug(id)}`;
 }
 
+// LEGACY id-slug home (pre-req_2735 packages were written here). Kept ONLY as
+// the store's resolution fallback for a package that predates name-first dirs;
+// never the target of a new write — claim through the store instead.
 export function packageDir(kind: ModelPackageKind, id: string): string {
   return `${MODELS_HOME}/${categoryDir(kind)}/${modelSlug(id)}`;
 }
 
 export function manifestPath(kind: ModelPackageKind, id: string): string {
   return `${packageDir(kind, id)}/manifest.json`;
-}
-
-export function subDir(kind: ModelPackageKind, id: string, sub: (typeof MODEL_PACKAGE_SUBDIRS)[number]): string {
-  return `${packageDir(kind, id)}/${sub}`;
-}
-
-// The display path shown in the content browser, now rooted at the package home
-// instead of the old "/Game/Models/Saved Studio/..." snapshot path.
-export function displayPath(kind: ModelPackageKind, id: string): string {
-  return `/${packageDir(kind, id)}`;
 }
 
 export function packageToManifest(pkg: ModelPackage): ModelManifest {
@@ -139,20 +140,23 @@ export function packageToManifest(pkg: ModelPackage): ModelManifest {
   };
 }
 
-export function manifestToPackage(manifest: ModelManifest): ModelPackage {
+// `dir` is the package's REAL on-disk home (the store resolved or claimed it) —
+// path/source derive from it, since a name-slug dir can't be re-derived from the
+// manifest alone once suffixing or an off-category home is in play (req_2735).
+export function manifestToPackage(manifest: ModelManifest, dir: string): ModelPackage {
   return {
     id: manifest.id,
     // Derived from the id (not the stored folderId) so every model has its own
     // home node even if an older manifest wrote a shared per-kind folderId.
     folderId: modelFolderIdFor(manifest.id),
     name: manifest.name,
-    path: displayPath(manifest.kind, manifest.id),
+    path: `/${dir}`,
     kind: manifest.kind,
     stage: manifest.stage,
     favorite: manifest.favorite,
     hidden: manifest.hidden,
     color: manifest.color,
-    source: manifestPath(manifest.kind, manifest.id),
+    source: `${dir}/manifest.json`,
     viewerPath: manifest.mesh.viewerPath,
     viewerMeshRef: manifest.mesh.viewerMeshRef,
     rig: manifest.rig,
