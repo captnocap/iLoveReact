@@ -5148,9 +5148,17 @@ pub fn run(config_in: AppConfig) !void {
                             state_mod.markDirty();
                             continue;
                         }
+                        // A bare PRINTABLE keydown while a text field is focused belongs to
+                        // that field — the character arrives via SDL_EVENT_TEXT_INPUT, so
+                        // handleKey correctly returns false here, but the keydown must still
+                        // count as consumed or it leaks to the JS key bus and fires app
+                        // hotkeys mid-typing (searching "wasd" panned the world map,
+                        // req_2745). Chords (ctrl) keep their existing routing.
+                        const printable = sym >= 32 and sym != 127 and sym < 0x40000000;
                         const input_consumed = if (input.getFocusedId() != null)
                             (handleInputVerticalKey(config.root, sym, mod) or
-                                if (ctrl) input.handleCtrlKey(sym, mod) else input.handleKey(sym, mod))
+                                (if (ctrl) input.handleCtrlKey(sym, mod) else input.handleKey(sym, mod)) or
+                                (!ctrl and printable))
                         else
                             false;
                         if (input_consumed) stampInputLatency("key");
