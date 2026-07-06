@@ -11,18 +11,23 @@
 import { catalogRowFor } from './buildCatalog';
 import type { BuildKind } from './buildCatalog';
 
+// Role sets mirror what the piece's decomposition can actually WEAR (pieceShapes
+// tags every box with a FaceSlot; pieceSkins maps role → box). Plates carry the
+// hmsc three-face model (req_2745: top/bottom/edges — a floor placed as a ceiling
+// paints its underside); the wall family adds 'sides' for the core/end caps. A
+// single-body piece (pillar/corner/trim) exposes the one surface it really has.
 const SLOTS_BY_KIND: Record<BuildKind, string[]> = {
-  wall: ['front', 'back'],
-  floor: ['top'],
-  roof: ['top'],
+  wall: ['front', 'back', 'sides'],
+  floor: ['top', 'bottom', 'edges'],
+  roof: ['top', 'bottom', 'edges'],
   ramp: ['surface'],
   stairs: ['surface'],
   elevator: ['surface'],
   pillar: ['surface'],
-  corner: ['front', 'back'],
-  arch: ['front', 'back'],
-  fence: ['front', 'back'],
-  railing: ['front', 'back'],
+  corner: ['surface'],
+  arch: ['front', 'back', 'sides'],
+  fence: ['front', 'back', 'sides'],
+  railing: ['front', 'back', 'sides'],
   trim: ['surface'],
   sign: ['face'],
 };

@@ -29,19 +29,23 @@ function fnv1a(s: string): number {
   return h >>> 0;
 }
 
-/** The material governing a decomposition box's face: the piece's slot for that
- *  face role, with sensible fallbacks (a single-surface piece's one slot covers
- *  every face; a wall's front/back cover their slabs). */
+/** The material governing a decomposition box: the piece's slot for that box's
+ *  face role. Chains are ROLE-EXPLICIT (req_2745): a plate's bottom sliver is
+ *  tagged 'back' and its core 'sides', so those boxes read the plate role names
+ *  (bottom/edges) too. A single-surface piece's one slot (surface/face) covers
+ *  every box. The old cross-face tails (back ← front ← top …) are gone — they
+ *  made a targeted "just the top" assignment bleed onto every face, which is
+ *  exactly what face targeting rules out. */
 function slotRefForBox(piece: PlacedPiece, boxSlot: FaceSlot | undefined): MaterialRef | undefined {
   const s = piece.slots;
   if (!s) return undefined;
   const any = s.surface ?? s.face;
   switch (boxSlot) {
-    case 'back': return s.back ?? any ?? s.front ?? s.top;
-    case 'sides': return s.sides ?? any ?? s.front ?? s.top;
-    case 'top': return s.top ?? any ?? s.front;
+    case 'back': return s.back ?? s.bottom ?? any;
+    case 'sides': return s.sides ?? s.edges ?? any;
+    case 'top': return s.top ?? any;
     case 'front':
-    default: return s.front ?? any ?? s.top;
+    default: return s.front ?? any;
   }
 }
 
