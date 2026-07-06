@@ -180,8 +180,12 @@ function snapToEdge(wx: number, wz: number): { x: number; z: number; yaw: number
  *  is the painted-terrain surface under the cursor (req_2666 — the
  *  __compiled_world_ground_hit door): the piece bases at terrainY + floor×3m, so
  *  a Ground placement sits ON a sculpted hill and Floor 1 is the hill + 3m.
- *  Omitted (no door / off-map) it is 0 — flat behavior, y = the storey exactly. */
-export function resolvePlacement(pieceId: string, wx: number, wz: number, floor: number, terrainY = 0): PlacedPiece | null {
+ *  Omitted (no door / off-map) it is 0 — flat behavior, y = the storey exactly.
+ *  `lift` (req_2751) is the prop-only scroll-wheel height: metres ABOVE the
+ *  terrain/storey base the prop hangs (a wall picture is ground-based geometry
+ *  + a 1.5m lift, never a floating mesh). Grid pieces ignore it — their
+ *  verticality is storeys. */
+export function resolvePlacement(pieceId: string, wx: number, wz: number, floor: number, terrainY = 0, lift = 0): PlacedPiece | null {
   const catalogIndex = buildCatalogIndex(pieceId);
   const kind = pieceKindOf(pieceId);
   const levelY = floor > 0 ? floor * METERS_PER_LEVEL : 0;
@@ -190,7 +194,7 @@ export function resolvePlacement(pieceId: string, wx: number, wz: number, floor:
   // the terrain/storey — a bench is not a 3m plate. No host validate either (the
   // build validator indexes only the catalog grid pieces).
   if (kind === 'prop') {
-    return { id: '', pieceId, x: wx, y, z: wz, yawDegrees: 0, floor };
+    return { id: '', pieceId, x: wx, y: y + lift, z: wz, yawDegrees: 0, floor };
   }
   const edge = kind ? EDGE_SNAP_KINDS.has(kind) : false;
   const { x, z, yaw } = edge ? snapToEdge(wx, wz) : { x: snapToModule(wx), z: snapToModule(wz), yaw: 0 };

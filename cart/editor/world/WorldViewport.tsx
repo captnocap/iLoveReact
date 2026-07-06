@@ -45,6 +45,10 @@ const WASD_PAN_PER_TICK = 0.02; // × eye→target distance, metres/tick
 
 // ctrl+wheel camera tilt (req_2711), degrees per wheel notch.
 const WHEEL_PITCH_STEP_DEG = 3;
+// Armed-prop scroll lift (req_2751), metres per wheel notch: while a prop is
+// armed the plain wheel raises/lowers the placement instead of zooming, so a
+// picture goes UP THE WALL at place time — never authored floating in the studio.
+const PROP_LIFT_STEP_M = 0.25;
 const HOVER_READOUT_POLL_MS = 50;
 
 const g: any = globalThis;
@@ -121,6 +125,12 @@ export default function WorldViewport(props: {
 
   const armedRef = useRef(props.armed);
   armedRef.current = props.armed;
+  // The armed prop's scroll-wheel lift (req_2751): metres above the terrain/
+  // storey base. Sticky across placements of the SAME prop (a gallery wall of
+  // pictures hangs at one height); re-arming a different piece resets to ground.
+  const propLiftRef = useRef(0);
+  const armedPieceId = props.armed?.pieceId ?? null;
+  useEffect(() => { propLiftRef.current = 0; }, [armedPieceId]);
   // Live refs so the once-created pointer callbacks read the current tool / piece list / selection
   // sink without being torn down and rebuilt every render.
   const toolRef = useRef(props.tool);
@@ -356,7 +366,7 @@ export default function WorldViewport(props: {
     // The floor INDEX threads through whole (req_2676): resolvePlacement records
     // it on the piece so the storey cutaway never re-derives storey from a y that
     // now carries the terrain base too (a mesa-top Ground piece is storey 0).
-    const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, props.floor, gp.terrainY);
+    const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, props.floor, gp.terrainY, propLiftRef.current);
     return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId, yaw: placed.yawDegrees, floor: placed.floor ?? props.floor } : null;
   }, [groundUnder, props.floor]);
 
@@ -580,6 +590,18 @@ export default function WorldViewport(props: {
     const r = rectRef.current;
     const mx = Number(g.getMouseX?.() ?? (r.x + r.width / 2));
     const my = Number(g.getMouseY?.() ?? (r.y + r.height / 2));
+    // Armed prop → the wheel is the HEIGHT dial (req_2751): scroll up lifts the
+    // placement off its terrain/storey base (posters climb the wall), scroll
+    // down brings it back to ground (clamped — the base is the floor of the
+    // gesture). Props only: build pieces are grid pieces, their verticality is
+    // storeys. Ctrl+wheel keeps the camera tilt either way; zoom while placing
+    // a prop means disarming first, which is the deliberate trade.
+    const armed = armedRef.current;
+    if (!currentModifiers().ctrl && toolRef.current === 'place' && armed && pieceKindOf(armed.pieceId) === 'prop') {
+      propLiftRef.current = Math.max(0, propLiftRef.current + (dy > 0 ? PROP_LIFT_STEP_M : -PROP_LIFT_STEP_M));
+      setSnap(resolveSnap(mx - r.x, my - r.y));
+      return;
+    }
     if (currentModifiers().ctrl) {
       // ctrl+wheel tilts (req_2711): wheel up climbs toward a plan view,
       // wheel down levels toward the horizon. Zoom stays untouched.

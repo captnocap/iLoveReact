@@ -9,20 +9,40 @@ import { modelPackageById } from '../data/content';
 
 const CACHE = new Map<string, Float32Array>();
 
+/** GROUND-REBASE (req_2751): a placeable's mesh is based at y=0 no matter where
+ *  it sat in the studio editor — a wall picture authored 1.5m up is the same
+ *  placeable as one authored on the floor. Placement y IS the base; vertical
+ *  position in the WORLD comes from terrain + storey + the place-time lift,
+ *  never from studio-space authoring. Copies before shifting (the source array
+ *  belongs to the package resolver / live edit state). */
+function groundRebase(vertices: Float32Array): Float32Array {
+  let minY = Infinity;
+  for (let i = 1; i + 1 < vertices.length; i += 8) if (vertices[i]! < minY) minY = vertices[i]!;
+  if (!Number.isFinite(minY) || Math.abs(minY) < 1e-4) return vertices;
+  const out = new Float32Array(vertices);
+  for (let i = 1; i + 1 < out.length; i += 8) out[i]! -= minY;
+  return out;
+}
+
 /** Stash a model's resolved vertices under its bare id (call at export). */
 export function cacheAuthoredMesh(modelId: string, vertices: Float32Array): void {
-  if (vertices.length >= 8) CACHE.set(modelId, vertices);
+  if (vertices.length >= 8) CACHE.set(modelId, groundRebase(vertices));
 }
 
 /** The vertices for an authored piece's model: the export-time capture, else the
  *  ONE package resolver (blob / parts / primitive) via the piece's package id.
- *  Null only when the geometry is host-only (a file-backed model). */
+ *  Always GROUND-REBASED (base at y=0 — see groundRebase). Null only when the
+ *  geometry is host-only (a file-backed model). */
 export function authoredMeshData(modelId: string, pkgId?: string): Float32Array | null {
   const cached = CACHE.get(modelId);
   if (cached && cached.length >= 8) return cached;
   const pkg = pkgId ? modelPackageById(pkgId) : null;
   const verts = pkg ? modelPackageMeshData(pkg) : null;
-  if (verts && verts.length >= 8) { CACHE.set(modelId, verts); return verts; }
+  if (verts && verts.length >= 8) {
+    const based = groundRebase(verts);
+    CACHE.set(modelId, based);
+    return based;
+  }
   return null;
 }
 
