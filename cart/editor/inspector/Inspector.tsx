@@ -16,6 +16,7 @@ import ReadOnlySection from './ReadOnlySection';
 import RigSection from './RigSection';
 import { skeletonToPropRig, type PropRig } from '../../../runtime/skeleton';
 import PieceBody from './PieceBody';
+import GlobalsSection from './GlobalsSection';
 import PresetSection from './PresetSection';
 import MissionSection from './MissionSection';
 import ModelDetailBody from '../library/ModelDetailBody';
@@ -326,6 +327,9 @@ export default function Inspector(props: {
   onClearPieceOverride: (id: string, path: string) => void;
   onAssignSlot: (id: string, role: string) => void;
   onClearSlot: (id: string, role: string) => void;
+  // World-globals tuning (GLOBALS req_2770) — the playtest tab's focus panel.
+  onSetGlobal: (field: string, value: number) => void;
+  onResetGlobal: (field: string) => void;
   colorSpine: ColorSpineHandlers;
   outlinerHandlers: OutlinerHandlers;
   // The outliner multi-select set (req_2659) — row highlights + the UV '+N' header.
@@ -371,6 +375,29 @@ export default function Inspector(props: {
       ['soundOcc', '—'],
     ];
   const showMission = props.state.rightPane === 'mission' || activeCommand.menu === 'Story';
+  // Playtest surface (GLOBALS req_2770): the focus panel IS the globals editor —
+  // tune a field, the playtest viewport pushes it live, the micro-save locks it in.
+  if (activeDocument?.kind === 'playtest') {
+    return (
+      <C.HW_RightPanel>
+        <C.HW_Inspector>
+          <C.HW_PanelHead>
+            <C.HW_Kicker>GLOBALS · PHYSICS</C.HW_Kicker>
+            <C.HW_Spacer />
+            <Icon name="Gauge" size={12} color={accentFor('textFaint')} />
+          </C.HW_PanelHead>
+          <C.HW_InspectorBody>
+            <GlobalsSection
+              physics={props.state.worldGlobals.physics}
+              onSet={props.onSetGlobal}
+              onReset={props.onResetGlobal}
+            />
+          </C.HW_InspectorBody>
+        </C.HW_Inspector>
+        <FocusRail activePane={props.state.rightPane} onPane={props.onPane} />
+      </C.HW_RightPanel>
+    );
+  }
   // World surface (req_2563): the focus panel is PIECE-aware — the real placed
   // piece (Select/Focus) or the armed catalog piece (Build), NOT the phantom
   // `objects` mock. This is what retires the "AC & Vents" ghost header.

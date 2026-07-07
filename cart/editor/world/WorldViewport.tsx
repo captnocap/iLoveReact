@@ -25,11 +25,10 @@
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable } from '@reactjit/primitives';
 import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
-import { pieceInstanceRows, resolvePlacement, resolveRunPlacements, pieceKindOf, pieceLook, pickAuthoredPlacement, PIECE_MODULE_METERS, type ArmedPiece, type PlacedPiece } from './pieces';
-import { pieceSkinBoxes } from './pieceSkins';
-import { encodeResidentMeshes, encodeMeshRefs, encodeMeshGhost, type ResidentMesh, type MeshRef } from './meshProps';
+import { resolvePlacement, resolveRunPlacements, pieceKindOf, pieceLook, pickAuthoredPlacement, PIECE_MODULE_METERS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
+import { encodeMeshGhost } from './meshProps';
 import { isAuthoredPiece, authoredModelIdOf, type AuthoredBuildPiece } from './authoredRegistry';
-import { authoredMeshData } from './authoredMesh';
+import { pushLiveWorld, pushResidentMeshes } from './livePush';
 import { pickBuildPieceHostHit } from '../../../runtime/game/build';
 import { ensureMapSeeded } from '../stage/mapPaint';
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
@@ -99,7 +98,7 @@ export default function WorldViewport(props: {
   onPieceContext: (id: string, x: number, y: number) => void;
   /** everything ONE gesture placed: a click is a one-piece batch, a drag-run
    *  (req_2747) is the whole wall run / floor rect — one journal entry either way. */
-  onPlace: (pieces: PlacedPiece[]) => void;
+  onPlace: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
   floor: number;
   paintActive: boolean;
@@ -253,54 +252,16 @@ export default function WorldViewport(props: {
   }, [props.paintActive]);
 
   // Live overlay: placed pieces render as real meshes instantly, no rebake.
+  // (Shared seam with the playtest tab — world/livePush.ts.)
   useEffect(() => {
-    const nodeId = Number(loaderRef.current?.id ?? 0);
-    if (!nodeId || typeof g.__compiled_world_set_live_pieces !== 'function') {
-      if (props.pieces.length) console.warn(`[place] live push SKIPPED — node=${nodeId} door=${typeof g.__compiled_world_set_live_pieces}`);
-      return;
-    }
-    g.__compiled_world_set_live_pieces(nodeId, pieceInstanceRows(props.pieces));
-    // Real textures (req_2575 Stage B): faces wearing an assigned material push
-    // their WGSL shader once, then a skin box per face so the loader samples it
-    // over the flat live box. Unskinned faces stay flat. Doors gated behind their
-    // presence so an older host without them still renders the flat geometry.
-    const skin = pieceSkinBoxes(props.pieces);
-    if (typeof g.__compiled_world_set_live_material === 'function') {
-      for (const m of skin.materials) g.__compiled_world_set_live_material(nodeId, m.hash, 0, m.wgsl, new Float32Array(m.data), m.opacity);
-    }
-    if (typeof g.__compiled_world_set_live_skin_boxes === 'function') {
-      g.__compiled_world_set_live_skin_boxes(nodeId, skin.boxes);
-    }
-    // Authored (mesh) pieces render via the live MESH-PROP path (req_2577): one
-    // ref per placement pointing at its resident mesh by key. Real geometry.
-    if (typeof g.__compiled_world_set_live_mesh_props === 'function') {
-      const refs: MeshRef[] = [];
-      for (const piece of props.pieces) {
-        if (!isAuthoredPiece(piece.pieceId)) continue;
-        refs.push({ key: authoredModelIdOf(piece.pieceId), x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees });
-      }
-      g.__compiled_world_set_live_mesh_props(nodeId, encodeMeshRefs(refs));
-    }
-    console.warn(`[place] live push: ${props.pieces.length} pieces (decomposed) + ${skin.materials.length} materials -> loader node ${nodeId}`);
+    pushLiveWorld(Number(loaderRef.current?.id ?? 0), props.pieces);
   }, [props.pieces]);
 
   // Keep the authored meshes RESIDENT so their placements can draw (req_2577).
   // Rebuilds + pushes the MESH_PROPS catalog whenever the authored list changes;
   // retries until the loader node exists (it lands a few frames after mount).
   useEffect(() => {
-    const push = (): boolean => {
-      const nodeId = Number(loaderRef.current?.id ?? 0);
-      if (!nodeId || typeof g.__compiled_world_set_resident_meshes !== 'function') return false;
-      const meshes: ResidentMesh[] = [];
-      for (const ap of props.authoredPieces) {
-        const verts = authoredMeshData(ap.modelId, ap.pkgId);
-        if (verts && verts.length >= 8) meshes.push({ key: ap.modelId, vertices: verts });
-        else console.warn(`[authored] no mesh data for '${ap.modelId}' (${ap.label}) — not resident (re-open + re-export the model)`);
-      }
-      g.__compiled_world_set_resident_meshes(nodeId, encodeResidentMeshes(meshes));
-      console.warn(`[authored] resident catalog: ${meshes.length} authored mesh(es) -> loader node ${nodeId}`);
-      return true;
-    };
+    const push = () => pushResidentMeshes(Number(loaderRef.current?.id ?? 0), props.authoredPieces);
     if (push()) return;
     let tries = 0;
     const t = setInterval(() => { tries += 1; if (push() || tries > 120) clearInterval(t); }, 32);
@@ -545,7 +506,8 @@ export default function WorldViewport(props: {
       // is still inert.
       if (runPieces && runPieces.length && toolRef.current === 'place') {
         console.warn(`[place] drag-run -> place ${runPieces.length}× ${runPieces[0]!.pieceId}`);
-        props.onPlace(runPieces);
+        const p = local(e);
+        props.onPlace(runPieces, { mode: 'drag-run', inputAtMs: Date.now(), pointerX: p.x, pointerY: p.y });
         return;
       }
       const p = local(e);
@@ -571,7 +533,10 @@ export default function WorldViewport(props: {
     const target = resolveSnap(d.x0, d.y0);
     if (!target) { console.warn(`[place] VALIDATOR rejected cell at world (${gp.x.toFixed(1)},${gp.z.toFixed(1)})`); return; }
     console.warn(`[place] click -> place ${target.pieceId} at (${target.x},${target.y},${target.z}) yaw ${target.yaw}`);
-    props.onPlace([{ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw, floor: target.floor }]);
+    props.onPlace(
+      [{ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw, floor: target.floor }],
+      { mode: 'click', inputAtMs: Date.now(), pointerX: d.x0, pointerY: d.y0 },
+    );
   }, [resolveSnap, groundUnder, props.onPlace, local, stage, pickPieceAt]);
 
   // Right-click quick context (req_2733): pick the piece under the cursor in ANY tool
@@ -679,6 +644,7 @@ export default function WorldViewport(props: {
 
       {/* pointer capture (near-transparent so it's hittable) */}
       <Pressable
+        testID="editor-world-input"
         onMouseDown={onDown}
         onMouseMove={onMove}
         onMouseUp={onUp}

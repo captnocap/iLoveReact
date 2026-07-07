@@ -16,6 +16,7 @@
 import { getHotState, setHotState } from '../../../runtime/hooks/useHotState';
 import { initialState, defaultModelTool } from './initialState';
 import { loadWorldSave } from './worldStore';
+import { loadGlobalsSave } from './globalsStore';
 import type { EditorState } from './types';
 
 const VIEW_HOT_KEY = 'editor:view:v1';
@@ -56,6 +57,10 @@ export function loadPersistedState(): EditorState {
     base.seq = Math.max(base.seq, world.seq);
     if (world.zones.length) base.mapPaint = { ...base.mapPaint, zones: world.zones };
   }
+  // Tuned globals rehydrate from their own per-concern save (GLOBALS req_2770) —
+  // a locked-in jump height survives the cold restart like placed pieces do.
+  const globals = loadGlobalsSave();
+  if (globals) base.worldGlobals = globals;
   const saved = getHotState<Partial<EditorState> | null>(VIEW_HOT_KEY, null);
   if (!saved) {
     if (world?.pieces.length) base.status = `restored world — ${world.pieces.length} placed piece${world.pieces.length === 1 ? '' : 's'} from the world save`;

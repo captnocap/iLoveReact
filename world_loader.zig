@@ -3533,6 +3533,16 @@ pub const Runtime = struct {
     /// untouched so clearing the override reverts to the shipped feel.
     physics_override: ?constructor.PhysicsConfig = null,
     physics_override_gen: u64 = 0,
+    /// Live-piece COLLIDERS (req_2792: "I can walk through every wall"): the
+    /// live overlay is draw-only, so applyLiveColliders rebuilds the physics
+    /// step buffer as BASE (the build-time rects/oriented, with their in-place
+    /// door/car state) + LIVE (rects derived from the live rows, floors-first)
+    /// whenever the overlay generation moves. These are the base section counts
+    /// captured at build(); the gen tracks the last overlay folded in.
+    base_rect_count: usize = 0,
+    base_oriented_count: usize = 0,
+    live_collider_gen: u64 = 0,
+    live_collider_warned: bool = false,
     // Live editor-placed MESH props (LIVEMESH req_1812): a just-placed imported/cooked
     // mesh prop renders instantly by REFERENCING an already-resident mesh (the user's
     // "once one X exists, the next is a reference to it" — instanced rendering). The
@@ -4401,6 +4411,11 @@ pub const Runtime = struct {
 
         self.physics_colliders = try buildPhysicsColliders(self.allocator, self.scene, self.insts, self.inst_count, self.stride, self.bodies.len, self.mesh_prop_islands);
         self.has_physics_colliders = true;
+        // req_2792: the build-time sections are the BASE the live-piece collider
+        // fold appends after; a fresh build starts with no overlay folded in.
+        self.base_rect_count = self.physics_colliders.rect_count;
+        self.base_oriented_count = self.physics_colliders.oriented_count;
+        self.live_collider_gen = 0;
         log.print("[loader] built {d} physics rects + {d} oriented physics rects + {d} heightfields\n", .{ self.physics_colliders.rect_count, self.physics_colliders.oriented_count, self.physics_colliders.heightfield_count });
         if (self.physics_colliders.clipped_rows > 0) {
             log.print("[loader] physics collider cap clipped {d} rendered instance rows\n", .{self.physics_colliders.clipped_rows});
@@ -7290,6 +7305,114 @@ fn applyPendingLive(runtime: *Runtime) void {
     }
 }
 
+// Fold the live overlay into the PHYSICS colliders (req_2792: "I can walk
+// through every wall" — the overlay was draw-only, so the playtest tab had no
+// solids). When the overlay generation moves, the step buffer is rebuilt as
+// BASE + LIVE:
+//   • BASE = the build-time rect/oriented sections, copied from the CURRENT
+//     buffer so in-place door/elevator state survives (their rect indices sit
+//     inside the base and never move — live rows append strictly after).
+//   • LIVE = the same two-pass derivation the pre-lump instance path uses,
+//     over the 12-stride live rows: walkable floors first so ground always
+//     survives the rect cap, walls solid by height, yawed rows oriented.
+// Heightfields are deliberately NOT touched — a full buildPhysicsColliders
+// rerun would clearHeightfields() and silently drop the PAINTED terrain
+// (applyPaintLayer only re-registers a chunk when its height goes dirty).
+fn applyLiveColliders(runtime: *Runtime) void {
+    const p = pendingLiveFor(runtime.node_id) orelse return;
+    if (runtime.live_collider_gen == p.gen) return;
+    if (!runtime.has_physics_colliders) return;
+    if (runtime.windowed) {
+        // The huge-map window rebuild owns this buffer per frame; folding live
+        // rows here would fight it. Say so once instead of silently no-oping.
+        if (!runtime.live_collider_warned) {
+            runtime.live_collider_warned = true;
+            log.print("[live] windowed map — live-piece colliders skipped (window rebuild owns the physics set)\n", .{});
+        }
+        runtime.live_collider_gen = p.gen;
+        return;
+    }
+    const alloc = runtime.allocator;
+    const rows = p.rows[0 .. p.count * INSTANCE_STRIDE];
+
+    var live_rects: std.ArrayList(f32) = .{};
+    defer live_rects.deinit(alloc);
+    var live_oriented: std.ArrayList(f32) = .{};
+    defer live_oriented.deinit(alloc);
+    var live_rect_count: usize = 0;
+    var live_oriented_count: usize = 0;
+    var clipped: usize = 0;
+
+    var pass: usize = 0;
+    while (pass < 2) : (pass += 1) {
+        const want_solid = pass == 1;
+        var row: usize = 0;
+        while (row < p.count) : (row += 1) {
+            const b = row * INSTANCE_STRIDE;
+            const sx = @abs(rows[b + 6]);
+            const sy = @abs(rows[b + 7]);
+            const sz = @abs(rows[b + 8]);
+            if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) continue;
+            const solid = instance_collider_policy.blocksPlayerByHeight(sy, PHYSICS_SOLID_HEIGHT_METERS);
+            if (solid != want_solid) continue;
+            const yaw = instanceYawRadians(rows, row, INSTANCE_STRIDE);
+            if (@abs(yaw) > 0.0001) {
+                if (runtime.base_oriented_count + live_oriented_count >= game_physics.MAX_ORIENTED) {
+                    clipped += 1;
+                    continue;
+                }
+                live_oriented.appendSlice(alloc, &orientedFloats(rows, row, INSTANCE_STRIDE, solid)) catch {
+                    clipped += 1;
+                    continue;
+                };
+                live_oriented_count += 1;
+            } else {
+                if (runtime.base_rect_count + live_rect_count >= game_physics.MAX_RECTS) {
+                    clipped += 1;
+                    continue;
+                }
+                live_rects.appendSlice(alloc, &rectFloats(rows, row, INSTANCE_STRIDE, solid)) catch {
+                    clipped += 1;
+                    continue;
+                };
+                live_rect_count += 1;
+            }
+        }
+    }
+
+    // Reassemble: header + entity slots zeroed (the step rewrites both every
+    // call), base rects + live rects, base oriented + live oriented.
+    const old = runtime.physics_colliders;
+    const rect_base = old.rectBase();
+    const base_rect_floats = runtime.base_rect_count * game_physics.RECT_FLOATS;
+    const base_oriented_floats = runtime.base_oriented_count * game_physics.ORIENTED_FLOATS;
+    const old_oriented_start = rect_base + old.rect_count * game_physics.RECT_FLOATS;
+    const values = alloc.alloc(f32, rect_base + base_rect_floats + live_rects.items.len + base_oriented_floats + live_oriented.items.len) catch {
+        log.print("[live] collider rebuild allocation failed — live pieces stay walk-through\n", .{});
+        runtime.live_collider_gen = p.gen;
+        return;
+    };
+    @memset(values[0..rect_base], 0);
+    var at: usize = rect_base;
+    @memcpy(values[at .. at + base_rect_floats], old.values[rect_base .. rect_base + base_rect_floats]);
+    at += base_rect_floats;
+    @memcpy(values[at .. at + live_rects.items.len], live_rects.items);
+    at += live_rects.items.len;
+    @memcpy(values[at .. at + base_oriented_floats], old.values[old_oriented_start .. old_oriented_start + base_oriented_floats]);
+    at += base_oriented_floats;
+    @memcpy(values[at .. at + live_oriented.items.len], live_oriented.items);
+
+    alloc.free(old.values);
+    runtime.physics_colliders.values = values;
+    runtime.physics_colliders.rect_count = runtime.base_rect_count + live_rect_count;
+    runtime.physics_colliders.oriented_count = runtime.base_oriented_count + live_oriented_count;
+    runtime.live_collider_gen = p.gen;
+    if (clipped > 0) {
+        log.print("[live] collider cap CLIPPED {d} live rows — distant pieces are walk-through\n", .{clipped});
+    }
+    log.print("[live] colliders folded: {d} base + {d} live rects, {d} base + {d} live oriented\n", .{ runtime.base_rect_count, live_rect_count, runtime.base_oriented_count, live_oriented_count });
+}
+
 // ── MAPPAINT req_2473: the live map-paint layer ───────────────────────────────
 // The map painter's authoring buffers (framework/game/map) are host globals; the
 // loader is their VIEW: each painted chunk claims a reserved paint node whose
@@ -8119,6 +8242,7 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
         }
     }
     applyPendingLive(runtime); // LIVEHOST req_1798: just-placed pieces, drawn without a rebake
+    applyLiveColliders(runtime); // req_2792: those same pieces COLLIDE — walls are solid in playtest
     applyPendingPhysics(runtime); // GLOBALS req_2770: live physics tuning, read by the next step
     // MAPPAINT req_2473: the pane rect feeds the screen→ray mapping; the paint
     // layer mirrors painted chunks + colliders and dresses the brush beam.

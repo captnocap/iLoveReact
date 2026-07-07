@@ -5,6 +5,7 @@ import type { EditorState, ModelToolSnapshot, WorldObject } from './types';
 import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
 import { DEFAULT_BRUSH, defaultPalette } from '../../../runtime/paint/model';
 import { defaultMapPaint } from '../stage/mapPaint';
+import { defaultWorldGlobals } from './globals';
 import { nsGet, nsSet } from '../../../runtime/hooks/localstore';
 import { authoredIdFor, type AuthoredBuildPiece } from '../world/authoredRegistry';
 
@@ -138,5 +139,6 @@ export function initialState(): EditorState {
     modelParts: {},
     modelActivePartId: null,
     mapPaint: defaultMapPaint(),
+    worldGlobals: defaultWorldGlobals(),
   };
 }

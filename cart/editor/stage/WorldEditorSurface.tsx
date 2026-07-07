@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { C } from '../workspace.cls';
 import WorldViewport from '../world/WorldViewport';
 import { worldToolFor } from '../world/worldTool';
-import { visibleStoreyPieces, type ArmedPiece, type PlacedPiece } from '../world/pieces';
+import { visibleStoreyPieces, type ArmedPiece, type PlacedPiece, type PlacementGesture } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
 
 // BLANKBOOT req_2490: the editor's world file is ITS OWN, fresh path — the old
@@ -10,8 +10,10 @@ import type { AuthoredBuildPiece } from '../world/authoredRegistry';
 // irrelevant) and mounting it clashed with the painted canvas. No file here yet
 // ⇒ the loader boots a BLANK world (paint-first); the new compile lane writes
 // this path when it lands.
-const EDITOR_GAME_FILE = 'zig-out/game/editor/world.gamefile';
-const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
+// Exported: the playtest tab (GLOBALS req_2770) mounts the SAME world file so
+// what you walk is what you authored.
+export const EDITOR_GAME_FILE = 'zig-out/game/editor/world.gamefile';
+export const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
 
 // The world document's surface: the editor's OWN thin viewport over host doors
 // (world/WorldViewport — req_2486 cut the LoaderIsoView cross-import; hmsc-int
@@ -35,7 +37,7 @@ export default function WorldEditorSurface(props: {
   armedPieceId: string | null;
   authoredPieces: readonly AuthoredBuildPiece[];
   /** one gesture's placements: a click is a one-piece batch, a drag-run (req_2747) is the lot. */
-  onPlace: (pieces: PlacedPiece[]) => void;
+  onPlace: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
   onSelect: (id: string | null) => void;
   /** right-click hit a placed piece → open the quick context menu at window (x,y) (req_2733). */
   onPieceContext: (id: string, x: number, y: number) => void;
@@ -43,7 +45,7 @@ export default function WorldEditorSurface(props: {
   // The viewport is modal (req_2550): the armed command decides the click. The palette piece is
   // armed ONLY in Place mode, so Select/Move/Focus never drop a piece. The armed piece id is the
   // Build bar's pick (req_2563 Phase 2), defaulting to a concrete floor.
-  const tool = worldToolFor(props.activeCommandId);
+  const tool = props.paintActive ? 'select' : worldToolFor(props.activeCommandId);
   const armed: ArmedPiece = tool === 'place' && props.armedPieceId ? { pieceId: props.armedPieceId } : null;
 
   // Storey cutaway (req_2567): the viewport only ever sees the pieces the active

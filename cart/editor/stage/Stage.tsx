@@ -125,7 +125,7 @@ export default function Stage(props: {
         {/* Sims build bar (req_2563) — overlays the bottom of the viewport in
             Build (Place) mode. Last child so it paints + hit-tests over the
             world surface's pointer-capture Pressable. */}
-        {activeDocument.kind === 'world' && worldToolFor(props.state.activeCommandId) === 'place' ? (
+        {activeDocument.kind === 'world' && !props.state.mapPaint.active && worldToolFor(props.state.activeCommandId) === 'place' ? (
           <BuildBar armedPieceId={props.state.armedPieceId} onArm={props.onArmPiece} />
         ) : null}
         {activeDocument.kind === 'world' && (props.state.mapPaint.active || props.state.mapPaint.texturePickerOpen) ? (
