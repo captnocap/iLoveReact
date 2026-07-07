@@ -12,8 +12,27 @@ import { pieceSkinBoxes } from './pieceSkins';
 import { encodeResidentMeshes, encodeMeshRefs, type ResidentMesh, type MeshRef } from './meshProps';
 import { isAuthoredPiece, authoredModelIdOf, type AuthoredBuildPiece } from './authoredRegistry';
 import { authoredMeshData } from './authoredMesh';
+import { exists, readFileBase64 } from '../../../runtime/hooks/fs';
+import { base64ToBytes } from '../../../runtime/workspace';
+import { modelPackageById } from '../data/content';
+import { resolvePackageDir } from '../data/modelPackageStore';
 
 const g: any = globalThis;
+
+/** The model's painted atlas (atlases/base.png — what you saw in the mesh editor;
+ *  export implies save, so it's current) as encoded PNG bytes for the resident lump.
+ *  Undefined = never painted / not materialized → the mesh keeps its flat colour. */
+function packageAtlasPng(pkgId: string): Uint8Array | undefined {
+  const pkg = modelPackageById(pkgId);
+  if (!pkg) return undefined;
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  if (!dir) return undefined;
+  const path = `${dir}/atlases/base.png`;
+  if (!exists(path)) return undefined;
+  const b64 = readFileBase64(path);
+  if (!b64) return undefined;
+  try { return base64ToBytes(b64); } catch { return undefined; }
+}
 
 /** Push the placed-piece world onto a mounted loader node: box instances, face
  *  skins, and authored mesh-prop refs. No-ops (loudly, when pieces exist) until
@@ -53,12 +72,18 @@ export function pushLiveWorld(nodeId: number, pieces: readonly PlacedPiece[]): v
 export function pushResidentMeshes(nodeId: number, authoredPieces: readonly AuthoredBuildPiece[]): boolean {
   if (!nodeId || typeof g.__compiled_world_set_resident_meshes !== 'function') return false;
   const meshes: ResidentMesh[] = [];
+  let painted = 0;
   for (const ap of authoredPieces) {
     const verts = authoredMeshData(ap.modelId, ap.pkgId);
-    if (verts && verts.length >= 8) meshes.push({ key: ap.modelId, vertices: verts });
-    else console.warn(`[authored] no mesh data for '${ap.modelId}' (${ap.label}) — not resident (re-open + re-export the model)`);
+    if (verts && verts.length >= 8) {
+      // The painted atlas rides the lump (req_2832: a placed export lost its
+      // paintings) — the loader decodes the PNG and the placement renders painted.
+      const png = packageAtlasPng(ap.pkgId);
+      if (png) painted += 1;
+      meshes.push({ key: ap.modelId, vertices: verts, png });
+    } else console.warn(`[authored] no mesh data for '${ap.modelId}' (${ap.label}) — not resident (re-open + re-export the model)`);
   }
   g.__compiled_world_set_resident_meshes(nodeId, encodeResidentMeshes(meshes));
-  console.warn(`[authored] resident catalog: ${meshes.length} authored mesh(es) -> loader node ${nodeId}`);
+  console.warn(`[authored] resident catalog: ${meshes.length} authored mesh(es), ${painted} painted -> loader node ${nodeId}`);
   return true;
 }

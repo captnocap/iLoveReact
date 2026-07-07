@@ -3542,6 +3542,10 @@ pub const Runtime = struct {
     base_rect_count: usize = 0,
     base_oriented_count: usize = 0,
     live_collider_gen: u64 = 0,
+    /// Live MESH-prop colliders (req_2832: "i walk right through it") — the last
+    /// live-mesh generation folded into the physics buffer, tracked separately so
+    /// either overlay moving triggers the one shared rebuild.
+    live_mesh_collider_gen: u64 = 0,
     live_collider_warned: bool = false,
     // Live editor-placed MESH props (LIVEMESH req_1812): a just-placed imported/cooked
     // mesh prop renders instantly by REFERENCING an already-resident mesh (the user's
@@ -7319,8 +7323,12 @@ fn applyPendingLive(runtime: *Runtime) void {
 // rerun would clearHeightfields() and silently drop the PAINTED terrain
 // (applyPaintLayer only re-registers a chunk when its height goes dirty).
 fn applyLiveColliders(runtime: *Runtime) void {
-    const p = pendingLiveFor(runtime.node_id) orelse return;
-    if (runtime.live_collider_gen == p.gen) return;
+    const p = pendingLiveFor(runtime.node_id);
+    const pm = pendingLiveMeshFor(runtime.node_id);
+    if (p == null and pm == null) return;
+    const piece_gen: u64 = if (p) |x| x.gen else 0;
+    const mesh_gen: u64 = if (pm) |x| x.gen else 0;
+    if (runtime.live_collider_gen == piece_gen and runtime.live_mesh_collider_gen == mesh_gen) return;
     if (!runtime.has_physics_colliders) return;
     if (runtime.windowed) {
         // The huge-map window rebuild owns this buffer per frame; folding live
@@ -7329,11 +7337,16 @@ fn applyLiveColliders(runtime: *Runtime) void {
             runtime.live_collider_warned = true;
             log.print("[live] windowed map — live-piece colliders skipped (window rebuild owns the physics set)\n", .{});
         }
-        runtime.live_collider_gen = p.gen;
+        runtime.live_collider_gen = piece_gen;
+        runtime.live_mesh_collider_gen = mesh_gen;
         return;
     }
+    // A live MESH ref resolves through the resident catalog + baked hash map, which
+    // stepNow builds AFTER this runs in the frame — force the gen-guarded decode NOW
+    // or the rebuild on the push's own frame misses every mesh placement.
+    runtime.applyResidentMeshes();
+    runtime.ensureMeshHashMap();
     const alloc = runtime.allocator;
-    const rows = p.rows[0 .. p.count * INSTANCE_STRIDE];
 
     var live_rects: std.ArrayList(f32) = .{};
     defer live_rects.deinit(alloc);
@@ -7343,39 +7356,67 @@ fn applyLiveColliders(runtime: *Runtime) void {
     var live_oriented_count: usize = 0;
     var clipped: usize = 0;
 
-    var pass: usize = 0;
-    while (pass < 2) : (pass += 1) {
-        const want_solid = pass == 1;
-        var row: usize = 0;
-        while (row < p.count) : (row += 1) {
-            const b = row * INSTANCE_STRIDE;
-            const sx = @abs(rows[b + 6]);
-            const sy = @abs(rows[b + 7]);
-            const sz = @abs(rows[b + 8]);
-            if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) continue;
-            const solid = instance_collider_policy.blocksPlayerByHeight(sy, PHYSICS_SOLID_HEIGHT_METERS);
-            if (solid != want_solid) continue;
-            const yaw = instanceYawRadians(rows, row, INSTANCE_STRIDE);
-            if (@abs(yaw) > 0.0001) {
+    if (p) |pp| {
+        const rows = pp.rows[0 .. pp.count * INSTANCE_STRIDE];
+        var pass: usize = 0;
+        while (pass < 2) : (pass += 1) {
+            const want_solid = pass == 1;
+            var row: usize = 0;
+            while (row < pp.count) : (row += 1) {
+                const b = row * INSTANCE_STRIDE;
+                const sx = @abs(rows[b + 6]);
+                const sy = @abs(rows[b + 7]);
+                const sz = @abs(rows[b + 8]);
+                if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) continue;
+                const solid = instance_collider_policy.blocksPlayerByHeight(sy, PHYSICS_SOLID_HEIGHT_METERS);
+                if (solid != want_solid) continue;
+                const yaw = instanceYawRadians(rows, row, INSTANCE_STRIDE);
+                if (@abs(yaw) > 0.0001) {
+                    if (runtime.base_oriented_count + live_oriented_count >= game_physics.MAX_ORIENTED) {
+                        clipped += 1;
+                        continue;
+                    }
+                    live_oriented.appendSlice(alloc, &orientedFloats(rows, row, INSTANCE_STRIDE, solid)) catch {
+                        clipped += 1;
+                        continue;
+                    };
+                    live_oriented_count += 1;
+                } else {
+                    if (runtime.base_rect_count + live_rect_count >= game_physics.MAX_RECTS) {
+                        clipped += 1;
+                        continue;
+                    }
+                    live_rects.appendSlice(alloc, &rectFloats(rows, row, INSTANCE_STRIDE, solid)) catch {
+                        clipped += 1;
+                        continue;
+                    };
+                    live_rect_count += 1;
+                }
+            }
+        }
+    }
+
+    // req_2832 ("i walk right through it"): live MESH placements collide too — box
+    // pieces folded in above, but a placed authored prop was draw-only. Same
+    // per-island oriented boxes the baked mesh-prop path emits (walk under a
+    // sign's overhead board), anchored at the live ref's transform. The GHOST
+    // (pendingMeshGhostFor) stays collision-free — it's a placement preview.
+    if (pm) |pmx| {
+        for (pmx.refs) |r| {
+            const mesh = runtime.meshForHash(r.hash) orelse continue;
+            const inst: constructor.MeshPropInstance = .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw };
+            const isls = meshPropIslands(alloc, mesh) catch continue;
+            defer alloc.free(isls);
+            for (isls) |isl| {
                 if (runtime.base_oriented_count + live_oriented_count >= game_physics.MAX_ORIENTED) {
                     clipped += 1;
                     continue;
                 }
-                live_oriented.appendSlice(alloc, &orientedFloats(rows, row, INSTANCE_STRIDE, solid)) catch {
+                live_oriented.appendSlice(alloc, &islandOrientedFloats(inst, isl)) catch {
                     clipped += 1;
                     continue;
                 };
                 live_oriented_count += 1;
-            } else {
-                if (runtime.base_rect_count + live_rect_count >= game_physics.MAX_RECTS) {
-                    clipped += 1;
-                    continue;
-                }
-                live_rects.appendSlice(alloc, &rectFloats(rows, row, INSTANCE_STRIDE, solid)) catch {
-                    clipped += 1;
-                    continue;
-                };
-                live_rect_count += 1;
             }
         }
     }
@@ -7389,7 +7430,8 @@ fn applyLiveColliders(runtime: *Runtime) void {
     const old_oriented_start = rect_base + old.rect_count * game_physics.RECT_FLOATS;
     const values = alloc.alloc(f32, rect_base + base_rect_floats + live_rects.items.len + base_oriented_floats + live_oriented.items.len) catch {
         log.print("[live] collider rebuild allocation failed — live pieces stay walk-through\n", .{});
-        runtime.live_collider_gen = p.gen;
+        runtime.live_collider_gen = piece_gen;
+        runtime.live_mesh_collider_gen = mesh_gen;
         return;
     };
     @memset(values[0..rect_base], 0);
@@ -7406,7 +7448,8 @@ fn applyLiveColliders(runtime: *Runtime) void {
     runtime.physics_colliders.values = values;
     runtime.physics_colliders.rect_count = runtime.base_rect_count + live_rect_count;
     runtime.physics_colliders.oriented_count = runtime.base_oriented_count + live_oriented_count;
-    runtime.live_collider_gen = p.gen;
+    runtime.live_collider_gen = piece_gen;
+    runtime.live_mesh_collider_gen = mesh_gen;
     if (clipped > 0) {
         log.print("[live] collider cap CLIPPED {d} live rows — distant pieces are walk-through\n", .{clipped});
     }

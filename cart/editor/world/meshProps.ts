@@ -8,10 +8,12 @@
 //
 // The lump byte format is the host decoder's contract verbatim
 // (framework/world/constructor.zig decodeMeshProps, MESH_PROPS_VERSION 8). We
-// write the mesh-only form (instanceCount 0) at version 7 — untextured (the mesh
-// draws with its flat colour; its own painted atlas is a later slice) with no
-// slots/door/collision blocks. The ref hash is FNV-1a over the mesh key, the
-// SAME hash the loader keys residency on (world_loader.zig liveMeshHash).
+// write the mesh-only form (instanceCount 0) at version 7. A mesh with a painted
+// atlas embeds its PNG in the v4+ pngLen block — the loader decodes it with stbi
+// and the placement renders painted, exactly like a baked cooked prop (req_2832:
+// an exported model lost its paintings at placement). No slots/door/collision
+// blocks. The ref hash is FNV-1a over the mesh key, the SAME hash the loader
+// keys residency on (world_loader.zig liveMeshHash).
 
 /** FNV-1a 32-bit — MUST match world_loader.zig liveMeshHash so a key resolves to
  *  the same resident mesh on both sides. */
@@ -30,6 +32,8 @@ export type ResidentMesh = {
   vertices: Float32Array;
   /** flat draw colour 0..1 (untextured meshes render with this). */
   color?: [number, number, number];
+  /** the model's painted atlas as ENCODED PNG bytes — absent = untextured (flat colour). */
+  png?: Uint8Array;
 };
 
 function boundsOf(v: Float32Array): { radius: number; w: number; d: number; h: number } {
@@ -48,8 +52,8 @@ function boundsOf(v: Float32Array): { radius: number; w: number; d: number; h: n
 const MESH_PROPS_VERSION = 7; // mesh-only form the host decoder accepts (<= 8)
 
 /** Encode resident meshes into a MESH_PROPS lump for __compiled_world_set_resident_meshes.
- *  instanceCount 0 (a catalog, not a baked scene); each mesh untextured with no
- *  slots/door/boxes. Empty list → a 12-byte header that clears residency. */
+ *  instanceCount 0 (a catalog, not a baked scene); a mesh with a painted atlas embeds
+ *  its PNG, no slots/door/boxes. Empty list → a 12-byte header that clears residency. */
 export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Array {
   // Size pass.
   let total = 12; // header
@@ -58,7 +62,7 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     total += 4 + keyBytes;         // keyLen + key
     total += 36;                   // meta
     total += m.vertices.length * 4; // vertices
-    total += 4;                    // pngLen (0)
+    total += 4 + (m.png?.length ?? 0); // pngLen + encoded PNG bytes
     total += 4;                    // slotCount (0)
     total += 4;                    // doorFlag (0)
     total += 4;                    // boxCount (0)
@@ -86,7 +90,8 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     dv.setUint32(o + 32, vertexCount, true);  // vertexCount
     o += 36;
     for (let i = 0; i < m.vertices.length; i += 1) { dv.setFloat32(o, m.vertices[i]!, true); o += 4; }
-    dv.setUint32(o, 0, true); o += 4; // pngLen
+    dv.setUint32(o, m.png?.length ?? 0, true); o += 4; // pngLen
+    if (m.png && m.png.length > 0) { bytes.set(m.png, o); o += m.png.length; }
     dv.setUint32(o, 0, true); o += 4; // slotCount
     dv.setUint32(o, 0, true); o += 4; // doorFlag
     dv.setUint32(o, 0, true); o += 4; // boxCount
