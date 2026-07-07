@@ -7388,6 +7388,22 @@ pub fn groundHitAt(node_id: u32, mx: f32, my: f32, level_y: f32) ?[3]f32 {
 /// ray from O is identical to intersecting y = terrain(x,z) from O − (0,L,0),
 /// so the heightfield march itself never learns what a storey is. The brush
 /// paths always pass 0 (painting is a ground affair).
+///
+/// The ray marches the RENDERED surface — the 121-grid abs-max floor mirror the
+/// mesh and collider use — NOT heightAt's fine 241-grid brush field, which sits
+/// up to half a metre BELOW the rendered slope on sculpted ground. Placing on
+/// that lower surface buried the 5 cm floor plate inside the visible hill while
+/// a 3 m wall still poked through (req_2789 — the drowned-grass class, req_2704).
+const RenderFloorSurface = struct {
+    runtime: *Runtime,
+    pub fn sample(self: @This(), x: f32, z: f32) f32 {
+        const cx = map_chunks.chunkOfGlobalTile(map_chunks.globalTile(x));
+        const cz = map_chunks.chunkOfGlobalTile(map_chunks.globalTile(z));
+        const chunk = map_chunks.chunkAt(cx, cz) orelse return 0;
+        return paintGroundY(paintSlotFloorFor(self.runtime, cx, cz), chunk, x, z);
+    }
+};
+
 fn paintGroundHitAt(runtime: *Runtime, mx: f32, my: f32, level_y: f32) ?[3]f32 {
     if (runtime.paint_last_w <= 1 or runtime.paint_last_h <= 1) return null;
     const cam = &runtime.camera;
@@ -7425,7 +7441,7 @@ fn paintGroundHitAt(runtime: *Runtime, mx: f32, my: f32, level_y: f32) ?[3]f32 {
     dx /= dlen;
     dy /= dlen;
     dz /= dlen;
-    return map_paint.groundHit(cam.ext_pos.x, cam.ext_pos.y - level_y, cam.ext_pos.z, dx, dy, dz, 2000);
+    return map_paint.surfaceHit(RenderFloorSurface{ .runtime = runtime }, cam.ext_pos.x, cam.ext_pos.y - level_y, cam.ext_pos.z, dx, dy, dz, 2000);
 }
 
 // Painted-water surface derivation (chunkFloor.ts floorToWaterBody, req_1840

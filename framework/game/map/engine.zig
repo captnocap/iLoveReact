@@ -98,6 +98,35 @@ pub const StrokeStats = struct {
     water_dry: bool = false,
 };
 
+pub const AuthoringEventKind = enum(u8) {
+    stroke = 0,
+    road_commit = 1,
+    road_delete = 2,
+    chunk_grow = 3,
+    zone_drop = 4,
+    tile_bindings = 5,
+};
+
+pub const AuthoringEvent = struct {
+    kind: AuthoringEventKind = .stroke,
+    tool: Tool = .{},
+    stats: StrokeStats = .{},
+    start_x: f32 = 0,
+    start_z: f32 = 0,
+    end_x: f32 = 0,
+    end_z: f32 = 0,
+    duration_ms: f32 = 0,
+    id: u32 = 0,
+    aux_a: i32 = 0,
+    aux_b: i32 = 0,
+    dropped_before: u32 = 0,
+};
+
+pub const AUTHORING_EVENT_CAP: usize = 128;
+var g_authoring_events: [AUTHORING_EVENT_CAP]AuthoringEvent = @splat(AuthoringEvent{});
+var g_authoring_event_count: usize = 0;
+var g_authoring_event_dropped: u32 = 0;
+
 const MAX_SLOPE_POINTS: usize = 2048;
 
 var g_stroke_active = false;
@@ -108,6 +137,10 @@ var g_slope_count: usize = 0;
 var g_ramp_start: ?[2]f32 = null;
 var g_ramp_current: [2]f32 = .{ 0, 0 };
 var g_water_wet_any = false;
+var g_stroke_tool: Tool = .{};
+var g_stroke_start: [2]f32 = .{ 0, 0 };
+var g_stroke_end: [2]f32 = .{ 0, 0 };
+var g_stroke_started_ms: i64 = 0;
 
 /// Per-stroke stamp dedup keys (global sample cell + a stamp-family tag).
 var g_seen: std.AutoHashMapUnmanaged(u64, void) = .empty;
@@ -128,6 +161,68 @@ fn claimStamp(key: u64) bool {
     return !gop.found_existing;
 }
 
+fn nowMs() i64 {
+    return std.time.milliTimestamp();
+}
+
+fn pushAuthoringEvent(event: AuthoringEvent) void {
+    var next = event;
+    if (g_authoring_event_count >= AUTHORING_EVENT_CAP) {
+        var i: usize = 1;
+        while (i < AUTHORING_EVENT_CAP) : (i += 1) {
+            g_authoring_events[i - 1] = g_authoring_events[i];
+        }
+        g_authoring_event_count = AUTHORING_EVENT_CAP - 1;
+        g_authoring_event_dropped += 1;
+    }
+    next.dropped_before = g_authoring_event_dropped;
+    g_authoring_events[g_authoring_event_count] = next;
+    g_authoring_event_count += 1;
+}
+
+pub fn drainAuthoringEvents(out: []AuthoringEvent) usize {
+    const n = @min(out.len, g_authoring_event_count);
+    var i: usize = 0;
+    while (i < n) : (i += 1) out[i] = g_authoring_events[i];
+    if (n == g_authoring_event_count) {
+        g_authoring_event_count = 0;
+        return n;
+    }
+    const remain = g_authoring_event_count - n;
+    i = 0;
+    while (i < remain) : (i += 1) g_authoring_events[i] = g_authoring_events[n + i];
+    g_authoring_event_count = remain;
+    return n;
+}
+
+fn pushStrokeAuthoringEvent() void {
+    if (g_stats.stamps == 0 and g_stats.samples == 0 and !g_stats.water_dry) return;
+    const ended_ms = nowMs();
+    const elapsed = @max(@as(i64, 0), ended_ms - g_stroke_started_ms);
+    pushAuthoringEvent(.{
+        .kind = .stroke,
+        .tool = g_stroke_tool,
+        .stats = g_stats,
+        .start_x = g_stroke_start[0],
+        .start_z = g_stroke_start[1],
+        .end_x = g_stroke_end[0],
+        .end_z = g_stroke_end[1],
+        .duration_ms = @floatFromInt(elapsed),
+    });
+}
+
+pub fn recordChunkGrow(cx: i32, cz: i32) void {
+    pushAuthoringEvent(.{ .kind = .chunk_grow, .tool = g_tool, .aux_a = cx, .aux_b = cz });
+}
+
+pub fn recordZoneDrop(index: i32) void {
+    pushAuthoringEvent(.{ .kind = .zone_drop, .tool = g_tool, .aux_a = index });
+}
+
+pub fn recordTileBindings(count: usize) void {
+    pushAuthoringEvent(.{ .kind = .tile_bindings, .tool = g_tool, .aux_a = @intCast(@min(count, @as(usize, std.math.maxInt(i32)))) });
+}
+
 pub fn reset() void {
     chunks.clearAll();
     roads.clearAll();
@@ -140,6 +235,8 @@ pub fn reset() void {
     g_slope_count = 0;
     g_ramp_start = null;
     g_seen.clearRetainingCapacity();
+    g_authoring_event_count = 0;
+    g_authoring_event_dropped = 0;
 }
 
 /// The draft profile road clicks author with (set by chrome before drafting).
@@ -158,16 +255,20 @@ pub fn strokeBegin(x: f32, z: f32) void {
     g_slope_count = 0;
     g_ramp_start = null;
     g_water_wet_any = false;
+    g_stroke_tool = g_tool;
+    g_stroke_start = .{ x, z };
+    g_stroke_end = .{ x, z };
+    g_stroke_started_ms = nowMs();
     g_seen.clearRetainingCapacity();
 
-    if (g_tool.channel == .terrain and g_tool.terrain_tool == .ramp) {
+    if (g_tool.channel == .terrain and g_tool.mode == .paint and g_tool.terrain_tool == .ramp) {
         // anchor snapped to the cell center (PaintCanvas beginRamp:1541)
         const anchor = cellCenter(x, z);
         g_ramp_start = anchor;
         g_ramp_current = anchor;
         return;
     }
-    if (g_tool.channel == .terrain and g_tool.terrain_tool == .slope) {
+    if (g_tool.channel == .terrain and g_tool.mode == .paint and g_tool.terrain_tool == .slope) {
         pushSlopePoint(x, z);
         return;
     }
@@ -188,15 +289,16 @@ pub fn strokeBegin(x: f32, z: f32) void {
 
 pub fn strokeMove(x: f32, z: f32) void {
     if (!g_stroke_active) return;
+    g_stroke_end = .{ x, z };
     g_stats.samples += 1;
 
     if (g_tool.channel == .road) return; // click tool: points land on press only
 
-    if (g_tool.channel == .terrain and g_tool.terrain_tool == .ramp) {
+    if (g_tool.channel == .terrain and g_tool.mode == .paint and g_tool.terrain_tool == .ramp) {
         g_ramp_current = .{ x, z };
         return;
     }
-    if (g_tool.channel == .terrain and g_tool.terrain_tool == .slope) {
+    if (g_tool.channel == .terrain and g_tool.mode == .paint and g_tool.terrain_tool == .slope) {
         pushSlopePoint(x, z);
         return;
     }
@@ -227,9 +329,9 @@ pub fn strokeEnd() StrokeStats {
     if (!g_stroke_active) return g_stats;
     g_stroke_active = false;
 
-    if (g_tool.channel == .terrain and g_tool.terrain_tool == .ramp) {
+    if (g_tool.channel == .terrain and g_tool.mode == .paint and g_tool.terrain_tool == .ramp) {
         finishRamp();
-    } else if (g_tool.channel == .terrain and g_tool.terrain_tool == .slope) {
+    } else if (g_tool.channel == .terrain and g_tool.mode == .paint and g_tool.terrain_tool == .slope) {
         finishSlope();
     }
     if (g_tool.channel == .water and g_tool.mode == .paint) {
@@ -237,6 +339,7 @@ pub fn strokeEnd() StrokeStats {
     }
     g_stats.touched = dirtyChunkCount();
     if (g_stats.stamps > 0) _ = autosaveNow();
+    pushStrokeAuthoringEvent();
     return g_stats;
 }
 
@@ -263,7 +366,9 @@ fn cellCenter(x: f32, z: f32) [2]f32 {
 
 fn applySampleAt(x: f32, z: f32) void {
     switch (g_tool.channel) {
-        .terrain => switch (g_tool.terrain_tool) {
+        .terrain => if (g_tool.mode == .erase)
+            stampHeightAt(x, z)
+        else switch (g_tool.terrain_tool) {
             .brush => stampHeightAt(x, z),
             .smooth => stampSmoothAt(x, z),
             .ramp, .slope => {}, // gesture tools stamp at stroke end
@@ -694,38 +799,51 @@ fn sampleAtGlobal(gsx: i32, gsz: i32) f32 {
     return ch.height[lz * chunks.SAMPLE_COLS + lx];
 }
 
-/// March a camera ray against the painted terrain (plane y=0 where unpainted).
-/// Returns the world hit point, or null when the ray never comes down within
-/// max_dist. Coarse 0.5 m steps + 8 bisection refinements — editor picking, not
-/// physics.
-pub fn groundHit(ox: f32, oy: f32, oz: f32, dx: f32, dy: f32, dz: f32, max_dist: f32) ?[3]f32 {
+/// March a camera ray down onto an arbitrary height surface: `surface.sample(x, z)`
+/// answers the surface height at a world point. Returns the world hit point, or
+/// null when the ray never comes down within max_dist. Coarse 0.5 m steps + 8
+/// bisection refinements — editor picking, not physics. groundHit marches the
+/// raw brush field through this; the loader's placement/brush pick marches the
+/// RENDERED 121-grid floor mirror instead (world_loader paintGroundHitAt), so a
+/// pick lands on the surface the user SEES, not the finer field it was sculpted
+/// in (req_2789 — a 5 cm floor plate buried under the abs-max downsample).
+pub fn surfaceHit(surface: anytype, ox: f32, oy: f32, oz: f32, dx: f32, dy: f32, dz: f32, max_dist: f32) ?[3]f32 {
     const STEP: f32 = 0.5;
     var t_prev: f32 = 0;
-    var above_prev = oy - heightAt(ox, oz);
-    if (above_prev <= 0) return .{ ox, oy, oz }; // camera already at/below ground
+    if (oy - surface.sample(ox, oz) <= 0) return .{ ox, oy, oz }; // camera already at/below ground
     var t: f32 = STEP;
     while (t <= max_dist) : (t += STEP) {
         const px = ox + dx * t;
         const py = oy + dy * t;
         const pz = oz + dz * t;
-        const above = py - heightAt(px, pz);
-        if (above <= 0) {
+        if (py - surface.sample(px, pz) <= 0) {
             // bisect [t_prev, t] to the crossing
             var lo = t_prev;
             var hi = t;
             var i: u8 = 0;
             while (i < 8) : (i += 1) {
                 const mid = (lo + hi) / 2;
-                const my = oy + dy * mid - heightAt(ox + dx * mid, oz + dz * mid);
+                const my = oy + dy * mid - surface.sample(ox + dx * mid, oz + dz * mid);
                 if (my > 0) lo = mid else hi = mid;
             }
             const th = (lo + hi) / 2;
             return .{ ox + dx * th, oy + dy * th, oz + dz * th };
         }
         t_prev = t;
-        above_prev = above;
     }
     return null;
+}
+
+const RawFieldSurface = struct {
+    pub fn sample(_: @This(), x: f32, z: f32) f32 {
+        return heightAt(x, z);
+    }
+};
+
+/// March a camera ray against the painted terrain (plane y=0 where unpainted),
+/// on the raw 241-grid brush field.
+pub fn groundHit(ox: f32, oy: f32, oz: f32, dx: f32, dy: f32, dz: f32, max_dist: f32) ?[3]f32 {
+    return surfaceHit(RawFieldSurface{}, ox, oy, oz, dx, dy, dz, max_dist);
 }
 
 // ── the loader's floor mirror ─────────────────────────────────────────────────
@@ -1008,6 +1126,7 @@ pub fn roadCommit() ?u32 {
     const id = roads.commitDraft() orelse return null;
     roadsRestamp();
     _ = autosaveNow();
+    pushAuthoringEvent(.{ .kind = .road_commit, .tool = g_tool, .id = id });
     return id;
 }
 
@@ -1020,6 +1139,7 @@ pub fn roadDelete(id: u32) bool {
     if (ok) {
         roadsRestamp();
         _ = autosaveNow();
+        pushAuthoringEvent(.{ .kind = .road_delete, .tool = g_tool, .id = id });
     }
     return ok;
 }
@@ -1343,6 +1463,37 @@ test "slope stroke grades along the drawn path at stroke end" {
     try std.testing.expectApproxEqAbs(@as(f32, 10), at.z(ch, row, 20), 0.3);
 }
 
+test "terrain erase clears even when ramp or slope tool is selected" {
+    reset();
+    defer reset();
+    _ = chunks.growChunk(0, 0).?;
+    const ch = chunks.chunkAt(0, 0).?;
+    const center = 120 * chunks.SAMPLE_COLS + 120;
+
+    setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 8, .center_z = 6, .profile = .flat });
+    strokeBegin(0, 0);
+    _ = strokeEnd();
+    try std.testing.expectApproxEqAbs(@as(f32, 6), ch.height[center], 0.0001);
+
+    setTool(.{ .channel = .terrain, .mode = .erase, .terrain_tool = .ramp, .radius_m = 3, .ramp_min = 2, .ramp_max = 10, .profile = .flat });
+    strokeBegin(0, 0);
+    strokeMove(0, 12);
+    _ = strokeEnd();
+    try std.testing.expectApproxEqAbs(@as(f32, 0), ch.height[center], 0.0001);
+
+    setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 8, .center_z = 6, .profile = .flat });
+    strokeBegin(0, 0);
+    _ = strokeEnd();
+    try std.testing.expectApproxEqAbs(@as(f32, 6), ch.height[center], 0.0001);
+
+    setTool(.{ .channel = .terrain, .mode = .erase, .terrain_tool = .slope, .radius_m = 3, .ramp_min = 2, .ramp_max = 10, .profile = .flat });
+    strokeBegin(-6, 0);
+    strokeMove(0, 0);
+    strokeMove(6, 0);
+    _ = strokeEnd();
+    try std.testing.expectApproxEqAbs(@as(f32, 0), ch.height[center], 0.0001);
+}
+
 test "smooth eases spikes toward the local plane" {
     reset();
     defer reset();
@@ -1393,6 +1544,29 @@ test "stationary height brush deposits once per stroke (global dedup)" {
     strokeMove(0.02, 0.0);
     const stats = strokeEnd();
     try std.testing.expectEqual(@as(u32, 1), stats.stamps);
+}
+
+test "completed strokes queue map authoring events" {
+    reset();
+    defer reset();
+    _ = chunks.growChunk(0, 0).?;
+    setTool(.{ .channel = .tile, .radius_m = 1, .kind_idx = 3, .bind_idx = 2 });
+
+    strokeBegin(-2, 0);
+    strokeMove(2, 0);
+    const stats = strokeEnd();
+
+    var events: [4]AuthoringEvent = undefined;
+    const n = drainAuthoringEvents(events[0..]);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqual(AuthoringEventKind.stroke, events[0].kind);
+    try std.testing.expectEqual(Channel.tile, events[0].tool.channel);
+    try std.testing.expectEqual(@as(i16, 3), events[0].tool.kind_idx);
+    try std.testing.expectEqual(@as(i16, 2), events[0].tool.bind_idx);
+    try std.testing.expectEqual(stats.stamps, events[0].stats.stamps);
+    try std.testing.expectApproxEqAbs(@as(f32, -2), events[0].start_x, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), events[0].end_x, 0.001);
+    try std.testing.expectEqual(@as(usize, 0), drainAuthoringEvents(events[0..]));
 }
 
 test "road clicks draft, commit stamps with undercoat, delete restores" {
