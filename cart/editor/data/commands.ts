@@ -35,6 +35,13 @@ const ADD_MESH_COMMANDS: Command[] = PRIMITIVE_MESHES.map((p) => ({
   id: `add-mesh-${p.kind}`, menu: 'Edit', submenu: 'Add Primitive', name: p.name, icon: p.icon,
   key: '', context: true, native: true, undoable: true, tool: false, scope: 'model',
 }));
+// Starter models under File → New Mesh — a fresh MULTI-PART document seeded as a whole
+// authored thing (the player/NPC body, req_2761: one part per body bone, skeleton on the
+// package). No size dialog: a starter's dimensions ARE its data table.
+const NEW_PLAYER_MODEL_COMMAND: Command = {
+  id: 'new-model-player', menu: 'File', submenu: 'New Mesh', name: 'Player / NPC Model', icon: 'PersonStanding',
+  key: '', context: false, native: true, undoable: false, scope: 'global',
+};
 
 // Paint resolution — texels per TRIANGLE patch for free-form model painting (a quad face is two
 // triangle patches; "face" would misread a cube's 6 as its 12 — req_2509). A MODEL-surface control
@@ -76,6 +83,7 @@ export const COMMANDS: Command[] = [
   // ── File ──────────────────────────────────────────────────────────────────────────────────
   { id: 'new-map', menu: 'File', name: 'New Map Workspace', icon: 'FilePlus2', key: 'Ctrl+N', context: false, native: true, undoable: false, scope: 'global' },
   ...NEW_MESH_COMMANDS,
+  NEW_PLAYER_MODEL_COMMAND,
   { id: 'open-map', menu: 'File', name: 'Open Workspace', icon: 'FolderOpen', key: 'Ctrl+O', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'open-file-explorer', menu: 'File', name: 'Open Project Asset Explorer', icon: 'FolderSearch', key: 'Ctrl+P', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'find-import-source', menu: 'File', name: 'Find Import Source', icon: 'SearchCode', key: 'Ctrl+Shift+P', context: false, native: true, undoable: false, scope: 'global' },
@@ -309,7 +317,12 @@ const MESH_SUBMENU: MenuNode = {
 const MENU_TREE: Record<Menu, MenuNode[]> = {
   File: [
     cmd('new-map'),
-    { kind: 'sub', id: 'New Mesh', label: 'New Mesh', icon: 'Boxes', scope: 'global', children: NEW_MESH_COMMANDS.map((c) => cmd(c.id)) },
+    {
+      kind: 'sub', id: 'New Mesh', label: 'New Mesh', icon: 'Boxes', scope: 'global', children: [
+        ...NEW_MESH_COMMANDS.map((c) => cmd(c.id)),
+        section('Starters'), cmd('new-model-player'),
+      ],
+    },
     cmd('open-map'), cmd('open-file-explorer'), cmd('find-import-source'), cmd('import-model-file'), cmd('save-snapshot'),
     // Export → Build Piece → <kind>. Nested so Export can grow other targets later.
     {

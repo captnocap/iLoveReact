@@ -4,6 +4,7 @@ import { HMSC_EDITOR_CATALOG, fileModelPackage, modelCategoryNodes } from './hms
 import { listPackageFiles, type PackageFile } from './modelPackageStore';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 import { commandById, PRIMITIVE_MESHES } from './commands';
+import { playerStarterSkeleton } from '../model/playerStarter';
 import { INITIAL_OBJECTS } from './initialState';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, PrimitiveKind, WorkspaceDocument, WorldObject } from './types';
 
@@ -197,6 +198,46 @@ export function primitiveModelPackage(id: string): ModelPackage {
   };
 }
 
+// A fresh player/NPC starter document (`character:player:<n>`) — the humanoid
+// body formation seeded as a multi-part model (req_2761). Like a primitive doc
+// it is fully described by its id until first save; the skeleton (bodyRigBones
+// formation + per-bone mesh assignments) rides the package so Save writes it
+// into the manifest as the rig truth (req_2718 pattern).
+export const PLAYER_MODEL_ID_PREFIX = 'character:player:';
+export function playerModelPackage(id: string): ModelPackage {
+  const seq = id.slice(PLAYER_MODEL_ID_PREFIX.length);
+  return {
+    id,
+    folderId: 'models-characters',
+    name: seq ? `Player Model ${seq}` : 'Player Model',
+    path: 'character/player',
+    kind: 'character',
+    stage: 'wip',
+    color: '#d9b08c',
+    source: 'starter',
+    rig: 'body',
+    data: '-',
+    triangles: 0,
+    lods: 1,
+    decompositions: [],
+    atlases: [],
+    paints: [],
+    semanticKind: 'player',
+    skeleton: playerStarterSkeleton(id),
+  };
+}
+
+// The next pristine player-model doc id — same collision rules as
+// nextPrimitiveDocId (open docs AND saved packages AND synthesized names).
+export function nextPlayerModelDocId(docs: WorkspaceDocument[]): string {
+  const taken = (n: number) =>
+    MODEL_PACKAGES.some((model) => model.id === `${PLAYER_MODEL_ID_PREFIX}${n}` || model.name === `Player Model ${n}`)
+    || docs.some((doc) => doc.kind === 'model' && doc.sourceId?.startsWith(PLAYER_MODEL_ID_PREFIX) && doc.sourceId.endsWith(`:${n}`));
+  let n = 1;
+  while (taken(n)) n += 1;
+  return `${PLAYER_MODEL_ID_PREFIX}${n}`;
+}
+
 export function modelPackageById(id: string): ModelPackage | null {
   // DISK-BACKED WINS (req_2620 S): a saved primitive doc has a real package in the
   // catalog (loadMaterializedPackages / a session save) — its manifest name is the
@@ -204,6 +245,7 @@ export function modelPackageById(id: string): ModelPackage | null {
   const registered = MODEL_PACKAGES.find((model) => model.id === id);
   if (registered) return registered;
   if (id.startsWith('primitive:')) return primitiveModelPackage(id);
+  if (id.startsWith(PLAYER_MODEL_ID_PREFIX)) return playerModelPackage(id);
   // A file-explorer / disk-picker open (`file:<path>`) re-synthesizes from the path in
   // the id — the file may live outside every indexed catalog dir.
   if (id.startsWith('file:')) return fileModelPackage(id.slice('file:'.length));
