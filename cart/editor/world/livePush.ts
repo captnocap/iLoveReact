@@ -19,19 +19,33 @@ import { resolvePackageDir } from '../data/modelPackageStore';
 
 const g: any = globalThis;
 
-/** The model's painted atlas (atlases/base.png — what you saw in the mesh editor;
- *  export implies save, so it's current) as encoded PNG bytes for the resident lump.
- *  Undefined = never painted / not materialized → the mesh keeps its flat colour. */
-function packageAtlasPng(pkgId: string): Uint8Array | undefined {
-  const pkg = modelPackageById(pkgId);
-  if (!pkg) return undefined;
-  const dir = resolvePackageDir(pkg.kind, pkg.id);
-  if (!dir) return undefined;
-  const path = `${dir}/atlases/base.png`;
+function readPackageBytes(dir: string, rel: string): Uint8Array | undefined {
+  const path = `${dir}/${rel}`;
   if (!exists(path)) return undefined;
   const b64 = readFileBase64(path);
   if (!b64) return undefined;
   try { return base64ToBytes(b64); } catch { return undefined; }
+}
+
+/** The model's PAINTED form for the resident lump: the paint-space mesh
+ *  (mesh/painted.blob — the displayed verts whose UVs the island layout rewrote
+ *  into atlas space) paired with its atlas (atlases/base.png). The atlas maps
+ *  ONLY onto those verts — pairing it with the source-UV doc verts scrambles the
+ *  painting (req_2833) — so a package missing painted.blob (saved before the
+ *  writer existed) ships NO png and honestly draws flat until its next save. */
+function packagePaintedForm(pkgId: string): { vertices: Float32Array; png: Uint8Array } | null {
+  const pkg = modelPackageById(pkgId);
+  if (!pkg) return null;
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  if (!dir) return null;
+  const blob = readPackageBytes(dir, 'mesh/painted.blob');
+  if (!blob) return null;
+  const vertCount = Math.floor(blob.length / 32);
+  if (vertCount < 3) return null;
+  const png = readPackageBytes(dir, 'atlases/base.png');
+  if (!png) return null;
+  const buf = blob.buffer.slice(blob.byteOffset, blob.byteOffset + vertCount * 32);
+  return { vertices: new Float32Array(buf, 0, vertCount * 8), png };
 }
 
 /** Push the placed-piece world onto a mounted loader node: box instances, face
@@ -74,13 +88,13 @@ export function pushResidentMeshes(nodeId: number, authoredPieces: readonly Auth
   const meshes: ResidentMesh[] = [];
   let painted = 0;
   for (const ap of authoredPieces) {
-    const verts = authoredMeshData(ap.modelId, ap.pkgId);
+    // The painted form rides the lump (req_2832/2833: a placed export lost its
+    // paintings): paint-space verts + atlas PNG together, or the doc mesh flat.
+    const paintedForm = packagePaintedForm(ap.pkgId);
+    const verts = paintedForm?.vertices ?? authoredMeshData(ap.modelId, ap.pkgId);
     if (verts && verts.length >= 8) {
-      // The painted atlas rides the lump (req_2832: a placed export lost its
-      // paintings) — the loader decodes the PNG and the placement renders painted.
-      const png = packageAtlasPng(ap.pkgId);
-      if (png) painted += 1;
-      meshes.push({ key: ap.modelId, vertices: verts, png });
+      if (paintedForm) painted += 1;
+      meshes.push({ key: ap.modelId, vertices: verts, png: paintedForm?.png });
     } else console.warn(`[authored] no mesh data for '${ap.modelId}' (${ap.label}) — not resident (re-open + re-export the model)`);
   }
   g.__compiled_world_set_resident_meshes(nodeId, encodeResidentMeshes(meshes));

@@ -1381,6 +1381,27 @@ fn hostModelMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnNumber(info, 1);
 }
 
+/// __model_painted_mesh_write(path) → 1 on success. Writes the active model's DISPLAYED
+/// mesh (interleaved 8 f32/vert, raw little-endian) — the verts whose UVs the paint
+/// island layout rewrote into atlas space, i.e. the ONLY vertex set atlases/base.png
+/// maps onto (req_2833: pairing the atlas with source-UV verts scrambles the painting).
+/// Written beside base.blob as mesh/painted.blob so a placement consumer can render
+/// the painted model exactly as the editor shows it.
+fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    const path = argToStringAlloc(info, 0) orelse return setReturnNumber(info, 0);
+    defer alloc.free(path);
+    const verts = scene3d.paintedMeshVerts() orelse return setReturnNumber(info, 0);
+    if (verts.len == 0) return setReturnNumber(info, 0);
+    const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
+    defer alloc.free(pathz);
+    const file = std.fs.cwd().createFile(pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
+    defer file.close();
+    file.writeAll(std.mem.sliceAsBytes(verts)) catch return setReturnNumber(info, 0);
+    setReturnNumber(info, 1);
+}
+
 /// __model_meshdoc_write(path) → 1 on success. The model DOCUMENT blob (RJMD v1) — the
 /// full editable state of the resident model, so a saved package reopens as the same
 /// multi-part document instead of re-arming its primitive seed (req_2753). Layout:
@@ -2615,6 +2636,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
     v8_runtime.registerHostFn("__image_write_png", hostImageWritePng);
     v8_runtime.registerHostFn("__model_mesh_write", hostModelMeshWrite);
+    v8_runtime.registerHostFn("__model_painted_mesh_write", hostModelPaintedMeshWrite);
     v8_runtime.registerHostFn("__model_meshdoc_write", hostModelMeshdocWrite);
     v8_runtime.registerHostFn("__model_atlas_base", hostModelAtlasBase);
     v8_runtime.registerHostFn("__model_atlas_apply", hostModelAtlasApply);

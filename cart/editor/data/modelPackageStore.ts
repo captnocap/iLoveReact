@@ -430,6 +430,11 @@ export function writeModelArtifacts(pkg: Pick<ModelPackage, 'kind' | 'id' | 'nam
     const atlas = JSON.parse(host.__model_atlas_read?.() || '{}');
     if (atlas.data && atlas.w > 0 && atlas.h > 0) {
       host.__image_write_png?.(`${atlasDir}/base.png`, atlas.data, atlas.w, atlas.h);
+      // The atlas maps onto the DISPLAYED mesh's island-space UVs, not the source
+      // UVs base.blob/doc.blob carry (req_2833: pairing them scrambles the painting)
+      // — persist the paint-space verts beside the atlas so placement consumers
+      // render the painted model exactly as the editor shows it.
+      host.__model_painted_mesh_write?.(`${meshDir}/painted.blob`);
     }
   } catch { /* no atlas resident yet — leave atlases/ empty, which is honest */ }
   return docWritten;

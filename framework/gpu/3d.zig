@@ -4992,6 +4992,15 @@ pub fn paintAtlas() ?PaintAtlas {
     const a = model_paint.atlas() orelse return null;
     return .{ .rgba = a.rgba, .w = a.w, .h = a.h, .detail = model_paint.detail() };
 }
+/// The active DISPLAYED mesh — the verts the painted preview actually renders, whose
+/// UVs the island layout rewrote into paint-atlas space (req_2833: the source mesh's
+/// UVs do NOT match the paint atlas; a consumer pairing base.png with source verts
+/// gets a scrambled painting). Null when no model is resident.
+pub fn paintedMeshVerts() ?[]const f32 {
+    const verts = g_edit_verts orelse return null;
+    if (g_edit_count == 0) return null;
+    return verts[0 .. @as(usize, g_edit_count) * 8];
+}
 /// Load a saved painting: restore its detail (rewrites UVs + re-uploads the mesh) then blit the
 /// saved atlas over the texture. Returns false if the bytes don't match the restored dimensions.
 pub fn applyPaintAtlas(detail_px: i32, rgba: []const u8) bool {
