@@ -47,6 +47,7 @@ var g_mode: Mode = .none;
 var g_built_for: u32 = 0; // facecount the current topology was built for (0 = none)
 var g_verts: ?[]f32 = null; // unique vertex positions, 3 f32 each
 var g_vert_count: u32 = 0;
+var g_vert_part: ?[]u32 = null; // one outliner part id per logical vertex
 var g_corner_vert: ?[]u32 = null; // facecount*3 → logical vertex index
 var g_edges: ?[]u32 = null; // edgecount*2 → logical vertex indices (a<b)
 var g_edge_count: u32 = 0;
@@ -73,15 +74,16 @@ var g_scope_built: u64 = 0;
 var g_affect_vert: ?[]bool = null; // scratch: logical verts affected by the active selection
 
 // ── Live mirror editing (req_2758 — the Studio's req_1183/1186 symmetric editing, host-native) ──
-// With one or more planes enabled (bit 0 = X, 1 = Y, 2 = Z; plane at coordinate 0, the same
-// convention the mirror-duplicate and the Studio's Center button use), every selection transform
-// also lands on each moved vertex's MIRROR TWIN — the logical vertex sitting at its reflected
-// position. Twins are matched by position ONCE per (topology, mask) into an index table, so a
-// vertex stays paired with its twin through the whole modeling session even mid-drag; per-frame
-// deltas then reflect through plain index lookups, no per-frame hashing. Multiple planes compose:
-// every non-empty subset of the enabled axes is one reflection (X+Y on → the X twin, the Y twin,
-// AND the XY-diagonal twin all follow). A vertex with no counterpart simply doesn't mirror —
-// same honesty as the Studio's mirrorEditAxes.
+// With one or more planes enabled (bit 0 = X, 1 = Y, 2 = Z), every selection transform also
+// lands on each moved vertex's MIRROR TWIN inside the same outliner part. The mirror plane is
+// the part's own bounds center, not workspace/model coordinate 0: an offset part still mirrors
+// top↔bottom / left↔right against itself. Twins are matched by position ONCE per topology into
+// an index table, so a vertex stays paired with its twin through the whole modeling session
+// even mid-drag; per-frame deltas then reflect through plain index lookups, no per-frame
+// hashing. Multiple planes compose: every non-empty subset of the enabled axes is one
+// reflection (X+Y on → the X twin, the Y twin, AND the XY-diagonal twin all follow). A vertex
+// with no counterpart in its part simply doesn't mirror — same honesty as the Studio's
+// mirrorEditAxes.
 const MIRROR_NONE: u32 = 0xffff_ffff;
 /// Twin matching quantization: positions rounded to this many units/metre must coincide.
 /// Deliberately coarser than WELD_Q — mirrored halves come from float-reflected geometry
@@ -303,6 +305,7 @@ pub fn reset() void {
     g_face_base.deinit(alloc);
     g_face_base = .{};
     if (g_verts) |v| alloc.free(v);
+    if (g_vert_part) |p| alloc.free(p);
     if (g_corner_vert) |c| alloc.free(c);
     if (g_edges) |e| alloc.free(e);
     if (g_edge_boundary) |b| alloc.free(b);
@@ -320,6 +323,7 @@ pub fn reset() void {
     g_mirror_built_for = 0; // mask itself survives — it's a user mode, retwinned on next use
     g_snap = null;
     g_verts = null;
+    g_vert_part = null;
     g_corner_vert = null;
     g_edges = null;
     g_edge_boundary = null;
@@ -669,6 +673,7 @@ fn ensureTopology() bool {
     var weld = std.AutoHashMapUnmanaged(WeldKey, u32){};
     defer weld.deinit(alloc);
     var verts = std.ArrayListUnmanaged(f32){};
+    var vert_parts = std.ArrayListUnmanaged(u32){};
     var corner_vert = alloc.alloc(u32, @as(usize, fc) * 3) catch return false;
 
     var f: u32 = 0;
@@ -685,6 +690,7 @@ fn ensureTopology() bool {
                 verts.append(alloc, p[0]) catch return false;
                 verts.append(alloc, p[1]) catch return false;
                 verts.append(alloc, p[2]) catch return false;
+                vert_parts.append(alloc, part) catch return false;
             }
             corner_vert[f * 3 + k] = gop.value_ptr.*;
         }
@@ -707,6 +713,7 @@ fn ensureTopology() bool {
     }
 
     g_verts = verts.toOwnedSlice(alloc) catch return false;
+    g_vert_part = vert_parts.toOwnedSlice(alloc) catch return false;
     g_corner_vert = corner_vert;
     g_edges = edges.toOwnedSlice(alloc) catch return false;
     g_vert_count = @intCast(g_verts.?.len / 3);
@@ -921,8 +928,8 @@ fn transformPoint(kind: TransformKind, p: [3]f32, delta: [3]f32, axis: [3]f32, p
 }
 
 // ── Live mirror editing (req_2758) ────────────────────────────────────────────────
-/// Set the enabled mirror planes (bit 0 = X, 1 = Y, 2 = Z; plane at 0). Toggling forces
-/// a twin-table rebuild so pairing always reflects the mesh as it stands right now.
+/// Set the enabled mirror planes (bit 0 = X, 1 = Y, 2 = Z). Toggling forces a twin-table
+/// rebuild so pairing always reflects the mesh as it stands right now.
 pub fn setMirrorMask(mask: u8) void {
     g_mirror_mask = mask & 7;
     g_mirror_built_for = 0;
@@ -931,20 +938,110 @@ pub fn mirrorMask() u8 {
     return g_mirror_mask;
 }
 
-const MirrorKey = struct { x: i32, y: i32, z: i32 };
-fn mirrorKey(p: [3]f32) MirrorKey {
+pub const MirrorFrame = struct { center: [3]f32, radius: f32 };
+
+/// The visual mirror frame for the current edit scope: scoped part(s) when the outliner
+/// focuses them, else the whole mesh. The actual twin solve still mirrors per part; this
+/// frame is the UI cue for the common one-focused-part case.
+pub fn mirrorFramePub() ?MirrorFrame {
+    if (!ensureTopology()) return null;
+    var mn: [3]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) };
+    var mx: [3]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) };
+    var any = false;
+    var i: u32 = 0;
+    while (i < g_vert_count) : (i += 1) {
+        if (!vertInScopePub(i)) continue;
+        const p = vertPos(i);
+        var a: usize = 0;
+        while (a < 3) : (a += 1) {
+            mn[a] = @min(mn[a], p[a]);
+            mx[a] = @max(mx[a], p[a]);
+        }
+        any = true;
+    }
+    if (!any) return null;
+    const center: [3]f32 = .{
+        (mn[0] + mx[0]) * 0.5,
+        (mn[1] + mx[1]) * 0.5,
+        (mn[2] + mx[2]) * 0.5,
+    };
+    const dx = mx[0] - mn[0];
+    const dy = mx[1] - mn[1];
+    const dz = mx[2] - mn[2];
+    return .{ .center = center, .radius = @max(0.6, @sqrt(dx * dx + dy * dy + dz * dz) * 0.6) };
+}
+
+const MirrorKey = struct { part: u32, x: i32, y: i32, z: i32 };
+fn mirrorKey(part: u32, p: [3]f32) MirrorKey {
     return .{
+        .part = part,
         .x = @intFromFloat(@round(p[0] * MIRROR_Q)),
         .y = @intFromFloat(@round(p[1] * MIRROR_Q)),
         .z = @intFromFloat(@round(p[2] * MIRROR_Q)),
     };
 }
-fn reflectPoint(p: [3]f32, subset: u8) [3]f32 {
+
+fn reflectPointAround(p: [3]f32, subset: u8, center: [3]f32) [3]f32 {
     var r = p;
     inline for (0..3) |a| {
-        if (subset & (@as(u8, 1) << @intCast(a)) != 0) r[a] = -r[a];
+        if (subset & (@as(u8, 1) << @intCast(a)) != 0) r[a] = center[a] * 2.0 - r[a];
     }
     return r;
+}
+
+const PartBounds = struct { min: [3]f32, max: [3]f32 };
+
+fn includePartBounds(bounds: *PartBounds, p: [3]f32) void {
+    var a: usize = 0;
+    while (a < 3) : (a += 1) {
+        bounds.min[a] = @min(bounds.min[a], p[a]);
+        bounds.max[a] = @max(bounds.max[a], p[a]);
+    }
+}
+
+/// Current bounds-center for every logical vertex's own outliner part. Rebuilt per
+/// transform so translating a whole part carries its local symmetry plane with it.
+fn buildMirrorCentersPerVert() ?[]f32 {
+    const parts = g_vert_part orelse return null;
+    if (parts.len < g_vert_count) return null;
+    const centers = alloc.alloc(f32, @as(usize, g_vert_count) * 3) catch return null;
+    var by_part = std.AutoHashMapUnmanaged(u32, PartBounds){};
+    defer by_part.deinit(alloc);
+
+    var i: u32 = 0;
+    while (i < g_vert_count) : (i += 1) {
+        const idx: usize = @intCast(i);
+        const p = vertPos(i);
+        const gop = by_part.getOrPut(alloc, parts[idx]) catch {
+            alloc.free(centers);
+            return null;
+        };
+        if (!gop.found_existing) {
+            gop.value_ptr.* = .{ .min = p, .max = p };
+        } else {
+            includePartBounds(gop.value_ptr, p);
+        }
+    }
+
+    i = 0;
+    while (i < g_vert_count) : (i += 1) {
+        const idx: usize = @intCast(i);
+        const b = by_part.get(parts[idx]) orelse {
+            alloc.free(centers);
+            return null;
+        };
+        const base = idx * 3;
+        centers[base + 0] = (b.min[0] + b.max[0]) * 0.5;
+        centers[base + 1] = (b.min[1] + b.max[1]) * 0.5;
+        centers[base + 2] = (b.min[2] + b.max[2]) * 0.5;
+    }
+    return centers;
+}
+
+fn mirrorCenterAt(centers: []const f32, v: u32) [3]f32 {
+    const base = @as(usize, v) * 3;
+    if (base + 2 >= centers.len) return .{ 0, 0, 0 };
+    return .{ centers[base + 0], centers[base + 1], centers[base + 2] };
 }
 
 /// Build (or reuse) the twin table: for every non-empty subset of ALL three axes, each
@@ -954,6 +1051,10 @@ fn reflectPoint(p: [3]f32, subset: u8) [3]f32 {
 fn ensureMirrorTwins() ?[]u32 {
     if (!ensureTopology()) return null;
     if (g_mirror_twin != null and g_mirror_built_for == g_vert_count and g_mirror_built_mask == g_mirror_mask) return g_mirror_twin;
+    const parts = g_vert_part orelse return null;
+    if (parts.len < g_vert_count) return null;
+    const centers = buildMirrorCentersPerVert() orelse return null;
+    defer alloc.free(centers);
     if (g_mirror_twin) |t| alloc.free(t);
     g_mirror_twin = null;
     const total: usize = @as(usize, g_vert_count) * 7;
@@ -967,14 +1068,18 @@ fn ensureMirrorTwins() ?[]u32 {
     };
     var i: u32 = 0;
     while (i < g_vert_count) : (i += 1) {
-        by_pos.put(alloc, mirrorKey(vertPos(i)), i) catch {};
+        const idx: usize = @intCast(i);
+        by_pos.put(alloc, mirrorKey(parts[idx], vertPos(i)), i) catch {};
     }
     i = 0;
     while (i < g_vert_count) : (i += 1) {
+        const idx: usize = @intCast(i);
+        const part = parts[idx];
         const p = vertPos(i);
+        const center = mirrorCenterAt(centers, i);
         var s: u8 = 1;
         while (s <= 7) : (s += 1) {
-            if (by_pos.get(mirrorKey(reflectPoint(p, s)))) |t| {
+            if (by_pos.get(mirrorKey(part, reflectPointAround(p, s, center)))) |t| {
                 twins[@as(usize, s - 1) * g_vert_count + i] = t;
             }
         }
@@ -995,6 +1100,8 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
     // Twin table must exist BEFORE the move loop — it pairs by position, and a fresh
     // build against half-moved verts would find nothing on the reflected side.
     const twins_opt: ?[]u32 = if (g_mirror_mask != 0) ensureMirrorTwins() else null;
+    const mirror_centers_opt: ?[]f32 = if (g_mirror_mask != 0) buildMirrorCentersPerVert() else null;
+    defer if (mirror_centers_opt) |c| alloc.free(c);
 
     var i: u32 = 0;
     while (i < g_vert_count) : (i += 1) {
@@ -1013,6 +1120,7 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
     var mmask: ?[]bool = null;
     if (g_mirror_mask != 0) mirror: {
         const twins = twins_opt orelse break :mirror;
+        const mirror_centers = mirror_centers_opt orelse break :mirror;
         if (g_mirror_affect == null or g_mirror_affect.?.len != g_vert_count) {
             if (g_mirror_affect) |m| alloc.free(m);
             g_mirror_affect = alloc.alloc(bool, g_vert_count) catch null;
@@ -1028,7 +1136,7 @@ fn applyTransform(kind: TransformKind, delta: [3]f32, axis_raw: [3]f32, pivot: [
                 if ((s & g_mirror_mask) != s) continue; // only subsets of the ENABLED planes
                 const t = twins[@as(usize, s - 1) * g_vert_count + v];
                 if (t == MIRROR_NONE or t == v or t >= g_vert_count or mask[t]) continue;
-                const rp = reflectPoint(np, s);
+                const rp = reflectPointAround(np, s, mirrorCenterAt(mirror_centers, v));
                 verts[t * 3 + 0] = rp[0];
                 verts[t * 3 + 1] = rp[1];
                 verts[t * 3 + 2] = rp[2];
@@ -1251,10 +1359,9 @@ fn pickVertex(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i
         const dx = sp[0] - mx;
         const dy = sp[1] - my;
         const d2 = dx * dx + dy * dy;
-        // Only a candidate that beats the best AND is actually visible (not hidden behind the
-        // surface) can win — so you never pick a vertex on the far side you can't see. The
-        // occlusion raycast runs only for the few in-radius candidates, so a click stays cheap.
-        if (d2 < best_d2 and !model_paint.occluded(cam, vertPos(i))) {
+        // The vertex dot is overlay geometry drawn on top of the mesh, so click picking
+        // follows that visible handle instead of depth-rejecting through another part.
+        if (d2 < best_d2) {
             best_d2 = d2;
             best = @intCast(i);
         }
@@ -1276,10 +1383,6 @@ fn pickEdge(cam: model_paint.Camera, vp_w: f32, vp_h: f32, mx: f32, my: f32) i32
         const b = model_paint.project(cam, vp_w, vp_h, vb) orelse continue;
         const d2 = segDist2(mx, my, a[0], a[1], b[0], b[1]);
         if (d2 < best_d2) {
-            // Visible if the midpoint isn't behind the surface (an edge across the silhouette
-            // stays pickable; one wholly on the far side does not).
-            const mid: [3]f32 = .{ (va[0] + vb[0]) * 0.5, (va[1] + vb[1]) * 0.5, (va[2] + vb[2]) * 0.5 };
-            if (model_paint.occluded(cam, mid)) continue;
             best_d2 = d2;
             best = @intCast(e);
         }
@@ -1466,11 +1569,129 @@ fn planeClipSide(p: [3][3]f32, s: [3]f32, keep_positive: bool, out: *[4][3]f32) 
     return n_out;
 }
 
+const CutLoop = std.ArrayListUnmanaged([3]f32);
+
+/// Position key for boundary chaining: raw f32 bits (−0 normalized) hashed. Within one
+/// authored group every shared corner is a bit-identical copy of the same source vert
+/// (the bake and every cut interpolate each point once and copy it), so no quantization
+/// is needed here — the weld's WELD_Q is cross-part identity, a different problem.
+fn cutPosKey(p: [3]f32) u64 {
+    const q: [3]f32 = .{ p[0] + 0.0, p[1] + 0.0, p[2] + 0.0 };
+    var h = std.hash.Wyhash.init(0xc07);
+    h.update(std.mem.asBytes(&q));
+    return h.final();
+}
+
+/// Chain the boundary loop of one authored group's triangles: directed tri edges whose
+/// undirected key appears exactly once (the shared fan diagonals appear twice and drop
+/// out), walked head-to-tail in the tris' own winding. False when the group isn't one
+/// clean closed loop (holes, pinches, gaps) — the caller falls back to per-tri cutting.
+fn chainGroupLoop(pos: []const f32, tris: []const u32, out: *CutLoop) bool {
+    const Dir = struct { from_key: u64, to_key: u64, ukey: u128, from: [3]f32 };
+    var undirected = std.AutoHashMapUnmanaged(u128, u32){};
+    defer undirected.deinit(alloc);
+    var dirs = std.ArrayListUnmanaged(Dir){};
+    defer dirs.deinit(alloc);
+    for (tris) |f| {
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const ia = (@as(usize, f) * 3 + k) * 3;
+            const ib = (@as(usize, f) * 3 + (k + 1) % 3) * 3;
+            if (ia + 2 >= pos.len or ib + 2 >= pos.len) return false;
+            const a: [3]f32 = .{ pos[ia + 0], pos[ia + 1], pos[ia + 2] };
+            const b: [3]f32 = .{ pos[ib + 0], pos[ib + 1], pos[ib + 2] };
+            const ka = cutPosKey(a);
+            const kb = cutPosKey(b);
+            if (ka == kb) continue; // degenerate corner
+            const ukey: u128 = (@as(u128, @min(ka, kb)) << 64) | @max(ka, kb);
+            const gop = undirected.getOrPut(alloc, ukey) catch return false;
+            if (!gop.found_existing) gop.value_ptr.* = 0;
+            gop.value_ptr.* += 1;
+            dirs.append(alloc, .{ .from_key = ka, .to_key = kb, .ukey = ukey, .from = a }) catch return false;
+        }
+    }
+    const Next = struct { to_key: u64, from: [3]f32 };
+    var adj = std.AutoHashMapUnmanaged(u64, Next){};
+    defer adj.deinit(alloc);
+    var boundary_n: u32 = 0;
+    var start_key: u64 = 0;
+    var have_start = false;
+    for (dirs.items) |de| {
+        if ((undirected.get(de.ukey) orelse 0) != 1) continue; // interior (diagonal)
+        boundary_n += 1;
+        const gop = adj.getOrPut(alloc, de.from_key) catch return false;
+        if (gop.found_existing) return false; // pinch: two boundary edges leave one vert
+        gop.value_ptr.* = .{ .to_key = de.to_key, .from = de.from };
+        if (!have_start) {
+            start_key = de.from_key;
+            have_start = true;
+        }
+    }
+    if (!have_start or boundary_n < 3) return false;
+    var cur = start_key;
+    var count: u32 = 0;
+    while (count < boundary_n) {
+        const e = adj.get(cur) orelse return false;
+        out.append(alloc, e.from) catch return false;
+        count += 1;
+        cur = e.to_key;
+        if (cur == start_key) break;
+    }
+    return cur == start_key and count == boundary_n; // one loop, fully consumed
+}
+
+/// Split one boundary polygon by the plane {p : dot(n,p) = d} into its −side and +side
+/// loops, inserting the SHARED intersection point on each crossed edge — the polygon
+/// twin of planeClipSide and the studio's cutMeshByPlane. Because the polygon is the
+/// authored face outline, the hidden fan diagonals never participate: no T-verts, one
+/// cut edge per face per plane.
+fn splitLoopByPlane(loop: []const [3]f32, n: [3]f32, d: f32, neg: *CutLoop, pos_side: *CutLoop) bool {
+    const m = loop.len;
+    var i: usize = 0;
+    while (i < m) : (i += 1) {
+        const a = loop[i];
+        const b = loop[(i + 1) % m];
+        const sa = vecDot(n, a) - d;
+        const sb = vecDot(n, b) - d;
+        if (sa <= CUT_EPS) neg.append(alloc, a) catch return false;
+        if (sa >= -CUT_EPS) pos_side.append(alloc, a) catch return false;
+        if ((sa > CUT_EPS and sb < -CUT_EPS) or (sa < -CUT_EPS and sb > CUT_EPS)) {
+            const t = sa / (sa - sb);
+            const p: [3]f32 = .{ a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t };
+            neg.append(alloc, p) catch return false;
+            pos_side.append(alloc, p) catch return false;
+        }
+    }
+    return true;
+}
+
+/// Fan-triangulate a cut piece into the output soup, dropping slivers — the same fan
+/// convention as the EditMesh bake, so winding carries through.
+fn emitLoopFan(out_pos: *std.ArrayListUnmanaged(f32), out_src: *std.ArrayListUnmanaged(u32), out_grp: *std.ArrayListUnmanaged(u32), want_groups: bool, loop: []const [3]f32, src: u32, gid: u32) bool {
+    if (loop.len < 3) return true;
+    var k: usize = 1;
+    while (k + 1 < loop.len) : (k += 1) {
+        if (triArea2Local(loop[0], loop[k], loop[k + 1]) < 1e-14) continue;
+        if (!emitTriPos(out_pos, loop[0], loop[k], loop[k + 1])) return false;
+        out_src.append(alloc, src) catch return false;
+        if (want_groups) out_grp.append(alloc, gid) catch return false;
+    }
+    return true;
+}
+
 /// Plane-cut a non-indexed triangle soup (`pos` = tri_count*9 floats, positions only) by
 /// the plane {p : dot(n,p) = d}. Returns a fresh soup (caller frees .positions and, if
 /// present, .groups). When groups_in is given (one id per input tri), the result carries
 /// one id per OUTPUT tri with the negative/positive split described above; null ⇒ no
 /// grouping is produced. Returns null only on allocation failure.
+///
+/// Grouped faces are cut as POLYGONS (req_2794/req_2802): chain the group's boundary
+/// loop, split the loop, re-fan both pieces. Cutting triangle-by-triangle stabbed every
+/// cut line through the quads' hidden fan diagonals — a T-vert in the middle of every
+/// crossed face and 2–3 edge records per cut line, which is exactly how a 2-cut on a
+/// plain cube counted 40 selected edges instead of 28 (12 + 2·8 + 4·(2+3) = 40, stable
+/// across shapes — the user's unchanging number). Ungrouped tris, non-straddling groups,
+/// and groups whose boundary won't chain (holes/pinches) keep the per-tri path.
 pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_in: ?[]const u32) ?CutResult {
     var out_pos = std.ArrayListUnmanaged(f32){};
     var out_grp = std.ArrayListUnmanaged(u32){};
@@ -1490,8 +1711,65 @@ pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_
         next_id = mx + 1;
     }
 
+    // ── Polygon pass: every straddling authored group with a chainable boundary ─────
+    const consumed = alloc.alloc(bool, tri_count) catch return null;
+    defer alloc.free(consumed);
+    @memset(consumed, false);
+    if (groups_in) |gsrc| {
+        var order = std.ArrayListUnmanaged(u32){};
+        defer order.deinit(alloc);
+        var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)){};
+        defer {
+            var bit = buckets.valueIterator();
+            while (bit.next()) |b| b.deinit(alloc);
+            buckets.deinit(alloc);
+        }
+        var bf: u32 = 0;
+        while (bf < tri_count and bf < gsrc.len) : (bf += 1) {
+            const og = gsrc[bf];
+            if (og == model_source.NO_FACE_GROUP) continue;
+            const gop = buckets.getOrPut(alloc, og) catch return null;
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{};
+                order.append(alloc, og) catch return null;
+            }
+            gop.value_ptr.append(alloc, bf) catch return null;
+        }
+        for (order.items) |og| {
+            const tris = buckets.getPtr(og).?.items;
+            var any_neg = false;
+            var any_pos = false;
+            for (tris) |tf| {
+                var k: u32 = 0;
+                while (k < 3) : (k += 1) {
+                    const vb = (@as(usize, tf) * 3 + k) * 3;
+                    if (vb + 2 >= pos.len) break;
+                    const s = n[0] * pos[vb + 0] + n[1] * pos[vb + 1] + n[2] * pos[vb + 2] - d;
+                    if (s > CUT_EPS) any_pos = true;
+                    if (s < -CUT_EPS) any_neg = true;
+                }
+            }
+            if (!(any_neg and any_pos)) continue; // whole group one side → per-tri passthrough
+            var loop = CutLoop{};
+            defer loop.deinit(alloc);
+            if (!chainGroupLoop(pos, tris, &loop)) continue; // messy group → per-tri fallback
+            var negl = CutLoop{};
+            defer negl.deinit(alloc);
+            var posl = CutLoop{};
+            defer posl.deinit(alloc);
+            if (!splitLoopByPlane(loop.items, n, d, &negl, &posl)) return null;
+            if (negl.items.len < 3 or posl.items.len < 3) continue; // grazed → passthrough
+            const src = tris[0]; // one part per group — any member carries the parentage
+            const gid_pos = if (want_groups) remapGroup(&remap, og, &next_id) else 0;
+            if (!emitLoopFan(&out_pos, &out_src, &out_grp, want_groups, negl.items, src, og)) return null;
+            if (!emitLoopFan(&out_pos, &out_src, &out_grp, want_groups, posl.items, src, gid_pos)) return null;
+            for (tris) |tf| consumed[tf] = true;
+        }
+    }
+
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
+        if (consumed[f]) continue;
         const base = @as(usize, f) * 9;
         if (base + 8 >= pos.len) break;
         const p = [3][3]f32{
@@ -1594,6 +1872,39 @@ test "planeCutSoup splits a crossing triangle and regroups the positive side" {
     }
     try testing.expectEqual(@as(u32, 1), neg); // negative half keeps the source id
     try testing.expectEqual(@as(u32, 2), new); // positive half gets the new id
+}
+
+test "planeCutSoup cuts a grouped quad as ONE polygon — no T-vert on the diagonal (req_2802)" {
+    // Quad [0,2]² on z=0 as two tris sharing the diagonal (0,0)→(2,2), ONE group, cut
+    // by x=1. Per-tri cutting stabbed the cut line through the diagonal — a T-vert at
+    // (1,1) and 6 output tris; the polygon path gives two quad pieces, 4 tris, no T-vert.
+    var pos = [_]f32{
+        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 2, 0, 0, 2, 0,
+    };
+    const groups = [_]u32{ 7, 7 };
+    const r = planeCutSoup(pos[0..], 2, .{ 1, 0, 0 }, 1.0, groups[0..]).?;
+    defer {
+        alloc.free(r.positions);
+        alloc.free(r.src_face);
+        if (r.groups) |g| alloc.free(g);
+    }
+    try testing.expectEqual(@as(u32, 4), r.tri_count);
+    var i: usize = 0;
+    while (i < r.positions.len) : (i += 3) {
+        const on_diag = @abs(r.positions[i] - 1.0) < 1e-6 and @abs(r.positions[i + 1] - 1.0) < 1e-6;
+        try testing.expect(!on_diag); // the old path's mid-diagonal T-vert must be gone
+    }
+    const g = r.groups.?;
+    var neg: u32 = 0;
+    var new: u32 = 0;
+    for (g) |v| {
+        if (v == 7) neg += 1;
+        if (v == 8) new += 1;
+    }
+    try testing.expectEqual(@as(u32, 2), neg); // −side quad keeps the source id
+    try testing.expectEqual(@as(u32, 2), new); // +side quad gets ONE fresh id
+    for (r.src_face) |sf| try testing.expect(sf == 0 or sf == 1); // group parentage
 }
 
 test "planeCutSoup leaves a non-crossing triangle whole" {
@@ -1756,6 +2067,50 @@ test "vertex pick selects the nearest welded corner; face highlight saves+restor
     try testing.expectEqual(base0[0], restored[0]);
     try testing.expectEqual(base0[1], restored[1]);
     try testing.expectEqual(base0[2], restored[2]);
+}
+
+test "vertex and edge picks follow overlay handles through an occluding part" {
+    // Back/scoped triangle is hidden behind a front triangle from the camera's ray, but
+    // its overlay dots/edges are drawn on top and must remain clickable.
+    var verts = [_]f32{
+        // scoped back part, group 0
+        0.00,  0.00, -1.0, 0, 0, 1, 0, 0,
+        0.25,  0.20, -1.0, 0, 0, 1, 0, 0,
+        -0.25, 0.20, -1.0, 0, 0, 1, 0, 0,
+        // front occluder part, group 1
+        -1.0,  -1.0, 0.0,  0, 0, 1, 0, 0,
+        1.0,   -1.0, 0.0,  0, 0, 1, 0, 0,
+        0.0,   1.0,  0.0,  0, 0, 1, 0, 0,
+    };
+    model_paint.setTarget(794, verts[0..], 6);
+    model_source.setFaceGroups(&[_]u32{ 0, 1 });
+    model_source.setPartRanges(&[_]u32{ 0, 1, 1, 2 });
+    setEditScope(0, 1);
+    defer {
+        setEditScope(0, 0);
+        reset();
+        model_paint.clear();
+        model_source.clear();
+    }
+
+    const cam = model_paint.Camera{ .eye = .{ 0, 0, 5 }, .target = .{ 0, 0, 0 }, .fov_deg = 50 };
+    const hidden_vert = [3]f32{ 0, 0, -1 };
+    try testing.expect(model_paint.occluded(cam, hidden_vert));
+
+    try testing.expect(ensureTopology());
+    setMode(.vertex);
+    const sp = model_paint.project(cam, 800, 600, hidden_vert).?;
+    try testing.expectEqual(@as(i32, 1), pick(cam, 800, 600, sp[0], sp[1], false));
+    const pivot = selectionPivot().?;
+    try testing.expectApproxEqAbs(@as(f32, -1), pivot[2], 1e-4);
+
+    clearSelection();
+    setMode(.edge);
+    const hidden_edge_mid = [3]f32{ 0.125, 0.10, -1 };
+    try testing.expect(model_paint.occluded(cam, hidden_edge_mid));
+    const ep = model_paint.project(cam, 800, 600, hidden_edge_mid).?;
+    try testing.expectEqual(@as(i32, 1), pick(cam, 800, 600, ep[0], ep[1], false));
+    try testing.expectEqual(@as(u32, 1), selectedEdgeCountPub());
 }
 
 test "box select grabs every element inside the rect; additive unions the snapshot" {
@@ -1977,6 +2332,38 @@ test "mirror X: translating a vertex drags its position twin to the reflected sp
         if (@abs(pos[c] - 0.5) < 0.001 and @abs(pos[c + 1] + 0.25) < 0.001 and @abs(pos[c + 2] + 0.5) < 0.001) found = true;
     }
     try testing.expect(found);
+}
+
+test "mirror Y uses the outliner part center, not workspace zero" {
+    var soup: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&soup);
+    var i: usize = 0;
+    while (i + 1 < soup.len) : (i += 8) {
+        soup[i + 1] += 3.0;
+    }
+    const groups = [12]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    model_source.setFaceGroups(groups[0..]);
+    model_source.setPartRanges(&[_]u32{ 0, 6 });
+    model_paint.setTarget(795, soup[0..], 36);
+    defer {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+        setMirrorMask(0);
+    }
+    setMirrorMask(2); // Y plane, centered on the part bounds at y=3, not workspace y=0.
+    setMode(.vertex);
+    try testing.expect(ensureTopology());
+    const vi = findVertAt(.{ -0.5, 3.5, -0.5 }).?;
+    const ti = findVertAt(.{ -0.5, 2.5, -0.5 }).?;
+    g_sel_vert.?[vi] = true;
+
+    const m = translateSelection(.{ 0, 0.25, 0 });
+    try testing.expect(m.changed);
+    try testing.expectApproxEqAbs(@as(f32, 3.75), vertPos(vi)[1], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, 2.25), vertPos(ti)[1], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(ti)[0], 0.0001);
+    try testing.expectApproxEqAbs(@as(f32, -0.5), vertPos(ti)[2], 0.0001);
 }
 
 test "mirror X+Y: a moved corner carries its X, Y, and XY-diagonal twins" {
