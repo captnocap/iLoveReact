@@ -442,6 +442,30 @@ fn hostSetPlayerAnimation(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     setReturnString(info, "ok");
 }
 
+// __compiled_world_set_player_live_pose(nodeId, Float32Array n*9) — the CAPTURE feed
+// (req_2786): per-node transforms pushed every solve tick override the clip sampler
+// while fresh; _clear drops the override. Node-scoped: only the capture surface's
+// loader wears the camera pose.
+fn hostSetPlayerLivePose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const bytes = argView(info, 1) orelse {
+        setReturnString(info, "error:BadPose");
+        return;
+    };
+    world_loader.setPlayerLivePose(node_id, bytes);
+    setReturnString(info, "ok");
+}
+
+fn hostClearPlayerLivePose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (argToNodeId(info, 0)) |node_id| world_loader.clearPlayerLivePose(node_id);
+    setReturnString(info, "ok");
+}
+
 // ── the pop-out window (WORLDWIN-0611) ──────────────────────────────────────
 // __compiled_world_window(gameFile, storeDir, width, height) opens the
 // second OS window (or reloads its gamefile when already open — the Compile
@@ -517,6 +541,8 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_set_resident_meshes", hostSetResidentMeshes);
     v8_runtime.registerHostFn("__compiled_world_set_player_model", hostSetPlayerModel);
     v8_runtime.registerHostFn("__compiled_world_set_player_animation", hostSetPlayerAnimation);
+    v8_runtime.registerHostFn("__compiled_world_set_player_live_pose", hostSetPlayerLivePose);
+    v8_runtime.registerHostFn("__compiled_world_clear_player_live_pose", hostClearPlayerLivePose);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);
     v8_runtime.registerHostFn("__compiled_world_window_status", hostWindowStatus);

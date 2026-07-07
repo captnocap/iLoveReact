@@ -954,16 +954,16 @@ fn pendingPlayerAnimationCopy(allocator: std.mem.Allocator, model_len: usize) ?c
     while (ci < src.clips.len) : (ci += 1) {
         const sclip = src.clips[ci];
         const keys = allocator.alloc(constructor.PlayerAnimationKeyframe, sclip.keyframes.len) catch {
-            for (clips[0..ci]) |c| c.deinit(allocator);
+            for (clips[0..ci]) |done_clip| done_clip.deinit(allocator);
             allocator.free(clips);
             return null;
         };
         var ki: usize = 0;
         while (ki < sclip.keyframes.len) : (ki += 1) {
             const transforms = allocator.alloc(constructor.PlayerTransform, sclip.keyframes[ki].transforms.len) catch {
-                for (keys[0..ki]) |k| k.deinit(allocator);
+                for (keys[0..ki]) |done_key| done_key.deinit(allocator);
                 allocator.free(keys);
-                for (clips[0..ci]) |c| c.deinit(allocator);
+                for (clips[0..ci]) |done_clip| done_clip.deinit(allocator);
                 allocator.free(clips);
                 return null;
             };
@@ -984,6 +984,74 @@ fn forceGaitEnv() bool {
     const v = s != null and s.?.len > 0 and s.?[0] == '1';
     g_force_gait = v;
     return v;
+}
+
+// ── the LIVE player pose (req_2786 — webcam capture drives the body) ────────
+// The capture surface pushes per-node transforms every solve tick
+// (__compiled_world_set_player_live_pose); while fresh they OVERRIDE the clip
+// sampler entirely — the figure mirrors the camera. Node-scoped (the iso
+// viewport's loader must never wear the capture pose) with the same slot
+// discipline as the physics override. A stale pose (no push for ~3/4s)
+// falls back to clips, so a dropped tracker never freezes the body.
+const LIVE_POSE_STALE_FRAMES: u32 = 45;
+
+const PendingPose = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    transforms: []f32 = &.{}, // n × 9 floats (px,py,pz, rx,ry,rz, sx,sy,sz), page_allocator
+    count: usize = 0,
+    age_frames: u32 = 0,
+};
+var g_pending_pose: [4]PendingPose = .{ .{}, .{}, .{}, .{} };
+
+fn pendingPoseFor(node_id: u32) ?*PendingPose {
+    if (node_id == 0) return null;
+    for (&g_pending_pose) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+pub fn setPlayerLivePose(node_id: u32, bytes: []const u8) void {
+    if (node_id == 0) return;
+    const alloc = std.heap.page_allocator;
+    var slot: ?*PendingPose = pendingPoseFor(node_id);
+    if (slot == null) {
+        for (&g_pending_pose) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    const p = slot orelse return;
+    const float_count = bytes.len / 4;
+    if (float_count == 0 or float_count % 9 != 0) {
+        clearPlayerLivePose(node_id);
+        return;
+    }
+    if (p.transforms.len != float_count) {
+        if (p.transforms.len > 0) alloc.free(p.transforms);
+        p.transforms = alloc.alloc(f32, float_count) catch {
+            p.transforms = &.{};
+            p.set = false;
+            return;
+        };
+    }
+    @memcpy(std.mem.sliceAsBytes(p.transforms), bytes[0 .. float_count * 4]);
+    p.node_id = node_id;
+    p.set = true;
+    p.count = float_count / 9;
+    p.age_frames = 0;
+}
+
+pub fn clearPlayerLivePose(node_id: u32) void {
+    const p = pendingPoseFor(node_id) orelse return;
+    if (p.transforms.len > 0) std.heap.page_allocator.free(p.transforms);
+    p.transforms = &.{};
+    p.count = 0;
+    p.set = false;
+    p.node_id = 0;
 }
 
 fn buildCubeOpenRun(comptime open_min: bool, comptime open_max: bool) [(36 - (if (open_min) 6 else 0) - (if (open_max) 6 else 0)) * 8]f32 {
@@ -3163,6 +3231,28 @@ fn updatePlayerModelNodes(kids: []Node, first: usize, groups: []const constructo
         node.scene3d_scale_x = t.scale[0];
         node.scene3d_scale_y = t.scale[1];
         node.scene3d_scale_z = t.scale[2];
+    }
+}
+
+/// The LIVE-POSE twin (req_2786): identical node math, but the per-node
+/// transforms come straight from the capture push instead of a clip — the
+/// figure mirrors the camera. Transforms are model-local like clip keys.
+fn updatePlayerModelNodesLive(kids: []Node, first: usize, groups: []const constructor.PlayerModelGroup, transforms: []const f32, player: PlayerState) void {
+    const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
+    var i: usize = 0;
+    while (i < groups.len) : (i += 1) {
+        const t = transforms[i * 9 ..][0..9];
+        const local = rotateYLocal(.{ t[0], t[1], t[2] }, model_yaw_degrees);
+        const node = &kids[first + i];
+        node.scene3d_pos_x = player.x + local.x;
+        node.scene3d_pos_y = player.y + local.y;
+        node.scene3d_pos_z = player.z + local.z;
+        node.scene3d_rot_x = t[3];
+        node.scene3d_rot_y = t[4] + model_yaw_degrees;
+        node.scene3d_rot_z = t[5];
+        node.scene3d_scale_x = t[6];
+        node.scene3d_scale_y = t[7];
+        node.scene3d_scale_z = t[8];
     }
 }
 
@@ -5891,7 +5981,18 @@ pub const Runtime = struct {
         self.stepCookedDoors(dt); // req_1908: swing custom doors toward their target
 
         updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, self.cameraColliderSet(), dt);
-        updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
+        // A FRESH capture pose overrides the clip sampler (req_2786); stale
+        // (~3/4s without a push) falls back to clips so a dropped tracker
+        // never freezes the body.
+        var live_posed = false;
+        if (pendingPoseFor(self.node_id)) |lp| {
+            if (lp.count == self.scene.player_model.len and lp.age_frames < LIVE_POSE_STALE_FRAMES) {
+                updatePlayerModelNodesLive(self.kid_list.items, self.player_first_child, self.scene.player_model, lp.transforms, self.player);
+                live_posed = true;
+            }
+            lp.age_frames +%= 1;
+        }
+        if (!live_posed) updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
         self.refreshNpcNodes();
         self.updateDynamicPropNodes();
         self.stepTickers(dt);

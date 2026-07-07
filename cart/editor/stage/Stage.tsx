@@ -1,15 +1,18 @@
 import { C } from '../workspace.cls';
 import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
-import type { PlacedPiece } from '../world/pieces';
+import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import { modelPackageById } from '../data/content';
 import { modelDocument } from '../data/documents';
 import ContextMenu from '../shell/ContextMenu';
+import AnimationCaptureSurface from './AnimationCaptureSurface';
 import MaterialFocusSurface from './MaterialFocusSurface';
 import ModelDocumentSurface, { type OutlinerHandlers } from './ModelDocumentSurface';
+import PlaytestSurface from './PlaytestSurface';
 import StageTabs from './StageTabs';
 import WorldEditorSurface from './WorldEditorSurface';
 import BuildBar from './BuildBar';
+import MapPaintDock from './MapPaintDock';
 import { worldToolFor } from '../world/worldTool';
 
 export default function Stage(props: {
@@ -18,6 +21,7 @@ export default function Stage(props: {
   onWorkspaceDocument: (id: string) => void;
   onCloseWorkspaceDocument: (id: string) => void;
   onCommand: (id: string, source: string) => void;
+  onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onModelToolApi: (api: ModelToolApi) => void;
   onModelToolState: (state: ModelToolSnapshot) => void;
   modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
@@ -25,7 +29,7 @@ export default function Stage(props: {
   onStage: () => void;
   onContext: () => void;
   onObject: (id: string) => void;
-  onPlacePiece: (pieces: PlacedPiece[]) => void;
+  onPlacePiece: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
   onSelectPiece: (id: string | null) => void;
   onPieceContext: (id: string, x: number, y: number) => void;
   onArmPiece: (pieceId: string) => void;
@@ -66,8 +70,16 @@ export default function Stage(props: {
   return (
     <C.HW_StagePanel>
       <C.HW_StageViewport>
-        {activeDocument.kind === 'world' || activeDocument.kind === 'model' ? null : <C.HW_CanvasGrid />}
-        {activeDocument.kind === 'world' ? (
+        {activeDocument.kind === 'world' || activeDocument.kind === 'model' || activeDocument.kind === 'playtest' || activeDocument.kind === 'animation' ? null : <C.HW_CanvasGrid />}
+        {activeDocument.kind === 'animation' ? (
+          <AnimationCaptureSurface />
+        ) : activeDocument.kind === 'playtest' ? (
+          <PlaytestSurface
+            globals={props.state.worldGlobals}
+            pieces={props.state.worldPieces}
+            authoredPieces={props.state.authoredBuildPieces}
+          />
+        ) : activeDocument.kind === 'world' ? (
           <WorldEditorSurface
             paintActive={props.state.mapPaint.active}
             floor={props.state.floorIndex}
@@ -115,6 +127,9 @@ export default function Stage(props: {
             world surface's pointer-capture Pressable. */}
         {activeDocument.kind === 'world' && worldToolFor(props.state.activeCommandId) === 'place' ? (
           <BuildBar armedPieceId={props.state.armedPieceId} onArm={props.onArmPiece} />
+        ) : null}
+        {activeDocument.kind === 'world' && (props.state.mapPaint.active || props.state.mapPaint.texturePickerOpen) ? (
+          <MapPaintDock state={props.state.mapPaint} onPatch={props.onMapPaint} />
         ) : null}
       </C.HW_StageViewport>
       <StageTabs

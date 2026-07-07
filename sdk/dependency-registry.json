@@ -795,6 +795,10 @@
         {
           "kind": "metafileInput",
           "input": "runtime/hooks/useSegment.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/capture/pose.ts"
         }
       ],
       "buildOptions": [
@@ -806,7 +810,7 @@
       "nativeLibraries": [
         "onnx-runtime"
       ],
-      "note": "Embeds onnxruntime + registers __onnx_* / __segment_* host fns. Phase 1 is a smoke-test only (__onnx_test); Phase 2 adds MobileSAM segmentation for cart/cutout. Carts that don't import runtime/hooks/useSegment.ts pay nothing — onnxruntime.so is ~22MB."
+      "note": "Embeds onnxruntime + registers __onnx_* / __segment_* / __pose_* host fns. MobileSAM segmentation (cart/cutout) + MoveNet pose estimation (the editor's animation capture, req_2786). Carts that import neither trigger pay nothing — onnxruntime.so is ~22MB."
     },
     "lua-worker": {
       "triggers": [

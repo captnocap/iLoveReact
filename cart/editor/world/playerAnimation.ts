@@ -80,6 +80,104 @@ function swingLimb(
   }
 }
 
+/** Rotate `p` about `pivot` around the world Z axis (degrees; positive swings
+ *  a hanging limb toward +X — the figure's right side). */
+function rotZAt(pivot: V3, p: V3, deg: number): V3 {
+  const r = deg * DEG;
+  const c = Math.cos(r), s = Math.sin(r);
+  const dx = p[0] - pivot[0], dy = p[1] - pivot[1];
+  return [pivot[0] + dx * c - dy * s, pivot[1] + dx * s + dy * c, p[2]];
+}
+
+/** The FRONTAL-plane twin of swingLimb (req_2786 live capture): the camera
+ *  sees lateral raises/bends, which are Z rotations on the figure. Same
+ *  measured pivots, same missing-part tolerance. */
+function swingLimbFrontal(
+  work: Map<string, { pos: V3; rx: number; ry: number; rz: number }>,
+  rest: Map<string, V3>,
+  side: 'left' | 'right',
+  kind: 'leg' | 'arm',
+  upperDeg: number,
+  lowerDeg: number,
+): void {
+  const chain = kind === 'leg'
+    ? ['upper_leg', 'knee', 'lower_leg', 'foot', 'toes']
+    : ['upper_arm', 'elbow', 'lower_arm', 'wrist', 'hand', 'fingers'];
+  const rootJoint = kind === 'leg' ? `hip_${side}` : `shoulder_${side}`;
+  const midJoint = kind === 'leg' ? `knee_${side}` : `elbow_${side}`;
+  const names = chain.map((n) => `${n}_${side}`);
+  const rootPivot = rest.get(rootJoint) ?? rest.get(names[0]!);
+  if (!rootPivot) return;
+  for (const name of names) {
+    const w = work.get(name);
+    if (!w) continue;
+    w.pos = rotZAt(rootPivot, w.pos, upperDeg);
+    w.rz += upperDeg;
+  }
+  const mid = work.get(midJoint);
+  if (!mid || lowerDeg === 0) return;
+  const lowerFrom = chain.indexOf(kind === 'leg' ? 'lower_leg' : 'lower_arm');
+  const midPivot = mid.pos;
+  for (const name of names.slice(lowerFrom)) {
+    const w = work.get(name);
+    if (!w) continue;
+    w.pos = rotZAt(midPivot, w.pos, lowerDeg);
+    w.rz += lowerDeg;
+  }
+}
+
+/** The live-capture pose vocabulary: frontal-plane limb angles (degrees,
+ *  positive = toward the figure's +X/right), torso lean, head tilt, and a
+ *  whole-body vertical drop (squat) in meters. */
+export type FrontalAngles = {
+  armL: { upper: number; lower: number };
+  armR: { upper: number; lower: number };
+  legL: { upper: number; lower: number };
+  legR: { upper: number; lower: number };
+  torso: number;
+  head: number;
+  drop: number;
+};
+
+export const FRONTAL_REST: FrontalAngles = {
+  armL: { upper: 0, lower: 0 }, armR: { upper: 0, lower: 0 },
+  legL: { upper: 0, lower: 0 }, legR: { upper: 0, lower: 0 },
+  torso: 0, head: 0, drop: 0,
+};
+
+/** Build the full-body pose for one solved camera frame — the live-sync
+ *  sample the capture surface pushes through the live-pose door. */
+export function frontalPose(nodes: AnimNode[], f: FrontalAngles): NodeTransform[] {
+  const work = new Map(nodes.map((n) => [n.name, { pos: [...n.center] as V3, rx: 0, ry: 0, rz: 0 }]));
+  const rest = new Map<string, V3>(nodes.map((n) => [n.name, n.center]));
+  swingLimbFrontal(work, rest, 'left', 'arm', f.armL.upper, f.armL.lower);
+  swingLimbFrontal(work, rest, 'right', 'arm', f.armR.upper, f.armR.lower);
+  swingLimbFrontal(work, rest, 'left', 'leg', f.legL.upper, f.legL.lower);
+  swingLimbFrontal(work, rest, 'right', 'leg', f.legR.upper, f.legR.lower);
+  // Torso lean about a low pivot; the head adds its own tilt on top.
+  const leanPivot: V3 = [0, 0.9, 0];
+  return nodes.map((n) => {
+    const w = work.get(n.name)!;
+    let pos = w.pos;
+    let rz = w.rz;
+    if (TORSO_BONES.has(n.name) || n.name === 'head' || n.name.startsWith('eye_') || ['nose', 'mouth', 'lips', 'teeth', 'hair'].includes(n.name)) {
+      pos = rotZAt(leanPivot, pos, f.torso);
+      rz += f.torso;
+      if (n.name === 'head' || n.name.startsWith('eye_') || ['nose', 'mouth', 'lips', 'teeth', 'hair'].includes(n.name)) rz += f.head;
+    }
+    return { pos: [pos[0], Math.max(0.02, pos[1] - f.drop), pos[2]] as V3, rot: [w.rx, w.ry, rz] as V3 };
+  });
+}
+
+/** Encode one live pose for __compiled_world_set_player_live_pose (n×9). */
+export function encodeLivePose(transforms: NodeTransform[]): Float32Array {
+  const out = new Float32Array(transforms.length * 9);
+  transforms.forEach((t, i) => {
+    out.set([t.pos[0], t.pos[1], t.pos[2], t.rot[0], t.rot[1], t.rot[2], 1, 1, 1], i * 9);
+  });
+  return out;
+}
+
 /** Bones that twist with the torso during gait (ry counter-rotation). */
 const TORSO_BONES = new Set(['chest', 'abdomen', 'butt', 'back', 'breast']);
 

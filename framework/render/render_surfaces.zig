@@ -1689,6 +1689,21 @@ pub fn getDimensions(src: []const u8) ?struct { w: u32, h: u32 } {
     return null;
 }
 
+pub const CpuFrame = struct { width: u32, height: u32, rgba: []const u8 };
+
+/// Borrow the latest CPU RGBA frame of a live feed (top-down, stride w*4) —
+/// the ML tracker input (req_2786: pose estimation reads the cam feed the
+/// same place the GPU upload does). The slice ALIASES feed.pixel_buf: consume
+/// it synchronously on the caller's frame, never hold it across updates.
+pub fn latestCpuFrame(src: []const u8) ?CpuFrame {
+    const f = findFeed(src) orelse return null;
+    const buf = f.pixel_buf orelse return null;
+    if (f.width == 0 or f.height == 0 or f.status != .ready) return null;
+    const need = @as(usize, f.width) * @as(usize, f.height) * 4;
+    if (buf.len < need) return null;
+    return .{ .width = f.width, .height = f.height, .rgba = buf[0..need] };
+}
+
 /// Suspend / resume the feed's subprocesses via SIGSTOP / SIGCONT. Idempotent
 /// — only acts on transitions. Skips no-op when feed doesn't exist yet.
 /// Sends to the whole process group via negative pid so any child of qemu

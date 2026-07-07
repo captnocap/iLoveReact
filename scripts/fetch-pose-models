@@ -1,0 +1,17 @@
+#!/bin/sh
+# fetch-pose-models — vendor the MoveNet SinglePose Lightning ONNX model the
+# editor's animation capture uses (req_2786, framework/ml/pose.zig). Same
+# home as the SlimSAM pair: ~/.reactjit/models/. Any MoveNet-signature model
+# (input int32 [1,192,192,3], output f32 [1,1,17,3]) drops in under this name.
+set -e
+DIR="$HOME/.reactjit/models"
+OUT="$DIR/movenet_lightning.onnx"
+URL="https://huggingface.co/Xenova/movenet-singlepose-lightning/resolve/main/onnx/model.onnx"
+mkdir -p "$DIR"
+if [ -s "$OUT" ]; then
+  echo "[pose-models] already present: $OUT ($(du -h "$OUT" | cut -f1))"
+  exit 0
+fi
+echo "[pose-models] downloading MoveNet Lightning → $OUT"
+curl -fsSL -o "$OUT" "$URL"
+echo "[pose-models] done: $(du -h "$OUT" | cut -f1)"

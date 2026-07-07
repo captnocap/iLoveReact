@@ -76,7 +76,7 @@ export function playerModelPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[])
   return { verts, table: new Float32Array(rows), nodes };
 }
 
-export type PlayerModelPush = { name: string; groups: number; animated: boolean };
+export type PlayerModelPush = { name: string; groups: number; animated: boolean; nodes: AnimNode[] };
 
 /** Resolve → slice → stage, model AND clips. Returns what was staged (the
  *  playtest readout), or null when there is no player-role export / no door /
@@ -108,5 +108,5 @@ export function pushPlayerModel(): PlayerModelPush | null {
     g.__compiled_world_set_player_animation(encodeAnimationPayload(payload.nodes.length, clips));
     animated = true;
   }
-  return { name: pkg.name, groups: payload.table.length / 8, animated };
+  return { name: pkg.name, groups: payload.table.length / 8, animated, nodes: payload.nodes };
 }

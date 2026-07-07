@@ -16,8 +16,9 @@ import type { PlacedPiece } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
 import type { BuildKind } from '../world/buildCatalog';
 import type { Skeleton, PropRig } from '../../../runtime/skeleton';
+import type { WorldGlobals } from './globals';
 
-export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Window' | 'Help';
+export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Globals' | 'Window' | 'Help';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
 // (cuboid/cylinder/…); see PRIMITIVE_MESHES (commands.ts) + primitiveMeshData (catalog).
 export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere';
@@ -52,7 +53,12 @@ export type ModelPart = {
 };
 export type LibraryTab = 'Build' | 'Props' | 'Skins';
 export type ViewMode = '3D' | '2D';
-export type WorkspaceDocumentKind = 'world' | 'model' | 'material';
+// 'playtest' (GLOBALS req_2770): the embodied drop-in tab — the SAME editor world
+// mounted with the loader's built-in player instead of the iso authoring camera,
+// where global tunables (Globals → Physics) are tested live.
+// 'animation' (req_2786): the CAPTURE tab — webcam feed beside the exported
+// player model with live pose sync; the animation workbench arc's surface.
+export type WorkspaceDocumentKind = 'world' | 'model' | 'material' | 'playtest' | 'animation';
 export type WorkspaceDocument = {
   id: string;
   kind: WorkspaceDocumentKind;
@@ -519,4 +525,10 @@ export type EditorState = {
   // painter's armed tool — rendered by MapPaintBar in the workspace action bar;
   // strokes/render/colliders are host-side (framework/game/map).
   mapPaint: MapPaintState;
+  // World GLOBALS (GLOBALS req_2770): the game's global tunables — physics/player
+  // for now (data/globals.ts is the canonical table). Edited in the playtest tab's
+  // focus panel, pushed live through __compiled_world_set_physics, micro-saved to
+  // world-globals.json (data/globalsStore.ts), and destined for the Compile bake's
+  // PHYSICS_CONFIG lump.
+  worldGlobals: WorldGlobals;
 };

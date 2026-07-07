@@ -25,6 +25,8 @@ const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const onnx = @import("ml/onnx.zig");
 const segment = @import("ml/segment.zig");
+const pose = @import("ml/pose.zig");
+const render_surfaces = @import("render/render_surfaces.zig");
 
 const SCRATCH_DIR = "/tmp/_reactjit_cutout";
 
@@ -253,9 +255,79 @@ fn hostSegmentRefine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnString(info, reply);
 }
 
+// ── Pose host fns (req_2786 — the CAPTURE pipeline's per-frame tracker) ──────
+// __pose_estimate(src)        → JSON {ok, kp:[x,y,s ×17]} from a LIVE render
+//                               surface's CPU frame (cam:N / /dev/video only —
+//                               SELFSHOT: never screen:/window: sources).
+// __pose_estimate_image(path) → same, from an image file (headless verify).
+// Keypoints are source-normalized 0..1, COCO order (nose, eyes, ears,
+// shoulders, elbows, wrists, hips, knees, ankles — L before R).
+
+fn poseReply(info: v8.FunctionCallbackInfo, alloc: std.mem.Allocator, kps: ?[pose.KEYPOINTS]pose.Keypoint) void {
+    const points = kps orelse {
+        const msg = pose.initError() orelse "no frame";
+        const escaped = jsonEscape(alloc, msg) catch msg;
+        const payload = std.fmt.allocPrint(alloc, "{{\"ok\":false,\"error\":\"{s}\"}}", .{escaped}) catch {
+            setReturnString(info, "{\"ok\":false,\"error\":\"alloc failure\"}");
+            return;
+        };
+        setReturnString(info, payload);
+        return;
+    };
+    var out = std.ArrayList(u8){};
+    defer out.deinit(alloc);
+    out.appendSlice(alloc, "{\"ok\":true,\"kp\":[") catch return;
+    for (points, 0..) |kp, i| {
+        const chunk = std.fmt.allocPrint(alloc, "{s}{d:.4},{d:.4},{d:.3}", .{ if (i == 0) "" else ",", kp.x, kp.y, kp.score }) catch return;
+        out.appendSlice(alloc, chunk) catch return;
+    }
+    out.appendSlice(alloc, "]}") catch return;
+    setReturnString(info, out.items);
+}
+
+fn hostPoseEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const src = argString(info, 0, alloc) orelse {
+        setReturnString(info, "{\"ok\":false,\"error\":\"no source arg\"}");
+        return;
+    };
+    // The camera-only law (SELFSHOT): the pose tracker reads the USER's cam
+    // feed, never a desktop surface.
+    if (!std.mem.startsWith(u8, src, "cam:") and !std.mem.startsWith(u8, src, "/dev/video")) {
+        setReturnString(info, "{\"ok\":false,\"error\":\"pose sources are cam:N / /dev/video only\"}");
+        return;
+    }
+    const frame = render_surfaces.latestCpuFrame(src) orelse {
+        setReturnString(info, "{\"ok\":false,\"error\":\"no live frame\"}");
+        return;
+    };
+    poseReply(info, alloc, pose.estimateRgba(frame.rgba, frame.width, frame.height));
+}
+
+fn hostPoseEstimateImage(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const path = argString(info, 0, alloc) orelse {
+        setReturnString(info, "{\"ok\":false,\"error\":\"no path arg\"}");
+        return;
+    };
+    const path_z = alloc.dupeZ(u8, path) catch {
+        setReturnString(info, "{\"ok\":false,\"error\":\"alloc failure\"}");
+        return;
+    };
+    poseReply(info, alloc, pose.estimateImage(path_z.ptr));
+}
+
 pub fn registerOnnx(_: anytype) void {
     v8_runtime.registerHostFn("__onnx_test", hostTest);
     v8_runtime.registerHostFn("__segment_open", hostSegmentOpen);
     v8_runtime.registerHostFn("__segment_close", hostSegmentClose);
     v8_runtime.registerHostFn("__segment_refine", hostSegmentRefine);
+    v8_runtime.registerHostFn("__pose_estimate", hostPoseEstimate);
+    v8_runtime.registerHostFn("__pose_estimate_image", hostPoseEstimateImage);
 }

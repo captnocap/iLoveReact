@@ -6,18 +6,26 @@
 // lookups that used to be scattered through AppFrame / DropdownMenu / ToolOptions.
 import type { EditorState, WorkspaceDocument } from './types';
 
-export type Surface = 'world' | 'model' | 'material';
+// 'playtest' (GLOBALS req_2770): the embodied drop-in tab. Deliberately NOT a
+// Command scope — no command targets it, so on the playtest tab every
+// world/model/material command grays with its surface reason and only global
+// chords fire (the loader owns WASD/Space/Shift).
+// 'animation' (req_2786): the webcam capture tab — same non-scope treatment.
+export type Surface = 'world' | 'model' | 'material' | 'playtest' | 'animation';
 
 function activeDoc(state: EditorState): WorkspaceDocument | undefined {
   return state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId);
 }
 
 /** The surface currently in view: a model document → 'model'; the Color Studio / a material
- *  document → 'material'; otherwise the default world/map surface. */
+ *  document → 'material'; the playtest drop-in → 'playtest'; otherwise the default world/map
+ *  surface. */
 export function activeSurface(state: EditorState): Surface {
   const doc = activeDoc(state);
   if (doc?.kind === 'model') return 'model';
   if (doc?.kind === 'material' || state.materialFocused) return 'material';
+  if (doc?.kind === 'playtest') return 'playtest';
+  if (doc?.kind === 'animation') return 'animation';
   return 'world';
 }
 

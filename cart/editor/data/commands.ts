@@ -8,7 +8,7 @@ import { activeSurface, hasSelection } from './surfaces';
 import { KIND_ORDER, KIND_LABEL } from '../world/buildCatalog';
 import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
-export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Story', 'Window', 'Help'];
+export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Story', 'Globals', 'Window', 'Help'];
 export const MENU_DROPDOWN_WIDTH = 420;
 
 // The starter primitives under File → New Mesh (fresh document) and Edit → Mesh → Add Primitive
@@ -154,6 +154,15 @@ export const COMMANDS: Command[] = [
   // ── Story (world) ─────────────────────────────────────────────────────────────────────────
   { id: 'mission-point', menu: 'Story', name: 'Place Mission Point', icon: 'Flag', key: 'G', context: true, native: true, undoable: true, tool: true, scope: 'world', available: false },
   { id: 'author-sequence', menu: 'Story', name: 'Author Sequence Marker', icon: 'Route', key: 'Q', context: true, native: true, undoable: true, tool: true, scope: 'world', available: false },
+
+  // ── Globals (GLOBALS req_2770) — the game's world-level tunables ──────────────────────────
+  // Each leaf opens the PLAYTEST tab (the editor world with the embodied player) and puts
+  // that domain's settings in the focus panel: tune a value, feel it the same second, and
+  // the micro-save locks it in. Physics is the first domain; the menu grows by addition.
+  { id: 'globals-physics', menu: 'Globals', name: 'Physics', icon: 'Gauge', key: '', context: false, native: true, undoable: false, scope: 'global' },
+  // Globals → Animation (req_2786): the CAPTURE surface — webcam feed beside the
+  // exported player model, live pose sync driving the body; the record verb grows here.
+  { id: 'globals-animation', menu: 'Globals', name: 'Animation', icon: 'PersonStanding', key: '', context: false, native: true, undoable: false, scope: 'global' },
 
   // ── Window (real popover toggles — flip the existing dock popover state) ─────────────────────
   { id: 'toggle-eventbus', menu: 'Window', name: 'Event Bus', icon: 'Workflow', key: 'Ctrl+H', context: false, native: true, undoable: false, scope: 'global' },
@@ -348,6 +357,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
   Map: [cmd('add-chunk'), cmd('add-trigger'), cmd('set-spawn'), cmd('cycle-floor')],
   Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-material'), cmd('open-color-studio'), cmd('sample-material')],
   Story: [cmd('mission-point'), cmd('author-sequence')],
+  Globals: [cmd('globals-physics'), cmd('globals-animation')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],
   Help: [cmd('show-pipeline')],
 };

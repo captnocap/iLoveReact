@@ -74,7 +74,7 @@ import { oklchName } from '../data/colorSpine';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import { useBuildJournal } from '../data/journal';
 import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
-import { WORLD_DOCUMENT_ID, PLAYTEST_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
+import { WORLD_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 import { scheduleGlobalsSave } from '../data/globalsStore';
 import { DEFAULT_PHYSICS_GLOBALS, type PhysicsGlobals } from '../data/globals';
 import { mapEventDrain, type MapAuthoringEvent } from '../../../runtime/game/map';
@@ -764,6 +764,19 @@ export default function AppFrame() {
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, PLAYTEST_DOCUMENT),
         activeWorkspaceDocumentId: PLAYTEST_DOCUMENT.id,
         status: 'playtest opened — WASD/Shift/Space drive the player; physics globals in the focus panel apply live',
+      }));
+      return;
+    }
+    // Globals → Animation (req_2786): the CAPTURE tab — webcam feed beside the
+    // exported player model with live pose sync; record grows from here.
+    if (command.id === 'globals-animation') {
+      setState((prev) => ({
+        ...prev,
+        openMenu: null,
+        actionMenu: 'Globals',
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, ANIMATION_DOCUMENT),
+        activeWorkspaceDocumentId: ANIMATION_DOCUMENT.id,
+        status: 'animation capture opened — stand in front of the webcam; the exported player model mirrors the tracked pose',
       }));
       return;
     }
@@ -1811,6 +1824,14 @@ export default function AppFrame() {
         ...prev,
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, PLAYTEST_DOCUMENT),
         activeWorkspaceDocumentId: PLAYTEST_DOCUMENT.id,
+      }));
+    } else if (kind === 'animation') {
+      // Headless repro of the capture tab (req_2786) — no cam in headless, so
+      // the tracker chip reports honestly while the layout verifies.
+      setState((prev) => ({
+        ...prev,
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, ANIMATION_DOCUMENT),
+        activeWorkspaceDocumentId: ANIMATION_DOCUMENT.id,
       }));
     } else if (kind) createNewMeshDocument(kind as PrimitiveKind, { size: 1, height: 1, resolution: 1 });
   }, []);

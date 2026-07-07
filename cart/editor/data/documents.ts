@@ -9,6 +9,30 @@ export const WORLD_DOCUMENT: WorkspaceDocument = {
   subtitle: 'main.gamefile',
 };
 
+// The playtest drop-in tab (GLOBALS req_2770): ONE document, upserted by the
+// Globals menu — the same editor world with the embodied player, where global
+// tunables are tested live. Closeable like any non-world tab.
+export const PLAYTEST_DOCUMENT_ID = 'playtest:globals';
+
+export const PLAYTEST_DOCUMENT: WorkspaceDocument = {
+  id: PLAYTEST_DOCUMENT_ID,
+  kind: 'playtest',
+  title: 'Playtest',
+  subtitle: 'physics globals',
+};
+
+// The animation capture tab (req_2786): webcam feed beside the exported
+// player model with live pose sync — the workbench arc's CAPTURE surface.
+// ONE document, upserted by Globals → Animation.
+export const ANIMATION_DOCUMENT_ID = 'animation:capture';
+
+export const ANIMATION_DOCUMENT: WorkspaceDocument = {
+  id: ANIMATION_DOCUMENT_ID,
+  kind: 'animation',
+  title: 'Animation',
+  subtitle: 'webcam capture',
+};
+
 export function modelDocument(model: ModelPackage): WorkspaceDocument {
   return {
     id: `model:${model.id}`,
