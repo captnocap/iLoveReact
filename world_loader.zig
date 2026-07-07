@@ -2184,12 +2184,36 @@ fn ufFind(parent: []u32, a0: u32) u32 {
 }
 
 /// The whole mesh as ONE box — the legacy full-bounds collider (anchor-centered XZ,
-/// ground→height in Y). Used for a welded/degenerate mesh that won't cleanly split.
+/// ground→height in Y). Only for a mesh with no scannable vertices: the centering
+/// ASSUMES symmetry about the anchor, which an authored mesh rarely has.
 fn meshFullBoundsIsland(mesh: constructor.MeshPropMesh) MeshIsland {
     return .{
         .lo = .{ -mesh.footprint_width / 2.0, 0, -mesh.footprint_depth / 2.0 },
         .hi = .{ mesh.footprint_width / 2.0, mesh.height, mesh.footprint_depth / 2.0 },
     };
+}
+
+/// The whole mesh as ONE box from its ACTUAL vertex bounds (req_2836: the centered
+/// footprint box overhangs an off-center mesh — an invisible wall on one side,
+/// pass-through on the other). Falls back to the centered form when no solid
+/// vertices exist to scan.
+fn meshVertexBoundsIsland(mesh: constructor.MeshPropMesh) MeshIsland {
+    const vc: usize = solidVertexCount(mesh);
+    if (vc == 0 or mesh.vertices.len < 8) return meshFullBoundsIsland(mesh);
+    var isl = MeshIsland{
+        .lo = .{ mesh.vertices[0], mesh.vertices[1], mesh.vertices[2] },
+        .hi = .{ mesh.vertices[0], mesh.vertices[1], mesh.vertices[2] },
+    };
+    var vi: usize = 1;
+    while (vi < vc and (vi * 8 + 2) < mesh.vertices.len) : (vi += 1) {
+        const b = vi * 8;
+        inline for (0..3) |a| {
+            const v = mesh.vertices[b + a];
+            if (v < isl.lo[a]) isl.lo[a] = v;
+            if (v > isl.hi[a]) isl.hi[a] = v;
+        }
+    }
+    return isl;
 }
 
 /// The 12 oriented-collider floats for one island of one placed mesh-prop instance —
@@ -2244,7 +2268,7 @@ fn meshPropIslands(allocator: std.mem.Allocator, mesh: constructor.MeshPropMesh)
     const oneBox = struct {
         fn make(a: std.mem.Allocator, m: constructor.MeshPropMesh) ![]MeshIsland {
             const out = try a.alloc(MeshIsland, 1);
-            out[0] = meshFullBoundsIsland(m);
+            out[0] = meshVertexBoundsIsland(m); // req_2836: true bounds, never the centered guess
             return out;
         }
     }.make;
