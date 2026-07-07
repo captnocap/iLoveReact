@@ -236,6 +236,7 @@ pub fn strokeEnd() StrokeStats {
         g_stats.water_dry = !g_water_wet_any;
     }
     g_stats.touched = dirtyChunkCount();
+    if (g_stats.stamps > 0) _ = autosaveNow();
     return g_stats;
 }
 
@@ -864,6 +865,7 @@ pub fn setTileBindings(vals: []const f32) void {
         const ch = maybe orelse continue;
         ch.dirty.tiles = true;
     }
+    _ = autosaveNow();
 }
 
 pub fn tileBindings() []const [BINDING_FLOATS]f32 {
@@ -1005,6 +1007,7 @@ pub fn roadsRestamp() void {
 pub fn roadCommit() ?u32 {
     const id = roads.commitDraft() orelse return null;
     roadsRestamp();
+    _ = autosaveNow();
     return id;
 }
 
@@ -1014,7 +1017,10 @@ pub fn roadCancel() void {
 
 pub fn roadDelete(id: u32) bool {
     const ok = roads.deleteStroke(id);
-    if (ok) roadsRestamp();
+    if (ok) {
+        roadsRestamp();
+        _ = autosaveNow();
+    }
     return ok;
 }
 
@@ -1080,6 +1086,41 @@ pub fn loadMap(bytes: []const u8) bool {
     g_tile_binding_count = if (ok) binding_count else 0;
     if (ok) roadsRestamp();
     return ok;
+}
+
+// ── autosave (SESSIONSAVE req_2765) ──────────────────────────────────────────
+// The painting micro-saves itself: with a path registered, every mutating
+// gesture (stroke end, road commit/delete, binding table edit, zone drop,
+// chunk growth) rewrites the save file atomically (tmp + rename). This is the
+// V20 contract — edits persist at every micro change, never only on a manual
+// Save. No path registered (tests, the compiled player) ⇒ never touches disk.
+
+var g_autosave_path_buf: [1024]u8 = undefined;
+var g_autosave_len: usize = 0;
+
+/// Register the file every subsequent mutation saves into. Empty disables.
+pub fn setAutosaveFile(path: []const u8) void {
+    const n = @min(path.len, g_autosave_path_buf.len);
+    @memcpy(g_autosave_path_buf[0..n], path[0..n]);
+    g_autosave_len = n;
+}
+
+/// Serialize the painting and atomically replace the autosave file.
+/// No-op (false) when no path is registered or the world is empty.
+pub fn autosaveNow() bool {
+    if (g_autosave_len == 0) return false;
+    const path = g_autosave_path_buf[0..g_autosave_len];
+    const alloc = std.heap.page_allocator;
+    const buf = alloc.alloc(u8, saveSizeUpperBound()) catch return false;
+    defer alloc.free(buf);
+    const n = saveMap(buf);
+    if (n == 0) return false;
+    if (std.fs.path.dirname(path)) |dir| std.fs.cwd().makePath(dir) catch {};
+    var tmp_buf: [g_autosave_path_buf.len + 4]u8 = undefined;
+    const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return false;
+    std.fs.cwd().writeFile(.{ .sub_path = tmp, .data = buf[0..n] }) catch return false;
+    std.fs.cwd().rename(tmp, path) catch return false;
+    return true;
 }
 
 // ── dirty bookkeeping ─────────────────────────────────────────────────────────

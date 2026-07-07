@@ -29,18 +29,19 @@ import { useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
-import type { PlacedPiece, MaterialRef } from '../world/pieces';
+import type { PlacedPiece, PlacementGesture, MaterialRef } from '../world/pieces';
 import { placementSlotKey } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
 import type { BuildKind } from '../world/buildCatalog';
 import { loadPersistedState, persistState } from '../data/persistView';
+import { scheduleWorldSave } from '../data/worldStore';
 import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, type PropRig } from '../../../runtime/skeleton';
 import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
-import { dispatchEdit } from '../data/editorEvents';
+import { dispatchEdit, dispatchPiecePlacement, draftPiecePlacementEvent, finalizePiecePlacementEvent, type PiecePlacementDraftPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/hmscAssetCatalog';
@@ -92,6 +93,7 @@ export default function AppFrame() {
   const playing = path === '/play';
   const [state, setState] = useState<EditorState>(loadPersistedState);
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
+  const pendingPieceEvents = useRef<PiecePlacementDraftPayload[]>([]);
   // The open paint-toolbar popover (ink / brush). Local, not persisted — the popovers render
   // LATE (below) so they sit over the body; the bar (early) only toggles this.
   const [paintPopover, setPaintPopover] = useState<PaintPopover>(null);
@@ -168,6 +170,15 @@ export default function AppFrame() {
   // what you were looking at instead of snapping back to defaults.
   useEffect(() => { persistState(state); }, [state]);
 
+  // Micro-save the world's authored edits to disk (SESSIONSAVE req_2765): every
+  // worldPieces / zone-def change — placements, verbs, undo/redo, all of it —
+  // schedules a debounced write of the world save, so placed pieces survive a
+  // cold restart with no Save button to forget. The painted map micro-saves
+  // itself host-side (ensureMapSeeded registers its autosave file).
+  useEffect(() => {
+    scheduleWorldSave(state.worldPieces, state.mapPaint.zones, state.seq);
+  }, [state.worldPieces, state.mapPaint.zones]);
+
   // MAPPAINT req_2492: a hot-restored ACTIVE paint tool must RE-ARM the host on
   // boot — applyMapPaintEffects otherwise only fires on patches, so a reload
   // that rehydrated active=true left the host with no ground look and a stale
@@ -179,18 +190,26 @@ export default function AppFrame() {
     if (hostPatch) setState((prev) => ({ ...prev, mapPaint: { ...prev.mapPaint, ...hostPatch } }));
   }, []);
 
-  // Board the bus: every recorded edit (state.seq bumps once per edit; undo/redo
-  // don't) is dispatched onto the real editorbus door as it happens. history[0] is
-  // always the newest entry. The first run just baselines seq so a restored session's
-  // prior history isn't re-emitted onto the durable log (req_2424).
-  const lastBusSeq = useRef<number | null>(null);
+  // Board the bus: every recorded generic edit is dispatched onto the real
+  // editorbus door as it happens. Typed events (piece.place, material.*, ...)
+  // dispatch themselves with richer payloads; this effect deliberately ignores
+  // them so a seq bump from placement cannot replay an older generic history row.
+  const lastHistoryId = useRef<string | null | undefined>(undefined);
   useEffect(() => {
-    if (lastBusSeq.current === null) { lastBusSeq.current = state.seq; return; }
-    if (state.seq <= lastBusSeq.current) return;
-    lastBusSeq.current = state.seq;
     const latest = state.history[0];
-    if (latest) dispatchEdit(latest);
-  }, [state.seq]);
+    const latestId = latest?.id ?? null;
+    if (lastHistoryId.current === undefined) { lastHistoryId.current = latestId; return; }
+    if (!latest || latestId === lastHistoryId.current) return;
+    lastHistoryId.current = latestId;
+    if (!latest.eventType) dispatchEdit(latest);
+  }, [state.history]);
+
+  useEffect(() => {
+    if (!pendingPieceEvents.current.length) return;
+    const materializedAtMs = Date.now();
+    const events = pendingPieceEvents.current.splice(0);
+    for (const event of events) dispatchPiecePlacement(finalizePiecePlacementEvent(event, materializedAtMs));
+  }, [state.worldPieces]);
 
   // Mirror the authored placeables into the module registry (req_2578) so the
   // pure placement/render helpers resolve them without prop threading. The
@@ -668,18 +687,7 @@ export default function AppFrame() {
       } else if (command.id === 'focus-selection') {
         next = { ...next, cursor: { x: object.left, y: 0, z: object.top } };
       } else if (command.id === 'place-piece') {
-        const placed: WorldObject = {
-          id: `obj-${prev.seq}`,
-          kind: asset.tab === 'Props' ? 'PROP' : asset.tab === 'Build' ? 'PIECE' : 'TILE',
-          name: asset.name,
-          assetId: asset.id,
-          left: 160 + (prev.seq % 5) * 42,
-          top: 112 + (prev.seq % 4) * 32,
-          width: asset.tab === 'Props' ? 42 : 64,
-          height: asset.tab === 'Props' ? 30 : 52,
-          metrics: [],
-        };
-        next = { ...next, objects: [...prev.objects, placed], selectedObjectId: placed.id, cursor: { x: placed.left, y: 0, z: placed.top } };
+        next = { ...next, status: `Place Piece armed — click the world to place ${prev.armedPieceId ?? 'a build piece'}` };
       } else if (command.id === 'move-selection') {
         next = {
           ...next,
@@ -734,7 +742,7 @@ export default function AppFrame() {
 
       const target = command.id === 'paint-material' || command.id === 'place-piece' ? asset.name : object.name;
       const editMs = Date.now() - t0;
-      const event = command.id === 'sample-material'
+      const event = command.id === 'sample-material' || command.id === 'place-piece'
         ? { history: prev.history, redo: prev.redo, seq: prev.seq }
         : pushHistory(prev, command, target, `${source} - ${command.native ? 'native-ready' : 'design-only'}`, editMs);
       // Any world slice this command touched becomes a REAL reversible entry
@@ -825,9 +833,10 @@ export default function AppFrame() {
   // EditorState now. WorldEditorSurface reports placements/picks up here; the
   // Inspector reads state.selectedPieceId. This retires the phantom `objects`
   // path as the world surface's selection source.
-  const placePieces = (pieces: PlacedPiece[]) => {
+  const placePieces = (pieces: PlacedPiece[], gesture: PlacementGesture) => {
     if (!pieces.length) return;
     setState((prev) => {
+      const applyStartMs = Date.now();
       // One gesture = ONE journal entry (req_2747): a click arrives as a one-piece
       // batch, a drag-run as the whole wall run / floor rect — never N entries.
       let seq = prev.seq;
@@ -842,9 +851,47 @@ export default function AppFrame() {
       const replaced = prev.worldPieces.length - kept.length;
       const what = placed.length === 1 ? pieces[0]!.pieceId : `${placed.length}× ${pieces[0]!.pieceId}`;
       const verb = replaced && placed.length === 1 ? 'replaced' : 'placed';
+      const committedAtMs = Date.now();
+      const event = draftPiecePlacementEvent({
+        placed,
+        replaced,
+        gesture,
+        applyMs: Math.max(0, committedAtMs - applyStartMs),
+        committedAtMs,
+      });
+      pendingPieceEvents.current.push(event);
+      const first = event.positions[0]!;
+      const coord = `pos=(${first.x.toFixed(2)},${first.y.toFixed(2)},${first.z.toFixed(2)})`;
+      const meta = [
+        `mode=${event.mode}`,
+        `kind=${event.kind}`,
+        `material=${event.material}`,
+        `floor=${first.floor}`,
+        coord,
+        `yaw=${Math.round(first.yawDegrees)}`,
+        `count=${event.count}`,
+        event.replaced ? `replaced=${event.replaced}` : '',
+        `apply=${event.applyMs.toFixed(1)}ms`,
+      ].filter(Boolean).join(' ');
       return recordWorldEdit(prev, {
         ...prev,
         seq,
+        history: [
+          {
+            id: `h-${prev.seq}`,
+            verb: event.action,
+            target: event.count === 1 ? event.label : `${event.count}x ${event.label}`,
+            meta,
+            undoable: true,
+            eventType: 'piece.place',
+            atMs: committedAtMs,
+            editMs: event.inputToCommitMs,
+            emptyMs: event.applyMs,
+            richMs: event.inputToCommitMs,
+          },
+          ...prev.history,
+        ].slice(0, 8),
+        redo: [],
         worldPieces: [...kept, ...placed],
         selectedPieceId: placed[placed.length - 1]!.id,
         status: `${verb} ${what}${replaced && placed.length > 1 ? ` (replaced ${replaced})` : ''}`,

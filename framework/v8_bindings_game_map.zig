@@ -18,6 +18,8 @@
 //!   __map_get_tile_bindings() -> Float32 ArrayBuffer [count, rows…]
 //!   __map_stroke_begin(x, z) / __map_stroke_move(x, z)
 //!   __map_stroke_end() -> Float32 ArrayBuffer [samples, stamps, touched, waterDry]
+//!   __map_save_file(path) / __map_load_file(path) -> 0|1
+//!   __map_set_autosave_file(path) -> 0|1        — micro-save target (req_2765)
 //!   __map_stats() -> Float32 ArrayBuffer [chunkCount, dirtyChunks]
 //!   __map_read_height(cx, cz) / __map_read_water(cx, cz)
 //!       -> Float32 ArrayBuffer of SAMPLE_CELLS (a copy; verification/readback)
@@ -127,7 +129,9 @@ fn hostGrowChunk(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnF64(info, 0);
         return;
     };
-    setReturnF64(info, if (chunks.growChunk(at[0], at[1]) != null) 1 else 0);
+    const grew = chunks.growChunk(at[0], at[1]) != null;
+    if (grew) _ = engine.autosaveNow();
+    setReturnF64(info, if (grew) 1 else 0);
 }
 
 fn hostChunkCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -280,6 +284,7 @@ fn hostDropZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const idx = argToF64(info, 0) orelse return;
     if (idx < 0 or !std.math.isFinite(idx)) return;
     chunks.dropZoneIndex(@intFromFloat(idx));
+    _ = engine.autosaveNow();
 }
 
 // __map_set_flora_specs(f32 triples) — per flora kind [spec, count, chance]
@@ -420,6 +425,21 @@ fn hostSaveFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnF64(info, 1);
 }
 
+// __map_set_autosave_file(path) -> 0|1 — register the painting's micro-save
+// target (SESSIONSAVE req_2765): every mutating gesture from here on rewrites
+// this file atomically host-side. Empty string disables.
+fn hostSetAutosaveFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path = argStringAlloc(alloc, info, 0) orelse {
+        setReturnF64(info, 0);
+        return;
+    };
+    defer alloc.free(path);
+    engine.setAutosaveFile(path);
+    setReturnF64(info, 1);
+}
+
 const MAX_MAP_FILE_BYTES: usize = 512 * 1024 * 1024;
 
 // __map_load_file(path) -> 0|1 (0 = missing/malformed; the world is untouched
@@ -515,6 +535,7 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_road_delete", hostRoadDelete);
     v8_runtime.registerHostFn("__map_road_stats", hostRoadStats);
     v8_runtime.registerHostFn("__map_save_file", hostSaveFile);
+    v8_runtime.registerHostFn("__map_set_autosave_file", hostSetAutosaveFile);
     v8_runtime.registerHostFn("__map_load_file", hostLoadFile);
     v8_runtime.registerHostFn("__map_stroke_begin", hostStrokeBegin);
     v8_runtime.registerHostFn("__map_stroke_move", hostStrokeMove);

@@ -236,6 +236,14 @@ export function mapLoadFile(path: string): boolean {
   return callHost<number>('__map_load_file', 0, path) === 1;
 }
 
+/** Register the painting's micro-save target (req_2765): from here on every
+ *  mutating gesture — stroke end, road commit/delete, binding edit, zone drop,
+ *  chunk growth — rewrites this file atomically host-side. False on a binary
+ *  that predates the door (the manual Save button still works there). */
+export function mapSetAutosaveFile(path: string): boolean {
+  return callHost<number>('__map_set_autosave_file', 0, path) === 1;
+}
+
 export function mapRoadStats(): { strokes: number; draftPoints: number; planTruncated: boolean } {
   const ab = callHost<ArrayBuffer | null>('__map_road_stats', null);
   if (!ab) return { strokes: 0, draftPoints: 0, planTruncated: false };

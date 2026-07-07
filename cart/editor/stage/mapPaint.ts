@@ -5,8 +5,9 @@
 // state and calls applyMapPaintEffects on every patch so the host tool always
 // tracks the chrome.
 import {
-  mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapSaveFile, mapSetGroundLook,
-  mapSetTileBindings, mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds, mapRoadSetProfile, mapSetBrushGizmo,
+  mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapSaveFile, mapSetAutosaveFile,
+  mapSetGroundLook, mapSetTileBindings, mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds,
+  mapRoadSetProfile, mapSetBrushGizmo,
   type MapBrushGizmo, type MapBrushProfile, type MapBrushShape, type MapTerrainTool,
 } from '../../../runtime/game/map';
 import {
@@ -150,6 +151,10 @@ function pushMapTool(s: MapPaintState): void {
 export function ensureMapSeeded(zones: readonly MapZoneDef[] = []): boolean {
   if (!mapHostLive()) return false;
   if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0);
+  // Micro-save from here on (req_2765): every gesture rewrites the map file
+  // host-side — painting done without the Save button survives a restart.
+  // False on a binary predating the door; the manual Save still covers those.
+  if (!mapSetAutosaveFile(EDITOR_MAP_FILE)) console.warn('[map-seed] autosave door missing — rebuild the host for micro-saves; manual Save still works');
   mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(zones));
   mapRoadSetKinds(ROAD_KIND_INDICES);
   mapSetFloraSpecs(FLORA_SPECS); // req_2497: painting flora grows LITERAL foliage live
