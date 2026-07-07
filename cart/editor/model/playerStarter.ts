@@ -17,7 +17,7 @@
 // re-based onto the bodyRigBones vocabulary. Ground is y=0; the figure stands
 // ~2.05 m tall facing -Z (the figure-stack convention).
 
-import { sphere, translateVerts, rotateVerts, type EditMesh, type V3 } from './editMesh';
+import { sphere, translateVerts, rotateVerts, mergeMesh, type EditMesh, type V3 } from './editMesh';
 import type { ModelPart } from '../data/types';
 import { bodyRigBones, defineSkeleton, type Skeleton, type MeshAssignment } from '../../../runtime/skeleton';
 
@@ -30,6 +30,7 @@ const TORSO_PROFILE = [0.72, 1.0, 0.94, 0.88, 0.6];
 const PIPE_PROFILE = [0.45, 0.85, 0.8, 0.85, 0.45];
 const HAND_PROFILE = [0.5, 0.92, 0.76];
 const FOOT_PROFILE = [0.38, 0.5, 0.66, 0.85, 1.0, 1.0];
+const FINGER_PROFILE = [0.54, 0.92, 0.8, 0.5];
 const BARREL_PROFILE = [0.85, 1.0, 1.0, 0.95, 0.8];
 const SEAT_PROFILE = [0.7, 1.0, 1.0, 0.92, 0.62];
 
@@ -95,23 +96,78 @@ function allVerts(m: EditMesh): number[] {
   return m.verts.map((_, i) => i);
 }
 
-/** Build one starter part's EditMesh: a unit UV sphere reshaped into a profile
- *  lathe (radial multipliers per latitude), squashed to the row's half-extents,
- *  leaned, and placed at its stand-pose center. */
-function latheMesh(row: StarterRow, mirrored: boolean): EditMesh {
-  const [rx, ry, rz] = row.radii;
-  let m = sphere(1, row.segments);
+/** The lathe core: a unit UV sphere reshaped by a radial profile (multiplies
+ *  ring RADIUS only) and squashed to half-extents. Origin-centered, unrotated. */
+function profiledLathe(radii: V3, profile: number[] | undefined, segments: number, leanZ = 0): EditMesh {
+  const [rx, ry, rz] = radii;
+  const m = sphere(1, segments);
   const verts = m.verts.map(([x, y, z]): V3 => {
     const t = (1 - y) / 2; // 0 at the top pole → 1 at the bottom
-    const p = row.profile ? sampleProfile(row.profile, t) : 1;
-    return [x * p * rx, y * ry, z * p * rz + (row.leanZ ? row.leanZ * t * rz : 0)];
+    const p = profile ? sampleProfile(profile, t) : 1;
+    return [x * p * rx, y * ry, z * p * rz + (leanZ ? leanZ * t * rz : 0)];
   });
-  m = { ...m, verts };
+  return { ...m, verts };
+}
+
+/** Build one starter part's EditMesh: the profile lathe leaned and placed at
+ *  its stand-pose center. */
+function latheMesh(row: StarterRow, mirrored: boolean): EditMesh {
+  let m = profiledLathe(row.radii, row.profile, row.segments, row.leanZ ?? 0);
   const tiltZ = row.tiltZ ? (mirrored ? -row.tiltZ : row.tiltZ) : 0;
   if (tiltZ) m = rotateVerts(m, allVerts(m), [0, 0, 0], 2, tiltZ * DEG);
   if (row.tiltX) m = rotateVerts(m, allVerts(m), [0, 0, 0], 0, row.tiltX * DEG);
   const cx = mirrored ? -row.center[0] : row.center[0];
   return translateVerts(m, allVerts(m), [cx, row.center[1], row.center[2]]);
+}
+
+// ── the finger fans (req_2768) ─────────────────────────────────────────────────
+// The old model's hands had real digits — 4 fingers + a thumb hanging off each
+// palm (fingerFan, game/figure/assembly.ts), articulated enough to fly the bird
+// (the 'middle' finger action). The starter bakes that fan at REST into one
+// `fingers_<side>` part per hand — the vocabulary's fingers bone — so the digits
+// are there to sculpt and the bone is there to animate. Numbers are the fan's
+// rest evaluation: digit roots buried in the palm (center palmHalf + 55% of the
+// finger below), index/middle thicker, thumb on the inner edge swung 58° out.
+type Digit = { off: V3; scale: number; thickness: number; rotX: number; rotZ: number };
+
+const PALM_HALF_Y = 0.056; // hand part scale 0.112 × preset scaleY 0.5
+
+/** The rest-pose fan, authored for the LEFT hand (thumb toward +x = inboard). */
+function restDigits(): Digit[] {
+  const out: Digit[] = [];
+  for (let i = 0; i < 4; i += 1) {
+    const mid = i === 1 || i === 2;
+    const scale = mid ? 0.078 : 0.068;
+    const halfLen = 0.79 * scale;
+    out.push({
+      off: [(i - 1.5) * 0.034, -PALM_HALF_Y - halfLen * 0.55, -0.03],
+      scale,
+      thickness: mid ? 1.12 : 1.0,
+      rotX: 14,
+      rotZ: -(i - 1.5) * 3,
+    });
+  }
+  out.push({ off: [0.068, -0.022, -0.025], scale: 0.058, thickness: 1.25, rotX: 12, rotZ: 58 });
+  return out;
+}
+
+/** One hand's digits merged into a single fingers part, riding the hand's lean
+ *  and placed below its palm. */
+function fingersMesh(hand: StarterRow, mirrored: boolean): EditMesh {
+  let fan: EditMesh | null = null;
+  for (const d of restDigits()) {
+    const radii: V3 = [d.scale * 0.34 * d.thickness, d.scale * 0.79, d.scale * 0.28 * d.thickness];
+    let m = profiledLathe(radii, FINGER_PROFILE, 6);
+    m = rotateVerts(m, allVerts(m), [0, 0, 0], 0, d.rotX * DEG);
+    const rotZ = mirrored ? -d.rotZ : d.rotZ;
+    if (rotZ) m = rotateVerts(m, allVerts(m), [0, 0, 0], 2, rotZ * DEG);
+    m = translateVerts(m, allVerts(m), [mirrored ? -d.off[0] : d.off[0], d.off[1], d.off[2]]);
+    fan = fan ? mergeMesh(fan, m, [0, 0, 0]) : m;
+  }
+  const tiltZ = hand.tiltZ ? (mirrored ? -hand.tiltZ : hand.tiltZ) : 0;
+  let m = tiltZ ? rotateVerts(fan!, allVerts(fan!), [0, 0, 0], 2, tiltZ * DEG) : fan!;
+  const cx = mirrored ? -hand.center[0] : hand.center[0];
+  return translateVerts(m, allVerts(m), [cx, hand.center[1], hand.center[2]]);
 }
 
 /** Every meshed bone id in outliner order (paired rows expand left, right). */
@@ -126,23 +182,39 @@ function starterBoneIds(): { bone: string; row: StarterRow; mirrored: boolean }[
 }
 
 /** The starter outliner: one ModelPart per meshed body bone, named by bone id.
- *  Face-detail bones (eyes/nose/mouth/hair/…) stay unmeshed — they are sculpt
- *  and paint territory, but they EXIST in the skeleton for later rigging. */
+ *  Each hand's finger fan follows it as a `fingers_<side>` part. Face-detail
+ *  bones (eyes/nose/mouth/hair/…) and toes stay unmeshed — sculpt and paint
+ *  territory, but they EXIST in the skeleton for later rigging. */
 export function playerStarterParts(): ModelPart[] {
-  return starterBoneIds().map(({ bone, row, mirrored }) => ({
-    id: `part:player:${bone}`,
-    name: bone,
-    mesh: latheMesh(row, mirrored),
-    visible: true,
-    color: row.color,
-  }));
+  const parts: ModelPart[] = [];
+  for (const { bone, row, mirrored } of starterBoneIds()) {
+    parts.push({
+      id: `part:player:${bone}`,
+      name: bone,
+      mesh: latheMesh(row, mirrored),
+      visible: true,
+      color: row.color,
+    });
+    if (row.bone === 'hand') {
+      const fingers = mirrored ? 'fingers_right' : 'fingers_left';
+      parts.push({
+        id: `part:player:${fingers}`,
+        name: fingers,
+        mesh: fingersMesh(row, mirrored),
+        visible: true,
+        color: SKIN,
+      });
+    }
+  }
+  return parts;
 }
 
 // ── the skeleton the package carries (rig truth) ───────────────────────────────
 
-// World-space rest anchors for the UNMESHED bones — the face features sit on the
-// -Z hemisphere (the figure faces -Z), back/breast on the chest surface, finger
-// and toe stubs just past their parent. Meshed bones anchor at their part center.
+// World-space rest anchors for bones without a STARTER_ROWS row — the face
+// features sit on the -Z hemisphere (the figure faces -Z), back/breast on the
+// chest surface, the finger fans at their merged-part center below the palms,
+// toe stubs just past the feet. Meshed row bones anchor at their part center.
 const EXTRA_BONE_WORLD: Record<string, V3> = {
   body: [0, 0.9, 0],
   crotch: [0, 0.8, 0],
@@ -155,8 +227,8 @@ const EXTRA_BONE_WORLD: Record<string, V3> = {
   teeth: [0, 1.74, -0.17],
   eye_left: [-0.08, 1.84, -0.18],
   eye_right: [0.08, 1.84, -0.18],
-  fingers_left: [-0.43, 0.6, 0],
-  fingers_right: [0.43, 0.6, 0],
+  fingers_left: [-0.43, 0.59, -0.028],
+  fingers_right: [0.43, 0.59, -0.028],
   toes_left: [-0.1836, 0.04, -0.24],
   toes_right: [0.1836, 0.04, -0.24],
 };
@@ -177,6 +249,15 @@ export function playerStarterSkeleton(modelId: string): Skeleton {
     const base: V3 = parentAt ?? [0, 0, 0];
     return { ...bone, transform: { pos: [at[0] - base[0], at[1] - base[1], at[2] - base[2]] as V3 } };
   });
-  const items: MeshAssignment[] = starterBoneIds().map(({ bone }) => ({ boneId: bone, geometryKey: bone }));
+  // One assignment per OUTLINER part (rows + the finger fans) — the part name
+  // IS the bone id, so the parts list is the assignment list.
+  const items: MeshAssignment[] = [];
+  for (const { bone, row } of starterBoneIds()) {
+    items.push({ boneId: bone, geometryKey: bone });
+    if (row.bone === 'hand') {
+      const fingers = bone === 'hand_left' ? 'fingers_left' : 'fingers_right';
+      items.push({ boneId: fingers, geometryKey: fingers });
+    }
+  }
   return defineSkeleton(modelId, bones, { meshes: { kind: 'perBone', items } });
 }
