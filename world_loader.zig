@@ -825,6 +825,17 @@ pub fn setPendingPlayerModel(verts_bytes: []const u8, table_bytes: []const u8) v
     log.print("[loader] player model staged — {d} groups (req_2780)\n", .{g_pending_player_model.len});
 }
 
+/// Figure geometry intern keys must name CONTENT, not a slot (req_2790): the
+/// geometry intern cache never evicts, so a stable "player-model-{i}" key wears
+/// whatever the FIRST construct interned under it forever — the stand-in
+/// figure's cubes survived into the exported body's first seven parts (a boxy
+/// torso over correct feet). Hashing the verts into the key makes a
+/// stand-in→export swap or a re-export intern fresh, while an unchanged body
+/// still cache-hits.
+fn geomContentHash(verts: []const f32) u64 {
+    return std.hash.Wyhash.hash(0, std.mem.sliceAsBytes(verts));
+}
+
 /// Deep-copy the staged player model for a constructing scene (the scene owns
 /// its copy — Scene.deinit frees it exactly like a decoded lump). Null when
 /// nothing is staged.
@@ -4684,7 +4695,7 @@ pub const Runtime = struct {
         }
         self.player_first_child = self.kid_list.items.len;
         for (self.scene.player_model, 0..) |group, i| {
-            const key = try std.fmt.allocPrint(self.allocator, "player-model-{d}", .{i});
+            const key = try std.fmt.allocPrint(self.allocator, "player-model-{d}-{x}", .{ i, geomContentHash(group.vertices) });
             self.player_geom_keys.append(self.allocator, key) catch |err| {
                 self.allocator.free(key);
                 return err;
@@ -4720,7 +4731,7 @@ pub const Runtime = struct {
             const first = self.kid_list.items.len;
             const npc_index = self.npcs.items.len;
             for (groups, 0..) |group, gi| {
-                const key = try std.fmt.allocPrint(self.allocator, "npc-{d}-{d}-{d}", .{ npc_index, mi, gi });
+                const key = try std.fmt.allocPrint(self.allocator, "npc-{d}-{d}-{d}-{x}", .{ npc_index, mi, gi, geomContentHash(group.vertices) });
                 self.player_geom_keys.append(self.allocator, key) catch |err| {
                     self.allocator.free(key);
                     return err;
