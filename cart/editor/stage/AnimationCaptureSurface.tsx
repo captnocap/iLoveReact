@@ -140,7 +140,7 @@ export default function AnimationCaptureSurface() {
             <Text style={{ color: '#9fc1ee', fontSize: 10, fontFamily: 'monospace' }}>
               {playerModel
                 ? `player model: ${playerModel.name} · ${playerModel.groups} parts · live sync ${trackError ? 'waiting' : 'on'}`
-                : 'no player model exported — File → Export → Player / NPC Model first'}
+                : 'no model declared as THE player — File → Export → Player Model first'}
             </Text>
           </Row>
         </Box>

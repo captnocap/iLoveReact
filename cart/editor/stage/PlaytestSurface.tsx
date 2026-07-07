@@ -18,7 +18,7 @@ import { Box, Row, Text } from '@reactjit/primitives';
 import { C } from '../workspace.cls';
 import { EDITOR_GAME_FILE, EDITOR_STORE_DIR } from './WorldEditorSurface';
 import { pushLiveWorld, pushResidentMeshes } from '../world/livePush';
-import { pushPlayerModel } from '../world/playerModelPush';
+import { pushPlayerModel, playerCharacterPackage } from '../world/playerModelPush';
 import { packPhysicsGlobals, type WorldGlobals } from '../data/globals';
 import type { PlacedPiece } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
@@ -95,13 +95,15 @@ export default function PlaytestSurface(props: {
             </Text>
           </Row>
         ) : null}
-        {playerModel ? (
-          <Row style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, backgroundColor: 'rgba(10,12,16,0.82)', borderRadius: 6, alignItems: 'center' }}>
-            <Text style={{ color: '#9fc1ee', fontSize: 10, fontFamily: 'monospace' }}>
-              {`player model: ${playerModel.name} · ${playerModel.groups} parts`}
-            </Text>
-          </Row>
-        ) : null}
+        <Row style={{ position: 'absolute', left: 8, bottom: 8, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4, backgroundColor: 'rgba(10,12,16,0.82)', borderRadius: 6, alignItems: 'center' }}>
+          <Text style={{ color: playerModel ? '#9fc1ee' : '#e0b866', fontSize: 10, fontFamily: 'monospace' }}>
+            {playerModel
+              ? `player model: ${playerModel.name} · ${playerModel.groups} parts`
+              : playerCharacterPackage()
+                ? 'player model unreadable — re-export it (File → Export → Player Model) · wearing the stand-in'
+                : 'no model declared as THE player — File → Export → Player Model · wearing the stand-in'}
+          </Text>
+        </Row>
       </Box>
     </C.HW_WorldEditorSurface>
   );
