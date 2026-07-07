@@ -420,6 +420,7 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
         return -1;
     }
     pub fn meshGizmoBegin() void {}
+    pub fn meshGizmoGrabAt(_: f32, _: f32, _: i32) void {}
     pub fn meshGizmoDrag(_: i32, _: f32, _: f32, _: bool, _: bool) bool {
         return false;
     }
@@ -854,6 +855,15 @@ fn meHitIsChrome(hit: ?*Node) bool {
         h.handlers.on_mouse_down != null or h.handlers.js_on_mouse_down != null or h.handlers.lua_on_mouse_down != null or
         h.handlers.on_press != null or h.handlers.js_on_press != null or h.handlers.lua_on_press != null or
         h.slider or h.href != null;
+}
+
+fn mapPaintHitIsChrome(root: *Node, mx: f32, my: f32) bool {
+    if (hitTestSlider(root, mx, my) != null or hitTestScrollbar(root, mx, my) != null) return true;
+    const hit = layout.hitTest(root, mx, my) orelse return false;
+    if (hit.test_id) |test_id| {
+        if (std.mem.eql(u8, test_id, "editor-world-input")) return false;
+    }
+    return meHitIsChrome(hit);
 }
 // <Slider> drag (SLIDER-0611) — engine-owned thumb, the scrollbar-drag wire
 // applied to a value control. While slider_drag_slot != 0 every motion
@@ -4395,6 +4405,9 @@ pub fn run(config_in: AppConfig) !void {
                                 me_gizmo_dragging = true;
                                 me_gizmo_axis = gh;
                                 r3d.meshGizmoBegin();
+                                // Handle code + grab point: the gold glow and the uniform
+                                // hub's radial ×1 base (req_2827 studio-gizmo port).
+                                r3d.meshGizmoGrabAt(mx, my, gh);
                                 state_mod.markDirty();
                                 continue;
                             }
@@ -4412,27 +4425,30 @@ pub fn run(config_in: AppConfig) !void {
                     if (event.button.button == c.SDL_BUTTON_LEFT or event.button.button == c.SDL_BUTTON_RIGHT) {
                         const mx: f32 = event.button.x;
                         const my: f32 = event.button.y;
-                        if (hitTestWorldLoader(config.root, mx, my)) |loader_node| {
-                            // MAPPAINT req_2473: an armed paint tool claims the LEFT
-                            // button before the external-camera fall-through — the
-                            // stroke runs host-side, zero JS per event.
-                            if (event.button.button == c.SDL_BUTTON_LEFT and world_loader.paintArmed(loader_node.id)) {
-                                world_loader_paint_node_id = loader_node.id;
-                                world_loader.paintPointer(loader_node.id, .down, mx, my);
-                                state_mod.markDirty();
-                                continue;
-                            }
-                            // LOADERVIEW req_1776: an editor-driven loader (external camera)
-                            // is a passive viewport — DON'T capture the pointer for in-world
-                            // look; fall through so the event reaches the editor's JS overlay
-                            // (its drag rotates the iso camera). Only a playable loader grabs it.
-                            if (!world_loader.isExternalCamera(loader_node.id)) {
-                                captureWorldLoaderPointer(loader_node);
-                                if (event.button.button == c.SDL_BUTTON_RIGHT) {
-                                    world_loader.setAiming(loader_node.id, true);
-                                    world_loader_mouse_aiming = true;
+                        const over_paint_chrome = mapPaintHitIsChrome(config.root, mx, my);
+                        if (!over_paint_chrome) {
+                            if (hitTestWorldLoader(config.root, mx, my)) |loader_node| {
+                                // MAPPAINT req_2473: an armed paint tool claims the LEFT
+                                // button before the external-camera fall-through — the
+                                // stroke runs host-side, zero JS per event.
+                                if (event.button.button == c.SDL_BUTTON_LEFT and world_loader.paintArmed(loader_node.id)) {
+                                    world_loader_paint_node_id = loader_node.id;
+                                    world_loader.paintPointer(loader_node.id, .down, mx, my);
+                                    state_mod.markDirty();
+                                    continue;
                                 }
-                                continue;
+                                // LOADERVIEW req_1776: an editor-driven loader (external camera)
+                                // is a passive viewport — DON'T capture the pointer for in-world
+                                // look; fall through so the event reaches the editor's JS overlay
+                                // (its drag rotates the iso camera). Only a playable loader grabs it.
+                                if (!world_loader.isExternalCamera(loader_node.id)) {
+                                    captureWorldLoaderPointer(loader_node);
+                                    if (event.button.button == c.SDL_BUTTON_RIGHT) {
+                                        world_loader.setAiming(loader_node.id, true);
+                                        world_loader_mouse_aiming = true;
+                                    }
+                                    continue;
+                                }
                             }
                         }
                     }
@@ -4880,6 +4896,11 @@ pub fn run(config_in: AppConfig) !void {
                         if (findWorldLoaderNodeById(config.root, world_loader_paint_node_id) == null) {
                             world_loader.paintPointer(world_loader_paint_node_id, .up, mx, my);
                             world_loader_paint_node_id = 0;
+                        } else if (mapPaintHitIsChrome(config.root, mx, my)) {
+                            world_loader.paintPointer(world_loader_paint_node_id, .up, mx, my);
+                            world_loader_paint_node_id = 0;
+                            state_mod.markDirty();
+                            continue;
                         } else {
                             world_loader.paintPointer(world_loader_paint_node_id, .move, mx, my);
                             state_mod.markDirty();

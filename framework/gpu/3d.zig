@@ -756,6 +756,111 @@ fn partOfWeldedEdge(va: u32, vb: u32) u32 {
     return model_source.NO_PART;
 }
 
+const FaceExtrudeEntity = struct {
+    grouped: bool,
+    group: u32,
+    face: u32,
+    part: u32,
+    color: [4]u8,
+};
+
+fn faceExtrudePosKey(p: [3]f32) u64 {
+    const q: [3]f32 = .{ p[0] + 0.0, p[1] + 0.0, p[2] + 0.0 };
+    var h = std.hash.Wyhash.init(0xe47d);
+    h.update(std.mem.asBytes(&q));
+    return h.final();
+}
+
+fn faceEntityContains(e: FaceExtrudeEntity, f: u32) bool {
+    return if (e.grouped) model_source.faceGroupOf(f) == e.group else f == e.face;
+}
+
+fn chainExtrudeBoundary(verts: []const f32, tri_count: u32, entity: FaceExtrudeEntity, out: *std.ArrayListUnmanaged([3]f32)) bool {
+    const Dir = struct { from_key: u64, to_key: u64, ukey: u128, from: [3]f32 };
+    var undirected = std.AutoHashMapUnmanaged(u128, u32){};
+    defer undirected.deinit(std.heap.c_allocator);
+    var dirs = std.ArrayListUnmanaged(Dir){};
+    defer dirs.deinit(std.heap.c_allocator);
+
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!faceEntityContains(entity, f)) continue;
+        const base = @as(usize, f) * 24;
+        if (base + 24 > verts.len) return false;
+        var k: usize = 0;
+        while (k < 3) : (k += 1) {
+            const ia = base + k * 8;
+            const ib = base + ((k + 1) % 3) * 8;
+            const a: [3]f32 = .{ verts[ia + 0], verts[ia + 1], verts[ia + 2] };
+            const b: [3]f32 = .{ verts[ib + 0], verts[ib + 1], verts[ib + 2] };
+            const ka = faceExtrudePosKey(a);
+            const kb = faceExtrudePosKey(b);
+            if (ka == kb) continue;
+            const ukey: u128 = (@as(u128, @min(ka, kb)) << 64) | @max(ka, kb);
+            const gop = undirected.getOrPut(std.heap.c_allocator, ukey) catch return false;
+            if (!gop.found_existing) gop.value_ptr.* = 0;
+            gop.value_ptr.* += 1;
+            dirs.append(std.heap.c_allocator, .{ .from_key = ka, .to_key = kb, .ukey = ukey, .from = a }) catch return false;
+        }
+    }
+
+    const Next = struct { to_key: u64, from: [3]f32 };
+    var adj = std.AutoHashMapUnmanaged(u64, Next){};
+    defer adj.deinit(std.heap.c_allocator);
+    var boundary_n: u32 = 0;
+    var start_key: u64 = 0;
+    var have_start = false;
+    for (dirs.items) |de| {
+        if ((undirected.get(de.ukey) orelse 0) != 1) continue;
+        boundary_n += 1;
+        const gop = adj.getOrPut(std.heap.c_allocator, de.from_key) catch return false;
+        if (gop.found_existing) return false;
+        gop.value_ptr.* = .{ .to_key = de.to_key, .from = de.from };
+        if (!have_start) {
+            start_key = de.from_key;
+            have_start = true;
+        }
+    }
+    if (!have_start or boundary_n < 3) return false;
+
+    var cur = start_key;
+    var count: u32 = 0;
+    while (count < boundary_n) {
+        const e = adj.get(cur) orelse return false;
+        out.append(std.heap.c_allocator, e.from) catch return false;
+        count += 1;
+        cur = e.to_key;
+        if (cur == start_key) break;
+    }
+    return cur == start_key and count == boundary_n;
+}
+
+fn faceLoopNormal(loop: []const [3]f32) [3]f32 {
+    var n: [3]f32 = .{ 0, 0, 0 };
+    for (loop, 0..) |cur, i| {
+        const nxt = loop[(i + 1) % loop.len];
+        n[0] += (cur[1] - nxt[1]) * (cur[2] + nxt[2]);
+        n[1] += (cur[2] - nxt[2]) * (cur[0] + nxt[0]);
+        n[2] += (cur[0] - nxt[0]) * (cur[1] + nxt[1]);
+    }
+    const l = @sqrt(vdot(n, n));
+    if (l > 1e-8) return .{ n[0] / l, n[1] / l, n[2] / l };
+    if (loop.len >= 3) return normalOf(loop[0], loop[1], loop[2]);
+    return .{ 0, 1, 0 };
+}
+
+fn faceLoopCentroid(loop: []const [3]f32) [3]f32 {
+    var c: [3]f32 = .{ 0, 0, 0 };
+    for (loop) |p| c = vadd(c, p);
+    const inv = if (loop.len > 0) 1.0 / @as(f32, @floatFromInt(loop.len)) else 1.0;
+    return vmul(c, inv);
+}
+
+fn appendFaceColor(list: *std.ArrayListUnmanaged(u8), c: [4]u8) bool {
+    list.appendSlice(std.heap.c_allocator, c[0..]) catch return false;
+    return true;
+}
+
 /// req_2644: an edge op (extrude / create face) appends faces and used to let retain()
 /// silently DROP the whole authored grouping — the mesh went ungrouped, and with it every
 /// part range. Re-apply the pre-op grouping, give the appended faces one fresh authored
@@ -780,6 +885,149 @@ fn adoptAppendedFaces(old_groups: ?[]const u32, old_faces: u32, src_part: u32) v
         renormalizePartRanges(fp, pc);
     }
     _ = refreshPaintLayout();
+}
+
+pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
+    if (!model_paint.hasTarget()) return false;
+    if (mesh_edit.mode() != .face) return false;
+    const cur_verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
+
+    const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
+    defer std.heap.c_allocator.free(mask);
+    const selected = mesh_edit.buildDeleteMask(mask);
+    if (selected == 0) return false;
+
+    const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+    var entity: ?FaceExtrudeEntity = null;
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!mask[f]) continue;
+        const g = if (has_groups) model_source.faceGroupOf(f) else model_source.NO_FACE_GROUP;
+        const grouped = has_groups and g != model_source.NO_FACE_GROUP;
+        if (entity) |e| {
+            if (grouped and e.grouped and e.group == g) continue;
+            return false; // face extrude is intentionally one authored face at a time
+        }
+        entity = .{
+            .grouped = grouped,
+            .group = g,
+            .face = f,
+            .part = if (grouped) model_source.partIndexOf(g) else model_source.NO_PART,
+            .color = trueFaceColor(f),
+        };
+    }
+    const ent = entity orelse return false;
+
+    const old_groups: ?[]u32 = if (has_groups) (captureFaceGroups() orelse return false) else null;
+    defer if (old_groups) |g| std.heap.c_allocator.free(g);
+    const part_count = hostPartCount();
+
+    var loop = std.ArrayListUnmanaged([3]f32){};
+    defer loop.deinit(std.heap.c_allocator);
+    if (!chainExtrudeBoundary(cur_verts, tri_count, ent, &loop) or loop.items.len < 3) return false;
+    const n = faceLoopNormal(loop.items);
+    const dist = if (@abs(distance_raw) > 1e-6) distance_raw else @max(0.05, g_orbit.radius * 0.08);
+    const off = vmul(n, dist);
+    const center = faceLoopCentroid(loop.items);
+
+    var out = std.ArrayListUnmanaged(f32){};
+    defer out.deinit(std.heap.c_allocator);
+    var groups = std.ArrayListUnmanaged(u32){};
+    defer groups.deinit(std.heap.c_allocator);
+    var face_part = std.ArrayListUnmanaged(u32){};
+    defer face_part.deinit(std.heap.c_allocator);
+    var colors = std.ArrayListUnmanaged(u8){};
+    defer colors.deinit(std.heap.c_allocator);
+
+    f = 0;
+    while (f < tri_count) : (f += 1) {
+        if (mask[f]) continue;
+        const base = @as(usize, f) * 24;
+        if (base + 24 > cur_verts.len) return false;
+        if (!appendFloats(&out, cur_verts[base .. base + 24])) return false;
+        if (has_groups) {
+            const g = old_groups.?[f];
+            groups.append(std.heap.c_allocator, g) catch return false;
+            if (part_count > 0) face_part.append(std.heap.c_allocator, model_source.partIndexOf(g)) catch return false;
+        }
+        if (!appendFaceColor(&colors, trueFaceColor(f))) return false;
+    }
+
+    var next_group: u32 = if (has_groups) @intCast(maxGroupId(old_groups.?) + 1) else 0;
+    const cap_group = if (has_groups) ent.group else model_source.NO_FACE_GROUP;
+    const cap_start_face: u32 = @intCast(out.items.len / 24);
+
+    var i: usize = 1;
+    while (i + 1 < loop.items.len) : (i += 1) {
+        const a = vadd(loop.items[0], off);
+        const b = vadd(loop.items[i], off);
+        const c = vadd(loop.items[i + 1], off);
+        if (!appendTri(&out, a, b, c)) return false;
+        if (has_groups) {
+            groups.append(std.heap.c_allocator, cap_group) catch return false;
+            if (part_count > 0) face_part.append(std.heap.c_allocator, ent.part) catch return false;
+        }
+        if (!appendFaceColor(&colors, ent.color)) return false;
+    }
+
+    i = 0;
+    while (i < loop.items.len) : (i += 1) {
+        const a = loop.items[i];
+        const b = loop.items[(i + 1) % loop.items.len];
+        const a2 = vadd(a, off);
+        const b2 = vadd(b, off);
+        const qc = vmul(vadd(vadd(a, b), vadd(a2, b2)), 0.25);
+        const wn = normalOf(a, b, b2);
+        const side_group = if (has_groups) blk: {
+            const g = next_group;
+            next_group += 1;
+            break :blk g;
+        } else model_source.NO_FACE_GROUP;
+        const ok = if (vdot(wn, vsub(qc, center)) < 0)
+            appendQuadSplit(&out, a2, b2, b, a)
+        else
+            appendQuadSplit(&out, a, b, b2, a2);
+        if (!ok) return false;
+        if (has_groups) {
+            groups.append(std.heap.c_allocator, side_group) catch return false;
+            groups.append(std.heap.c_allocator, side_group) catch return false;
+            if (part_count > 0) {
+                face_part.append(std.heap.c_allocator, ent.part) catch return false;
+                face_part.append(std.heap.c_allocator, ent.part) catch return false;
+            }
+        }
+        if (!appendFaceColor(&colors, ent.color) or !appendFaceColor(&colors, ent.color)) return false;
+    }
+
+    const new_count: u32 = @intCast(out.items.len / 8);
+    if (new_count == g_edit_count) return false;
+    var snap = journalSnapshotCurrent("extrude face");
+    mesh_edit.clearSelection();
+    if (!replaceActiveEditMesh(out.items, new_count)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    if (has_groups) {
+        model_source.setFaceGroups(groups.items);
+        if (part_count > 0) renormalizePartRanges(face_part.items, part_count) else _ = refreshPaintLayout();
+    }
+    model_paint.applyColors(colors.items);
+    if (model_source.colors()) |src| {
+        const nbytes = @min(src.len, colors.items.len);
+        if (nbytes > 0) @memcpy(src[0..nbytes], colors.items[0..nbytes]);
+    }
+    const cap_group_after = if (has_groups) model_source.faceGroupOf(cap_start_face) else model_source.NO_FACE_GROUP;
+    ensureGlassTrailing();
+    if (cap_group_after != model_source.NO_FACE_GROUP) {
+        _ = mesh_edit.selectFacesByGroupRange(cap_group_after, cap_group_after + 1, false);
+    } else {
+        _ = mesh_edit.selectFaceByIndex(cap_start_face, false);
+    }
+    mesh_edit.setMode(.face);
+    journalCommit(&snap);
+    return true;
 }
 
 pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
@@ -2815,9 +3063,25 @@ pub fn meshGizmoBegin() void {
     g_guard_face_count = model_paint.faceCount();
 }
 
+/// Grab bookkeeping the engine reports at press: WHICH handle was grabbed (the gold
+/// glow) and where the cursor started — the uniform hub drag is RADIAL (the studio's
+/// hypot(cursor − anchor) / startScreenDist), so it needs the grab point. Window px.
+pub fn meshGizmoGrabAt(mx: f32, my: f32, code: i32) void {
+    g_gizmo_active = code;
+    g_gizmo_cursor = .{ vpLocalX(mx), vpLocalY(my) };
+    g_gizmo_start_dist = 4;
+    const pivot = mesh_edit.selectionPivot() orelse return;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const a = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return;
+    const ddx = g_gizmo_cursor[0] - a[0];
+    const ddy = g_gizmo_cursor[1] - a[1];
+    g_gizmo_start_dist = @max(4.0, @sqrt(ddx * ddx + ddy * ddy));
+}
+
 pub fn meshGizmoFinish() bool {
     g_gizmo_readout_len = 0; // the drag is ending — drop the live step readout
     g_gizmo_pivot0 = null;
+    g_gizmo_active = -1; // release drops the gold glow
     const before = g_guard_before orelse {
         journalDiscard(&g_gizmo_snap);
         return false;
@@ -3008,28 +3272,31 @@ const OV_ORANGE = [3]f32{ 1.0, 0.52, 0.16 }; // selected
 const OV_VERT = [3]f32{ 0.95, 0.97, 1.0 }; // unselected vertex fill
 const OV_HALO = [4]f32{ 0.02, 0.03, 0.07, 0.95 }; // dark outline behind every marker
 const OV_MARQUEE = [4]f32{ 0.62, 0.78, 1.0, 0.98 };
-const GIZMO_X = [3]f32{ 1.0, 0.18, 0.16 };
-const GIZMO_Y = [3]f32{ 0.28, 0.9, 0.28 };
-const GIZMO_Z = [3]f32{ 0.3, 0.55, 1.0 };
-// ── Gizmo sizing policy (req_2620 gap V / req_2619 gap Q) ──────────────────────────
-// The axis length is no longer one fixed pixel count: it scales with the SELECTION's
-// projected screen extent (a one-face selection gets a compact gizmo instead of three
-// overlapping blobs; a whole-part selection gets a reaching one), clamped to
-// [GIZMO_MIN_PX, GIZMO_MAX_PX]. On top of that, an axis that lies near-PARALLEL to the
-// screen plane (you're viewing it side-on) grows up to GIZMO_SIDE_GROW× — the old
-// studio's precision affordance: a longer drawn handle means fewer world units per
-// dragged pixel along it (meshGizmoDrag maps through the drawn length). An axis that
-// points INTO the screen foreshortens; its world length is boosted to keep the drawn
-// px near target, but only up to 1/GIZMO_MIN_PERP so a view-aligned axis reads short
-// instead of exploding toward the horizon.
-const GIZMO_MIN_PX: f32 = 46;
-const GIZMO_MAX_PX: f32 = 170;
-const GIZMO_SIDE_GROW: f32 = 1.9; // side-on growth cap (× the base length)
-const GIZMO_MIN_PERP: f32 = 0.35; // foreshortening compensation floor
-const GIZMO_DOT_MOVE_PX: f32 = 7; // handle dots small enough to never overlap at MIN_PX
-const GIZMO_DOT_SCALE_PX: f32 = 9;
-const GIZMO_PIVOT_DOT_PX: f32 = 6;
-const GIZMO_HIT_PX: f32 = 13;
+// ── Gizmo (PORT of the studio's meshGizmo.tsx, req_2827) ────────────────────────────
+// Fixed SCREEN sizes — zoom-independent, like Blockbench: armPx 48 / headPx 9 /
+// centerPx 6 / grabPx 14 / shaft 2.5, verbatim from the studio's GIZMO table. Shape
+// encodes the tool: MOVE arms end in chevron ARROWHEADS and the hub is a hollow ring;
+// SCALE arms are DOUBLE-ended with square handles and a solid hub — grabbing the hub
+// scales ALL axes at once (uniform). The grabbed handle glows gold. The axis palette
+// is the studio's (#e0584e / #5ec26a / #4aa3ff) — the compass and mirror planes share
+// it through axisColor.
+const GIZMO_X = [3]f32{ 0.878, 0.345, 0.306 }; // #e0584e
+const GIZMO_Y = [3]f32{ 0.369, 0.761, 0.416 }; // #5ec26a
+const GIZMO_Z = [3]f32{ 0.290, 0.639, 1.0 }; // #4aa3ff
+const GIZMO_ACTIVE = [3]f32{ 1.0, 0.824, 0.290 }; // #ffd24a — the grabbed handle glows
+const GIZMO_HUB_RIM = [3]f32{ 0.812, 0.886, 1.0 }; // #cfe2ff — hub border / rotate hub
+const GIZMO_HUB_FILL = [3]f32{ 0.749, 0.902, 0.933 }; // #bfe6ee — scale's solid hub
+const GIZMO_DARK = [3]f32{ 0.043, 0.075, 0.125 }; // #0b1320 — move hub fill / square edge
+const GIZMO_ARM_PX: f32 = 48; // studio armPx — fixed, never selection-scaled
+const GIZMO_HEAD_PX: f32 = 9; // arrowhead reach / square handle half-size
+const GIZMO_CENTER_PX: f32 = 6; // hub radius
+const GIZMO_SHAFT_W: f32 = 2.5;
+const GIZMO_UNIFORM_CODE: i32 = 3; // hit code: the scale hub — uniform all-axes scale
+// negative-end handles (scale's second squares) encode as axis + GIZMO_NEG_BASE.
+const GIZMO_NEG_BASE: i32 = 4;
+const GIZMO_STEP_UNIFORM: f32 = 0.1; // studio gizmoUniformStep
+const GIZMO_STEP_UNIFORM_FINE: f32 = 0.05; // studio gizmoUniformStepFine
+const GIZMO_HIT_PX: f32 = 14; // studio grabPx — click radius around a handle / along a shaft
 const OV_MAX_VERT_DOTS: u32 = 80000; // beyond this draw only selected dots (wireframe still
 // shows topology) — a generous fps guard, not a data cap.
 const OV_EDGE = [3]f32{ 0.62, 0.70, 0.85 }; // unselected boundary edge (real model edges)
@@ -3137,89 +3404,26 @@ fn worldUnitsPerPixel(cam: model_paint.Camera, p: [3]f32) f32 {
     const span = 2.0 * z * @tan(cam.fov_deg * std.math.pi / 180.0 * 0.5);
     return if (g_paint_vp_h > 1) span / g_paint_vp_h else 0.01;
 }
-/// The selection's projected screen radius (px): world bbox of every face the current
-/// selection touches (any mode, via buildDeleteMask), projected corner-by-corner around
-/// the pivot. 0 when nothing is selected / projectable. Linear in face count — these
-/// meshes are small, and the gizmo only exists while a selection does.
-fn selectionScreenRadiusPx(cam: model_paint.Camera, pivot: [3]f32) f32 {
-    const pos = model_paint.positions() orelse return 0;
-    const fc = model_paint.faceCount();
-    if (fc == 0) return 0;
-    const mask = std.heap.c_allocator.alloc(bool, fc) catch return 0;
-    defer std.heap.c_allocator.free(mask);
-    if (mesh_edit.buildDeleteMask(mask) == 0) return 0;
-    var mn: [3]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) };
-    var mx: [3]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) };
-    var f: u32 = 0;
-    while (f < fc) : (f += 1) {
-        if (!mask[f]) continue;
-        var k: u32 = 0;
-        while (k < 3) : (k += 1) {
-            const b = (@as(usize, f) * 3 + k) * 3;
-            if (b + 2 >= pos.len) break;
-            var d: u32 = 0;
-            while (d < 3) : (d += 1) {
-                mn[d] = @min(mn[d], pos[b + d]);
-                mx[d] = @max(mx[d], pos[b + d]);
-            }
-        }
-    }
-    if (mn[0] > mx[0]) return 0;
-    const pc = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return 0;
-    var radius: f32 = 0;
-    var c: u32 = 0;
-    while (c < 8) : (c += 1) {
-        const corner: [3]f32 = .{
-            if (c & 1 != 0) mx[0] else mn[0],
-            if (c & 2 != 0) mx[1] else mn[1],
-            if (c & 4 != 0) mx[2] else mn[2],
-        };
-        const sp = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, corner) orelse continue;
-        const dx = sp[0] - pc[0];
-        const dy = sp[1] - pc[1];
-        radius = @max(radius, @sqrt(dx * dx + dy * dy));
-    }
-    return radius;
+/// Port of the studio's axisScreen (meshGizmo.tsx): a world direction at the pivot, in
+/// screen space — the anchor, the 2D unit direction, and how many screen px one world
+/// unit spans there (the drag→world mapping). Arms are drawn a FIXED GIZMO_ARM_PX along
+/// this direction, so the gizmo is zoom-independent and foreshortening never bends it.
+/// Null when the pivot/probe projects behind the camera or the axis vanishes into the
+/// screen (the studio's `pxPerUnit <= 0` skip).
+const AxisScreen = struct { ax: f32, ay: f32, dx: f32, dy: f32, px_per_unit: f32 };
+fn axisScreenInfo(cam: model_paint.Camera, pivot: [3]f32, u: [3]f32) ?AxisScreen {
+    const eps: f32 = 0.01;
+    const a = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return null;
+    const b = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, vadd(pivot, vmul(u, eps))) orelse return null;
+    const vx = b[0] - a[0];
+    const vy = b[1] - a[1];
+    const len = @sqrt(vx * vx + vy * vy);
+    if (len <= 1e-4) return null; // studio: lenPerEps must clear 1e-4
+    return .{ .ax = a[0], .ay = a[1], .dx = vx / len, .dy = vy / len, .px_per_unit = len / eps };
 }
-/// The gizmo's base screen length (px) for the current selection — selection-scaled,
-/// clamped so a one-face pick stays compact and a whole-part grab doesn't explode.
-fn gizmoBasePx(cam: model_paint.Camera, pivot: [3]f32) f32 {
-    const r = selectionScreenRadiusPx(cam, pivot);
-    return std.math.clamp(r * 0.9 + 26.0, GIZMO_MIN_PX, GIZMO_MAX_PX);
-}
-const GizmoAxisGeom = struct { target_px: f32, world_len: f32, grow: f32 };
-/// Per-axis draw geometry: base length grown when the axis lies near-parallel to the
-/// screen plane (side-on precision), world length compensated for foreshortening (floored
-/// at GIZMO_MIN_PERP so a view-aligned axis shortens instead of shooting to the horizon).
-/// `grow` (0..1) is the precision ramp — the draw pass also THICKENS the stroke with it,
-/// because length growth alone read as nothing at the old 0.80-perp onset (req_2644 RR):
-/// in a normal 3/4 orbit every axis sits near perp≈0.8, so the ramp never left zero. The
-/// onset now starts at 0.55, giving a visible length+weight gradient as the view swings
-/// toward side-on. Clamps stay: base ∈ [GIZMO_MIN_PX, GIZMO_MAX_PX], growth ≤ SIDE_GROW×.
-fn gizmoAxisGeom(cam: model_paint.Camera, pivot: [3]f32, axis: i32) GizmoAxisGeom {
-    const base = gizmoBasePx(cam, pivot);
-    const fwd = vnorm(vsub(cam.target, cam.eye));
-    const alignment = @abs(vdot(axisVec(axis), fwd));
-    const perp = @sqrt(@max(0.0, 1.0 - alignment * alignment));
-    const t = std.math.clamp((perp - 0.55) / 0.45, 0.0, 1.0);
-    const target_px = base * (1.0 + (GIZMO_SIDE_GROW - 1.0) * t * t);
-    const world_len = worldUnitsPerPixel(cam, pivot) * target_px / @max(perp, GIZMO_MIN_PERP);
-    return .{ .target_px = target_px, .world_len = world_len, .grow = t };
-}
-fn axisEndpoint(cam: model_paint.Camera, pivot: [3]f32, axis: i32) ?[2][2]f32 {
-    const p0 = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return null;
-    const geom = gizmoAxisGeom(cam, pivot, axis);
-    const p1w = vadd(pivot, vmul(axisVec(axis), geom.world_len));
-    const p1 = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, p1w) orelse return null;
-    return .{ p0, p1 };
-}
-fn screenAxisDir(cam: model_paint.Camera, pivot: [3]f32, axis: i32) [2]f32 {
-    const ep = axisEndpoint(cam, pivot, axis) orelse return .{ 1, 0 };
-    const dx = ep[1][0] - ep[0][0];
-    const dy = ep[1][1] - ep[0][1];
-    const l = @sqrt(dx * dx + dy * dy);
-    if (l < 4) return .{ 1, 0 };
-    return .{ dx / l, dy / l };
+/// A handle's screen position: GIZMO_ARM_PX along the axis' screen direction.
+fn gizmoArmEnd(s: AxisScreen, sign: f32) [2]f32 {
+    return .{ s.ax + s.dx * GIZMO_ARM_PX * sign, s.ay + s.dy * GIZMO_ARM_PX * sign };
 }
 fn segDist2(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) f32 {
     const vx = bx - ax;
@@ -3239,13 +3443,22 @@ fn ringBasis(axis: [3]f32) [2][3]f32 {
     const u = vnorm(vcross(axis, ref));
     return .{ u, vnorm(vcross(axis, u)) };
 }
-/// Rotate-ring world radius — shares the selection-scaled base with the axis handles so
-/// draw and hit-test always agree.
+/// Port of the studio's ringRadiusWorld: the world radius that projects to ~armPx at
+/// the pivot, derived from the FIRST axis with a usable screen span (X unless X is
+/// degenerate). Deliberately including the studio's quirk the user PINNED as a feature
+/// (req_2827): when that axis foreshortens (the view swinging down it), px-per-unit
+/// collapses and the rings BLOW UP on screen — a much larger wheel, so every dragged
+/// pixel is a finer angle.
 fn gizmoRingWorldR(cam: model_paint.Camera, pivot: [3]f32) f32 {
-    return worldUnitsPerPixel(cam, pivot) * gizmoBasePx(cam, pivot) * 0.82;
+    var a: i32 = 0;
+    while (a < 3) : (a += 1) {
+        const s = axisScreenInfo(cam, pivot, axisVec(a)) orelse continue;
+        if (s.px_per_unit > 1e-4) return GIZMO_ARM_PX / s.px_per_unit;
+    }
+    return 0;
 }
 fn drawGizmoRing(cam: model_paint.Camera, pivot: [3]f32, axis: i32, ox: f32, oy: f32) void {
-    const col = axisColor(axis);
+    const col = gizmoAxisDrawColor(axis); // the grabbed ring glows gold (studio behavior)
     const av = axisVec(axis);
     const basis = ringBasis(av);
     const r = gizmoRingWorldR(cam, pivot);
@@ -3317,25 +3530,76 @@ fn drawMirrorPlanesOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
     }
 }
 
+/// Gold when this axis is the live grab — the studio glows BOTH ends of a grabbed axis.
+fn gizmoAxisDrawColor(axis: i32) [3]f32 {
+    if (g_gizmo_active == axis or g_gizmo_active == axis + GIZMO_NEG_BASE) return GIZMO_ACTIVE;
+    return axisColor(axis);
+}
+/// Chevron arrowhead (studio ArrowHead): two wings opening back along the axis at ±26°,
+/// so MOVE reads as an arrow (vs SCALE's square).
+fn drawGizmoArrowHead(x: f32, y: f32, dx: f32, dy: f32, col: [3]f32) void {
+    const base = std.math.atan2(dy, dx);
+    const wing = 26.0 * std.math.pi / 180.0;
+    const len = GIZMO_HEAD_PX + 3;
+    overlayLine(x, y, x - @cos(base - wing) * len, y - @sin(base - wing) * len, col[0], col[1], col[2], GIZMO_SHAFT_W);
+    overlayLine(x, y, x - @cos(base + wing) * len, y - @sin(base + wing) * len, col[0], col[1], col[2], GIZMO_SHAFT_W);
+}
+/// Square scale handle (studio Square): screen-aligned quad, dark edge under the fill.
+fn drawGizmoSquare(x: f32, y: f32, col: [3]f32) void {
+    const h = GIZMO_HEAD_PX;
+    const e = h + 1.5;
+    polys.drawTri(x - e, y - e, x + e, y - e, x + e, y + e, GIZMO_DARK[0], GIZMO_DARK[1], GIZMO_DARK[2], 1.0);
+    polys.drawTri(x - e, y - e, x + e, y + e, x - e, y + e, GIZMO_DARK[0], GIZMO_DARK[1], GIZMO_DARK[2], 1.0);
+    polys.drawTri(x - h, y - h, x + h, y - h, x + h, y + h, col[0], col[1], col[2], 1.0);
+    polys.drawTri(x - h, y - h, x + h, y + h, x - h, y + h, col[0], col[1], col[2], 1.0);
+}
 fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
     if (g_paint_session) return; // paint mode suspends the gizmo entirely (req_2662)
     if (meshEditModeRaw() == 0) return;
     const pivot = mesh_edit.selectionPivot() orelse return;
     const pc = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return;
-    overlayDot(pc[0] + ox, pc[1] + oy, OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], GIZMO_PIVOT_DOT_PX);
-    var axis: i32 = 0;
-    while (axis < 3) : (axis += 1) {
-        if (g_gizmo_tool == .rotate) {
-            drawGizmoRing(cam, pivot, axis, ox, oy);
-        } else if (axisEndpoint(cam, pivot, axis)) |ep| {
-            const c = axisColor(axis);
-            // Precision state must READ (req_2644 RR): a near-screen-parallel axis drags
-            // finer, so it draws longer AND heavier — weight carries the signal even when
-            // the length delta is subtle at a glance.
-            const grow = gizmoAxisGeom(cam, pivot, axis).grow;
-            overlayLine(ep[0][0] + ox, ep[0][1] + oy, ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], 4.0 + 3.5 * grow * grow);
-            overlayDot(ep[1][0] + ox, ep[1][1] + oy, c[0], c[1], c[2], if (g_gizmo_tool == .scale) GIZMO_DOT_SCALE_PX else GIZMO_DOT_MOVE_PX);
+    if (g_gizmo_tool == .rotate) {
+        var axis: i32 = 0;
+        while (axis < 3) : (axis += 1) drawGizmoRing(cam, pivot, axis, ox, oy);
+        // rotate hub: the studio's small light dot at the anchor.
+        overlayDot(pc[0] + ox, pc[1] + oy, GIZMO_HUB_RIM[0], GIZMO_HUB_RIM[1], GIZMO_HUB_RIM[2], 6);
+    } else {
+        // Arms in the current capsule pass; MOVE tips get chevrons.
+        var axis: i32 = 0;
+        while (axis < 3) : (axis += 1) {
+            const s = axisScreenInfo(cam, pivot, axisVec(axis)) orelse continue;
+            const c = gizmoAxisDrawColor(axis);
+            const signs = [2]f32{ 1, -1 };
+            const nsigns: usize = if (g_gizmo_tool == .scale) 2 else 1; // scale is double-ended
+            var k: usize = 0;
+            while (k < nsigns) : (k += 1) {
+                const h = gizmoArmEnd(s, signs[k]);
+                overlayLine(s.ax + ox, s.ay + oy, h[0] + ox, h[1] + oy, c[0], c[1], c[2], GIZMO_SHAFT_W);
+                if (g_gizmo_tool == .move) drawGizmoArrowHead(h[0] + ox, h[1] + oy, s.dx, s.dy, c);
+            }
         }
+        // Fresh segment: the square handles are POLYS, and within one segment polys flush
+        // under capsules — the break lands them ON TOP of the already-flushed arms, and
+        // the hub capsules below then top the squares (studio stacking: arm < square < hub).
+        overlayLayerBreak(ox, oy);
+        if (g_gizmo_tool == .scale) {
+            var sq_axis: i32 = 0;
+            while (sq_axis < 3) : (sq_axis += 1) {
+                const s = axisScreenInfo(cam, pivot, axisVec(sq_axis)) orelse continue;
+                const c = gizmoAxisDrawColor(sq_axis);
+                for ([2]f32{ 1, -1 }) |sign| {
+                    const h = gizmoArmEnd(s, sign);
+                    drawGizmoSquare(h[0] + ox, h[1] + oy, c);
+                }
+            }
+        }
+        // Hub (studio): MOVE = hollow ring, decoration; SCALE = solid ball, THE uniform
+        // handle — grabbing it scales all three axes at once, gold while held.
+        const hub_active = g_gizmo_active == GIZMO_UNIFORM_CODE;
+        const rim = if (hub_active) GIZMO_ACTIVE else GIZMO_HUB_RIM;
+        overlayDot(pc[0] + ox, pc[1] + oy, rim[0], rim[1], rim[2], GIZMO_CENTER_PX * 2 + 2);
+        const core_col = if (g_gizmo_tool == .scale) (if (hub_active) GIZMO_ACTIVE else GIZMO_HUB_FILL) else GIZMO_DARK;
+        capsules.drawCapsule(pc[0] + ox, pc[1] + oy, pc[0] + ox, pc[1] + oy, core_col[0], core_col[1], core_col[2], 1.0, GIZMO_CENTER_PX * 2 - 2);
     }
     // Live step readout (req_2759): the drag's current SNAPPED value beside the pivot —
     // "+3.00u" / "+15°" / "×1.20" — so the grid the drag clicks along can be read off.
@@ -3348,6 +3612,10 @@ fn drawGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
     }
 }
 
+/// Port of the studio's pickGizmoHandle: rotate → nearest ring; else the SCALE hub
+/// (uniform, centerPx+4 grab ring) first, then each arm — TIP or SHAFT, whichever is
+/// closer, within grabPx. Returns 0..2 = positive axis handle, GIZMO_NEG_BASE+axis =
+/// scale's negative-end square, GIZMO_UNIFORM_CODE = the uniform hub, -1 = miss.
 pub fn meshGizmoHit(mx: f32, my: f32) i32 {
     if (g_paint_session) return -1; // req_2662: no gizmo grabs while paint owns the surface
     if (!g_me_capture or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return -1;
@@ -3355,22 +3623,44 @@ pub fn meshGizmoHit(mx: f32, my: f32) i32 {
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const lmx = vpLocalX(mx);
     const lmy = vpLocalY(my);
-    var best_axis: i32 = -1;
+    var best: i32 = -1;
     var best_d2: f32 = GIZMO_HIT_PX * GIZMO_HIT_PX;
+    if (g_gizmo_tool == .rotate) {
+        var axis: i32 = 0;
+        while (axis < 3) : (axis += 1) {
+            const d2 = ringHitDist2(cam, pivot, axis, lmx, lmy);
+            if (d2 < best_d2) {
+                best_d2 = d2;
+                best = axis;
+            }
+        }
+        return best;
+    }
+    const a = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return -1;
+    if (g_gizmo_tool == .scale) {
+        const dxc = lmx - a[0];
+        const dyc = lmy - a[1];
+        const r = GIZMO_CENTER_PX + 4;
+        if (dxc * dxc + dyc * dyc <= r * r) return GIZMO_UNIFORM_CODE;
+    }
     var axis: i32 = 0;
     while (axis < 3) : (axis += 1) {
-        const d2 = if (g_gizmo_tool == .rotate) blk: {
-            break :blk ringHitDist2(cam, pivot, axis, lmx, lmy);
-        } else blk: {
-            const ep = axisEndpoint(cam, pivot, axis) orelse break :blk 1.0e12;
-            break :blk segDist2(lmx, lmy, ep[0][0], ep[0][1], ep[1][0], ep[1][1]);
-        };
-        if (d2 < best_d2) {
-            best_d2 = d2;
-            best_axis = axis;
+        const s = axisScreenInfo(cam, pivot, axisVec(axis)) orelse continue;
+        const signs = [2]f32{ 1, -1 };
+        const nsigns: usize = if (g_gizmo_tool == .scale) 2 else 1;
+        var k: usize = 0;
+        while (k < nsigns) : (k += 1) {
+            const h = gizmoArmEnd(s, signs[k]);
+            const tdx = lmx - h[0];
+            const tdy = lmy - h[1];
+            const d2 = @min(tdx * tdx + tdy * tdy, segDist2(lmx, lmy, s.ax, s.ay, h[0], h[1]));
+            if (d2 < best_d2) {
+                best_d2 = d2;
+                best = if (k == 1) axis + GIZMO_NEG_BASE else axis;
+            }
         }
     }
-    return best_axis;
+    return best;
 }
 
 // ── Stepped gizmo drags (req_2759; the studio's req_1023 USER RULING, host-native) ────
@@ -3390,6 +3680,9 @@ var g_gizmo_applied: f32 = 0; // the stepped value already ON the mesh (scale: t
 var g_gizmo_pivot0: ?[3]f32 = null; // pivot frozen at grab
 var g_gizmo_readout: [24]u8 = undefined; // live drag readout ("+3u" / "+15°" / "×1.20")
 var g_gizmo_readout_len: usize = 0;
+var g_gizmo_active: i32 = -1; // the grabbed handle's hit code (gold glow); -1 = none
+var g_gizmo_cursor: [2]f32 = .{ 0, 0 }; // live cursor (vp-local px), accumulated from grab
+var g_gizmo_start_dist: f32 = 40; // cursor→anchor px at grab — the uniform drag's ×1 base
 
 fn snapStep(value: f32, step: f32, fine: f32, shift: bool, free: bool) f32 {
     if (free) return value;
@@ -3414,26 +3707,45 @@ fn gizmoDragReset() void {
     g_gizmo_readout_len = 0;
 }
 
-pub fn meshGizmoDrag(axis: i32, dx: f32, dy: f32, shift: bool, free: bool) bool {
-    if (axis < 0 or axis > 2 or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
+pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool) bool {
+    if (axis_code < 0 or axis_code > GIZMO_NEG_BASE + 2 or meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
+    g_gizmo_active = axis_code; // the grabbed handle glows gold until release
     // The FROZEN grab pivot keeps cumulative rotate/scale exact (each step re-derives
     // from the same origin); the live pivot is only a fallback for a lost grab.
     const pivot = g_gizmo_pivot0 orelse (mesh_edit.selectionPivot() orelse return false);
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
-    const dir = screenAxisDir(cam, pivot, axis);
-    const px = dx * dir[0] + dy * dir[1];
-    const av = axisVec(axis);
-    // Move maps through the DRAWN handle: world-units-per-pixel = handle world length /
-    // handle projected px length. A side-on (grown) handle therefore drags FINER — the
-    // studio's precision behavior (req_2620). Degenerate projections (axis into the
-    // screen, handle a few px long) fall back to the depth-based rate.
-    var move_wpp = worldUnitsPerPixel(cam, pivot);
-    if (axisEndpoint(cam, pivot, axis)) |ep| {
-        const hdx = ep[1][0] - ep[0][0];
-        const hdy = ep[1][1] - ep[0][1];
-        const hlen = @sqrt(hdx * hdx + hdy * hdy);
-        if (hlen > 8) move_wpp = gizmoAxisGeom(cam, pivot, axis).world_len / hlen;
+    g_gizmo_cursor[0] += dx;
+    g_gizmo_cursor[1] += dy;
+    // UNIFORM scale — the studio's center-hub grab: the factor is the cursor's RADIAL
+    // screen distance from the anchor over the grab distance (pull away to grow, toward
+    // to shrink), snapped on the studio's gizmoUniformStep grid, applied on all 3 axes.
+    if (axis_code == GIZMO_UNIFORM_CODE) {
+        if (g_gizmo_tool != .scale) return false;
+        const anchor = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pivot) orelse return false;
+        const rdx = g_gizmo_cursor[0] - anchor[0];
+        const rdy = g_gizmo_cursor[1] - anchor[1];
+        const f_raw = @sqrt(rdx * rdx + rdy * rdy) / @max(g_gizmo_start_dist, 4.0);
+        const target = std.math.clamp(snapStep(f_raw, GIZMO_STEP_UNIFORM, GIZMO_STEP_UNIFORM_FINE, shift, free), 0.02, 50.0);
+        setGizmoReadout("\u{00D7}{d:.2}", .{target});
+        const rel = target / g_gizmo_applied;
+        if (@abs(rel - 1.0) < 1e-6) return false;
+        var ua: i32 = 0;
+        while (ua < 3) : (ua += 1) {
+            const m = mesh_edit.scaleSelectionAxis(axisVec(ua), pivot, rel);
+            if (!applyMeshMutation(m)) return false;
+        }
+        g_gizmo_applied = target;
+        return true;
     }
+    const neg = axis_code >= GIZMO_NEG_BASE;
+    const axis: i32 = if (neg) axis_code - GIZMO_NEG_BASE else axis_code;
+    const s = axisScreenInfo(cam, pivot, axisVec(axis)) orelse return false;
+    // Studio dragWorldDistance: project the cursor delta onto the axis' screen direction,
+    // divide by px-per-unit at the anchor. A negative-end square inverts — its outward
+    // (grow) direction is −axis on screen.
+    const px = (dx * s.dx + dy * s.dy) * @as(f32, if (neg) -1 else 1);
+    const av = axisVec(axis);
+    const move_wpp = 1.0 / s.px_per_unit;
     switch (g_gizmo_tool) {
         .move => {
             g_gizmo_raw += px * move_wpp;
