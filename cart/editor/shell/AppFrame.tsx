@@ -1979,10 +1979,9 @@ export default function AppFrame() {
       return;
     }
     const targets = verbTargets(id, allParts);
-    // Deleting the LAST visible geometry: the host refuses to empty a mesh (its guard),
-    // so don't ask it — removing the rows unmounts the viewer, which drops the host
-    // mesh with it. Empty model IS the outcome we want here (req_2560).
-    const emptiesModel = composeModelParts(allParts.filter((p) => !targets.includes(p.id))).positions.length === 0;
+    // Deleting the last visible geometry goes through the SAME host op as any other
+    // delete — the host empties honestly now (req_2806: the refuse-to-empty guard is
+    // gone; it made this path skip the op and leave a ghost mesh behind, req_2805).
     const lines: string[] = [];
     for (const tid of targets) {
       const part = allParts.find((p) => p.id === tid);
@@ -1990,17 +1989,15 @@ export default function AppFrame() {
       const range = partRange(part);
       // Each visible part is its own host op and its own journal entry — the status
       // reads one line per part (honest N entries, no faked atomicity; req_2659e).
-      const r = !emptiesModel && range && part.visible ? modelToolApiRef.current?.deletePartRange(range.lo, range.hi) : null;
+      const r = range && part.visible ? modelToolApiRef.current?.deletePartRange(range.lo, range.hi) : null;
       lines.push(part.visible && range
-        ? (emptiesModel
-          ? `deleted ${part.name}`
-          : r?.ok
-            ? `deleted ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`
-            : `could not delete ${part.name} [${range.lo},${range.hi}) — host op failed`)
+        ? r?.ok
+          ? `deleted ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`
+          : `could not delete ${part.name} [${range.lo},${range.hi}) — host op failed`
         : `removed ${part.name} from the outliner`);
       hiddenPartIdsRef.current.delete(tid);
     }
-    const status = emptiesModel ? `${lines.join(' · ')} — model is now empty` : lines.join(' · ');
+    const status = lines.join(' · ');
     setState((prev) => {
       const parts = (prev.modelParts[mid] ?? []).filter((p) => !targets.includes(p.id));
       return { ...prev, status, modelParts: { ...prev.modelParts, [mid]: parts }, modelActivePartId: targets.includes(prev.modelActivePartId ?? '') ? (parts[0]?.id ?? null) : prev.modelActivePartId };

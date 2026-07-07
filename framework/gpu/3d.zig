@@ -686,7 +686,11 @@ fn applyCarriedFaceColors(old_colors: ?[]const u8, new_fc: u32) void {
 
 fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     const need = @as(usize, count) * 8;
-    if (count < 3 or new_verts.len < need) return false;
+    // count == 0 is a LEGITIMATE state (req_2806: deleting the last part empties the
+    // model — the old refuse-to-empty guard was never asked for): setPaintTarget
+    // clears the paint target below 3 verts, the empty soup stashes under a fresh
+    // key, and the viewer draws nothing.
+    if (count != 0 and (count < 3 or new_verts.len < need)) return false;
     const old_colors = collectCurrentFaceColors();
     defer if (old_colors) |c| std.heap.c_allocator.free(c);
     // Part ranges are pure authored-group-id spans — they survive every EDIT replace
@@ -1633,8 +1637,11 @@ pub fn meshLcState() ?LcState {
 
 /// Delete exactly the selected mesh elements: drop every triangle the current selection
 /// marks (mesh_edit.buildDeleteMask — selected faces, or faces touching a selected vert/edge)
-/// and rebuild the edit mesh from the survivors, carrying their face groups. Refuses to empty
-/// the mesh (a no-op when nothing is selected or everything would go).
+/// and rebuild the edit mesh from the survivors, carrying their face groups. Deleting
+/// EVERYTHING is allowed and empties the model (req_2806 USER RULING: the old
+/// refuse-to-empty guard "shouldn't exist" — it made the outliner remove its last row
+/// while the host kept a ghost mesh). An empty result is journaled like any edit, so
+/// undo restores it.
 pub fn meshDeleteSelection() bool {
     if (!model_paint.hasTarget()) return false;
     const verts = g_edit_verts orelse return false;
@@ -1644,7 +1651,7 @@ pub fn meshDeleteSelection() bool {
     const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
     defer std.heap.c_allocator.free(mask);
     const del = mesh_edit.buildDeleteMask(mask);
-    if (del == 0 or del >= tri_count) return false;
+    if (del == 0) return false;
 
     // Drop the selection FIRST (same rule as detach/glass): the orange tint is
     // real atlas pixels with per-face saved patches, and both are keyed by the
@@ -1669,10 +1676,6 @@ pub fn meshDeleteSelection() bool {
         if (has_groups) groups.append(std.heap.c_allocator, model_source.faceGroupOf(f)) catch {};
     }
     const kept: u32 = @intCast(out.items.len / 8);
-    if (kept < 3) {
-        out.deinit(std.heap.c_allocator);
-        return false;
-    }
     const owned = out.toOwnedSlice(std.heap.c_allocator) catch {
         out.deinit(std.heap.c_allocator);
         return false;
@@ -1682,9 +1685,11 @@ pub fn meshDeleteSelection() bool {
     var snap = journalSnapshotCurrent("delete selection");
     const ok = replaceActiveEditMesh(owned, kept);
     if (ok) {
-        if (has_groups) {
+        if (kept > 0 and has_groups) {
             model_source.setFaceGroups(groups.items);
             _ = refreshPaintLayout();
+        } else if (kept == 0) {
+            model_source.setPartRanges(&.{}); // no faces → no parts own anything
         }
         journalCommit(&snap);
     } else journalDiscard(&snap);
@@ -1728,7 +1733,9 @@ pub fn meshAppendGroup(new_verts: []const f32, new_count: u32, new_groups: []con
 
 fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const u32) AppendResult {
     const fail = AppendResult{ .ok = false, .lo = 0, .hi = 0, .count = 0 };
-    if (!model_paint.hasTarget()) return fail;
+    // An EMPTIED model (req_2806: delete-all is legal) has no paint target but a live
+    // zero-count edit mesh — appending the first part onto it is a plain install.
+    if (g_edit_count > 0 and !model_paint.hasTarget()) return fail;
     const cur_verts = g_edit_verts orelse return fail;
     const cur_count = g_edit_count;
     const need = @as(usize, new_count) * 8;
@@ -1786,6 +1793,11 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
                 ranges.append(std.heap.c_allocator, offset + new_group_span) catch {};
                 if (ranges.items.len == pr.len + 2) model_source.setPartRanges(ranges.items);
             }
+        } else {
+            // First part onto an EMPTIED model (req_2806): no ranges survive the empty
+            // state — the fresh pair IS the partition.
+            const pair = [_]u32{ offset, offset + new_group_span };
+            model_source.setPartRanges(pair[0..]);
         }
         _ = refreshPaintLayout();
     }
@@ -1993,7 +2005,8 @@ fn journalFreeStack(stack: *std.ArrayListUnmanaged(JournalEntry)) void {
 
 fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
     const verts = g_edit_verts orelse return null;
-    if (g_edit_count == 0) return null;
+    // g_edit_count == 0 is a valid EMPTY snapshot (req_2806): stepping the journal
+    // away from an emptied model must be able to record "it was empty" for redo.
     const need = @as(usize, g_edit_count) * 8;
     if (verts.len < need) return null;
     const v = jalloc.dupe(f32, verts[0..need]) catch return null;
@@ -2133,7 +2146,7 @@ fn journalInstall(e: *const JournalEntry) bool {
     }
     if (g_journal_note) |n| jalloc.free(n);
     g_journal_note = if (e.note) |n| (jalloc.dupe(u8, n) catch null) else null;
-    _ = refreshPaintLayout();
+    if (e.count > 0) _ = refreshPaintLayout(); // an EMPTY snapshot has no islands to lay out
     return true;
 }
 
@@ -7124,6 +7137,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                 var ri: usize = 0;
                 while (ri < sh_nrec) : (ri += 1) {
                     const sl = sh_rec_slot[ri];
+                    if (sl.count == 0) continue; // empty mesh (req_2806) — 0-byte setVertexBuffer aborts wgpu
                     sp.setVertexBuffer(0, g_retained_vbuf.?, sl.offset, bu.bytesOfCount(Vertex, sl.count));
                     sp.setVertexBuffer(1, g_shadow_inst_buf.?, sh_rec_off[ri], bu.bytesOfCount(InstanceData, sh_rec_cnt[ri]));
                     sp.draw(sl.count, sh_rec_cnt[ri], 0, 0);
@@ -7435,7 +7449,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                     mvisited[gi] = true;
                     const first: u32 = @min(leader.scene3d_instance_first, sd.count);
                     const count: u32 = @min(leader.scene3d_instance_count, sd.count - first);
-                    if (count > 0) {
+                    if (count > 0 and group_slot.count > 0) {
                         if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
                         pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, bu.bytesOfCount(Vertex, group_slot.count));
                         if (is_slim) {
@@ -7498,7 +7512,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                 }
                 mvisited[hf] = true;
             }
-            if (fcount == 0) continue;
+            if (fcount == 0 or group_slot.count == 0) continue;
             const fstart_index: usize = @intCast(fstart / @sizeOf(SlimInstance));
             bu.writeTypedBuffer(queue, g_slim_inst_buf.?, fstart, SlimInstance, slim_inst_scratch[fstart_index .. fstart_index + fcount]);
             if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
@@ -7590,7 +7604,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
             mvisited[hi] = true;
         }
 
-        if (group_count == 0) continue;
+        if (group_count == 0 or group_slot.count == 0) continue;
         const inst_start_index: usize = @intCast(inst_start / @sizeOf(InstanceData));
         bu.writeTypedBuffer(queue, g_instance_buf.?, inst_start, InstanceData, inst_scratch[inst_start_index .. inst_start_index + group_count]);
         if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
@@ -7701,6 +7715,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
         var ti: usize = 0;
         while (ti < tcount) : (ti += 1) {
             if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) break;
+            if (tslot[ti].count == 0) continue; // empty mesh (req_2806) — 0-byte setVertexBuffer aborts wgpu
             const child = &scene_node.children[tidx[ti]];
             const inst_index: usize = @intCast(inst_top / @sizeOf(InstanceData));
             inst_scratch[inst_index] = makeInstance(
