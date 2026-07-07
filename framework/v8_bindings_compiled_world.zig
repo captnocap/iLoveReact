@@ -428,6 +428,20 @@ fn hostSetPlayerModel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnString(info, "ok");
 }
 
+// __compiled_world_set_player_animation(Float32Array payload) stages the basic animation
+// shapes generated for the pushed body (req_2781) — same staging discipline as the model
+// door: process-global, consumed at construct when the gamefile carries no animation and
+// the payload's node count matches the model's groups. Empty payload clears.
+fn hostSetPlayerAnimation(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const payload = argView(info, 0) orelse {
+        setReturnString(info, "error:BadPayload");
+        return;
+    };
+    world_loader.setPendingPlayerAnimation(payload);
+    setReturnString(info, "ok");
+}
+
 // ── the pop-out window (WORLDWIN-0611) ──────────────────────────────────────
 // __compiled_world_window(gameFile, storeDir, width, height) opens the
 // second OS window (or reloads its gamefile when already open — the Compile
@@ -502,6 +516,7 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_set_paint_mode", hostSetPaintMode);
     v8_runtime.registerHostFn("__compiled_world_set_resident_meshes", hostSetResidentMeshes);
     v8_runtime.registerHostFn("__compiled_world_set_player_model", hostSetPlayerModel);
+    v8_runtime.registerHostFn("__compiled_world_set_player_animation", hostSetPlayerAnimation);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);
     v8_runtime.registerHostFn("__compiled_world_window_status", hostWindowStatus);

@@ -16,6 +16,7 @@
 import { MODEL_PACKAGES } from '../data/catalog';
 import { packageMeshDoc, packageMeshDocParts } from '../data/hmscAssetCatalog';
 import { meshDocRangeCenters, type PackageMeshDoc, type MeshDocPartMeta } from '../data/meshDoc';
+import { buildBodyClips, encodeAnimationPayload, type AnimNode } from './playerAnimation';
 import type { ModelPackage } from '../data/types';
 
 const g: any = globalThis;
@@ -34,8 +35,10 @@ function hexRgb(hex: string | undefined): [number, number, number] {
 
 /** Slice a meshdoc into the door payload: one group per part range, vertices
  *  LOCAL to the range's measured bounds center, color from the rank-paired
- *  parts row. Table rows: [vertStart, vertCount, cx, cy, cz, r, g, b]. */
-export function playerModelPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[]): { verts: Float32Array; table: Float32Array } {
+ *  parts row. Table rows: [vertStart, vertCount, cx, cy, cz, r, g, b].
+ *  `nodes` mirrors the emitted groups one-for-one (name + center, rank order)
+ *  — the clip generator MUST see the exact node order the loader will animate. */
+export function playerModelPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[]): { verts: Float32Array; table: Float32Array; nodes: AnimNode[] } {
   const triCount = Math.floor(doc.vertices.length / 24);
   const centers = meshDocRangeCenters(doc);
   const buckets: number[][] = doc.ranges.map(() => []);
@@ -59,6 +62,7 @@ export function playerModelPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[])
   const totalFloats = buckets.reduce((sum, b) => sum + b.length, 0);
   const verts = new Float32Array(totalFloats);
   const rows: number[] = [];
+  const nodes: AnimNode[] = [];
   let vertStart = 0;
   buckets.forEach((bucket, rank) => {
     if (bucket.length === 0) return;
@@ -66,20 +70,24 @@ export function playerModelPayload(doc: PackageMeshDoc, meta: MeshDocPartMeta[])
     const center = centers[rank] ?? [0, 0, 0];
     const [r, gg, b] = hexRgb(meta[rank]?.color);
     rows.push(vertStart, bucket.length / 8, center[0], center[1], center[2], r, gg, b);
+    nodes.push({ name: meta[rank]?.name ?? `part ${rank + 1}`, center: [center[0], center[1], center[2]] });
     vertStart += bucket.length / 8;
   });
-  return { verts, table: new Float32Array(rows) };
+  return { verts, table: new Float32Array(rows), nodes };
 }
 
-export type PlayerModelPush = { name: string; groups: number };
+export type PlayerModelPush = { name: string; groups: number; animated: boolean };
 
-/** Resolve → slice → stage. Returns what was staged (the playtest readout), or
- *  null when there is no player-role export / no door / no readable meshdoc —
- *  in every null case the staging is CLEARED so the loader honestly falls back
- *  to the stand-in instead of wearing a stale body. */
+/** Resolve → slice → stage, model AND clips. Returns what was staged (the
+ *  playtest readout), or null when there is no player-role export / no door /
+ *  no readable meshdoc — in every null case the staging is CLEARED so the
+ *  loader honestly falls back to the stand-in instead of wearing a stale body. */
 export function pushPlayerModel(): PlayerModelPush | null {
   if (typeof g.__compiled_world_set_player_model !== 'function') return null;
-  const clear = () => g.__compiled_world_set_player_model(new Float32Array(0), new Float32Array(0));
+  const clear = () => {
+    g.__compiled_world_set_player_model(new Float32Array(0), new Float32Array(0));
+    g.__compiled_world_set_player_animation?.(new Float32Array(0));
+  };
   const pkg = playerCharacterPackage();
   if (!pkg) { clear(); return null; }
   const doc = packageMeshDoc(pkg);
@@ -92,5 +100,13 @@ export function pushPlayerModel(): PlayerModelPush | null {
   const payload = playerModelPayload(doc, meta);
   if (payload.table.length === 0) { clear(); return null; }
   g.__compiled_world_set_player_model(payload.verts, payload.table);
-  return { name: pkg.name, groups: payload.table.length / 8 };
+  // The basic animation shapes (req_2781), generated for THIS body's exact
+  // node order — clips only engage when node_count matches the groups.
+  let animated = false;
+  if (typeof g.__compiled_world_set_player_animation === 'function') {
+    const clips = buildBodyClips(payload.nodes);
+    g.__compiled_world_set_player_animation(encodeAnimationPayload(payload.nodes.length, clips));
+    animated = true;
+  }
+  return { name: pkg.name, groups: payload.table.length / 8, animated };
 }
