@@ -620,8 +620,9 @@ fn hostMeshTopoCreateFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     setMeshTopoReturn(info, ok);
 }
 
-/// __mesh_topo_loop_cut() → JSON {"ok","key","count"}. Slice the mesh by the plane
-/// perpendicular to the ONE selected edge, through its midpoint — the host-native loop
+/// __mesh_topo_loop_cut() → JSON {"ok","key","count"}. Slice the mesh by the axis-aligned
+/// plane across the ONE selected edge (normal = the edge's dominant world axis, through
+/// its midpoint — req_2837: keeps the ring level on tapered shapes) — the host-native loop
 /// cut. Straddling faces split; authored grouping carries through so each crossed face
 /// becomes two clean faces.
 fn hostMeshTopoLoopCut(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

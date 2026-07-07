@@ -1267,24 +1267,31 @@ fn renormalizePartRanges(face_part: []const u32, part_count: u32) void {
     _ = refreshPaintLayout(); // islands key off the grouping
 }
 
-/// Loop cut: slice the resident mesh by the plane perpendicular to the ONE selected edge,
-/// through its midpoint (Blender's rule — the new loop runs across the ring the
-/// edge belongs to). Straddling faces split; authored face grouping (studio meshes)
-/// carries through so each crossed n-gon becomes two clean faces — the host-native twin of
-/// the Studio's loopCut(EditMesh). The heavy work is mesh_edit.planeCutSoup (pure, tested);
-/// this derives the plane, rebuilds the interleaved edit mesh, and re-applies the grouping.
+/// Loop cut: slice the resident mesh by the axis-aligned plane across the ONE selected
+/// edge, through its midpoint. The plane's normal is the edge's DOMINANT world axis, not
+/// the raw edge direction (req_2837): on a tapered shape the side edges lean, and a plane
+/// perpendicular to a leaning edge cuts a slanted ring nothing can level afterwards —
+/// snapping to the dominant axis keeps the ring flat (Blender's topological loop lands
+/// level on a taper too; every other cut in this family is axis-aligned). Straddling faces
+/// split; authored face grouping (studio meshes) carries through so each crossed n-gon
+/// becomes two clean faces — the host-native twin of the Studio's loopCut(EditMesh). The
+/// heavy work is mesh_edit.planeCutSoup (pure, tested); this derives the plane, rebuilds
+/// the interleaved edit mesh, and re-applies the grouping.
 pub fn meshTopoLoopCut() bool {
     if (!model_paint.hasTarget()) return false;
     const edge_idx = mesh_edit.selectedEdgeIndexPub() orelse return false;
     const ep = mesh_edit.edgeEndpointsPub(edge_idx);
     const a = mesh_edit.vertPosPub(ep[0]);
     const b = mesh_edit.vertPosPub(ep[1]);
-    var nrm = vsub(b, a);
-    const l2 = vdot(nrm, nrm);
-    if (l2 < 1e-12) return false;
-    nrm = vmul(nrm, 1.0 / @sqrt(l2));
+    const dir = vsub(b, a);
+    if (vdot(dir, dir) < 1e-12) return false;
+    var axis: usize = 0;
+    if (@abs(dir[1]) > @abs(dir[axis])) axis = 1;
+    if (@abs(dir[2]) > @abs(dir[axis])) axis = 2;
+    var nrm: [3]f32 = .{ 0, 0, 0 };
+    nrm[axis] = 1;
     const mid = vmul(vadd(a, b), 0.5);
-    const d = vdot(nrm, mid);
+    const d = mid[axis];
 
     const verts = g_edit_verts orelse return false;
     const tri_count = g_edit_count / 3;
