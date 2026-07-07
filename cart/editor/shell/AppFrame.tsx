@@ -1804,6 +1804,14 @@ export default function AppFrame() {
       // starter doc with the role choice open.
       createPlayerModelDocument();
       setState((prev) => ({ ...prev, exportCharacterPrompt: true }));
+    } else if (kind === 'playtest') {
+      // Headless repro of the playtest tab (req_2780): the embodied world with
+      // the exported player model (or the stand-in when none is declared).
+      setState((prev) => ({
+        ...prev,
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, PLAYTEST_DOCUMENT),
+        activeWorkspaceDocumentId: PLAYTEST_DOCUMENT.id,
+      }));
     } else if (kind) createNewMeshDocument(kind as PrimitiveKind, { size: 1, height: 1, resolution: 1 });
   }, []);
   // ── Outliner multi-select (req_2659) ──────────────────────────────────────────

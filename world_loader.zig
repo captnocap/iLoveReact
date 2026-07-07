@@ -720,6 +720,142 @@ fn buildCube() [36 * 8]f32 {
     return out;
 }
 
+/// GLOBALS req_2770: a stand-in blocky figure for worlds whose bake carries no
+/// PLAYER_MODEL lump (the editor's blank paint-first world) — tuning physics in
+/// the playtest tab needs a VISIBLE body, not a silent camera target. Proportions
+/// follow the scale contract (R4): 1.65m collider, stylized-tall ~2m visual
+/// head-top. Feet at local y=0 (the baked player-model convention); each part is
+/// one unit-cube group scaled/offset via the group transform, no texture. The
+/// visor is an asymmetric marker so turning is visible while testing.
+fn fallbackPlayerModel(allocator: std.mem.Allocator) ![]constructor.PlayerModelGroup {
+    const cube = buildCube();
+    const Part = struct { pos: [3]f32, scale: [3]f32, color: [3]f32 };
+    const parts = [_]Part{
+        .{ .pos = .{ -0.11, 0.475, 0 }, .scale = .{ 0.17, 0.95, 0.20 }, .color = .{ 0.24, 0.32, 0.48 } }, // left leg
+        .{ .pos = .{ 0.11, 0.475, 0 }, .scale = .{ 0.17, 0.95, 0.20 }, .color = .{ 0.24, 0.32, 0.48 } }, // right leg
+        .{ .pos = .{ 0, 1.275, 0 }, .scale = .{ 0.46, 0.65, 0.26 }, .color = .{ 0.30, 0.42, 0.38 } }, // torso
+        .{ .pos = .{ -0.325, 1.30, 0 }, .scale = .{ 0.13, 0.60, 0.18 }, .color = .{ 0.30, 0.42, 0.38 } }, // left arm
+        .{ .pos = .{ 0.325, 1.30, 0 }, .scale = .{ 0.13, 0.60, 0.18 }, .color = .{ 0.30, 0.42, 0.38 } }, // right arm
+        .{ .pos = .{ 0, 1.82, 0 }, .scale = .{ 0.30, 0.32, 0.28 }, .color = .{ 0.78, 0.62, 0.50 } }, // head
+        .{ .pos = .{ 0, 1.86, 0.16 }, .scale = .{ 0.22, 0.06, 0.06 }, .color = .{ 0.15, 0.15, 0.18 } }, // visor
+    };
+    var groups = try allocator.alloc(constructor.PlayerModelGroup, parts.len);
+    var initialized: usize = 0;
+    errdefer {
+        for (groups[0..initialized]) |group| group.deinit(allocator);
+        allocator.free(groups);
+    }
+    for (parts, 0..) |part, i| {
+        const verts = try allocator.alloc(f32, cube.len);
+        @memcpy(verts, cube[0..]);
+        groups[i] = .{
+            .color = part.color,
+            .alpha = 1,
+            .vertices = verts,
+            .vertex_count = 36,
+            .tex_w = 0,
+            .tex_h = 0,
+            .tex_rgba = null,
+            .position = part.pos,
+            .rotation = .{ 0, 0, 0 },
+            .scale = part.scale,
+        };
+        initialized += 1;
+    }
+    return groups;
+}
+
+// ── the live-pushed player model (req_2780) ─────────────────────────────────
+// The editor's EXPORTED player-role character (manifest placeable
+// {as:'character', role:'player'}) replaces the stand-in figure in worlds whose
+// gamefile carries no player lump (the blank editor/playtest world). The cart
+// stages it through __compiled_world_set_player_model BEFORE the loader node
+// constructs (the door is process-global, consumed at construct); pending
+// survives remounts so every playtest session wears the last-pushed body until
+// a new push or a clear. The gamefile lump, when present, still wins — this is
+// the pre-Compile live lane, not a second bake truth.
+var g_pending_player_model: []constructor.PlayerModelGroup = &.{};
+
+/// Decode + store the pushed player model. `table_bytes` is a Float32Array of
+/// 8-float rows [vertStart, vertCount, cx, cy, cz, r, g, b]; `verts_bytes` is
+/// the concatenated stride-8 vertex pool the rows slice (vertices are LOCAL to
+/// each group's center so future clips can pose the parts). Empty table clears.
+pub fn setPendingPlayerModel(verts_bytes: []const u8, table_bytes: []const u8) void {
+    const alloc = std.heap.page_allocator;
+    for (g_pending_player_model) |group| group.deinit(alloc);
+    if (g_pending_player_model.len > 0) alloc.free(g_pending_player_model);
+    g_pending_player_model = &.{};
+
+    const vert_floats = verts_bytes.len / 4;
+    const rows = table_bytes.len / (8 * 4);
+    if (rows == 0 or vert_floats == 0) return;
+    const table = alloc.alloc(f32, rows * 8) catch return;
+    defer alloc.free(table);
+    @memcpy(std.mem.sliceAsBytes(table), table_bytes[0 .. rows * 8 * 4]);
+
+    var groups = std.ArrayListUnmanaged(constructor.PlayerModelGroup){};
+    var r: usize = 0;
+    while (r < rows) : (r += 1) {
+        const row = table[r * 8 ..][0..8];
+        const start: usize = @intFromFloat(@max(0.0, row[0]));
+        const count: usize = @intFromFloat(@max(0.0, row[1]));
+        if (count == 0) continue;
+        const lo = start * 8 * 4;
+        const hi = (start + count) * 8 * 4;
+        if (hi > verts_bytes.len or lo >= hi) continue;
+        const verts = alloc.alloc(f32, count * 8) catch continue;
+        @memcpy(std.mem.sliceAsBytes(verts), verts_bytes[lo..hi]);
+        groups.append(alloc, .{
+            .color = .{ row[5], row[6], row[7] },
+            .alpha = 1,
+            .vertices = verts,
+            .vertex_count = @intCast(count),
+            .tex_w = 0,
+            .tex_h = 0,
+            .tex_rgba = null,
+            .position = .{ row[2], row[3], row[4] },
+            .rotation = .{ 0, 0, 0 },
+            .scale = .{ 1, 1, 1 },
+        }) catch {
+            alloc.free(verts);
+            continue;
+        };
+    }
+    g_pending_player_model = groups.toOwnedSlice(alloc) catch &.{};
+    log.print("[loader] player model staged — {d} groups (req_2780)\n", .{g_pending_player_model.len});
+}
+
+/// Deep-copy the staged player model for a constructing scene (the scene owns
+/// its copy — Scene.deinit frees it exactly like a decoded lump). Null when
+/// nothing is staged.
+fn pendingPlayerModelCopy(allocator: std.mem.Allocator) ?[]constructor.PlayerModelGroup {
+    if (g_pending_player_model.len == 0) return null;
+    const groups = allocator.alloc(constructor.PlayerModelGroup, g_pending_player_model.len) catch return null;
+    var initialized: usize = 0;
+    for (g_pending_player_model, 0..) |src, i| {
+        const verts = allocator.alloc(f32, src.vertices.len) catch {
+            for (groups[0..initialized]) |g2| g2.deinit(allocator);
+            allocator.free(groups);
+            return null;
+        };
+        @memcpy(verts, src.vertices);
+        groups[i] = .{
+            .color = src.color,
+            .alpha = src.alpha,
+            .vertices = verts,
+            .vertex_count = src.vertex_count,
+            .tex_w = 0,
+            .tex_h = 0,
+            .tex_rgba = null,
+            .position = src.position,
+            .rotation = src.rotation,
+            .scale = src.scale,
+        };
+        initialized += 1;
+    }
+    return groups;
+}
+
 fn buildCubeOpenRun(comptime open_min: bool, comptime open_max: bool) [(36 - (if (open_min) 6 else 0) - (if (open_max) 6 else 0)) * 8]f32 {
     const Corner = [3]f32;
     const v0 = Corner{ -0.5, -0.5, -0.5 };
@@ -3160,6 +3296,12 @@ pub const Runtime = struct {
     live_kid: ?usize = null,
     live_buf: []f32 = &.{},
     live_gen: u64 = 0,
+    /// Live physics-globals override (GLOBALS req_2770): the editor's Globals →
+    /// Physics panel pushes the 13-float PHYSICS_CONFIG tuning through
+    /// setPhysicsConfig and the NEXT step reads it — the baked lump value stays
+    /// untouched so clearing the override reverts to the shipped feel.
+    physics_override: ?constructor.PhysicsConfig = null,
+    physics_override_gen: u64 = 0,
     // Live editor-placed MESH props (LIVEMESH req_1812): a just-placed imported/cooked
     // mesh prop renders instantly by REFERENCING an already-resident mesh (the user's
     // "once one X exists, the next is a reference to it" — instanced rendering). The
@@ -4297,6 +4439,21 @@ pub const Runtime = struct {
         try self.kid_list.append(self.allocator, .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = env.ambient_color[0], .scene3d_color_g = env.ambient_color[1], .scene3d_color_b = env.ambient_color[2], .scene3d_intensity = env.ambient_intensity });
         try self.kid_list.append(self.allocator, .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = env.dir[0], .scene3d_dir_y = env.dir[1], .scene3d_dir_z = env.dir[2], .scene3d_color_r = env.dir_color[0], .scene3d_color_g = env.dir_color[1], .scene3d_color_b = env.dir_color[2], .scene3d_intensity = env.dir_intensity });
 
+        // GLOBALS req_2770 / req_2780: a blank/pre-lump world wears the EXPORTED
+        // player model when one is staged (__compiled_world_set_player_model);
+        // only when nothing is staged does the stand-in figure mount. The scene
+        // owns the groups exactly like a decoded lump (Scene.deinit frees them).
+        if (self.scene.player_model.len == 0) {
+            if (pendingPlayerModelCopy(self.allocator)) |groups| {
+                self.scene.player_model = groups;
+                log.print("[loader] player model from live push — {d} groups (req_2780)\n", .{groups.len});
+            } else {
+                self.scene.player_model = fallbackPlayerModel(self.allocator) catch &.{};
+                if (self.scene.player_model.len > 0) {
+                    log.print("[loader] no player model lump — stand-in figure (GLOBALS req_2770)\n", .{});
+                }
+            }
+        }
         self.player_first_child = self.kid_list.items.len;
         for (self.scene.player_model, 0..) |group, i| {
             const key = try std.fmt.allocPrint(self.allocator, "player-model-{d}", .{i});
@@ -4318,7 +4475,7 @@ pub const Runtime = struct {
                 .scene3d_tex_rgba = group.tex_rgba,
             });
         }
-        if (self.scene.player_model.len == 0) log.print("[loader] no player model lump — camera target only\n", .{});
+        if (self.scene.player_model.len == 0) log.print("[loader] no player model lump and stand-in failed — camera target only\n", .{});
 
         // NPC figures (req_0935): one child node per spawn × model group, posed
         // every frame by updateNpcModelNodes. Each (spawn, group) gets a unique
@@ -5562,7 +5719,8 @@ pub const Runtime = struct {
         const run_down = keyDown(SCAN_LSHIFT);
         // Locomotion speed from the baked PHYSICS_CONFIG (the editor's walk/run),
         // falling back to the loader's built-in constants for pre-lump bakes.
-        const cfg = self.scene.physics_config;
+        // A live Globals override (GLOBALS req_2770) outranks the baked lump.
+        const cfg = self.physics_override orelse self.scene.physics_config;
         const walk_speed = if (cfg) |cf| cf.walk_speed else PLAYER_WALK_SPEED_METERS_PER_SECOND;
         const run_speed = if (cfg) |cf| cf.run_speed else PLAYER_RUN_SPEED_METERS_PER_SECOND;
         const speed: f32 = if (run_down) run_speed else walk_speed;
@@ -6257,6 +6415,88 @@ const PendingCam = struct {
     fov: f32 = CAMERA_FOV_DEGREES,
 };
 var g_pending_cams: [MAX_EMBEDDED_LOADERS]PendingCam = [_]PendingCam{.{}} ** MAX_EMBEDDED_LOADERS;
+
+// Live physics-globals override (GLOBALS req_2770): the editor's Globals → Physics
+// panel pushes the SAME 13 floats the PHYSICS_CONFIG lump bakes (order:
+// gravity, jumpSpeed, playerRadius, playerHeight, stepHeight, wallRestitution,
+// bodyRestitution, walkableSidePushGrace, accelMult, surfaceFriction,
+// surfaceRestitution, walkSpeed, runSpeed — the encodePhysicsConfigLump layout),
+// and the mounted runtime's NEXT physics step reads them. Keyed by node id and
+// INDEPENDENT of mount state (same reason as PendingCam), applied each
+// renderEmbedded frame; `on = false` reverts to the baked lump / built-ins.
+pub const PHYSICS_CONFIG_FLOATS: usize = 13;
+const PendingPhysics = struct {
+    node_id: u32 = 0,
+    set: bool = false,
+    on: bool = false,
+    values: [PHYSICS_CONFIG_FLOATS]f32 = @splat(0),
+    gen: u64 = 0,
+};
+var g_pending_physics: [MAX_EMBEDDED_LOADERS]PendingPhysics = [_]PendingPhysics{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn pendingPhysicsFor(node_id: u32) ?*PendingPhysics {
+    for (&g_pending_physics) |*p| {
+        if (p.set and p.node_id == node_id) return p;
+    }
+    return null;
+}
+
+/// Replace the live physics override for a node (GLOBALS req_2770). `bytes` is the raw
+/// Float32Array backing (13 floats, lump order); we copy so the JS array can be freed.
+/// Short/oversized payloads are rejected loudly — a wrong pack is a bug, not a default.
+pub fn setPhysicsConfig(node_id: u32, bytes: []const u8) bool {
+    if (bytes.len < PHYSICS_CONFIG_FLOATS * 4) {
+        log.print("[loader] physics override rejected: {d} bytes (need {d})\n", .{ bytes.len, PHYSICS_CONFIG_FLOATS * 4 });
+        return false;
+    }
+    var slot: ?*PendingPhysics = pendingPhysicsFor(node_id);
+    if (slot == null) {
+        for (&g_pending_physics) |*p| {
+            if (!p.set) {
+                slot = p;
+                break;
+            }
+        }
+    }
+    const p = slot orelse return false;
+    p.node_id = node_id;
+    p.set = true;
+    p.on = true;
+    @memcpy(std.mem.sliceAsBytes(p.values[0..]), bytes[0 .. PHYSICS_CONFIG_FLOATS * 4]);
+    p.gen +%= 1;
+    return true;
+}
+
+/// Drop the live physics override for a node — the next step reads the baked
+/// PHYSICS_CONFIG lump again (or the loader built-ins on a pre-lump/blank world).
+pub fn clearPhysicsConfig(node_id: u32) void {
+    const p = pendingPhysicsFor(node_id) orelse return;
+    p.on = false;
+    p.gen +%= 1;
+}
+
+// Copy the node's pending physics override into the runtime (gen-guarded, so a
+// still panel costs nothing per frame). Field order = the lump order above.
+fn applyPendingPhysics(runtime: *Runtime) void {
+    const p = pendingPhysicsFor(runtime.node_id) orelse return;
+    if (runtime.physics_override_gen == p.gen) return;
+    runtime.physics_override = if (p.on) constructor.PhysicsConfig{
+        .gravity = p.values[0],
+        .jump_speed = p.values[1],
+        .player_radius = p.values[2],
+        .player_height = p.values[3],
+        .step_height = p.values[4],
+        .wall_restitution = p.values[5],
+        .body_restitution = p.values[6],
+        .walkable_side_push_grace = p.values[7],
+        .accel_mult = p.values[8],
+        .surface_friction = p.values[9],
+        .surface_restitution = p.values[10],
+        .walk_speed = p.values[11],
+        .run_speed = p.values[12],
+    } else null;
+    runtime.physics_override_gen = p.gen;
+}
 
 // Live-pieces overlay (LIVEHOST req_1798): the editor pushes instance rows for pieces
 // it has placed-but-not-yet-baked, and the loader draws them as real solid box meshes
@@ -7611,6 +7851,7 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
         }
     }
     applyPendingLive(runtime); // LIVEHOST req_1798: just-placed pieces, drawn without a rebake
+    applyPendingPhysics(runtime); // GLOBALS req_2770: live physics tuning, read by the next step
     // MAPPAINT req_2473: the pane rect feeds the screen→ray mapping; the paint
     // layer mirrors painted chunks + colliders and dresses the brush beam.
     runtime.paint_last_x = x;

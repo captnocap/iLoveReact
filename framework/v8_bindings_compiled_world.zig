@@ -166,6 +166,37 @@ fn hostClearLivePieces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnString(info, "ok");
 }
 
+// ── live physics globals (GLOBALS req_2770) ─────────────────────────────────
+// __compiled_world_set_physics(nodeId, Float32Array[13]) overrides the mounted
+// loader's physics tuning THIS frame — the same 13 floats, same order, as the
+// PHYSICS_CONFIG lump (encodePhysicsConfigLump): gravity, jumpSpeed, playerRadius,
+// playerHeight, stepHeight, wallRestitution, bodyRestitution, walkableSidePushGrace,
+// accelMult, surfaceFriction, surfaceRestitution, walkSpeed, runSpeed.
+// _clear_physics reverts to the baked lump (or loader built-ins on a blank world).
+
+fn hostSetPhysics(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const bytes = argView(info, 1) orelse {
+        setReturnString(info, "error:BadFloats");
+        return;
+    };
+    if (!world_loader.setPhysicsConfig(node_id, bytes)) {
+        setReturnString(info, "error:BadFloats");
+        return;
+    }
+    setReturnString(info, "ok");
+}
+
+fn hostClearPhysics(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (argToNodeId(info, 0)) |node_id| world_loader.clearPhysicsConfig(node_id);
+    setReturnString(info, "ok");
+}
+
 // __compiled_world_set_live_mesh_props(nodeId, Uint8Array refs) draws just-placed MESH
 // props (imported genmesh / Studio-cooked) by REFERENCING an already-resident mesh — no
 // rebake (LIVEMESH req_1812). Each ref is 20 bytes: u32 keyHash, then f32 x,y,z,yaw.
@@ -377,6 +408,26 @@ fn hostSetResidentMeshes(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnString(info, "ok");
 }
 
+// __compiled_world_set_player_model(Float32Array verts, Float32Array groupTable) stages the
+// editor's EXPORTED player-role character as the loader's player figure (req_2780). Process-
+// global (no nodeId): staged BEFORE a loader constructs, consumed by every construct whose
+// gamefile has no player lump — the blank playtest world's case. Table rows are 8 floats
+// [vertStart, vertCount, cx, cy, cz, r, g, b]; verts are stride-8, LOCAL to each group's
+// center. Two empty arrays clear the staging (back to the stand-in figure).
+fn hostSetPlayerModel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const verts = argView(info, 0) orelse {
+        setReturnString(info, "error:BadVerts");
+        return;
+    };
+    const table = argView(info, 1) orelse {
+        setReturnString(info, "error:BadTable");
+        return;
+    };
+    world_loader.setPendingPlayerModel(verts, table);
+    setReturnString(info, "ok");
+}
+
 // ── the pop-out window (WORLDWIN-0611) ──────────────────────────────────────
 // __compiled_world_window(gameFile, storeDir, width, height) opens the
 // second OS window (or reloads its gamefile when already open — the Compile
@@ -437,6 +488,8 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_clear_camera", hostClearCamera);
     v8_runtime.registerHostFn("__compiled_world_set_live_pieces", hostSetLivePieces);
     v8_runtime.registerHostFn("__compiled_world_clear_live_pieces", hostClearLivePieces);
+    v8_runtime.registerHostFn("__compiled_world_set_physics", hostSetPhysics);
+    v8_runtime.registerHostFn("__compiled_world_clear_physics", hostClearPhysics);
     v8_runtime.registerHostFn("__compiled_world_set_live_mesh_props", hostSetLiveMeshProps);
     v8_runtime.registerHostFn("__compiled_world_clear_live_mesh_props", hostClearLiveMeshProps);
     v8_runtime.registerHostFn("__compiled_world_set_live_mesh_ghost", hostSetLiveMeshGhost);
@@ -448,6 +501,7 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_ground_hit", hostGroundHit);
     v8_runtime.registerHostFn("__compiled_world_set_paint_mode", hostSetPaintMode);
     v8_runtime.registerHostFn("__compiled_world_set_resident_meshes", hostSetResidentMeshes);
+    v8_runtime.registerHostFn("__compiled_world_set_player_model", hostSetPlayerModel);
     v8_runtime.registerHostFn("__compiled_world_window", hostWindowOpen);
     v8_runtime.registerHostFn("__compiled_world_window_close", hostWindowClose);
     v8_runtime.registerHostFn("__compiled_world_window_status", hostWindowStatus);
