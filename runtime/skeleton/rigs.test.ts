@@ -122,6 +122,7 @@ test('the BODY formation template is a valid formation with mirrored limb chains
   const byId = new Map(bones.map((b) => [b.id, b]));
   assert(byId.get('knee_left')?.parent === 'upper_leg_left', 'left chain links left');
   assert(byId.get('knee_right')?.parent === 'upper_leg_right', 'right chain links right');
+  assert(byId.get('back')?.parent === 'chest', 'back rides the chest (backpack mount / seat-back contact)');
 });
 
 test('the CAR formation template is valid; wheels spin, doors/hood/trunk hinge', () => {

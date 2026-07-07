@@ -253,6 +253,7 @@ export function bodyRigBones(): Bone[] {
     { id: 'crotch', parent: 'abdomen' },
     { id: 'chest', parent: 'abdomen' },
     { id: 'breast', parent: 'chest' },
+    { id: 'back', parent: 'chest' },
     { id: 'head', parent: 'chest' },
     { id: 'mouth', parent: 'head' },
     { id: 'lips', parent: 'mouth' },
