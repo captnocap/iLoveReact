@@ -1278,6 +1278,35 @@ fn hostMeshEditGuardResolve(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(
     setReturnNumber(info, if (changed) 1 else 0);
 }
 
+/// __mesh_symmetry_report(axis) → JSON {"center","unmatched","total"} — the live
+/// symmetry badge (studio req_1191/1192 ported, req_2831). "" when no mesh is resident.
+fn hostMeshSymmetryReport(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const axis: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 2));
+    const rep = scene3d.meshSymmetryReport(axis) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    var buf: [96]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"center\":{d:.4},\"unmatched\":{d},\"total\":{d}}}", .{ rep[0], @as(u32, @intFromFloat(rep[1])), @as(u32, @intFromFloat(rep[2])) }) catch {
+        setReturnString(info, "");
+        return;
+    };
+    setReturnString(info, json);
+}
+
+/// __mesh_symmetrize(axis, keepPositive) → JSON {"ok","key","count"} — the keep+/keep−
+/// repair (studio req_1190 ported, req_2831): the model comes out exactly symmetric
+/// across the plane; the fresh mesh key rides the standard topo return for adoptMesh.
+fn hostMeshSymmetrize(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const axis: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 2));
+    const keep = (argToI32(info, 1) orelse 1) != 0;
+    const ok = scene3d.meshTopoSymmetrize(axis, keep);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_edit_counts() → JSON {"mode","verts","edges","sel"} for the HUD.
 fn hostMeshEditCounts(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -2569,6 +2598,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_select_edge", hostMeshEditSelectEdge);
     v8_runtime.registerHostFn("__mesh_edit_guard", hostMeshEditGuard);
     v8_runtime.registerHostFn("__mesh_edit_guard_resolve", hostMeshEditGuardResolve);
+    v8_runtime.registerHostFn("__mesh_symmetry_report", hostMeshSymmetryReport);
+    v8_runtime.registerHostFn("__mesh_symmetrize", hostMeshSymmetrize);
     v8_runtime.registerHostFn("__mesh_edit_counts", hostMeshEditCounts);
     v8_runtime.registerHostFn("__model_paint_at", hostModelPaintAt);
     v8_runtime.registerHostFn("__model_paint_face", hostModelPaintFace);

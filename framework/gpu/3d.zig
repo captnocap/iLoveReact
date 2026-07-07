@@ -1378,6 +1378,212 @@ pub fn meshTopoLoopCut() bool {
     return ok;
 }
 
+// ── Symmetrize + symmetry check (the studio's req_1190/1191/1192, host-native — req_2831) ──
+// The trust layer the mirror planes shipped without: a live "is it symmetric?" count and
+// the keep+/keep− repair. Ports editMesh.ts symmetrize/symmetryReport verbatim onto the
+// resident soup; the plane is the MIRROR FRAME's center on that axis — the same plane the
+// armed mirror overlay draws, so what the badge measures is what the user sees.
+
+/// Port of symmetryReport (editMesh.ts): unique verts (1e-3 grid), each must have a
+/// twin within eps of its reflection. Returns {center, unmatched, total}; total is the
+/// UNIQUE vert count. Null when no mesh is resident.
+pub fn meshSymmetryReport(axis: u8) ?[3]f32 {
+    if (axis > 2 or !model_paint.hasTarget()) return null;
+    const pos = model_paint.positions() orelse return null;
+    const frame = mesh_edit.mirrorFramePub() orelse return null;
+    const c = frame.center[axis];
+    const eps: f32 = 1e-3;
+    // Unique verts via the JS's tolerance grid (bucket by eps-cell, probe neighbours).
+    const Cell = struct { x: i32, y: i32, z: i32 };
+    var cells = std.AutoHashMapUnmanaged(Cell, std.ArrayListUnmanaged([3]f32)){};
+    defer {
+        var it = cells.valueIterator();
+        while (it.next()) |l| l.deinit(std.heap.c_allocator);
+        cells.deinit(std.heap.c_allocator);
+    }
+    var uniq = std.ArrayListUnmanaged([3]f32){};
+    defer uniq.deinit(std.heap.c_allocator);
+    const gq = struct {
+        fn f(x: f32) i32 {
+            return @intFromFloat(@round(x / 1e-3));
+        }
+    }.f;
+    var i: usize = 0;
+    while (i + 2 < pos.len) : (i += 3) {
+        const p = [3]f32{ pos[i], pos[i + 1], pos[i + 2] };
+        const key = Cell{ .x = gq(p[0]), .y = gq(p[1]), .z = gq(p[2]) };
+        const gop = cells.getOrPut(std.heap.c_allocator, key) catch return null;
+        if (!gop.found_existing) gop.value_ptr.* = .{};
+        var dup = false;
+        for (gop.value_ptr.items) |q| {
+            if (@abs(q[0] - p[0]) <= eps and @abs(q[1] - p[1]) <= eps and @abs(q[2] - p[2]) <= eps) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) continue;
+        gop.value_ptr.append(std.heap.c_allocator, p) catch return null;
+        uniq.append(std.heap.c_allocator, p) catch return null;
+    }
+    var unmatched: u32 = 0;
+    for (uniq.items) |v| {
+        var r = v;
+        r[axis] = 2.0 * c - r[axis];
+        const gx = gq(r[0]);
+        const gy = gq(r[1]);
+        const gz = gq(r[2]);
+        var found = false;
+        var dx: i32 = -1;
+        outer: while (dx <= 1) : (dx += 1) {
+            var dy: i32 = -1;
+            while (dy <= 1) : (dy += 1) {
+                var dz: i32 = -1;
+                while (dz <= 1) : (dz += 1) {
+                    const bucket = cells.get(.{ .x = gx + dx, .y = gy + dy, .z = gz + dz }) orelse continue;
+                    for (bucket.items) |q| {
+                        if (@abs(q[0] - r[0]) <= eps and @abs(q[1] - r[1]) <= eps and @abs(q[2] - r[2]) <= eps) {
+                            found = true;
+                            break :outer;
+                        }
+                    }
+                }
+            }
+        }
+        if (!found) unmatched += 1;
+    }
+    return .{ c, @floatFromInt(unmatched), @floatFromInt(uniq.items.len) };
+}
+
+/// Port of symmetrize (editMesh.ts, req_1190): cut the soup at the mirror plane so no
+/// face straddles, DROP the far half, and emit each kept off-seam face plus its
+/// reflected reverse-wound twin — the model comes out exactly symmetric. Twins mint
+/// fresh group ids (one per source group) and inherit their source's part, riding the
+/// same adoption path as loop cut. keep_positive keeps the +axis half.
+pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
+    if (axis > 2 or !model_paint.hasTarget()) return false;
+    const verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
+    const frame = mesh_edit.mirrorFramePub() orelse return false;
+    const c = frame.center[axis];
+    const keep_sign: f32 = if (keep_positive) 1 else -1;
+    const eps: f32 = 1e-5;
+
+    // Positions-only soup from the interleaved edit mesh (the loop-cut prologue).
+    const pos = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return false;
+    defer std.heap.c_allocator.free(pos);
+    {
+        var f: u32 = 0;
+        while (f < tri_count) : (f += 1) {
+            var k: u32 = 0;
+            while (k < 3) : (k += 1) {
+                const src = (@as(usize, f) * 3 + k) * 8;
+                const dst = (@as(usize, f) * 3 + k) * 3;
+                if (src + 2 >= verts.len) return false;
+                pos[dst + 0] = verts[src + 0];
+                pos[dst + 1] = verts[src + 1];
+                pos[dst + 2] = verts[src + 2];
+            }
+        }
+    }
+    var groups_buf: ?[]u32 = null;
+    defer if (groups_buf) |g| std.heap.c_allocator.free(g);
+    if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) {
+        const g = std.heap.c_allocator.alloc(u32, tri_count) catch return false;
+        var i: u32 = 0;
+        while (i < tri_count) : (i += 1) g[i] = model_source.faceGroupOf(i);
+        groups_buf = g;
+    }
+    const base_part = capturePartOfFaces();
+    defer if (base_part) |bp| std.heap.c_allocator.free(bp);
+    const part_count = hostPartCount();
+
+    // Cut at the mirror plane (axis-aligned normal) so no face straddles it.
+    var nrm = [3]f32{ 0, 0, 0 };
+    nrm[axis] = 1;
+    const groups_arg: ?[]const u32 = if (groups_buf) |g| g else null;
+    const cut = mesh_edit.planeCutSoup(pos, tri_count, nrm, c, groups_arg) orelse return false;
+    defer std.heap.c_allocator.free(cut.positions);
+    defer std.heap.c_allocator.free(cut.src_face);
+    defer if (cut.groups) |g| std.heap.c_allocator.free(g);
+
+    // Keep + reflect: kept faces re-emit as-is; off-seam kept faces also emit their
+    // reflected twin with two corners swapped (reflection flips handedness).
+    var out = std.ArrayListUnmanaged(f32){};
+    defer out.deinit(std.heap.c_allocator);
+    var out_groups = std.ArrayListUnmanaged(u32){};
+    defer out_groups.deinit(std.heap.c_allocator);
+    var out_src = std.ArrayListUnmanaged(u32){};
+    defer out_src.deinit(std.heap.c_allocator);
+    var twin_group = std.AutoHashMapUnmanaged(u32, u32){};
+    defer twin_group.deinit(std.heap.c_allocator);
+    var next_group: u32 = 0;
+    if (cut.groups) |g| {
+        for (g) |gid| {
+            if (gid != model_source.NO_FACE_GROUP and gid >= next_group) next_group = gid + 1;
+        }
+    }
+    var kept: u32 = 0;
+    var t: u32 = 0;
+    while (t < cut.tri_count) : (t += 1) {
+        const b = @as(usize, t) * 9;
+        var corners: [3][3]f32 = undefined;
+        var cs: f32 = 0;
+        var k: usize = 0;
+        while (k < 3) : (k += 1) {
+            corners[k] = .{ cut.positions[b + k * 3], cut.positions[b + k * 3 + 1], cut.positions[b + k * 3 + 2] };
+            cs += corners[k][axis];
+        }
+        cs = cs / 3.0 - c;
+        if (cs * keep_sign < -eps) continue; // the far half is DROPPED (rebuilt below)
+        if (!appendTri(&out, corners[0], corners[1], corners[2])) return false;
+        const gid: u32 = if (cut.groups) |g| g[t] else model_source.NO_FACE_GROUP;
+        out_groups.append(std.heap.c_allocator, gid) catch return false;
+        out_src.append(std.heap.c_allocator, cut.src_face[t]) catch return false;
+        kept += 1;
+        if (@abs(cs) <= eps) continue; // seam-coplanar face — its own mirror
+        var m: [3][3]f32 = corners;
+        for (0..3) |j| m[j][axis] = 2.0 * c - m[j][axis];
+        // Winding: reflection flips handedness — swap two corners so the twin faces out.
+        if (!appendTri(&out, m[0], m[2], m[1])) return false;
+        var tg: u32 = model_source.NO_FACE_GROUP;
+        if (gid != model_source.NO_FACE_GROUP) {
+            const gop = twin_group.getOrPut(std.heap.c_allocator, gid) catch return false;
+            if (!gop.found_existing) {
+                gop.value_ptr.* = next_group;
+                next_group += 1;
+            }
+            tg = gop.value_ptr.*;
+        }
+        out_groups.append(std.heap.c_allocator, tg) catch return false;
+        out_src.append(std.heap.c_allocator, cut.src_face[t]) catch return false;
+    }
+    if (kept == 0 or out_groups.items.len == 0) return false;
+
+    const new_count: u32 = @intCast(out_groups.items.len);
+    var snap = journalSnapshotCurrent("symmetrize");
+    const ok = replaceActiveEditMesh(out.items, new_count * 3);
+    if (ok) {
+        if (cut.groups != null) {
+            model_source.setFaceGroups(out_groups.items);
+            _ = refreshPaintLayout();
+        }
+        if (base_part) |bp| {
+            if (std.heap.c_allocator.alloc(u32, new_count)) |fp| {
+                defer std.heap.c_allocator.free(fp);
+                var i: u32 = 0;
+                while (i < new_count) : (i += 1) {
+                    const sf = out_src.items[i];
+                    fp[i] = if (sf < bp.len) bp[sf] else model_source.NO_PART;
+                }
+                renormalizePartRanges(fp, part_count);
+            } else |_| {}
+        }
+        journalCommit(&snap);
+    } else journalDiscard(&snap);
+    return ok;
+}
+
 // ── Loop cut on a FACE: the studio treatment as a host-owned popup session ─────────
 // The old studio's Blockbench loop cut (req_0984/0985/0990): the cut axis is one of the
 // clicked face's two IN-PLANE axes (never its normal — cutting ⟂ the normal would slab

@@ -282,6 +282,19 @@ type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 // Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at each outliner part's local center.
 const meshSetMirror = (mask: number) => host.__mesh_edit_mirror?.(mask);
+// Symmetry trust layer (studio req_1190-1192 ported, req_2831): the live off-count badge
+// + the keep+/keep− repair, against the SAME plane the armed mirror overlay draws.
+type SymReport = { center: number; unmatched: number; total: number };
+const meshSymmetryReport = (axis: number): SymReport | null => {
+  const j = host.__mesh_symmetry_report?.(axis);
+  if (typeof j !== 'string' || !j) return null;
+  try { return JSON.parse(j) as SymReport; } catch { return null; }
+};
+const meshSymmetrize = (axis: number, keepPositive: boolean): TopoResult | null => {
+  const j = host.__mesh_symmetrize?.(axis, keepPositive ? 1 : 0);
+  if (typeof j !== 'string' || !j) return null;
+  try { return JSON.parse(j) as TopoResult; } catch { return null; }
+};
 const meshClearSel = () => host.__mesh_edit_clear?.();
 const meshGizmoTool = (t: number) => host.__mesh_gizmo_tool?.(t);
 const meshSelectEdge = (idx: number, additive = false) => host.__mesh_edit_select_edge?.(idx, additive ? 1 : 0) === 1;
@@ -1028,6 +1041,36 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     meshSetMirror(mirrorMask);
     return () => { if (mirrorMask) meshSetMirror(0); };
   }, [mirrorMask]);
+
+  // Symmetry trust layer (studio req_1190-1192 ported, req_2831): while mirror planes
+  // are armed, poll the live report per armed axis — the "⚠ N off Y" / "✓ clean" badge
+  // and the keep+/keep− symmetrize verbs beside it. Poll, not per-edit hooks: edits land
+  // host-side (gizmo drags, topo ops) where no JS callback fires.
+  const [symReports, setSymReports] = useState<Record<number, SymReport>>({});
+  useEffect(() => {
+    if (!mirrorMask || !model || paintMode) { setSymReports({}); return; }
+    let alive = true;
+    const read = () => {
+      if (!alive) return;
+      const out: Record<number, SymReport> = {};
+      for (let axis = 0; axis < 3; axis += 1) {
+        if (!(mirrorMask & (1 << axis))) continue;
+        const rep = meshSymmetryReport(axis);
+        if (rep) out[axis] = rep;
+      }
+      setSymReports((prev) => {
+        const same = [0, 1, 2].every((a) => (prev[a]?.unmatched === out[a]?.unmatched) && ((prev[a] == null) === (out[a] == null)));
+        return same ? prev : out;
+      });
+      setTimeout(read, 600);
+    };
+    read();
+    return () => { alive = false; };
+  }, [mirrorMask, model?.key, paintMode]);
+
+  const runSymmetrize = (axis: number, keepPositive: boolean) => {
+    if (!adoptMesh(meshSymmetrize(axis, keepPositive))) setError('symmetrize: no mesh half to keep');
+  };
 
   // ── Editor bridge ──────────────────────────────────────────────────────────
   // Hand the tool handlers out (once) and mirror the live tool state back, so an
@@ -2238,6 +2281,32 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           ) : null}
         </Col>
         </Box>
+      ) : null}
+
+      {/* Symmetry trust strip (studio req_1190-1192 ported, req_2831): one row per ARMED
+          mirror axis — the live badge ("⚠ N off Y" / "✓ clean") + the keep+/keep−
+          symmetrize verbs. Only while mirror planes are armed, never in paint. */}
+      {model && !paintMode && mirrorMask !== 0 ? (
+        <Col style={{ position: 'absolute', left: 18, top: 44, gap: 6 }}>
+          {[0, 1, 2].filter((a) => mirrorMask & (1 << a)).map((axis) => {
+            const label = 'XYZ'[axis];
+            const rep = symReports[axis];
+            const off = rep ? rep.unmatched : null;
+            return (
+              <Row key={`sym${axis}`} style={{ alignItems: 'center', gap: 6, paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 7, backgroundColor: 'rgba(17,20,29,0.92)', borderWidth: 1, borderColor: off ? '#805f3c' : '#2c4a3a' }}>
+                <Text style={{ color: off ? '#ffb454' : '#7fd6a0', fontSize: 11, fontWeight: 700 }}>
+                  {off == null ? `· ${label}` : off ? `⚠ ${off} off ${label}` : `✓ ${label} clean`}
+                </Text>
+                <Pressable onPress={() => runSymmetrize(axis, true)} tooltip={`symmetrize — keep the +${label} half, rebuild −${label} as its mirror`} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}>
+                  <Text style={{ color: '#7fd6a0', fontSize: 10, fontWeight: 700 }}>{`keep +${label}`}</Text>
+                </Pressable>
+                <Pressable onPress={() => runSymmetrize(axis, false)} tooltip={`symmetrize — keep the −${label} half, rebuild +${label} as its mirror`} style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 5, backgroundColor: '#1c3a2a', borderWidth: 1, borderColor: '#2f7a4f' }}>
+                  <Text style={{ color: '#7fd6a0', fontSize: 10, fontWeight: 700 }}>{`keep −${label}`}</Text>
+                </Pressable>
+              </Row>
+            );
+          })}
+        </Col>
       ) : null}
 
       {/* Create Paint Atlas — the explicit step between modeling and painting (every paint
