@@ -13,6 +13,7 @@
 import {
   propRigToSkeleton, skeletonToPropRig, itemRigToSkeleton, describePropRig,
   bodyRigBones, carRigBones,
+  matchCharacterBones, partsToCharacterSkeleton,
   pocketName, placementName, seatName,
   GRIP_LEFT, GRIP_RIGHT, PHYSICAL_CONTACT, AMMO_MOUNT, PROJECTILE_MOUNT,
   CONTAINER_CAPABILITY, SEAT_CAPABILITY, COVER_CAPABILITY, DYNAMICS_CAPABILITY,
@@ -132,6 +133,49 @@ test('the CAR formation template is valid; wheels spin, doors/hood/trunk hinge',
   assert(byId.get('wheel_front_left')?.joint?.kind === 'spin', 'wheel spins');
   assert(byId.get('door_driver')?.joint?.kind === 'hinge', 'door hinges');
   assert(byId.get('hood')?.joint?.kind === 'hinge' && byId.get('trunk')?.joint?.kind === 'hinge', 'hood + trunk hinge');
+});
+
+test('character binding: normalized names bind, Blender side suffixes alias, strays report', () => {
+  const b = matchCharacterBones(['Head', 'chest', 'Hand.L', 'hand_r', 'upper arm-left', 'Blob 3']);
+  const boundBones = b.bound.map((x) => x.bone);
+  assert(boundBones.includes('head') && boundBones.includes('chest'), 'case-insensitive bind');
+  assert(boundBones.includes('hand_left') && boundBones.includes('hand_right'), '.L/_r suffixes alias to _left/_right');
+  assert(boundBones.includes('upper_arm_left'), 'spaces/dashes normalize to underscores');
+  assert(b.unbound.length === 1 && b.unbound[0] === 'Blob 3', 'stray part reported by NAME');
+  assert(b.duplicates.length === 0, 'no false duplicates');
+});
+
+test('character binding: duplicate bone claims report, first claimant wins', () => {
+  const b = matchCharacterBones(['head', 'HEAD', 'chest']);
+  assert(b.duplicates.length === 1 && b.duplicates[0] === 'head', 'second head claim reported');
+  assert(b.bound.filter((x) => x.bone === 'head').length === 1, 'exactly one head binding survives');
+  assert(b.bound.find((x) => x.bone === 'head')?.part === 'head', 'first claimant wins');
+});
+
+test('partsToCharacterSkeleton compiles the LIVE outliner: full formation, bound-only assignments, measured transforms', () => {
+  const rows = [
+    { name: 'head', center: [0, 1.8, 0] as [number, number, number] },
+    { name: 'chest', center: [0, 1.4, 0] as [number, number, number] },
+    { name: 'Blob 3', center: [9, 9, 9] as [number, number, number] },
+  ];
+  const c = partsToCharacterSkeleton('char-test', rows);
+  assertValidFormation(c.skeleton.bones as Bone[], 'compiled character');
+  assert(c.skeleton.bones.length === bodyRigBones().length, 'the FULL body formation ships regardless of which parts exist');
+  assert(c.skeleton.meshes?.kind === 'perBone', 'per-bone assignments');
+  const items = c.skeleton.meshes?.kind === 'perBone' ? c.skeleton.meshes.items : [];
+  assert(items.length === 2, 'ONLY bound parts get assignments (deleted/stray parts bind nothing)');
+  assert(!items.some((i) => i.geometryKey.includes('Blob')), 'stray geometry never enters the rig');
+  const head = c.skeleton.bones.find((x) => x.id === 'head');
+  // chest is head's nearest measured ancestor: local pos = [0,1.8,0] - [0,1.4,0].
+  assert(Math.abs((head?.transform?.pos?.[1] ?? 0) - 0.4) < 1e-6, 'rest transform measured parent-relative from part centers');
+  const knee = c.skeleton.bones.find((x) => x.id === 'knee_left');
+  assert(knee?.transform === undefined, 'bones without a measured part keep identity');
+});
+
+test('partsToCharacterSkeleton with zero bound parts ships a bare formation (no meshes section)', () => {
+  const c = partsToCharacterSkeleton('char-empty', [{ name: 'whatever' }]);
+  assert(c.skeleton.meshes === undefined, 'no assignments — absence is the valid default');
+  assert(c.unbound.length === 1, 'the stray still reports');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

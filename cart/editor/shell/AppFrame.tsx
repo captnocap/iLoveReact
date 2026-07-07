@@ -39,14 +39,14 @@ import type { BuildKind } from '../world/buildCatalog';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { scheduleWorldSave } from '../data/worldStore';
 import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
-import { propRigToSkeleton, skeletonToPropRig, describePropRig, type PropRig } from '../../../runtime/skeleton';
+import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
 import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
-import { dispatchEdit, dispatchPiecePlacement, draftPiecePlacementEvent, finalizePiecePlacementEvent, type PiecePlacementDraftPayload } from '../data/editorEvents';
+import { dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacement, draftPiecePlacementEvent, finalizePiecePlacementEvent, type MapPaintPayload, type PiecePlacementDraftPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/hmscAssetCatalog';
-import { partsMetaFromRows } from '../data/meshDoc';
+import { partsMetaFromRows, meshDocRangeCenters } from '../data/meshDoc';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
 // Key edges come straight off the ffi bus (not useModifiers.onKeyDown): the active key
@@ -74,7 +74,13 @@ import { oklchName } from '../data/colorSpine';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import { useBuildJournal } from '../data/journal';
 import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
-import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } from '../data/documents';
+import { WORLD_DOCUMENT_ID, PLAYTEST_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
+import { scheduleGlobalsSave } from '../data/globalsStore';
+import { DEFAULT_PHYSICS_GLOBALS, type PhysicsGlobals } from '../data/globals';
+import { mapEventDrain, type MapAuthoringEvent } from '../../../runtime/game/map';
+import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
+import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
+import { GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
 
 // FLOORCTL req_2485: floorIndex is the world viewport's REAL active storey
 // (0 = Ground) — the action bar's ▼/▲ is the one control. 128 storeys
@@ -83,6 +89,79 @@ import { WORLD_DOCUMENT_ID, materialDocument, modelDocument, upsertDocument } fr
 // filter, and the host validator (build.zig validatePlacement) has no storey
 // cap — floor 128 places at terrainY + 384m and validates clean.
 const MAX_FLOOR = 128;
+
+function materialBindingLabel(fn: string, variant: number): string {
+  const material = GROUND_MATERIALS.find((item) => item.fn === fn);
+  const variantLabel = material?.variantLabels?.[variant];
+  return [material?.name ?? fn, variantLabel && variantLabel !== 'Std' ? variantLabel : ''].filter(Boolean).join(' ');
+}
+
+function mapEventPayload(event: MapAuthoringEvent, mapPaint: EditorState['mapPaint'], materializedAtMs: number): MapPaintPayload {
+  const tool = event.tool;
+  const action = event.kind;
+  const mode = tool.mode;
+  const channel = tool.channel;
+  const tileKind = TILE_KINDS[tool.kindIdx] ?? TILE_KINDS[mapPaint.tileKindIdx] ?? 'sidewalk';
+  const tileDef = tileKindDefinition(tileKind);
+  const binding = tool.bindIdx >= 0
+    ? mapPaint.tileBindings[tool.bindIdx]
+    : tileBindingFor(tileKind);
+  const flora = FLORA_KIND_DEFINITIONS[tool.floraKindIdx] ?? FLORA_KIND_DEFINITIONS[mapPaint.floraKindIdx];
+  const zone = mapPaint.zones[tool.zoneIdx];
+  const strokeTarget = (() => {
+    if (channel === 'terrain') return `terrain ${tool.terrainTool}`;
+    if (channel === 'tile') return `tile ${tileDef.label}`;
+    if (channel === 'water') return 'water';
+    if (channel === 'flora') return `flora ${flora?.label ?? `#${tool.floraKindIdx}`}`;
+    if (channel === 'zone') return `zone ${zone?.name ?? `#${tool.zoneIdx}`}`;
+    if (channel === 'road') return 'road draft point';
+    return channel;
+  })();
+  const label = (() => {
+    if (action === 'stroke') return `${mode} ${strokeTarget}`;
+    if (action === 'road.commit') return `commit road #${event.id}`;
+    if (action === 'road.delete') return `delete road #${event.id}`;
+    if (action === 'chunk.grow') return `grow chunk (${event.auxA}, ${event.auxB})`;
+    if (action === 'zone.drop') return `drop zone ${mapPaint.zones[event.auxA]?.name ?? `#${event.auxA}`}`;
+    if (action === 'tile.bindings') return `edit tile material bindings (${event.auxA})`;
+    return action;
+  })();
+  const durationMs = Math.max(0, event.durationMs);
+  return {
+    action,
+    label,
+    channel: action === 'chunk.grow' ? 'map' : channel,
+    mode,
+    terrainTool: tool.terrainTool,
+    shape: tool.shape,
+    profile: tool.profile,
+    radiusM: tool.radiusM,
+    heightM: tool.centerZ,
+    tileKind,
+    tileLabel: tileDef.label,
+    material: binding ? materialBindingLabel(binding.fn, binding.variant) : undefined,
+    floraKind: flora?.kind,
+    floraLabel: flora?.label,
+    floraLane: tool.floraLane,
+    zoneIdx: tool.zoneIdx,
+    zoneLabel: zone?.name,
+    start: action === 'stroke' ? event.start : undefined,
+    end: action === 'stroke' ? event.end : undefined,
+    samples: action === 'stroke' ? event.stats.samples : undefined,
+    stamps: action === 'stroke' ? event.stats.stamps : undefined,
+    touchedChunks: action === 'stroke' ? event.stats.touched : undefined,
+    waterDry: action === 'stroke' ? event.stats.waterDry : undefined,
+    roadId: event.id || undefined,
+    chunk: action === 'chunk.grow' ? { cx: event.auxA, cz: event.auxB } : undefined,
+    bindingCount: action === 'tile.bindings' ? event.auxA : undefined,
+    droppedBefore: event.droppedBefore || undefined,
+    durationMs,
+    materializedAtMs,
+    inputToMaterializedMs: durationMs,
+    applyMs: durationMs,
+    renderDeltaMs: 0,
+  };
+}
 
 export default function AppFrame() {
   // The shell for BOTH routes. AppFrame stays mounted across the Editor/Play
@@ -179,6 +258,30 @@ export default function AppFrame() {
   useEffect(() => {
     scheduleWorldSave(state.worldPieces, state.mapPaint.zones, state.seq);
   }, [state.worldPieces, state.mapPaint.zones]);
+
+  // GLOBALS req_2770: tuned world globals micro-save on the same contract —
+  // "find a value, lock it in" is a debounced write, never a Save button.
+  useEffect(() => {
+    scheduleGlobalsSave(state.worldGlobals);
+  }, [state.worldGlobals]);
+
+  // One field of the world globals changes: state (→ the playtest surface pushes
+  // the live physics door), the bus event, and the micro-save all ride the same
+  // click. Reset = set back to the game default, through the same path.
+  const setWorldGlobal = (field: string, value: number) => {
+    const previous = state.worldGlobals.physics[field as keyof PhysicsGlobals];
+    if (previous === value || !Number.isFinite(value)) return;
+    dispatchGlobalsSet({ field, value, previous });
+    setState((prev) => ({
+      ...prev,
+      worldGlobals: { ...prev.worldGlobals, physics: { ...prev.worldGlobals.physics, [field]: value } },
+      status: `globals: ${field} = ${value}`,
+    }));
+  };
+  const resetWorldGlobal = (field: string) => {
+    const base = DEFAULT_PHYSICS_GLOBALS[field as keyof PhysicsGlobals];
+    if (base !== undefined) setWorldGlobal(field, base);
+  };
 
   // MAPPAINT req_2492: a hot-restored ACTIVE paint tool must RE-ARM the host on
   // boot — applyMapPaintEffects otherwise only fires on patches, so a reload
@@ -647,6 +750,20 @@ export default function AppFrame() {
         openMenu: null,
         actionMenu: 'File',
         status: 'compile output unavailable - validation 0/0',
+      }));
+      return;
+    }
+    // Globals menu (GLOBALS req_2770): open (or re-focus) the PLAYTEST tab — the
+    // editor world with the embodied player — and the focus panel becomes the
+    // physics-globals editor (Inspector's playtest branch). Tune, jump, lock in.
+    if (command.id === 'globals-physics') {
+      setState((prev) => ({
+        ...prev,
+        openMenu: null,
+        actionMenu: 'Globals',
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, PLAYTEST_DOCUMENT),
+        activeWorkspaceDocumentId: PLAYTEST_DOCUMENT.id,
+        status: 'playtest opened — WASD/Shift/Space drive the player; physics globals in the focus panel apply live',
       }));
       return;
     }
@@ -1606,12 +1723,14 @@ export default function AppFrame() {
     return state.modelDupes.find(isPlayer) ?? MODEL_PACKAGES.find(isPlayer) ?? null;
   };
 
-  // Export → Player / NPC Model, confirmed (req_2771). Tags along the prop/build
-  // export shape exactly: export implies save (artifacts land first), the role
-  // declaration + the model's own skeleton (the body formation — NEVER a compiled
-  // prop rig) write into the manifest (req_2718 disk truth), and the live roster
-  // mirrors it. Player role is EXCLUSIVE: any other package declared player
-  // demotes to NPC in the same move, manifest and roster both.
+  // Export → Player / NPC Model, confirmed (req_2771/req_2777). Tags along the
+  // prop/build export shape exactly: export implies save (artifacts land first),
+  // the declaration writes into the manifest (req_2718 disk truth), the roster
+  // mirrors it. The SKELETON is compiled FROM THE LIVE OUTLINER at export — the
+  // prop rig's measured-at-export law: part name → bone id is the binding, rest
+  // transforms stamp from the just-written meshdoc's measured range centers, a
+  // deleted part simply binds nothing, and strays report LOUDLY. Player role is
+  // EXCLUSIVE: any other package declared player demotes to NPC in the same move.
   const exportCharacterAs = (role: CharacterRole) => {
     const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
     const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
@@ -1619,19 +1738,28 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'Export needs a MODEL open — open one from Models, then File → Export.' }));
       return;
     }
-    writeModelArtifacts(pkg, partsMetaFromRows(state.modelParts[pkg.id] ?? []));
+    const liveRows = state.modelParts[pkg.id] ?? [];
+    writeModelArtifacts(pkg, partsMetaFromRows(liveRows));
+    // Measured part centers off the meshdoc just written (host truth). Ranges
+    // pair with rows by RANK (both ascend by lo — the parts.json contract); a
+    // failed write degrades to name-only rows (binding holds, transforms identity).
+    const freshDoc = packageMeshDoc(pkg);
+    const centers = freshDoc ? meshDocRangeCenters(freshDoc) : [];
+    const rowsByLo = liveRows.slice().sort((a, b) => ((a.lo ?? Number.MAX_SAFE_INTEGER) - (b.lo ?? Number.MAX_SAFE_INTEGER)));
+    const partRows: CharacterPartRow[] = rowsByLo.map((row, rank) => ({ name: row.name, center: centers[rank] ?? undefined }));
+    const compiled = partsToCharacterSkeleton(authoredModelIdForPackage(pkg.id), partRows);
     const placeable: ModelPlaceable = { as: 'character', role };
     // The package keeps its own kind (its category dir on disk); the CHARACTER
     // declaration is the placeable role, not a kind rewrite — rewriting kind on
     // an already-materialized package would split it across two category dirs.
-    const pkgExported: ModelPackage = { ...pkg, placeable };
+    const pkgExported: ModelPackage = { ...pkg, placeable, skeleton: compiled.skeleton };
     const firstMaterialize = !isMaterialized(pkg.kind, pkg.id);
     let disk: string;
     if (firstMaterialize) {
       const res = materializeModelPackage(pkgExported);
       disk = res.ok ? `package materialized → ${res.dir}` : `PACKAGE WRITE FAILED (${res.error ?? 'unknown'}) — export is session-only`;
     } else {
-      disk = updateManifestPlaceable(pkg.kind, pkg.id, { placeable, skeleton: pkg.skeleton })
+      disk = updateManifestPlaceable(pkg.kind, pkg.id, { placeable, skeleton: compiled.skeleton })
         ? 'manifest updated'
         : 'MANIFEST WRITE FAILED — export is session-only';
     }
@@ -1646,6 +1774,11 @@ export default function AppFrame() {
       upsertSavedPackage(demoted);
     }
     const roleLabel = role === 'player' ? 'THE PLAYER model' : 'an NPC model';
+    // The binding readout is part of the export's own report — silent truncation
+    // is the disease; "26/28 bind" + the stray names is the cure.
+    const bindReport = `${compiled.bound.length}/${liveRows.length} parts bind`
+      + (compiled.unbound.length ? ` · unbound: ${compiled.unbound.join(', ')}` : '')
+      + (compiled.duplicates.length ? ` · DUPLICATE bone claims: ${compiled.duplicates.join(', ')}` : '');
     setState((prev) => ({
       ...prev,
       exportCharacterPrompt: null,
@@ -1656,7 +1789,7 @@ export default function AppFrame() {
           : [...dupes, changed],
         prev.modelDupes,
       ),
-      status: `Exported "${pkg.name}" as ${roleLabel} — ${disk}${demoted ? ` · "${demoted.name}" demoted to NPC` : ''}`,
+      status: `Exported "${pkg.name}" as ${roleLabel} — ${bindReport} — ${disk}${demoted ? ` · "${demoted.name}" demoted to NPC` : ''}`,
     }));
   };
 
@@ -2251,6 +2384,23 @@ export default function AppFrame() {
   stateRef.current = state;
   const runCommandRef = useRef(runCommand);
   runCommandRef.current = runCommand;
+
+  // Native map painting bypasses React hit-testing while the WorldLoader owns
+  // the pointer stream. Drain completed host-side authoring events at UI rate
+  // and board them onto the same editor bus as piece placements.
+  useEffect(() => {
+    const drain = () => {
+      const events = mapEventDrain();
+      if (!events.length) return;
+      const materializedAtMs = Date.now();
+      const mapPaint = stateRef.current.mapPaint;
+      for (const event of events) dispatchMapPaint(mapEventPayload(event, mapPaint, materializedAtMs));
+    };
+    drain();
+    const t = setInterval(drain, 250);
+    return () => clearInterval(t);
+  }, []);
+
   // ── RJIT_PARTOPS: headless outliner harness (req_2659) ────────────────────────
   // Drives the REAL outliner handlers by row index — the shell-side twin of
   // RJIT_MESHOPS (which drives host doors). ';'-separated ops:
@@ -2882,6 +3032,9 @@ export default function AppFrame() {
             onClearPieceOverride={clearPieceOverride}
             onAssignSlot={assignPieceSlot}
             onClearSlot={clearPieceSlot}
+            // World-globals tuning (GLOBALS req_2770): the playtest tab's panel.
+            onSetGlobal={guarded(setWorldGlobal)}
+            onResetGlobal={guarded(resetWorldGlobal)}
             outlinerHandlers={outlinerHandlers}
             // Multi-select set (req_2659): row highlights + the UV header's '+N'.
             selectedPartIds={selectedPartIds}
@@ -2949,6 +3102,13 @@ export default function AppFrame() {
         <ExportCharacterDialog
           modelName={activeModelPkg?.name ?? 'model'}
           currentPlayerName={currentPlayerCharacter()?.name ?? null}
+          binding={(() => {
+            // Binding preview is NAME-only (centers only matter at write time),
+            // so the dialog readout costs nothing and always matches the compiler.
+            const rows = activeModelPkg ? (state.modelParts[activeModelPkg.id] ?? []) : [];
+            const match = matchCharacterBones(rows.map((r) => r.name));
+            return { total: rows.length, bound: match.bound.length, unbound: match.unbound, duplicates: match.duplicates };
+          })()}
           onCancel={() => setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'character export cancelled' }))}
           onExport={exportCharacterAs}
         />

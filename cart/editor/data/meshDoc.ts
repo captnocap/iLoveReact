@@ -155,3 +155,32 @@ export function partsMetaFromRows(rows: readonly { name: string; color: string; 
     .sort((a, b) => (a.lo ?? Number.MAX_SAFE_INTEGER) - (b.lo ?? Number.MAX_SAFE_INTEGER))
     .map((p) => ({ name: p.name, color: p.color, visible: p.visible, kind: p.kind }));
 }
+
+/** Per-range bounds centers, rank-ordered to match `doc.ranges` — the MEASURED
+ *  part centers the character rig compiler stamps rest transforms from
+ *  (req_2777: measured at export, never a stored table). A range with no
+ *  triangles yields null (its bone keeps identity). */
+export function meshDocRangeCenters(doc: PackageMeshDoc): ([number, number, number] | null)[] {
+  const triCount = Math.floor(doc.vertices.length / 24);
+  const box = doc.ranges.map(() => ({ n: 0, min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }));
+  for (let tri = 0; tri < triCount; tri += 1) {
+    const group = doc.faceGroups ? doc.faceGroups[tri]! : tri;
+    const rank = doc.ranges.findIndex((r) => group >= r.lo && group < r.hi);
+    if (rank < 0) continue;
+    const b = box[rank]!;
+    for (let corner = 0; corner < 3; corner += 1) {
+      const at = (tri * 3 + corner) * 8;
+      for (let axis = 0; axis < 3; axis += 1) {
+        const v = doc.vertices[at + axis]!;
+        if (v < b.min[axis]!) b.min[axis] = v;
+        if (v > b.max[axis]!) b.max[axis] = v;
+      }
+    }
+    b.n += 1;
+  }
+  return box.map((b) => (b.n === 0 ? null : [
+    (b.min[0]! + b.max[0]!) / 2,
+    (b.min[1]! + b.max[1]!) / 2,
+    (b.min[2]! + b.max[2]!) / 2,
+  ]));
+}

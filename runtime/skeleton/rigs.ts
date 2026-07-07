@@ -303,3 +303,91 @@ export function carRigBones(): Bone[] {
     { id: 'wheel_back_right', parent: 'body', joint: spinX },
   ];
 }
+
+// ── the CHARACTER rig compiler (req_2777) ─────────────────────────────────────
+// A character export derives its skeleton FROM THE LIVE OUTLINER at export time
+// — the same measured-at-export law the prop rig follows, never a stored
+// snapshot. Part NAME → bone id is the binding contract: rename an outliner row
+// to a body bone and it binds; anything else is reported unbound, LOUDLY. This
+// is what makes "import an arbitrary model, chop it up, rename the parts" a
+// first-class rigging workflow, and what keeps a delete honest (a bone whose
+// part is gone simply carries no mesh — a valid formation).
+
+/** Outliner-row shape the compiler consumes: the part's name and, when known,
+ *  its measured world center (bounds center — measured, never hand-typed). */
+export type CharacterPartRow = { name: string; center?: Vec3 };
+
+export type CharacterBinding = {
+  /** bone id → the part name bound to it, in formation order. */
+  bound: { bone: string; part: string }[];
+  /** Part names that match no body bone (exported as geometry, bound to nothing). */
+  unbound: string[];
+  /** Bone ids claimed by MORE THAN ONE part — first claimant wins, rest report. */
+  duplicates: string[];
+};
+
+/** Normalize an outliner name to a bone id: case/space/dash-insensitive, with
+ *  the common `.l`/`_l` / `.r`/`_r` side suffixes (Blender convention) accepted
+ *  as `_left`/`_right`. */
+export function normalizeBoneName(name: string): string {
+  let n = name.trim().toLowerCase().replace(/[\s\-.]+/g, '_');
+  n = n.replace(/_l$/, '_left').replace(/_r$/, '_right');
+  return n;
+}
+
+/** Match outliner part names against the body formation — the dialog's binding
+ *  readout and the compiler share this one matcher. First claimant wins a bone. */
+export function matchCharacterBones(names: string[]): CharacterBinding {
+  const boneIds = new Set(bodyRigBones().map((b) => b.id));
+  const claimed = new Map<string, string>();
+  const unbound: string[] = [];
+  const duplicates: string[] = [];
+  for (const name of names) {
+    const bone = normalizeBoneName(name);
+    if (!boneIds.has(bone)) { unbound.push(name); continue; }
+    if (claimed.has(bone)) { duplicates.push(bone); continue; }
+    claimed.set(bone, name);
+  }
+  const bound = bodyRigBones()
+    .filter((b) => claimed.has(b.id))
+    .map((b) => ({ bone: b.id, part: claimed.get(b.id)! }));
+  return { bound, unbound, duplicates };
+}
+
+export type CharacterRigCompile = CharacterBinding & { skeleton: Skeleton };
+
+/** Compile the live outliner into the exported character Skeleton: the full
+ *  body formation, a per-bone mesh assignment for every BOUND part (geometry
+ *  key = the bone id — the parts.json row it binds), and rest transforms
+ *  stamped parent-relative from the parts' MEASURED centers (bones without a
+ *  measured part keep identity — absence is a valid default). */
+export function partsToCharacterSkeleton(id: string, rows: CharacterPartRow[]): CharacterRigCompile {
+  const binding = matchCharacterBones(rows.map((r) => r.name));
+  const centerByPart = new Map(rows.filter((r) => r.center).map((r) => [r.name, r.center!]));
+  const world = new Map<string, Vec3>();
+  for (const { bone, part } of binding.bound) {
+    const center = centerByPart.get(part);
+    if (center) world.set(bone, center);
+  }
+  const formation = bodyRigBones();
+  const parentOf = new Map(formation.map((b) => [b.id, b.parent ?? null]));
+  /** Nearest ancestor with a measured world position (the transform base). */
+  const ancestorWorld = (boneId: string): Vec3 => {
+    let cur = parentOf.get(boneId) ?? null;
+    while (cur) {
+      const at = world.get(cur);
+      if (at) return at;
+      cur = parentOf.get(cur) ?? null;
+    }
+    return [0, 0, 0];
+  };
+  const bones = formation.map((bone) => {
+    const at = world.get(bone.id);
+    if (!at) return bone;
+    const base = ancestorWorld(bone.id);
+    return { ...bone, transform: { pos: [at[0] - base[0], at[1] - base[1], at[2] - base[2]] as Vec3 } };
+  });
+  const items = binding.bound.map(({ bone }) => ({ boneId: bone, geometryKey: bone }));
+  const skeleton = defineSkeleton(id, bones, items.length ? { meshes: { kind: 'perBone', items } } : {});
+  return { ...binding, skeleton };
+}

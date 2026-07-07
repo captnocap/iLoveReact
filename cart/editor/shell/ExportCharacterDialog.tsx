@@ -12,7 +12,12 @@ import { Box, Col, Row, Text, Pressable } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { CharacterRole } from '../data/types';
 
-const PANEL = '#17181b', BORDER = '#2a2c31', TEXT = '#e8e8ea', DIM = '#9a9ea6', ACCENT = '#6ea8fe', BTN_BG = '#1f2126';
+const PANEL = '#17181b', BORDER = '#2a2c31', TEXT = '#e8e8ea', DIM = '#9a9ea6', ACCENT = '#6ea8fe', BTN_BG = '#1f2126', WARN = '#e8b04c';
+
+/** The outliner→bone binding readout the dialog shows BEFORE the role choice —
+ *  part name → bone id is the rigging contract (req_2777), so the dialog says
+ *  exactly what will bind and names every stray out loud. */
+export type CharacterBindingReadout = { total: number; bound: number; unbound: string[]; duplicates: string[] };
 
 function RoleCard({ icon, title, blurb, note, onPress }: {
   icon: string; title: string; blurb: string; note?: string | null; onPress: () => void;
@@ -34,10 +39,11 @@ function RoleCard({ icon, title, blurb, note, onPress }: {
   );
 }
 
-export default function ExportCharacterDialog({ modelName, currentPlayerName, onCancel, onExport }: {
+export default function ExportCharacterDialog({ modelName, currentPlayerName, binding, onCancel, onExport }: {
   modelName: string;
   /** The package currently declared as the played model, if any. */
   currentPlayerName: string | null;
+  binding: CharacterBindingReadout;
   onCancel: () => void;
   onExport: (role: CharacterRole) => void;
 }) {
@@ -51,6 +57,21 @@ export default function ExportCharacterDialog({ modelName, currentPlayerName, on
           <Pressable onPress={onCancel}><Text style={{ color: DIM, fontSize: 12 }}>cancel</Text></Pressable>
         </Row>
         <Text style={{ color: DIM, fontSize: 11 }}>The role is written into the model's own package manifest — the compile bake reads it from there.</Text>
+
+        {/* Binding readout: part name → bone id is the rig. Strays are named, not counted. */}
+        <Col style={{ gap: 3, backgroundColor: '#101114', borderWidth: 1, borderColor: BORDER, borderRadius: 8, padding: 10 }}>
+          <Text style={{ color: binding.bound > 0 ? ACCENT : WARN, fontSize: 11, fontFamily: 'ui-monospace', fontWeight: '700' }}>
+            {binding.bound > 0
+              ? `${binding.bound} of ${binding.total} parts bind to body bones`
+              : `0 of ${binding.total} parts bind — rename outliner parts to bone names (head, chest, hand_left, ...) to rig them`}
+          </Text>
+          {binding.unbound.length > 0 ? (
+            <Text style={{ color: WARN, fontSize: 10, fontFamily: 'ui-monospace' }}>unbound (export as loose geometry): {binding.unbound.join(', ')}</Text>
+          ) : null}
+          {binding.duplicates.length > 0 ? (
+            <Text style={{ color: WARN, fontSize: 10, fontFamily: 'ui-monospace' }}>duplicate bone claims (first part wins): {binding.duplicates.join(', ')}</Text>
+          ) : null}
+        </Col>
 
         <Row style={{ gap: 10, alignItems: 'stretch' }}>
           <RoleCard
