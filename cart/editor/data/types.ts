@@ -310,8 +310,14 @@ export type ModelOverride = { name?: string; favorite?: boolean; hidden?: boolea
 // What a model is EXPORTED AS — declared in its own on-disk manifest (USER
 // RULING req_2718: the package is the ENTIRE source of truth for placeability;
 // localstore is only ever a rebuildable cache). A build piece carries its snap
-// affinity; a prop free-places.
-export type ModelPlaceable = { as: 'build-piece'; kind: BuildKind } | { as: 'prop' };
+// affinity; a prop free-places; a character declares its ROLE — the game's ONE
+// played model, or an NPC population model (req_2771). Characters never join
+// the build palette: the compile bake is their consumer, not the build bar.
+export type CharacterRole = 'player' | 'npc';
+export type ModelPlaceable =
+  | { as: 'build-piece'; kind: BuildKind }
+  | { as: 'prop' }
+  | { as: 'character'; role: CharacterRole };
 
 export type ModelPackage = {
   id: string;
@@ -376,6 +382,9 @@ export type HistoryEvent = {
   target: string;
   meta: string;
   undoable: boolean;
+  /** Set when a richer typed editorbus event owns the durable log entry. */
+  eventType?: string;
+  atMs?: number;
   editMs?: number;
   emptyMs?: number;
   richMs?: number;
@@ -401,6 +410,10 @@ export type EditorState = {
   // verbs that used to share one command: 'new' always spawns a FRESH model document; 'add'
   // appends a part to the model already in view (the outliner + and Edit → Mesh → Add Primitive).
   newMeshPrompt?: { kind: PrimitiveKind; mode: 'new' | 'add' } | null;
+  // When true, the character-export dialog is open for the ACTIVE model doc —
+  // the player-vs-NPC role choice that File → Export → Player / NPC Model
+  // gates on (req_2771). The confirmed role lands in manifest.placeable.
+  exportCharacterPrompt?: boolean | null;
   presetMenuOpen: boolean;
   actionMenu: Menu;
   activeDomain: string;

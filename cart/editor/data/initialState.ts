@@ -41,6 +41,9 @@ export function bootAuthoredPieces(): AuthoredBuildPiece[] {
   const fromDisk: AuthoredBuildPiece[] = [];
   for (const pkg of MODEL_PACKAGES) {
     if (!pkg.placeable) continue;
+    // Characters (player/NPC exports, req_2771) are compile-bake material, not
+    // build-bar placeables — they never join the palette.
+    if (pkg.placeable.as === 'character') continue;
     const kind = pkg.placeable.as === 'prop' ? ('prop' as const) : pkg.placeable.kind;
     const modelId = authoredModelIdForPackage(pkg.id);
     fromDisk.push({ id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color });

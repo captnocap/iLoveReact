@@ -70,6 +70,14 @@ const EXPORT_PROP_COMMAND: Command = {
   key: '', context: false, native: true, undoable: false, scope: 'model',
 };
 
+// Export → Player / NPC Model (req_2771): export the OPEN model as a CHARACTER.
+// Opens the role dialog — the game's ONE played model vs an NPC population
+// model — and the confirmed role lands in manifest.placeable (req_2718 truth).
+const EXPORT_CHARACTER_COMMAND: Command = {
+  id: 'export-character', menu: 'File', submenu: 'Export', name: 'Player / NPC Model...', icon: 'PersonStanding',
+  key: '', context: false, native: true, undoable: false, scope: 'model',
+};
+
 // Menu-bar geometry, derived from the Chrome styles (workspace.cls HW_*). The dropdown is mounted
 // at the app root, so these are window-relative pixels: the first menu item begins after the chrome
 // padding + brand block + chrome gap.
@@ -94,6 +102,7 @@ export const COMMANDS: Command[] = [
   { id: 'save-snapshot', menu: 'File', name: 'Save Model to Library', icon: 'Save', key: 'Ctrl+S', context: false, native: true, undoable: false, scope: 'model' },
   ...EXPORT_BUILD_COMMANDS,
   EXPORT_PROP_COMMAND,
+  EXPORT_CHARACTER_COMMAND,
   // Compile bakes the WORLD to RLE game data; the pipeline isn't wired yet (returns 0/0).
   { id: 'compile-rle', menu: 'File', name: 'Compile RLE Game Data', icon: 'PackageCheck', key: 'F9', context: false, native: true, undoable: false, scope: 'world', available: false },
 
@@ -329,6 +338,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
       kind: 'sub', id: 'Export', label: 'Export', icon: 'Upload', scope: 'model', children: [
         { kind: 'sub', id: 'Export Build Piece', label: 'Build Piece', icon: 'PackagePlus', scope: 'model', children: EXPORT_BUILD_COMMANDS.map((c) => cmd(c.id)) },
         cmd('export-prop'),
+        cmd('export-character'),
       ],
     },
     cmd('compile-rle'),

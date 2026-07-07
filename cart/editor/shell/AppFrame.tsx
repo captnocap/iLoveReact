@@ -13,6 +13,7 @@ import BuildDock from './BuildDock';
 import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
 import NewMeshDialog from './NewMeshDialog';
+import ExportCharacterDialog from './ExportCharacterDialog';
 import PaintToolbar, { PaintPopovers, type PaintPopover } from './PaintToolbar';
 import PerformancePopover from './PerformancePopover';
 import MemoryPopover from './MemoryPopover';
@@ -27,7 +28,7 @@ import RenderProbe from '../../../runtime/render_tracker';
 import PlayRoute from '../PlayRoute';
 import { useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
-import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices } from '../data/types';
+import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture, MaterialRef } from '../world/pieces';
 import { placementSlotKey } from '../world/pieces';
@@ -602,6 +603,17 @@ export default function AppFrame() {
       // New Mesh → Player / NPC Model: the starter opens straight into the editor —
       // its dimensions are the stand-pose data table, so there is no size dialog.
       createPlayerModelDocument();
+      return;
+    }
+    if (command.id === 'export-character') {
+      // Export → Player / NPC Model (req_2771): the ROLE choice gates the write —
+      // open the dialog; exportCharacterAs(role) runs the export on confirm.
+      const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+      if (doc?.kind !== 'model' || !doc.sourceId) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Export needs a MODEL open — open one from Models, then File → Export.' }));
+        return;
+      }
+      setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', exportCharacterPrompt: true, status: 'export character — choose the role' }));
       return;
     }
     if (command.id === 'open-map' || command.id === 'open-file-explorer' || command.id === 'find-import-source') {
@@ -1586,13 +1598,80 @@ export default function AppFrame() {
     });
   };
 
+  // The package currently declared as THE played model, if any — the character
+  // export dialog names it, and a player-role export replaces it (req_2771).
+  // Session dupes carry the freshest declarations; the disk-loaded roster backs.
+  const currentPlayerCharacter = (): ModelPackage | null => {
+    const isPlayer = (m: ModelPackage) => m.placeable?.as === 'character' && m.placeable.role === 'player';
+    return state.modelDupes.find(isPlayer) ?? MODEL_PACKAGES.find(isPlayer) ?? null;
+  };
+
+  // Export → Player / NPC Model, confirmed (req_2771). Tags along the prop/build
+  // export shape exactly: export implies save (artifacts land first), the role
+  // declaration + the model's own skeleton (the body formation — NEVER a compiled
+  // prop rig) write into the manifest (req_2718 disk truth), and the live roster
+  // mirrors it. Player role is EXCLUSIVE: any other package declared player
+  // demotes to NPC in the same move, manifest and roster both.
+  const exportCharacterAs = (role: CharacterRole) => {
+    const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
+    const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
+    if (!pkg) {
+      setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'Export needs a MODEL open — open one from Models, then File → Export.' }));
+      return;
+    }
+    writeModelArtifacts(pkg, partsMetaFromRows(state.modelParts[pkg.id] ?? []));
+    const placeable: ModelPlaceable = { as: 'character', role };
+    // The package keeps its own kind (its category dir on disk); the CHARACTER
+    // declaration is the placeable role, not a kind rewrite — rewriting kind on
+    // an already-materialized package would split it across two category dirs.
+    const pkgExported: ModelPackage = { ...pkg, placeable };
+    const firstMaterialize = !isMaterialized(pkg.kind, pkg.id);
+    let disk: string;
+    if (firstMaterialize) {
+      const res = materializeModelPackage(pkgExported);
+      disk = res.ok ? `package materialized → ${res.dir}` : `PACKAGE WRITE FAILED (${res.error ?? 'unknown'}) — export is session-only`;
+    } else {
+      disk = updateManifestPlaceable(pkg.kind, pkg.id, { placeable, skeleton: pkg.skeleton })
+        ? 'manifest updated'
+        : 'MANIFEST WRITE FAILED — export is session-only';
+    }
+    upsertSavedPackage(pkgExported);
+    // ONE played model: demote the previous holder to NPC, on disk and in the roster.
+    const previous = role === 'player' ? currentPlayerCharacter() : null;
+    const demoted: ModelPackage | null = previous && previous.id !== pkg.id
+      ? { ...previous, placeable: { as: 'character', role: 'npc' } }
+      : null;
+    if (demoted) {
+      updateManifestPlaceable(demoted.kind, demoted.id, { placeable: demoted.placeable, skeleton: demoted.skeleton });
+      upsertSavedPackage(demoted);
+    }
+    const roleLabel = role === 'player' ? 'THE PLAYER model' : 'an NPC model';
+    setState((prev) => ({
+      ...prev,
+      exportCharacterPrompt: null,
+      modelDirty: { ...prev.modelDirty, [pkg.id]: false },
+      modelDupes: [pkgExported, ...(demoted ? [demoted] : [])].reduce(
+        (dupes, changed) => dupes.some((m) => m.id === changed.id)
+          ? dupes.map((m) => (m.id === changed.id ? changed : m))
+          : [...dupes, changed],
+        prev.modelDupes,
+      ),
+      status: `Exported "${pkg.name}" as ${roleLabel} — ${disk}${demoted ? ` · "${demoted.name}" demoted to NPC` : ''}`,
+    }));
+  };
+
   // RJIT_MODELDOC=<primitive kind> boots straight into a fresh model document seeded with
   // that primitive — the headless gesture-repro path (`rjit shot editor` + RJIT_MESHOPS in
   // ModelView drives real select gestures and captures the result). Unset = no-op.
   useEffect(() => {
     const kind = (globalThis as any).__env_get?.('RJIT_MODELDOC') as string | null | undefined;
     if (kind === 'player') createPlayerModelDocument();
-    else if (kind) createNewMeshDocument(kind as PrimitiveKind, { size: 1, height: 1, resolution: 1 });
+    else if (kind === 'player-export') {
+      // Headless repro of the character-export dialog (req_2771): boot the player
+      // starter doc with the role choice open.
+      createPlayerModelDocument();
+      setState((prev) => ({ ...prev, exportCharacterPrompt: true }));
+    } else if (kind) createNewMeshDocument(kind as PrimitiveKind, { size: 1, height: 1, resolution: 1 });
   }, []);
   // ── Outliner multi-select (req_2659) ──────────────────────────────────────────
   // Shift-click accumulates parts into ONE selected set with a PRIMARY part (the last
@@ -2864,6 +2943,14 @@ export default function AppFrame() {
           mode={state.newMeshPrompt.mode}
           onCancel={() => setState((prev) => ({ ...prev, newMeshPrompt: null, status: `${prev.newMeshPrompt?.mode === 'add' ? 'add' : 'new'} mesh cancelled` }))}
           onAdd={(params) => submitMeshPrompt(state.newMeshPrompt!, params)}
+        />
+      ) : null}
+      {state.exportCharacterPrompt ? (
+        <ExportCharacterDialog
+          modelName={activeModelPkg?.name ?? 'model'}
+          currentPlayerName={currentPlayerCharacter()?.name ?? null}
+          onCancel={() => setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'character export cancelled' }))}
+          onExport={exportCharacterAs}
         />
       ) : null}
       {state.addChunkOpen ? (
