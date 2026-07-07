@@ -11,6 +11,8 @@
 // threading EditorState through every call — the same module-level pattern
 // buildCatalog uses.
 import { catalogByKind, catalogRowFor, rowHex, KIND_LABEL, KIND_ORDER, type BuildKind } from './buildCatalog';
+import { listPaintSkins } from '../data/paintVariants';
+import { modelPackageById } from '../data/content';
 
 /** Everything a placeable can BE: a build-piece affinity, or a free-placing prop. */
 export type PlaceableKind = BuildKind | 'prop';
@@ -44,8 +46,27 @@ export function isAuthoredPiece(pieceId: string): boolean {
   return pieceId.startsWith('model:') || pieceId.startsWith('prop:');
 }
 
-/** `model:<modelId>` / `prop:<modelId>` → the stored model id (the resident-mesh
- *  + ref key). The ONE place the namespaces strip. */
+// ── paint SKINS on placeable ids (req_2834) ───────────────────────────────────
+// A stored painting is catalog variety on the exported placeable (V24: "variety
+// lives in the CATALOG"): `prop:<modelId>#p<skinId>` places the model wearing
+// paint skin <skinId>. The suffix rides authoredModelIdOf's result, so the
+// resident-mesh key `<modelId>#p<skinId>` resolves the per-skin mesh everywhere
+// (ghost, live refs, colliders) with no other id plumbing.
+const SKIN_MARK = '#p';
+
+/** The skinned placeable id — the base piece wearing paint skin `skinId`. */
+export function skinnedPieceId(basePieceId: string, skinId: string): string {
+  return `${basePieceId}${SKIN_MARK}${skinId}`;
+}
+
+/** The paint-skin id a placeable id carries, or null for the base look. */
+export function paintSkinIdOf(pieceId: string): string | null {
+  const at = pieceId.lastIndexOf(SKIN_MARK);
+  return at >= 0 ? pieceId.slice(at + SKIN_MARK.length) : null;
+}
+
+/** `model:<modelId>` / `prop:<modelId>` (+ optional `#p<skin>`) → the resident-mesh
+ *  + ref key. The skin suffix STAYS — `<modelId>#p<skin>` is the per-skin mesh key. */
 export function authoredModelIdOf(pieceId: string): string {
   return pieceId.slice(pieceId.indexOf(':') + 1);
 }
@@ -60,8 +81,13 @@ export function authoredList(): readonly AuthoredBuildPiece[] {
   return AUTHORED;
 }
 
+/** Resolve a placeable id to its authored piece — a skinned id (`…#p<skin>`)
+ *  resolves to its BASE piece (kind/label/bounds are skin-independent). */
 export function authoredPieceFor(pieceId: string): AuthoredBuildPiece | null {
-  return BY_ID.get(pieceId) ?? null;
+  const hit = BY_ID.get(pieceId);
+  if (hit) return hit;
+  const at = pieceId.lastIndexOf(SKIN_MARK);
+  return at >= 0 ? BY_ID.get(pieceId.slice(0, at)) ?? null : null;
 }
 
 /** The base kind of any placeable id — authored affinity/prop or catalog kind. */
@@ -74,8 +100,9 @@ export type PlaceableEntry = { id: string; label: string; hex: string; authored:
 export type PlaceableGroup = { kind: PlaceableKind; label: string; entries: PlaceableEntry[] };
 
 /** Every placeable grouped by kind: catalog rows first, then authored pieces of
- *  that same affinity (so an exported "wall piece" sits under Wall), and every
- *  exported PROP under its own trailing Props category. */
+ *  that same affinity (so an exported "wall piece" sits under Wall) — each
+ *  followed by one entry per stored paint SKIN (req_2834) — and every exported
+ *  PROP under its own trailing Props category. */
 export function placeablesByKind(): PlaceableGroup[] {
   const byKind = new Map<PlaceableKind, PlaceableEntry[]>();
   for (const g of catalogByKind()) {
@@ -84,6 +111,10 @@ export function placeablesByKind(): PlaceableGroup[] {
   for (const ap of AUTHORED) {
     const list = byKind.get(ap.kind) ?? [];
     list.push({ id: ap.id, label: ap.label, hex: ap.hex, authored: true });
+    const pkg = modelPackageById(ap.pkgId);
+    for (const skin of pkg ? listPaintSkins(pkg) : []) {
+      list.push({ id: skinnedPieceId(ap.id, skin.id), label: `${ap.label} · ${skin.name}`, hex: ap.hex, authored: true });
+    }
     byKind.set(ap.kind, list);
   }
   const groups: PlaceableGroup[] = KIND_ORDER

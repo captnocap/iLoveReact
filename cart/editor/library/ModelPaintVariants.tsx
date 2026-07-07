@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { ScrollView } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { listPaintVariants, savePaintVariant, updatePaintVariant, removePaintVariant } from '../data/paintVariants';
+import { listPaintVariants, savePaintVariant, updatePaintVariant, removePaintVariant, writePaintVariantMeshBlob } from '../data/paintVariants';
 import { writeModelArtifacts } from '../data/modelPackageStore';
 import type { ModelPackage } from '../data/types';
 
@@ -82,7 +82,12 @@ export default function ModelPaintVariants({ model }: { model: ModelPackage }) {
     const ok = v.format === 'program'
       ? host.__model_paint_program_apply?.(v.data) === 1
       : host.__model_atlas_apply?.(v.detail, v.data) === 1;
-    if (ok) setActiveId(id); // now Save writes back to this one
+    if (ok) {
+      setActiveId(id); // now Save writes back to this one
+      // The variant is now the APPLIED painting — persist its paint-space mesh blob
+      // (req_2834), healing pre-blob variants into placeable skins on first load.
+      writePaintVariantMeshBlob(model, id);
+    }
     setNote(ok ? `Loaded ${v.name} — Save now updates it.` : `Couldn't load ${v.name} (open this model in the viewer first).`);
   };
 

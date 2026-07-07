@@ -10,12 +10,13 @@
 import { pieceInstanceRows, type PlacedPiece } from './pieces';
 import { pieceSkinBoxes } from './pieceSkins';
 import { encodeResidentMeshes, encodeMeshRefs, type ResidentMesh, type MeshRef } from './meshProps';
-import { isAuthoredPiece, authoredModelIdOf, type AuthoredBuildPiece } from './authoredRegistry';
+import { isAuthoredPiece, authoredModelIdOf, skinnedPieceId, type AuthoredBuildPiece } from './authoredRegistry';
 import { authoredMeshData } from './authoredMesh';
 import { exists, readFileBase64 } from '../../../runtime/hooks/fs';
 import { base64ToBytes } from '../../../runtime/workspace';
 import { modelPackageById } from '../data/content';
 import { resolvePackageDir } from '../data/modelPackageStore';
+import { listPaintSkins } from '../data/paintVariants';
 
 const g: any = globalThis;
 
@@ -27,25 +28,27 @@ function readPackageBytes(dir: string, rel: string): Uint8Array | undefined {
   try { return base64ToBytes(b64); } catch { return undefined; }
 }
 
-/** The model's PAINTED form for the resident lump: the paint-space mesh
- *  (mesh/painted.blob — the displayed verts whose UVs the island layout rewrote
- *  into atlas space) paired with its atlas (atlases/base.png). The atlas maps
- *  ONLY onto those verts — pairing it with the source-UV doc verts scrambles the
- *  painting (req_2833) — so a package missing painted.blob (saved before the
- *  writer existed) ships NO png and honestly draws flat until its next save. */
-function packagePaintedForm(pkgId: string): { vertices: Float32Array; png: Uint8Array } | null {
-  const pkg = modelPackageById(pkgId);
-  if (!pkg) return null;
-  const dir = resolvePackageDir(pkg.kind, pkg.id);
-  if (!dir) return null;
-  const blob = readPackageBytes(dir, 'mesh/painted.blob');
+type PaintedForm = { vertices: Float32Array; png: Uint8Array };
+
+/** A paint-space mesh blob + its atlas png as one resident-mesh payload. The atlas
+ *  maps ONLY onto the blob's island-space verts — pairing it with the source-UV doc
+ *  verts scrambles the painting (req_2833) — so both halves or nothing. */
+function readPaintedForm(dir: string, blobRel: string, pngRel: string): PaintedForm | null {
+  const blob = readPackageBytes(dir, blobRel);
   if (!blob) return null;
   const vertCount = Math.floor(blob.length / 32);
   if (vertCount < 3) return null;
-  const png = readPackageBytes(dir, 'atlases/base.png');
+  const png = readPackageBytes(dir, pngRel);
   if (!png) return null;
   const buf = blob.buffer.slice(blob.byteOffset, blob.byteOffset + vertCount * 32);
   return { vertices: new Float32Array(buf, 0, vertCount * 8), png };
+}
+
+/** The model's CURRENT painted form (mesh/painted.blob + atlases/base.png — the
+ *  look last saved in the mesh editor). Null for a package saved before the
+ *  writer existed → the mesh honestly draws flat until its next save. */
+function packagePaintedForm(dir: string): PaintedForm | null {
+  return readPaintedForm(dir, 'mesh/painted.blob', 'atlases/base.png');
 }
 
 /** Push the placed-piece world onto a mounted loader node: box instances, face
@@ -87,17 +90,31 @@ export function pushResidentMeshes(nodeId: number, authoredPieces: readonly Auth
   if (!nodeId || typeof g.__compiled_world_set_resident_meshes !== 'function') return false;
   const meshes: ResidentMesh[] = [];
   let painted = 0;
+  let skins = 0;
   for (const ap of authoredPieces) {
+    const pkg = modelPackageById(ap.pkgId);
+    const dir = pkg ? resolvePackageDir(pkg.kind, pkg.id) : null;
     // The painted form rides the lump (req_2832/2833: a placed export lost its
     // paintings): paint-space verts + atlas PNG together, or the doc mesh flat.
-    const paintedForm = packagePaintedForm(ap.pkgId);
+    const paintedForm = dir ? packagePaintedForm(dir) : null;
     const verts = paintedForm?.vertices ?? authoredMeshData(ap.modelId, ap.pkgId);
     if (verts && verts.length >= 8) {
       if (paintedForm) painted += 1;
       meshes.push({ key: ap.modelId, vertices: verts, png: paintedForm?.png });
     } else console.warn(`[authored] no mesh data for '${ap.modelId}' (${ap.label}) — not resident (re-open + re-export the model)`);
+    // Every stored paint SKIN is its own resident mesh (req_2834): key
+    // `<modelId>#p<skinId>` — the same key a skinned placeable id resolves to,
+    // so skinned ghosts/placements/colliders draw that painting.
+    if (pkg && dir) {
+      for (const skin of listPaintSkins(pkg)) {
+        const form = readPaintedForm(dir, `paints/paint_${skin.id}.blob`, `paints/paint_${skin.id}.png`);
+        if (!form) continue;
+        meshes.push({ key: skinnedPieceId(ap.modelId, skin.id), vertices: form.vertices, png: form.png });
+        skins += 1;
+      }
+    }
   }
   g.__compiled_world_set_resident_meshes(nodeId, encodeResidentMeshes(meshes));
-  console.warn(`[authored] resident catalog: ${meshes.length} authored mesh(es), ${painted} painted -> loader node ${nodeId}`);
+  console.warn(`[authored] resident catalog: ${meshes.length} mesh(es) — ${painted} painted, ${skins} paint skin(s) -> loader node ${nodeId}`);
   return true;
 }

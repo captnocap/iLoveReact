@@ -36,6 +36,17 @@ export type PaintVariant = {
 function paintsDir(pkg: PaintTarget): string { return `${claimPackageDir(pkg)}/paints`; }
 function jsonPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.json`; }
 function pngPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.png`; }
+function blobPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.blob`; }
+
+/** Persist the DISPLAYED paint-space mesh beside a variant (paints/paint_<id>.blob).
+ *  The variant's .png maps ONLY onto these verts (req_2833: island-space UVs) — the
+ *  pair is what makes the painting placeable in the world (req_2834). Call when the
+ *  variant is the APPLIED painting (save writes what you see; load just applied it). */
+export function writePaintVariantMeshBlob(pkg: PaintTarget, id: string): boolean {
+  const ok = host.__model_painted_mesh_write?.(blobPath(pkg, id)) === 1;
+  if (ok) invalidatePaintSkins(pkg);
+  return ok;
+}
 
 export function listPaintVariants(pkg: PaintTarget): PaintVariant[] {
   const dir = paintsDir(pkg);
@@ -80,6 +91,7 @@ export function savePaintVariant(
     png,
   };
   writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
+  writePaintVariantMeshBlob(pkg, id); // save writes what you SEE — the paint-space mesh pairs with the .png
   return variant;
 }
 
@@ -107,10 +119,60 @@ export function updatePaintVariant(
     png,
   };
   writeFile(jsonPath(pkg, id), JSON.stringify(variant, null, 2));
+  writePaintVariantMeshBlob(pkg, id); // keep the paint-space mesh in step with the refreshed painting
   return variant;
 }
 
 export function removePaintVariant(pkg: PaintTarget, id: string): void {
   remove(jsonPath(pkg, id));
   remove(pngPath(pkg, id));
+  remove(blobPath(pkg, id));
+  invalidatePaintSkins(pkg);
+}
+
+// ── Paint SKINS: the placement-facing view of a model's paintings (req_2834) ──────────
+// A stored painting is CATALOG VARIETY on the exported placeable (V24: "variety lives in
+// the CATALOG — skin by catalog"): the build palette lists one entry per skin and the
+// world registers one resident mesh per skin. A skin is PLACEABLE only when both halves
+// exist on disk — paint_<id>.png (the atlas) AND paint_<id>.blob (the paint-space mesh
+// it maps onto); a variant saved before the blob writer existed heals on its next
+// Load/Save in the paint panel. Reads are light (listDir + a name sniff on the json's
+// head — never a full parse of the multi-MB stroke program) and cached per package dir;
+// every writer above invalidates.
+
+export type PaintSkin = { id: string; name: string };
+
+const skinsCache = new Map<string, PaintSkin[]>();
+
+function invalidatePaintSkins(pkg: PaintTarget): void {
+  skinsCache.delete(paintsDir(pkg));
+}
+
+/** The variant's user-facing name without parsing the whole multi-MB json: the writer
+ *  puts id/name first (JSON.stringify property order), so the head carries it. */
+function sniffVariantName(text: string, fallback: string): string {
+  const m = /"name":\s*"((?:[^"\\]|\\.)*)"/.exec(text.slice(0, 512));
+  return m ? m[1]!.replace(/\\(.)/g, '$1') : fallback;
+}
+
+/** The model's PLACEABLE paint skins: every variant with both its atlas png and its
+ *  paint-space mesh blob on disk, sorted by id. */
+export function listPaintSkins(pkg: PaintTarget): PaintSkin[] {
+  const dir = paintsDir(pkg);
+  const hit = skinsCache.get(dir);
+  if (hit) return hit;
+  const out: PaintSkin[] = [];
+  if (exists(dir)) {
+    for (const name of listDir(dir)) {
+      const m = /^paint_(\w+)\.blob$/.exec(name);
+      if (!m) continue;
+      const id = m[1]!;
+      if (!exists(pngPath(pkg, id))) continue;
+      const head = readFile(jsonPath(pkg, id));
+      out.push({ id, name: head ? sniffVariantName(head, `Painting ${id}`) : `Painting ${id}` });
+    }
+  }
+  out.sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+  skinsCache.set(dir, out);
+  return out;
 }
