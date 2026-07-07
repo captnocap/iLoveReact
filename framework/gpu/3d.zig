@@ -2706,52 +2706,11 @@ fn faceCrossFromPositions(pos: []const f32, face: u32) [3]f32 {
     return vcross(vsub(p1, a), vsub(p2, a));
 }
 
-fn faceEdgeLensSq(pos: []const f32, face: u32) [3]f32 {
-    const b = @as(usize, face) * 9;
-    if (b + 8 >= pos.len) return .{ 0, 0, 0 };
-    const a: [3]f32 = .{ pos[b + 0], pos[b + 1], pos[b + 2] };
-    const p1: [3]f32 = .{ pos[b + 3], pos[b + 4], pos[b + 5] };
-    const p2: [3]f32 = .{ pos[b + 6], pos[b + 7], pos[b + 8] };
-    const e0 = vsub(p1, a);
-    const e1 = vsub(p2, p1);
-    const e2 = vsub(a, p2);
-    return .{ vdot(e0, e0), vdot(e1, e1), vdot(e2, e2) };
-}
-
-/// A triangle whose three edge lengths survived the drag moved RIGIDLY (rotate gizmo,
-/// fully-selected translate) — a proper rigid motion can't flip a face, no matter how
-/// far its normal swung from the original (req_2754). The tolerance absorbs the float
-/// drift of a rotation applied incrementally across hundreds of mouse-move events.
-fn faceMovedRigidly(before: []const f32, after: []const f32, face: u32) bool {
-    const lb = faceEdgeLensSq(before, face);
-    const la = faceEdgeLensSq(after, face);
-    for (0..3) |k| {
-        if (@abs(la[k] - lb[k]) > @max(lb[k], @as(f32, 1e-12)) * 2e-3) return false;
-    }
-    return true;
-}
-
-fn collectUnsafeFaceEdits(before: []const f32, after: []const f32, face_count: u32, out: *std.ArrayListUnmanaged(u32)) void {
-    var f: u32 = 0;
-    while (f < face_count) : (f += 1) {
-        const bc = faceCrossFromPositions(before, f);
-        const ac = faceCrossFromPositions(after, f);
-        const b2 = vdot(bc, bc);
-        const a2 = vdot(ac, ac);
-        // A face that was ALREADY degenerate before the drag isn't something this edit
-        // broke — imported/generated meshes carry zero-area tris, and counting them made
-        // every drag (even a pure translate) re-report the same number (req_2755). Only
-        // a transition INTO degeneracy counts.
-        if (b2 <= 1e-12) continue;
-        if (a2 < b2 * 1e-6) {
-            out.append(std.heap.c_allocator, f) catch return;
-            continue;
-        }
-        if (vdot(vnorm(bc), vnorm(ac)) < -0.05 and !faceMovedRigidly(before, after, f)) {
-            out.append(std.heap.c_allocator, f) catch return;
-        }
-    }
-}
+// The unsafe-edit predicate is the studio's concave Auto-Fix, ported verbatim
+// (mesh_edit.newlyConcaveGroups ← editMesh.ts isFaceConcave/newConcaveFaces,
+// req_2823). The differential normal/area heuristics that lived here false-fired
+// on rotates (req_2754), pre-degenerate meshes (req_2755), loop-cut slivers, and
+// hinge edits (req_2816) — "changed a lot" is not "became invalid".
 
 /// True if Split Quads would actually change topology: authored groups exist, the
 /// displayed mesh IS the source (group ids are per source face), and at least one
@@ -2876,15 +2835,23 @@ pub fn meshGizmoFinish() bool {
     // A press that moved nothing leaves no undo step.
     if (std.mem.eql(f32, before, after)) journalDiscard(&g_gizmo_snap) else journalCommit(&g_gizmo_snap);
     const fc: u32 = @intCast(@min(before.len / 9, after.len / 9));
+    // Studio concave guard (req_0949 port): only an authored face NEWLY buckled into a
+    // reflex polygon is unsafe. bad_list carries one member tri per buckled face (the
+    // currency guardSplitPossible/guardSplitQuads already speak); the dialog count is
+    // FACES, matching the studio's "N face(s) buckled — not convex".
     var bad_list = std.ArrayListUnmanaged(u32){};
-    collectUnsafeFaceEdits(before, after, fc, &bad_list);
-    if (bad_list.items.len == 0) {
+    var bad_faces: u32 = 0;
+    if (captureFaceGroups()) |groups| {
+        defer std.heap.c_allocator.free(groups);
+        bad_faces = mesh_edit.newlyConcaveGroups(before, after, fc, groups, &bad_list);
+    }
+    if (bad_faces == 0) {
         bad_list.deinit(std.heap.c_allocator);
         clearMeshGuardSnapshot();
         return false;
     }
     g_guard_pending = true;
-    g_guard_bad_faces = @intCast(bad_list.items.len);
+    g_guard_bad_faces = bad_faces;
     g_guard_face_count = fc;
     g_guard_bad_list = bad_list.toOwnedSlice(std.heap.c_allocator) catch null;
     g_guard_can_split = if (g_guard_bad_list) |bl| guardSplitPossible(bl) else false;

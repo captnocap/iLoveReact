@@ -1640,6 +1640,95 @@ fn chainGroupLoop(pos: []const f32, tris: []const u32, out: *CutLoop) bool {
     return cur == start_key and count == boundary_n; // one loop, fully consumed
 }
 
+// ── The concave-face guard predicate (PORT of the studio's req_0949 Auto-Fix) ──────
+// Verbatim port of cart/hmsc-int/editors/model/editMesh.ts isFaceConcave /
+// newConcaveFaces (req_2823): the only unsafe edit is an authored face newly buckled
+// into a reflex polygon, judged on the face's boundary loop — never on the frozen fan
+// triangles. Convexity is invariant under rigid motion and collinear corners are
+// skipped, so whole-selection rotates and loop-cut slivers cannot fire it — the
+// failure modes of the differential normal/area heuristics this replaces
+// (req_2754/req_2755/req_2816).
+
+/// Newell's method over a polygon loop — robust where a single cross product is
+/// fragile (editMesh.ts faceNormal). Degenerate loop falls back to +Y, as the studio does.
+fn loopNewellNormal(loop: []const [3]f32) [3]f32 {
+    var n: [3]f32 = .{ 0, 0, 0 };
+    for (loop, 0..) |cur, i| {
+        const nxt = loop[(i + 1) % loop.len];
+        n[0] += (cur[1] - nxt[1]) * (cur[2] + nxt[2]);
+        n[1] += (cur[2] - nxt[2]) * (cur[0] + nxt[0]);
+        n[2] += (cur[0] - nxt[0]) * (cur[1] + nxt[1]);
+    }
+    const len = @sqrt(vecDot(n, n));
+    if (len < 1e-9) return .{ 0, 1, 0 };
+    return .{ n[0] / len, n[1] / len, n[2] / len };
+}
+
+/// editMesh.ts isFaceConcave: does any consecutive-edge turn disagree in sign against
+/// the Newell normal? Loops under 4 corners are never concave; |turn| < 1e-9 corners
+/// are collinear and ignored (both thresholds verbatim from the studio).
+pub fn loopIsConcave(loop: []const [3]f32) bool {
+    if (loop.len < 4) return false;
+    const normal = loopNewellNormal(loop);
+    var sign: f32 = 0;
+    for (loop, 0..) |cur, i| {
+        const prev = loop[(i + loop.len - 1) % loop.len];
+        const next = loop[(i + 1) % loop.len];
+        const turn = vecDot(vecCross(vecSub(cur, prev), vecSub(next, cur)), normal);
+        if (@abs(turn) < 1e-9) continue;
+        const s: f32 = if (turn > 0) 1 else -1;
+        if (sign == 0) {
+            sign = s;
+        } else if (s != sign) return true;
+    }
+    return false;
+}
+
+/// Is one authored group (its member tri indices into `pos`) concave? A group whose
+/// boundary won't chain into one clean loop can't be judged — treated as convex, the
+/// same fallback shrug the polygon cut path uses.
+fn groupIsConcave(pos: []const f32, tris: []const u32) bool {
+    var loop = CutLoop{};
+    defer loop.deinit(alloc);
+    if (!chainGroupLoop(pos, tris, &loop)) return false;
+    return loopIsConcave(loop.items);
+}
+
+/// editMesh.ts newConcaveFaces, grouped-soup form: the authored groups an edit NEWLY
+/// buckled — concave in `after` and NOT concave in `before`, so a mesh that
+/// legitimately contains concave faces stays quiet. Appends ONE member tri per
+/// offending group to `out` (the guard bad-list currency Split Quads consumes) and
+/// returns the offending FACE count. `groups` is one id per tri; ungrouped tris are
+/// plain triangles — always convex, never flagged.
+pub fn newlyConcaveGroups(before: []const f32, after: []const f32, tri_count: u32, groups: []const u32, out: *std.ArrayListUnmanaged(u32)) u32 {
+    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)){};
+    defer {
+        var vals = buckets.valueIterator();
+        while (vals.next()) |lst| lst.deinit(alloc);
+        buckets.deinit(alloc);
+    }
+    var f: u32 = 0;
+    while (f < tri_count and f < groups.len) : (f += 1) {
+        const g = groups[f];
+        if (g == model_source.NO_FACE_GROUP) continue;
+        const gop = buckets.getOrPut(alloc, g) catch return 0;
+        if (!gop.found_existing) gop.value_ptr.* = .{};
+        gop.value_ptr.append(alloc, f) catch return 0;
+    }
+    var bad: u32 = 0;
+    var vals = buckets.valueIterator();
+    while (vals.next()) |lst| {
+        const tris = lst.items;
+        if (tris.len < 2) continue; // a single-tri face is a triangle — always convex
+        if (!groupIsConcave(after, tris)) continue;
+        if (groupIsConcave(before, tris)) continue; // already concave — not this edit's doing
+        out.append(alloc, tris[0]) catch return bad;
+        bad += 1;
+    }
+    std.mem.sort(u32, out.items, {}, std.sort.asc(u32)); // stable order for the guard UI
+    return bad;
+}
+
 /// Split one boundary polygon by the plane {p : dot(n,p) = d} into its −side and +side
 /// loops, inserting the SHARED intersection point on each crossed edge — the polygon
 /// twin of planeClipSide and the studio's cutMeshByPlane. Because the polygon is the
@@ -2431,4 +2520,73 @@ test "mirror X: a selection containing BOTH twins transforms each directly (no d
     // a selected twin back over the plane.
     try testing.expectApproxEqAbs(@as(f32, -0.25), vertPos(vi)[0], 0.0001);
     try testing.expectApproxEqAbs(@as(f32, 0.75), vertPos(ti)[0], 0.0001);
+}
+
+test "concave guard: rigid 120-degree rotation of a grouped quad fires nothing (req_2754 class)" {
+    // Flat quad [0,2]^2 on z=0 as two fan tris, ONE group. Rotate every vert 120 deg
+    // about X — the old differential guard's normal-dot test read this as a flip;
+    // convexity is rigid-motion invariant, so the ported predicate stays silent.
+    const before = [_]f32{
+        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 2, 0, 0, 2, 0,
+    };
+    const c: f32 = -0.5; // cos 120
+    const s: f32 = 0.8660254; // sin 120
+    var after: [18]f32 = undefined;
+    var i: usize = 0;
+    while (i < 18) : (i += 3) {
+        after[i] = before[i];
+        after[i + 1] = before[i + 1] * c - before[i + 2] * s;
+        after[i + 2] = before[i + 1] * s + before[i + 2] * c;
+    }
+    const groups = [_]u32{ 7, 7 };
+    var out = std.ArrayListUnmanaged(u32){};
+    defer out.deinit(alloc);
+    try testing.expectEqual(@as(u32, 0), newlyConcaveGroups(before[0..], after[0..], 2, groups[0..], &out));
+}
+
+test "concave guard: dragging a corner into the quad interior buckles it — 1 face, not 2 tris" {
+    // D (0,2) dragged to (1.5,0.5): the authored polygon goes reflex at D. The guard
+    // reports ONE face (the studio's counting) and hands back a member tri for Split Quads.
+    const before = [_]f32{
+        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 2, 0, 0, 2, 0,
+    };
+    const after = [_]f32{
+        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 2, 0, 1.5, 0.5, 0,
+    };
+    const groups = [_]u32{ 7, 7 };
+    var out = std.ArrayListUnmanaged(u32){};
+    defer out.deinit(alloc);
+    try testing.expectEqual(@as(u32, 1), newlyConcaveGroups(before[0..], after[0..], 2, groups[0..], &out));
+    try testing.expectEqual(@as(usize, 1), out.items.len);
+    try testing.expectEqual(@as(u32, 0), out.items[0]); // first member tri of the buckled group
+}
+
+test "concave guard: a face that was ALREADY concave stays quiet (newConcaveFaces diff)" {
+    // Same reflex quad before AND after (corner nudged but still reflex) — the edit
+    // didn't buckle it, so an organic mesh that legitimately contains concave faces
+    // never re-alarms on every drag (editMesh.ts newConcaveFaces semantics).
+    const before = [_]f32{
+        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 2, 0, 1.5, 0.5, 0,
+    };
+    const after = [_]f32{
+        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 2, 0, 1.4, 0.6, 0,
+    };
+    const groups = [_]u32{ 7, 7 };
+    var out = std.ArrayListUnmanaged(u32){};
+    defer out.deinit(alloc);
+    try testing.expectEqual(@as(u32, 0), newlyConcaveGroups(before[0..], after[0..], 2, groups[0..], &out));
+}
+
+test "concave guard: ungrouped triangle soup can never fire — tris are always convex" {
+    const before = [_]f32{ 0, 0, 0, 2, 0, 0, 2, 2, 0 };
+    const after = [_]f32{ 0, 0, 0, 2, 0, 0, 0.001, 0.001, 0 }; // near-collapsed tri
+    const groups = [_]u32{model_source.NO_FACE_GROUP};
+    var out = std.ArrayListUnmanaged(u32){};
+    defer out.deinit(alloc);
+    try testing.expectEqual(@as(u32, 0), newlyConcaveGroups(before[0..], after[0..], 1, groups[0..], &out));
 }

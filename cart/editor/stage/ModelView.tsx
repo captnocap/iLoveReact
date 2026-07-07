@@ -279,7 +279,7 @@ type SelInfo = { mode: number; verts: number; edges: number; sel: number };
 type TopoResult = { ok: number; key?: string; count?: number; lo?: number; hi?: number; label?: string; undo?: number; redo?: number };
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
-// Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at coordinate 0.
+// Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at each outliner part's local center.
 const meshSetMirror = (mask: number) => host.__mesh_edit_mirror?.(mask);
 const meshClearSel = () => host.__mesh_edit_clear?.();
 const meshGizmoTool = (t: number) => host.__mesh_gizmo_tool?.(t);
@@ -591,7 +591,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
       setSelMode(2);
       setWire(true);
-      setSelInfo(readSelInfo() ?? { mode: 2, verts: 0, edges: 0, sel: 0 });
+      adoptHostSelection({ mode: 2, verts: 0, edges: 0, sel: 0 });
       setError(null);
       resyncPartRanges(); // the op may have renumbered groups — mirror the host's ranges (req_2644)
       refreshUvIfLive(); // the op rewrote the atlas layout — the UV panel must follow (req_2625 GG)
@@ -608,7 +608,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const adoptMesh = (r: TopoResult | null): boolean => {
     if (r?.ok && typeof r.key === 'string' && typeof r.count === 'number') {
       setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
-      setSelInfo(readSelInfo() ?? selInfo);
+      adoptHostSelection(selInfo);
       resyncPartRanges();
       refreshUvIfLive();
       return true;
@@ -619,7 +619,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const closeGuard = (action: number) => {
     const changed = resolveGuard(action);
     setGuard(null);
-    setSelInfo(readSelInfo() ?? selInfo);
+    adoptHostSelection(selInfo);
     if (action === 0 && changed) {
       // The split renumbered groups + part ranges and re-islanded the paint layout —
       // the outliner mirror and the live UV panel must re-read host truth.
@@ -730,6 +730,24 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // leaving gaps (the host stamps one disc per call; JS walks the segment between moves).
   const lastPtRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Native selection can change mode without going through chooseSelMode: engine clicks,
+  // marquee, Ctrl+A, and the shell's outliner group-select all mutate host state directly.
+  // Counts already carry the host's authoritative mode; mirror both so toolbar highlights
+  // cannot drift from the active native tool.
+  const adoptHostSelection = (fallback: SelInfo = { mode: 0, verts: 0, edges: 0, sel: 0 }): SelInfo => {
+    const info = readSelInfo() ?? fallback;
+    const mode = Math.max(0, Math.min(3, info.mode | 0));
+    const next = mode === info.mode ? info : { ...info, mode };
+    setSelInfo(next);
+    setSelMode(mode);
+    if (mode !== 0) {
+      setPaintMode(false);
+      setFocusMode(false);
+      meshFocusTool(false);
+    }
+    return next;
+  };
+
   // Switch tool: selecting a mesh mode (or going back to view) is the active tool, so it
   // turns off Paint/Focus, and pushes the mode to the host. Mode 0 = plain view/orbit.
   const chooseSelMode = (m: number) => {
@@ -741,7 +759,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // triangulation diagonals) — NOT the GPU triangle wireframe, which would draw every
     // quad's diagonal. Wireframe (W) stays an independent "show all triangles" toggle.
     meshSetMode(m);
-    setSelInfo(readSelInfo() ?? { mode: m, verts: 0, edges: 0, sel: 0 });
+    adoptHostSelection({ mode: m, verts: 0, edges: 0, sel: 0 });
   };
   const chooseGizmoTool = (t: number) => {
     setGizmoTool(t);
@@ -1249,7 +1267,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     escape: () => {
       if (lc) { closeLoopCut(false); return; } // an open loop-cut popup cancels first
       if (atlasPrompt) { setAtlasPrompt(false); return; } // the atlas gate cancels next
-      if (selMode !== 0) { meshClearSel(); setSelInfo(readSelInfo() ?? selInfo); }
+      if (selMode !== 0) { meshClearSel(); adoptHostSelection(selInfo); }
     },
   });
 
@@ -1376,7 +1394,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     meshCapture(true);
     // The host calls this once per committed selection change (a click or a marquee release,
     // NOT per drag-move) so the count HUD refreshes without any JS in the interaction loop.
-    (globalThis as any).__meshEditSelChanged = () => setSelInfo(readSelInfo() ?? { mode: 0, verts: 0, edges: 0, sel: 0 });
+    (globalThis as any).__meshEditSelChanged = () => adoptHostSelection();
     (globalThis as any).__meshEditGuardChanged = () => setGuard(readGuard());
     if (initialFileParts) {
       applyFileParts(initialFileParts);
@@ -1650,7 +1668,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       let step = 0;
       const runNext = () => {
         if (step >= ops.length) {
-          setSelInfo(readSelInfo() ?? { mode: 0, verts: 0, edges: 0, sel: 0 });
+          adoptHostSelection();
           console.error(`[meshops] DONE → ${JSON.stringify(readSelInfo())}`);
           return;
         }
@@ -1996,7 +2014,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                 {`${selInfo.sel} sel · ${selMode === 1 ? `${selInfo.verts} verts` : selMode === 2 ? `${selInfo.edges} edges` : `${(model.count / 3).toLocaleString()} faces`}`}
               </Text>
               <Pressable
-                onPress={() => { meshClearSel(); setSelInfo(readSelInfo() ?? selInfo); }}
+                onPress={() => { meshClearSel(); adoptHostSelection(selInfo); }}
                 tooltip="Clear selection (Esc)"
                 style={{ marginLeft: 8, paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
               >
@@ -2164,9 +2182,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             borderRadius: 8,
           }}
         >
-          <Text style={{ color: '#ffe1bf', fontSize: 13, fontWeight: 700 }}>Unsafe face edit</Text>
+          {/* Studio concave Auto-Fix wording (req_0949 port, req_2823): counts authored
+              FACES newly buckled — the host predicate is editMesh.ts isFaceConcave ported
+              to mesh_edit.newlyConcaveGroups, not the old per-triangle heuristics. */}
+          <Text style={{ color: '#ffe1bf', fontSize: 13, fontWeight: 700 }}>⚠ Concave face</Text>
           <Text style={{ color: '#b9c4d4', fontSize: 12, marginTop: 6 }}>
-            {`${guard.bad} triangle${guard.bad === 1 ? '' : 's'} collapsed or flipped. ${guard.canSplit ? 'Split the affected quads, ignore it, or revert.' : 'Ignore it or revert.'}`}
+            {`${guard.bad} face${guard.bad === 1 ? '' : 's'} buckled — not convex`}
           </Text>
           <Row style={{ marginTop: 12, gap: 8 }}>
             {guard.canSplit ? (
@@ -2190,6 +2211,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
               <Text style={{ color: '#ffe3e4', fontSize: 12, fontWeight: 700 }}>Revert</Text>
             </Pressable>
           </Row>
+          {guard.canSplit ? (
+            <Text style={{ color: '#8b95a7', fontSize: 10, marginTop: 8 }}>Split Quads is recommended — keeps the surface valid.</Text>
+          ) : null}
         </Col>
         </Box>
       ) : null}
