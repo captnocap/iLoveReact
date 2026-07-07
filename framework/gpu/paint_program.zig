@@ -52,8 +52,12 @@ const OP_INK_COLOR: u8 = 0; // r,g,b
 const OP_INK_MATERIAL: u8 = 1; // matIndex u16
 const OP_DAB: u8 = 2; // v2: group u32, ord u32, u f32, v f32, radius f32, flow f32
 const OP_FILL: u8 = 3; // v2: group u32, ord u32
+// v3 (req_2831): OP_DAB + the brush footprint (the BRUSH_SHAPE_ID contract) — kind u32,
+// hardness f32, angle_rad f32, aspect f32, scatter f32. Older blobs never contain it,
+// so v1/v2 replay is untouched; newer blobs are version-gated at the header.
+const OP_DAB_SHAPED: u8 = 4;
 const MAGIC = [4]u8{ 'R', 'J', 'P', 'P' };
-const VERSION: u16 = 2; // v1 = flat face-indexed op stream, still readable
+const VERSION: u16 = 3; // v1 = flat face-indexed stream, v2 = hide-stable keys — both readable
 const MAT_BAKE_SIZE: u32 = 256;
 
 /// Ungrouped faces carry this group key; the ordinal is then the raw face index.
@@ -591,6 +595,27 @@ pub fn recordDab(face: u32, u: f32, v: f32, radius: f32, flow: f32, mat: bool, r
     appendOpenF32(flow);
 }
 
+/// Record a SHAPED dab (req_2831): OP_DAB's fields + the brush footprint spec, so
+/// program replay reproduces rakes/fans/sprays exactly (grain seeds derive from u/v).
+pub fn recordDabShaped(face: u32, u: f32, v: f32, radius: f32, flow: f32, mat: bool, rgb: [3]u8, spec: model_paint.BrushShape) void {
+    if (!g_recording) return;
+    openUnit("stroke");
+    emitInk(mat, rgb);
+    const key = faceKeyOf(face);
+    g_open.append(alloc, OP_DAB_SHAPED) catch {};
+    appendOpenU32(key.group);
+    appendOpenU32(key.ord);
+    appendOpenF32(u);
+    appendOpenF32(v);
+    appendOpenF32(radius);
+    appendOpenF32(flow);
+    appendOpenU32(spec.kind);
+    appendOpenF32(spec.hardness);
+    appendOpenF32(spec.angle_rad);
+    appendOpenF32(spec.aspect);
+    appendOpenF32(spec.scatter);
+}
+
 /// Record one whole-face fill (same hide-stable key).
 pub fn recordFill(face: u32, mat: bool, rgb: [3]u8) void {
     if (!g_recording) return;
@@ -865,6 +890,23 @@ fn runStrokeOps(ops: []const u8, res: *const Resolver, ink: *ReplayInk, dabs: *u
                 const face = resolveFace(res, group, ord) orelse continue;
                 if (ink.mat_active) model_paint.paintStampTex(face, u, v, radius, flow) else model_paint.paintStamp(face, u, v, radius, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2], 255 }, flow);
             },
+            OP_DAB_SHAPED => {
+                const group = c.u32v() orelse return;
+                const ord = c.u32v() orelse return;
+                const u = c.f32v() orelse return;
+                const v = c.f32v() orelse return;
+                const radius = c.f32v() orelse return;
+                const flow = c.f32v() orelse return;
+                const kind = c.u32v() orelse return;
+                const hardness = c.f32v() orelse return;
+                const angle = c.f32v() orelse return;
+                const aspect = c.f32v() orelse return;
+                const scatter = c.f32v() orelse return;
+                dabs.* += 1;
+                const face = resolveFace(res, group, ord) orelse continue;
+                const spec = model_paint.BrushShape{ .kind = @intCast(@min(kind, 255)), .hardness = hardness, .angle_rad = angle, .aspect = aspect, .scatter = scatter };
+                if (ink.mat_active) model_paint.paintStampTexShaped(face, u, v, radius, flow, spec) else model_paint.paintStampShaped(face, u, v, radius, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2], 255 }, flow, spec);
+            },
             OP_FILL => {
                 const group = c.u32v() orelse return;
                 const ord = c.u32v() orelse return;
@@ -985,7 +1027,7 @@ pub fn programDetail(blob: []const u8) ?u16 {
     if (blob.len < 8) return null;
     if (!std.mem.eql(u8, blob[0..4], &MAGIC)) return null;
     const ver = std.mem.readInt(u16, blob[4..6], .little);
-    if (ver != 1 and ver != VERSION) return null;
+    if (ver < 1 or ver > VERSION) return null;
     return std.mem.readInt(u16, blob[6..8], .little);
 }
 
@@ -1097,7 +1139,7 @@ pub fn apply(blob: []const u8) bool {
     const magic = c.bytes(4) orelse return false;
     if (!std.mem.eql(u8, magic, &MAGIC)) return false;
     const ver = c.u16v() orelse return false;
-    if (ver != 1 and ver != VERSION) return false;
+    if (ver < 1 or ver > VERSION) return false;
     _ = c.u16v() orelse return false; // detail (applied by the caller before apply)
     _ = c.u32v() orelse return false; // facecount (advisory)
 

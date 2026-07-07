@@ -1149,6 +1149,118 @@ fn sampleMatAtTexel(isl: paint_islands.Island, fx: f32, fy: f32) [4]u8 {
     return sampleMat(u * g_mat_scale, v * g_mat_scale);
 }
 
+// ── Brush footprint shapes (PORT of paintable.zig's brush fragment, req_2831) ────────
+// The 11 analytic bristle kinds (round/soft/square/flat/angle/filbert/rake/fan/dry/
+// spray/knife) — the BRUSH_SHAPE_ID contract in runtime/paint/model.ts, kinds 0..10,
+// "must not be reordered". The mesh painter's dabs stamped a bare disc while the UI
+// wore every shape's icon; this is the CPU port of the exact WGSL formulas so both
+// painters rasterize the same footprints. Coverage MODULATES flow per texel — with the
+// door's default hardness 1 the round brush stays the hard binary dab req_2538 pinned.
+pub const BrushShape = struct {
+    kind: u8 = 0, // BRUSH_SHAPE_ID: 0 round … 10 knife
+    hardness: f32 = 1.0,
+    angle_rad: f32 = 0.0,
+    aspect: f32 = 1.0,
+    scatter: f32 = 0.0,
+};
+
+fn satf(v: f32) f32 {
+    return std.math.clamp(v, 0.0, 1.0);
+}
+fn smoothstepf(e0: f32, e1: f32, x: f32) f32 {
+    const t = satf((x - e0) / (e1 - e0));
+    return t * t * (3.0 - 2.0 * t);
+}
+/// paintable.zig hash12 — verbatim, so grain shapes (dry/spray) match the 2D painter.
+fn hash12f(x: f32, y: f32) f32 {
+    const s = @sin(x * 127.1 + y * 311.7) * 43758.5453;
+    return s - @floor(s);
+}
+/// paintable.zig edge_coverage — hardness 1 ≈ a hard step (the req_2538 binary dab).
+fn edgeCoverage(dist: f32, hardness: f32) f32 {
+    const feather = @max(0.002, (1.0 - satf(hardness)) * 0.55 + 0.002);
+    return 1.0 - smoothstepf(1.0 - feather, 1.0, dist);
+}
+/// Footprint coverage at (dx,dy) texels from the dab centre — the fs_main port. wx/wy
+/// are absolute atlas texels (grain hash space); `seed` is derived from the dab's (u,v)
+/// so stroke-program REPLAY reproduces the grain exactly.
+fn brushCoverage(spec: BrushShape, dx: f32, dy: f32, r_raw: f32, flow: f32, wx: f32, wy: f32, seed: f32) f32 {
+    const ca = @cos(spec.angle_rad);
+    const sa = @sin(spec.angle_rad);
+    const px = dx * ca + dy * sa;
+    const py = -dx * sa + dy * ca;
+    const r = @max(r_raw, 0.001);
+    const aspect = @max(spec.aspect, 0.05);
+    var coverage: f32 = 0.0;
+    switch (spec.kind) {
+        1 => { // soft
+            const d = @sqrt(px * px + py * py) / r;
+            coverage = std.math.pow(f32, satf(1.0 - d), 0.55 + 2.45 * satf(spec.hardness));
+        },
+        2 => { // square
+            const d = @max(@abs(px) / (r * aspect), @abs(py) / r);
+            coverage = edgeCoverage(d, spec.hardness);
+        },
+        3 => { // flat
+            const d = @max(@abs(px) / (r * @max(aspect, 1.6)), @abs(py) / (r * 0.42));
+            coverage = edgeCoverage(d, spec.hardness);
+        },
+        4 => { // angle
+            const skew = px + py * 0.55;
+            const d = @max(@abs(skew) / (r * @max(aspect, 1.5)), @abs(py) / (r * 0.46));
+            coverage = edgeCoverage(d, spec.hardness);
+        },
+        5 => { // filbert
+            const qx = px / (r * @max(aspect, 1.15));
+            const qy = py / (r * 0.62);
+            coverage = edgeCoverage(@sqrt(qx * qx + qy * qy), spec.hardness);
+        },
+        6 => { // rake
+            const qx = px / (r * @max(aspect, 1.3));
+            const qy = py / r;
+            const base = edgeCoverage(@sqrt(qx * qx + qy * qy), spec.hardness);
+            const teeth: f32 = 7.0;
+            const cellv = (qx * 0.5 + 0.5) * teeth;
+            const cell = cellv - @floor(cellv);
+            coverage = if (cell <= 0.48) base else 0.0;
+        },
+        7 => { // fan
+            const qx = px / (r * @max(aspect, 1.8));
+            const qy = (py + r * 0.18) / r;
+            const width = 0.42 + (1.08 - 0.42) * satf((qy + 0.95) / 1.9);
+            const base = (1.0 - smoothstepf(width - 0.08, width, @abs(qx))) * (1.0 - smoothstepf(0.86, 1.0, @abs(qy)));
+            const teeth: f32 = 9.0;
+            const cellv = (qx * 0.5 + 0.5) * teeth;
+            const cell = cellv - @floor(cellv);
+            coverage = base * (if (cell <= 0.42) @as(f32, 1.0) else 0.24);
+        },
+        8 => { // dry
+            const qx = px / (r * @max(aspect, 1.2));
+            const qy = py / r;
+            const base = edgeCoverage(@sqrt(qx * qx + qy * qy), spec.hardness);
+            const n = hash12f(@floor(wx * 0.65 + seed), @floor(wy * 0.65 + seed * 1.7));
+            coverage = if (n >= 0.36 + satf(spec.scatter) * 0.28) base else 0.0;
+        },
+        9 => { // spray
+            const rs = r * (1.0 + @max(spec.scatter, 0.0));
+            const d = @sqrt(px * px + py * py) / rs;
+            const n = hash12f(@floor(wx * 0.9 + seed * 3.1), @floor(wy * 0.9 + seed * 1.3));
+            const density = 0.78 + (0.38 - 0.78) * satf(flow);
+            coverage = if (n >= density) (1.0 - smoothstepf(0.75, 1.0, d)) else 0.0;
+        },
+        10 => { // knife
+            const skew = px + py * 0.22;
+            const d = @max(@abs(skew) / (r * @max(aspect, 2.8)), @abs(py) / (r * 0.22));
+            coverage = edgeCoverage(d, spec.hardness);
+        },
+        else => { // 0: round
+            const d = @sqrt(px * px + py * py) / r;
+            coverage = edgeCoverage(d, spec.hardness);
+        },
+    }
+    return satf(coverage) * satf(flow);
+}
+
 /// Blend one texel toward `ink` by `amt` (alpha snaps opaque — paint is paint).
 fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32) void {
     inline for (0..3) |c| {
@@ -1167,7 +1279,7 @@ fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32) void {
 /// the blend toward the ink. When `mat` is set the ink is SAMPLED from the material
 /// image (paint-with-a-shader) in island space; `fill` floods the face triangle
 /// instead of a disc (bucket fill, material mode).
-fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, fill: bool) void {
+fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, fill: bool, spec: BrushShape) void {
     const buf = g_rgba orelse return;
     const lay = &(g_layout orelse return);
     if (face >= g_facecount) return;
@@ -1210,14 +1322,20 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
     // stroke stacked those partial texels into a blurry fan; a texel is either painted
     // at full flow or untouched). The 0.75 floor keeps a 1px brush from ever missing:
     // the farthest a texel CENTRE can sit from an arbitrary point is √2/2 ≈ 0.71.
+    // Shaped dabs (req_2831): coverage MODULATES the blend, and with the default
+    // hardness 1 the round brush's edge_coverage is that same hard step.
     const r = @max(radius, 0.75);
+    // Grain seed derived from the dab's OWN (u,v) so program replay reproduces it.
+    const seed = cu * 7.13 + cv * 3.71;
 
-    // Disc bounds ∩ island rect (a dab can bleed into the pad gutter via PAINT_EPS,
-    // never into a neighbour island).
-    const x0f = @max(@floor(cx - r), @as(f32, @floatFromInt(isl.x)));
-    const y0f = @max(@floor(cy - r), @as(f32, @floatFromInt(isl.y)));
-    const x1f = @min(@ceil(cx + r), @as(f32, @floatFromInt(isl.x + isl.w)) - 1.0);
-    const y1f = @min(@ceil(cy + r), @as(f32, @floatFromInt(isl.y + isl.h)) - 1.0);
+    // Footprint bounds ∩ island rect (the paintable.zig vertex-shader bbox: elongated
+    // shapes reach aspect× the radius, spray reaches scatter× further). A dab can bleed
+    // into the pad gutter via PAINT_EPS, never into a neighbour island.
+    const rb = r * (@max(@max(spec.aspect, 1.0), 1.0) + @max(spec.scatter, 0.0)) + 3.0;
+    const x0f = @max(@floor(cx - rb), @as(f32, @floatFromInt(isl.x)));
+    const y0f = @max(@floor(cy - rb), @as(f32, @floatFromInt(isl.y)));
+    const x1f = @min(@ceil(cx + rb), @as(f32, @floatFromInt(isl.x + isl.w)) - 1.0);
+    const y1f = @min(@ceil(cy + rb), @as(f32, @floatFromInt(isl.y + isl.h)) - 1.0);
     if (x1f < x0f or y1f < y0f) return;
     const x0: u32 = @intFromFloat(@max(0, x0f));
     const y0: u32 = @intFromFloat(@max(0, y0f));
@@ -1230,33 +1348,95 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
         while (tx <= x1) : (tx += 1) {
             const fx: f32 = @floatFromInt(tx);
             const fy: f32 = @floatFromInt(ty);
-            // Binary coverage: the texel centre is in the disc or it isn't.
             const dx = fx + 0.5 - cx;
             const dy = fy + 0.5 - cy;
-            if (dx * dx + dy * dy > r * r) continue;
+            // Footprint coverage (the paintable.zig fragment, CPU): 0 outside the shape.
+            const cov = brushCoverage(spec, dx, dy, r, flow_amt, fx + 0.5, fy + 0.5, seed);
+            if (cov <= 0.001) continue;
             // Clip to the island silhouette — the dab covers every member triangle it
             // overlaps, so the diagonal is invisible to the stroke.
             if (!pointInIsland(lay, isl_idx, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
             const ink: [4]u8 = if (mat) sampleMatAtTexel(isl, fx, fy) else rgba;
-            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, flow_amt);
+            blendTexel(buf, (@as(usize, ty) * g_atlas_w + tx) * 4, ink, cov);
         }
     }
     markRows(y0, y1);
 }
 
 pub fn paintStamp(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, flow: f32) void {
-    stampInner(face, cu, cv, radius, rgba, false, flow, false);
+    stampInner(face, cu, cv, radius, rgba, false, flow, false, .{});
 }
 
-/// Free-form dab that deposits the active material ink (paint-with-a-shader). Same disc +
-/// triangle clip as paintStamp; samples flat white if no material is set.
+/// Shaped dab (req_2831): paintStamp with the full brush footprint spec.
+pub fn paintStampShaped(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, flow: f32, spec: BrushShape) void {
+    stampInner(face, cu, cv, radius, rgba, false, flow, false, spec);
+}
+
+/// Free-form dab that deposits the active material ink (paint-with-a-shader). Same
+/// footprint + island clip as paintStamp; samples flat white if no material is set.
 pub fn paintStampTex(face: u32, cu: f32, cv: f32, radius: f32, flow: f32) void {
-    stampInner(face, cu, cv, radius, DEFAULT_FACE, true, flow, false);
+    stampInner(face, cu, cv, radius, DEFAULT_FACE, true, flow, false, .{});
+}
+
+/// Shaped material dab (req_2831).
+pub fn paintStampTexShaped(face: u32, cu: f32, cv: f32, radius: f32, flow: f32, spec: BrushShape) void {
+    stampInner(face, cu, cv, radius, DEFAULT_FACE, true, flow, false, spec);
 }
 
 /// Bucket-fill a whole face triangle with the material ink (the fill tool, material mode).
 pub fn paintFaceTex(face: u32) void {
-    stampInner(face, 0.34, 0.33, 0.0, DEFAULT_FACE, true, 1.0, true);
+    stampInner(face, 0.34, 0.33, 0.0, DEFAULT_FACE, true, 1.0, true, .{});
+}
+
+// ── Mirror painting support (req_1538 ported → req_2831) ───────────────────────────
+/// The model's overall scale (max bounds extent) — the studio's on-plane epsilon base.
+pub fn modelScale() f32 {
+    const pos = g_positions orelse return 1.0;
+    if (pos.len < 3) return 1.0;
+    var lo: f32 = std.math.floatMax(f32);
+    var hi: f32 = -std.math.floatMax(f32);
+    var i: usize = 0;
+    while (i < pos.len) : (i += 1) {
+        lo = @min(lo, pos[i]);
+        hi = @max(hi, pos[i]);
+    }
+    return @max(1e-3, hi - lo);
+}
+
+pub const FaceBary = struct { face: u32, u: f32, v: f32 };
+/// Port of the studio's localToFaceUV (meshPaint.tsx, the mirror-paint mapper): the
+/// face whose plane holds world point `p` (within `eps`, nearest wins) with a
+/// barycentric inside-test, returning the (u,v) affine weights paintStamp speaks
+/// (point = A + u·(B−A) + v·(C−A)). Null when no face owns the point.
+pub fn worldToFaceBary(p: [3]f32, eps: f32) ?FaceBary {
+    const pos = g_positions orelse return null;
+    var best: ?FaceBary = null;
+    var best_dist = eps;
+    var f: u32 = 0;
+    while (f < g_facecount) : (f += 1) {
+        const b = @as(usize, f) * 9;
+        if (b + 8 >= pos.len) break;
+        const ax = pos[b + 0];
+        const ay = pos[b + 1];
+        const az = pos[b + 2];
+        const e1 = [3]f32{ pos[b + 3] - ax, pos[b + 4] - ay, pos[b + 5] - az };
+        const e2 = [3]f32{ pos[b + 6] - ax, pos[b + 7] - ay, pos[b + 8] - az };
+        const n = [3]f32{ e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+        const n2 = n[0] * n[0] + n[1] * n[1] + n[2] * n[2];
+        if (n2 < 1e-12) continue;
+        const ap = [3]f32{ p[0] - ax, p[1] - ay, p[2] - az };
+        const dist = @abs(ap[0] * n[0] + ap[1] * n[1] + ap[2] * n[2]) / @sqrt(n2);
+        if (dist >= best_dist) continue;
+        // weights of B and C via the cross-product areas (the JS's wa/wb/wc test).
+        const c1 = [3]f32{ ap[1] * e2[2] - ap[2] * e2[1], ap[2] * e2[0] - ap[0] * e2[2], ap[0] * e2[1] - ap[1] * e2[0] };
+        const c2 = [3]f32{ e1[1] * ap[2] - e1[2] * ap[1], e1[2] * ap[0] - e1[0] * ap[2], e1[0] * ap[1] - e1[1] * ap[0] };
+        const wu = (n[0] * c1[0] + n[1] * c1[1] + n[2] * c1[2]) / n2; // weight of B
+        const wv = (n[0] * c2[0] + n[1] * c2[1] + n[2] * c2[2]) / n2; // weight of C
+        if (wu < -1e-3 or wv < -1e-3 or wu + wv > 1.001) continue;
+        best = .{ .face = f, .u = wu, .v = wv };
+        best_dist = dist;
+    }
+    return best;
 }
 
 // ── Detail = DENSITY (texels per meter) ───────────────────────────────────────────

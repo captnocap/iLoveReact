@@ -494,9 +494,10 @@ fn hostMeshEditMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 }
 
 /// __mesh_edit_mirror(mask) — live mirror editing (req_2758): enable the X/Y/Z symmetry
-/// planes (bit 0 = X, 1 = Y, 2 = Z; plane at coordinate 0). While a plane is on, every
-/// selection transform (gizmo drag / nudge) also lands, reflected, on each moved vertex's
-/// position-matched twin — the Studio's req_1183/1186 symmetric editing, host-native.
+/// planes (bit 0 = X, 1 = Y, 2 = Z). While a plane is on, every selection transform
+/// (gizmo drag / nudge) also lands, reflected around that outliner part's local center,
+/// on each moved vertex's position-matched twin — the Studio's req_1183/1186 symmetric
+/// editing, host-native.
 fn hostMeshEditMirror(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const mask: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 7));
@@ -596,6 +597,16 @@ fn hostMeshTopoExtrudeEdge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const distance: f32 = @floatCast(argToF64(info, 0) orelse 0);
     const ok = scene3d.meshTopoExtrudeEdge(distance);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
+/// __mesh_topo_extrude_face(distance) → JSON {"ok","key","count"}. Extrude exactly
+/// one selected authored face, capping it and adding side-wall quads.
+fn hostMeshTopoExtrudeFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const distance: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const ok = scene3d.meshTopoExtrudeFace(distance);
     if (ok) state.markDirty();
     setMeshTopoReturn(info, ok);
 }
@@ -1426,11 +1437,13 @@ fn hostModelPaintStrokeBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     setReturnNumber(info, @floatFromInt(scene3d.paintStrokeBegin(x, y)));
 }
 
-/// __model_paint_stamp(x, y, r, g, b, radius, flow) → 1 if a face was dabbed, 0 on a miss.
-/// One free-form sub-face brush dab (see scene3d.paintStampAt); fired per pointer-move during
-/// a stroke. radius is in patch-texel units, flow 0..1. Free-form paint lands directly on the
-/// paint atlas (not the per-face source store — sub-face detail has no single face colour), so
-/// it marks the frame dirty to re-upload the atlas but does not touch model_source.
+/// __model_paint_stamp(x, y, r, g, b, radius, flow[, kind, hardness, angleDeg, aspect,
+/// scatter]) → 1 if a face was dabbed, 0 on a miss. One free-form sub-face brush dab (see
+/// scene3d.paintStampAt); fired per pointer-move during a stroke. radius is in patch-texel
+/// units, flow 0..1. The optional tail is the brush FOOTPRINT (req_2831) — kind is the
+/// BRUSH_SHAPE_ID contract (runtime/paint/model.ts, 0 round … 10 knife); absent = the old
+/// bare round dab. Free-form paint lands directly on the paint atlas (not the per-face
+/// source store), so it marks the frame dirty but does not touch model_source.
 fn hostModelPaintStamp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
@@ -1440,7 +1453,14 @@ fn hostModelPaintStamp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     const b: u8 = @intCast(std.math.clamp(argToI32(info, 4) orelse 0, 0, 255));
     const radius: f32 = @floatCast(argToF64(info, 5) orelse 2.0);
     const flow: f32 = @floatCast(argToF64(info, 6) orelse 1.0);
-    const face = scene3d.paintStampAt(x, y, r, g, b, radius, flow);
+    const spec = scene3d.BrushShape{
+        .kind = @intCast(std.math.clamp(argToI32(info, 7) orelse 0, 0, 10)),
+        .hardness = @floatCast(argToF64(info, 8) orelse 1.0),
+        .angle_rad = @as(f32, @floatCast(argToF64(info, 9) orelse 0.0)) * std.math.pi / 180.0,
+        .aspect = @floatCast(argToF64(info, 10) orelse 1.0),
+        .scatter = @floatCast(argToF64(info, 11) orelse 0.0),
+    };
+    const face = scene3d.paintStampAt(x, y, r, g, b, radius, flow, spec);
     if (face >= 0) state.markDirty();
     setReturnNumber(info, if (face >= 0) 1 else 0);
 }
@@ -2507,6 +2527,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
     v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
     v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
+    v8_runtime.registerHostFn("__mesh_topo_extrude_face", hostMeshTopoExtrudeFace);
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
     v8_runtime.registerHostFn("__mesh_lc_begin", hostMeshLcBegin);

@@ -4636,10 +4636,49 @@ pub fn paintStrokeBegin(mx: f32, my: f32) i32 {
 /// obsolete: a single stamp covers every triangle of the authored face the disc
 /// overlaps (the island is one continuous space), and stamping each member separately
 /// would double-blend the texels near the diagonal.
-fn stampGroup(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, rgb: [3]u8) void {
+/// Re-export for the binding layer — the brush footprint spec lives in model_paint.
+pub const BrushShape = model_paint.BrushShape;
+
+fn stampGroup(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, rgb: [3]u8, spec: model_paint.BrushShape) void {
     paint_program.beginRecordedOp(); // anchor the undo baseline BEFORE the dab lands (req_2672)
-    if (mat) model_paint.paintStampTex(face, u, v, radius, flow) else model_paint.paintStamp(face, u, v, radius, rgba, flow);
-    paint_program.recordDab(face, u, v, radius, flow, mat, rgb);
+    if (mat) model_paint.paintStampTexShaped(face, u, v, radius, flow, spec) else model_paint.paintStampShaped(face, u, v, radius, rgba, flow, spec);
+    paint_program.recordDabShaped(face, u, v, radius, flow, mat, rgb, spec);
+}
+
+/// Mirror painting (the studio's req_1538, ported host-side — req_2831): with mirror
+/// planes armed, every dab also lands at its reflection(s). Face+bary → the world
+/// point, reflect across each non-empty SUBSET of the armed planes about the mirror
+/// frame's center (1 plane = 1 image, 2 = 3, 3 = 7 — the geometry mirror's law), map
+/// each image back to face+bary, and stamp it as its OWN recorded dab — so program
+/// replay never depends on the mirror state that painted it.
+fn stampGroupMirrored(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: bool, flow: f32, rgb: [3]u8, spec: model_paint.BrushShape) void {
+    stampGroup(face, u, v, radius, rgba, mat, flow, rgb, spec);
+    const mask = mesh_edit.mirrorMask();
+    if (mask == 0) return;
+    const frame = mesh_edit.mirrorFramePub() orelse return;
+    const pos = model_paint.positions() orelse return;
+    const b = @as(usize, face) * 9;
+    if (b + 8 >= pos.len) return;
+    const a3 = [3]f32{ pos[b + 0], pos[b + 1], pos[b + 2] };
+    const p = [3]f32{
+        a3[0] + u * (pos[b + 3] - a3[0]) + v * (pos[b + 6] - a3[0]),
+        a3[1] + u * (pos[b + 4] - a3[1]) + v * (pos[b + 7] - a3[1]),
+        a3[2] + u * (pos[b + 5] - a3[2]) + v * (pos[b + 8] - a3[2]),
+    };
+    // On-plane epsilon proportional to the model's scale (the studio's rule).
+    const eps = model_paint.modelScale() * 1e-3 + 1e-4;
+    var sub: u8 = 1;
+    while (sub < 8) : (sub += 1) {
+        if ((sub & mask) != sub) continue; // only subsets of the ARMED planes
+        var q = p;
+        var ax: u3 = 0;
+        while (ax < 3) : (ax += 1) {
+            if (sub & (@as(u8, 1) << ax) != 0) q[ax] = 2.0 * frame.center[ax] - q[ax];
+        }
+        const hit = model_paint.worldToFaceBary(q, eps) orelse continue;
+        if (hit.face == face) continue; // a dab ON the plane is its own mirror — skip
+        stampGroup(hit.face, hit.u, hit.v, radius, rgba, mat, flow, rgb, spec);
+    }
 }
 
 /// One free-form brush dab. CLIP: paint whichever face the ray hits, clipped to its
@@ -4648,7 +4687,7 @@ fn stampGroup(face: u32, u: f32, v: f32, radius: f32, rgba: [4]u8, mat: bool, fl
 /// plane, even if the cursor drifted onto a neighbour. `radius`/`flow` are the brush disc
 /// (patch-texel units) and its blend. Reuses vpLocalX/Y so the embedded-editor viewport
 /// offset is honoured (req_2248) exactly like paintAt. Returns the painted face, or -1.
-pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f32) i32 {
+pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f32, spec: model_paint.BrushShape) i32 {
     if (!model_paint.hasTarget()) return -1;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const lx = vpLocalX(mx);
@@ -4657,11 +4696,11 @@ pub fn paintStampAt(mx: f32, my: f32, r: u8, g: u8, b: u8, radius: f32, flow: f3
     const mat = model_paint.hasMaterialInk(); // dip into a shader bucket → sample it per dab
     if (g_paint_mode == 1) {
         const uv = model_paint.baryOnFace(cam, g_paint_vp_w, g_paint_vp_h, lx, ly, g_locked_face) orelse return -1;
-        stampGroup(g_locked_face, uv[0], uv[1], radius, rgba, mat, flow, .{ r, g, b });
+        stampGroupMirrored(g_locked_face, uv[0], uv[1], radius, rgba, mat, flow, .{ r, g, b }, spec);
         return @intCast(g_locked_face);
     }
     const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, lx, ly) orelse return -1;
-    stampGroup(hit.face, hit.u, hit.v, radius, rgba, mat, flow, .{ r, g, b });
+    stampGroupMirrored(hit.face, hit.u, hit.v, radius, rgba, mat, flow, .{ r, g, b }, spec);
     return @intCast(hit.face);
 }
 

@@ -39,7 +39,7 @@ import {
 // stamping is a Zig host capability (model_paint.zig via the __model_paint_* doors), so this
 // is the brush MODEL driving a host backend, not a second brush implementation.
 import {
-  BrushKit, DEFAULT_BRUSH, defaultPalette, hexToRgb01, inkColorHex, DARK_THEME,
+  BrushKit, BRUSH_SHAPE_ID, DEFAULT_BRUSH, defaultPalette, hexToRgb01, inkColorHex, DARK_THEME,
   type Brush, type BrushTool, type Palette,
 } from '@reactjit/runtime/paint';
 // The shader catalog — the "paint buckets". A shader ink names a spec here; the host bakes
@@ -112,7 +112,7 @@ export type ModelFocusBridge = { uv: ModelFocusUv | null; paintLive: boolean; re
 // The handlers the viewer owns, handed out so an external surface can invoke
 // them. Same functions the floating buttons and hotkeys call — one owner, no
 // split-brain: the shell remote-controls; the viewer stays the source of truth.
-// extrudeEdge / createFace are the contextual topology ops (valid on an edge
+// extrudeEdge / extrudeFace / createFace are the contextual topology ops (valid on edge/face
 // selection); setQuality drives the live decimation knob.
 export type ModelToolApi = {
   selMode: (m: number) => void;
@@ -121,6 +121,7 @@ export type ModelToolApi = {
   focus: () => void;
   wire: () => void;
   extrudeEdge: () => void;
+  extrudeFace: () => void;
   createFace: () => void;
   loopCut: () => void;
   deleteSelection: () => void;
@@ -304,6 +305,7 @@ const readTopoResult = (json: any): TopoResult | null => {
   }
 };
 const meshExtrudeEdge = (distance: number) => readTopoResult(host.__mesh_topo_extrude_edge?.(distance));
+const meshExtrudeFace = (distance: number) => readTopoResult(host.__mesh_topo_extrude_face?.(distance));
 const meshCreateFace = () => readTopoResult(host.__mesh_topo_create_face?.());
 // Loop cut: slice the mesh by the plane perpendicular to the ONE selected edge (host op).
 const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
@@ -433,8 +435,15 @@ type RGB = [number, number, number];
 // quad's diagonal cleanly but never bleed onto a neighbour face. No verts or UVs cross the
 // bridge; only the pixel + colour do.
 const fillFaceAt = (x: number, y: number, rgb: RGB) => host.__model_paint_at?.(x, y, rgb[0], rgb[1], rgb[2]) === 1;
-const stampAt = (x: number, y: number, rgb: RGB, radius: number, flow: number) =>
-  host.__model_paint_stamp?.(x, y, rgb[0], rgb[1], rgb[2], radius, flow) === 1;
+// The dab carries the brush FOOTPRINT (req_2831): shape kind (BRUSH_SHAPE_ID contract),
+// hardness, angle, aspect, scatter — model_paint rasterizes the same 11 bristle shapes
+// paintable.zig does, so the shape icon on the preset is finally the shape that lands.
+const stampAt = (x: number, y: number, rgb: RGB, radius: number, b: Brush) =>
+  host.__model_paint_stamp?.(
+    x, y, rgb[0], rgb[1], rgb[2], radius, b.flow,
+    b.stamp.kind === 'analytic' ? BRUSH_SHAPE_ID[b.stamp.shape] : 0,
+    b.hardness, b.angleDeg, b.aspect, b.scatter,
+  ) === 1;
 const strokeBeginAt = (x: number, y: number) => host.__model_paint_stroke_begin?.(x, y) ?? -1;
 // Face-safety mode for free-form: 0 = clip (paint whatever face the dab is over), 1 = lock
 // (mask the whole stroke to the face pressed at stroke-begin).
@@ -1033,6 +1042,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
     extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
+    extrudeFace: () => { if (model) applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
     // Mode-aware: face mode opens the studio-style popup session (direction/cuts/offset
     // with live preview); edge mode keeps the one-shot perpendicular-plane cut.
@@ -1597,7 +1607,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         // sub-face stroke the flat per-face carry could never preserve). Logs the hit
         // face (or -1) so a scripted stamp is verifiable.
         else if (name === 'stamp') {
-          const hit = host.__model_paint_stamp?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]), Number(a[5]) || 4, Number(a[6]) || 1);
+          const hit = host.__model_paint_stamp?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]), Number(a[5]) || 4, Number(a[6]) || 1, num(a[7]), a[8] === undefined ? 1 : num(a[8]), num(a[9]), a[10] === undefined ? 1 : num(a[10]), num(a[11]));
           console.error(`[meshops] stamp @${a[0]},${a[1]} → face ${hit}`);
         }
         // ── Stroke journal + paint layers (req_2672) ────────────────────────────────
@@ -1755,7 +1765,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             const rgb = brushRgb(brush);
             if (brushTool === 'fill') { fillFaceAt(x, y, rgb); return; }
             strokeBeginAt(x, y); // capture the pressed face for LOCK-mode masking
-            stampAt(x, y, rgb, brushRadius(brush.size), brush.flow);
+            stampAt(x, y, rgb, brushRadius(brush.size), brush);
           }}
           onMouseMove={(p: any) => {
             if (!paintingRef.current) return;
@@ -1770,7 +1780,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             const radius = brushRadius(brush.size);
             for (let i = 1; i <= steps; i += 1) {
               const t = i / steps;
-              stampAt(last.x + dx * t, last.y + dy * t, rgb, radius, brush.flow);
+              stampAt(last.x + dx * t, last.y + dy * t, rgb, radius, brush);
             }
             lastPtRef.current = { x, y };
           }}
@@ -1997,6 +2007,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
               {selMode === 3 && selInfo.sel > 0 && (
                 <>
                   <Box style={{ width: 1, height: 22, backgroundColor: '#2a3446', marginLeft: 4, marginRight: 4 }} />
+                  {selInfo.sel === 1 && (
+                    <Pressable
+                      onPress={() => applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude')}
+                      tooltip="Extrude selected face (E)"
+                      style={{
+                        paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                        backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                      }}
+                    >
+                      <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Extrude</Text>
+                    </Pressable>
+                  )}
                   <Pressable
                     onPress={openLoopCut}
                     tooltip="Loop cut across this face — popup picks direction, cuts, and offset (L)"
