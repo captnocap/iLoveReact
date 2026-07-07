@@ -1144,8 +1144,15 @@ const LcSession = struct {
     base_face_part: ?[]u32,
     last_face_part: ?[]u32, // per LAST-preview face; aliases nothing (owned)
     part_count: u32,
-    axes: [2]u8, // the face's two in-plane axes; popup direction 0/1 picks one
-    lo: [2]f32, // selected-face extent on each in-plane axis
+    // The face's two in-plane cut directions as UNIT VECTORS (popup direction 0/1
+    // picks one): dirs[0] runs along the selection's longest boundary edge, dirs[1]
+    // is normal × dirs[0]. Derived from the face's ACTUAL edges — never world axes —
+    // so a cut on a leaned/sheared shape follows the shape (req_2794: world-axis
+    // planes pushed through a leaning column exited through the slanted corner
+    // edges partway up, splitting them at arbitrary heights). On an axis-aligned
+    // face these degenerate to the world axes exactly.
+    dirs: [2][3]f32,
+    lo: [2]f32, // selected-face extent along each cut direction (dot-space)
     hi: [2]f32,
     keep_group: u32, // clicked face's group id — its −side piece re-selects after commit
     snap: ?JournalEntry,
@@ -1179,6 +1186,93 @@ fn lcFree() void {
     if (s.last_face_part) |p| std.heap.c_allocator.free(p);
     journalDiscard(&s.snap);
     g_lc = null;
+}
+
+/// Dominant world axis of a direction (largest |component|) — the gizmo color /
+/// fallback-axis rule shared by the loop-cut handle and direction derivation.
+fn domAxis(v: [3]f32) u8 {
+    const x = @abs(v[0]);
+    const y = @abs(v[1]);
+    const z = @abs(v[2]);
+    return if (x >= y and x >= z) 0 else if (y >= z) 1 else 2;
+}
+
+/// Canonical sign for a cut direction: dominant component positive, so repeat sessions
+/// on the same face comb the same way regardless of triangle winding.
+fn lcCanonSign(v: [3]f32) [3]f32 {
+    return if (v[domAxis(v)] < 0) vmul(v, -1) else v;
+}
+
+/// The loop-cut session's two in-plane cut directions, from the selection's ACTUAL
+/// geometry (req_2794): dirs[0] runs along the longest BOUNDARY edge of the masked
+/// tris (endpoint-keyed by position — the shared triangulation diagonals appear twice
+/// and drop out), projected orthogonal to the average normal; dirs[1] = normal ×
+/// dirs[0]. World-axis planes are only correct while the shape is axis-aligned — on a
+/// leaned column they exit through the slanted corner edges partway up, splitting them
+/// at arbitrary heights. On an axis-aligned face these ARE the world axes. Falls back
+/// to the axes flanking the normal's dominant axis when the boundary walk degenerates;
+/// null only when the selection has no usable normal at all.
+fn lcDeriveDirs(pos: []const f32, tri_count: u32, mask: []const bool, nrm: [3]f32) ?[2][3]f32 {
+    if (vdot(nrm, nrm) < 0.5) return null; // vnorm zeroed it — degenerate selection
+    const Edge = struct { a: [3]f32, b: [3]f32, n: u32 };
+    var edges = std.AutoHashMapUnmanaged(u128, Edge){};
+    defer edges.deinit(std.heap.c_allocator);
+    const vertKey = struct {
+        fn of(p: [3]f32) u64 {
+            const q: [3]f32 = .{ p[0] + 0.0, p[1] + 0.0, p[2] + 0.0 }; // −0 → +0
+            var h = std.hash.Wyhash.init(0x2794);
+            h.update(std.mem.asBytes(&q));
+            return h.final();
+        }
+    }.of;
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!mask[f]) continue;
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const ia = (@as(usize, f) * 3 + k) * 3;
+            const ib = (@as(usize, f) * 3 + (k + 1) % 3) * 3;
+            const a: [3]f32 = .{ pos[ia + 0], pos[ia + 1], pos[ia + 2] };
+            const b: [3]f32 = .{ pos[ib + 0], pos[ib + 1], pos[ib + 2] };
+            const ka = vertKey(a);
+            const kb = vertKey(b);
+            const key: u128 = (@as(u128, @min(ka, kb)) << 64) | @max(ka, kb);
+            const gop = edges.getOrPut(std.heap.c_allocator, key) catch break;
+            if (!gop.found_existing) gop.value_ptr.* = .{ .a = a, .b = b, .n = 0 };
+            gop.value_ptr.n += 1;
+        }
+    }
+    var best: [3]f32 = .{ 0, 0, 0 };
+    var best_l2: f32 = 0;
+    var it = edges.iterator();
+    while (it.next()) |e| {
+        if (e.value_ptr.n != 1) continue; // interior edge (diagonal) — shared by 2 tris
+        var dv = vsub(e.value_ptr.b, e.value_ptr.a);
+        dv = vsub(dv, vmul(nrm, vdot(dv, nrm))); // in-plane component
+        const l2 = vdot(dv, dv);
+        if (l2 > best_l2) {
+            best_l2 = l2;
+            best = dv;
+        }
+    }
+    if (best_l2 > 1e-10) {
+        const u = lcCanonSign(vnorm(best));
+        const v = vnorm(vcross(nrm, u));
+        if (vdot(v, v) > 0.5) return .{ u, lcCanonSign(v) };
+    }
+    // Degenerate boundary (nothing masked, zero-length edges): the pre-req_2794
+    // world-axis behavior — the two axes flanking the normal's dominant axis.
+    const na = domAxis(nrm);
+    var out: [2][3]f32 = undefined;
+    var w: u8 = 0;
+    var a: u8 = 0;
+    while (a < 3) : (a += 1) {
+        if (a != na) {
+            out[w] = axisVec(a);
+            w += 1;
+        }
+    }
+    return out;
 }
 
 /// The plane comb for `cuts` planes at `offset` within [lo,hi] — the studio's
@@ -1271,8 +1365,9 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
         }
     }
 
-    // Average selected-face normal → its dominant axis; the OTHER two axes are the
-    // cut candidates (in ascending order, matching the studio's direction toggle).
+    // Average selected-face normal + the selection's actual edge directions → the two
+    // in-plane cut directions (req_2794: world axes are only right while the shape is
+    // axis-aligned; a leaned column needs planes that follow its edges).
     var acc: [3]f32 = .{ 0, 0, 0 };
     var keep_group: u32 = model_source.NO_FACE_GROUP;
     {
@@ -1283,24 +1378,14 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
             if (keep_group == model_source.NO_FACE_GROUP) keep_group = model_source.faceGroupOf(f);
         }
     }
-    const ax = @abs(acc[0]);
-    const ay = @abs(acc[1]);
-    const az = @abs(acc[2]);
-    const na: u8 = if (ax >= ay and ax >= az) 0 else if (ay >= az) 1 else 2;
-    var axes: [2]u8 = undefined;
-    {
-        var w: u8 = 0;
-        var a: u8 = 0;
-        while (a < 3) : (a += 1) {
-            if (a != na) {
-                axes[w] = a;
-                w += 1;
-            }
-        }
-    }
+    const dirs = lcDeriveDirs(pos, tri_count, mask, vnorm(acc)) orelse {
+        std.heap.c_allocator.free(pos);
+        return null;
+    };
 
-    // The SELECTED faces' extent on each candidate axis (not the whole mesh — req_1006),
-    // plus the selection's world centroid — the anchor for the overlay's cut-plane handle.
+    // The SELECTED faces' extent along each cut direction (not the whole mesh —
+    // req_1006), plus the selection's world centroid — the anchor for the overlay's
+    // cut-plane handle. Extents live in dot-space along the direction vectors.
     var lo: [2]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32) };
     var hi: [2]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32) };
     var center: [3]f32 = .{ 0, 0, 0 };
@@ -1312,11 +1397,12 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
             var k: u32 = 0;
             while (k < 3) : (k += 1) {
                 const vb = (@as(usize, f) * 3 + k) * 3;
-                center = vadd(center, .{ pos[vb + 0], pos[vb + 1], pos[vb + 2] });
+                const vert: [3]f32 = .{ pos[vb + 0], pos[vb + 1], pos[vb + 2] };
+                center = vadd(center, vert);
                 corner_n += 1;
                 var d: u8 = 0;
                 while (d < 2) : (d += 1) {
-                    const v = pos[vb + axes[d]];
+                    const v = vdot(vert, dirs[d]);
                     if (v < lo[d]) lo[d] = v;
                     if (v > hi[d]) hi[d] = v;
                 }
@@ -1343,7 +1429,7 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
         .base_face_part = capturePartOfFaces(),
         .last_face_part = null, // no preview yet — commit falls back to the base parts
         .part_count = hostPartCount(),
-        .axes = axes,
+        .dirs = dirs,
         .lo = lo,
         .hi = hi,
         .keep_group = keep_group,
@@ -1360,7 +1446,6 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
 pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     const s: *LcSession = if (g_lc) |*sp| sp else return false;
     const d: usize = @min(dir, 1);
-    const axis = s.axes[d];
     const lo = s.lo[d];
     const hi = s.hi[d];
     if (hi - lo < 1e-6) return false;
@@ -1387,9 +1472,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     var owned = false; // false while cur_* still aliases the session base
     var pi: u32 = 0;
     while (pi < n_planes) : (pi += 1) {
-        var nvec: [3]f32 = .{ 0, 0, 0 };
-        nvec[axis] = 1;
-        const cut = mesh_edit.planeCutSoup(cur_pos, cur_count, nvec, planes[pi], cur_groups) orelse break;
+        const cut = mesh_edit.planeCutSoup(cur_pos, cur_count, s.dirs[d], planes[pi], cur_groups) orelse break;
         var next_part: ?[]const u32 = null;
         if (cur_part) |cp| {
             if (std.heap.c_allocator.alloc(u32, cut.tri_count)) |np| {
@@ -3167,23 +3250,27 @@ fn ringHitDist2(cam: model_paint.Camera, pivot: [3]f32, axis: i32, mx: f32, my: 
 }
 
 /// Live mirror planes (req_2758): each enabled symmetry plane draws as an axis-colored
-/// square outline at coordinate 0, sized to the model's orbit radius — the standing
+/// square outline through the current outliner scope's local center — the standing
 /// signal that edits on one side land on the other. Edit dressing: paint mode hides it.
 fn drawMirrorPlanesOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
     const mask = mesh_edit.mirrorMask();
     if (mask == 0) return;
-    const r = @max(0.6, g_orbit.radius * 1.15);
+    const frame = mesh_edit.mirrorFramePub() orelse return;
+    const r = frame.radius;
+    const center = frame.center;
     var axis: u3 = 0;
     while (axis < 3) : (axis += 1) {
         if (mask & (@as(u8, 1) << axis) == 0) continue;
-        // The plane's rect spans the two OTHER axes; the plane axis stays 0.
+        // The plane's rect spans the two OTHER axes; the plane axis stays at the
+        // scoped part center, not workspace zero.
         const b: u3 = if (axis == 0) 1 else 0;
         const cx: u3 = if (axis == 2) 1 else 2;
-        var corners: [4][3]f32 = .{ .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 } };
+        var corners: [4][3]f32 = .{ center, center, center, center };
         const signs = [4][2]f32{ .{ -1, -1 }, .{ 1, -1 }, .{ 1, 1 }, .{ -1, 1 } };
         for (signs, 0..) |s, i| {
-            corners[i][b] = s[0] * r;
-            corners[i][cx] = s[1] * r;
+            corners[i][axis] = center[axis];
+            corners[i][b] = center[b] + s[0] * r;
+            corners[i][cx] = center[cx] + s[1] * r;
         }
         const col = axisColor(@intCast(axis));
         var i: usize = 0;
@@ -3542,13 +3629,13 @@ fn drawFaceDotsOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
 /// While a loop-cut session is live, edges lying in a previewed cut plane accent bright.
 fn drawEdgeOverlay(cam: model_paint.Camera, mode: u8, ox: f32, oy: f32) void {
     if (mesh_edit.boundaryEdgeCount() > OV_MAX_EDGE_LINES) return;
-    var lc_axis: i32 = -1;
+    var lc_dir: ?[3]f32 = null;
     var lc_eps: f32 = 1e-4;
     var lc_planes: []const f32 = &.{};
     if (g_lc) |*sp| {
         if (sp.last_plane_count > 0) {
             const d: usize = @min(sp.last_dir, 1);
-            lc_axis = sp.axes[d];
+            lc_dir = sp.dirs[d];
             lc_eps = @max(1e-4, (sp.hi[d] - sp.lo[d]) * 1e-3);
             lc_planes = sp.last_planes[0..sp.last_plane_count];
         }
@@ -3568,10 +3655,9 @@ fn drawEdgeOverlay(cam: model_paint.Camera, mode: u8, ox: f32, oy: f32) void {
             overlayLine(a[0], a[1], b[0], b[1], OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 4.0);
             continue;
         }
-        if (lc_axis >= 0) {
-            const ai: usize = @intCast(lc_axis);
-            const ca = wa[ai];
-            const cb = wb[ai];
+        if (lc_dir) |ld| {
+            const ca = vdot(wa, ld);
+            const cb = vdot(wb, ld);
             if (@abs(ca - cb) <= lc_eps) {
                 var on_plane = false;
                 for (lc_planes) |pl| {
@@ -3599,18 +3685,19 @@ const LcHandleGeom = struct { p: [3]f32, a: [3]f32, b: [3]f32, axis: i32, half_w
 fn lcHandleGeom(cam: model_paint.Camera) ?LcHandleGeom {
     const sp: *const LcSession = if (g_lc) |*p| p else return null;
     const d: usize = @min(sp.last_dir, 1);
-    const axis: i32 = sp.axes[d];
-    var p = sp.sel_center;
-    p[@intCast(axis)] = if (sp.last_plane_count > 0)
+    const dirv = sp.dirs[d];
+    const target: f32 = if (sp.last_plane_count > 0)
         sp.last_planes[sp.last_plane_count / 2]
     else
         (sp.lo[d] + sp.hi[d]) * 0.5;
+    // Slide the centroid along the cut direction onto the middle plane (dot-space).
+    const p = vadd(sp.sel_center, vmul(dirv, target - vdot(sp.sel_center, dirv)));
     const half_w = worldUnitsPerPixel(cam, p) * OV_LC_HANDLE_PX;
     return .{
         .p = p,
-        .a = vadd(p, vmul(axisVec(axis), -half_w)),
-        .b = vadd(p, vmul(axisVec(axis), half_w)),
-        .axis = axis,
+        .a = vadd(p, vmul(dirv, -half_w)),
+        .b = vadd(p, vmul(dirv, half_w)),
+        .axis = domAxis(dirv), // gizmo color only — the geometry runs along dirv
         .half_w = half_w,
     };
 }
