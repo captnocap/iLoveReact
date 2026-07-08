@@ -3688,6 +3688,13 @@ pub const Runtime = struct {
     paint_frond_rows: ?[]f32 = null,
     paint_trunk_rows: ?[]f32 = null,
     paint_foliage_ver: u32 = 0,
+    /// req_2838: preview-budget attention tracking. The regen spends the row
+    /// budget NEAREST-FIRST from the anchor (brush hover, else camera look).
+    /// When any family clipped, the preview FOLLOWS the author — a fresh regen
+    /// fires once the anchor drifts half a chunk, re-spending the budget
+    /// around the new spot so the place being painted is always dressed.
+    paint_foliage_clipped: bool = false,
+    paint_foliage_anchor: [2]f32 = .{ 0, 0 },
     paint_water_kids_first: ?usize = null,
     paint_slot_water_ver: [MAX_PAINT_SLOTS]u32 = @splat(0),
     paint_slot_water_key: [MAX_PAINT_SLOTS]?[]u8 = @splat(null),
@@ -8021,7 +8028,19 @@ fn applyPaintLayer(runtime: *Runtime) void {
         }
     }
 
-    if (foliage_stale) regenPaintFoliage(runtime);
+    // req_2838: when the last regen CLIPPED a family, the preview follows the
+    // author's attention — once the anchor (brush, else camera look) drifts
+    // half a chunk from where the budget was last spent, regrow around the new
+    // spot. Quiet regen (no saturation log) so panning doesn't spam it.
+    var foliage_follow = false;
+    if (!foliage_stale and runtime.paint_foliage_clipped) {
+        const anchor = paintPreviewAnchor(runtime);
+        const dx = anchor[0] - runtime.paint_foliage_anchor[0];
+        const dz = anchor[1] - runtime.paint_foliage_anchor[1];
+        const step = map_chunks.CHUNK_METERS * 0.5;
+        foliage_follow = dx * dx + dz * dz > step * step;
+    }
+    if (foliage_stale or foliage_follow) regenPaintFoliage(runtime, foliage_stale);
 
     // the brush gizmo: preview-only chrome over the footprint at the hover point
     if (runtime.paint_beam_kid) |beam_kid| {
@@ -8114,7 +8133,18 @@ fn ensureFoliageBuf(runtime: *Runtime, slot: *?[]f32, cap: u32) ?[]f32 {
     return buf;
 }
 
-fn regenPaintFoliage(runtime: *Runtime) void {
+/// Where the author's attention is (req_2838): the brush hover point when the
+/// painter is armed, else the camera's look target (the pushed external pose
+/// in editor mode). The foliage preview budget spends nearest-first from here.
+fn paintPreviewAnchor(runtime: *Runtime) [2]f32 {
+    if (runtime.paint_hover) |h| return .{ h[0], h[2] };
+    const look = if (runtime.camera.external) runtime.camera.ext_look else runtime.camera.current_target;
+    return .{ look.x, look.z };
+}
+
+/// `log_full` is true on paint-driven regens (the saturation warning prints);
+/// anchor-follow regens pass false so panning the camera doesn't spam it.
+fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
     const first = runtime.paint_foliage_kids_first orelse return;
     const grass = ensureFoliageBuf(runtime, &runtime.paint_grass_rows, PAINT_GRASS_ROW_CAP) orelse return;
     const flowers = ensureFoliageBuf(runtime, &runtime.paint_flower_rows, PAINT_FLOWER_ROW_CAP) orelse return;
@@ -8135,8 +8165,32 @@ fn regenPaintFoliage(runtime: *Runtime) void {
     var frond_full = false;
     var trunk_full = false;
 
+    // req_2838: the budget spends NEAREST-FIRST from the author's anchor, so a
+    // saturated preview undresses the FARTHEST chunks — never the one under
+    // the brush. Raw slot order dropped whatever chunks the walk reached last,
+    // which could be exactly where the user was painting (invisible strokes).
+    const anchor = paintPreviewAnchor(runtime);
+    const ChunkDist = struct {
+        chunk: *map_chunks.Chunk,
+        d2: f32,
+        fn closer(_: void, a: @This(), b: @This()) bool {
+            return a.d2 < b.d2;
+        }
+    };
+    var order: [map_chunks.SLOT_COUNT]ChunkDist = undefined;
+    var order_n: usize = 0;
     for (map_chunks.slots()) |maybe| {
         const chunk = maybe orelse continue;
+        // chunks are CENTERED at (cx·CHUNK_METERS, cz·CHUNK_METERS)
+        const dx = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS - anchor[0];
+        const dz = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS - anchor[1];
+        order[order_n] = .{ .chunk = chunk, .d2 = dx * dx + dz * dz };
+        order_n += 1;
+    }
+    std.sort.pdq(ChunkDist, order[0..order_n], {}, ChunkDist.closer);
+
+    for (order[0..order_n]) |entry| {
+        const chunk = entry.chunk;
         const slot_floor = paintSlotFloorFor(runtime, chunk.cx, chunk.cz);
         var lz: i32 = 0;
         while (lz < map_chunks.CHUNK_TILES) : (lz += 1) {
@@ -8221,8 +8275,11 @@ fn regenPaintFoliage(runtime: *Runtime) void {
         }
     }
 
-    if (grass_full or flower_full or bush_full or frond_full or trunk_full) {
-        log.print("[paint] LIVE FOLIAGE PREVIEW FULL (grass {d}/{d}{s} flowers {d}/{d}{s} bush {d}/{d}{s} fronds {d}/{d}{s} trunks {d}/{d}{s}) — the Compile bake grows the full population\n", .{
+    const any_full = grass_full or flower_full or bush_full or frond_full or trunk_full;
+    runtime.paint_foliage_clipped = any_full;
+    runtime.paint_foliage_anchor = anchor;
+    if (log_full and any_full) {
+        log.print("[paint] LIVE FOLIAGE PREVIEW FULL (grass {d}/{d}{s} flowers {d}/{d}{s} bush {d}/{d}{s} fronds {d}/{d}{s} trunks {d}/{d}{s}) — budget spends nearest the brush first, so the bare patches are the FARTHEST chunks and the preview follows as you move. The Compile bake grows the full population\n", .{
             grass_n,  PAINT_GRASS_ROW_CAP,  clippedMark(grass_full),
             flower_n, PAINT_FLOWER_ROW_CAP, clippedMark(flower_full),
             bush_n,   PAINT_BUSH_ROW_CAP,   clippedMark(bush_full),
