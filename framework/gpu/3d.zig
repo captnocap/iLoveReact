@@ -5119,11 +5119,18 @@ var g_inst_scratch: [MAX_INSTANCES]InstanceData = undefined;
 // reserve nothing.
 pub const MAX_STATIC_INSTANCES: u32 = 1048576; // pub: the world loader budgets its LOD shell against this
 const STATIC_INST_CACHE_LEN: usize = 64;
-const StaticInstEntry = struct { key: usize = 0, count: u32 = 0, offset: u64 = 0, used: bool = false, version: u32 = 0 };
+const StaticInstEntry = struct { key: usize = 0, count: u32 = 0, offset: u64 = 0, used: bool = false, version: u32 = 0, last_seen: u64 = 0 };
 var g_static_inst_buf: ?*wgpu.Buffer = null;
 var g_static_inst_top: u64 = 0; // bump cursor (bytes) into g_static_inst_buf
 var g_static_inst_cache: [STATIC_INST_CACHE_LEN]StaticInstEntry = [_]StaticInstEntry{.{}} ** STATIC_INST_CACHE_LEN;
 var g_static_inst_cache_len: usize = 0;
+// req_2843 ("the 15.5mb cap on flora is killing me"): the retained pools are
+// ELASTIC — MAX_STATIC_INSTANCES is the STARTING size, these are the live row
+// capacities. When a batch doesn't fit, the pool doubles (GPU-copy at the same
+// offsets, so every retained region stays valid) up to the device's granted
+// maxBufferSize. The machine is the wall now, not a constant in this file.
+var g_static_inst_cap: u32 = MAX_STATIC_INSTANCES;
+var g_slim_static_cap: u32 = MAX_STATIC_INSTANCES;
 
 // FOLIAGE CARDS' OWN retained instance pool — the slim 24-byte twin of g_static_inst_*,
 // shared by grass/bush/flower (~grass~) and palm fronds (~frond~). Foliage is the
@@ -5149,13 +5156,73 @@ var g_frame_pool_warned: bool = false;
 fn staticRetainWarn(pool: []const u8, what: []const u8, rows: u32, used: u32) void {
     if (g_static_retain_warned) return;
     g_static_retain_warned = true;
-    std.debug.print("[r3d] static {s} instance {s} FULL ({d}-row batch refused, {d}/{d} rows retained) — the batch degrades to per-frame staging and can VANISH if the per-frame pool also fills. Raise MAX_STATIC_INSTANCES / STATIC_INST_CACHE_LEN in framework/gpu/3d.zig.\n", .{ pool, what, rows, used, MAX_STATIC_INSTANCES });
+    std.debug.print("[r3d] static {s} instance {s} FULL ({d}-row batch refused, {d} rows retained) — the pool could NOT grow further (device maxBufferSize, or every cache entry was used this render). The batch degrades to per-frame staging and can VANISH if the per-frame pool also fills (req_2843: pools are elastic, this is the machine's wall).\n", .{ pool, what, rows, used });
 }
 
 fn framePoolWarn(pool: []const u8) void {
     if (g_frame_pool_warned) return;
     g_frame_pool_warned = true;
     std.debug.print("[r3d] per-frame {s} instance pool FULL — the remaining instance groups this frame were DROPPED (foliage/props visibly missing). Raise MAX_INSTANCES in framework/gpu/3d.zig or free the static pools.\n", .{pool});
+}
+
+/// Grow a retained instance pool to hold `needed_rows` (req_2843). The new
+/// buffer is the doubled capacity (clamped to the device's granted
+/// maxBufferSize) and the old contents ride along via a GPU-side copy at the
+/// SAME offsets, so every cached region stays valid and no re-upload is
+/// needed. Returns false only when the DEVICE can't go further — the honest
+/// wall — and the caller falls to the loud per-frame degrade path.
+fn growStaticPool(device: *wgpu.Device, queue: *wgpu.Queue, buf: *?*wgpu.Buffer, cap_rows: *u32, top_bytes: u64, row_bytes: u64, needed_rows: u64, label: []const u8) bool {
+    const max_rows: u64 = core.deviceMaxBufferSize() / row_bytes;
+    if (needed_rows > max_rows) return false;
+    var new_cap: u64 = @max(@as(u64, cap_rows.*), 1);
+    while (new_cap < needed_rows) new_cap *= 2;
+    if (new_cap > max_rows) new_cap = max_rows;
+    const old = buf.* orelse return false;
+    const new_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice(label),
+        .size = new_cap * row_bytes,
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst | wgpu.BufferUsages.copy_src,
+        .mapped_at_creation = 0,
+    }) orelse return false;
+    if (top_bytes > 0) {
+        const enc = device.createCommandEncoder(&.{}) orelse {
+            new_buf.release();
+            return false;
+        };
+        enc.copyBufferToBuffer(old, 0, new_buf, 0, top_bytes);
+        const cmd = enc.finish(null) orelse {
+            enc.release();
+            new_buf.release();
+            return false;
+        };
+        enc.release();
+        queue.submit(&.{cmd});
+        cmd.release();
+    }
+    old.release();
+    buf.* = new_buf;
+    cap_rows.* = @intCast(new_cap);
+    std.debug.print("[r3d] {s} pool GREW to {d} rows ({d} MiB) — elastic pools, the device is the wall (req_2843)\n", .{ label, new_cap, new_cap * row_bytes / (1024 * 1024) });
+    return true;
+}
+
+/// Pick the cache slot for a new retained batch: the next free slot, else the
+/// least-recently-seen entry that was NOT referenced this render (req_2843 —
+/// elastic CPU buffers change pointers when they grow, stranding their old
+/// entries; recycling the stalest slot keeps the table from filling with
+/// ghosts). Returns null only when every entry was seen this render.
+fn staticCacheSlot(cache: []StaticInstEntry, len: *usize, now: u64) ?*StaticInstEntry {
+    if (len.* < cache.len) {
+        const e = &cache[len.*];
+        len.* += 1;
+        return e;
+    }
+    var oldest: ?*StaticInstEntry = null;
+    for (cache) |*e| {
+        if (e.last_seen >= now) continue;
+        if (oldest == null or e.last_seen < oldest.?.last_seen) oldest = e;
+    }
+    return oldest;
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -7083,19 +7150,16 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
                 stageStaticInstanceBytes(queue, idata, stride, icount, e.offset);
                 e.version = version;
             }
+            e.last_seen = g_dbg_frame;
             return .{ .offset = e.offset, .count = e.count };
         }
     }
     if (icount == 0) return null;
-    if (g_static_inst_cache_len >= STATIC_INST_CACHE_LEN) {
-        staticRetainWarn("standard", "cache table", icount, @intCast(g_static_inst_top / @sizeOf(InstanceData)));
-        return null;
-    }
     if (g_static_inst_buf == null) {
         g_static_inst_buf = device.createBuffer(&.{
             .label = wgpu.StringView.fromSlice("render3d_static_instances"),
-            .size = @as(u64, MAX_STATIC_INSTANCES) * @sizeOf(InstanceData),
-            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+            .size = @as(u64, g_static_inst_cap) * @sizeOf(InstanceData),
+            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst | wgpu.BufferUsages.copy_src,
             .mapped_at_creation = 0,
         });
         if (g_static_inst_buf == null) return null;
@@ -7105,18 +7169,24 @@ fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []con
     // Retained static uploads must be whole-array because streamed draw nodes
     // address sub-ranges by scene3d_instance_first. A partial upload makes any
     // later range clamp to count=0, so turning the camera can drop whole chunks.
-    // Oversized batches fall back to the dynamic sub-range path below instead.
-    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, MAX_STATIC_INSTANCES)) {
-        staticRetainWarn("standard", "row budget", icount, used_count);
-        return null;
+    // A batch past the current capacity GROWS the pool (req_2843); only the
+    // device's refusal drops to the loud per-frame degrade path below.
+    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, g_static_inst_cap)) {
+        if (!growStaticPool(device, queue, &g_static_inst_buf, &g_static_inst_cap, g_static_inst_top, @sizeOf(InstanceData), @as(u64, used_count) + icount, "render3d_static_instances")) {
+            staticRetainWarn("standard", "row budget", icount, used_count);
+            return null;
+        }
     }
+    const slot = staticCacheSlot(g_static_inst_cache[0..], &g_static_inst_cache_len, g_dbg_frame) orelse {
+        staticRetainWarn("standard", "cache table", icount, used_count);
+        return null;
+    };
     const n: u32 = icount;
     if (n == 0) return null;
     const base_offset = g_static_inst_top;
     stageStaticInstanceBytes(queue, idata, stride, n, base_offset);
     g_static_inst_top += @as(u64, n) * @sizeOf(InstanceData);
-    g_static_inst_cache[g_static_inst_cache_len] = .{ .key = key, .count = n, .offset = base_offset, .used = true, .version = version };
-    g_static_inst_cache_len += 1;
+    slot.* = .{ .key = key, .count = n, .offset = base_offset, .used = true, .version = version, .last_seen = g_dbg_frame };
     return .{ .offset = base_offset, .count = n };
 }
 
@@ -7162,34 +7232,36 @@ fn resolveStaticSlimInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: [
                 stageStaticSlimBytes(queue, idata, stride, icount, e.offset);
                 e.version = version;
             }
+            e.last_seen = g_dbg_frame;
             return .{ .offset = e.offset, .count = e.count };
         }
     }
     if (icount == 0) return null;
-    if (g_slim_static_cache_len >= STATIC_INST_CACHE_LEN) {
-        staticRetainWarn("slim (foliage)", "cache table", icount, @intCast(g_slim_static_top / @sizeOf(SlimInstance)));
-        return null;
-    }
     if (g_slim_static_buf == null) {
         g_slim_static_buf = device.createBuffer(&.{
             .label = wgpu.StringView.fromSlice("render3d_slim_static_instances"),
-            .size = @as(u64, MAX_STATIC_INSTANCES) * @sizeOf(SlimInstance),
-            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+            .size = @as(u64, g_slim_static_cap) * @sizeOf(SlimInstance),
+            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst | wgpu.BufferUsages.copy_src,
             .mapped_at_creation = 0,
         });
         if (g_slim_static_buf == null) return null;
         g_slim_static_top = 0;
     }
     const used_count: u32 = @intCast(g_slim_static_top / @sizeOf(SlimInstance));
-    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, MAX_STATIC_INSTANCES)) {
-        staticRetainWarn("slim (foliage)", "row budget", icount, used_count);
-        return null;
+    if (!static_instance_policy.canRetainWholeBatch(icount, used_count, g_slim_static_cap)) {
+        if (!growStaticPool(device, queue, &g_slim_static_buf, &g_slim_static_cap, g_slim_static_top, @sizeOf(SlimInstance), @as(u64, used_count) + icount, "render3d_slim_static_instances")) {
+            staticRetainWarn("slim (foliage)", "row budget", icount, used_count);
+            return null;
+        }
     }
+    const slot = staticCacheSlot(g_slim_static_cache[0..], &g_slim_static_cache_len, g_dbg_frame) orelse {
+        staticRetainWarn("slim (foliage)", "cache table", icount, used_count);
+        return null;
+    };
     const base_offset = g_slim_static_top;
     stageStaticSlimBytes(queue, idata, stride, icount, base_offset);
     g_slim_static_top += @as(u64, icount) * @sizeOf(SlimInstance);
-    g_slim_static_cache[g_slim_static_cache_len] = .{ .key = key, .count = icount, .offset = base_offset, .used = true, .version = version };
-    g_slim_static_cache_len += 1;
+    slot.* = .{ .key = key, .count = icount, .offset = base_offset, .used = true, .version = version, .last_seen = g_dbg_frame };
     return .{ .offset = base_offset, .count = icount };
 }
 

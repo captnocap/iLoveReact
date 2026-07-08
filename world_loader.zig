@@ -75,16 +75,16 @@ const PAINT_BEAM_HEIGHT_METERS: f32 = 42;
 const PAINT_BEAM_ALPHA: f32 = 0.32;
 const PAINT_GIZMO_SURFACE_LIFT_M: f32 = 0.035;
 const PAINT_GIZMO_PROFILE_MAX_M: f32 = 8;
-// Live-foliage preview row caps (req_2497: painting flora grows LITERAL
-// blades/bushes/flowers/palms live). Truncation is LOUD — the Compile bake
-// grows the full population; this is the authoring preview's budget.
-// Sized for a HEAVY hand-painted map (req_2649: the old 24576-frond cap
-// exhausted at ~1.5k palms while trunks kept placing — topless palms). One
-// palm = 1 trunk + ~16 crown fronds, so frond:trunk stays 16:1. The rows are
-// SLIM on the GPU: grass/bush/flower/frond ride the 24 B SlimInstance pool
-// (262144+65536+65536+262144 = 655360 rows ≈ 15.7 MB of the shared
-// 1048576-row slim static pool) and trunks the 80 B InstanceData pool
-// (16384 rows ≈ 1.3 MB). CPU side is 12 f32/row → ~31 MB, allocated once.
+// Live-foliage preview STARTING sizes (req_2497: painting flora grows LITERAL
+// blades/bushes/flowers/palms live). These are NOT walls (req_2843: "the
+// 15.5mb cap on flora is killing me" — dozens of asks died on fixed budgets):
+// pushFoliageRow DOUBLES a family when it fills, and the GPU retained pools
+// grow to match (gpu/3d.zig growStaticPool, up to the device's granted
+// maxBufferSize — real limits are requested at device creation now). The only
+// refusals left are the machine's: allocator, device, frame rate. One palm =
+// 1 trunk + ~16 crown fronds, so frond:trunk starts 16:1. Rows are SLIM on
+// the GPU: grass/bush/flower/frond ride the 24 B SlimInstance pool and trunks
+// the InstanceData pool. CPU side is 12 f32/row, reallocated on growth.
 const PAINT_GRASS_ROW_CAP: u32 = 262144;
 const PAINT_BUSH_ROW_CAP: u32 = 65536;
 const PAINT_FLOWER_ROW_CAP: u32 = 65536;
@@ -3679,8 +3679,9 @@ pub const Runtime = struct {
     /// live-foliage preview (req_2497): five family nodes (grass blades,
     /// flower heads, bush clumps, palm fronds, palm trunks) regenerated from
     /// the painted flora lanes whenever flora or terrain height changes —
-    /// painting a tree paints a TREE, live. Buffers are cap-sized once (the
-    /// static instance region is reserved at first upload and reused).
+    /// painting a tree paints a TREE, live. Buffers start at the family's
+    /// ROW_CAP and DOUBLE when full (req_2843: elastic — the machine is the
+    /// only wall); the renderer re-retains a grown family's fresh pointer.
     paint_foliage_kids_first: ?usize = null,
     paint_grass_rows: ?[]f32 = null,
     paint_flower_rows: ?[]f32 = null,
@@ -8112,9 +8113,21 @@ fn paintSlotFloorFor(runtime: *Runtime, cx: i32, cz: i32) ?[]const f32 {
     return null;
 }
 
-/// Append one 12-float foliage row; false = family budget full.
-fn pushFoliageRow(buf: []f32, count: *u32, cap: u32, row: [foliage.STRIDE]f32) bool {
-    if (count.* >= cap) return false;
+/// Append one 12-float foliage row, GROWING the family when full (req_2843:
+/// the row caps are STARTING sizes, not walls — "the 15.5mb cap on flora is
+/// killing me"). The doubled CPU buffer re-keys the render batch and the GPU
+/// pool grows to match (gpu/3d.zig growStaticPool); the recycled old region
+/// ages out of the retain cache. false = the ALLOCATOR refused the growth —
+/// the machine's honest wall, not a budget's.
+fn pushFoliageRow(runtime: *Runtime, slot: *?[]f32, name: []const u8, count: *u32, row: [foliage.STRIDE]f32) bool {
+    var buf = slot.*.?;
+    const cap: u32 = @intCast(buf.len / foliage.STRIDE);
+    if (count.* >= cap) {
+        const grown = runtime.allocator.realloc(buf, buf.len * 2) catch return false;
+        slot.* = grown;
+        buf = grown;
+        log.print("[paint] LIVE FOLIAGE PREVIEW GREW: {s} → {d} rows ({d} MiB CPU) — elastic budget, the machine is the wall (req_2843)\n", .{ name, buf.len / foliage.STRIDE, buf.len * @sizeOf(f32) / (1024 * 1024) });
+    }
     const at = @as(usize, count.*) * foliage.STRIDE;
     @memcpy(buf[at .. at + foliage.STRIDE], row[0..]);
     count.* += 1;
@@ -8146,11 +8159,11 @@ fn paintPreviewAnchor(runtime: *Runtime) [2]f32 {
 /// anchor-follow regens pass false so panning the camera doesn't spam it.
 fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
     const first = runtime.paint_foliage_kids_first orelse return;
-    const grass = ensureFoliageBuf(runtime, &runtime.paint_grass_rows, PAINT_GRASS_ROW_CAP) orelse return;
-    const flowers = ensureFoliageBuf(runtime, &runtime.paint_flower_rows, PAINT_FLOWER_ROW_CAP) orelse return;
-    const bush = ensureFoliageBuf(runtime, &runtime.paint_bush_rows, PAINT_BUSH_ROW_CAP) orelse return;
-    const frond = ensureFoliageBuf(runtime, &runtime.paint_frond_rows, PAINT_FROND_ROW_CAP) orelse return;
-    const trunk = ensureFoliageBuf(runtime, &runtime.paint_trunk_rows, PAINT_TRUNK_ROW_CAP) orelse return;
+    _ = ensureFoliageBuf(runtime, &runtime.paint_grass_rows, PAINT_GRASS_ROW_CAP) orelse return;
+    _ = ensureFoliageBuf(runtime, &runtime.paint_flower_rows, PAINT_FLOWER_ROW_CAP) orelse return;
+    _ = ensureFoliageBuf(runtime, &runtime.paint_bush_rows, PAINT_BUSH_ROW_CAP) orelse return;
+    _ = ensureFoliageBuf(runtime, &runtime.paint_frond_rows, PAINT_FROND_ROW_CAP) orelse return;
+    _ = ensureFoliageBuf(runtime, &runtime.paint_trunk_rows, PAINT_TRUNK_ROW_CAP) orelse return;
 
     var grass_n: u32 = 0;
     var flower_n: u32 = 0;
@@ -8230,7 +8243,7 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                             // Trunk + crown ride ONE ground delta (the trunk's
                             // footing) so bark and fronds stay attached on slopes.
                             const trunk_delta = paintGroundY(slot_floor, chunk, @floatCast(px), @floatCast(pz)) - @as(f32, @floatCast(top));
-                            if (!pushFoliageRow(trunk, &trunk_n, PAINT_TRUNK_ROW_CAP, .{
+                            if (!pushFoliageRow(runtime, &runtime.paint_trunk_rows, "trunks", &trunk_n, .{
                                 @floatCast(px),        @as(f32, @floatCast(top)) + trunk_delta, @floatCast(pz),
                                 0,                     @floatCast(lean),          0,
                                 span,                  @floatCast(trunk_h),       span,
@@ -8242,7 +8255,7 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                             while (k < fc) : (k += 1) {
                                 var row = foliage.palmFrondRow(&crown, k);
                                 row[1] += trunk_delta;
-                                if (!pushFoliageRow(frond, &frond_n, PAINT_FROND_ROW_CAP, row)) frond_full = true;
+                                if (!pushFoliageRow(runtime, &runtime.paint_frond_rows, "fronds", &frond_n, row)) frond_full = true;
                             }
                         },
                         2 => {
@@ -8250,7 +8263,7 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                             while (k < spec.count) : (k += 1) {
                                 var row = foliage.flowerRow(&foliage.FLOWER, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
                                 seatRowOnTerrain(&row, top, slot_floor, chunk);
-                                if (!pushFoliageRow(flowers, &flower_n, PAINT_FLOWER_ROW_CAP, row)) flower_full = true;
+                                if (!pushFoliageRow(runtime, &runtime.paint_flower_rows, "flowers", &flower_n, row)) flower_full = true;
                             }
                         },
                         1 => {
@@ -8258,7 +8271,7 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                             while (k < spec.count) : (k += 1) {
                                 var row = foliage.bladeRow(&foliage.BUSH, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
                                 seatRowOnTerrain(&row, top, slot_floor, chunk);
-                                if (!pushFoliageRow(bush, &bush_n, PAINT_BUSH_ROW_CAP, row)) bush_full = true;
+                                if (!pushFoliageRow(runtime, &runtime.paint_bush_rows, "bush", &bush_n, row)) bush_full = true;
                             }
                         },
                         else => {
@@ -8266,7 +8279,7 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                             while (k < spec.count) : (k += 1) {
                                 var row = foliage.bladeRow(&foliage.GRASS, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
                                 seatRowOnTerrain(&row, top, slot_floor, chunk);
-                                if (!pushFoliageRow(grass, &grass_n, PAINT_GRASS_ROW_CAP, row)) grass_full = true;
+                                if (!pushFoliageRow(runtime, &runtime.paint_grass_rows, "grass", &grass_n, row)) grass_full = true;
                             }
                         },
                     }
@@ -8275,16 +8288,26 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
         }
     }
 
+    // Re-read the family slices from the runtime — a push may have GROWN
+    // (reallocated) any of them mid-walk (req_2843).
+    const grass = runtime.paint_grass_rows.?;
+    const flowers = runtime.paint_flower_rows.?;
+    const bush = runtime.paint_bush_rows.?;
+    const frond = runtime.paint_frond_rows.?;
+    const trunk = runtime.paint_trunk_rows.?;
+
+    // A family only reads full when the ALLOCATOR refused to grow it — the
+    // machine's wall, not a budget's (req_2843: the caps are starting sizes).
     const any_full = grass_full or flower_full or bush_full or frond_full or trunk_full;
     runtime.paint_foliage_clipped = any_full;
     runtime.paint_foliage_anchor = anchor;
     if (log_full and any_full) {
-        log.print("[paint] LIVE FOLIAGE PREVIEW FULL (grass {d}/{d}{s} flowers {d}/{d}{s} bush {d}/{d}{s} fronds {d}/{d}{s} trunks {d}/{d}{s}) — budget spends nearest the brush first, so the bare patches are the FARTHEST chunks and the preview follows as you move. The Compile bake grows the full population\n", .{
-            grass_n,  PAINT_GRASS_ROW_CAP,  clippedMark(grass_full),
-            flower_n, PAINT_FLOWER_ROW_CAP, clippedMark(flower_full),
-            bush_n,   PAINT_BUSH_ROW_CAP,   clippedMark(bush_full),
-            frond_n,  PAINT_FROND_ROW_CAP,  clippedMark(frond_full),
-            trunk_n,  PAINT_TRUNK_ROW_CAP,  clippedMark(trunk_full),
+        log.print("[paint] LIVE FOLIAGE PREVIEW at the MACHINE'S wall (grass {d}/{d}{s} flowers {d}/{d}{s} bush {d}/{d}{s} fronds {d}/{d}{s} trunks {d}/{d}{s}) — the allocator refused further growth; budget spends nearest the brush first, so the bare patches are the FARTHEST chunks and the preview follows as you move. The Compile bake grows the full population\n", .{
+            grass_n,  grass.len / foliage.STRIDE,   clippedMark(grass_full),
+            flower_n, flowers.len / foliage.STRIDE, clippedMark(flower_full),
+            bush_n,   bush.len / foliage.STRIDE,    clippedMark(bush_full),
+            frond_n,  frond.len / foliage.STRIDE,   clippedMark(frond_full),
+            trunk_n,  trunk.len / foliage.STRIDE,   clippedMark(trunk_full),
         });
     }
 
@@ -8293,9 +8316,11 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
     const counts = [_]u32{ grass_n, flower_n, bush_n, frond_n, trunk_n };
     for (bufs, counts, 0..) |buf, n, fi| {
         const node = &runtime.kid_list.items[first + fi];
-        // the FULL cap-sized slice every time: the static instance region is
-        // reserved at first upload and re-uploaded in place on version bumps —
-        // a constant slice keeps the retained offset valid forever
+        // the FULL family slice every time: the static instance region is
+        // reserved at first upload and re-uploaded in place on version bumps.
+        // The slice only changes when the family GROWS (req_2843) — the
+        // renderer then retains a fresh region and the old one ages out of
+        // the cache (gpu/3d.zig staticCacheSlot).
         node.scene3d_instance_data = buf;
         node.scene3d_instance_count = n;
         node.scene3d_instance_version = runtime.paint_foliage_ver;

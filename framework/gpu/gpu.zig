@@ -176,6 +176,10 @@ fn presentKms() void {
 var g_adapter: ?*wgpu.Adapter = null;
 var g_device: ?*wgpu.Device = null;
 var g_queue: ?*wgpu.Queue = null;
+// The limits the device actually GRANTED at creation (req_2843) — adapter-real
+// on healthy drivers, WebGPU defaults on the fallback path. Zero-init until
+// device creation fills it.
+var g_device_limits: wgpu.Limits = .{};
 var g_format: wgpu.TextureFormat = .bgra8_unorm;
 var g_width: u32 = 0;
 var g_height: u32 = 0;
@@ -452,6 +456,16 @@ pub fn getDevice() ?*wgpu.Device {
 
 pub fn getQueue() ?*wgpu.Queue {
     return g_queue;
+}
+
+/// The per-buffer ceiling the device GRANTED at creation (req_2843). Pool
+/// growers size against this — it is the machine's real wall, typically
+/// gigabytes on desktop GPUs. Falls back to the WebGPU-default 256 MiB when
+/// the driver reported nothing usable.
+pub fn deviceMaxBufferSize() u64 {
+    const m = g_device_limits.max_buffer_size;
+    if (m == 0 or m == std.math.maxInt(u64)) return 268_435_456;
+    return m;
 }
 
 pub fn getWidth() u32 {
@@ -2015,8 +2029,20 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
         });
     }
 
-    // Request device
-    const device_response = adapter.requestDeviceSync(instance, null, 200_000_000);
+    // Request device — with the ADAPTER'S real limits (req_2843). Passing null
+    // gets the WebGPU baseline (256 MiB maxBufferSize), and every world pool
+    // inherited that default as its ceiling. The adapter supports what it
+    // reports by definition; if the request still fails, fall back to defaults
+    // so a quirky driver never blocks startup.
+    var adapter_limits = wgpu.Limits{};
+    const have_adapter_limits = adapter.getLimits(&adapter_limits) == .success;
+    adapter_limits.next_in_chain = null;
+    const limits_desc = wgpu.DeviceDescriptor{ .required_limits = &adapter_limits };
+    var device_response = adapter.requestDeviceSync(instance, if (have_adapter_limits) &limits_desc else null, 200_000_000);
+    if (device_response.status != .success and have_adapter_limits) {
+        log.print("[gpu] device request with adapter limits failed — retrying with WebGPU defaults\n", .{});
+        device_response = adapter.requestDeviceSync(instance, null, 200_000_000);
+    }
     if (device_response.status != .success) {
         log.print("wgpu device request failed\n", .{});
         return error.DeviceRequestFailed;
@@ -2024,6 +2050,12 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     g_device = device_response.device;
     const device = g_device.?;
     g_queue = device.getQueue();
+    g_device_limits = wgpu.Limits{};
+    if (device.getLimits(&g_device_limits) == .success) {
+        log.print("[gpu] device limits granted: maxBufferSize {d} MiB\n", .{g_device_limits.max_buffer_size / (1024 * 1024)});
+    } else {
+        g_device_limits = wgpu.Limits{};
+    }
 
     // Get window size and configure surface
     var w: c_int = 0;
