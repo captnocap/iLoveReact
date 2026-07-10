@@ -35,7 +35,7 @@ export const editor_map_documents: DocIndex = {
       kind: 'utility',
       sourceFile: 'framework/game/map/engine.zig',
       description:
-        'reset clears chunks/roads/tool state AND the outgoing autosave path + per-map tile-binding table. A caller must bind a target after load/seed; a reset can no longer autosave into the previously active document or carry its material palette into a fresh map.',
+        'reset clears chunks/road+rail transport paths/tool state AND the outgoing autosave path + per-map tile-binding table. A caller must bind a target after load/seed; a reset can no longer autosave into the previously active document or carry its material palette into a fresh map.',
       consumers: ['cart/editor/stage/mapPaint.ts'],
       status: 'live',
     },

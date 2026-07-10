@@ -8,7 +8,7 @@
 import {
   mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapReset, mapSaveFile, mapSetAutosaveFile,
   mapSetGroundLook, mapSetTileBindings, mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds,
-  mapRoadSetProfile, mapSetBrushGizmo,
+  mapPathSetProfile, mapSetBrushGizmo,
   type MapBrushGizmo, type MapBrushProfile, type MapBrushShape, type MapTerrainTool,
 } from '../../../runtime/game/map';
 import { exists } from '../../../runtime/hooks/fs';
@@ -25,11 +25,12 @@ import {
   hasLegacyMapImport,
   mapDocumentPaths,
 } from '../data/mapDocuments';
+import { pathProfileOf, type TransportPathChrome } from './transportPathUi';
 
 export type MapZoneDef = { id: string; name: string; color: string };
 export type MapPaintChannel = 'terrain' | 'tile' | 'water' | 'flora' | 'zone' | 'road';
 
-export type MapPaintState = {
+export type MapPaintState = TransportPathChrome & {
   active: boolean;
   channel: MapPaintChannel;
   mode: 'paint' | 'erase';
@@ -62,10 +63,6 @@ export type MapPaintState = {
   zones: MapZoneDef[];
   /** armed zone — index into zones */
   zoneIdx: number;
-  // road draft profile (lanesB 0 = one-way)
-  roadLanesF: number;
-  roadLanesB: number;
-  roadSidewalks: boolean;
 };
 
 export function defaultMapPaint(): MapPaintState {
@@ -91,6 +88,9 @@ export function defaultMapPaint(): MapPaintState {
     floraKindIdx: 1, // 'Grass'
     zones: [],
     zoneIdx: 0,
+    pathKind: 'road',
+    pathCurveRadiusM: 8,
+    railTracks: 1,
     roadLanesF: 1,
     roadLanesB: 1,
     roadSidewalks: true,
@@ -190,7 +190,7 @@ export function flushMapDocumentPainting(stem: string): boolean {
 function pushMapTool(s: MapPaintState): void {
   const flora = FLORA_KIND_DEFINITIONS[s.floraKindIdx];
   const gizmo = s.gizmo ?? 'profile';
-  mapRoadSetProfile({ lanesF: s.roadLanesF, lanesB: s.roadLanesB, sidewalks: s.roadSidewalks });
+  mapPathSetProfile(pathProfileOf(s));
   mapSetTool({
     channel: s.channel,
     mode: s.mode,

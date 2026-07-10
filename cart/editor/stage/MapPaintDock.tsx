@@ -7,12 +7,13 @@ import { Fragment, useEffect, useState } from 'react';
 import { Box, Row, Slider, TextInput } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { mapRoadCancel, mapRoadCommit, mapRoadStats } from '../../../runtime/game/map';
+import { mapPathCancel, mapPathCommit, mapPathDelete, mapPathStats, mapPathUndoPoint, type MapPathStats } from '../../../runtime/game/map';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
 import { addZonePatch, PAINTABLE_TILE_KINDS, saveMapFile, type MapPaintChannel, type MapPaintState } from './mapPaint';
 import { CHANNELS, CHANNEL_META, cycle, GIZMOS, GIZMO_META, PROFILES, SHAPES, TERRAIN_TOOLS, TERRAIN_TOOL_META } from './mapPaintUi';
+import { PATH_CURVE_TUNING, PATH_KIND_META, PATH_KIND_ORDER, pathInvalidLabel, pathKindPatch } from './transportPathUi';
 
 const ICON_PANEL = '#101923';
 const ICON_PANEL_ON = '#12283a';
@@ -178,7 +179,7 @@ function channelCount(state: MapPaintState, channel: MapPaintChannel): string {
   if (channel === 'tile') return String(PAINTABLE_TILE_KINDS.length);
   if (channel === 'flora') return String(FLORA_KIND_DEFINITIONS.length);
   if (channel === 'zone') return String(state.zones.length);
-  if (channel === 'road') return String(mapRoadStats().strokes);
+  if (channel === 'road') return String(mapPathStats().paths);
   return '1';
 }
 
@@ -391,45 +392,117 @@ function ZoneTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPai
   );
 }
 
-function RoadTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPaintState>) => void }) {
+function pathStatsKey(stats: MapPathStats): string {
+  return [stats.paths, stats.roads, stats.rails, stats.draftPoints, stats.planTruncated ? 1 : 0,
+    stats.draftKind ?? '-', stats.valid ? 1 : 0, stats.invalidReason,
+    stats.minCurveM ?? '-', stats.lastPathId, stats.curveRadiusM].join('|');
+}
+
+/** Native clicks do not traverse React. Poll this tiny diagnostics record at UI
+ * rate so Finish/Undo and the point count follow the path under the cursor. */
+function usePathStats(): MapPathStats {
+  const [stats, setStats] = useState(mapPathStats);
+  useEffect(() => {
+    const refresh = () => {
+      const next = mapPathStats();
+      setStats((current) => pathStatsKey(current) === pathStatsKey(next) ? current : next);
+    };
+    const timer = setInterval(refresh, 100);
+    return () => clearInterval(timer);
+  }, []);
+  return stats;
+}
+
+function PathTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPaintState>) => void }) {
   const s = props.state;
-  const stats = mapRoadStats();
+  const stats = usePathStats();
+  const isRoad = s.pathKind === 'road';
+  const invalid = stats.draftPoints > 0 && !stats.valid
+    ? pathInvalidLabel(stats.invalidReason, stats.minCurveM)
+    : '';
   return (
     <Fragment>
-      <StepperPanel
-        label="LANES F"
-        value={String(s.roadLanesF)}
-        onDown={() => props.onPatch({ roadLanesF: Math.max(1, s.roadLanesF - 1) })}
-        onUp={() => props.onPatch({ roadLanesF: Math.min(3, s.roadLanesF + 1) })}
-      />
-      <StepperPanel
-        label="LANES B"
-        value={s.roadLanesB === 0 ? '1-WAY' : String(s.roadLanesB)}
-        onDown={() => props.onPatch({ roadLanesB: Math.max(0, s.roadLanesB - 1) })}
-        onUp={() => props.onPatch({ roadLanesB: Math.min(3, s.roadLanesB + 1) })}
-      />
-      <OptionTile
-        icon="Footprints"
-        label="Walks"
-        tooltip="Sidewalks - flank the committed road with sidewalks"
-        on={s.roadSidewalks}
-        onPress={() => props.onPatch({ roadSidewalks: !s.roadSidewalks })}
+      {PATH_KIND_ORDER.map((kind) => (
+        <OptionTile
+          key={kind}
+          icon={PATH_KIND_META[kind].icon}
+          label={PATH_KIND_META[kind].label}
+          tooltip={PATH_KIND_META[kind].tooltip}
+          on={s.pathKind === kind}
+          onPress={() => props.onPatch(pathKindPatch(kind))}
+        />
+      ))}
+      {isRoad ? (
+        <Fragment>
+          <StepperPanel
+            label="LANES F"
+            value={String(s.roadLanesF)}
+            onDown={() => props.onPatch({ roadLanesF: Math.max(1, s.roadLanesF - 1) })}
+            onUp={() => props.onPatch({ roadLanesF: Math.min(3, s.roadLanesF + 1) })}
+          />
+          <StepperPanel
+            label="LANES B"
+            value={s.roadLanesB === 0 ? '1-WAY' : String(s.roadLanesB)}
+            onDown={() => props.onPatch({ roadLanesB: Math.max(0, s.roadLanesB - 1) })}
+            onUp={() => props.onPatch({ roadLanesB: Math.min(3, s.roadLanesB + 1) })}
+          />
+          <OptionTile
+            icon="Footprints"
+            label="Walks"
+            tooltip="Sidewalks — flank the committed road with the locked two-tile ring"
+            on={s.roadSidewalks}
+            onPress={() => props.onPatch({ roadSidewalks: !s.roadSidewalks })}
+          />
+        </Fragment>
+      ) : (
+        <StepperPanel
+          label="TRACKS"
+          value={String(s.railTracks)}
+          onDown={() => props.onPatch({ railTracks: Math.max(PATH_CURVE_TUNING.railTracksMin, s.railTracks - 1) })}
+          onUp={() => props.onPatch({ railTracks: Math.min(PATH_CURVE_TUNING.railTracksMax, s.railTracks + 1) })}
+        />
+      )}
+      <ScalarPanel
+        label="CURVE"
+        value={s.pathCurveRadiusM}
+        min={PATH_CURVE_TUNING.minM}
+        max={PATH_CURVE_TUNING.maxM}
+        step={PATH_CURVE_TUNING.stepM}
+        unit="m"
+        onValue={(pathCurveRadiusM) => props.onPatch({ pathCurveRadiusM })}
       />
       <FactPanel label="DRAFT" value={`${stats.draftPoints} pts`} />
-      <FactPanel label="ROADS" value={stats.planTruncated ? 'truncated' : String(stats.strokes)} />
+      <FactPanel label="PATHS" value={stats.planTruncated ? 'truncated' : `${stats.roads}r · ${stats.rails}t`} />
+      {invalid ? <FactPanel label="ADJUST" value={invalid} /> : null}
       <OptionTile
         icon="Check"
-        label="Commit"
-        tooltip="Commit road - compile the clicked centerline into lanes/junctions/crosswalks"
-        on
-        onPress={() => { mapRoadCommit(); props.onPatch({}); }}
+        label="Finish"
+        tooltip={stats.valid
+          ? 'Finish path — roads compile their lane grid; rail persists and renders from the curve'
+          : invalid || 'Place two anchors before finishing'}
+        on={stats.valid}
+        onPress={() => { if (stats.valid) mapPathCommit(); props.onPatch({}); }}
+      />
+      <OptionTile
+        icon="Undo"
+        label="Point"
+        tooltip="Undo the last accepted path point; the live hover piece remains editable"
+        onPress={() => { mapPathUndoPoint(); props.onPatch({}); }}
       />
       <OptionTile
         icon="X"
         label="Cancel"
-        tooltip="Cancel road - drop the drafted centerline"
-        onPress={() => { mapRoadCancel(); props.onPatch({}); }}
+        tooltip="Cancel this path draft without changing committed roads or rail"
+        onPress={() => { mapPathCancel(); props.onPatch({}); }}
       />
+      {stats.lastPathId > 0 ? (
+        <OptionTile
+          icon="Trash2"
+          label="Last"
+          tooltip={`Delete the last committed path (#${stats.lastPathId})`}
+          onPress={() => { mapPathDelete(stats.lastPathId); props.onPatch({}); }}
+        />
+      ) : null}
     </Fragment>
   );
 }
@@ -455,7 +528,7 @@ function ChannelTray(props: { state: MapPaintState; onPatch: (patch: Partial<Map
   if (props.state.channel === 'water') return <WaterTray {...props} />;
   if (props.state.channel === 'flora') return <FloraTray {...props} />;
   if (props.state.channel === 'zone') return <ZoneTray {...props} />;
-  return <RoadTray {...props} />;
+  return <PathTray {...props} />;
 }
 
 function Tray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPaintState>) => void }) {

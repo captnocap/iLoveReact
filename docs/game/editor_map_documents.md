@@ -9,7 +9,7 @@ present when the editor boots:
 
 ```text
 zig-out/game/editor/maps/<stem>/
-  painting.rmap   native terrain, chunks, flora, water, roads, painted cells
+  painting.rmap   native terrain, chunks, flora, water, road/rail paths, painted cells
   world.json      placed pieces/props, semantic objects, zone definitions, id sequence
 zig-out/game/editor/maps/_last.txt
 ```
@@ -54,7 +54,7 @@ data loss or pair a partial JSON load with the damaged document's painting.
 
 `framework/game/map/engine.zig::reset` now starts an unbound map: it clears the
 previous autosave path and the map-scoped tile-binding table in addition to
-chunks/roads/strokes. Callers must explicitly bind a document after loading or
+chunks/transport paths/strokes. Callers must explicitly bind a document after loading or
 seeding it. This prevents a test/reset/grow sequence from overwriting the map
 that was open before the reset, and prevents a fresh map inheriting another
 map's painted-material palette.

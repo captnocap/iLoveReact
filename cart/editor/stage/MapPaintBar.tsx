@@ -33,7 +33,7 @@ export default function MapPaintBar(props: {
   return (
     <IconButton
       icon="Paintbrush"
-      tooltip="Map Paint - sculpt terrain, paint ground/water/flora/zones, lay roads"
+      tooltip="Map Paint — sculpt terrain, paint ground/water/flora/zones, draw roads and rail"
       on={s.active}
       onPress={() => props.onPatch({ active: !s.active })}
     />

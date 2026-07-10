@@ -8,7 +8,7 @@ export const CHANNEL_META: Record<MapPaintChannel, { icon: string; label: string
   water: { icon: 'Waves', label: 'Water', tooltip: 'Water - carves its own bed into any terrain' },
   flora: { icon: 'Leaf', label: 'Flora', tooltip: 'Flora - plant trees, palms and grass' },
   zone: { icon: 'LandPlot', label: 'Zone', tooltip: 'Zone - paint named zone regions' },
-  road: { icon: 'Route', label: 'Road', tooltip: 'Road - draft a centerline, commit lanes' },
+  road: { icon: 'TrainTrack', label: 'Paths', tooltip: 'Paths — live-draw roads, light rail and railway curves' },
 };
 
 export const TERRAIN_TOOLS: MapTerrainTool[] = ['brush', 'ramp', 'slope', 'smooth'];
