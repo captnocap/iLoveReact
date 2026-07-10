@@ -1158,12 +1158,19 @@ pub fn build(b: *std.Build) void {
     stage_scale_test_step.dependOn(&run_stage_scale_test.step);
 
     // ── mesh edit (welded topology + vertex/edge/face selection) unit tests ───
-    const mesh_edit_test_mod = b.createModule(.{
+    const mesh_edit_impl_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/mesh_edit.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
+    const mesh_edit_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_edit.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_edit_test_mod.addImport("mesh_edit", mesh_edit_impl_test_mod);
     const mesh_edit_test = b.addTest(.{
         .name = "mesh-edit-test",
         .root_module = mesh_edit_test_mod,

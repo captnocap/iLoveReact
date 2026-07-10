@@ -2888,6 +2888,11 @@ pub fn meshMergeSelectedFaces() bool {
         if (mask[f]) groups[f] = target.?;
     }
     model_source.setFaceGroups(groups);
+    // Group ids are one of the welded topology's inputs: after this regroup, every
+    // edge shared by the fused faces is an internal triangulation seam. Invalidate the
+    // old boundary cache now or those dissolved edges keep drawing and stay selectable
+    // until some unrelated topology operation happens to rebuild it (req_2871).
+    mesh_edit.faceGroupsChanged();
     _ = refreshPaintLayout();
     journalCommit(&snap);
     return true;

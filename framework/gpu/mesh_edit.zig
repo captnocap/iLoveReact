@@ -19,6 +19,7 @@
 //! through the overlay-geometry pass (next slice); selection state + picking are here now.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const model_paint = @import("model_paint.zig");
 const model_source = @import("model_source.zig");
 
@@ -338,6 +339,36 @@ pub fn reset() void {
     g_edge_count = 0;
     g_built_for = 0;
 }
+
+/// Authored face groups are topology, not presentation metadata: they decide whether
+/// a shared triangle edge is a real face boundary or an internal triangulation seam.
+/// Group-only mutations keep the triangle count unchanged, so the normal face-count
+/// cache key cannot notice them. Call this after such a mutation so the next overlay,
+/// pick, or edit rebuilds the boundary classification from the new authored faces.
+pub fn faceGroupsChanged() void {
+    reset();
+}
+
+/// Headless fixture door for the focused unit target. It is absent from production
+/// builds; tests still exercise this module's real model_source/model_paint instances.
+pub const test_support = if (builtin.is_test) struct {
+    pub fn loadGroupedSoup(key: u64, verts: []f32, count: u32, groups: []const u32) void {
+        clear();
+        model_source.setFaceGroups(groups);
+        model_paint.setTarget(key, verts, count);
+    }
+
+    pub fn regroup(groups: []const u32) void {
+        model_source.setFaceGroups(groups);
+        faceGroupsChanged();
+    }
+
+    pub fn clear() void {
+        reset();
+        model_paint.clear();
+        model_source.clear();
+    }
+} else struct {};
 
 // ── Edit scope (focus one part, or a multi-selected set of parts) ─────────────────
 /// Restrict editing to the authored group range [lo, hi). hi <= lo clears the scope (edit
