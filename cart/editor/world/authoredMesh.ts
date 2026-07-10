@@ -8,6 +8,8 @@ import { modelPackageMeshData } from '../data/hmscAssetCatalog';
 import { modelPackageById } from '../data/content';
 
 const CACHE = new Map<string, Float32Array>();
+export type MeshBounds = { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number };
+const BOUNDS_CACHE = new Map<string, MeshBounds>();
 
 /** GROUND-REBASE (req_2751): a placeable's mesh is based at y=0 no matter where
  *  it sat in the studio editor — a wall picture authored 1.5m up is the same
@@ -24,9 +26,13 @@ function groundRebase(vertices: Float32Array): Float32Array {
   return out;
 }
 
-/** Stash a model's resolved vertices under its bare id (call at export). */
+/** Stash a model's resolved vertices under its bare id (call at export). Every
+ *  derived value for that revision expires with it: keeping an old AABB beside
+ *  new vertices renders the correct mesh inside the previous export's ghost. */
 export function cacheAuthoredMesh(modelId: string, vertices: Float32Array): void {
-  if (vertices.length >= 8) CACHE.set(modelId, groundRebase(vertices));
+  if (vertices.length < 8) return;
+  CACHE.set(modelId, groundRebase(vertices));
+  BOUNDS_CACHE.delete(modelId);
 }
 
 /** The vertices for an authored piece's model: the export-time capture, else the
@@ -45,10 +51,6 @@ export function authoredMeshData(modelId: string, pkgId?: string): Float32Array 
   }
   return null;
 }
-
-export type MeshBounds = { minX: number; minY: number; minZ: number; maxX: number; maxY: number; maxZ: number };
-
-const BOUNDS_CACHE = new Map<string, MeshBounds>();
 
 /** The mesh-space AABB of an authored piece's model — the box its placements
  *  hit-test and outline with. Cached alongside the vertices. */
