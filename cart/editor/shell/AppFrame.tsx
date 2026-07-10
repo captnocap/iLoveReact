@@ -22,6 +22,7 @@ import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
 import FileExplorerDialog from '../dialogs/FileExplorerDialog';
 import AddChunkDialog from '../dialogs/AddChunkDialog';
+import MapDocumentsDialog from '../dialogs/MapDocumentsDialog';
 import ModelContextMenu from '../stage/ModelContextMenu';
 import WorldContextMenu from '../stage/WorldContextMenu';
 import RenderProbe from '../../../runtime/render_tracker';
@@ -37,10 +38,12 @@ import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type Auth
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
 import type { BuildKind } from '../world/buildCatalog';
 import { loadPersistedState, persistState } from '../data/persistView';
-import { scheduleWorldSave } from '../data/worldStore';
+import { emptyWorldSave, flushWorldSave, readWorldSave, saveWorldNow, scheduleWorldSave, type WorldSave } from '../data/worldStore';
+import { createMapDocument, listMapDocuments, setActiveMapDocumentStem } from '../data/mapDocuments';
+import { mapAuthoringSlicesFor } from '../data/mapDocumentState';
 import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
-import { applyMapPaintEffects, defaultMapPaint } from '../stage/mapPaint';
+import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacement, draftPiecePlacementEvent, finalizePiecePlacementEvent, type MapPaintPayload, type PiecePlacementDraftPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
@@ -79,7 +82,7 @@ import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFol
 import { WORLD_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 import { scheduleGlobalsSave } from '../data/globalsStore';
 import { DEFAULT_PHYSICS_GLOBALS, type PhysicsGlobals } from '../data/globals';
-import { mapEventDrain, type MapAuthoringEvent } from '../../../runtime/game/map';
+import { mapEventDrain, mapHostLive, type MapAuthoringEvent } from '../../../runtime/game/map';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
@@ -253,13 +256,14 @@ export default function AppFrame() {
   useEffect(() => { persistState(state); }, [state]);
 
   // Micro-save the world's authored edits to disk (SESSIONSAVE req_2765): every
-  // worldPieces / zone-def change — placements, verbs, undo/redo, all of it —
+  // worldPieces / semantic-object / zone-def change — placements, verbs,
+  // undo/redo, all of it —
   // schedules a debounced write of the world save, so placed pieces survive a
   // cold restart with no Save button to forget. The painted map micro-saves
   // itself host-side (ensureMapSeeded registers its autosave file).
   useEffect(() => {
-    scheduleWorldSave(state.worldPieces, state.mapPaint.zones, state.seq);
-  }, [state.worldPieces, state.mapPaint.zones]);
+    scheduleWorldSave(state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, state.seq);
+  }, [state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones]);
 
   // GLOBALS req_2770: tuned world globals micro-save on the same contract —
   // "find a value, lock it in" is a debounced write, never a Save button.
@@ -437,6 +441,85 @@ export default function AppFrame() {
     return { ...prev, mapPaint };
   };
 
+  // ── Named map-document lifecycle ───────────────────────────────────────────
+  // A switch is a small transaction across the two persistence owners:
+  // validate target world.json → synchronously flush BOTH outgoing concerns →
+  // replace the native painting → persist/point at target → replace every
+  // React-authored map slice. Any failure reloads the just-flushed outgoing
+  // painting and leaves the active pointer/state untouched.
+  const switchMapDocument = (stem: string, target: WorldSave, verb: 'opened' | 'created') => {
+    if (stem === state.activeMapStem) {
+      setState((prev) => ({ ...prev, mapDocumentOpen: false, openMenu: null, status: `${stem} is already the active map` }));
+      return;
+    }
+    if (!mapHostLive()) {
+      setState((prev) => ({ ...prev, status: 'map switch unavailable — rebuild/run the editor with the game-map host enabled' }));
+      return;
+    }
+
+    const outgoingStem = state.activeMapStem;
+    const outgoingZones = state.mapPaint.zones;
+    if (!flushWorldSave(outgoingStem, state.worldPieces, state.objects, outgoingZones, state.seq)) {
+      setState((prev) => ({ ...prev, status: `map switch stopped — could not save ${outgoingStem}/world.json` }));
+      return;
+    }
+    if (!flushMapDocumentPainting(outgoingStem)) {
+      setState((prev) => ({ ...prev, status: `map switch stopped — could not save ${outgoingStem}/painting.rmap` }));
+      return;
+    }
+
+    // Old authoring events are audit-feed material only; drain them before the
+    // target state lands so they cannot be mislabeled with the target's legend.
+    mapEventDrain();
+    const activation = activateMapDocumentPainting(stem, target.zones);
+    if (!activation.ok) {
+      const rollback = activateMapDocumentPainting(outgoingStem, outgoingZones);
+      setState((prev) => ({
+        ...prev,
+        status: `map switch refused — ${activation.error}${rollback.ok ? '; current map restored' : `; WARNING: current map reload also failed (${rollback.error})`}`,
+      }));
+      return;
+    }
+
+    if (!saveWorldNow(target) || !setActiveMapDocumentStem(stem)) {
+      const rollback = activateMapDocumentPainting(outgoingStem, outgoingZones);
+      setState((prev) => ({
+        ...prev,
+        status: `map switch stopped — could not commit ${stem}'s world save/pointer${rollback.ok ? '; current map restored' : `; WARNING: current map reload failed (${rollback.error})`}`,
+      }));
+      return;
+    }
+
+    setState((prev) => ({
+      ...prev,
+      ...mapAuthoringSlicesFor(prev, stem, target, activation.bindings),
+      openMenu: null,
+      actionMenu: 'File',
+      status: `${verb} map ${stem} — ${activation.seeded ? 'clean seed chunk' : `${target.pieces.length} placed piece${target.pieces.length === 1 ? '' : 's'}`}; all map authoring switched together`,
+    }));
+  };
+
+  const openMapDocument = (stem: string) => {
+    const result = readWorldSave(stem);
+    if (result.status === 'invalid') {
+      setState((prev) => ({ ...prev, status: `cannot open ${stem} — ${result.error}; current map left untouched` }));
+      return;
+    }
+    const target = result.save ?? emptyWorldSave(stem, state.seq);
+    switchMapDocument(stem, target, 'opened');
+  };
+
+  const createNewMap = (rawName = 'untitled') => {
+    let stem: string;
+    try {
+      stem = createMapDocument(rawName);
+    } catch (error) {
+      setState((prev) => ({ ...prev, status: `could not create map — ${(error as Error).message}; current map left untouched` }));
+      return;
+    }
+    switchMapDocument(stem, emptyWorldSave(stem, state.seq), 'created');
+  };
+
   const runCommand = (commandId: string, source: string) => {
     const command = commandById(commandId);
     // Modal discipline (req_2626 HH): while a blocking session/dialog is unresolved every
@@ -445,6 +528,10 @@ export default function AppFrame() {
     {
       const block = blockingNow(state);
       if (block && commandId !== block.closerCommandId) { refuseBlocked(block); return; }
+    }
+    if (commandId === 'new-map') {
+      createNewMap('untitled');
+      return;
     }
     // Paint resolution (Edit → Mesh → Paint → Paint Resolution): set exact texels/triangle on the
     // viewer. The host clamps dense meshes to the atlas budget; the readout reflects what took.
@@ -470,6 +557,7 @@ export default function AppFrame() {
     // so they route through dedicated handlers that keep the outliner metadata true.
     // Must run BEFORE the generic model-tool router below (same 'model' surface).
     if (commandId === 'mesh-detach') { runDetachSelection(); return; }
+    if (commandId === 'mesh-flip-face') { runFaceOp('flip'); return; }
     if (commandId === 'mesh-glass') { runFaceOp('glass'); return; }
     if (commandId === 'mesh-solidify') { runFaceOp('solidify'); return; }
     // Outliner multi-select is carried host-side as a face selection so the gizmo can
@@ -748,7 +836,17 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', exportCharacterPrompt: true, status: 'export character — choose the role' }));
       return;
     }
-    if (command.id === 'open-map' || command.id === 'open-file-explorer' || command.id === 'find-import-source') {
+    if (command.id === 'open-map') {
+      setState((prev) => ({
+        ...prev,
+        openMenu: null,
+        actionMenu: 'File',
+        mapDocumentOpen: true,
+        status: `map workspaces — ${prev.activeMapStem} is active`,
+      }));
+      return;
+    }
+    if (command.id === 'open-file-explorer' || command.id === 'find-import-source') {
       setState((prev) => ({
         ...prev,
         openMenu: null,
@@ -2356,14 +2454,30 @@ export default function AppFrame() {
     });
   };
 
-  // Face-selection ops that don't change part structure: glass / solidify / merge-faces.
-  const runFaceOp = (kind: 'glass' | 'solidify' | 'merge-faces') => {
+  // Face-selection ops that don't change part structure: winding / glass / solidify /
+  // merge-faces. Each is a host-owned journaled mutation; the shell only reports it.
+  const runFaceOp = (kind: 'flip' | 'glass' | 'solidify' | 'merge-faces') => {
     const api = modelToolApiRef.current;
-    const ok = kind === 'glass' ? api?.glassSelection() : kind === 'solidify' ? api?.solidifySelection() : api?.mergeFaces();
-    const okMsg = kind === 'glass' ? 'toggled glass on the selected faces' : kind === 'solidify' ? 'solidified the selected faces (inner skin + rim walls)' : 'merged the selection into one face';
-    const failMsg = kind === 'merge-faces'
-      ? 'merge faces: select 2+ faces (face mode) first'
-      : `${kind}: select faces first (face mode)`;
+    let ok = false;
+    let okMsg = '';
+    let failMsg = '';
+    if (kind === 'flip') {
+      ok = api?.flipSelection() ?? false;
+      okMsg = 'flipped the selected face(s) to the opposite side';
+      failMsg = 'flip face: select face(s) first (face mode)';
+    } else if (kind === 'glass') {
+      ok = api?.glassSelection() ?? false;
+      okMsg = 'toggled glass on the selected faces';
+      failMsg = 'glass: select faces first (face mode)';
+    } else if (kind === 'solidify') {
+      ok = api?.solidifySelection() ?? false;
+      okMsg = 'solidified the selected faces (inner skin + rim walls)';
+      failMsg = 'solidify: select faces first (face mode)';
+    } else {
+      ok = api?.mergeFaces() ?? false;
+      okMsg = 'merged the selection into one face';
+      failMsg = 'merge faces: select 2+ faces (face mode) first';
+    }
     setState((prev) => ({ ...prev, status: ok ? okMsg : failMsg }));
   };
 
@@ -2695,6 +2809,7 @@ export default function AppFrame() {
       if (key === 'escape') {
         if (block.id === 'new-mesh') setState((prev) => ({ ...prev, newMeshPrompt: null, status: `${prev.newMeshPrompt?.mode === 'add' ? 'add' : 'new'} mesh cancelled` }));
         else if (block.id === 'file-explorer') setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'asset explorer closed' }));
+        else if (block.id === 'map-documents') setState((prev) => ({ ...prev, mapDocumentOpen: false, status: 'map workspaces closed' }));
         else if (block.id === 'build-journal') setState((prev) => ({ ...prev, buildDialogOpen: false, status: 'build journal closed' }));
         else if (block.id === 'add-chunk') setState((prev) => ({ ...prev, addChunkOpen: false, status: 'add chunk closed' }));
         else if (block.id === 'import-image') setImportPlan(null);
@@ -3342,6 +3457,17 @@ export default function AppFrame() {
           onCancel={() => setState((prev) => ({ ...prev, exportCharacterPrompt: null, status: 'character export cancelled' }))}
           onExport={exportCharacterAs}
         />
+      ) : null}
+      {state.mapDocumentOpen ? (
+        <RenderProbe id="Map Workspaces Dialog">
+          <MapDocumentsDialog
+            current={state.activeMapStem}
+            documents={listMapDocuments()}
+            onOpen={openMapDocument}
+            onNew={createNewMap}
+            onClose={() => setState((prev) => ({ ...prev, mapDocumentOpen: false, status: 'map workspaces closed' }))}
+          />
+        </RenderProbe>
       ) : null}
       {state.addChunkOpen ? (
         <RenderProbe id="Add Chunk Dialog">

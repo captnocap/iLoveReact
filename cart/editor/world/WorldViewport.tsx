@@ -32,6 +32,7 @@ import { pushLiveWorld, pushResidentMeshes } from './livePush';
 import { pickBuildPieceHostHit } from '../../../runtime/game/build';
 import { faceRoleForHit } from './pieceSlots';
 import { ensureMapSeeded } from '../stage/mapPaint';
+import type { MapZoneDef } from '../stage/mapPaint';
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import type { WorldTool } from './worldTool';
 import { publishWorldHoverReadout } from '../data/worldHoverReadout';
@@ -123,6 +124,8 @@ export default function WorldViewport(props: {
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
   floor: number;
   paintActive: boolean;
+  mapStem: string;
+  mapZones: readonly MapZoneDef[];
 }) {
   const loaderRef = useRef<any>(null);
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 1, height: 1 });
@@ -239,14 +242,14 @@ export default function WorldViewport(props: {
   // mount gives boot-time ground + orientation for free. Same retry pattern as
   // the camera boot push above — the doors land a few frames after mount.
   useEffect(() => {
-    if (ensureMapSeeded()) return;
+    if (ensureMapSeeded(props.mapZones, props.mapStem)) return;
     let tries = 0;
     const t = setInterval(() => {
       tries += 1;
-      if (ensureMapSeeded() || tries > 120) clearInterval(t);
+      if (ensureMapSeeded(props.mapZones, props.mapStem) || tries > 120) clearInterval(t);
     }, 32);
     return () => clearInterval(t);
-  }, []);
+  }, [props.mapStem, props.mapZones]);
 
   // The active floor lifts the camera target + the pick plane (Sims storeys).
   useEffect(() => {

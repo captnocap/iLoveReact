@@ -216,6 +216,9 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-extrude', menu: 'Edit', scope: 'model', name: 'Extrude Edge', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-extrude-face', menu: 'Edit', scope: 'model', name: 'Extrude Face', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-create-face', menu: 'Edit', scope: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
+  // Studio's req_1182 face correction, restored on the active host-native surface:
+  // reverse winding + UV corner order so an inside-out created face points outward.
+  { id: 'mesh-flip-face', menu: 'Edit', scope: 'model', name: 'Flip Face', icon: 'FlipVertical2', key: 'X', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-loopcut', menu: 'Edit', scope: 'model', name: 'Loop Cut', icon: 'Scissors', key: 'L', context: true, native: true, undoable: true, tool: true },
   // Face-selection ops: detach peels the selection into a NEW part; glass toggles translucency;
   // solidify thickens in place; merge fuses 2+ authored faces into one.
@@ -254,6 +257,7 @@ export function blockingOverlay(state: EditorState): BlockingOverlay | null {
   if (mv === 'face-guard') return { id: 'face-guard', label: 'Unsafe Face Edit' };
   if (state.newMeshPrompt) return { id: 'new-mesh', label: state.newMeshPrompt.mode === 'add' ? 'Add Mesh' : 'New Mesh' };
   if (state.fileExplorerOpen) return { id: 'file-explorer', label: 'Asset Explorer' };
+  if (state.mapDocumentOpen) return { id: 'map-documents', label: 'Map Workspaces' };
   if (state.buildDialogOpen) return { id: 'build-journal', label: 'Build Journal', closerCommandId: 'toggle-build-journal' };
   if (state.addChunkOpen) return { id: 'add-chunk', label: 'Add Chunk' };
   return null;
@@ -354,7 +358,7 @@ const MESH_SUBMENU: MenuNode = {
   children: [
     section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'),
     section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'),
-    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-loopcut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
+    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
     cmd('mesh-duplicate-part'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
@@ -430,7 +434,7 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
   if (tool.selMode === 3) {
     return [
       ...(tool.sel === 1 ? [commandById('mesh-extrude-face')] : []),
-      commandById('mesh-loopcut'), commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'),
+      commandById('mesh-flip-face'), commandById('mesh-loopcut'), commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'),
       // Outliner multi-select is represented host-side by selecting every authored face
       // in those parts. Offering Merge Faces here would collapse all of those groups to
       // one face and strand zero-face outliner rows (req_2870). The parts command below

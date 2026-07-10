@@ -49,6 +49,10 @@ export default function Chrome(props: {
         })}
       </C.HW_MenuBar>
       <C.HW_Spacer />
+      <C.HW_Pill onPress={() => props.onCommand('open-map', 'chrome')} tooltip={`Active map: ${props.state.activeMapStem} — open map workspaces`}>
+        <Icon name="MapPinned" size={12} color={accentFor('primary')} />
+        <C.HW_PillText>{props.state.activeMapStem}</C.HW_PillText>
+      </C.HW_Pill>
       <C.HW_Compile
         {...(compile.on ? { onPress: () => props.onCommand('compile-rle', 'chrome') } : { style: { opacity: 0.4 } })}
         tooltip={compile.on ? 'Compile RLE game data' : `Compile — ${compile.reason}`}

@@ -4,6 +4,7 @@ import WorldViewport from '../world/WorldViewport';
 import { worldToolFor } from '../world/worldTool';
 import { visibleStoreyPieces, type ArmedPiece, type PlacedPiece, type PlacementGesture } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
+import type { MapZoneDef } from './mapPaint';
 
 // BLANKBOOT req_2490: the editor's world file is ITS OWN, fresh path — the old
 // main.gamefile is the condemned hmsc sandbox bake ("farts and dicks", ruled
@@ -26,6 +27,8 @@ export const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
 // comes from the action bar's one real floor control (req_2485).
 export default function WorldEditorSurface(props: {
   paintActive: boolean;
+  mapStem: string;
+  mapZones: readonly MapZoneDef[];
   floor: number;
   wallsDown: boolean;
   activeCommandId: string;
@@ -82,6 +85,8 @@ export default function WorldEditorSurface(props: {
         onMove={props.onMove}
         floor={props.floor}
         paintActive={props.paintActive}
+        mapStem={props.mapStem}
+        mapZones={props.mapZones}
       />
     </C.HW_WorldEditorSurface>
   );

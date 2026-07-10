@@ -4,7 +4,8 @@
 // which normally resets all React state (you lose which folder/model/material
 // you were looking at). useHotState persists atoms in Zig-owned memory
 // (framework/state/hotstate.zig) that outlives the teardown, so we mirror the
-// whole editor state into one atom and rehydrate it on boot. Same idea the
+// editor VIEW into one atom and rehydrate it on boot. Map-authored slices are
+// redacted: named document files are their only truth. Same idea the
 // previous editor app (hmsc-int) leans on for its studio/game state.
 //
 // Survives hot reload; resets on a cold process restart (hotstate is
@@ -15,7 +16,8 @@
 // painted map reloads host-side from its RMAP on the same boot.
 import { getHotState, setHotState } from '../../../runtime/hooks/useHotState';
 import { initialState, defaultModelTool } from './initialState';
-import { loadWorldSave } from './worldStore';
+import { readWorldSave } from './worldStore';
+import { createMapDocument, setActiveMapDocumentStem } from './mapDocuments';
 import { loadGlobalsSave } from './globalsStore';
 import type { EditorState } from './types';
 
@@ -29,6 +31,7 @@ const RESET_ON_RELOAD: Partial<EditorState> = {
   presetMenuOpen: false,
   contextOpen: false,
   buildDialogOpen: false,
+  mapDocumentOpen: false,
   addChunkOpen: false,
   eventbusPopoverOpen: false,
   perfPopoverOpen: false,
@@ -45,17 +48,40 @@ const RESET_ON_RELOAD: Partial<EditorState> = {
 
 /** Boot state: the on-disk world save materialized into fresh defaults, then
  *  the persisted view merged over it (so fields added since the last save get
- *  their defaults), with transient overlays forced closed. Cold start = world
- *  save only; hot reload = hotstate wins where it carries a value (it is never
- *  behind the disk — every edit micro-saves), and the disk fills any slice a
- *  pre-worldStore hotstate shape lacks. */
+ *  their defaults), with transient overlays forced closed. Cold start = named
+ *  world save only; hot reload may restore chrome/view fields, while durable
+ *  map-authored slices always remain the named document's values. */
 export function loadPersistedState(): EditorState {
   const base = initialState();
-  const world = loadWorldSave();
+  let load = readWorldSave(base.activeMapStem);
+  let bootStatus: string | null = null;
+  if (load.status === 'invalid') {
+    const damagedStem = base.activeMapStem;
+    const damageError = load.error;
+    try {
+      const recoveryStem = createMapDocument(`${damagedStem}-recovery`);
+      if (!setActiveMapDocumentStem(recoveryStem)) throw new Error('could not commit the recovery pointer');
+      base.activeMapStem = recoveryStem;
+      bootStatus = `${damagedStem}/world.json is malformed and was preserved (${damageError}); opened clean recovery map ${recoveryStem}`;
+      load = { status: 'missing', save: null, migratedLegacy: false };
+    } catch (error) {
+      // readWorldSave write-protected the malformed stem, so the debounce below
+      // cannot overwrite it even when recovery allocation itself is unavailable.
+      bootStatus = `${damagedStem}/world.json is malformed and write-protected (${damageError}); recovery failed: ${(error as Error).message}`;
+    }
+  }
+  const world = load.status === 'ok' ? load.save : null;
   if (world) {
     base.worldPieces = world.pieces;
+    base.objects = world.objects;
+    base.selectedObjectId = world.objects.find((object) => !object.hidden)?.id ?? 'obj-tile';
     base.seq = Math.max(base.seq, world.seq);
     if (world.zones.length) base.mapPaint = { ...base.mapPaint, zones: world.zones };
+  } else {
+    // INITIAL_OBJECTS is an old view placeholder, not content for a genuinely
+    // empty named map. Do not let the first micro-save turn it into authoring.
+    base.objects = [];
+    base.selectedObjectId = 'obj-tile';
   }
   // Tuned globals rehydrate from their own per-concern save (GLOBALS req_2770) —
   // a locked-in jump height survives the cold restart like placed pieces do.
@@ -63,10 +89,41 @@ export function loadPersistedState(): EditorState {
   if (globals) base.worldGlobals = globals;
   const saved = getHotState<Partial<EditorState> | null>(VIEW_HOT_KEY, null);
   if (!saved) {
-    if (world?.pieces.length) base.status = `restored world — ${world.pieces.length} placed piece${world.pieces.length === 1 ? '' : 's'} from the world save`;
+    if (bootStatus) base.status = bootStatus;
+    else if (world?.pieces.length) base.status = `restored world — ${world.pieces.length} placed piece${world.pieces.length === 1 ? '' : 's'} from the world save`;
     return base;
   }
-  const merged = { ...base, ...saved, ...RESET_ON_RELOAD, status: 'restored your last view' };
+  // Hot state is a VIEW cache, never a second world store. In particular, do
+  // not let the prior map's pieces/zones/binding table or selections cross the
+  // named document boundary. The durable per-document files above are the only
+  // source for those slices.
+  const savedPaint = saved.mapPaint;
+  const merged: EditorState = {
+    ...base,
+    ...saved,
+    ...RESET_ON_RELOAD,
+    activeMapStem: base.activeMapStem,
+    worldPieces: base.worldPieces,
+    objects: base.objects,
+    selectedObjectId: base.selectedObjectId,
+    selectedPieceId: null,
+    armedStamp: null,
+    worldUndo: [],
+    worldRedo: [],
+    mapPaint: {
+      ...base.mapPaint,
+      ...(savedPaint ?? {}),
+      active: false,
+      texturePickerOpen: false,
+      zones: base.mapPaint.zones,
+      // painting.rmap is authoritative; ensureMapSeeded mirrors this table when
+      // Map Paint is armed. A hot table may belong to another document.
+      tileBindings: [],
+      zoneIdx: base.mapPaint.zones.length ? Math.min(savedPaint?.zoneIdx ?? 0, base.mapPaint.zones.length - 1) : 0,
+      tileBindIdx: -1,
+    },
+    status: bootStatus ?? 'restored your last view',
+  };
   // The id seq only ever grows: a stale hotstate seq must not re-mint ids the
   // disk save already handed out.
   merged.seq = Math.max(merged.seq, base.seq);
@@ -75,5 +132,25 @@ export function loadPersistedState(): EditorState {
 
 /** Mirror the current state into the hot atom so the next reload can rehydrate. */
 export function persistState(state: EditorState): void {
-  setHotState(VIEW_HOT_KEY, state);
+  // Store the chrome/view shape but redact every per-map authored slice. This
+  // makes stale hot memory incapable of resurrecting pieces after New/Open.
+  setHotState(VIEW_HOT_KEY, {
+    ...state,
+    worldPieces: [],
+    objects: [],
+    selectedObjectId: 'obj-tile',
+    selectedPieceId: null,
+    armedStamp: null,
+    worldUndo: [],
+    worldRedo: [],
+    mapPaint: {
+      ...state.mapPaint,
+      active: false,
+      texturePickerOpen: false,
+      zones: [],
+      tileBindings: [],
+      zoneIdx: 0,
+      tileBindIdx: -1,
+    },
+  });
 }

@@ -5,6 +5,43 @@ const std = @import("std");
 const testing = std.testing;
 const mesh_edit = @import("mesh_edit");
 
+test "flipping selected winding reverses the normal and keeps corner UVs attached" {
+    var verts = [_]f32{
+        // Selected triangle: +Z winding, distinct UVs on every corner.
+        0, 0, 0, 0.25, 0.5, 0.75, 0.1, 0.2,
+        1, 0, 0, 0.25, 0.5, 0.75, 0.3, 0.4,
+        0, 1, 0, 0.25, 0.5, 0.75, 0.5, 0.6,
+        // Unselected control triangle.
+        2, 0, 0, 0.2,  0.4, 0.8,  0.7, 0.1,
+        3, 0, 0, 0.2,  0.4, 0.8,  0.8, 0.2,
+        2, 1, 0, 0.2,  0.4, 0.8,  0.9, 0.3,
+    };
+    const original = verts;
+
+    try testing.expectEqual(@as(u32, 1), mesh_edit.flipSelectedTriangleWinding(verts[0..], 2, &.{ true, false }));
+
+    // a stays first; c and b swap as complete rows, including their UV pair.
+    try testing.expectEqualSlices(f32, &.{ 0, 0, 0 }, verts[0..3]);
+    try testing.expectEqualSlices(f32, &.{ 0, 1, 0 }, verts[8..11]);
+    try testing.expectEqualSlices(f32, &.{ 0.5, 0.6 }, verts[14..16]);
+    try testing.expectEqualSlices(f32, &.{ 1, 0, 0 }, verts[16..19]);
+    try testing.expectEqualSlices(f32, &.{ 0.3, 0.4 }, verts[22..24]);
+    try testing.expectEqualSlices(f32, &.{ -0.25, -0.5, -0.75 }, verts[3..6]);
+
+    // The unselected triangle is byte-for-byte untouched, and flipping twice is an
+    // involution: useful for both the user's correction and undo/redo confidence.
+    try testing.expectEqualSlices(f32, original[24..], verts[24..]);
+    try testing.expectEqual(@as(u32, 1), mesh_edit.flipSelectedTriangleWinding(verts[0..], 2, &.{ true, false }));
+    try testing.expectEqualSlices(f32, original[0..], verts[0..]);
+}
+
+test "flipping winding rejects an undersized boundary without partial writes" {
+    var verts = [_]f32{0} ** 24;
+    const original = verts;
+    try testing.expectEqual(@as(u32, 0), mesh_edit.flipSelectedTriangleWinding(verts[0..], 2, &.{ true, true }));
+    try testing.expectEqualSlices(f32, original[0..], verts[0..]);
+}
+
 test "merging authored faces dissolves their shared selectable edge (req_2871)" {
     // Two side-by-side quads, each represented by two render triangles. Before the
     // merge there are seven authored boundary segments: the six-segment outer rim plus

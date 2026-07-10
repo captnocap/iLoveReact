@@ -6,17 +6,25 @@
 // AppFrame owns the state and calls applyMapPaintEffects on every patch so the
 // host tool tracks chrome.
 import {
-  mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapSaveFile, mapSetAutosaveFile,
+  mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapReset, mapSaveFile, mapSetAutosaveFile,
   mapSetGroundLook, mapSetTileBindings, mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds,
   mapRoadSetProfile, mapSetBrushGizmo,
   type MapBrushGizmo, type MapBrushProfile, type MapBrushShape, type MapTerrainTool,
 } from '../../../runtime/game/map';
+import { exists } from '../../../runtime/hooks/fs';
 import {
   EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf,
   bindingsToFloats, floatsToBindings, type TileMaterialBinding,
 } from '../render3d/groundFormula';
 import { FLORA_KIND_DEFINITIONS, FLORA_LANE_INDEX, FLORA_SPECS, ZONE_COLORS } from '../world/floraKinds';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
+import {
+  LEGACY_MAP_FILE,
+  activeMapDocumentStem,
+  finishLegacyMapImport,
+  hasLegacyMapImport,
+  mapDocumentPaths,
+} from '../data/mapDocuments';
 
 export type MapZoneDef = { id: string; name: string; color: string };
 export type MapPaintChannel = 'terrain' | 'tile' | 'water' | 'flora' | 'zone' | 'road';
@@ -112,9 +120,70 @@ export const PAINTABLE_TILE_KINDS: readonly number[] = TILE_KINDS
 const ROAD_KIND_INDICES = (['laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'median', 'sidewalk', 'junction', 'crosswalk'] as const)
   .map((k) => TILE_KINDS.indexOf(k));
 
-// The painted map's save file — beside the gamefile it will compile into.
-// RLE blob written/read host-side (__map_save_file).
-export const EDITOR_MAP_FILE = 'zig-out/game/editor/painted-map.rmap';
+// The live native map is one concern inside the ACTIVE named document. Never
+// use a process-global fixed path here: that was how a fresh terrain reset got
+// paired with the previous map's placed pieces.
+let liveMapStem: string | null = null;
+
+export function editorMapFile(stem = activeMapDocumentStem()): string {
+  return mapDocumentPaths(stem).painting;
+}
+
+export type MapPaintingActivation =
+  | { ok: true; bindings: TileMaterialBinding[]; seeded: boolean }
+  | { ok: false; error: string };
+
+function configureMapContent(zones: readonly MapZoneDef[]): void {
+  mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(zones));
+  mapRoadSetKinds(ROAD_KIND_INDICES);
+  mapSetFloraSpecs(FLORA_SPECS);
+}
+
+/** Replace the host map with one named document. Existing malformed RMAPs are
+ * refused (the caller can reload the just-flushed outgoing map); a genuinely
+ * missing painting is a valid empty concern and receives one seed chunk. */
+export function activateMapDocumentPainting(stem: string, zones: readonly MapZoneDef[]): MapPaintingActivation {
+  if (!mapHostLive()) return { ok: false, error: 'map host is not live in this binary' };
+  const paths = mapDocumentPaths(stem);
+  // This door is the transaction's first hard gate. On an older host, reset +
+  // grow could otherwise still autosave the fresh target into the outgoing
+  // document before the later bind attempt tells us the door is unavailable.
+  if (!mapSetAutosaveFile('')) {
+    return { ok: false, error: 'map autosave door is unavailable; rebuild the editor host' };
+  }
+
+  let seeded = false;
+  if (exists(paths.painting)) {
+    if (!mapLoadFile(paths.painting)) return { ok: false, error: `${paths.painting} is malformed` };
+  } else if (hasLegacyMapImport(paths.stem) && exists(LEGACY_MAP_FILE)) {
+    if (!mapLoadFile(LEGACY_MAP_FILE)) return { ok: false, error: `${LEGACY_MAP_FILE} is malformed` };
+    if (!mapSaveFile(paths.painting)) return { ok: false, error: `could not import painting into ${paths.painting}` };
+  } else {
+    mapReset();
+    if (!mapGrowChunk(0, 0, false)) return { ok: false, error: 'could not seed chunk (0, 0)' };
+    seeded = true;
+  }
+
+  configureMapContent(zones);
+  if (!mapSetAutosaveFile(paths.painting)) {
+    return { ok: false, error: 'map autosave door is unavailable; rebuild the editor host' };
+  }
+  if (seeded && !mapSaveFile(paths.painting)) return { ok: false, error: `could not create ${paths.painting}` };
+  finishLegacyMapImport(paths.stem);
+  liveMapStem = paths.stem;
+  return { ok: true, bindings: floatsToBindings(mapGetTileBindings()), seeded };
+}
+
+/** Durably flush the current host painting to the named outgoing document. */
+export function flushMapDocumentPainting(stem: string): boolean {
+  const expected = mapDocumentPaths(stem).stem;
+  // Never serialize an unidentified/other live host map into this document.
+  // A hot reload re-establishes identity through ensureMapSeeded before edits.
+  if (!mapHostLive() || liveMapStem !== expected || mapChunkCount() === 0) return false;
+  const path = editorMapFile(stem);
+  if (!mapSetAutosaveFile(path)) return false;
+  return mapSaveFile(path);
+}
 
 /** Push the chrome state into the host map painter as the ONE armed tool. The
  *  height dial + RAISE/DIG toggle collapse into the engine's signed centerZ. */
@@ -149,16 +218,21 @@ function pushMapTool(s: MapPaintState): void {
  *  viewport can seed it at BOOT — before this, no chunk existed until the user
  *  armed Map Paint and the editor booted into a groundless void. Returns false
  *  when the host map doors aren't live yet (callers retry). */
-export function ensureMapSeeded(zones: readonly MapZoneDef[] = []): boolean {
+export function ensureMapSeeded(
+  zones: readonly MapZoneDef[] = [],
+  stem = activeMapDocumentStem(),
+): boolean {
   if (!mapHostLive()) return false;
-  if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0, false);
-  // Micro-save from here on (req_2765): every gesture rewrites the map file
-  // host-side — painting done without the Save button survives a restart.
-  // False on a binary predating the door; the manual Save still covers those.
-  if (!mapSetAutosaveFile(EDITOR_MAP_FILE)) console.warn('[map-seed] autosave door missing — rebuild the host for micro-saves; manual Save still works');
-  mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(zones));
-  mapRoadSetKinds(ROAD_KIND_INDICES);
-  mapSetFloraSpecs(FLORA_SPECS); // req_2497: painting flora grows LITERAL foliage live
+  if (liveMapStem !== stem || mapChunkCount() === 0) {
+    const activation = activateMapDocumentPainting(stem, zones);
+    if (!activation.ok) {
+      console.error(`[map-seed] ${activation.error}`);
+      return false;
+    }
+  } else {
+    if (!mapSetAutosaveFile(editorMapFile(stem))) return false;
+    configureMapContent(zones);
+  }
   console.warn(`[map-seed] ground seeded — ${mapChunkCount()} chunk(s) live`);
   return true;
 }
@@ -205,5 +279,6 @@ export function addZonePatch(s: MapPaintState): Partial<MapPaintState> {
 
 /** SAVE writes the whole painting host-side (RLE blob; roads as recipes). */
 export function saveMapFile(): void {
-  if (!mapSaveFile(EDITOR_MAP_FILE)) console.error(`[map-paint] SAVE FAILED: ${EDITOR_MAP_FILE}`);
+  const path = editorMapFile();
+  if (!mapSaveFile(path)) console.error(`[map-paint] SAVE FAILED: ${path}`);
 }

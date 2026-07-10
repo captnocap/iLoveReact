@@ -33,6 +33,53 @@ pub const Mutation = struct {
 };
 pub const Edge = [2]u32;
 
+// The resident model-view mesh format: position3 / normal3 / uv2, three rows per
+// render triangle. These are layout constants, not tuning values.
+const EDIT_VERTEX_FLOATS: usize = 8;
+const TRIANGLE_VERTICES: usize = 3;
+const TRIANGLE_FLOATS: usize = EDIT_VERTEX_FLOATS * TRIANGLE_VERTICES;
+const NORMAL_FIRST: usize = 3;
+const NORMAL_END: usize = 6;
+
+/// Reverse every selected render triangle's winding while keeping each corner's UV
+/// paired with its position. Negating the carried vertex normals makes this the native
+/// triangle-soup twin of cart/editor/model/editMesh.ts `flipFace`: geometry, grouping,
+/// and paint coordinates stay put; only the side the face points toward changes.
+///
+/// Returns the number of triangles flipped. An undersized mesh/mask is rejected at the
+/// boundary before any write, so callers never receive a half-flipped authored face.
+pub fn flipSelectedTriangleWinding(verts: []f32, triangle_count: u32, selected: []const bool) u32 {
+    const count: usize = @intCast(triangle_count);
+    if (selected.len < count or count > verts.len / TRIANGLE_FLOATS) return 0;
+
+    var flipped: u32 = 0;
+    var face: usize = 0;
+    while (face < count) : (face += 1) {
+        if (!selected[face]) continue;
+        const base = face * TRIANGLE_FLOATS;
+        const second = base + EDIT_VERTEX_FLOATS;
+        const third = second + EDIT_VERTEX_FLOATS;
+
+        // (a,b,c) -> (a,c,b) is one odd permutation: winding reverses without
+        // changing the triangle's existing diagonal. Whole interleaved rows move, so
+        // UVs remain attached to their geometric corners.
+        var attr: usize = 0;
+        while (attr < EDIT_VERTEX_FLOATS) : (attr += 1) {
+            const tmp = verts[second + attr];
+            verts[second + attr] = verts[third + attr];
+            verts[third + attr] = tmp;
+        }
+        var corner: usize = 0;
+        while (corner < TRIANGLE_VERTICES) : (corner += 1) {
+            const row = base + corner * EDIT_VERTEX_FLOATS;
+            var normal_attr = NORMAL_FIRST;
+            while (normal_attr < NORMAL_END) : (normal_attr += 1) verts[row + normal_attr] = -verts[row + normal_attr];
+        }
+        flipped += 1;
+    }
+    return flipped;
+}
+
 /// Selection orange (matches the Studio's selectFaceColor), blended 0.7 over a face's base.
 const SELECT_RGB: [3]f32 = .{ 255, 138, 61 };
 const SELECT_MIX: f32 = 0.7;
@@ -516,6 +563,25 @@ pub fn selectFaceByIndex(idx: u32, additive: bool) bool {
     setFaceGroup(sel, idx, true);
     applyFaceHighlight();
     return true;
+}
+
+/// Restore a face selection from a displayed-triangle mask in one highlight pass.
+/// Grouped triangles expand back to their whole authored face, matching a normal pick.
+/// Topology ops use this after reinstalling an unchanged face order so the user's
+/// selected face(s) remain ready for another operation.
+pub fn selectFacesByTriangleMask(mask: []const bool) u32 {
+    if (!ensureFaceSel()) return 0;
+    const sel = g_sel_face orelse return 0;
+    if (mask.len < sel.len) return 0;
+    g_mode = .face;
+    restoreAllFaces();
+    @memset(sel, false);
+    var face: usize = 0;
+    while (face < sel.len) : (face += 1) {
+        if (mask[face]) setFaceGroup(sel, @intCast(face), true);
+    }
+    applyFaceHighlight();
+    return selCount();
 }
 
 /// Select (face mode) every displayed face whose authored group id is in [lo, hi). The

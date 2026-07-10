@@ -620,6 +620,16 @@ fn hostMeshTopoCreateFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_topo_flip_faces() → JSON {"ok","key","count"}. Reverse the winding of
+/// every selected authored face so its normal points to the opposite side. Geometry,
+/// UV attachment, paint, grouping, and the face selection stay intact.
+fn hostMeshTopoFlipFaces(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = scene3d.meshFlipSelectionWinding();
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_topo_loop_cut() → JSON {"ok","key","count"}. Slice the mesh by the axis-aligned
 /// plane across the ONE selected edge (normal = the edge's dominant world axis, through
 /// its midpoint — req_2837: keeps the ring level on tapered shapes) — the host-native loop
@@ -2580,6 +2590,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
     v8_runtime.registerHostFn("__mesh_topo_extrude_face", hostMeshTopoExtrudeFace);
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);
+    v8_runtime.registerHostFn("__mesh_topo_flip_faces", hostMeshTopoFlipFaces);
     v8_runtime.registerHostFn("__mesh_topo_loop_cut", hostMeshTopoLoopCut);
     v8_runtime.registerHostFn("__mesh_lc_begin", hostMeshLcBegin);
     v8_runtime.registerHostFn("__mesh_lc_preview", hostMeshLcPreview);

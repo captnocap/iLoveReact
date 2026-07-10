@@ -24,6 +24,13 @@ const ids = (commands: { id: string }[]) => commands.map((command) => command.id
 test('ordinary face selection still offers authored-face merge', () => {
   const commands = ids(meshTopoCommands({ selMode: 3, sel: 2 }, 1));
   assert(commands.includes('mesh-merge-faces'), 'Merge Faces remains available for a real face selection');
+  assert(commands.includes('mesh-flip-face'), 'Flip Face is available for any real face selection');
+});
+
+test('a single face exposes the winding correction beside face extrude', () => {
+  const commands = ids(meshTopoCommands({ selMode: 3, sel: 1 }, 1));
+  assert(commands.includes('mesh-extrude-face'), 'single-face Extrude disappeared');
+  assert(commands.includes('mesh-flip-face'), 'single-face Flip disappeared');
 });
 
 test('multi-part outliner selection cannot fall through to Merge Faces', () => {

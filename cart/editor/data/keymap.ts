@@ -14,6 +14,7 @@ import type { EditorState, ModelToolSnapshot } from './types';
 // Global chords fire on any surface (their commands self-gate via commandEnabled — e.g. Ctrl+S
 // Save is model-scoped, so it no-ops on the world). Keyed by a normalized chord string.
 const GLOBAL_CHORDS: Record<string, string> = {
+  'ctrl+n': 'new-map',
   'ctrl+o': 'open-map',
   'ctrl+p': 'open-file-explorer',
   'ctrl+shift+p': 'find-import-source',
@@ -54,8 +55,9 @@ const WORLD_KEYS: Record<string, string> = {
 };
 
 // Model bare-keys → command ids, dispatched (like the menus) through runCommand, which routes
-// each to the host tool api / the outliner-syncing face-op handlers. `mode` disambiguates the two
-// commands that share a key but never coexist: B is Fill while painting, Glass in face mode.
+// each to the host tool api / the outliner-syncing face-op handlers. `mode` disambiguates keys
+// whose commands never coexist: B is Fill while painting / Glass in face mode; X is Face Safety
+// while painting / Flip Face in face mode.
 // (Delete/Backspace/Escape stay ModelView-local — they're viewport-native, not registry commands.)
 export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'face' }[] = [
   { key: '1', commandId: 'mesh-vertex' },
@@ -70,6 +72,9 @@ export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'fac
   { key: 'e', commandId: 'mesh-extrude' },
   { key: 'l', commandId: 'mesh-loopcut' },
   { key: 'c', commandId: 'mesh-create-face' },
+  // X is contextual exactly as the Studio control contract was: flip winding in
+  // face mode, Face Safety while painting.
+  { key: 'x', commandId: 'mesh-flip-face', mode: 'face' },
   { key: 'd', commandId: 'mesh-detach' },
   { key: 'o', commandId: 'mesh-solidify' },
   { key: 'm', commandId: 'mesh-merge-faces' },

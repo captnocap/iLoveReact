@@ -1,9 +1,8 @@
-// editor/data/globalsStore.ts — on-disk persistence for the world GLOBALS
-// (GLOBALS req_2770), beside the world's other per-concern save files:
+// editor/data/globalsStore.ts — on-disk persistence for GAME-WIDE globals
+// (GLOBALS req_2770), intentionally outside named map documents:
 //
-//   zig-out/game/editor/painted-map.rmap    — the painting (host-side RMAP)
-//   zig-out/game/editor/world-pieces.json   — placed pieces + zones (worldStore)
-//   zig-out/game/editor/world-globals.json  — physics/player tunables (this file)
+//   zig-out/game/editor/maps/<stem>/...     — per-map painting + placements
+//   zig-out/game/editor/world-globals.json  — shared physics/player tunables
 //
 // Per-concern files, never one blob (V20). Saves are DEBOUNCED micro-saves,
 // exactly the worldStore contract: every worldGlobals change schedules a write,

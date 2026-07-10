@@ -5,6 +5,7 @@ import type { EditorState, ModelToolSnapshot, WorldObject } from './types';
 import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
 import { DEFAULT_BRUSH, defaultPalette } from '../../../runtime/paint/model';
 import { defaultMapPaint } from '../stage/mapPaint';
+import { activeMapDocumentStem } from './mapDocuments';
 import { defaultWorldGlobals } from './globals';
 import { nsGet, nsSet } from '../../../runtime/hooks/localstore';
 import { authoredIdFor, type AuthoredBuildPiece } from '../world/authoredRegistry';
@@ -87,6 +88,8 @@ export function initialState(): EditorState {
     colorSpinePalette: SPINE_DEFAULT_PALETTE.map((c) => ({ ...c })),
     colorSpineScenePick: null,
     buildDialogOpen: false,
+    mapDocumentOpen: false,
+    activeMapStem: activeMapDocumentStem(),
     addChunkOpen: false,
     eventbusPopoverOpen: false,
     perfPopoverOpen: false,

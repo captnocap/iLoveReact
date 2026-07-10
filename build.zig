@@ -1278,7 +1278,9 @@ pub fn build(b: *std.Build) void {
     // no SDL/V8 link; the cart binary gets it only through the gated
     // v8_bindings_game_map.zig ingredient.
     const game_map_test_mod = b.createModule(.{
-        .root_source_file = b.path("framework/game/map/engine.zig"),
+        // Keep the test module rooted at framework/: the map engine's flora
+        // boundary deliberately imports the sibling world/ recipe vocabulary.
+        .root_source_file = b.path("framework/testing_game_map.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,

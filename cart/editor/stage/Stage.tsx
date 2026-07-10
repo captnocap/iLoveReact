@@ -84,6 +84,8 @@ export default function Stage(props: {
         ) : activeDocument.kind === 'world' ? (
           <WorldEditorSurface
             paintActive={props.state.mapPaint.active}
+            mapStem={props.state.activeMapStem}
+            mapZones={props.state.mapPaint.zones}
             floor={props.state.floorIndex}
             wallsDown={props.state.wallsDown}
             activeCommandId={props.state.activeCommandId}

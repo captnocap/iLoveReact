@@ -144,6 +144,8 @@ export type ModelToolApi = {
   extrudeEdge: () => void;
   extrudeFace: () => void;
   createFace: () => void;
+  // Reverse selected face winding so its normal points to the opposite side.
+  flipSelection: () => boolean;
   loopCut: () => void;
   deleteSelection: () => void;
   appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string) => { lo: number; hi: number } | null;
@@ -444,6 +446,11 @@ export type EditorState = {
   colorSpinePalette: OklchColor[];
   colorSpineScenePick: string | null;
   buildDialogOpen: boolean;
+  /** Named map-document picker. Map documents own BOTH native painting and
+   * React-authored placements; switching replaces those concerns together. */
+  mapDocumentOpen: boolean;
+  /** Directory stem below zig-out/game/editor/maps/. */
+  activeMapStem: string;
   /** Map → Add Chunk… topology dialog (req_2703) */
   addChunkOpen: boolean;
   eventbusPopoverOpen: boolean;

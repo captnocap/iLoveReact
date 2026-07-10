@@ -102,6 +102,8 @@ export function mapHostLive(): boolean {
   return hasHost('__map_stroke_begin');
 }
 
+/** Drop every authored map concern and DISABLE the prior autosave target. The
+ * caller must explicitly bind a new target after loading/seeding a document. */
 export function mapReset(): void {
   callHost('__map_reset', undefined);
 }

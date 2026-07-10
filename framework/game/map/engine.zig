@@ -225,6 +225,11 @@ pub fn recordTileBindings(count: usize) void {
 }
 
 pub fn reset() void {
+    // A reset starts an UNBOUND map. Keeping the previous document's autosave
+    // target here is how a throwaway reset+grow sequence can overwrite the map
+    // that happened to be open before it. The caller must explicitly bind the
+    // new document after seeding/loading it.
+    g_autosave_len = 0;
     chunks.clearAll();
     roads.clearAll();
     g_road_under.clearRetainingCapacity();
@@ -238,6 +243,9 @@ pub fn reset() void {
     g_seen.clearRetainingCapacity();
     g_authoring_event_count = 0;
     g_authoring_event_dropped = 0;
+    // Painted-material bindings are authored per map and ride the RMAP. A new
+    // map must not inherit the outgoing map's material table.
+    g_tile_binding_count = 0;
 }
 
 /// The draft profile road clicks author with (set by chrome before drafting).

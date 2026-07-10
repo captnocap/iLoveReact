@@ -123,6 +123,7 @@ export type ModelToolApi = {
   extrudeEdge: () => void;
   extrudeFace: () => void;
   createFace: () => void;
+  flipSelection: () => boolean;
   loopCut: () => void;
   deleteSelection: () => void;
   // Live mirror editing (req_2758): flip one symmetry plane (0 = X, 1 = Y, 2 = Z) on/off.
@@ -320,6 +321,7 @@ const readTopoResult = (json: any): TopoResult | null => {
 const meshExtrudeEdge = (distance: number) => readTopoResult(host.__mesh_topo_extrude_edge?.(distance));
 const meshExtrudeFace = (distance: number) => readTopoResult(host.__mesh_topo_extrude_face?.(distance));
 const meshCreateFace = () => readTopoResult(host.__mesh_topo_create_face?.());
+const meshFlipFaces = () => readTopoResult(host.__mesh_topo_flip_faces?.());
 // Loop cut: slice the mesh by the plane perpendicular to the ONE selected edge (host op).
 const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
 // ── Face loop cut (the studio's Blockbench treatment): a host-owned popup session ──
@@ -1087,6 +1089,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
     extrudeFace: () => { if (model) applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
+    flipSelection: () => adoptMesh(meshFlipFaces()),
     // Mode-aware: face mode opens the studio-style popup session (direction/cuts/offset
     // with live preview); edge mode keeps the one-shot perpendicular-plane cut.
     loopCut: () => {
@@ -1550,7 +1553,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // headless repro harness for selection/tint bugs (req_2613). Each op waits a few
     // frames so camera-dependent doors (pick/box) act on a drawn viewport. Ops:
     //   mode:N sel:N add:N range:lo,hi pick:x,y pickadd:x,y box:x0,y0,x1,y1 snap revert
-    //   clear scope:lo,hi nudge:axis,amt gizmo:N undo redo del grouppaint:lo,hi,r,g,b
+    //   clear scope:lo,hi nudge:axis,amt gizmo:N undo redo del flip spiketrace:0|1
+    //   grouppaint:lo,hi,r,g,b
     //   detail:px wait:frames report atlas:/path.png parts addpart:kind orbit:dx,dy
     //   lcbegin lcprev:dir,cuts,off lcend:0|1 lcstate  (loop-cut session; off = 0..1 frac)
     //   paintend paintundo paintredo painthist layers layerop:op,id[,arg] progread
@@ -1633,6 +1637,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         // door echoes the session's last-previewed dir/cuts/offsetFrac + live key.
         else if (name === 'lcstate') console.error(`[meshops] lcstate → ${host.__mesh_lc_state?.() ?? 'n/a'}`);
         else if (name === 'del') adoptMesh(meshDeleteSelection());
+        else if (name === 'flip') { const r = meshFlipFaces(); adoptMesh(r); console.error(`[meshops] flip → ${JSON.stringify(r)}`); }
+        else if (name === 'spiketrace') host.__hmsc_spike_trace?.(num(a[0]) === 1 ? 1 : 0);
         else if (name === 'grouppaint') host.__model_paint_group_range?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
         else if (name === 'detail') applyPaintDetail(num(a[0]));
         // hidepart:lo,hi / showpart:lo,hi — the outliner eye, headless (req_2660 repro:
@@ -2062,6 +2068,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                       <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Extrude</Text>
                     </Pressable>
                   )}
+                  <Pressable
+                    onPress={() => { if (!adoptMesh(meshFlipFaces())) setError('Select face(s) to flip'); }}
+                    tooltip="Flip selected face(s) to the opposite side (X)"
+                    style={{
+                      paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+                      backgroundColor: '#203a2fee', borderWidth: 1, borderColor: '#3d765c',
+                    }}
+                  >
+                    <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Flip</Text>
+                  </Pressable>
                   <Pressable
                     onPress={openLoopCut}
                     tooltip="Loop cut across this face — popup picks direction, cuts, and offset (L)"
