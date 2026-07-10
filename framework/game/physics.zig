@@ -1340,6 +1340,16 @@ fn collideCircleRect(x: *f32, z: *f32, vx: *f32, vz: *f32, radius: f32, rect: []
     return true;
 }
 
+const COLLIDER_TOP_SIDE_CLEARANCE_METERS: f32 = 0.04;
+
+/// Whether the player's vertical capsule span intersects a collider's solid
+/// band closely enough to require horizontal side-push. This is deliberately
+/// relative to the collider band: negative world elevations (underwater basins,
+/// tunnels, basements) obey the same collision law as elevations above Y=0.
+fn bodyOverlapsColliderBand(feet_y: f32, height: f32, floor_y: f32, top_y: f32) bool {
+    return feet_y < top_y - COLLIDER_TOP_SIDE_CLEARANCE_METERS and feet_y + height > floor_y;
+}
+
 fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, height: f32, rects: []const f32, oriented: []const f32, restitution: f32, step_height: f32, walkable_side_push_grace: f32) void {
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
@@ -1348,11 +1358,10 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
         const rect_floor = rects[at + 8];
         const too_tall_to_step = rect_height > y + step_height;
         if (!solid and !too_tall_to_step) continue;
-        if (y >= rect_height - 0.04 or y + height < 0) continue;
-        // Banded solid: skip the side push when the body is entirely below the
-        // rect's floor — you walk UNDER a raised platform (a parking deck), not
-        // into it. Walls pass floor = −∞ so this never skips them.
-        if (y + height <= rect_floor) continue;
+        // Banded solid: skip side-push above the top or entirely below the
+        // floor. The comparison is collider-relative; world Y=0 is not sea
+        // level to generic physics and must not disable submerged collision.
+        if (!bodyOverlapsColliderBand(y, height, rect_floor, rect_height)) continue;
         const finite_floor_band = rect_floor > -100000;
         const grace_walkable = walkable_side_push_grace > 0 and finite_floor_band and rect_height <= y + step_height and y >= rect_floor - walkable_side_push_grace;
         // req_0742: slope_walkable skips the side-push so descending a slope/stairs
@@ -1376,8 +1385,7 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
         const rect_floor = oriented[o + 8];
         const too_tall_to_step = rect_height > y + step_height;
         if (!solid and !too_tall_to_step) continue;
-        if (y >= rect_height - 0.04 or y + height < 0) continue;
-        if (y + height <= rect_floor) continue;
+        if (!bodyOverlapsColliderBand(y, height, rect_floor, rect_height)) continue;
         const finite_floor_band = rect_floor > -100000;
         const grace_walkable = walkable_side_push_grace > 0 and finite_floor_band and rect_height <= y + step_height and y >= rect_floor - walkable_side_push_grace;
         // req_0742: slope_walkable skips the side-push so descending a slope/stairs

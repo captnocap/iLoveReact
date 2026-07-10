@@ -43,6 +43,8 @@ const Sim = struct {
     entities: []const [physics.ENTITY_FLOATS]f32 = &.{},
     // rect: [minX,minZ,maxX,maxZ,top,solid,friction,restitution,floor]
     rects: []const [physics.RECT_FLOATS]f32 = &.{},
+    // oriented: rect floats + [pivotX,pivotZ,yawRadians]
+    oriented: []const [physics.ORIENTED_FLOATS]f32 = &.{},
 
     fn pack(self: Sim, buf: []f32) []f32 {
         @memset(buf, 0);
@@ -69,7 +71,7 @@ const Sim = struct {
         buf[22] = self.surface_friction;
         buf[23] = self.surface_restitution;
         buf[11] = self.walkable_side_push_grace;
-        buf[24] = 0; // oriented count
+        buf[24] = @floatFromInt(self.oriented.len);
         var at: usize = H;
         for (self.entities) |e| {
             @memcpy(buf[at .. at + physics.ENTITY_FLOATS], &e);
@@ -78,6 +80,10 @@ const Sim = struct {
         for (self.rects) |r| {
             @memcpy(buf[at .. at + physics.RECT_FLOATS], &r);
             at += physics.RECT_FLOATS;
+        }
+        for (self.oriented) |r| {
+            @memcpy(buf[at .. at + physics.ORIENTED_FLOATS], &r);
+            at += physics.ORIENTED_FLOATS;
         }
         return buf[0..at];
     }
@@ -182,6 +188,40 @@ test "ground collide: solid wall blocks horizontal motion" {
         out = physics.step(sim.pack(&g_buf)).?;
         try testing.expect(out[1] <= 1 - 0.4 + 1e-4);
     }
+}
+
+test "ground collide: solid rect blocks a player fully below world zero" {
+    physics.clearHeightfields();
+    // Regression for req_2847: the player stands on a -2.5m seabed with their
+    // head still below Y=0. The rock band spans the seabed and must block just
+    // as it does above water; world zero has no collision semantics.
+    const seabed = [physics.RECT_FLOATS]f32{ -50, -50, 50, 50, -2.5, 0, 0.5, 0, -1e9 };
+    const rock = [physics.RECT_FLOATS]f32{ 1, -50, 2, 50, 9.21, 1, 0.5, 0, -2.6 };
+    const out = physics.step((Sim{
+        .dt = 0.05,
+        .px = 0.7,
+        .py = -2.5,
+        .pvx = 4,
+        .player_height = 1.65,
+        .rects = &.{ seabed, rock },
+    }).pack(&g_buf)).?;
+    try testing.expect(out[1] <= 1 - 0.4 + 1e-4);
+}
+
+test "ground collide: oriented mesh prop blocks a player fully below world zero" {
+    physics.clearHeightfields();
+    const seabed = [physics.RECT_FLOATS]f32{ -50, -50, 50, 50, -2.5, 0, 0.5, 0, -1e9 };
+    const rock = [physics.ORIENTED_FLOATS]f32{ 1, -50, 2, 50, 9.21, 1, 0.5, 0, -2.6, 0, 0, 0 };
+    const out = physics.step((Sim{
+        .dt = 0.05,
+        .px = 0.7,
+        .py = -2.5,
+        .pvx = 4,
+        .player_height = 1.65,
+        .rects = &.{seabed},
+        .oriented = &.{rock},
+    }).pack(&g_buf)).?;
+    try testing.expect(out[1] <= 1 - 0.4 + 1e-4);
 }
 
 test "ground collide: raised finite-band slabs are walk-under from below" {
