@@ -328,6 +328,10 @@ pub fn draftKind() ?Kind {
     return if (g_draft_active) kindOf(g_draft.profile) else null;
 }
 
+pub fn draftCurveRadius() f32 {
+    return if (g_draft_active) g_draft.curve_radius_m else 0;
+}
+
 pub fn addDraftPoint(raw: Point) void {
     if (!g_draft_active or g_draft.count >= MAX_POINTS_PER_PATH) return;
     const point = snapPoint(raw.gx, raw.gz);
@@ -458,7 +462,11 @@ pub fn railCount() usize {
 }
 
 pub fn lastPathId() u32 {
-    return if (g_next_id > 1) g_next_id - 1 else 0;
+    var last: u32 = 0;
+    for (&g_paths) |*slot| {
+        if (slot.used) last = @max(last, slot.id);
+    }
+    return last;
 }
 
 pub fn collectPaths(out: []Path) usize {

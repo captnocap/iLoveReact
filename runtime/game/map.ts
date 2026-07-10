@@ -233,6 +233,34 @@ export function mapSetFloraSpecs(specs: Float32Array): void {
 
 export type MapRoadProfile = { lanesF: number; lanesB: number; sidewalks: boolean };
 
+export type MapPathKind = 'road' | 'lightRail' | 'railway';
+export type MapPathProfile = MapRoadProfile & {
+  kind: MapPathKind;
+  tracks: number;
+  curveRadiusM: number;
+};
+export type MapPathInvalidReason = 'none' | 'tooFewPoints' | 'segmentTooShort' | 'curveTooTight';
+
+const PATH_KIND_INDEX: Record<MapPathKind, number> = { road: 0, lightRail: 1, railway: 2 };
+const PATH_KINDS: readonly MapPathKind[] = ['road', 'lightRail', 'railway'];
+const PATH_INVALID_REASONS: readonly MapPathInvalidReason[] = ['none', 'tooFewPoints', 'segmentTooShort', 'curveTooTight'];
+
+/** Arm the shared semantic path pen. Roads and rails share gesture/curve data;
+ * their compiler/render policies remain distinct behind this boundary. */
+export function mapPathSetProfile(profile: MapPathProfile): void {
+  if (hasHost('__map_path_set_profile')) {
+    callHost(
+      '__map_path_set_profile', undefined,
+      PATH_KIND_INDEX[profile.kind], profile.lanesF, profile.lanesB,
+      profile.sidewalks ? 1 : 0, profile.tracks, profile.curveRadiusM,
+    );
+    return;
+  }
+  // Honest hot-reload fallback: an older host can still author roads, but it
+  // cannot pretend to persist/render rail paths it does not understand.
+  if (profile.kind === 'road') mapRoadSetProfile(profile);
+}
+
 /** The draft profile road clicks author with. */
 export function mapRoadSetProfile(p: MapRoadProfile): void {
   callHost('__map_road_set_profile', undefined, p.lanesF, p.lanesB, p.sidewalks ? 1 : 0);
@@ -256,6 +284,22 @@ export function mapRoadCancel(): void {
 
 export function mapRoadDelete(id: number): boolean {
   return callHost<number>('__map_road_delete', 0, id) === 1;
+}
+
+export function mapPathCommit(): number {
+  return callHost<number>(hasHost('__map_path_commit') ? '__map_path_commit' : '__map_road_commit', 0);
+}
+
+export function mapPathCancel(): void {
+  callHost(hasHost('__map_path_cancel') ? '__map_path_cancel' : '__map_road_cancel', undefined);
+}
+
+export function mapPathUndoPoint(): boolean {
+  return callHost<number>('__map_path_undo', 0) === 1;
+}
+
+export function mapPathDelete(id: number): boolean {
+  return callHost<number>(hasHost('__map_path_delete') ? '__map_path_delete' : '__map_road_delete', 0, id) === 1;
 }
 
 /** Save the whole painting to a file — the blob never crosses the bridge (the
@@ -293,6 +337,51 @@ export function mapRoadStats(): { strokes: number; draftPoints: number; planTrun
   if (!ab) return { strokes: 0, draftPoints: 0, planTruncated: false };
   const out = new Float32Array(ab);
   return { strokes: out[0]!, draftPoints: out[1]!, planTruncated: out[2]! >= 0.5 };
+}
+
+export type MapPathStats = {
+  paths: number;
+  roads: number;
+  rails: number;
+  draftPoints: number;
+  planTruncated: boolean;
+  draftKind: MapPathKind | null;
+  valid: boolean;
+  invalidReason: MapPathInvalidReason;
+  minCurveM: number | null;
+  lastPathId: number;
+  curveRadiusM: number;
+};
+
+export function mapPathStats(): MapPathStats {
+  const ab = callHost<ArrayBuffer | null>('__map_path_stats', null);
+  if (!ab) {
+    const road = mapRoadStats();
+    return {
+      paths: road.strokes, roads: road.strokes, rails: 0,
+      draftPoints: road.draftPoints, planTruncated: road.planTruncated,
+      draftKind: road.draftPoints > 0 ? 'road' : null,
+      valid: road.draftPoints >= 2, invalidReason: road.draftPoints >= 2 ? 'none' : 'tooFewPoints',
+      minCurveM: null, lastPathId: 0, curveRadiusM: 0,
+    };
+  }
+  const out = new Float32Array(ab);
+  const kindIndex = Math.trunc(out[5] ?? -1);
+  const reasonIndex = Math.max(0, Math.min(PATH_INVALID_REASONS.length - 1, Math.trunc(out[7] ?? 0)));
+  const minCurve = out[8] ?? -1;
+  return {
+    paths: Math.trunc(out[0] ?? 0),
+    roads: Math.trunc(out[1] ?? 0),
+    rails: Math.trunc(out[2] ?? 0),
+    draftPoints: Math.trunc(out[3] ?? 0),
+    planTruncated: (out[4] ?? 0) >= 0.5,
+    draftKind: kindIndex >= 0 ? (PATH_KINDS[kindIndex] ?? null) : null,
+    valid: (out[6] ?? 0) >= 0.5,
+    invalidReason: PATH_INVALID_REASONS[reasonIndex]!,
+    minCurveM: minCurve >= 0 ? minCurve : null,
+    lastPathId: Math.trunc(out[9] ?? 0),
+    curveRadiusM: out[10] ?? 0,
+  };
 }
 
 /** Begin a stroke at a world-meter point (chrome-driven path). */

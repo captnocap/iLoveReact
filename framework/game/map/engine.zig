@@ -355,7 +355,9 @@ pub fn strokeEnd() StrokeStats {
         g_stats.water_dry = !g_water_wet_any;
     }
     g_stats.touched = dirtyChunkCount();
-    if (g_stats.stamps > 0) _ = autosaveNow();
+    // Transport anchors are still a draft and are not serialized until Finish;
+    // writing the unchanged RMAP after every click only stalls the live pen.
+    if (g_stats.stamps > 0 and g_tool.channel != .road) _ = autosaveNow();
     pushStrokeAuthoringEvent();
     return g_stats;
 }

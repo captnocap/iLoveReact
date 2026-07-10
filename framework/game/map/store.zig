@@ -436,6 +436,34 @@ test "load rejects garbage LOUDLY and leaves a clean world" {
     try std.testing.expectEqual(@as(usize, 0), chunks.chunkCount());
 }
 
+test "v2 road recipes migrate with the historical five-metre curve" {
+    var bytes: [128]u8 = @splat(0);
+    var sink = Sink{ .buf = bytes[0..] };
+    sink.put(u32, MAGIC);
+    sink.put(u32, 2);
+    sink.put(u32, 0); // bindings
+    sink.put(u32, 0); // chunks
+    sink.put(u32, 1); // roads
+    sink.put(u32, 41); // legacy id (sequentially reminted)
+    sink.put(i32, 1);
+    sink.put(i32, 1);
+    sink.put(u8, 1);
+    sink.put(f32, 50);
+    sink.put(u32, 2);
+    sink.put(f32, 10.5);
+    sink.put(f32, 20.5);
+    sink.put(f32, 40.5);
+    sink.put(f32, 20.5);
+
+    var bindings: [8][BINDING_FLOATS]f32 = undefined;
+    var binding_count: usize = 0;
+    try std.testing.expect(load(bytes[0..sink.n], bindings[0..], &binding_count));
+    var paths: [transport.MAX_PATHS]transport.Path = undefined;
+    try std.testing.expectEqual(@as(usize, 1), transport.collectPaths(paths[0..]));
+    try std.testing.expectEqual(transport.Kind.road, transport.kindOf(paths[0].profile));
+    try std.testing.expectApproxEqAbs(transport.TUNING.legacy_road_curve_radius_m, paths[0].curve_radius_m, 0.001);
+}
+
 test "inspectHeader reads v1 and current chunk counts without loading the world" {
     var v1: [12]u8 = @splat(0);
     std.mem.writeInt(u32, v1[0..4], MAGIC, .little);

@@ -323,6 +323,28 @@ fn hostRoadSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     });
 }
 
+// __map_path_set_profile(kind, lanesF, lanesB, sidewalks, tracks, curveRadius)
+// — the one strict road/rail authoring boundary. Kind: 0 road, 1 light rail,
+// 2 railway. Inapplicable fields are ignored by the tagged host profile.
+fn hostPathSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const raw_kind = argToF64(info, 0) orelse 0;
+    const kind_index: u8 = @intFromFloat(std.math.clamp(raw_kind, 0, 2));
+    const kind: engine.transport.Kind = @enumFromInt(kind_index);
+    const tracks: i32 = @intFromFloat(@max(1, argToF64(info, 4) orelse 1));
+    const profile: engine.transport.Profile = switch (kind) {
+        .road => .{ .road = .{
+            .lanesF = @intFromFloat(@max(0, argToF64(info, 1) orelse 1)),
+            .lanesB = @intFromFloat(@max(0, argToF64(info, 2) orelse 1)),
+            .sidewalks = (argToF64(info, 3) orelse 1) != 0,
+        } },
+        .light_rail => .{ .light_rail = .{ .tracks = tracks } },
+        .railway => .{ .railway = .{ .tracks = tracks } },
+    };
+    const curve_radius: f32 = @floatCast(argToF64(info, 5) orelse engine.transport.defaultCurveRadius(kind));
+    engine.setPathProfile(profile, curve_radius);
+}
+
 // __map_road_set_kinds(f32[8]) — RoadCellKind → content tile index, in enum
 // order (laneNorth, laneSouth, laneEast, laneWest, median, sidewalk, junction,
 // crosswalk).
@@ -341,9 +363,22 @@ fn hostRoadCommit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnF64(info, @floatFromInt(engine.roadCommit() orelse 0));
 }
 
+fn hostPathCommit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    hostRoadCommit(info_c);
+}
+
 fn hostRoadCancel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     _ = info_c;
     engine.roadCancel();
+}
+
+fn hostPathCancel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    hostRoadCancel(info_c);
+}
+
+fn hostPathUndo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnF64(info, if (engine.pathUndoPoint()) 1 else 0);
 }
 
 // __map_road_delete(id) -> 0|1
@@ -357,6 +392,10 @@ fn hostRoadDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnF64(info, if (engine.roadDelete(@intFromFloat(id))) 1 else 0);
 }
 
+fn hostPathDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    hostRoadDelete(info_c);
+}
+
 // __map_road_stats() -> [strokeCount, draftPoints, planTruncated]
 var road_stats_out: [3]f32 = undefined;
 
@@ -366,6 +405,28 @@ fn hostRoadStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     road_stats_out[1] = @floatFromInt(engine.roads.draftPointCount());
     road_stats_out[2] = if (engine.road_plan_truncated) 1 else 0;
     setReturnF32Buffer(info, road_stats_out[0..]);
+}
+
+// __map_path_stats() -> [paths, roads, rails, draftPoints, planTruncated,
+// draftKind(-1 none), valid, invalidReason, minCurve(-1 straight), lastId,
+// draftCurveRadius]. Read-only UI-rate diagnostics.
+var path_stats_out: [11]f32 = undefined;
+
+fn hostPathStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const validation = engine.transport.draftValidation();
+    path_stats_out[0] = @floatFromInt(engine.transport.pathCount());
+    path_stats_out[1] = @floatFromInt(engine.transport.countKind(.road));
+    path_stats_out[2] = @floatFromInt(engine.transport.railCount());
+    path_stats_out[3] = @floatFromInt(engine.transport.draftPointCount());
+    path_stats_out[4] = if (engine.road_plan_truncated) 1 else 0;
+    path_stats_out[5] = if (engine.transport.draftKind()) |kind| @floatFromInt(@intFromEnum(kind)) else -1;
+    path_stats_out[6] = if (validation.valid) 1 else 0;
+    path_stats_out[7] = @floatFromInt(@intFromEnum(validation.reason));
+    path_stats_out[8] = if (std.math.isFinite(validation.min_curve_m)) validation.min_curve_m else -1;
+    path_stats_out[9] = @floatFromInt(engine.transport.lastPathId());
+    path_stats_out[10] = engine.transport.draftCurveRadius();
+    setReturnF32Buffer(info, path_stats_out[0..]);
 }
 
 fn argWorldPoint(info: v8.FunctionCallbackInfo) ?[2]f32 {
@@ -625,11 +686,17 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_drop_zone", hostDropZone);
     v8_runtime.registerHostFn("__map_set_flora_specs", hostSetFloraSpecs);
     v8_runtime.registerHostFn("__map_road_set_profile", hostRoadSetProfile);
+    v8_runtime.registerHostFn("__map_path_set_profile", hostPathSetProfile);
     v8_runtime.registerHostFn("__map_road_set_kinds", hostRoadSetKinds);
     v8_runtime.registerHostFn("__map_road_commit", hostRoadCommit);
     v8_runtime.registerHostFn("__map_road_cancel", hostRoadCancel);
     v8_runtime.registerHostFn("__map_road_delete", hostRoadDelete);
     v8_runtime.registerHostFn("__map_road_stats", hostRoadStats);
+    v8_runtime.registerHostFn("__map_path_commit", hostPathCommit);
+    v8_runtime.registerHostFn("__map_path_cancel", hostPathCancel);
+    v8_runtime.registerHostFn("__map_path_undo", hostPathUndo);
+    v8_runtime.registerHostFn("__map_path_delete", hostPathDelete);
+    v8_runtime.registerHostFn("__map_path_stats", hostPathStats);
     v8_runtime.registerHostFn("__map_save_file", hostSaveFile);
     v8_runtime.registerHostFn("__map_inspect_file", hostInspectFile);
     v8_runtime.registerHostFn("__map_set_autosave_file", hostSetAutosaveFile);

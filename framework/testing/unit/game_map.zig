@@ -24,3 +24,25 @@ test "reset unbinds the outgoing document and clears map-scoped bindings" {
     _ = chunks.growChunk(0, 0).?;
     try std.testing.expect(!engine.autosaveNow());
 }
+
+test "transport pen previews after one anchor and keeps rail out of the road tile compiler" {
+    engine.reset();
+    defer engine.reset();
+    const chunk = chunks.growChunk(0, 0).?;
+    engine.setTool(.{ .channel = .road });
+    engine.setPathProfile(.{ .light_rail = .{ .tracks = 2 } }, 18);
+
+    engine.strokeBegin(-20, 0);
+    _ = engine.strokeEnd();
+    engine.setPathHover(20, 0);
+    const live = engine.transport.draftPreview().?;
+    try std.testing.expectEqual(@as(usize, 1), engine.transport.draftPointCount());
+    try std.testing.expectEqual(@as(usize, 2), live.points.len);
+    try std.testing.expect(engine.transport.draftValidation().valid);
+
+    engine.strokeBegin(20, 0);
+    _ = engine.strokeEnd();
+    try std.testing.expect(engine.pathCommit() != null);
+    try std.testing.expectEqual(@as(usize, 1), engine.transport.railCount());
+    for (chunk.tiles) |tile| try std.testing.expectEqual(chunks.EMPTY_CELL, tile);
+}

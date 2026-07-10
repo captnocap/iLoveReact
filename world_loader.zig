@@ -45,6 +45,7 @@ const game_physics = @import("framework/game/physics.zig");
 // engine, and refreshes its heightfield colliders — all in-process, no bridge.
 const map_paint = @import("framework/game/map/engine.zig");
 const map_chunks = @import("framework/game/map/chunks.zig");
+const map_transport = @import("framework/game/map/transport.zig");
 
 // Resolution of each materialized shader's 1-tile texture (the shader's canvas
 // is exactly one 1m tile; the face sampler REPEATS it across the surface).
@@ -77,6 +78,58 @@ const PAINT_BEAM_HEIGHT_METERS: f32 = 42;
 const PAINT_BEAM_ALPHA: f32 = 0.32;
 const PAINT_GIZMO_SURFACE_LIFT_M: f32 = 0.035;
 const PAINT_GIZMO_PROFILE_MAX_M: f32 = 8;
+
+/// The rendered vocabulary for semantic rail paths and the live path ghost.
+/// Values are P2 tuning, consumed by both committed and preview geometry.
+const TransportRenderTuning = struct {
+    surface_lift_m: f32,
+    preview_thickness_m: f32,
+    preview_alpha: f32,
+    anchor_marker_m: f32,
+    segment_overlap_m: f32,
+    rail_gauge_m: f32,
+    double_track_spacing_m: f32,
+    rail_width_m: f32,
+    rail_height_m: f32,
+    sleeper_spacing_m: f32,
+    sleeper_width_m: f32,
+    sleeper_height_m: f32,
+    railway_bed_margin_m: f32,
+    railway_bed_height_m: f32,
+    light_rail_slab_margin_m: f32,
+    light_rail_slab_height_m: f32,
+    preview_color: [3]f32,
+    invalid_color: [3]f32,
+    ballast_color: [3]f32,
+    slab_color: [3]f32,
+    sleeper_color: [3]f32,
+    steel_color: [3]f32,
+};
+
+const TRANSPORT_RENDER = TransportRenderTuning{
+    .surface_lift_m = 0.055,
+    .preview_thickness_m = 0.07,
+    .preview_alpha = 0.58,
+    .anchor_marker_m = 1.1,
+    .segment_overlap_m = 0.08,
+    .rail_gauge_m = 1.435,
+    .double_track_spacing_m = 3.6,
+    .rail_width_m = 0.095,
+    .rail_height_m = 0.13,
+    .sleeper_spacing_m = 0.72,
+    .sleeper_width_m = 0.19,
+    .sleeper_height_m = 0.09,
+    .railway_bed_margin_m = 0.95,
+    .railway_bed_height_m = 0.11,
+    .light_rail_slab_margin_m = 0.72,
+    .light_rail_slab_height_m = 0.08,
+    .preview_color = .{ 0.16, 0.88, 1.0 },
+    .invalid_color = .{ 1.0, 0.2, 0.16 },
+    .ballast_color = .{ 0.33, 0.31, 0.28 },
+    .slab_color = .{ 0.32, 0.36, 0.41 },
+    .sleeper_color = .{ 0.34, 0.22, 0.14 },
+    .steel_color = .{ 0.68, 0.72, 0.76 },
+};
 // Live-foliage preview STARTING sizes (req_2497: painting flora grows LITERAL
 // blades/bushes/flowers/palms live). These are NOT walls (req_2843: "the
 // 15.5mb cap on flora is killing me" — dozens of asks died on fixed budgets):
@@ -3803,6 +3856,16 @@ pub const Runtime = struct {
     // mapping paintPointer needs.
     paint_kids_first: ?usize = null,
     paint_beam_kid: ?usize = null,
+    /// req_2924: committed rail and the current road/rail ghost are native
+    /// cube-instance ribbons. Committed rows rebuild only when path recipes or
+    /// terrain move; preview rows only when the snapped hover/draft changes.
+    transport_committed_kid: ?usize = null,
+    transport_preview_kid: ?usize = null,
+    transport_committed_rows: std.ArrayListUnmanaged(f32) = .{},
+    transport_preview_rows: std.ArrayListUnmanaged(f32) = .{},
+    transport_committed_revision: u64 = 0,
+    transport_draft_revision: u64 = 0,
+    transport_preview_active: bool = false,
     paint_slot_used: [MAX_PAINT_SLOTS]bool = @splat(false),
     paint_slot_chunk: [MAX_PAINT_SLOTS][2]i32 = @splat(.{ 0, 0 }),
     paint_slot_ver: [MAX_PAINT_SLOTS]u32 = @splat(0),
@@ -3986,6 +4049,8 @@ pub const Runtime = struct {
         self.erased_rows.deinit(self.allocator);
         self.wall_collapsed_rows.deinit(self.allocator);
         self.skin_box_buf.deinit(self.allocator);
+        self.transport_committed_rows.deinit(self.allocator);
+        self.transport_preview_rows.deinit(self.allocator);
         {
             var it = self.live_mat_keys.valueIterator();
             while (it.next()) |v| self.allocator.free(v.*);
@@ -5487,6 +5552,29 @@ pub const Runtime = struct {
             .scene3d_vertices = self.cube[0..],
             .scene3d_vert_count = 36,
             .scene3d_color_a = PAINT_BEAM_ALPHA,
+        });
+        self.transport_committed_kid = self.kid_list.items.len;
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = false,
+            .scene3d_geom_key = "box",
+            .scene3d_vertices = self.cube[0..],
+            .scene3d_vert_count = 36,
+            .scene3d_instance_data = &.{},
+            .scene3d_instance_count = 0,
+            .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
+            .scene3d_instance_static = false,
+        });
+        self.transport_preview_kid = self.kid_list.items.len;
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = false,
+            .scene3d_geom_key = "box",
+            .scene3d_vertices = self.cube[0..],
+            .scene3d_vert_count = 36,
+            .scene3d_instance_data = &.{},
+            .scene3d_instance_count = 0,
+            .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
+            .scene3d_instance_static = false,
+            .scene3d_color_a = TRANSPORT_RENDER.preview_alpha,
         });
         self.paint_kids_first = self.kid_list.items.len;
         var paint_slot: usize = 0;
@@ -8080,6 +8168,225 @@ fn paintWaterSurface(raw_depths: []const f32, beds: []const f32, depths: []f32, 
     return true;
 }
 
+// ── semantic road / rail path preview (req_2924) ─────────────────────────────
+
+fn transportWorldPoint(point: map_transport.Point) [2]f32 {
+    const author_origin = map_chunks.CHUNK_METERS / 2;
+    return .{ point.gx - author_origin, point.gz - author_origin };
+}
+
+fn transportGroundY(runtime: *Runtime, x: f32, z: f32) f32 {
+    const cx = map_chunks.chunkOfGlobalTile(map_chunks.globalTile(x));
+    const cz = map_chunks.chunkOfGlobalTile(map_chunks.globalTile(z));
+    const chunk = map_chunks.chunkAt(cx, cz) orelse return 0;
+    return paintGroundY(paintSlotFloorFor(runtime, cx, cz), chunk, x, z);
+}
+
+/// Append one terrain-draped cube row whose local +Z runs from A to B.
+fn appendTransportBox(
+    runtime: *Runtime,
+    rows: *std.ArrayListUnmanaged(f32),
+    ax: f32,
+    az: f32,
+    bx: f32,
+    bz: f32,
+    width_m: f32,
+    height_m: f32,
+    lift_m: f32,
+    color: [3]f32,
+) !void {
+    const dx = bx - ax;
+    const dz = bz - az;
+    const horizontal = @sqrt(dx * dx + dz * dz);
+    if (horizontal < 0.0001) return;
+    const ay = transportGroundY(runtime, ax, az) + lift_m + height_m * 0.5;
+    const by = transportGroundY(runtime, bx, bz) + lift_m + height_m * 0.5;
+    const dy = by - ay;
+    const length = @sqrt(horizontal * horizontal + dy * dy) + TRANSPORT_RENDER.segment_overlap_m;
+    const degrees = 180.0 / std.math.pi;
+    try rows.appendSlice(runtime.allocator, &[INSTANCE_STRIDE]f32{
+        (ax + bx) * 0.5,
+        (ay + by) * 0.5,
+        (az + bz) * 0.5,
+        -std.math.atan2(dy, horizontal) * degrees,
+        std.math.atan2(dx, dz) * degrees,
+        0,
+        width_m,
+        height_m,
+        length,
+        color[0],
+        color[1],
+        color[2],
+    });
+}
+
+fn appendRoadPreview(runtime: *Runtime, path: map_transport.Path, rows: *std.ArrayListUnmanaged(f32), color: [3]f32) !void {
+    const profile = switch (path.profile) {
+        .road => |road| road,
+        else => return,
+    };
+    var curve: [map_transport.MAX_CURVE_POINTS]map_transport.Point = undefined;
+    const count = map_transport.curvePoints(path.points, path.curve_radius_m, curve[0..]);
+    if (count < 2) return;
+    const width_m: f32 = @floatFromInt(map_paint.roads.roadWidthTiles(profile));
+    var i: usize = 0;
+    while (i + 1 < count) : (i += 1) {
+        const a = transportWorldPoint(curve[i]);
+        const b = transportWorldPoint(curve[i + 1]);
+        try appendTransportBox(
+            runtime,
+            rows,
+            a[0],
+            a[1],
+            b[0],
+            b[1],
+            width_m,
+            TRANSPORT_RENDER.preview_thickness_m,
+            TRANSPORT_RENDER.surface_lift_m,
+            color,
+        );
+    }
+}
+
+fn appendRailPath(runtime: *Runtime, path: map_transport.Path, rows: *std.ArrayListUnmanaged(f32), preview: bool, valid: bool) !void {
+    const kind = map_transport.kindOf(path.profile);
+    const rail_profile = switch (path.profile) {
+        .light_rail => |rail| rail,
+        .railway => |rail| rail,
+        else => return,
+    };
+    var curve: [map_transport.MAX_CURVE_POINTS]map_transport.Point = undefined;
+    const count = map_transport.curvePoints(path.points, path.curve_radius_m, curve[0..]);
+    if (count < 2) return;
+
+    const tracks: usize = @intCast(std.math.clamp(rail_profile.tracks, 1, map_transport.TUNING.max_tracks));
+    const track_span = TRANSPORT_RENDER.double_track_spacing_m * @as(f32, @floatFromInt(tracks - 1)) + TRANSPORT_RENDER.rail_gauge_m;
+    const is_light_rail = kind == .light_rail;
+    const bed_margin = if (is_light_rail) TRANSPORT_RENDER.light_rail_slab_margin_m else TRANSPORT_RENDER.railway_bed_margin_m;
+    const bed_height = if (is_light_rail) TRANSPORT_RENDER.light_rail_slab_height_m else TRANSPORT_RENDER.railway_bed_height_m;
+    const preview_color = if (valid) TRANSPORT_RENDER.preview_color else TRANSPORT_RENDER.invalid_color;
+    const bed_color = if (preview) preview_color else if (is_light_rail) TRANSPORT_RENDER.slab_color else TRANSPORT_RENDER.ballast_color;
+    const detail_color = if (preview) preview_color else TRANSPORT_RENDER.steel_color;
+    const sleeper_color = if (preview) preview_color else TRANSPORT_RENDER.sleeper_color;
+    const bed_width = track_span + bed_margin * 2;
+    var sleeper_to_next: f32 = 0;
+
+    var i: usize = 0;
+    while (i + 1 < count) : (i += 1) {
+        const a = transportWorldPoint(curve[i]);
+        const b = transportWorldPoint(curve[i + 1]);
+        const dx = b[0] - a[0];
+        const dz = b[1] - a[1];
+        const segment_length = @sqrt(dx * dx + dz * dz);
+        if (segment_length < 0.0001) continue;
+        const right_x = -dz / segment_length;
+        const right_z = dx / segment_length;
+
+        try appendTransportBox(
+            runtime,
+            rows,
+            a[0],
+            a[1],
+            b[0],
+            b[1],
+            bed_width,
+            bed_height,
+            TRANSPORT_RENDER.surface_lift_m,
+            bed_color,
+        );
+
+        var track_index: usize = 0;
+        while (track_index < tracks) : (track_index += 1) {
+            const centered_index = @as(f32, @floatFromInt(track_index)) - @as(f32, @floatFromInt(tracks - 1)) * 0.5;
+            const track_center = centered_index * TRANSPORT_RENDER.double_track_spacing_m;
+            for ([_]f32{ -0.5, 0.5 }) |rail_side| {
+                const offset = track_center + rail_side * TRANSPORT_RENDER.rail_gauge_m;
+                try appendTransportBox(
+                    runtime,
+                    rows,
+                    a[0] + right_x * offset,
+                    a[1] + right_z * offset,
+                    b[0] + right_x * offset,
+                    b[1] + right_z * offset,
+                    TRANSPORT_RENDER.rail_width_m,
+                    TRANSPORT_RENDER.rail_height_m,
+                    TRANSPORT_RENDER.surface_lift_m + bed_height,
+                    detail_color,
+                );
+            }
+        }
+
+        // The live ghost keeps ballast + both steel lines but omits sleepers;
+        // spacing hundreds of ties while the cursor moves adds no shape signal.
+        if (!is_light_rail and !preview) {
+            while (sleeper_to_next <= segment_length) : (sleeper_to_next += TRANSPORT_RENDER.sleeper_spacing_m) {
+                const t = sleeper_to_next / segment_length;
+                const cx = a[0] + dx * t;
+                const cz = a[1] + dz * t;
+                const half_sleeper = bed_width * 0.5 - bed_margin * 0.25;
+                try appendTransportBox(
+                    runtime,
+                    rows,
+                    cx - right_x * half_sleeper,
+                    cz - right_z * half_sleeper,
+                    cx + right_x * half_sleeper,
+                    cz + right_z * half_sleeper,
+                    TRANSPORT_RENDER.sleeper_width_m,
+                    TRANSPORT_RENDER.sleeper_height_m,
+                    TRANSPORT_RENDER.surface_lift_m + bed_height,
+                    sleeper_color,
+                );
+            }
+            sleeper_to_next -= segment_length;
+        }
+    }
+}
+
+fn updateTransportNode(runtime: *Runtime, maybe_kid: ?usize, rows: *std.ArrayListUnmanaged(f32)) void {
+    const kid = maybe_kid orelse return;
+    const node = &runtime.kid_list.items[kid];
+    node.scene3d_mesh = rows.items.len >= INSTANCE_STRIDE;
+    node.scene3d_instance_data = rows.items;
+    node.scene3d_instance_count = @intCast(rows.items.len / INSTANCE_STRIDE);
+    node.scene3d_instance_version +%= 1;
+}
+
+fn rebuildCommittedTransport(runtime: *Runtime, force: bool) void {
+    const revision = map_transport.committedRevision();
+    if (!force and runtime.transport_committed_revision == revision) return;
+    runtime.transport_committed_rows.clearRetainingCapacity();
+    var paths: [map_transport.MAX_PATHS]map_transport.Path = undefined;
+    const count = map_transport.collectPaths(paths[0..]);
+    for (paths[0..count]) |path| {
+        if (map_transport.kindOf(path.profile) == .road) continue;
+        appendRailPath(runtime, path, &runtime.transport_committed_rows, false, true) catch {
+            runtime.transport_committed_rows.clearRetainingCapacity();
+            break;
+        };
+    }
+    updateTransportNode(runtime, runtime.transport_committed_kid, &runtime.transport_committed_rows);
+    runtime.transport_committed_revision = revision;
+}
+
+fn rebuildTransportPreview(runtime: *Runtime, active: bool, force: bool) void {
+    const revision = map_transport.draftRevision();
+    if (!force and runtime.transport_draft_revision == revision and runtime.transport_preview_active == active) return;
+    runtime.transport_preview_rows.clearRetainingCapacity();
+    if (active) {
+        if (map_transport.draftPreview()) |path| {
+            const validation = map_transport.validate(path);
+            const color = if (validation.valid) TRANSPORT_RENDER.preview_color else TRANSPORT_RENDER.invalid_color;
+            switch (map_transport.kindOf(path.profile)) {
+                .road => appendRoadPreview(runtime, path, &runtime.transport_preview_rows, color) catch runtime.transport_preview_rows.clearRetainingCapacity(),
+                .light_rail, .railway => appendRailPath(runtime, path, &runtime.transport_preview_rows, true, validation.valid) catch runtime.transport_preview_rows.clearRetainingCapacity(),
+            }
+        }
+    }
+    updateTransportNode(runtime, runtime.transport_preview_kid, &runtime.transport_preview_rows);
+    runtime.transport_draft_revision = revision;
+    runtime.transport_preview_active = active;
+}
+
 fn paintGizmoColor(tool: map_paint.Tool) [3]f32 {
     if (tool.mode == .erase) return .{ 0.95, 0.25, 0.2 };
     return switch (tool.channel) {
@@ -8130,6 +8437,22 @@ fn dressPaintGizmo(runtime: *Runtime, node: *Node, hover: [3]f32, tool: map_pain
     node.scene3d_color_r = color[0];
     node.scene3d_color_g = color[1];
     node.scene3d_color_b = color[2];
+
+    // The path pen targets a precise semantic anchor, not a brush footprint.
+    // Once an anchor exists the full-width live path node becomes the gizmo.
+    if (tool.channel == .road) {
+        setPaintGizmoMesh(node, "paint-gizmo-rings", runtime.brush_rings[0..], 0.92);
+        setPaintGizmoTransform(
+            node,
+            hover,
+            TRANSPORT_RENDER.anchor_marker_m,
+            1,
+            TRANSPORT_RENDER.anchor_marker_m,
+            PAINT_GIZMO_SURFACE_LIFT_M,
+            0,
+        );
+        return;
+    }
 
     const diamond_rot: f32 = if (tool.shape == .diamond) std.math.pi / 4.0 else 0.0;
     switch (map_paint.brushGizmo()) {
@@ -8208,10 +8531,23 @@ fn applyPaintLayer(runtime: *Runtime) void {
         runtime.paint_hover = null;
     }
 
+    const live_tool = map_paint.tool();
+    const path_active = armed and live_tool.channel == .road;
+    if (path_active and runtime.paint_hover != null) {
+        const hover = runtime.paint_hover.?;
+        map_paint.setPathHover(hover[0], hover[2]);
+    } else {
+        map_paint.clearPathHover();
+    }
+    // Capture the height dirty bit before the chunk mirror clears it. Rail and
+    // preview boxes then follow sculpted terrain without becoming frame work.
+    var path_terrain_dirty = false;
+
     // painted-chunk mirror: assign slots, re-bake dirty heights, refresh colliders
     var foliage_stale = false;
     for (map_chunks.slots()) |maybe| {
         const chunk = maybe orelse continue;
+        path_terrain_dirty = path_terrain_dirty or chunk.dirty.height;
         var slot: ?usize = null;
         var free_slot: ?usize = null;
         for (0..MAX_PAINT_SLOTS) |i| {
@@ -8403,6 +8739,11 @@ fn applyPaintLayer(runtime: *Runtime) void {
         }
     }
 
+    // Height mirrors are current now, so a forced rail re-drape samples the
+    // exact 121-grid surface the user sees rather than the previous frame.
+    rebuildCommittedTransport(runtime, path_terrain_dirty);
+    rebuildTransportPreview(runtime, path_active, path_terrain_dirty);
+
     // req_2838: when the last regen CLIPPED a family, the preview follows the
     // author's attention — once the anchor (brush, else camera look) drifts
     // half a chunk from where the budget was last spent, regrow around the new
@@ -8424,7 +8765,7 @@ fn applyPaintLayer(runtime: *Runtime) void {
     // the brush gizmo: preview-only chrome over the footprint at the hover point
     if (runtime.paint_beam_kid) |beam_kid| {
         const node = &runtime.kid_list.items[beam_kid];
-        if (armed and runtime.paint_hover != null) {
+        if (armed and runtime.paint_hover != null and !(path_active and map_transport.draftPointCount() > 0)) {
             const hover = runtime.paint_hover.?;
             const tool = map_paint.tool();
             dressPaintGizmo(runtime, node, hover, tool);
