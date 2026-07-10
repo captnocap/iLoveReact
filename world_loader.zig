@@ -8089,6 +8089,28 @@ fn lerpF64(a: f64, b: f64, t: f64) f64 {
     return a + (b - a) * t;
 }
 
+/// Seeded Fisher–Yates over rows [first, end) of a family buffer (req_2868).
+/// Deterministic per chunk: the same permutation every regen, so the distant
+/// LOD subset never shimmers while painting elsewhere. WORKER THREAD.
+fn shuffleFoliageRows(buf: []f32, first: u32, end: u32, seed: u32) void {
+    var h = seed;
+    var i: u32 = end - first;
+    while (i > 1) {
+        i -= 1;
+        h = foliage.mix(h);
+        const j = h % (i + 1);
+        if (j == i) continue;
+        const a = @as(usize, first + i) * foliage.STRIDE;
+        const b = @as(usize, first + j) * foliage.STRIDE;
+        var k: usize = 0;
+        while (k < foliage.STRIDE) : (k += 1) {
+            const tmp = buf[a + k];
+            buf[a + k] = buf[b + k];
+            buf[b + k] = tmp;
+        }
+    }
+}
+
 /// Ground height on the surface the painted ground RENDERS — the chunk's
 /// 121-grid abs-max floor downsample (the same grid the collider walks).
 /// heightAt's fine 241-grid bilinear can sit up to half a metre BELOW the
@@ -8441,6 +8463,10 @@ fn applyFoliageResult(runtime: *Runtime, result: FoliageResult) void {
         // family whose segment append failed draws whole.
         const segs = set.segs[fi].items;
         node.scene3d_instance_segments = if (result.segs_ok[fi] and segs.len > 0) segs else null;
+        // req_2868: grass/flowers/bush (0-2) are per-chunk shuffled by the
+        // worker, so the renderer may thin far segments to a prefix. Fronds
+        // and trunks keep authored order and always draw whole.
+        node.scene3d_instance_lod_density = fi < 3 and node.scene3d_instance_segments != null;
     }
 }
 
@@ -8603,6 +8629,19 @@ fn buildFoliageRows(runtime: *Runtime, job: FoliageJob) FoliageResult {
         // headroom (palm trunk + crown ≈ 11 m) vertically; conservative
         // bounds only ever draw a little extra, never cull a visible plant.
         const seg_end = [5]u32{ grass_n, flower_n, bush_n, frond_n, trunk_n };
+        // req_2868: shuffle each thin-able family's chunk rows (seeded per
+        // chunk, IDENTICAL across regens — no distant shimmer while painting)
+        // so a PREFIX of the range is a spatially uniform density subset; the
+        // renderer's distance LOD draws prefixes. Palms keep authored order —
+        // thinning a crown makes half-bald trees, and trunks anchor the
+        // silhouette, so fronds (3) and trunks (4) always draw whole.
+        const chunk_seed: u32 = (@as(u32, @bitCast(chunk_snap.cx)) *% 0x9E3779B1) ^
+            (@as(u32, @bitCast(chunk_snap.cz)) *% 0x85EBCA77);
+        for (0..3) |fi| {
+            if (seg_end[fi] > seg_start[fi]) {
+                shuffleFoliageRows(set.rows[fi].?, seg_start[fi], seg_end[fi], chunk_seed +% @as(u32, @intCast(fi)));
+            }
+        }
         const seg_cx = @as(f32, @floatFromInt(chunk_snap.cx)) * map_chunks.CHUNK_METERS;
         const seg_cz = @as(f32, @floatFromInt(chunk_snap.cz)) * map_chunks.CHUNK_METERS;
         const seg_grounded = seg_ymax >= seg_ymin;

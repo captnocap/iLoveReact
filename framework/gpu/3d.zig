@@ -5393,6 +5393,15 @@ fn recordDraw(vertex_count: u32, instance_count: u32) void {
     g_telemetry.triangles += (@as(u64, vertex_count) / 3) * @as(u64, instance_count);
 }
 
+// Distance-density LOD for segmented foliage batches (req_2868). Inside NEAR
+// every plant draws; density falls linearly to FLOOR at FAR and holds there.
+// A 0.5 m grass blade is sub-pixel past ~150 m on a 1440p view, so the thinning
+// starts where individual plants stop being resolvable and never drops below
+// the floor — distant fields stay green, they just stop paying per-blade.
+const FOLIAGE_LOD_NEAR_M: f32 = 150.0;
+const FOLIAGE_LOD_FAR_M: f32 = 480.0;
+const FOLIAGE_LOD_FLOOR: f32 = 0.15;
+
 /// Sphere-vs-frustum: true when the sphere at (cx,cy,cz) touches the frustum
 /// described by six normalized inward-facing planes (req_2859).
 fn sphereInFrustum(planes: *const [6][4]f32, cx: f32, cy: f32, cz: f32, radius: f32) bool {
@@ -8117,19 +8126,46 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                             // coalesce adjacent survivors into one draw. Segment
                             // ranges are absolute rows of the batch, clamped to
                             // what actually staged.
+                            // req_2868: with lod_density, a FAR segment draws only
+                            // a prefix of its (producer-shuffled) rows — sub-pixel
+                            // distant plants thin out, near segments stay exact.
+                            // Partial segments draw alone; only full ones coalesce.
+                            const lod_on = leader.scene3d_instance_lod_density;
                             var run_first: u32 = 0;
                             var run_count: u32 = 0;
                             for (segments) |seg| {
                                 const sfirst = @min(seg.first, count);
-                                const scount = @min(seg.count, count - sfirst);
+                                var scount = @min(seg.count, count - sfirst);
                                 if (scount == 0) continue;
                                 if (!sphereInFrustum(&frustum_planes, seg.cx, seg.cy, seg.cz, seg.radius)) continue;
-                                if (run_count > 0 and run_first + run_count == sfirst) {
+                                var partial = false;
+                                if (lod_on) {
+                                    const ddx = seg.cx - cam_pos.x;
+                                    const ddy = seg.cy - cam_pos.y;
+                                    const ddz = seg.cz - cam_pos.z;
+                                    const dist = @sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+                                    if (dist > FOLIAGE_LOD_NEAR_M) {
+                                        const t = @min(1.0, (dist - FOLIAGE_LOD_NEAR_M) / (FOLIAGE_LOD_FAR_M - FOLIAGE_LOD_NEAR_M));
+                                        const density = 1.0 - t * (1.0 - FOLIAGE_LOD_FLOOR);
+                                        const thinned: u32 = @intFromFloat(@ceil(@as(f32, @floatFromInt(scount)) * density));
+                                        if (thinned < scount) {
+                                            scount = @max(1, thinned);
+                                            partial = true;
+                                        }
+                                    }
+                                }
+                                if (!partial and run_count > 0 and run_first + run_count == sfirst) {
                                     run_count += scount;
                                 } else {
                                     drawStaticInstanceRange(pass, group_slot.count, sd.offset, is_slim, run_first, run_count);
-                                    run_first = sfirst;
-                                    run_count = scount;
+                                    if (partial) {
+                                        drawStaticInstanceRange(pass, group_slot.count, sd.offset, is_slim, sfirst, scount);
+                                        run_first = 0;
+                                        run_count = 0;
+                                    } else {
+                                        run_first = sfirst;
+                                        run_count = scount;
+                                    }
                                 }
                             }
                             drawStaticInstanceRange(pass, group_slot.count, sd.offset, is_slim, run_first, run_count);

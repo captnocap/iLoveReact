@@ -605,6 +605,12 @@ pub const Node = struct {
     // whose sphere survives the camera frustum — foliage behind the camera
     // costs zero. Absent (null) = the whole batch draws as one range.
     scene3d_instance_segments: ?[]const InstanceSegment = null,
+    // Distance-density LOD over the segments (req_2868): a far segment draws
+    // only a PREFIX of its rows. Set this ONLY when the producer shuffled
+    // each segment's rows (a prefix must be a spatially uniform subset, not
+    // a stripe of cells). Near segments stay exact; sub-pixel distant plants
+    // are the ones thinned.
+    scene3d_instance_lod_density: bool = false,
     // Physics 2D — inline in the 2D tree, driven by framework/physics2d.zig
     physics_world_id: u8 = 0, // multi-physics-world instance index (0..MAX_PHYSICS_WORLDS-1)
     physics_world: bool = false, // true = Physics.World container
