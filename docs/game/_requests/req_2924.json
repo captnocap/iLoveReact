@@ -3,7 +3,7 @@
   "at": "2026-07-10T21:22:58.601Z",
   "origin": "codex:019f4de6",
   "text": "Hey so ive been thinking a lot about vehicles, and well, one thing i know i definitely want to do is get setup with a train track / light rail track tool for the world, where i can hopefully get the same effect that you would get with something the likes of roller coaster tycoon style piece drawing, and that way i can draw out a railway system. You will find that we have something very similar to this (kinda), its the road painting tools, however, this port of them from a 2d PoV into the now 3d approach, is very ass, and so i would not copy it verbatim, Some of t he things you could do here is take both under the wing and instrument the road pathing to take on a shape a lot like the train tracks would, the main problem areas are it currently asks me as the user to click one point, and click another ,before i even see anything. but this blows, i cant do curves properly, i cant even see what im doing actually until resolving between two or more points which sucks, i need something to be more real time and more fine tuned for both these systems to perform at the capability i would like to author them at",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f4de6-2533-7ed0-8e75-190a8d7d1e46",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,26 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-10T21:28:46.121Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Survey complete: active cart/editor road authoring is still a host-native click-point draft with no full-width 3D preview before commit. Implementing one semantic transport-path authoring surface for road/light-rail/railway: first click anchors, hover previews immediately, later clicks shape adjustable curves, rail/road keep separate compile/render policies, and RMAP persists the path recipes."
+    },
+    {
+      "at": "2026-07-10T21:45:38.294Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Implemented a shared semantic road, light-rail, and railway path authoring system on the active cart/editor surface. The first terrain click now anchors a path and cursor movement immediately renders the next full 3D piece; subsequent points support live adjustable fillet curves, rail minimum-radius validation, undo/cancel/finish/delete controls, native terrain draping, persistence in RMAP v3, and backward-compatible legacy road loading. Roads continue compiling into the existing lane and sidewalk substrate while rails remain authored semantic networks ready for later switches, stations, and vehicle routing. Zig unit tests, editor UI tests, the ReleaseFast editor ship, diff checks, and oracle indexing pass. Visual behavior and the required 60-second spikewatch play gate remain for user review.",
+  "shas": [
+    "8b8a09b0f",
+    "511150d15",
+    "9bff5da74"
+  ],
+  "resolvedAt": "2026-07-10T21:45:38.294Z"
 }
