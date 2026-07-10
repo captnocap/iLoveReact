@@ -51,7 +51,8 @@ import { writeModelArtifacts } from '../data/modelPackageStore';
 import { syntheticKeyEdge } from '../data/keymap';
 // Headless harness only (RJIT_MESHOPS addpart) — builds a primitive's grouped soup so the
 // gesture script can exercise the REAL appendPart path without the outliner UI (req_2644).
-import { primitiveMeshData } from '../data/hmscAssetCatalog';
+import { primitiveMeshData, U_PER_TILE } from '../data/hmscAssetCatalog';
+import type { PathArrayParams } from '../data/pathArray';
 // The fixed-region layout contract (req_2627): popup control grids share the editor's
 // ONE column grid instead of inventing local cell widths.
 import { REGIONS } from '../shell/regions';
@@ -142,6 +143,8 @@ export type ModelToolApi = {
   deletePartRange: (lo: number, hi: number) => { ok: boolean; count: number } | null;
   // ── Studio-parity part ops (host-native, journaled for undo/redo) ─────────────
   duplicatePart: (lo: number, hi: number, mirrorAxis: number) => { lo: number; hi: number } | null;
+  pathArraySpans: (ranges: { lo: number; hi: number }[]) => { xU: number; zU: number } | null;
+  pathArray: (ranges: { lo: number; hi: number }[], params: PathArrayParams) => { ranges: { lo: number; hi: number }[] } | null;
   detachSelection: () => { lo: number; hi: number } | null;
   mergeParts: (aLo: number, aHi: number, bLo: number, bHi: number) => { lo: number; hi: number } | null;
   mergeFaces: () => boolean;
@@ -281,7 +284,7 @@ const orbitZoom = (delta: number) => host.__model_orbit_zoom?.(delta);
 // the host's: welded topology, selection sets, AND the input loop (engine.zig). The cart
 // only sets mode/tool/capture and reads counts for the HUD — never a per-event handler.
 type SelInfo = { mode: number; verts: number; edges: number; sel: number };
-type TopoResult = { ok: number; key?: string; count?: number; lo?: number; hi?: number; label?: string; undo?: number; redo?: number };
+type TopoResult = { ok: number; key?: string; count?: number; lo?: number; hi?: number; ranges?: [number, number][]; label?: string; undo?: number; redo?: number };
 type GuardInfo = { pending: number; bad: number; faces: number; canSplit: number };
 const meshSetMode = (m: number) => host.__mesh_edit_mode?.(m);
 // Live mirror editing (req_2758): bit 0/1/2 = X/Y/Z symmetry plane at each outliner part's local center.
@@ -395,6 +398,34 @@ const meshSetGroupHidden = (lo: number, hi: number, hidden: boolean) =>
 // ── Studio-parity part ops (all journaled host-side for undo/redo) ────────────────
 const meshDuplicateRange = (lo: number, hi: number, mirrorAxis: number) =>
   readTopoResult(host.__mesh_duplicate_range?.(lo, hi, mirrorAxis));
+const meshRangePairs = (ranges: { lo: number; hi: number }[]) => {
+  const pairs = new Uint32Array(ranges.length * 2);
+  ranges.forEach((range, index) => { pairs[index * 2] = range.lo; pairs[index * 2 + 1] = range.hi; });
+  return pairs;
+};
+const meshPathArraySpans = (ranges: { lo: number; hi: number }[]) => {
+  try {
+    const json = host.__mesh_path_array_spans?.(meshRangePairs(ranges));
+    if (typeof json !== 'string' || !json) return null;
+    const value = JSON.parse(json);
+    return value?.ok === 1 && Number.isFinite(value.x) && Number.isFinite(value.z)
+      ? { xU: value.x * U_PER_TILE, zU: value.z * U_PER_TILE }
+      : null;
+  } catch { return null; }
+};
+const meshPathArray = (ranges: { lo: number; hi: number }[], params: PathArrayParams) => {
+  const pairs = meshRangePairs(ranges);
+  if (params.points && params.points.length >= 2) {
+    const points = new Float32Array(params.points.length * 3);
+    params.points.forEach((point, index) => {
+      points[index * 3] = point.xU / U_PER_TILE;
+      points[index * 3 + 1] = point.yU / U_PER_TILE;
+      points[index * 3 + 2] = point.zU / U_PER_TILE;
+    });
+    return readTopoResult(host.__mesh_path_array_points?.(pairs, params.axis, points));
+  }
+  return readTopoResult(host.__mesh_path_array?.(pairs, params.axis, params.bays, params.turnDegrees, params.riseU / U_PER_TILE, params.profile === 'linear' ? 0 : 1));
+};
 const meshDetach = () => readTopoResult(host.__mesh_topo_detach?.());
 const meshMergePartsDoor = (aLo: number, aHi: number, bLo: number, bHi: number) =>
   readTopoResult(host.__mesh_merge_parts?.(aLo, aHi, bLo, bHi));
@@ -1201,6 +1232,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       }
       return { lo: r.lo, hi: r.hi };
     },
+    pathArraySpans: (ranges) => meshPathArraySpans(ranges),
+    pathArray: (ranges, params) => {
+      const r = meshPathArray(ranges, params);
+      if (!adoptMesh(r) || !Array.isArray(r?.ranges)) return null;
+      const fresh = r.ranges
+        .map((pair) => ({ lo: Number(pair?.[0]), hi: Number(pair?.[1]) }))
+        .filter((range) => Number.isInteger(range.lo) && Number.isInteger(range.hi) && range.hi > range.lo);
+      if (fresh.length !== r.ranges.length) return null;
+      resyncPartRanges();
+      return { ranges: fresh };
+    },
     detachSelection: () => {
       const r = meshDetach();
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
@@ -1649,6 +1691,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     //   lcbegin lcprev:dir,cuts,off lcend:0|1 lcstate  (loop-cut session; off = 0..1 frac)
     //   paintend paintundo paintredo painthist layers layerop:op,id[,arg] progread
     //   progapply  (stroke journal + paint layers, req_2672)
+    //   patharc:lo,hi,axis,bays,turnDeg,riseModel
+    //   patharcmulti:axis,bays,turnDeg,riseModel,lo,hi[,lo,hi…]
+    //   pathpoints:lo,hi,axis,x,y,z,...
     // `RJIT_MESHOPS=@/path/ops.txt` reads the script from a FILE — re-read on every
     // eval, so a reload-torture run (req_2914) can rewrite the file between reloads
     // and script a DIFFERENT phase per remount (env vars are fixed for the process).
@@ -1736,6 +1781,25 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'flip') { const r = meshFlipFaces(); adoptMesh(r); console.error(`[meshops] flip → ${JSON.stringify(r)}`); }
         else if (name === 'spiketrace') host.__hmsc_spike_trace?.(num(a[0]) === 1 ? 1 : 0);
         else if (name === 'grouppaint') host.__model_paint_group_range?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
+        else if (name === 'patharc') {
+          const pairs = new Uint32Array([num(a[0]), num(a[1])]);
+          const r = readTopoResult(host.__mesh_path_array?.(pairs, num(a[2]), num(a[3]), Number(a[4]) || 0, Number(a[5]) || 0, 1));
+          adoptMesh(r);
+          console.error(`[meshops] patharc → ${JSON.stringify(r)} spans=${host.__mesh_path_array_spans?.(pairs) ?? 'n/a'}`);
+        }
+        else if (name === 'patharcmulti') {
+          const pairs = new Uint32Array(a.slice(4).map((value) => num(value)));
+          const r = readTopoResult(host.__mesh_path_array?.(pairs, num(a[0]), num(a[1]), Number(a[2]) || 0, Number(a[3]) || 0, 1));
+          adoptMesh(r);
+          console.error(`[meshops] patharcmulti → ${JSON.stringify(r)}`);
+        }
+        else if (name === 'pathpoints') {
+          const pairs = new Uint32Array([num(a[0]), num(a[1])]);
+          const coords = new Float32Array(a.slice(3).map((value) => Number(value) || 0));
+          const r = readTopoResult(host.__mesh_path_array_points?.(pairs, num(a[2]), coords));
+          adoptMesh(r);
+          console.error(`[meshops] pathpoints → ${JSON.stringify(r)}`);
+        }
         else if (name === 'detail') applyPaintDetail(num(a[0]));
         // hidepart:lo,hi / showpart:lo,hi — the outliner eye, headless (req_2660 repro:
         // paint → hide → paint → show; the stroke made while hidden must SURVIVE).

@@ -69,3 +69,23 @@ test "eased rise starts gently while linear rise remains proportional" {
     const eased = path_array.mapPoint(template, params, 0, .{ 0, 0, -1 });
     try std.testing.expectApproxEqAbs(@as(f32, 1.25), eased[1], 0.0001);
 }
+
+test "explicit 3D boundary points share frames and preserve their coordinates" {
+    const template = path_array.Template{
+        .forward_min = 0,
+        .forward_max = 1,
+        .lateral_center = 0,
+        .vertical_origin = 0,
+    };
+    const points = [_]path_array.Vec3{
+        .{ 0, 0, 0 },
+        .{ 1, 0.5, 0 },
+        .{ 2, 1, 1 },
+    };
+    try std.testing.expect(path_array.validPointPath(template, &points));
+    const first_end = path_array.mapPointPath(template, .positive_x, &points, 0, .{ 1, 0, 0 });
+    const second_start = path_array.mapPointPath(template, .positive_x, &points, 1, .{ 0, 0, 0 });
+    try expectVec(first_end, second_start);
+    try expectVec(.{ 2, 0.5, 0 }, first_end);
+    try expectVec(.{ 3, 1, 1 }, path_array.mapPointPath(template, .positive_x, &points, 1, .{ 1, 0, 0 }));
+}

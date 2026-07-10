@@ -909,6 +909,118 @@ fn hostMeshDuplicateRange(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     setMeshAppendReturn(info, r);
 }
 
+/// __mesh_path_array(u32Ranges, axis, bays, turnDegrees, rise, profile)
+///   → JSON {"ok","key","count","ranges":[[lo,hi],...]}
+/// Keep the selected source bay untouched, then append bays-1 independently editable
+/// copies along one constant-radius horizontal turn and elevation profile. The selected
+/// ranges are read from the resident edited mesh; the full append is one journal unit.
+fn setMeshPathArrayReturn(info: v8.FunctionCallbackInfo, result: scene3d.PathArrayResult) void {
+    const fresh = result.ranges orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    defer std.heap.c_allocator.free(fresh);
+    if (!result.ok) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    const key = scene3d.meshEditActiveKey() orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var json = std.ArrayListUnmanaged(u8){};
+    defer json.deinit(std.heap.c_allocator);
+    const w = json.writer(std.heap.c_allocator);
+    w.print("{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"ranges\":[", .{ key, result.count }) catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var i: usize = 0;
+    while (i + 1 < fresh.len) : (i += 2) {
+        w.print("{s}[{d},{d}]", .{ if (i == 0) "" else ",", fresh[i], fresh[i + 1] }) catch {
+            setReturnString(info, "{\"ok\":0}");
+            return;
+        };
+    }
+    w.writeAll("]}") catch {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    state.markDirty();
+    setReturnString(info, json.items);
+}
+
+fn hostMeshPathArray(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const range_bytes = argBytes(info, 0) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    if (range_bytes.len == 0 or range_bytes.len % (2 * @sizeOf(u32)) != 0) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    const ranges: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, range_bytes));
+    const axis_code: u8 = @intCast(std.math.clamp(argToI32(info, 1) orelse 0, 0, 3));
+    const bays: u32 = @intCast(@max(0, argToI32(info, 2) orelse 0));
+    const turn_degrees: f32 = @floatCast(argToF64(info, 3) orelse 0);
+    const rise: f32 = @floatCast(argToF64(info, 4) orelse 0);
+    const profile_code: u8 = @intCast(std.math.clamp(argToI32(info, 5) orelse 0, 0, 1));
+    const params = scene3d.PathArrayParams{
+        .axis = @enumFromInt(axis_code),
+        .bays = bays,
+        .turn_radians = turn_degrees * (@as(f32, std.math.pi) / 180),
+        .rise = rise,
+        .profile = @enumFromInt(profile_code),
+    };
+    setMeshPathArrayReturn(info, scene3d.meshPathArray(std.heap.c_allocator, ranges, params));
+}
+
+/// __mesh_path_array_points(u32Ranges, axis, f32PointTriples) → path-array JSON.
+/// Points are model-space XYZ offsets from the source bay's forward-end center;
+/// point zero is the fixed origin and every adjacent pair defines one generated bay.
+fn hostMeshPathArrayPoints(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const range_bytes = argBytes(info, 0) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    const point_bytes = argBytes(info, 2) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    if (range_bytes.len == 0 or range_bytes.len % (2 * @sizeOf(u32)) != 0 or point_bytes.len < 2 * 3 * @sizeOf(f32) or point_bytes.len % (3 * @sizeOf(f32)) != 0) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    const ranges: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, range_bytes));
+    const points: []const [3]f32 = @alignCast(std.mem.bytesAsSlice([3]f32, point_bytes));
+    const axis_code: u8 = @intCast(std.math.clamp(argToI32(info, 1) orelse 0, 0, 3));
+    setMeshPathArrayReturn(info, scene3d.meshPathArrayPoints(std.heap.c_allocator, ranges, @enumFromInt(axis_code), points));
+}
+
+/// __mesh_path_array_spans(u32Ranges) → JSON {"ok":1,"x":modelUnits,"z":modelUnits}.
+/// Read-only sizing hint for the coordinate editor; no journal or dirty state.
+fn hostMeshPathArraySpans(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const range_bytes = argBytes(info, 0) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    if (range_bytes.len == 0 or range_bytes.len % (2 * @sizeOf(u32)) != 0) {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    }
+    const ranges: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, range_bytes));
+    const spans = scene3d.meshPathArrayHorizontalSpans(ranges) orelse {
+        setReturnString(info, "{\"ok\":0}");
+        return;
+    };
+    var buf: [128]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "{{\"ok\":1,\"x\":{d},\"z\":{d}}}", .{ spans[0], spans[1] }) catch "{\"ok\":0}";
+    setReturnString(info, json);
+}
+
 /// __mesh_topo_detach() → JSON {"ok","key","count","lo","hi"}. Peel the selected faces
 /// (face mode) into a NEW part — a pure authored-group remap; geometry and paint stay.
 fn hostMeshTopoDetach(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -2633,6 +2745,9 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_history", hostMeshHistory);
     v8_runtime.registerHostFn("__mesh_journal_note", hostMeshJournalNote);
     v8_runtime.registerHostFn("__mesh_duplicate_range", hostMeshDuplicateRange);
+    v8_runtime.registerHostFn("__mesh_path_array", hostMeshPathArray);
+    v8_runtime.registerHostFn("__mesh_path_array_points", hostMeshPathArrayPoints);
+    v8_runtime.registerHostFn("__mesh_path_array_spans", hostMeshPathArraySpans);
     v8_runtime.registerHostFn("__mesh_topo_detach", hostMeshTopoDetach);
     v8_runtime.registerHostFn("__mesh_merge_parts", hostMeshMergeParts);
     v8_runtime.registerHostFn("__mesh_topo_merge_faces", hostMeshTopoMergeFaces);

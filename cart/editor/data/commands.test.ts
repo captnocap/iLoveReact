@@ -57,7 +57,7 @@ test('model context menu folds stable tool families without hiding a command', (
   assert(ids(layout.groups[2]!.commands).join('|') === 'mesh-sym-x|mesh-sym-y|mesh-sym-z|mesh-mirror-x|mesh-mirror-y|mesh-mirror-z', 'mirror edit and part axes are not together');
   assert(ids(layout.groups[3]!.commands).join('|') === 'mesh-focus|mesh-wire|mesh-cam-lock', 'view tools escaped their group');
   assert(ids(layout.directToolCommands).join('|') === 'mesh-paint', 'Paint Faces must remain one click away');
-  assert(ids(layout.directPartCommands).join('|') === 'mesh-duplicate-part|mesh-merge-down|mesh-import-part', 'primary part verbs must remain direct');
+  assert(ids(layout.directPartCommands).join('|') === 'mesh-duplicate-part|mesh-path-array|mesh-merge-down|mesh-import-part', 'primary part verbs must remain direct');
 
   const expected = ids([...meshToolCommands(), ...meshPartCommands(true, 2)]).sort().join('|');
   const presented = ids([
@@ -73,7 +73,7 @@ test('model context mirror group omits part actions without a focused part', () 
   const mirror = layout.groups.find((group) => group.id === 'mirror');
   assert(!!mirror, 'Mirror group disappeared');
   assert(ids(mirror!.commands).join('|') === 'mesh-sym-x|mesh-sym-y|mesh-sym-z', 'part mirrors appeared without a focused part');
-  assert(ids(layout.directPartCommands).join('|') === 'mesh-import-part', 'library import should remain available without a focused part');
+  assert(ids(layout.directPartCommands).join('|') === 'mesh-import-part', 'part generators need focus while library import remains global to the model');
 });
 
 test('New Mesh exposes every semantic build starter under one nested menu', () => {

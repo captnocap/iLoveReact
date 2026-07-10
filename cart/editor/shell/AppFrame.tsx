@@ -13,6 +13,7 @@ import BuildDock from './BuildDock';
 import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
 import NewMeshDialog from './NewMeshDialog';
+import PathArrayDialog from './PathArrayDialog';
 import ExportCharacterDialog from './ExportCharacterDialog';
 import PaintToolbar, { PaintPopovers, type PaintPopover } from './PaintToolbar';
 import PerformancePopover from './PerformancePopover';
@@ -58,6 +59,7 @@ import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../
 import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/hmscAssetCatalog';
 import { partsMetaFromRows, meshDocRangeCenters } from '../data/meshDoc';
 import { assignPartsToGroup, nextDuplicateGroupName, nextDuplicatePartName, nextModelGroupName, ungroupParts } from '../data/modelOutliner';
+import { materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
 // Key edges come straight off the ffi bus (not useModifiers.onKeyDown): the active key
@@ -196,6 +198,9 @@ export default function AppFrame() {
   const [importPlan, setImportPlan] = useState<ImportImagePlan | null>(null);
   // The Add From Library picker (append a saved model into the OPEN model as parts).
   const [importPartOpen, setImportPartOpen] = useState(false);
+  // Path Array's source is frozen when the dialog opens. Params remain dialog-local;
+  // Apply revalidates these ids/ranges against the live outliner before touching mesh.
+  const [pathArrayPrompt, setPathArrayPrompt] = useState<{ sourceIds: string[]; label: string; sourceSpanU: { xU: number; zU: number } } | null>(null);
 
   // Imported textures register as dynamic ShaderSpecs at boot (and after every
   // import), so they are first-class materials everywhere a catalog material is.
@@ -230,6 +235,7 @@ export default function AppFrame() {
     if (block) return block;
     if (importPlan) return { id: 'import-image', label: 'Import Image' };
     if (importPartOpen) return { id: 'import-part', label: 'Add From Library' };
+    if (pathArrayPrompt) return { id: 'path-array', label: 'Path Array' };
     return null;
   };
   // Live handle for the once-installed hotkey subscription (fresh closures per render).
@@ -613,6 +619,7 @@ export default function AppFrame() {
       return;
     }
     if (commandId === 'mesh-duplicate-part') { duplicatePartById(state.modelActivePartId, -1); return; }
+    if (commandId === 'mesh-path-array') { openPathArrayPrompt(); return; }
     if (commandId === 'mesh-mirror-x') { duplicatePartById(state.modelActivePartId, 0); return; }
     if (commandId === 'mesh-mirror-y') { duplicatePartById(state.modelActivePartId, 1); return; }
     if (commandId === 'mesh-mirror-z') { duplicatePartById(state.modelActivePartId, 2); return; }
@@ -2645,6 +2652,91 @@ export default function AppFrame() {
     });
   };
 
+  const openPathArrayPrompt = () => {
+    const mid = activePartsModelId(state);
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const sourceIds = effectiveSelectedIds(state, parts, selectedPartIdsRef.current);
+    const sources = sourceIds.map((id) => parts.find((part) => part.id === id)).filter((part): part is ModelPart => Boolean(part));
+    if (!mid || sources.length === 0) {
+      setState((prev) => ({ ...prev, status: 'path array: select a source part or outliner group first' }));
+      return;
+    }
+    const blocked = sources.find((part) => !part.visible || !partRange(part));
+    if (blocked) {
+      setState((prev) => ({
+        ...prev,
+        status: !blocked.visible
+          ? `path array: show ${blocked.name} first — every source member must be live`
+          : `path array: ${blocked.name} has no stamped host range`,
+      }));
+      return;
+    }
+    const commonGroup = sources[0]!.groupId && sources.every((part) => part.groupId === sources[0]!.groupId)
+      ? sources[0]!.groupName
+      : null;
+    const label = commonGroup
+      ? `${commonGroup} (${sources.length} independent part${sources.length === 1 ? '' : 's'})`
+      : sources.length === 1 ? sources[0]!.name : `${sources.length} selected parts`;
+    const ranges = sources.map((part) => partRange(part)!) as { lo: number; hi: number }[];
+    const sourceSpanU = modelToolApiRef.current?.pathArraySpans(ranges) ?? { xU: 1, zU: 1 };
+    modelMenu.close();
+    setPathArrayPrompt({ sourceIds, label, sourceSpanU });
+    setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `path array source: ${label}` }));
+  };
+
+  const applyPathArray = (rawParams: PathArrayParams) => {
+    const prompt = pathArrayPrompt;
+    const mid = activePartsModelId(state);
+    const api = modelToolApiRef.current;
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const sources = prompt?.sourceIds.map((id) => parts.find((part) => part.id === id)).filter((part): part is ModelPart => Boolean(part)) ?? [];
+    if (!prompt || !mid || !api || sources.length !== prompt.sourceIds.length) {
+      setPathArrayPrompt(null);
+      setState((prev) => ({ ...prev, status: 'path array cancelled — its source parts changed while the dialog was open' }));
+      return;
+    }
+    const ranges = sources.map(partRange);
+    if (sources.some((part) => !part.visible) || ranges.some((range) => range === null)) {
+      setPathArrayPrompt(null);
+      setState((prev) => ({ ...prev, status: 'path array cancelled — show and reselect the complete source bay' }));
+      return;
+    }
+    const params = sanitizePathArrayParams(rawParams);
+    const hostResult = api.pathArray(ranges as { lo: number; hi: number }[], params);
+    const expectedRanges = (params.bays - 1) * sources.length;
+    if (!hostResult || hostResult.ranges.length !== expectedRanges) {
+      // A malformed post-success answer must never strand geometry without rows.
+      // The host operation is one journal unit, so this is an exact rollback.
+      if (hostResult) api.undoMesh();
+      setState((prev) => ({ ...prev, status: 'path array failed — source length/axis or host ranges were invalid; no partial array was kept' }));
+      return;
+    }
+    const materialized = materializePathArrayRows(parts, prompt.sourceIds, hostResult.ranges, state.seq);
+    if (!materialized || materialized.created.length !== expectedRanges) {
+      api.undoMesh();
+      setState((prev) => ({ ...prev, status: 'path array metadata failed validation — host append rolled back exactly' }));
+      return;
+    }
+    const focusedIds = materialized.created.map((part) => part.id);
+    const primaryId = focusedIds[focusedIds.length - 1]!;
+    const pointEnd = params.points?.[params.points.length - 1];
+    const pathSummary = pointEnd
+      ? `${params.points!.length} XYZ boundaries ending at (${pointEnd.xU}, ${pointEnd.yU}, ${pointEnd.zU}) u`
+      : `${params.turnDegrees >= 0 ? '+' : ''}${params.turnDegrees}° turn, ${params.riseU >= 0 ? '+' : ''}${params.riseU} u rise`;
+    selectedPartIdsRef.current = focusedIds;
+    setSelectedPartIds(focusedIds);
+    pushPartSetToHost(state, materialized.parts, focusedIds, primaryId);
+    setPathArrayPrompt(null);
+    setState((prev) => ({
+      ...prev,
+      seq: materialized.nextSeq,
+      modelParts: { ...prev.modelParts, [mid]: materialized.parts },
+      modelActivePartId: primaryId,
+      modelDirty: { ...prev.modelDirty, [mid]: true },
+      status: `built ${params.bays}-bay path in ${materialized.groupName} — ${materialized.created.length} new independent part${materialized.created.length === 1 ? '' : 's'}, ${pathSummary} · one undo`,
+    }));
+  };
+
   // Detach the face-mode selection into a NEW part (host group remap — geometry and
   // paint stay put). The panel becomes the focused part, ready to grab with the gizmo.
   const runDetachSelection = () => {
@@ -3120,6 +3212,7 @@ export default function AppFrame() {
         else if (block.id === 'add-chunk') setState((prev) => ({ ...prev, addChunkOpen: false, status: 'add chunk closed' }));
         else if (block.id === 'import-image') setImportPlan(null);
         else if (block.id === 'import-part') setImportPartOpen(false);
+        else if (block.id === 'path-array') setPathArrayPrompt(null);
         return;
       }
       if (key.length === 1 || ['enter', 'delete', 'backspace', 'tab', 'space'].includes(key)) {
@@ -3758,6 +3851,17 @@ export default function AppFrame() {
           onCancel={() => setState((prev) => ({ ...prev, newMeshPrompt: null, status: `${prev.newMeshPrompt?.mode === 'add' ? 'add' : 'new'} mesh cancelled` }))}
           onAdd={(params) => submitMeshPrompt(state.newMeshPrompt!, params)}
         />
+      ) : null}
+      {pathArrayPrompt ? (
+        <RenderProbe id="Path Array Dialog">
+          <PathArrayDialog
+            sourceLabel={pathArrayPrompt.label}
+            sourcePartCount={pathArrayPrompt.sourceIds.length}
+            sourceSpanU={pathArrayPrompt.sourceSpanU}
+            onCancel={() => { setPathArrayPrompt(null); setState((prev) => ({ ...prev, status: 'path array cancelled' })); }}
+            onApply={applyPathArray}
+          />
+        </RenderProbe>
       ) : null}
       {state.exportCharacterPrompt ? (
         <ExportCharacterDialog

@@ -233,6 +233,7 @@ export const COMMANDS: Command[] = [
   // exact shift-selected set. The id keeps its old spelling for persisted keymaps, but
   // the operation is NEVER based on outliner order (req_2811 / req_2870).
   { id: 'mesh-duplicate-part', menu: 'Edit', scope: 'model', name: 'Duplicate Part', icon: 'CopyPlus', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-path-array', menu: 'Edit', scope: 'model', name: 'Path Array...', icon: 'Route', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-mirror-x', menu: 'Edit', scope: 'model', name: 'Mirror Part X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-mirror-y', menu: 'Edit', scope: 'model', name: 'Mirror Part Y', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-mirror-z', menu: 'Edit', scope: 'model', name: 'Mirror Part Z', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
@@ -364,7 +365,7 @@ const MESH_SUBMENU: MenuNode = {
     section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
-    cmd('mesh-duplicate-part'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
+    cmd('mesh-duplicate-part'), cmd('mesh-path-array'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
     section('Paint'), cmd('mesh-paint'), cmd('mesh-paint-fill'), cmd('mesh-paint-brush'), cmd('mesh-paint-safety'), cmd('mesh-paint-detail'),
     { kind: 'sub', id: 'Paint Resolution', label: 'Paint Resolution', icon: 'Grid3x3', scope: 'model', children: PAINT_RES_COMMANDS.map((c) => cmd(c.id)) },
   ],
@@ -453,7 +454,7 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
 export function meshPartCommands(hasActivePart: boolean, selectedPartCount: number): Command[] {
   const out: Command[] = [];
   if (hasActivePart) {
-    out.push(commandById('mesh-duplicate-part'), commandById('mesh-mirror-x'), commandById('mesh-mirror-y'), commandById('mesh-mirror-z'));
+    out.push(commandById('mesh-duplicate-part'), commandById('mesh-path-array'), commandById('mesh-mirror-x'), commandById('mesh-mirror-y'), commandById('mesh-mirror-z'));
     if (selectedPartCount >= 2) out.push(commandById('mesh-merge-down'));
   }
   out.push(commandById('mesh-import-part'));
@@ -511,7 +512,7 @@ export function modelContextMenuLayout(hasActivePart: boolean, selectedPartCount
     // Paint Faces stays direct. Any future always-on tool also stays visible until
     // it is intentionally assigned to a family above.
     directToolCommands: meshToolCommands().filter((command) => !MODEL_CONTEXT_GROUPED_TOOL_IDS.has(command.id)),
-    // Duplicate / structural merge / import are primary part verbs. Only mirrored
+    // Duplicate / path array / structural merge / import are primary part verbs. Only mirrored
     // duplication moves into Mirror, where all six axis controls live together.
     directPartCommands: partCommands.filter((command) => !MODEL_CONTEXT_MIRROR_PART_IDS.has(command.id)),
   };

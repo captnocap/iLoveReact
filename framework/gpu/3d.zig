@@ -21,6 +21,7 @@ const paint_islands_mod = @import("paint_islands.zig");
 const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
 const mesh_edit = @import("mesh_edit.zig");
+const path_array = @import("path_array.zig");
 const stage_scale = @import("stage_scale.zig");
 const capsules = @import("capsules.zig");
 const polys = @import("polys.zig");
@@ -2874,6 +2875,239 @@ pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult 
     journalCommit(&snap);
     ensureGlassTrailing();
     return r;
+}
+
+pub const PathArrayAxis = path_array.Axis;
+pub const PathArrayProfile = path_array.Profile;
+pub const PathArrayParams = path_array.Params;
+pub const PathArrayResult = struct {
+    ok: bool,
+    count: u32,
+    /// Fresh [lo,hi) pairs in generated-bay-major, source-part-minor order.
+    /// Owned by the allocator passed to meshPathArray when ok=true.
+    ranges: ?[]u32,
+};
+
+fn pathArrayFail() PathArrayResult {
+    return .{ .ok = false, .count = 0, .ranges = null };
+}
+
+fn knownPartRange(part_ranges: []const u32, lo: u32, hi: u32) bool {
+    var i: usize = 0;
+    while (i + 1 < part_ranges.len) : (i += 2) {
+        if (part_ranges[i] == lo and part_ranges[i + 1] == hi) return true;
+    }
+    return false;
+}
+
+fn sourceRangeIndex(source_ranges: []const u32, group: u32) ?usize {
+    var i: usize = 0;
+    while (i + 1 < source_ranges.len) : (i += 2) {
+        if (group >= source_ranges[i] and group < source_ranges[i + 1]) return i / 2;
+    }
+    return null;
+}
+
+fn pathDot(a: [3]f32, b: [3]f32) f32 {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+/// Read-only source-bay spans for the cart's 3D-coordinate editor. Returns X/Z
+/// model-space lengths; the cart expresses them in its ruled 16-u-per-tile scale.
+pub fn meshPathArrayHorizontalSpans(source_ranges: []const u32) ?[2]f32 {
+    if (source_ranges.len == 0 or source_ranges.len % 2 != 0) return null;
+    const verts = g_edit_verts orelse return null;
+    const groups = captureFaceGroups() orelse return null;
+    defer jalloc.free(groups);
+    var min_x = std.math.inf(f32);
+    var max_x = -std.math.inf(f32);
+    var min_z = std.math.inf(f32);
+    var max_z = -std.math.inf(f32);
+    var found = false;
+    var f: u32 = 0;
+    while (f < g_edit_count / 3) : (f += 1) {
+        if (sourceRangeIndex(source_ranges, groups[f]) == null) continue;
+        const base = @as(usize, f) * 24;
+        if (base + 24 > verts.len) return null;
+        var corner: usize = 0;
+        while (corner < 3) : (corner += 1) {
+            const x = verts[base + corner * 8];
+            const z = verts[base + corner * 8 + 2];
+            min_x = @min(min_x, x);
+            max_x = @max(max_x, x);
+            min_z = @min(min_z, z);
+            max_z = @max(max_z, z);
+            found = true;
+        }
+    }
+    return if (found) .{ max_x - min_x, max_z - min_z } else null;
+}
+
+/// Grow one selected source bay into a curved/rising run without touching that source.
+/// Every selected range remains an independent part in every generated bay. The whole
+/// append is built before installation and journals as ONE "path array" undo unit.
+/// Geometry comes from the resident edited mesh, never the cart's stale primitive seed.
+pub fn meshPathArray(alloc: std.mem.Allocator, source_ranges: []const u32, params: PathArrayParams) PathArrayResult {
+    return meshPathArrayInner(alloc, source_ranges, params, null);
+}
+
+pub fn meshPathArrayPoints(alloc: std.mem.Allocator, source_ranges: []const u32, axis: PathArrayAxis, points: []const path_array.Vec3) PathArrayResult {
+    const bays: u32 = @intCast(points.len);
+    return meshPathArrayInner(alloc, source_ranges, .{
+        .axis = axis,
+        .bays = bays,
+        .turn_radians = 0,
+        .rise = 0,
+        .profile = .linear,
+    }, points);
+}
+
+fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, params: PathArrayParams, point_path: ?[]const path_array.Vec3) PathArrayResult {
+    const fail = pathArrayFail();
+    if (!model_paint.hasTarget() or source_ranges.len == 0 or source_ranges.len % 2 != 0) return fail;
+    const cur_verts = g_edit_verts orelse return fail;
+    const part_ranges = model_source.partRanges() orelse return fail;
+    const cur_groups = captureFaceGroups() orelse return fail;
+    defer jalloc.free(cur_groups);
+    const cur_colors = collectCurrentFaceColors() orelse return fail;
+    defer jalloc.free(cur_colors);
+    const cur_faces = g_edit_count / 3;
+    if (cur_colors.len != @as(usize, cur_faces) * 4) return fail;
+
+    // The bridge is strict: callers may only array complete, distinct live parts.
+    var pair_i: usize = 0;
+    while (pair_i + 1 < source_ranges.len) : (pair_i += 2) {
+        const lo = source_ranges[pair_i];
+        const hi = source_ranges[pair_i + 1];
+        if (hi <= lo or !knownPartRange(part_ranges, lo, hi)) return fail;
+        var earlier: usize = 0;
+        while (earlier < pair_i) : (earlier += 2) {
+            if (lo < source_ranges[earlier + 1] and hi > source_ranges[earlier]) return fail;
+        }
+    }
+
+    const frame = path_array.basis(params.axis);
+    var forward_min = std.math.inf(f32);
+    var forward_max = -std.math.inf(f32);
+    var lateral_min = std.math.inf(f32);
+    var lateral_max = -std.math.inf(f32);
+    var vertical_min = std.math.inf(f32);
+    var vertical_max = -std.math.inf(f32);
+    var source_faces: u32 = 0;
+    var f: u32 = 0;
+    while (f < cur_faces) : (f += 1) {
+        if (sourceRangeIndex(source_ranges, cur_groups[f]) == null) continue;
+        source_faces += 1;
+        const base = @as(usize, f) * 24;
+        if (base + 24 > cur_verts.len) return fail;
+        var corner: usize = 0;
+        while (corner < 3) : (corner += 1) {
+            const p: [3]f32 = .{ cur_verts[base + corner * 8], cur_verts[base + corner * 8 + 1], cur_verts[base + corner * 8 + 2] };
+            const forward = pathDot(p, frame.forward);
+            const lateral = pathDot(p, frame.right);
+            forward_min = @min(forward_min, forward);
+            forward_max = @max(forward_max, forward);
+            lateral_min = @min(lateral_min, lateral);
+            lateral_max = @max(lateral_max, lateral);
+            vertical_min = @min(vertical_min, p[1]);
+            vertical_max = @max(vertical_max, p[1]);
+        }
+    }
+    if (source_faces == 0) return fail;
+    const template = path_array.Template{
+        .forward_min = forward_min,
+        .forward_max = forward_max,
+        .lateral_center = (lateral_min + lateral_max) * 0.5,
+        .vertical_origin = (vertical_min + vertical_max) * 0.5,
+    };
+    if (point_path) |points| {
+        if (!path_array.validPointPath(template, points)) return fail;
+    } else if (!path_array.valid(template, params)) return fail;
+
+    var verts = std.ArrayListUnmanaged(f32){};
+    defer verts.deinit(jalloc);
+    var groups = std.ArrayListUnmanaged(u32){};
+    defer groups.deinit(jalloc);
+    var colors = std.ArrayListUnmanaged(u8){};
+    defer colors.deinit(jalloc);
+    var all_ranges = std.ArrayListUnmanaged(u32){};
+    defer all_ranges.deinit(jalloc);
+    var fresh_ranges = std.ArrayListUnmanaged(u32){};
+    defer fresh_ranges.deinit(alloc);
+
+    if (!appendFloats(&verts, cur_verts[0 .. @as(usize, g_edit_count) * 8])) return fail;
+    groups.appendSlice(jalloc, cur_groups) catch return fail;
+    colors.appendSlice(jalloc, cur_colors) catch return fail;
+    all_ranges.appendSlice(jalloc, part_ranges) catch return fail;
+
+    var next_group: u32 = @intCast(maxGroupId(cur_groups) + 1);
+    const generated_bays: u32 = if (point_path) |points| @intCast(points.len - 1) else params.bays - 1;
+    var bay: u32 = 0;
+    while (bay < generated_bays) : (bay += 1) {
+        var source_index: usize = 0;
+        while (source_index * 2 + 1 < source_ranges.len) : (source_index += 1) {
+            const lo = source_ranges[source_index * 2];
+            const hi = source_ranges[source_index * 2 + 1];
+            const range_start = next_group;
+            var local_groups = std.AutoHashMapUnmanaged(u32, u32){};
+            defer local_groups.deinit(jalloc);
+            var next_local: u32 = 0;
+            var copied_faces: u32 = 0;
+
+            f = 0;
+            while (f < cur_faces) : (f += 1) {
+                const source_group = cur_groups[f];
+                if (source_group < lo or source_group >= hi) continue;
+                const base = @as(usize, f) * 24;
+                if (base + 24 > cur_verts.len) return fail;
+                var mapped: [3][3]f32 = undefined;
+                var corner: usize = 0;
+                while (corner < 3) : (corner += 1) {
+                    const p: [3]f32 = .{ cur_verts[base + corner * 8], cur_verts[base + corner * 8 + 1], cur_verts[base + corner * 8 + 2] };
+                    mapped[corner] = if (point_path) |points|
+                        path_array.mapPointPath(template, params.axis, points, bay, p)
+                    else
+                        path_array.mapPoint(template, params, bay, p);
+                }
+                if (!appendTri(&verts, mapped[0], mapped[1], mapped[2])) return fail;
+                const group_entry = local_groups.getOrPut(jalloc, source_group) catch return fail;
+                if (!group_entry.found_existing) {
+                    group_entry.value_ptr.* = next_local;
+                    next_local += 1;
+                }
+                groups.append(jalloc, range_start + group_entry.value_ptr.*) catch return fail;
+                colors.appendSlice(jalloc, cur_colors[@as(usize, f) * 4 .. @as(usize, f) * 4 + 4]) catch return fail;
+                copied_faces += 1;
+            }
+            if (copied_faces == 0 or next_local == 0) return fail;
+            next_group += next_local;
+            all_ranges.appendSlice(jalloc, &.{ range_start, next_group }) catch return fail;
+            fresh_ranges.appendSlice(alloc, &.{ range_start, next_group }) catch return fail;
+        }
+    }
+
+    const expected_fresh_pairs = @as(usize, generated_bays) * (source_ranges.len / 2) * 2;
+    if (fresh_ranges.items.len != expected_fresh_pairs) return fail;
+    const result_ranges = fresh_ranges.toOwnedSlice(alloc) catch return fail;
+    const installed_count: u32 = @intCast(verts.items.len / 8);
+    var snap = journalSnapshotCurrent("path array");
+    if (!replaceActiveEditMesh(verts.items, installed_count)) {
+        journalDiscard(&snap);
+        alloc.free(result_ranges);
+        return fail;
+    }
+    model_source.setFaceGroups(groups.items);
+    model_source.setPartRanges(all_ranges.items);
+    if (!applyExactFaceColors(colors.items, @intCast(groups.items.len))) {
+        if (snap) |*before| _ = journalInstall(before);
+        journalDiscard(&snap);
+        alloc.free(result_ranges);
+        return fail;
+    }
+    _ = refreshPaintLayout();
+    journalCommit(&snap);
+    ensureGlassTrailing();
+    return .{ .ok = true, .count = installed_count, .ranges = result_ranges };
 }
 
 /// Detach the selected faces (face mode) into a NEW part: their authored groups are

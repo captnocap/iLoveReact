@@ -17,6 +17,7 @@ import type { AuthoredBuildPiece } from '../world/authoredRegistry';
 import type { BuildKind, WallEdit } from '../world/buildCatalog';
 import type { Skeleton, PropRig } from '../../../runtime/skeleton';
 import type { WorldGlobals } from './globals';
+import type { PathArrayParams } from './pathArray';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Globals' | 'Window' | 'Help';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
@@ -164,6 +165,11 @@ export type ModelToolApi = {
   // Duplicate a part's range; mirrorAxis 0/1/2 reflects the copy across that origin
   // plane (-1 = plain copy). Returns the new part's group range.
   duplicatePart: (lo: number, hi: number, mirrorAxis: number) => { lo: number; hi: number } | null;
+  // Read-only source size for the coordinate-path editor, expressed in u (16 u = 1 tile).
+  pathArraySpans: (ranges: { lo: number; hi: number }[]) => { xU: number; zU: number } | null;
+  // Append bays along a curved/rising path from complete source-part ranges. The
+  // host returns one fresh independent range per source member per generated bay.
+  pathArray: (ranges: { lo: number; hi: number }[], params: PathArrayParams) => { ranges: { lo: number; hi: number }[] } | null;
   // Peel the selected faces (face mode) into a NEW part (pure group remap).
   detachSelection: () => { lo: number; hi: number } | null;
   // Merge two parts' faces into ONE fresh range (the old studio's "merge down").
