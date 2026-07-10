@@ -450,6 +450,16 @@ fn hostModelOrbitPan(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     state.markDirty();
 }
 
+/// __model_orbit_lock(on) — freeze/unfreeze the mesh editor's orbit camera (req_2893).
+/// While locked, EVERY camera motion (drag, wheel, pivot pan, double-click focus,
+/// compass snap) no-ops in gpu/3d.zig — the gate sits where the JS doors and the
+/// native input loop converge, so nothing can nudge the saved angle.
+fn hostModelOrbitLock(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const on = (argToF64(info, 0) orelse 0) != 0;
+    scene3d.orbitSetLocked(on);
+}
+
 /// __model_focus_at(x, y) → bool. Re-centre the orbit on whatever the viewport pixel
 /// (x,y) hits (double-click to recentre). Returns 1 on a hit (and repaints), 0 on a miss
 /// (empty space — focus unchanged). The programmatic counterpart drives the same path.
@@ -2577,6 +2587,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_orbit_drag", hostModelOrbitDrag);
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
     v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
+    v8_runtime.registerHostFn("__model_orbit_lock", hostModelOrbitLock);
     v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
     v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);
     v8_runtime.registerHostFn("__mesh_edit_mirror", hostMeshEditMirror);

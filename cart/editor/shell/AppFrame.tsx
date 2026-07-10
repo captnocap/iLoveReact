@@ -603,6 +603,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-paint') api.paint();
         else if (commandId === 'mesh-focus') api.focus();
         else if (commandId === 'mesh-wire') api.wire();
+        else if (commandId === 'mesh-cam-lock') api.camLock();
         else if (commandId === 'mesh-sym-x') api.toggleMirror(0);
         else if (commandId === 'mesh-sym-y') api.toggleMirror(1);
         else if (commandId === 'mesh-sym-z') api.toggleMirror(2);

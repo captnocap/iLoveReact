@@ -88,7 +88,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; camLock: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -120,6 +120,8 @@ export type ModelToolApi = {
   paint: () => void;
   focus: () => void;
   wire: () => void;
+  // Camera lock toggle (req_2893): freeze/unfreeze the orbit view host-side.
+  camLock: () => void;
   extrudeEdge: () => void;
   extrudeFace: () => void;
   createFace: () => void;
@@ -303,6 +305,9 @@ const meshSelectEdge = (idx: number, additive = false) => host.__mesh_edit_selec
 // zero JS per event), and toggle the Focus tool (left-drag pans the pivot).
 const meshCapture = (on: boolean) => host.__mesh_edit_capture?.(on ? 1 : 0);
 const meshFocusTool = (on: boolean) => host.__mesh_edit_focus?.(on ? 1 : 0);
+// Camera lock (req_2893): while on, the host no-ops EVERY orbit motion (drag/zoom/
+// pan/focus/compass) so a stray drag can't nudge the angle the user set.
+const orbitSetLocked = (on: boolean) => host.__model_orbit_lock?.(on ? 1 : 0);
 const readSelInfo = (): SelInfo | null => {
   try {
     const j = host.__mesh_edit_counts?.();
@@ -524,6 +529,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [wire, setWire] = useState(false);
   const [paintMode, setPaintMode] = useState(false);
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
+  const [camLock, setCamLock] = useState(false); // Camera lock (req_2893): view frozen where set
   const [selMode, setSelMode] = useState(0); // 0 view · 1 vertex · 2 edge · 3 face
   const [gizmoTool, setGizmoTool] = useState(0); // 0 move · 1 scale · 2 rotate
   // Live mirror editing (req_2758): enabled symmetry planes, bit 0/1/2 = X/Y/Z. The host
@@ -982,6 +988,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     enterPaint();
   };
   const toggleFocus = () => setFocusMode((v) => { const nv = !v; meshFocusTool(nv); if (nv) { setPaintMode(false); setSelMode(0); meshSetMode(0); } return nv; });
+  // Camera lock is a pure view toggle — it doesn't leave the current tool/mode; the
+  // host gate is what freezes the orbit. Pushed on every change AND at mount, so a
+  // hot-reloaded cart (fresh false state) re-syncs a host that was left locked.
+  const toggleCamLock = () => setCamLock((v) => !v);
+  useEffect(() => { orbitSetLocked(camLock); }, [camLock]);
 
   // ── Brush behaviour handlers ─────────────────────────────────────────────────
   // Apply an exact density through the host (it rebuilds the paint atlas and re-uploads
@@ -1086,6 +1097,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     paint: togglePaint,
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
+    camLock: toggleCamLock,
     extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
     extrudeFace: () => { if (model) applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
@@ -1264,8 +1276,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, focusMode, wire, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, camLock, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, focusMode, wire, camLock, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -1720,6 +1732,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         // orbit:dx,dy — swing the host orbit camera (for POV-dependent shots, e.g. the
         // gizmo's side-on growth).
         else if (name === 'orbit') host.__model_orbit_drag?.(num(a[0]), num(a[1]));
+        // camlock:0|1 — the req_2893 camera lock, straight at the host gate (headless
+        // proof: camlock:1;orbit:...;shot must equal the no-orbit shot).
+        else if (name === 'camlock') orbitSetLocked(num(a[0]) !== 0);
         else if (name === 'atlas') dumpAtlasPng(a.join(','));
         else if (name !== 'wait') console.error(`[meshops] unknown op: ${name}`);
       };
@@ -1906,6 +1921,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             }}
           >
             <Text style={{ color: wire ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>Wireframe</Text>
+          </Pressable>
+        )}
+        {!hostChrome && model && (
+          <Pressable
+            onPress={toggleCamLock}
+            tooltip="Lock camera (K) — freeze the view exactly where you set it; orbit/zoom/pan/focus all no-op until unlocked"
+            style={{
+              marginRight: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
+              backgroundColor: camLock ? '#2a466e' : '#16233aee', borderWidth: 1, borderColor: camLock ? '#5a86c0' : '#2c4a6a',
+            }}
+          >
+            <Text style={{ color: camLock ? '#eaf2ff' : '#cfe0f5', fontSize: 12, fontWeight: 600 }}>{camLock ? 'Cam Locked' : 'Lock Cam'}</Text>
           </Pressable>
         )}
         {allowFilePicker ? (

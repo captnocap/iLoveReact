@@ -375,8 +375,19 @@ const Orbit = struct {
     target: [3]f32 = .{ 0, 0, 0 },
     radius: f32 = 1,
     framed: bool = false,
+    // Camera lock (req_2893): freeze the view where the user set it. Gates EVERY
+    // user-motion entry (drag/zoom/pan/double-click focus/compass snap) at the one
+    // place they all funnel through, so the JS doors AND engine.zig's native input
+    // loop are covered by the same switch. orbitFrame (model load) stays live — a
+    // fresh model must land in view even under lock.
+    locked: bool = false,
 };
 var g_orbit: Orbit = .{};
+
+/// Set the mesh editor's camera lock (req_2893 — `__model_orbit_lock`).
+pub fn orbitSetLocked(on: bool) void {
+    g_orbit.locked = on;
+}
 
 /// Seed the orbit to frame a model of bounding `radius` about `target`. Called by the
 /// load door the moment a model finishes parsing.
@@ -392,6 +403,7 @@ pub fn orbitFrame(target: [3]f32, radius: f32) void {
 const ORBIT_PITCH_LIM: f32 = 1.5;
 /// Orbit by a screen-space drag delta (pixels). Pitch clamps shy of the poles.
 pub fn orbitDrag(dx: f32, dy: f32) void {
+    if (g_orbit.locked) return;
     g_orbit.yaw -= dx * 0.01;
     g_orbit.pitch += dy * 0.01;
     g_orbit.pitch = @max(-ORBIT_PITCH_LIM, @min(ORBIT_PITCH_LIM, g_orbit.pitch));
@@ -399,6 +411,7 @@ pub fn orbitDrag(dx: f32, dy: f32) void {
 /// Dolly in/out by a wheel delta (sign only matters). Clamped to a sane band of the
 /// model radius so you can't fly through it or lose it.
 pub fn orbitZoom(delta: f32) void {
+    if (g_orbit.locked) return;
     const factor: f32 = if (delta > 0) 0.88 else 1.0 / 0.88;
     g_orbit.dist = @max(g_orbit.radius * 0.15, @min(g_orbit.radius * 40.0, g_orbit.dist * factor));
 }
@@ -416,6 +429,7 @@ fn orbitCamPos() math.Vec3 {
 /// lets you drop the centre of rotation right where you're working (req_2148). Speed
 /// scales with dist so the grab tracks the cursor at any zoom; drag follows the content.
 pub fn orbitPan(dx: f32, dy: f32) void {
+    if (g_orbit.locked) return;
     const eye = orbitCamPos();
     const tgt = math.Vec3{ .x = g_orbit.target[0], .y = g_orbit.target[1], .z = g_orbit.target[2] };
     const fwd = math.v3normalize(math.v3sub(tgt, eye));
@@ -435,6 +449,7 @@ pub fn orbitFocus(p: [3]f32) void {
 /// far corner and it becomes the pivot. Returns false on a miss (empty space) so the cart
 /// keeps the current focus. Uses the exact last-drawn camera, like paintAt.
 pub fn focusAt(mx: f32, my: f32) bool {
+    if (g_orbit.locked) return false;
     if (!model_paint.hasTarget()) return false;
     const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
     const p = model_paint.pickPoint(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)) orelse return false;
@@ -4697,6 +4712,7 @@ pub fn meshCompassHit(mx: f32, my: f32) i32 {
 /// target and distance. Y uses the orbit's own pitch clamp — the pole is degenerate
 /// for a Y-up camera — so "top" is the same near-vertical view dragging reaches.
 pub fn meshCompassSnap(code: i32) bool {
+    if (g_orbit.locked) return false;
     if (code < 0 or code > 5) return false;
     const neg = @rem(code, 2) == 1;
     const half_pi: f32 = std.math.pi / 2.0;
