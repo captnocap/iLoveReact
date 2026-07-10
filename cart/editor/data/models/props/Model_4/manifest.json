@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "id": "primitive:plane:4",
+  "name": "house_of_god_sign",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "plane",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "placeable": {
+    "as": "prop"
+  },
+  "skeleton": {
+    "id": "primitive:plane:4",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "primitive:plane:4"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  }
+}

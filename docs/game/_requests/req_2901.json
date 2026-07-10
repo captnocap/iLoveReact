@@ -1,0 +1,28 @@
+{
+  "id": "req_2901",
+  "at": "2026-07-10T17:51:33.893Z",
+  "origin": "session:54e620c2",
+  "text": "huh thats i mean that all sounds correct to what it should be but the part of it that makes me scratch my own head is like i can import a model that is like 400k tris from a glb or obj and that also, when exported to a prop, is the same byte allocation ?",
+  "status": "review",
+  "sessionId": "54e620c2-839a-4d1b-89bb-d585b2326ecf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T17:51:59.484Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T17:52:38.078Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Question-only ask, no code changed. Confirmed and explained: yes, an imported 400k-tri GLB/OBJ pays the same uniform 20 B/vertex as any authored prop — there is no size- or source-based special casing. mesh_import.zig de-indexes GLB/OBJ into a non-indexed triangle soup (its documented output contract), so 400k tris = 1.2M verts = ~24 MB GPU-resident (was 38.4 MB pre-packing) for the ONE interned copy; placements stay 32 B refs; the cooked asset on disk stays raw f32 per V29. Pointed at the two levers for heavy imports: the existing import quality knob (decimateExpanded vertex clustering) and the roadmap item — an indexed-mesh pipeline that would recover the ~6x vertex sharing the de-index throws away (already noted at MAX_DYN_VERTS as the real long-term fix).",
+  "shas": [],
+  "resolvedAt": "2026-07-10T17:52:38.078Z"
+}

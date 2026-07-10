@@ -1,0 +1,28 @@
+{
+  "id": "req_2904",
+  "at": "2026-07-10T18:08:03.307Z",
+  "origin": "session:54e620c2",
+  "text": "hm. ok, so lets run some numbers on this real fast because we did it earlier today with just flora and memory and i had said it would effectively become problematic in my eyes when flora starts to hit a memory consumption rate of ~750mb-1gb to just exist, and we figured it was some absolutely absurd amount of flora painting that i will never hit, however, props start touching on the area now im genuinely curious about because as it stands, with the underlying goal here to populate an extremely dense and large world, i mean we could be talking thousands of props per chunk on top of building pieces and what have you before you even factor in npcs and vehicles and objectives and all of that jazz, so uh lets just again, do some rough numbers here. if i said the absolute most i want to pay in memory for props across the entire loaded map file, is 1gb-1.25gb, how many props, at an average of how many vertexes would it take to hit that (reasonably); lets just look at some of the models i have made by hand to get some values here. so, ak47 is 418 tris, awp is 420, m4a1 is 656, tig_ol_bitties sign is 1232 tris, warped_shelf is 276, piped is 2350, pills_r_us_logo is 1508, so heres a ballpark to run from",
+  "status": "review",
+  "sessionId": "54e620c2-839a-4d1b-89bb-d585b2326ecf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T18:08:49.064Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T18:09:23.531Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Numbers-only ask, no code changed. Ran the prop memory budget against the user's 1-1.25GB ceiling using their hand-made model roster (avg 980 tris = 2,940 soup verts = 57.4KB/model at the packed 20B vertex). Key structural point: props are two ledgers — unique models pay vertex memory ONCE (interned), placements pay 32B each. To hit 1.25GB you would need ~22,800 DISTINCT hand-made models or ~42M placements; a dense-world scenario of 2,000 props/chunk x 1,216 chunks = 2.4M placements costs only ~74MB GPU + ~121MB CPU rows, and a huge 2,048-model library costs ~115MB — authored content cannot reasonably reach the budget, same conclusion as the flora run earlier today. What bites FIRST: GEO_CACHE_SIZE=2048 unique geometry keys (a fixed content cap that contradicts the req_2843 elastic-pools ruling — flagged as the thing to elasticize) and the 256MiB per-buffer retained region (~2,960 unique avg models if fully unique). The only realistic budget eater is dense imports (~24MB per 400k-tri GLB, ~50 of them = the budget), which is exactly what the roadmapped indexed pipeline divides by ~6.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T18:09:23.530Z"
+}

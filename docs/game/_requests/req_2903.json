@@ -1,0 +1,28 @@
+{
+  "id": "req_2903",
+  "at": "2026-07-10T17:58:52.602Z",
+  "origin": "session:54e620c2",
+  "text": "so  ok when you say its soup, that doesnt really sound like a good thing and i cant imagine it really is,",
+  "status": "review",
+  "sessionId": "54e620c2-839a-4d1b-89bb-d585b2326ecf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T17:59:29.110Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T17:59:45.239Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Question-only ask, no code changed. Gave the honest assessment of 'triangle soup' (the non-indexed vertex stream): it is not a correctness or rendering-quality problem and was the right v1 — flat expanded faces are what make the host mesh editor's part ranges, face selection, paint, and journal simple, and hard-surface authored props need vertex splits at every crease anyway so their real duplication factor is ~2x, kilobytes in practice. Where it IS genuinely wasteful: smooth/dense geometry (imports, sculpts, cylinders) duplicates each shared vertex ~6x in memory AND runs the vertex shader per duplicate. The known fix is the indexed-mesh pipeline (already flagged at MAX_DYN_VERTS as the real long-term fix); recommended shape = keep authoring/editing on expanded faces, index at cook/intern time so cooked assets + the GPU copy are indexed while editor drafts stay soup — consistent with V29 (an index lump is still raw aligned data). Sized it as a real project (touches every 3D pipeline, intern cache, dyn slots) and offered to take it on; awaiting the user's word.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T17:59:45.238Z"
+}

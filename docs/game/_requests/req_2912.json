@@ -1,0 +1,49 @@
+{
+  "id": "req_2912",
+  "at": "2026-07-10T19:32:46.257Z",
+  "origin": "codex:019f4d0a",
+  "text": "also if you could curb the whole 'copy copy copy copy' chain that forever grows... that would be nice. just do something like Cube(1) Cube(20) etc.",
+  "status": "done",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T19:32:50.902Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T19:46:35.773Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Replaced the outliner duplicate suffix chain with source-family numbering. Legacy names like 'Cube copy copy' normalize to Cube, existing numeric siblings are scanned, and the next duplicate becomes Cube (N+1); mirrors use a separate qualified family. Pure naming regression passes."
+    },
+    {
+      "at": "2026-07-10T19:49:24.156Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Verified duplicate-family normalization in the pure outliner suite and through the full editor bundle/build. Commit 88c4167a3."
+    },
+    {
+      "at": "2026-07-10T19:49:24.164Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-10T20:11:43.785Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Replaced endlessly appended copy labels with stable duplicate-family numbering. Legacy names such as Cube copy copy normalize back to Cube, existing numbered siblings are scanned, and the next copy advances to Cube (N); duplicating Cube (20) yields Cube (21). Mirror variants use their own qualified numbering family.",
+  "shas": [
+    "88c4167a3"
+  ],
+  "resolvedAt": "2026-07-10T19:49:24.164Z"
+}

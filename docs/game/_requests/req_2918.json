@@ -1,0 +1,30 @@
+{
+  "id": "req_2918",
+  "at": "2026-07-10T20:26:42.060Z",
+  "origin": "codex:019f4d0a",
+  "text": "the nests work great actually on like select and gizmo etc, but paint faces got wrecked so did dupe and add from lib",
+  "status": "review",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T20:26:50.192Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T20:29:10.314Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the model context menu regression where Paint Faces, Duplicate Part, and Add From Library lost their classified row layout. Direct command rows now omit the optional style prop entirely, preserving height, horizontal flex, alignment, spacing, and padding; indented submenu children still receive their intended padding override. The existing submenu behavior was left unchanged. Focused tests, editor type-check, and the ReleaseFast editor ship all pass.",
+  "shas": [
+    "48160e8a2"
+  ],
+  "resolvedAt": "2026-07-10T20:29:10.314Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2907",
+  "at": "2026-07-10T18:33:03.253Z",
+  "origin": "session:54e620c2",
+  "text": "cool well thanks for the info, there was more we could close in on now you said or did you clear the board",
+  "status": "review",
+  "sessionId": "54e620c2-839a-4d1b-89bb-d585b2326ecf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T18:33:24.656Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T18:33:24.666Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Status question, no code changed. Listed what remains open after the req_2889 packing series landed (2D pools + Vertex 32->20B + lod_budget fix all shipped): (1) indexed mesh pipeline — the big one, ~6x on imports/smooth geometry, cook-time weld keeping the editor on expanded faces; (2) elasticize GEO_CACHE_SIZE=2048 unique-geometry cap per the req_2843 elastic-pools ruling; (3) yaw-only static InstanceData 32->24B (~8MB, small); (4) glyph identity-matrix fast path 48->24B (small); (5) auto coplanar-dissolve pass at export/cook (floated during the rifle discussion). All tracked in memory project_slim_packing_candidates.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T18:33:24.665Z"
+}

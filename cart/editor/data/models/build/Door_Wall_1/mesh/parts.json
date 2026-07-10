@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Door Frame",
+      "color": "#9aa3ad",
+      "visible": true
+    },
+    {
+      "name": "Door Leaf",
+      "color": "#c98f9b",
+      "visible": true,
+      "kind": "pyramid"
+    }
+  ]
+}

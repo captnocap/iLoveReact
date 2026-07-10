@@ -1,0 +1,30 @@
+{
+  "id": "req_2915",
+  "at": "2026-07-10T20:05:57.246Z",
+  "origin": "codex:019f4d0a",
+  "text": "nice heres another little clean up to hit, this right click context menu is cluttered, a number of these could be contained into a nested menu like mirror controls is one to call out for sure [Image #1]",
+  "status": "review",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T20:11:07.524Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T20:21:35.435Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked the model viewport right-click menu into compact Select Mode, Gizmo, Mirror, and View families. Mirror now contains both live edit-axis toggles and mirrored-part actions, while View also owns lighting. Paint Faces, contextual topology, duplicate/merge/import, and Quality remain direct. Added layout coverage proving every command appears exactly once and that part actions remain correctly scoped; editor type-check and the ReleaseFast ship both pass.",
+  "shas": [
+    "2d2a0c49d"
+  ],
+  "resolvedAt": "2026-07-10T20:21:35.435Z"
+}

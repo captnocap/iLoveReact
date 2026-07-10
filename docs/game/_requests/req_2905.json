@@ -1,0 +1,28 @@
+{
+  "id": "req_2905",
+  "at": "2026-07-10T18:16:13.825Z",
+  "origin": "session:54e620c2",
+  "text": "Ok last question is one of the first things with the arbitrary model imports i had added was the quality slider because in general i didnt think that even any model would effectively render at all, and they do, but regardless i can still take a 400k and decimate to 4k, retain a great amount of the shape still, and this just cut a huge amount off the top. yeah?",
+  "status": "review",
+  "sessionId": "54e620c2-839a-4d1b-89bb-d585b2326ecf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T18:16:31.693Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T18:16:31.701Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmation-only ask, no code changed. Confirmed the user's conclusion: the import quality slider (decimateExpanded, grid vertex clustering) is exactly the right lever — decimating a 400k-tri import to 4k cuts its GPU-resident vertex memory ~100x, from ~24MB to ~240KB, which lands it in hand-authored prop territory (~4x their average 980-tri model). Noted the one caveat: vertex clustering preserves silhouette well but at aggressive levels it can soften hard edges and shift UVs, so eyeball painted/hard-surface imports at the chosen level before committing; the adopted model stores the decimated result so the saving is permanent for the cooked prop.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T18:16:31.701Z"
+}

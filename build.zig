@@ -1179,6 +1179,27 @@ pub fn build(b: *std.Build) void {
     const mesh_edit_test_step = b.step("test-mesh-edit", "Run the mesh-edit welding/selection unit tests");
     mesh_edit_test_step.dependOn(&run_mesh_edit_test.step);
 
+    // ── path array (constant-radius turn + elevation profile) unit tests ─────
+    const path_array_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/path_array.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    path_array_test_mod.addImport("path_array", b.createModule(.{
+        .root_source_file = b.path("framework/gpu/path_array.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    }));
+    const path_array_test = b.addTest(.{
+        .name = "path-array-test",
+        .root_module = path_array_test_mod,
+    });
+    const run_path_array_test = b.addRunArtifact(path_array_test);
+    const path_array_test_step = b.step("test-path-array", "Run the model path-array geometry tests");
+    path_array_test_step.dependOn(&run_path_array_test.step);
+
     // ── GPU attribution unit tests ──────────────────────────────
     // Exercises native text/capture attribution producers without going
     // through the TS bridge: atlas-miss rollover, text trace summaries,

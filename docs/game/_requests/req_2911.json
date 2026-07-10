@@ -1,0 +1,49 @@
+{
+  "id": "req_2911",
+  "at": "2026-07-10T19:31:31.101Z",
+  "origin": "codex:019f4d0a",
+  "text": "nice this works. Ok here is another thing you can help with, so im making a bridge, and here is a start of it [Image #1] i have the primitive shapes and then the combined pieces to use, but without combining these primitives i need a grouping system so i can better tuck it away and get it out of the way without shooting myself in the foot, without combining into one piece",
+  "status": "done",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T19:31:40.907Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T19:46:35.763Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implemented flat organizational folders over ModelPart metadata: Shift-select + FolderPlus groups without touching host ranges; folders expand/collapse, select visible members as one scope, toggle visibility, rename, and dissolve safely. Group ids/names persist through parts.json and host journal notes; duplicates inherit membership. Pure grouping and persistence tests pass."
+    },
+    {
+      "at": "2026-07-10T19:49:24.136Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Verified grouping with 3 pure outliner tests, 4 meshdoc tests, tools/tsc-check editor, and a full ReleaseFast editor build. Commit 88c4167a3; unrelated framework/gpu/3d.zig and model-data work were not staged."
+    },
+    {
+      "at": "2026-07-10T19:49:24.146Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-10T20:11:43.780Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Added non-destructive flat folders to the model outliner. Shift-selected parts can be grouped, collapsed, selected and moved as a visible set, hidden/shown together, renamed, partially ungrouped, or safely dissolved while preserving every independent part id and host range. Group metadata persists through parts.json and mesh journal notes, and duplicates remain in their source folder.",
+  "shas": [
+    "88c4167a3"
+  ],
+  "resolvedAt": "2026-07-10T19:49:24.146Z"
+}

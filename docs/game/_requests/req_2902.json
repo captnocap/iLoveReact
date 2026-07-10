@@ -1,0 +1,28 @@
+{
+  "id": "req_2902",
+  "at": "2026-07-10T17:56:07.643Z",
+  "origin": "session:54e620c2",
+  "text": "Oh so its per vertex. I see, so then ok this is helpful because for example if i just bring something like this model into question [Image #1] notice how many flat faces i have, that, are the product of extruding plane edges to create a shape, but effectively i COULD go through this and merge all the faces that are on the same flat plane, and that would take my vertex count down drastically from what it looks like here is 228 [Image #2]",
+  "status": "review",
+  "sessionId": "54e620c2-839a-4d1b-89bb-d585b2326ecf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T17:56:35.776Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T17:57:24.275Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Question-only ask, no code changed. Confirmed the user's intuition: coplanar face merging is visually lossless (same plane = same normal, oct encoding identical) and shrinks the GPU soup. Told them the tool ALREADY EXISTS in the active editor — select faces then Merge (editMesh.mergeFaces + host door __mesh_topo_merge_faces, wired in AppFrame/ModelView) — no hand vertex work needed. Gave honest scale math: a 228-logical-vert authored prop is ~25-30 KB GPU-resident after packing (soup = tris x 3 x 20B), so merging there is craft not performance; the discipline pays on imports/sculpts and library aggregate. Noted from their screenshots that most density is the scope/barrel ring segments (round geometry — merge won't touch it; segment count/decimation is that lever). Floated a possible follow-up (auto limited-dissolve pass at export/cook) without building it.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T17:57:24.275Z"
+}

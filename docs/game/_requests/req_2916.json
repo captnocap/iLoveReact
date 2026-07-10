@@ -1,0 +1,30 @@
+{
+  "id": "req_2916",
+  "at": "2026-07-10T20:20:14.905Z",
+  "origin": "session:8452c1d5",
+  "text": "looks good, for now haha what about paint did u cover for paint",
+  "status": "review",
+  "sessionId": "8452c1d5-9bbd-4caf-832a-8210fc1a5f17",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T20:21:00.690Z",
+      "actor": "fable-hotstate",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T20:25:05.424Z",
+      "actor": "fable-hotstate",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Extended the reload torture to PAINT, pixel-level, against the real dev-mode watcher reload. The earlier suite had only proven the atlas EXISTS across reloads — this one proves the painted CONTENT survives. Results, all green: (1) baseline honesty check — dumped the atlas before and after stamping, hashes differ, so the strokes genuinely changed pixels (guards against a suite that passes because nothing painted); (2) two real committed strokes (paint mode armed, stamp, stroke committed, twice), then a reload — the atlas PNG dumps byte-identical on both sides of the reload (same sha256), the stroke journal holds {undo:2}, and the serialized stroke program reads back as the identical 204 b64 chars; (3) after a SECOND reload, paintundo still drives the surviving journal (undo:1/redo:1) — stroke replay works on the resumed session; (4) paint mode itself re-arms via the tool twig when the atlas is live. Also code-verified the render side: the atlas GPU texture (g_paint_tex) is recreated and fully re-uploaded from the surviving CPU atlas whenever it goes missing, so the painted look cannot silently drop even if a future reload path destroyed the texture. The paint phases are documented in docs/game/editor_hot_reload.md alongside the mesh suite. No product code changed — the harness ops already existed; docs-only commit.",
+  "shas": [
+    "8b9d67860"
+  ],
+  "resolvedAt": "2026-07-10T20:25:05.423Z"
+}

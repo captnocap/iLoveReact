@@ -1,0 +1,49 @@
+{
+  "id": "req_2899",
+  "at": "2026-07-10T17:45:11.330Z",
+  "origin": "codex:019f4d0a",
+  "text": "hello. here is a really annoying problem i have in the cart/editor some times, and sometimes it doesnt happen or my ability to realize it is happening is crap, idk, but consider this image [Image #1] here is a door wall outliner combo, and im going to select the door, [Image #2] and notice they are two seperate outliners [Image #3] alright, now so i have the leaf selected, im going to now click loop cut [Image #4] and notice right away its spreading the loop cut across both outliners. [Image #5] and we can see it. lets now submit and target the frame and now see if it really cut it [Image #6] and it sure did D:",
+  "status": "done",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T17:45:18.474Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T17:47:22.927Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause isolated in framework/gpu/3d.zig: face loop-cut derives its planes from the selected part but meshLoopCutFacePreview passes the entire resident soup to planeCutSoup, so every crossing outliner part is split. Fix will enforce a per-input-face mutation mask in the pure topology boundary and propagate it across multi-plane previews."
+    },
+    {
+      "at": "2026-07-10T17:50:38.232Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Verified: zig build test-mesh-edit passes, including the two-part crossing-plane regression; SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor completes in ReleaseFast. Commit b32b2409d."
+    },
+    {
+      "at": "2026-07-10T17:50:38.242Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-10T19:31:48.999Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Fixed loop-cut isolation in the native mesh editor by adding a strict per-face mutation mask and carrying the active outliner scope through every preview plane. Face-popup and edge loop cuts now leave sibling parts untouched, with a Zig regression covering two parts crossed by the same plane. Verified by the targeted native test and a full ReleaseFast editor build.",
+  "shas": [
+    "b32b2409d"
+  ],
+  "resolvedAt": "2026-07-10T17:50:38.242Z"
+}

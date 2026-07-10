@@ -1,0 +1,30 @@
+{
+  "id": "req_2914",
+  "at": "2026-07-10T20:04:07.193Z",
+  "origin": "session:8452c1d5",
+  "text": "Oh its fine im not heart broken over it but do whatever u can to simulate whatever would fire a reset even if it doesnt really make sense just try everything and il tell u if it resets",
+  "status": "review",
+  "sessionId": "8452c1d5-9bbd-4caf-832a-8210fc1a5f17",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T20:05:27.070Z",
+      "actor": "fable-hotstate",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T20:12:30.620Z",
+      "actor": "fable-hotstate",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built a reload torture harness and fired every reset path reachable headlessly against a REAL dev-mode watcher reload (a -Ddev-mode build whose bundle lives at a scratch path; touching it fires the genuine reload; RJIT_MESHOPS=@file re-reads the op script per eval so each remount runs a different phase). Suite results, all green with zero seed-resets: (1) plain reload after an edit + face-mode selection — resumed '1 undo · atlas live · mode 3 · 2 selected', so even the live SELECTION survives; (2) rapid double reload 3s apart — two clean resumes, session byte-identical; (3) BROKEN bundle (syntax error → V8 compile fails → the host's last_good recovery re-eval) — the session survives BOTH teardown cycles and resume fires right after recovery; (4) undo across a reload — undo pops the op (312→36 verts), the doc twig tracks the undo's re-key, and the reload resumes the UNDONE state (0 undo, 1 redo); (5) redo across a reload — 312 verts back, twig tracks, match=true. Hardening that fell out: the resumed log now reports mode+selection, and an orphaned host loop-cut session gets cancelled on resume (its popup died with the JS world — modal discipline). What headless cannot fire: real pointer gestures mid-reload, popout windows, and the cold-restart path (which resets twigs BY DESIGN — disk saves are the durable layer). The torture recipe is documented in docs/game/editor_hot_reload.md so reload-safety claims must use it, never an in-process shot. Cart changes ride hot reload; no rebuild needed beyond the one req_2913 already requires.",
+  "shas": [
+    "0f6dfa5da"
+  ],
+  "resolvedAt": "2026-07-10T20:12:30.620Z"
+}

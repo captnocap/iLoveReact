@@ -1,0 +1,37 @@
+{
+  "id": "req_2920",
+  "at": "2026-07-10T20:31:20.868Z",
+  "origin": "codex:019f4d0a",
+  "text": "oh and for the grouping of outliners, you could pass a duplicate to that same idea here would be great.",
+  "status": "done",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T20:31:39.050Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T20:37:38.454Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-10T20:47:53.133Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Added a Duplicate control to organizational group rows. It copies every member through the existing host-native part operation, preserves paint and editable part boundaries, assigns the copies a fresh collision-free numbered group, and focuses the complete copied group immediately. Hidden or unstamped groups fail before copying to avoid predictable partial folders. Added focused naming coverage; type-check and ReleaseFast ship pass.",
+  "shas": [
+    "a741ef0bf"
+  ],
+  "resolvedAt": "2026-07-10T20:37:38.454Z"
+}

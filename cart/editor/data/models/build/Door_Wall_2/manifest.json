@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "starter:build:door-wall:2",
+  "name": "Door Wall 2",
+  "kind": "build",
+  "stage": "wip",
+  "folderId": "models-build",
+  "semanticKind": "door",
+  "sourceKind": "build-starter",
+  "color": "#9aa3ad",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": []
+}

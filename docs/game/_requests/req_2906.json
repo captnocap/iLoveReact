@@ -1,0 +1,49 @@
+{
+  "id": "req_2906",
+  "at": "2026-07-10T18:17:57.745Z",
+  "origin": "codex:019f4d0a",
+  "text": "Ok, so it looks right now but it does this one thing that is a bit strange still if u asked me. so here is the interface with 1 cut up [Image #1] and then i go to two, it does this [Image #2] which makes this weird gap in the area that is not the same outliner, but then if i go to 3 cuts, [Image #3] now its back",
+  "status": "done",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T18:18:13.964Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T18:20:23.005Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Confirmed the count-dependent gap is face-attribute drift: Door Wall 2 has a grey Door Frame and dark Door Leaf, while each preview recuts base geometry but replaceActiveEditMesh carries colors positionally from the previous preview. Changing 1→2→3 cuts changes face order/count, so the leaf's dark color temporarily lands on a frame face. The fix will inherit RGBA through CutResult.src_face from the captured base on every plane."
+    },
+    {
+      "at": "2026-07-10T18:23:43.029Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implemented source-face RGBA inheritance across every loop-cut preview plane. The native two-plane regression keeps the unscoped sibling at its original two triangles and grey color; zig build test-mesh-edit and the full ReleaseFast editor ship both pass. Commit dd888ea60."
+    },
+    {
+      "at": "2026-07-10T18:23:43.037Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-10T19:31:49.009Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Fixed the 1→2→3 cut-count flicker by capturing true base face colors when the loop-cut session opens and inheriting RGBA through each plane's source-face map. Preview face order can now change without transferring the dark Door Leaf color onto the grey Door Frame; the same protection also covers edge loop cuts. Added a repeated masked-cut Zig regression and verified the full ReleaseFast editor build.",
+  "shas": [
+    "dd888ea60"
+  ],
+  "resolvedAt": "2026-07-10T18:23:43.037Z"
+}

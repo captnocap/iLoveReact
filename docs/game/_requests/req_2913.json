@@ -1,0 +1,30 @@
+{
+  "id": "req_2913",
+  "at": "2026-07-10T19:41:21.596Z",
+  "origin": "session:8452c1d5",
+  "text": "hm. damn you... you added the hot state right? haha fuck i rebuilt and didnt think to do a small test first, was working on [Image #11] and then all of a sudden everything turned into its most primitive shape from a code update [Image #12]",
+  "status": "review",
+  "sessionId": "8452c1d5-9bbd-4caf-832a-8210fc1a5f17",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T19:42:40.850Z",
+      "actor": "fable-hotstate",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T19:52:47.290Z",
+      "actor": "fable-hotstate",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Found and fixed why the reload still wiped your model: the resume mechanism (req_2898) was correct, but the dev host's reload path itself was destroying the thing it checks — resetForReload (framework/gpu/3d.zig), which flushes the append-only GPU intern caches on every reload, ALSO called clearActiveEditMesh, freeing the resident session's identity (g_edit_key). So __model_session_json came back empty, the resume precondition failed, and the remount fell back to composing seed geometry — your deck reverted to its primitive spawn shapes. My original proof ran in ONE process and never crossed a real reload, which is exactly where the bug lived. Fix: resetForReload now leaves the session alone and RE-STASHES the session mesh from its own CPU copy (g_edit_verts) so the first post-reload draw re-interns it into the freshly flushed cache; selection, journal, paint atlas, and orbit were never cleared there and keep surviving. Also made the RJIT_MODELDOC harness effect idempotent across reloads (it was minting a second fresh doc, which would mask resume in tests). This time proven against a REAL reload: built a -Ddev-mode binary, made an edit headlessly, touched the bundle on disk, and the log shows '[modelview] resumed live host session (1 undo · atlas live)' firing across the reload with the next edit continuing the surviving mesh (312→588 verts, undo=2) instead of resetting to a seed cube. Docs + oracle hazard record updated (severity high: reload-time cleanup must never touch g_edit_*/journal/paint/orbit, and reload claims need the dev-mode reload test, not an in-process shot). Needs a dev host rebuild. Your Model 6 edits from before the fix are unrecoverable (the old code freed the mesh and the model was never saved) — I'm sorry about that one.",
+  "shas": [
+    "f41db2418"
+  ],
+  "resolvedAt": "2026-07-10T19:52:47.290Z"
+}

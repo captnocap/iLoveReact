@@ -1,0 +1,37 @@
+{
+  "id": "req_2919",
+  "at": "2026-07-10T20:29:25.084Z",
+  "origin": "codex:019f4d0a",
+  "text": "oh heres one thing thats minor and huge at the same time, when u duplicate an outliner, it never puts that outliner into focus entirely, so you have to end up going to find the new duplicate in the outliner list and click to put into focus, really slows down the flow",
+  "status": "done",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T20:29:35.809Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T20:37:38.452Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-10T20:47:53.113Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Changed outliner part duplication into a complete focus handoff: the new duplicate set now becomes the selected-id set and primary row, its ranges replace the host edit scope, face selection/counts move to the copies, and the live UV target follows. Multi-part duplication focuses the entire copied set. A headless host audit confirmed the source is unselected and the copied range is primary, selected, and editable immediately.",
+  "shas": [
+    "a741ef0bf"
+  ],
+  "resolvedAt": "2026-07-10T20:37:38.452Z"
+}

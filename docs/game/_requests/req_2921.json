@@ -1,0 +1,37 @@
+{
+  "id": "req_2921",
+  "at": "2026-07-10T20:47:38.562Z",
+  "origin": "codex:019f4d0a",
+  "text": "yeah yeah nice that landed great heres the next one, so either i have the most shit luck or this thing is just a pain in the ass but when i create faces between edges its like 95% of the time upside down ;_; and trying to select it to flip sometimes is a real bitch, can u atleast when making a face from edges, automatically go into face select for the new face so i can instantly press x and flip it",
+  "status": "done",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T20:47:53.119Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T20:54:08.005Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-10T21:14:32.505Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
+    }
+  ],
+  "resolution": "Changed the native Create Face postcondition so a successful edge bridge immediately enters Face mode and selects exactly the newly authored face. Grouped quads select both render triangles as one authored face; ungrouped imports select every appended triangle, so X flips the complete result without another pick. The React editor now adopts the host result mode instead of forcing Edge mode. Added Zig coverage for grouped and ungrouped cases, and verified the real Create Face → X key path, editor type-check, and ReleaseFast ship.",
+  "shas": [
+    "d2a1e7671"
+  ],
+  "resolvedAt": "2026-07-10T20:54:08.005Z"
+}

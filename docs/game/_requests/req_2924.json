@@ -1,0 +1,18 @@
+{
+  "id": "req_2924",
+  "at": "2026-07-10T21:22:58.601Z",
+  "origin": "codex:019f4de6",
+  "text": "Hey so ive been thinking a lot about vehicles, and well, one thing i know i definitely want to do is get setup with a train track / light rail track tool for the world, where i can hopefully get the same effect that you would get with something the likes of roller coaster tycoon style piece drawing, and that way i can draw out a railway system. You will find that we have something very similar to this (kinda), its the road painting tools, however, this port of them from a 2d PoV into the now 3d approach, is very ass, and so i would not copy it verbatim, Some of t he things you could do here is take both under the wing and instrument the road pathing to take on a shape a lot like the train tracks would, the main problem areas are it currently asks me as the user to click one point, and click another ,before i even see anything. but this blows, i cant do curves properly, i cant even see what im doing actually until resolving between two or more points which sucks, i need something to be more real time and more fine tuned for both these systems to perform at the capability i would like to author them at",
+  "status": "doing",
+  "sessionId": "019f4de6-2533-7ed0-8e75-190a8d7d1e46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T21:23:08.745Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}
