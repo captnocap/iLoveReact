@@ -3683,15 +3683,20 @@ pub const Runtime = struct {
     /// ROW_CAP and DOUBLE when full (req_2843: elastic — the machine is the
     /// only wall); the renderer re-retains a grown family's fresh pointer.
     paint_foliage_kids_first: ?usize = null,
-    paint_grass_rows: ?[]f32 = null,
-    paint_flower_rows: ?[]f32 = null,
-    paint_bush_rows: ?[]f32 = null,
-    paint_frond_rows: ?[]f32 = null,
-    paint_trunk_rows: ?[]f32 = null,
-    /// Per-chunk row ranges of each family, in kid order (grass, flowers,
-    /// bush, fronds, trunks) — the renderer frustum-culls these so foliage
-    /// behind the camera submits nothing (req_2859). Rebuilt every regen.
-    paint_foliage_segs: [5]std.ArrayListUnmanaged(layout.InstanceSegment) = .{ .{}, .{}, .{}, .{}, .{} },
+    /// req_2864: the regen runs on a WORKER thread (the pose_mailbox pattern,
+    /// req_2845) — a moving brush must never spend frame time growing plants
+    /// (240fps → 10fps measured). The main thread snapshots painted-chunk data
+    /// (flora lanes + render floor) and submits; the worker grows rows +
+    /// per-chunk segments (req_2859) into the row set the renderer is NOT
+    /// displaying; poll swaps the finished set in. Strictly serial: one job in
+    /// flight, stroke bursts coalesce through `foliage_want`.
+    foliage_worker: ?std.Thread = null,
+    foliage_box: FoliageMailbox = .{},
+    foliage_sets: [2]FoliageRowSet = .{ .{}, .{} },
+    foliage_display: u8 = 0,
+    foliage_snap: FoliageSnapSlot = .{},
+    foliage_want: bool = false,
+    foliage_want_log: bool = false,
     paint_foliage_ver: u32 = 0,
     /// req_2838: preview-budget attention tracking. The regen spends the row
     /// budget NEAREST-FIRST from the anchor (brush hover, else camera look).
@@ -3872,12 +3877,18 @@ pub const Runtime = struct {
         for (self.paint_slot_surface) |maybe_buf| {
             if (maybe_buf) |buf| self.allocator.free(buf);
         }
-        if (self.paint_grass_rows) |buf| self.allocator.free(buf);
-        if (self.paint_flower_rows) |buf| self.allocator.free(buf);
-        if (self.paint_bush_rows) |buf| self.allocator.free(buf);
-        if (self.paint_frond_rows) |buf| self.allocator.free(buf);
-        if (self.paint_trunk_rows) |buf| self.allocator.free(buf);
-        for (&self.paint_foliage_segs) |*segs| segs.deinit(self.allocator);
+        // Foliage worker teardown (req_2864): stop the mailbox, join, THEN free
+        // the worker-owned row sets — never while a regen could be writing them.
+        self.foliage_box.stop();
+        if (self.foliage_worker) |worker| worker.join();
+        self.foliage_worker = null;
+        for (&self.foliage_sets) |*set| {
+            for (&set.rows) |*maybe_rows| {
+                if (maybe_rows.*) |buf| std.heap.c_allocator.free(buf);
+            }
+            for (&set.segs) |*segs| segs.deinit(std.heap.c_allocator);
+        }
+        if (self.foliage_snap.chunks.len > 0) std.heap.c_allocator.free(self.foliage_snap.chunks);
         {
             var it = self.live_slot_keys.valueIterator();
             while (it.next()) |key| self.allocator.free(key.*);
@@ -8048,7 +8059,11 @@ fn applyPaintLayer(runtime: *Runtime) void {
         const step = map_chunks.CHUNK_METERS * 0.5;
         foliage_follow = dx * dx + dz * dz > step * step;
     }
-    if (foliage_stale or foliage_follow) regenPaintFoliage(runtime, foliage_stale);
+    if (foliage_stale or foliage_follow) requestFoliageRegen(runtime, foliage_stale);
+    // req_2864: apply finished worker regens + feed the worker its next job.
+    // The regen itself runs OFF this thread — a paint frame spends microseconds
+    // here no matter how much of the world is planted.
+    pollFoliageRegen(runtime);
 
     // the brush gizmo: preview-only chrome over the footprint at the hover point
     if (runtime.paint_beam_kid) |beam_kid| {
@@ -8074,20 +8089,14 @@ fn lerpF64(a: f64, b: f64, t: f64) f64 {
     return a + (b - a) * t;
 }
 
-/// Re-seat a foliage row on the terrain under its OWN x/z. The generators
-/// plant every row at the CELL-CENTRE height; on a slope the ground under a
-/// scattered blade can sit a metre above that sample and swallow it whole —
-/// the bare-hillside bug (req_2699). The delta keeps any in-row y offset
-/// (flower stems, frond fans) intact.
-fn seatRowOnTerrain(row: *[foliage.STRIDE]f32, cell_top: f64, floor: ?[]const f32, chunk: *const map_chunks.Chunk) void {
-    row[1] += paintGroundY(floor, chunk, row[0], row[2]) - @as(f32, @floatCast(cell_top));
-}
-
 /// Ground height on the surface the painted ground RENDERS — the chunk's
 /// 121-grid abs-max floor downsample (the same grid the collider walks).
 /// heightAt's fine 241-grid bilinear can sit up to half a metre BELOW the
 /// rendered slope, which drowned 0.3 m grass while 1.6 m bush poked through
 /// (req_2704). Falls back to heightAt while the chunk has no mirrored floor.
+/// MAIN THREAD only (live chunk reads) — the foliage worker uses its snapshot
+/// twin snapGroundY (req_2864); the req_2699 per-row re-seat lives inline in
+/// the worker walk.
 fn paintGroundY(floor: ?[]const f32, chunk: *const map_chunks.Chunk, wx: f32, wz: f32) f32 {
     const f = floor orelse return map_paint.heightAt(wx, wz);
     const res = map_paint.FLOOR_RES;
@@ -8125,15 +8134,17 @@ fn paintSlotFloorFor(runtime: *Runtime, cx: i32, cz: i32) ?[]const f32 {
 /// killing me"). The doubled CPU buffer re-keys the render batch and the GPU
 /// pool grows to match (gpu/3d.zig growStaticPool); the recycled old region
 /// ages out of the retain cache. false = the ALLOCATOR refused the growth —
-/// the machine's honest wall, not a budget's.
-fn pushFoliageRow(runtime: *Runtime, slot: *?[]f32, name: []const u8, count: *u32, row: [foliage.STRIDE]f32) bool {
+/// the machine's honest wall, not a budget's. Runs on the foliage WORKER
+/// thread (req_2864) — alloc is the thread-safe c_allocator, and the GREW
+/// log prints through std.debug (mutex-serialized).
+fn pushFoliageRow(alloc: std.mem.Allocator, slot: *?[]f32, name: []const u8, count: *u32, row: [foliage.STRIDE]f32) bool {
     var buf = slot.*.?;
     const cap: u32 = @intCast(buf.len / foliage.STRIDE);
     if (count.* >= cap) {
-        const grown = runtime.allocator.realloc(buf, buf.len * 2) catch return false;
+        const grown = alloc.realloc(buf, buf.len * 2) catch return false;
         slot.* = grown;
         buf = grown;
-        log.print("[paint] LIVE FOLIAGE PREVIEW GREW: {s} → {d} rows ({d} MiB CPU) — elastic budget, the machine is the wall (req_2843)\n", .{ name, buf.len / foliage.STRIDE, buf.len * @sizeOf(f32) / (1024 * 1024) });
+        std.debug.print("[paint] LIVE FOLIAGE PREVIEW GREW: {s} → {d} rows ({d} MiB CPU) — elastic budget, the machine is the wall (req_2843)\n", .{ name, buf.len / foliage.STRIDE, buf.len * @sizeOf(f32) / (1024 * 1024) });
     }
     const at = @as(usize, count.*) * foliage.STRIDE;
     @memcpy(buf[at .. at + foliage.STRIDE], row[0..]);
@@ -8146,9 +8157,9 @@ fn clippedMark(family_full: bool) []const u8 {
     return if (family_full) " CLIPPED" else "";
 }
 
-fn ensureFoliageBuf(runtime: *Runtime, slot: *?[]f32, cap: u32) ?[]f32 {
+fn ensureFoliageBuf(alloc: std.mem.Allocator, slot: *?[]f32, cap: u32) ?[]f32 {
     if (slot.*) |buf| return buf;
-    const buf = runtime.allocator.alloc(f32, @as(usize, cap) * foliage.STRIDE) catch return null;
+    const buf = alloc.alloc(f32, @as(usize, cap) * foliage.STRIDE) catch return null;
     slot.* = buf;
     return buf;
 }
@@ -8162,27 +8173,308 @@ fn paintPreviewAnchor(runtime: *Runtime) [2]f32 {
     return .{ look.x, look.z };
 }
 
+// ── the foliage regen WORKER (req_2864) ──────────────────────────────────────
+// Painting at 240fps leaves ~4ms of frame budget; a whole-preview regen costs
+// tens of ms and used to run synchronously on every stroke frame (240 → 10fps
+// with a moving brush). The regen now runs on ONE worker thread behind a
+// strictly serial mailbox (the pose_mailbox pattern, req_2845):
+//
+//   stroke → requestFoliageRegen flags `foliage_want`
+//   pollFoliageRegen (every paint frame): applies a finished result (pointer
+//   swap + version bump — microseconds), then turns `want` into a job when
+//   the box is idle: SNAPSHOT the painted chunks (flora lanes + render
+//   floor) and submit.
+//   worker: grows rows + per-chunk segments (req_2859) into the row set the
+//   renderer is NOT displaying, reading the snapshot alone — it never touches
+//   live chunk storage, so painting continues freely while it works.
+//
+// Stroke bursts coalesce: however many cells change during a regen, the next
+// job regenerates once from the newest snapshot. The preview lags the brush
+// by one regen; the frame rate never does.
+
+const FoliageChunkSnap = struct {
+    cx: i32,
+    cz: i32,
+    flora: [map_chunks.FLORA_LAYER_COUNT][map_chunks.TILE_CELLS]i16,
+    floor: [map_paint.FLOOR_CELLS]f32,
+};
+
+const FoliageSnapSlot = struct {
+    chunks: []FoliageChunkSnap = &.{},
+    count: u32 = 0,
+};
+
+/// One ping-pong half of the preview: five families of rows + their per-chunk
+/// segments, in kid order (grass, flowers, bush, fronds, trunks). The
+/// renderer displays one set while the worker fills the other.
+const FoliageRowSet = struct {
+    rows: [5]?[]f32 = @splat(null),
+    segs: [5]std.ArrayListUnmanaged(layout.InstanceSegment) = .{ .{}, .{}, .{}, .{}, .{} },
+};
+
+const FoliageJob = struct {
+    set: u8,
+    anchor: [2]f32,
+    log_full: bool,
+    specs: [map_paint.MAX_PALETTE]?map_paint.FloraSpec,
+};
+
+const FoliageResult = struct {
+    set: u8,
+    counts: [5]u32,
+    fulls: [5]bool,
+    segs_ok: [5]bool,
+    anchor: [2]f32,
+    log_full: bool,
+};
+
+/// Strictly serial cross-thread mailbox: at most ONE job anywhere in the
+/// pipeline (pending, working, or unpolled result). submit() only succeeds
+/// when fully idle, so snapshot/row-set ownership never overlaps between
+/// the main thread and the worker.
+const FoliageMailbox = struct {
+    mutex: std.Thread.Mutex = .{},
+    cond: std.Thread.Condition = .{},
+    pending: ?FoliageJob = null,
+    result: ?FoliageResult = null,
+    working: bool = false,
+    shutdown: bool = false,
+
+    fn idle(self: *FoliageMailbox) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.pending == null and !self.working and self.result == null;
+    }
+
+    fn submit(self: *FoliageMailbox, job: FoliageJob) bool {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        if (self.shutdown) return false;
+        if (self.pending != null or self.working or self.result != null) return false;
+        self.pending = job;
+        self.cond.signal();
+        return true;
+    }
+
+    /// Worker-only blocking take. `null` means shutdown.
+    fn waitTake(self: *FoliageMailbox) ?FoliageJob {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        while (self.pending == null and !self.shutdown) self.cond.wait(&self.mutex);
+        if (self.shutdown) return null;
+        const job = self.pending.?;
+        self.pending = null;
+        self.working = true;
+        return job;
+    }
+
+    fn publish(self: *FoliageMailbox, result: FoliageResult) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        self.working = false;
+        if (!self.shutdown) self.result = result;
+    }
+
+    fn poll(self: *FoliageMailbox) ?FoliageResult {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const out = self.result;
+        self.result = null;
+        return out;
+    }
+
+    fn stop(self: *FoliageMailbox) void {
+        self.mutex.lock();
+        self.shutdown = true;
+        self.cond.signal();
+        self.mutex.unlock();
+    }
+};
+
+/// paintGroundY's snapshot twin (req_2704 semantics: the 121-grid render
+/// floor is the surface plants must seat on). Bilinear over COPIED floor
+/// data — the worker never reads live chunk storage.
+fn snapGroundY(floor: *const [map_paint.FLOOR_CELLS]f32, min_x: f32, min_z: f32, wx: f32, wz: f32) f32 {
+    const res = map_paint.FLOOR_RES;
+    const cell = map_chunks.CHUNK_METERS / @as(f32, @floatFromInt(res - 1));
+    const max_i: f32 = @floatFromInt(res - 1);
+    const gx = @max(0, @min(max_i, (wx - min_x) / cell));
+    const gz = @max(0, @min(max_i, (wz - min_z) / cell));
+    const x0: usize = @intFromFloat(@floor(gx));
+    const z0: usize = @intFromFloat(@floor(gz));
+    const x1 = @min(x0 + 1, res - 1);
+    const z1 = @min(z0 + 1, res - 1);
+    const tx = gx - @floor(gx);
+    const tz = gz - @floor(gz);
+    const h00 = floor[z0 * res + x0];
+    const h10 = floor[z0 * res + x1];
+    const h01 = floor[z1 * res + x0];
+    const h11 = floor[z1 * res + x1];
+    const a = h00 + (h10 - h00) * tx;
+    const b = h01 + (h11 - h01) * tx;
+    return a + (b - a) * tz;
+}
+
+/// MAIN THREAD: copy every painted chunk's flora lanes + render floor into
+/// the snapshot slot (~150KB memcpy per chunk). Chunks without a paint slot
+/// get their floor sampled from heightAt at the same 121 dots here, so the
+/// worker never calls into live engine state.
+fn snapshotPaintedChunks(runtime: *Runtime) bool {
+    var count: u32 = 0;
+    for (map_chunks.slots()) |maybe| {
+        if (maybe != null) count += 1;
+    }
+    const snap = &runtime.foliage_snap;
+    if (count == 0) {
+        snap.count = 0;
+        return true;
+    }
+    if (snap.chunks.len < count) {
+        snap.chunks = std.heap.c_allocator.realloc(snap.chunks, count) catch return false;
+    }
+    var i: u32 = 0;
+    for (map_chunks.slots()) |maybe| {
+        const chunk = maybe orelse continue;
+        const dst = &snap.chunks[i];
+        dst.cx = chunk.cx;
+        dst.cz = chunk.cz;
+        dst.flora = chunk.flora;
+        if (paintSlotFloorFor(runtime, chunk.cx, chunk.cz)) |floor| {
+            @memcpy(dst.floor[0..], floor);
+        } else {
+            const res = map_paint.FLOOR_RES;
+            const cell = map_chunks.CHUNK_METERS / @as(f32, @floatFromInt(res - 1));
+            var gz: usize = 0;
+            while (gz < res) : (gz += 1) {
+                var gx: usize = 0;
+                while (gx < res) : (gx += 1) {
+                    const wx = chunk.minX() + @as(f32, @floatFromInt(gx)) * cell;
+                    const wz = chunk.minZ() + @as(f32, @floatFromInt(gz)) * cell;
+                    dst.floor[gz * res + gx] = map_paint.heightAt(wx, wz);
+                }
+            }
+        }
+        i += 1;
+    }
+    snap.count = i;
+    return true;
+}
+
 /// `log_full` is true on paint-driven regens (the saturation warning prints);
 /// anchor-follow regens pass false so panning the camera doesn't spam it.
-fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
+/// This only FLAGS the want — pollFoliageRegen turns it into a worker job.
+fn requestFoliageRegen(runtime: *Runtime, log_full: bool) void {
+    runtime.foliage_want = true;
+    if (log_full) runtime.foliage_want_log = true;
+}
+
+/// MAIN THREAD, every paint-layer frame: apply a finished regen, then feed
+/// the worker if a regen is wanted and the pipeline is idle.
+fn pollFoliageRegen(runtime: *Runtime) void {
+    if (runtime.foliage_box.poll()) |result| applyFoliageResult(runtime, result);
+    if (!runtime.foliage_want) return;
+    if (!runtime.foliage_box.idle()) return;
+    if (runtime.foliage_worker == null) {
+        runtime.foliage_worker = std.Thread.spawn(.{}, foliageWorkerMain, .{runtime}) catch |err| {
+            log.print("[paint] foliage worker spawn FAILED ({any}) — live foliage preview will not update\n", .{err});
+            runtime.foliage_want = false;
+            runtime.foliage_want_log = false;
+            return;
+        };
+    }
+    if (!snapshotPaintedChunks(runtime)) return; // OOM: keep the want, retry next frame
+    var job = FoliageJob{
+        .set = 1 - runtime.foliage_display,
+        .anchor = paintPreviewAnchor(runtime),
+        .log_full = runtime.foliage_want_log,
+        .specs = undefined,
+    };
+    for (0..map_paint.MAX_PALETTE) |k| job.specs[k] = map_paint.floraSpec(@intCast(k));
+    if (runtime.foliage_box.submit(job)) {
+        runtime.foliage_want = false;
+        runtime.foliage_want_log = false;
+    }
+}
+
+/// MAIN THREAD: point the five family kids at the finished row set. This is
+/// the regen's only frame-time cost — pointers, counts, one version bump.
+fn applyFoliageResult(runtime: *Runtime, result: FoliageResult) void {
     const first = runtime.paint_foliage_kids_first orelse return;
-    _ = ensureFoliageBuf(runtime, &runtime.paint_grass_rows, PAINT_GRASS_ROW_CAP) orelse return;
-    _ = ensureFoliageBuf(runtime, &runtime.paint_flower_rows, PAINT_FLOWER_ROW_CAP) orelse return;
-    _ = ensureFoliageBuf(runtime, &runtime.paint_bush_rows, PAINT_BUSH_ROW_CAP) orelse return;
-    _ = ensureFoliageBuf(runtime, &runtime.paint_frond_rows, PAINT_FROND_ROW_CAP) orelse return;
-    _ = ensureFoliageBuf(runtime, &runtime.paint_trunk_rows, PAINT_TRUNK_ROW_CAP) orelse return;
+    runtime.foliage_display = result.set;
+    const set = &runtime.foliage_sets[result.set];
+    // A family only reads full when the ALLOCATOR refused to grow it — the
+    // machine's wall, not a budget's (req_2843: the caps are starting sizes).
+    const any_full = result.fulls[0] or result.fulls[1] or result.fulls[2] or result.fulls[3] or result.fulls[4];
+    runtime.paint_foliage_clipped = any_full;
+    runtime.paint_foliage_anchor = result.anchor;
+    if (result.log_full and any_full) {
+        const cap = struct {
+            fn rows(maybe: ?[]f32) usize {
+                return if (maybe) |buf| buf.len / foliage.STRIDE else 0;
+            }
+        };
+        log.print("[paint] LIVE FOLIAGE PREVIEW at the MACHINE'S wall (grass {d}/{d}{s} flowers {d}/{d}{s} bush {d}/{d}{s} fronds {d}/{d}{s} trunks {d}/{d}{s}) — the allocator refused further growth; budget spends nearest the brush first, so the bare patches are the FARTHEST chunks and the preview follows as you move. The Compile bake grows the full population\n", .{
+            result.counts[0], cap.rows(set.rows[0]), clippedMark(result.fulls[0]),
+            result.counts[1], cap.rows(set.rows[1]), clippedMark(result.fulls[1]),
+            result.counts[2], cap.rows(set.rows[2]), clippedMark(result.fulls[2]),
+            result.counts[3], cap.rows(set.rows[3]), clippedMark(result.fulls[3]),
+            result.counts[4], cap.rows(set.rows[4]), clippedMark(result.fulls[4]),
+        });
+    }
+    runtime.paint_foliage_ver += 1;
+    for (0..5) |fi| {
+        const node = &runtime.kid_list.items[first + fi];
+        const buf = set.rows[fi] orelse {
+            node.scene3d_mesh = false;
+            continue;
+        };
+        // the FULL family slice every time: the static instance region is
+        // reserved at first upload and re-uploaded in place on version bumps.
+        // The slice only changes when the family GROWS (req_2843) — the
+        // renderer then retains a fresh region and the old one ages out of
+        // the cache (gpu/3d.zig staticCacheSlot).
+        node.scene3d_instance_data = buf;
+        node.scene3d_instance_count = result.counts[fi];
+        node.scene3d_instance_version = runtime.paint_foliage_ver;
+        node.scene3d_mesh = result.counts[fi] > 0;
+        // req_2859: this family's per-chunk ranges, for frustum culling. A
+        // family whose segment append failed draws whole.
+        const segs = set.segs[fi].items;
+        node.scene3d_instance_segments = if (result.segs_ok[fi] and segs.len > 0) segs else null;
+    }
+}
+
+/// WORKER THREAD entry: block on the mailbox, regen, publish, repeat.
+fn foliageWorkerMain(runtime: *Runtime) void {
+    while (runtime.foliage_box.waitTake()) |job| {
+        runtime.foliage_box.publish(buildFoliageRows(runtime, job));
+    }
+}
+
+/// WORKER THREAD: the regen walk — grow every painted cell's plants from the
+/// snapshot into the off-display row set. Reads the snapshot and job ONLY.
+fn buildFoliageRows(runtime: *Runtime, job: FoliageJob) FoliageResult {
+    const alloc = std.heap.c_allocator;
+    const set = &runtime.foliage_sets[job.set];
+    var result = FoliageResult{
+        .set = job.set,
+        .counts = @splat(0),
+        .fulls = @splat(false),
+        .segs_ok = @splat(true),
+        .anchor = job.anchor,
+        .log_full = job.log_full,
+    };
+    const caps = [5]u32{ PAINT_GRASS_ROW_CAP, PAINT_FLOWER_ROW_CAP, PAINT_BUSH_ROW_CAP, PAINT_FROND_ROW_CAP, PAINT_TRUNK_ROW_CAP };
+    for (0..5) |fi| {
+        if (ensureFoliageBuf(alloc, &set.rows[fi], caps[fi]) == null) return result;
+        set.segs[fi].clearRetainingCapacity();
+    }
 
     var grass_n: u32 = 0;
     var flower_n: u32 = 0;
     var bush_n: u32 = 0;
     var frond_n: u32 = 0;
     var trunk_n: u32 = 0;
-    // Per-chunk segment recording (req_2859): each family's rows land
-    // chunk-contiguously (the cell walk finishes a chunk before the next), so
-    // one {row range, chunk sphere} per family per chunk is exact. On any
-    // append failure the family keeps NO segment table and draws whole.
-    for (&runtime.paint_foliage_segs) |*segs| segs.clearRetainingCapacity();
-    var segs_ok = [_]bool{ true, true, true, true, true };
     // Per-family saturation flags: the regen-end log names WHICH family
     // clipped (a saturated frond budget with trunk headroom = topless palms).
     var grass_full = false;
@@ -8195,29 +8487,28 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
     // saturated preview undresses the FARTHEST chunks — never the one under
     // the brush. Raw slot order dropped whatever chunks the walk reached last,
     // which could be exactly where the user was painting (invisible strokes).
-    const anchor = paintPreviewAnchor(runtime);
-    const ChunkDist = struct {
-        chunk: *map_chunks.Chunk,
+    const Order = struct {
+        idx: u32,
         d2: f32,
         fn closer(_: void, a: @This(), b: @This()) bool {
             return a.d2 < b.d2;
         }
     };
-    var order: [map_chunks.SLOT_COUNT]ChunkDist = undefined;
-    var order_n: usize = 0;
-    for (map_chunks.slots()) |maybe| {
-        const chunk = maybe orelse continue;
+    var order: [map_chunks.SLOT_COUNT]Order = undefined;
+    const snap = &runtime.foliage_snap;
+    const n_chunks: usize = @min(snap.count, snap.chunks.len);
+    for (snap.chunks[0..n_chunks], 0..) |*chunk_snap, ci| {
         // chunks are CENTERED at (cx·CHUNK_METERS, cz·CHUNK_METERS)
-        const dx = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS - anchor[0];
-        const dz = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS - anchor[1];
-        order[order_n] = .{ .chunk = chunk, .d2 = dx * dx + dz * dz };
-        order_n += 1;
+        const dx = @as(f32, @floatFromInt(chunk_snap.cx)) * map_chunks.CHUNK_METERS - job.anchor[0];
+        const dz = @as(f32, @floatFromInt(chunk_snap.cz)) * map_chunks.CHUNK_METERS - job.anchor[1];
+        order[ci] = .{ .idx = @intCast(ci), .d2 = dx * dx + dz * dz };
     }
-    std.sort.pdq(ChunkDist, order[0..order_n], {}, ChunkDist.closer);
+    std.sort.pdq(Order, order[0..n_chunks], {}, Order.closer);
 
-    for (order[0..order_n]) |entry| {
-        const chunk = entry.chunk;
-        const slot_floor = paintSlotFloorFor(runtime, chunk.cx, chunk.cz);
+    for (order[0..n_chunks]) |entry| {
+        const chunk_snap = &snap.chunks[entry.idx];
+        const min_x = @as(f32, @floatFromInt(chunk_snap.cx)) * map_chunks.CHUNK_METERS - map_chunks.CHUNK_METERS / 2;
+        const min_z = @as(f32, @floatFromInt(chunk_snap.cz)) * map_chunks.CHUNK_METERS - map_chunks.CHUNK_METERS / 2;
         const seg_start = [5]u32{ grass_n, flower_n, bush_n, frond_n, trunk_n };
         var seg_ymin: f32 = std.math.floatMax(f32);
         var seg_ymax: f32 = -std.math.floatMax(f32);
@@ -8228,16 +8519,16 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                 const idx = @as(usize, @intCast(lz)) * map_chunks.TILE_COLS + @as(usize, @intCast(lx));
                 var lane: usize = 0;
                 while (lane < map_chunks.FLORA_LAYER_COUNT) : (lane += 1) {
-                    const kind = chunk.flora[lane][idx];
-                    if (kind < 0) continue;
-                    const spec = map_paint.floraSpec(kind) orelse continue;
-                    const wx = chunk.minX() + @as(f32, @floatFromInt(lx)) + 0.5;
-                    const wz = chunk.minZ() + @as(f32, @floatFromInt(lz)) + 0.5;
-                    const top: f64 = paintGroundY(slot_floor, chunk, wx, wz);
+                    const kind = chunk_snap.flora[lane][idx];
+                    if (kind < 0 or kind >= @as(i16, @intCast(map_paint.MAX_PALETTE))) continue;
+                    const spec = job.specs[@intCast(kind)] orelse continue;
+                    const wx = min_x + @as(f32, @floatFromInt(lx)) + 0.5;
+                    const wz = min_z + @as(f32, @floatFromInt(lz)) + 0.5;
+                    const top: f64 = snapGroundY(&chunk_snap.floor, min_x, min_z, wx, wz);
                     seg_ymin = @min(seg_ymin, @as(f32, @floatCast(top)));
                     seg_ymax = @max(seg_ymax, @as(f32, @floatCast(top)));
-                    const gx = chunk.cx * map_chunks.CHUNK_TILES + lx;
-                    const gz = chunk.cz * map_chunks.CHUNK_TILES + lz;
+                    const gx = chunk_snap.cx * map_chunks.CHUNK_TILES + lx;
+                    const gz = chunk_snap.cz * map_chunks.CHUNK_TILES + lz;
                     const cell_key: u32 = (@as(u32, @bitCast(gx)) *% 0x9E3779B1) ^
                         (@as(u32, @bitCast(gz)) *% 0x85EBCA77) ^
                         (@as(u32, @intCast(lane + 1)) *% 0xC2B2AE3D);
@@ -8260,12 +8551,12 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                             const span: f32 = @floatCast(radius / PALM_TRUNK_UNIT_RADIUS);
                             // Trunk + crown ride ONE ground delta (the trunk's
                             // footing) so bark and fronds stay attached on slopes.
-                            const trunk_delta = paintGroundY(slot_floor, chunk, @floatCast(px), @floatCast(pz)) - @as(f32, @floatCast(top));
-                            if (!pushFoliageRow(runtime, &runtime.paint_trunk_rows, "trunks", &trunk_n, .{
-                                @floatCast(px),        @as(f32, @floatCast(top)) + trunk_delta, @floatCast(pz),
-                                0,                     @floatCast(lean),          0,
-                                span,                  @floatCast(trunk_h),       span,
-                                PALM_TRUNK_COLOR[0],   PALM_TRUNK_COLOR[1],       PALM_TRUNK_COLOR[2],
+                            const trunk_delta = snapGroundY(&chunk_snap.floor, min_x, min_z, @floatCast(px), @floatCast(pz)) - @as(f32, @floatCast(top));
+                            if (!pushFoliageRow(alloc, &set.rows[4], "trunks", &trunk_n, .{
+                                @floatCast(px),      @as(f32, @floatCast(top)) + trunk_delta, @floatCast(pz),
+                                0,                   @floatCast(lean),                        0,
+                                span,                @floatCast(trunk_h),                     span,
+                                PALM_TRUNK_COLOR[0], PALM_TRUNK_COLOR[1],                     PALM_TRUNK_COLOR[2],
                             })) trunk_full = true;
                             const crown = foliage.palmCrown(&foliage.PALM, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key);
                             const fc = crown.total();
@@ -8273,53 +8564,55 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                             while (k < fc) : (k += 1) {
                                 var row = foliage.palmFrondRow(&crown, k);
                                 row[1] += trunk_delta;
-                                if (!pushFoliageRow(runtime, &runtime.paint_frond_rows, "fronds", &frond_n, row)) frond_full = true;
+                                if (!pushFoliageRow(alloc, &set.rows[3], "fronds", &frond_n, row)) frond_full = true;
                             }
                         },
                         2 => {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
                                 var row = foliage.flowerRow(&foliage.FLOWER, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
-                                seatRowOnTerrain(&row, top, slot_floor, chunk);
-                                if (!pushFoliageRow(runtime, &runtime.paint_flower_rows, "flowers", &flower_n, row)) flower_full = true;
+                                // re-seat on the terrain under the row's OWN x/z
+                                // (req_2699: cell-centre height buries slope rows)
+                                row[1] += snapGroundY(&chunk_snap.floor, min_x, min_z, row[0], row[2]) - @as(f32, @floatCast(top));
+                                if (!pushFoliageRow(alloc, &set.rows[1], "flowers", &flower_n, row)) flower_full = true;
                             }
                         },
                         1 => {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
                                 var row = foliage.bladeRow(&foliage.BUSH, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
-                                seatRowOnTerrain(&row, top, slot_floor, chunk);
-                                if (!pushFoliageRow(runtime, &runtime.paint_bush_rows, "bush", &bush_n, row)) bush_full = true;
+                                row[1] += snapGroundY(&chunk_snap.floor, min_x, min_z, row[0], row[2]) - @as(f32, @floatCast(top));
+                                if (!pushFoliageRow(alloc, &set.rows[2], "bush", &bush_n, row)) bush_full = true;
                             }
                         },
                         else => {
                             var k: u32 = 0;
                             while (k < spec.count) : (k += 1) {
                                 var row = foliage.bladeRow(&foliage.GRASS, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key, k);
-                                seatRowOnTerrain(&row, top, slot_floor, chunk);
-                                if (!pushFoliageRow(runtime, &runtime.paint_grass_rows, "grass", &grass_n, row)) grass_full = true;
+                                row[1] += snapGroundY(&chunk_snap.floor, min_x, min_z, row[0], row[2]) - @as(f32, @floatCast(top));
+                                if (!pushFoliageRow(alloc, &set.rows[0], "grass", &grass_n, row)) grass_full = true;
                             }
                         },
                     }
                 }
             }
         }
-        // Close out this chunk's segments: one {row range, sphere} per family
-        // that grew rows here. Sphere = chunk half-diagonal (+ lateral jitter)
-        // horizontally, sampled ground span + tallest-plant headroom (palm
-        // trunk + crown ≈ 11 m) vertically; conservative bounds only ever
-        // draw a little extra, never cull a visible plant.
+        // Close out this chunk's segments (req_2859): one {row range, sphere}
+        // per family that grew rows here. Sphere = chunk half-diagonal (+
+        // lateral jitter) horizontally, sampled ground span + tallest-plant
+        // headroom (palm trunk + crown ≈ 11 m) vertically; conservative
+        // bounds only ever draw a little extra, never cull a visible plant.
         const seg_end = [5]u32{ grass_n, flower_n, bush_n, frond_n, trunk_n };
-        const seg_cx = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS;
-        const seg_cz = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS;
+        const seg_cx = @as(f32, @floatFromInt(chunk_snap.cx)) * map_chunks.CHUNK_METERS;
+        const seg_cz = @as(f32, @floatFromInt(chunk_snap.cz)) * map_chunks.CHUNK_METERS;
         const seg_grounded = seg_ymax >= seg_ymin;
         const seg_cy: f32 = if (seg_grounded) (seg_ymin + seg_ymax) * 0.5 else 0;
         const seg_yhalf: f32 = (if (seg_grounded) (seg_ymax - seg_ymin) * 0.5 else 0) + 14.0;
         const seg_radius: f32 = @sqrt(87.0 * 87.0 + seg_yhalf * seg_yhalf);
         for (0..5) |fi| {
             const added = seg_end[fi] - seg_start[fi];
-            if (added == 0 or !segs_ok[fi]) continue;
-            runtime.paint_foliage_segs[fi].append(runtime.allocator, .{
+            if (added == 0 or !result.segs_ok[fi]) continue;
+            set.segs[fi].append(alloc, .{
                 .first = seg_start[fi],
                 .count = added,
                 .cx = seg_cx,
@@ -8327,53 +8620,14 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                 .cz = seg_cz,
                 .radius = seg_radius,
             }) catch {
-                segs_ok[fi] = false;
+                result.segs_ok[fi] = false;
             };
         }
     }
 
-    // Re-read the family slices from the runtime — a push may have GROWN
-    // (reallocated) any of them mid-walk (req_2843).
-    const grass = runtime.paint_grass_rows.?;
-    const flowers = runtime.paint_flower_rows.?;
-    const bush = runtime.paint_bush_rows.?;
-    const frond = runtime.paint_frond_rows.?;
-    const trunk = runtime.paint_trunk_rows.?;
-
-    // A family only reads full when the ALLOCATOR refused to grow it — the
-    // machine's wall, not a budget's (req_2843: the caps are starting sizes).
-    const any_full = grass_full or flower_full or bush_full or frond_full or trunk_full;
-    runtime.paint_foliage_clipped = any_full;
-    runtime.paint_foliage_anchor = anchor;
-    if (log_full and any_full) {
-        log.print("[paint] LIVE FOLIAGE PREVIEW at the MACHINE'S wall (grass {d}/{d}{s} flowers {d}/{d}{s} bush {d}/{d}{s} fronds {d}/{d}{s} trunks {d}/{d}{s}) — the allocator refused further growth; budget spends nearest the brush first, so the bare patches are the FARTHEST chunks and the preview follows as you move. The Compile bake grows the full population\n", .{
-            grass_n,  grass.len / foliage.STRIDE,   clippedMark(grass_full),
-            flower_n, flowers.len / foliage.STRIDE, clippedMark(flower_full),
-            bush_n,   bush.len / foliage.STRIDE,    clippedMark(bush_full),
-            frond_n,  frond.len / foliage.STRIDE,   clippedMark(frond_full),
-            trunk_n,  trunk.len / foliage.STRIDE,   clippedMark(trunk_full),
-        });
-    }
-
-    runtime.paint_foliage_ver += 1;
-    const bufs = [_][]f32{ grass, flowers, bush, frond, trunk };
-    const counts = [_]u32{ grass_n, flower_n, bush_n, frond_n, trunk_n };
-    for (bufs, counts, 0..) |buf, n, fi| {
-        const node = &runtime.kid_list.items[first + fi];
-        // the FULL family slice every time: the static instance region is
-        // reserved at first upload and re-uploaded in place on version bumps.
-        // The slice only changes when the family GROWS (req_2843) — the
-        // renderer then retains a fresh region and the old one ages out of
-        // the cache (gpu/3d.zig staticCacheSlot).
-        node.scene3d_instance_data = buf;
-        node.scene3d_instance_count = n;
-        node.scene3d_instance_version = runtime.paint_foliage_ver;
-        node.scene3d_mesh = n > 0;
-        // req_2859: hand the renderer this family's per-chunk ranges so it can
-        // frustum-cull them. A family whose segment append failed draws whole.
-        const segs = runtime.paint_foliage_segs[fi].items;
-        node.scene3d_instance_segments = if (segs_ok[fi] and segs.len > 0) segs else null;
-    }
+    result.counts = .{ grass_n, flower_n, bush_n, frond_n, trunk_n };
+    result.fulls = .{ grass_full, flower_full, bush_full, frond_full, trunk_full };
+    return result;
 }
 
 fn findMounted(node_id: u32) ?*MountedLoader {
