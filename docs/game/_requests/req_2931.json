@@ -1,0 +1,28 @@
+{
+  "id": "req_2931",
+  "at": "2026-07-10T23:31:11.582Z",
+  "origin": "codex:019f4ce0",
+  "text": "door windows and all relate inqueries are solid, nice job. [Image #1][Image #2]",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T23:31:21.887Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T23:31:33.966Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user-provided visual verification from the newly built cart/editor host. The supplied screenshots and report confirm the legacy door window now shows terrain and tile-painted ground correctly, while the previously repaired two-sided interaction and traversable doorway behaviors are also solid. No additional code change was needed for this verification.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T23:31:33.966Z"
+}
