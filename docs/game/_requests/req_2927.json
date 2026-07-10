@@ -1,0 +1,30 @@
+{
+  "id": "req_2927",
+  "at": "2026-07-10T21:33:36.213Z",
+  "origin": "codex:019f4ce0",
+  "text": "still not doing it, i even added some tile paint to make sure it maybe was just the unpainted terrain, nah, its just not seeing terrain at all [Image #1] you can see it catches flora tho, and build pieces, but no terrain [Image #2]",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T21:33:46.889Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T21:40:40.528Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed against the exact saved Door_Wall_1 package: its mesh document is RJMD v1 and its atlas contains four translucent alpha-87 pixels, so glass and opaque leaf geometry share one legacy slot. The renderer formerly depth-wrote that entire slot before the dedicated terrain pass, hiding terrain while earlier flora and build-piece draws remained visible. The compatibility route now detects atlas translucency on legacy single-leaf-slot doors and sends that slot through the transparent non-depth-writing pass; version-2 split glass slots retain their explicit route.",
+  "shas": [
+    "4c0635874"
+  ],
+  "resolvedAt": "2026-07-10T21:40:40.528Z"
+}
