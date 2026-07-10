@@ -119,6 +119,7 @@ export type ModelFocusBridge = { uv: ModelFocusUv | null; paintLive: boolean; re
 export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
+  scaleBy: (factor: number) => boolean;
   paint: () => void;
   focus: () => void;
   wire: () => void;
@@ -304,6 +305,7 @@ const meshSymmetrize = (axis: number, keepPositive: boolean): TopoResult | null 
 };
 const meshClearSel = () => host.__mesh_edit_clear?.();
 const meshGizmoTool = (t: number) => host.__mesh_gizmo_tool?.(t);
+const meshScaleBy = (factor: number) => host.__mesh_gizmo_scale_by?.(factor) === 1;
 const meshSelectEdge = (idx: number, additive = false) => host.__mesh_edit_select_edge?.(idx, additive ? 1 : 0) === 1;
 // Hand the model-editor input loop to the host (native orbit/select/marquee/zoom/focus,
 // zero JS per event), and toggle the Focus tool (left-drag pans the pivot).
@@ -1169,6 +1171,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   toolApiRef.current = {
     selMode: chooseSelMode,
     gizmo: chooseGizmoTool,
+    scaleBy: meshScaleBy,
     paint: togglePaint,
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
@@ -1685,7 +1688,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // headless repro harness for selection/tint bugs (req_2613). Each op waits a few
     // frames so camera-dependent doors (pick/box) act on a drawn viewport. Ops:
     //   mode:N sel:N add:N range:lo,hi pick:x,y pickadd:x,y box:x0,y0,x1,y1 snap revert
-    //   clear scope:lo,hi nudge:axis,amt gizmo:N undo redo del flip glass spiketrace:0|1
+    //   clear scope:lo,hi nudge:axis,amt scaleby:factor gizmo:N undo redo del flip glass spiketrace:0|1
     //   grouppaint:lo,hi,r,g,b
     //   detail:px wait:frames report atlas:/path.png parts addpart:kind orbit:dx,dy
     //   lcbegin lcprev:dir,cuts,off lcend:0|1 lcstate  (loop-cut session; off = 0..1 frac)
@@ -1734,6 +1737,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'clear') meshClearSel();
         else if (name === 'scope') host.__mesh_edit_scope?.(num(a[0]), num(a[1]));
         else if (name === 'nudge') host.__mesh_gizmo_nudge?.(a[0] === 'y' ? 1 : a[0] === 'z' ? 2 : 0, Number(a[1]) || 0);
+        else if (name === 'scaleby') console.error(`[meshops] scaleby:${a[0]} → ${meshScaleBy(Number(a[0]))}`);
         else if (name === 'mirror') { const m = num(a[0]); setMirrorMask(m); meshSetMirror(m); } // mirror:mask (bit 0/1/2 = X/Y/Z) — pushed immediately so a same-tick nudge reflects
         else if (name === 'gizmo') chooseGizmoTool(num(a[0]));
         // undo/redo adopt like the app's undo (the door returns a NEW mesh key) and LOG the

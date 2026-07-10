@@ -10,7 +10,7 @@
 //   tools/v8cli /tmp/editor-commands.test.js
 
 import {
-  menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
+  commandById, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
   type MenuNode,
 } from './commands';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
@@ -53,13 +53,13 @@ test('model context menu folds stable tool families without hiding a command', (
   const layout = modelContextMenuLayout(true, 2);
   assert(layout.groups.map((group) => group.id).join('|') === 'select|gizmo|mirror|view', 'context groups drifted');
   assert(ids(layout.groups[0]!.commands).join('|') === 'mesh-vertex|mesh-edge|mesh-face', 'select modes escaped their group');
-  assert(ids(layout.groups[1]!.commands).join('|') === 'mesh-move|mesh-scale|mesh-rotate', 'gizmos escaped their group');
+  assert(ids(layout.groups[1]!.commands).join('|') === 'mesh-move|mesh-scale|mesh-scale-by|mesh-rotate', 'gizmos escaped their group');
   assert(ids(layout.groups[2]!.commands).join('|') === 'mesh-sym-x|mesh-sym-y|mesh-sym-z|mesh-mirror-x|mesh-mirror-y|mesh-mirror-z', 'mirror edit and part axes are not together');
   assert(ids(layout.groups[3]!.commands).join('|') === 'mesh-focus|mesh-wire|mesh-cam-lock', 'view tools escaped their group');
   assert(ids(layout.directToolCommands).join('|') === 'mesh-paint', 'Paint Faces must remain one click away');
   assert(ids(layout.directPartCommands).join('|') === 'mesh-duplicate-part|mesh-path-array|mesh-merge-down|mesh-import-part', 'primary part verbs must remain direct');
 
-  const expected = ids([...meshToolCommands(), ...meshPartCommands(true, 2)]).sort().join('|');
+  const expected = ids([...meshToolCommands(), commandById('mesh-scale-by'), ...meshPartCommands(true, 2)]).sort().join('|');
   const presented = ids([
     ...layout.groups.flatMap((group) => group.commands),
     ...layout.directToolCommands,

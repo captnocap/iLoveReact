@@ -4443,15 +4443,16 @@ pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool) 
         const rdx = g_gizmo_cursor[0] - anchor[0];
         const rdy = g_gizmo_cursor[1] - anchor[1];
         const f_raw = @sqrt(rdx * rdx + rdy * rdy) / @max(g_gizmo_start_dist, 4.0);
-        const target = std.math.clamp(snapStep(f_raw, GIZMO_STEP_UNIFORM, GIZMO_STEP_UNIFORM_FINE, shift, free), 0.02, 50.0);
+        const target = std.math.clamp(
+            snapStep(f_raw, GIZMO_STEP_UNIFORM, GIZMO_STEP_UNIFORM_FINE, shift, free),
+            mesh_edit.scale_factor_tuning.min,
+            mesh_edit.scale_factor_tuning.max,
+        );
         setGizmoReadout("\u{00D7}{d:.2}", .{target});
         const rel = target / g_gizmo_applied;
         if (@abs(rel - 1.0) < 1e-6) return false;
-        var ua: i32 = 0;
-        while (ua < 3) : (ua += 1) {
-            const m = mesh_edit.scaleSelectionAxis(axisVec(ua), pivot, rel);
-            if (!applyMeshMutation(m)) return false;
-        }
+        const m = mesh_edit.scaleSelectionUniform(pivot, rel);
+        if (!applyMeshMutation(m)) return false;
         g_gizmo_applied = target;
         return true;
     }
@@ -4491,7 +4492,11 @@ pub fn meshGizmoDrag(axis_code: i32, dx: f32, dy: f32, shift: bool, free: bool) 
         },
         .scale => {
             g_gizmo_raw += px * 0.012;
-            const target = std.math.clamp(1.0 + snapStep(g_gizmo_raw, GIZMO_STEP_SCALE, GIZMO_STEP_SCALE_FINE, shift, free), 0.02, 50.0);
+            const target = std.math.clamp(
+                1.0 + snapStep(g_gizmo_raw, GIZMO_STEP_SCALE, GIZMO_STEP_SCALE_FINE, shift, free),
+                mesh_edit.scale_factor_tuning.min,
+                mesh_edit.scale_factor_tuning.max,
+            );
             setGizmoReadout("\u{00D7}{d:.2}", .{target});
             // Multiplicative bookkeeping: applying target/applied lands the mesh exactly
             // at the cumulative factor, whatever path the drag wandered.
@@ -4511,6 +4516,24 @@ pub fn meshGizmoNudge(axis: u8, amount: f32) bool {
     const m = mesh_edit.translateSelection(vmul(axisVec(axis), amount));
     const ok = applyMeshMutation(m);
     if (ok) journalCommit(&snap) else journalDiscard(&snap);
+    return ok;
+}
+
+/// Apply an exact uniform factor without a screen-distance drag. The selection
+/// pivot is frozen once, the geometry changes in one mutation / one journal
+/// entry, and the orbit is reframed to the result unless the camera is locked.
+pub fn meshGizmoScaleBy(factor: f32) bool {
+    if (meshEditModeRaw() == 0 or !model_paint.hasTarget()) return false;
+    const pivot = mesh_edit.selectionPivot() orelse return false;
+    var snap = journalSnapshotCurrent("scale by value");
+    const m = mesh_edit.scaleSelectionUniform(pivot, factor);
+    const ok = applyMeshMutation(m);
+    if (ok) {
+        journalCommit(&snap);
+        if (!g_orbit.locked) {
+            if (mesh_edit.selectionFrame()) |frame| orbitFrame(frame.center, frame.radius);
+        }
+    } else journalDiscard(&snap);
     return ok;
 }
 

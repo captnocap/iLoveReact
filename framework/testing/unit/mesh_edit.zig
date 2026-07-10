@@ -68,6 +68,28 @@ test "created ungrouped quad focuses both appended triangles" {
     try testing.expectEqualSlices(bool, &.{ false, true, true }, mask[0..]);
 }
 
+test "exact uniform scale multiplies the selection frame around a stable pivot" {
+    var soup = [_]f32{
+        0, 0, 0, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 1, 0,
+        0, 2, 0, 0, 0, 1, 0, 1,
+    };
+    mesh_edit.test_support.loadGroupedSoup(2930, soup[0..], 3, &.{0});
+    defer mesh_edit.test_support.clear();
+    mesh_edit.setMode(.face);
+    try testing.expect(mesh_edit.selectFaceByIndex(0, false));
+
+    const before = mesh_edit.selectionFrame().?;
+    const mutation = mesh_edit.scaleSelectionUniform(before.center, 48);
+    try testing.expect(mutation.changed);
+    const after = mesh_edit.selectionFrame().?;
+    inline for (0..3) |axis| try testing.expectApproxEqAbs(before.center[axis], after.center[axis], 0.0001);
+    try testing.expectApproxEqAbs(before.radius * 48, after.radius, 0.001);
+
+    // A factor of one is an explicit no-op, not a phantom undo candidate.
+    try testing.expect(!mesh_edit.scaleSelectionUniform(after.center, 1).changed);
+}
+
 test "merging authored faces dissolves their shared selectable edge (req_2871)" {
     // Two side-by-side quads, each represented by two render triangles. Before the
     // merge there are seven authored boundary segments: the six-segment outer rim plus

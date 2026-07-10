@@ -14,6 +14,7 @@ import EventBusPopover from './EventBusPopover';
 import BuildJournalDialog from './BuildJournalDialog';
 import NewMeshDialog from './NewMeshDialog';
 import PathArrayDialog from './PathArrayDialog';
+import ScaleByDialog from './ScaleByDialog';
 import ExportCharacterDialog from './ExportCharacterDialog';
 import PaintToolbar, { PaintPopovers, type PaintPopover } from './PaintToolbar';
 import PerformancePopover from './PerformancePopover';
@@ -201,6 +202,7 @@ export default function AppFrame() {
   // Path Array's source is frozen when the dialog opens. Params remain dialog-local;
   // Apply revalidates these ids/ranges against the live outliner before touching mesh.
   const [pathArrayPrompt, setPathArrayPrompt] = useState<{ sourceIds: string[]; label: string; sourceSpanU: { xU: number; zU: number } } | null>(null);
+  const [scaleByOpen, setScaleByOpen] = useState(false);
 
   // Imported textures register as dynamic ShaderSpecs at boot (and after every
   // import), so they are first-class materials everywhere a catalog material is.
@@ -236,6 +238,7 @@ export default function AppFrame() {
     if (importPlan) return { id: 'import-image', label: 'Import Image' };
     if (importPartOpen) return { id: 'import-part', label: 'Add From Library' };
     if (pathArrayPrompt) return { id: 'path-array', label: 'Path Array' };
+    if (scaleByOpen) return { id: 'scale-by', label: 'Scale By' };
     return null;
   };
   // Live handle for the once-installed hotkey subscription (fresh closures per render).
@@ -570,6 +573,19 @@ export default function AppFrame() {
     setState((prev) => ({ ...prev, mapDocumentOpen: false, status: 'map workspaces closed' }));
   };
 
+  const applyScaleBy = (factor: number) => {
+    const ok = modelToolApiRef.current?.scaleBy(factor) ?? false;
+    setScaleByOpen(false);
+    setState((prev) => ({
+      ...prev,
+      contextOpen: false,
+      openMenu: null,
+      status: ok
+        ? `scaled selection ×${factor} around its pivot — one Undo; camera reframed unless locked`
+        : 'scale by: select a part, face, edge, or vertices first',
+    }));
+  };
+
   const runCommand = (commandId: string, source: string) => {
     const command = commandById(commandId);
     // Modal discipline (req_2626 HH): while a blocking session/dialog is unresolved every
@@ -633,6 +649,11 @@ export default function AppFrame() {
     if (commandId === 'model-ref-images') {
       modelToolApiRef.current?.referenceImages();
       setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: 'reference images — add a blueprint/photo to trace over' }));
+      return;
+    }
+    if (commandId === 'mesh-scale-by') {
+      setScaleByOpen(true);
+      setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `Scale By opened — ${source}` }));
       return;
     }
     // Model-surface tools route to the viewer's host-native tool api; the viewer
@@ -3213,6 +3234,7 @@ export default function AppFrame() {
         else if (block.id === 'import-image') setImportPlan(null);
         else if (block.id === 'import-part') setImportPartOpen(false);
         else if (block.id === 'path-array') setPathArrayPrompt(null);
+        else if (block.id === 'scale-by') setScaleByOpen(false);
         return;
       }
       if (key.length === 1 || ['enter', 'delete', 'backspace', 'tab', 'space'].includes(key)) {
@@ -3860,6 +3882,14 @@ export default function AppFrame() {
             sourceSpanU={pathArrayPrompt.sourceSpanU}
             onCancel={() => { setPathArrayPrompt(null); setState((prev) => ({ ...prev, status: 'path array cancelled' })); }}
             onApply={applyPathArray}
+          />
+        </RenderProbe>
+      ) : null}
+      {scaleByOpen ? (
+        <RenderProbe id="Scale By Dialog">
+          <ScaleByDialog
+            onCancel={() => { setScaleByOpen(false); setState((prev) => ({ ...prev, status: 'scale by cancelled' })); }}
+            onApply={applyScaleBy}
           />
         </RenderProbe>
       ) : null}

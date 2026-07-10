@@ -144,6 +144,8 @@ export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boo
 export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
+  /** Exact uniform factor around the active host selection pivot. */
+  scaleBy: (factor: number) => boolean;
   paint: () => void;
   focus: () => void;
   wire: () => void;

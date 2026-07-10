@@ -598,6 +598,16 @@ fn hostMeshGizmoNudge(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __mesh_gizmo_scale_by(factor) → bool. Exact uniform scale around the active
+/// selection pivot, journaled by the host as one undoable operation.
+fn hostMeshGizmoScaleBy(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const factor: f32 = @floatCast(argToF64(info, 0) orelse 1);
+    const ok = scene3d.meshGizmoScaleBy(factor);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 fn setMeshTopoReturn(info: v8.FunctionCallbackInfo, ok: bool) void {
     if (!ok) {
         setReturnString(info, "{\"ok\":0}");
@@ -2727,6 +2737,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_edit_focus", hostMeshEditFocus);
     v8_runtime.registerHostFn("__mesh_gizmo_tool", hostMeshGizmoTool);
     v8_runtime.registerHostFn("__mesh_gizmo_nudge", hostMeshGizmoNudge);
+    v8_runtime.registerHostFn("__mesh_gizmo_scale_by", hostMeshGizmoScaleBy);
     v8_runtime.registerHostFn("__mesh_topo_extrude_edge", hostMeshTopoExtrudeEdge);
     v8_runtime.registerHostFn("__mesh_topo_extrude_face", hostMeshTopoExtrudeFace);
     v8_runtime.registerHostFn("__mesh_topo_create_face", hostMeshTopoCreateFace);

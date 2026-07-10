@@ -1023,7 +1023,41 @@ pub fn selectionPivot() ?[3]f32 {
     return .{ sum[0] * inv, sum[1] * inv, sum[2] * inv };
 }
 
-const TransformKind = enum { translate, scale_axis, rotate_axis };
+pub const SelectionFrame = struct {
+    center: [3]f32,
+    radius: f32,
+};
+
+/// Bounding sphere of the active logical selection. Numeric transforms use this
+/// after a large one-shot scale to keep the result in view without changing the
+/// user's orbit angle.
+pub fn selectionFrame() ?SelectionFrame {
+    const center = selectionPivot() orelse return null;
+    const mask = fillAffectedVerts() orelse return null;
+    var radius_sq: f32 = 0;
+    var i: u32 = 0;
+    while (i < g_vert_count) : (i += 1) {
+        if (!mask[i]) continue;
+        const rel = vecSub(vertPos(i), center);
+        radius_sq = @max(radius_sq, vecDot(rel, rel));
+    }
+    return .{ .center = center, .radius = @sqrt(radius_sq) };
+}
+
+pub const ScaleFactorTuning = struct {
+    min: f32,
+    max: f32,
+    no_op_epsilon: f32,
+};
+
+/// One scale-factor contract for mouse drags and exact numeric entry.
+pub const scale_factor_tuning = ScaleFactorTuning{
+    .min = 0.02,
+    .max = 50.0,
+    .no_op_epsilon = 1e-5,
+};
+
+const TransformKind = enum { translate, scale_axis, scale_uniform, rotate_axis };
 
 fn transformPoint(kind: TransformKind, p: [3]f32, delta: [3]f32, axis: [3]f32, pivot: [3]f32, scalar: f32) [3]f32 {
     return switch (kind) {
@@ -1033,6 +1067,7 @@ fn transformPoint(kind: TransformKind, p: [3]f32, delta: [3]f32, axis: [3]f32, p
             const along = vecDot(rel, axis);
             break :blk vecAdd(p, vecMul(axis, along * (scalar - 1.0)));
         },
+        .scale_uniform => vecAdd(pivot, vecMul(vecSub(p, pivot), scalar)),
         .rotate_axis => blk: {
             const rel = vecSub(p, pivot);
             const c = @cos(scalar);
@@ -1298,9 +1333,20 @@ pub fn translateSelection(delta: [3]f32) Mutation {
 }
 
 pub fn scaleSelectionAxis(axis: [3]f32, pivot: [3]f32, factor_raw: f32) Mutation {
-    const factor = std.math.clamp(factor_raw, 0.02, 50.0);
-    if (@abs(factor - 1.0) < 1e-5) return .{};
+    if (!std.math.isFinite(factor_raw)) return .{};
+    const factor = std.math.clamp(factor_raw, scale_factor_tuning.min, scale_factor_tuning.max);
+    if (@abs(factor - 1.0) < scale_factor_tuning.no_op_epsilon) return .{};
     return applyTransform(.scale_axis, .{ 0, 0, 0 }, axis, pivot, factor);
+}
+
+/// Exact uniform scale in one mesh mutation. Applying X/Y/Z as three separate
+/// mutations made an exact-value command vulnerable to partial application if a
+/// later axis failed; this path transforms every selected position atomically.
+pub fn scaleSelectionUniform(pivot: [3]f32, factor_raw: f32) Mutation {
+    if (!std.math.isFinite(factor_raw)) return .{};
+    const factor = std.math.clamp(factor_raw, scale_factor_tuning.min, scale_factor_tuning.max);
+    if (@abs(factor - 1.0) < scale_factor_tuning.no_op_epsilon) return .{};
+    return applyTransform(.scale_uniform, .{ 0, 0, 0 }, .{ 0, 0, 0 }, pivot, factor);
 }
 
 pub fn rotateSelectionAxis(axis: [3]f32, pivot: [3]f32, radians: f32) Mutation {

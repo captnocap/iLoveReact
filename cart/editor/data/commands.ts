@@ -203,6 +203,7 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-face', menu: 'Edit', scope: 'model', name: 'Face Select', icon: 'Triangle', key: '3', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-move', menu: 'Edit', scope: 'model', name: 'Move Gizmo', icon: 'Move', key: 'G', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-scale', menu: 'Edit', scope: 'model', name: 'Scale Gizmo', icon: 'Scale3d', key: 'S', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-scale-by', menu: 'Edit', scope: 'model', name: 'Scale By…', icon: 'Scale3d', key: '', context: true, native: true, undoable: true },
   { id: 'mesh-rotate', menu: 'Edit', scope: 'model', name: 'Rotate Gizmo', icon: 'Rotate3d', key: 'R', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-paint', menu: 'Edit', scope: 'model', name: 'Paint Faces', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-focus', menu: 'Edit', scope: 'model', name: 'Focus Pivot', icon: 'Focus', key: 'F', context: true, native: true, undoable: false, tool: true },
@@ -361,7 +362,7 @@ const MESH_SUBMENU: MenuNode = {
   kind: 'sub', id: 'Mesh', label: 'Mesh', icon: 'Boxes', scope: 'model',
   children: [
     section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'),
-    section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'),
+    section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'),
     section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
@@ -487,7 +488,7 @@ const MODEL_CONTEXT_GROUPS: {
   commandIds: string[];
 }[] = [
   { id: 'select', label: 'Select Mode', icon: 'Grip', commandIds: ['mesh-vertex', 'mesh-edge', 'mesh-face'] },
-  { id: 'gizmo', label: 'Gizmo', icon: 'Move', commandIds: ['mesh-move', 'mesh-scale', 'mesh-rotate'] },
+  { id: 'gizmo', label: 'Gizmo', icon: 'Move', commandIds: ['mesh-move', 'mesh-scale', 'mesh-scale-by', 'mesh-rotate'] },
   { id: 'mirror', label: 'Mirror', icon: 'FlipHorizontal2', commandIds: ['mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z'] },
   { id: 'view', label: 'View', icon: 'Grid3x3', commandIds: ['mesh-focus', 'mesh-wire', 'mesh-cam-lock'] },
 ];
