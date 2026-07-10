@@ -1,0 +1,30 @@
+{
+  "id": "req_2892",
+  "at": "2026-07-10T16:41:20.148Z",
+  "origin": "session:8452c1d5",
+  "text": "It works. it, kinda annoyingly assigns both sides of a wall on first pass, but the 2nd pass updates with the other shader when applied to it, so thats fine. the caveat is expected, fine for now. Uh, so earlier there was a request that asked for this feature to land and it never did or maybe it did but i dont see it. I said in the file menu there is a file -> new mesh -> and then in here you see things like Cube, Cylinder, etc. as well as Playerr and NPC. What i asked to be added was in this list of starting points, to pass me the default build pieces as starting points to use also, so floor, wall, door, stairs, etc. That way i can make more build pieces but have the base to start from, otherwise im always remaking it. The agent who had this request shipped something, im not really sure what as when i open the file -> new mesh menu, i dont see floor, or wall, etc.",
+  "status": "review",
+  "sessionId": "8452c1d5-9bbd-4caf-832a-8210fc1a5f17",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T17:30:31.826Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T17:30:31.885Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Restored the complete build-piece starter family under File → New Mesh, now derived from the real build catalog rather than a parallel mock list. Floors, walls, doors, stairs, elevators, arches, and the rest open as grounded editable meshes; door variants seed named frame/leaf parts for semantic export. Focused starter and command suites pass and the editor bundle/full host compile are green.",
+  "shas": [
+    "981c161a5"
+  ],
+  "resolvedAt": "2026-07-10T17:30:31.885Z"
+}

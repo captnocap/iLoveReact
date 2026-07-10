@@ -1,0 +1,30 @@
+{
+  "id": "req_2898",
+  "at": "2026-07-10T17:03:37.388Z",
+  "origin": "session:8452c1d5",
+  "text": "hell yeah t hat works great haha should save me a lot of frustration. Uh, ok, so one thing that can come with this and one thing i been honestly meaning to pass in here because i cante tell you how many times ive had it just wipe from a code change, but we need to pass in some @framework/state/hotstate.zig on things like current edits and camera and all of that noise, paint, anything basically in here that is state would be really helpful",
+  "status": "review",
+  "sessionId": "8452c1d5-9bbd-4caf-832a-8210fc1a5f17",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T17:04:23.938Z",
+      "actor": "fable-hotstate",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T17:26:00.291Z",
+      "actor": "fable-hotstate",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wired hot-reload state survival through framework/state/hotstate.zig, the way the ask describes: current edits, cameras, paint, tools — the noisy working state — now survive a code save. The key realization: the Zig process already keeps everything (the live edit mesh, its undo journal, the paint atlas, the orbit camera) — the REMOUNT was what wiped it by re-loading stale seeds over the live session. So: (1) new door __model_session_json reads back the resident session (mesh key/count, orbit radius, journal depths, atlas presence); (2) a DOC twig (editor:meshdoc:v1) stamps which document owns the host mesh under its current key on every adopt, and on remount a matching twig+session ADOPTS the live mesh — edits, undo history, selection, atlas, and the mesh camera all survive because the load doors (which clear the journal and re-frame the orbit) never fire; any mismatch falls through to the normal load; (3) a TOOL twig (editor:meshtool:v1) re-seeds wire/camera-lock/gizmo/mirror/brush/palette/safety/detail/light-rig on mount and re-enters paint mode when the resumed atlas is live; (4) an ISO pose twig (editor:isopose:v1) keeps the world viewport camera exactly where you left it. Cold restarts stay clean by design (hotstate is in-process; world save/meshdoc autosaves remain the durable layer). Proven headless with a new meshops session op: after a topology op re-keys the mesh (undo=1, atlas live) the twig tracks the new key with match=true — the exact resume precondition; cold-boot shots of both surfaces pass unchanged. Docs: docs/game/editor_hot_reload.md + oracle-visible index record. Needs a dev-host rebuild (framework changed).",
+  "shas": [
+    "f50443a2c"
+  ],
+  "resolvedAt": "2026-07-10T17:26:00.291Z"
+}

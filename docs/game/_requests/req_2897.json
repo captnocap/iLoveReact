@@ -1,0 +1,28 @@
+{
+  "id": "req_2897",
+  "at": "2026-07-10T16:58:40.333Z",
+  "origin": "session:54e620c2",
+  "text": "curious how that translates to props that are built from mesh outliners. Since the prop is quite arbitrary, how exactly does the packed buffer affect this, and i guess worth asking how is it as it stands now. Is it for the entire model? or something else ?",
+  "status": "review",
+  "sessionId": "54e620c2-839a-4d1b-89bb-d585b2326ecf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T16:59:18.386Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T17:02:40.853Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Question-only ask, no code changed. Explained how the packed 20-byte Vertex relates to outliner-built props: an outliner model is ONE concatenated vertex stream on the host (parts are contiguous ranges — metadata, not separate buffers); placement registers the whole model once as a resident mesh keyed by FNV hash (meshProps.ts -> world_loader scene3d_geom_key -> internGeometry), so the packing applies per-vertex to that single shared GPU copy at upload; each placement stays a 32-byte InstanceData row referencing it. Arbitrary shapes are unaffected because positions stay full f32 — only normals (oct, ~0.003 deg) and UVs (f16, ~1-texel worst case at a 4096 atlas edge, absorbed by island gutters) are quantized. Live mesh-editor drafts stream through the same pack at the dyn-slot upload boundary.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T17:02:40.853Z"
+}

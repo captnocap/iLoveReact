@@ -1,0 +1,40 @@
+{
+  "id": "req_2896",
+  "at": "2026-07-10T16:55:56.619Z",
+  "origin": "codex:019f4ce0",
+  "text": "to be clear, the old approach you will also find something t hat is a door tile, this is not the same thing to be clear.",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T16:56:00.683Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T17:00:40.351Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Clarification applied: cart/editor/world/tileKinds.ts door tile is not the reference and remains untouched. Work targets the separate Studio-authored mesh door/build-piece contract from hmsc-int."
+    },
+    {
+      "at": "2026-07-10T17:21:24.954Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-10T17:30:45.869Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Whole-file sweep committed the reviewed wall-family door boundary (never the door tile path) in 981c161a5."
+    }
+  ],
+  "resolution": "Kept the clarification as a hard boundary throughout the implementation: the existing door tile path was not used or modified. The new behavior is explicitly a wall-family mesh export carrying the door or garageDoor wall edit plus a named Door Leaf geometry slot; command coverage also asserts that no door-tile export target appears. Automated editor and host checks are green, with user interaction and frame-time confirmation requested in review.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T17:21:24.954Z"
+}

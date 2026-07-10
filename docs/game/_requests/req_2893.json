@@ -1,0 +1,30 @@
+{
+  "id": "req_2893",
+  "at": "2026-07-10T16:43:03.482Z",
+  "origin": "session:8452c1d5",
+  "text": "cool now inside of the mesh editor side of the app, can you give me a camera lock toggle, so i can set my camera angle, lock it, and it cannot move. i have a habbit of just barely rotating the shit and then getting everyhthing off track from wherre i was lol. need a lock on that por favor",
+  "status": "review",
+  "sessionId": "8452c1d5-9bbd-4caf-832a-8210fc1a5f17",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T16:43:19.888Z",
+      "actor": "fable-camlock",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T16:59:16.979Z",
+      "actor": "fable-camlock",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the mesh-editor camera lock the ask describes: set your angle, lock it, and it cannot move. Zig-first — the lock is ONE host-side gate (g_orbit.locked in framework/gpu/3d.zig) sitting exactly where every camera motion funnels, so orbit drag, wheel zoom, pivot pan, double-click focus, AND the orientation-compass snaps all no-op while locked, whether they arrive through the JS doors or engine.zig's native input loop; a stray micro-drag physically cannot nudge the view anymore. New door __model_orbit_lock; ModelView owns the toggle state and re-syncs the host on hot reload. Surfaced three ways: the Lock icon at the end of the mesh action bar (highlights while locked), bare key K in the model keymap, and the Edit menu; the standalone viewer gets a Lock Cam pill. Model-load framing intentionally stays live under lock so opening a model still lands it in view. Proven headless with a new meshops camlock op: camlock:1 + orbit:200,50 renders pixel-identical to the no-orbit baseline (yaw 40 pitch 26 held), while the same orbit unlocked swings to yaw -74 pitch 54 (shots in scratchpad, editor binary compiles ReleaseFast, cart bundles clean).",
+  "shas": [
+    "fecdbbd0d"
+  ],
+  "resolvedAt": "2026-07-10T16:59:16.979Z"
+}

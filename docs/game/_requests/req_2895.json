@@ -1,0 +1,40 @@
+{
+  "id": "req_2895",
+  "at": "2026-07-10T16:54:57.030Z",
+  "origin": "codex:019f4ce0",
+  "text": "Hello. Inside of cart/editor there was a feature that landed earlier this morning related to being able to start from existing build piece as a mesh in the studio to edit from and ultimately export. Well, it all in part landed it seems except for things like a door wall pieces, now, i want you to quickly turn your attention to the previous door mesh piece approach, and how I was able to create a door in the studio, and export it as a build piece. We want that same idea brought over here. But, Your going to run into a roadblock right away, the old approach says to name an Outliner as the door piece, but the current approach does not have the capability to rename outliners. This is more of a lacking capability that comes from the current approach that can also fold in with this feature request. So, check the previous door studio mesh exports in cart/hmsc-int and evaluate against the current exporting pipeline for mesh inside of cart/editor and lets find the mendable seam here correctly",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T16:55:01.740Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T17:00:40.351Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Survey found the old Studio door contract: Door Wall seeds Door Frame + Door Leaf; export explicitly declares a wall-family door, and the cook promotes the visible Outliner part matching /door.*leaf/i into the movable panel. Current editor has generic wall starters/export only, no part rename, and its resident mesh encoder hardcodes zero slots/door metadata."
+    },
+    {
+      "at": "2026-07-10T17:21:24.945Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-10T17:30:45.857Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Whole-file sweep committed the reviewed semantic door-wall and Outliner rename implementation in 981c161a5."
+    }
+  ],
+  "resolution": "Ported the prior Studio door-mesh contract into cart/editor: Door Wall and Garage Door Wall now seed named frame and leaf parts, Outliner rows can be renamed, export requires one visible semantic Door Leaf, MESH_PROPS carries a real movable slot and door metadata, and the live host now renders, collides, prompts, toggles, swings, and preserves state before a map compile. Focused TypeScript suites, Zig reconciliation tests, the editor bundle, diff checks, and the full ReleaseFast editor build are green; user visual and 60-second spikewatch verification remain the review gate.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T17:21:24.945Z"
+}
