@@ -82,12 +82,22 @@ function residentMeshFor(
     return null;
   }
   const tuning = ap.edit === 'garageDoor' ? DOOR_EXPORT_TUNING.garage : DOOR_EXPORT_TUNING.walk;
+  const slots = compiled.mesh.leafGlass
+    ? [
+      { start: compiled.mesh.leaf.start, count: compiled.mesh.leafGlass.start - compiled.mesh.leaf.start },
+      compiled.mesh.leafGlass,
+    ]
+    : [compiled.mesh.leaf];
   return {
     key,
     vertices: compiled.mesh.vertices,
     png,
-    slots: [compiled.mesh.leaf],
+    // Slot 0 is opaque leaf; an optional trailing slot is the Studio glass run.
+    // The live host swings every slot from leafSlot onward and routes the glass
+    // tail through its depth-write-off transparent pass.
+    slots,
     door: { leafSlot: 0, reachMeters: tuning.reachMeters, vehicle: tuning.vehicle, startOpen: false },
+    collisionBoxes: compiled.mesh.collisionBoxes,
   };
 }
 

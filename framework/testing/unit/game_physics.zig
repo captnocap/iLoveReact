@@ -973,6 +973,25 @@ test "reach gate: a thin box CONTAINING the target (the aimed door panel) is ski
     try testing.expect(!eye_to_panel_center);
 }
 
+test "reach gate: an explicitly identified swung door leaf cannot make its prompt one-sided" {
+    // Closed-position prompt target is x=0. Once the panel swings toward +X it
+    // crosses only the +X player's sightline; containment can no longer identify
+    // it as the candidate. Explicit rect identity keeps both approaches valid.
+    const swung_leaf = [physics.RECT_FLOATS]f32{ 0.55, -0.1, 0.75, 0.1, 2.2, 1, 0.5, 0, 0 };
+    const buf = (Sim{ .rects = &.{swung_leaf} }).pack(&g_buf);
+    try testing.expect(!physics.reachBlockedStepColliders(buf, 1, 0, -2, 1.4, 0, 0, 1.1, 0, 0.5));
+    try testing.expect(physics.reachBlockedStepColliders(buf, 1, 0, 2, 1.4, 0, 0, 1.1, 0, 0.5));
+    try testing.expect(!physics.reachBlockedStepCollidersExceptRect(buf, 1, 0, -2, 1.4, 0, 0, 1.1, 0, 0.5, 0));
+    try testing.expect(!physics.reachBlockedStepCollidersExceptRect(buf, 1, 0, 2, 1.4, 0, 0, 1.1, 0, 0.5, 0));
+}
+
+test "reach gate: skipping the candidate leaf still respects another wall" {
+    const wall = [physics.RECT_FLOATS]f32{ 0.9, -1, 1.1, 1, 3, 1, 0.5, 0, 0 };
+    const leaf = [physics.RECT_FLOATS]f32{ 1.4, -0.1, 1.6, 0.1, 2.2, 1, 0.5, 0, 0 };
+    const buf = (Sim{ .rects = &.{ wall, leaf } }).pack(&g_buf);
+    try testing.expect(physics.reachBlockedStepCollidersExceptRect(buf, 2, 0, 0, 1.4, 0, 2, 1.1, 0, 0.5, 1));
+}
+
 // ── stair traversal (req_1453) ───────────────────────────────────────
 // A 3x3x3 stairs build piece bakes (placed.ts) into a slope heightfield rising
 // 0..3 along +z (walk_cos 0.6) plus three full-height boundary walls (2 sides +

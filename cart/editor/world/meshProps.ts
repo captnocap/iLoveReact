@@ -12,7 +12,8 @@
 // atlas embeds its PNG in the v4+ pngLen block — the loader decodes it with stbi
 // and the placement renders painted, exactly like a baked cooked prop (req_2832:
 // an exported model lost its paintings at placement). Door exports additionally
-// carry one named leaf slot + the v6 door block; collision boxes stay derived.
+// carry one named leaf slot + the v6 door block and portal-preserving authored
+// frame boxes in the v7 collision block.
 // The ref hash is FNV-1a over the mesh key, the SAME hash the loader
 // keys residency on (world_loader.zig liveMeshHash).
 
@@ -39,6 +40,13 @@ export type ResidentMesh = {
   slots?: { start: number; count: number }[];
   /** MESH_PROPS v6 two-state panel declaration; leafSlot indexes `slots`. */
   door?: { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean };
+  /** Local-frame authored colliders; Door Walls use jamb/header bands around the portal. */
+  collisionBoxes?: ResidentCollisionBox[];
+};
+
+export type ResidentCollisionBox = {
+  minX: number; minY: number; minZ: number;
+  maxX: number; maxY: number; maxZ: number;
 };
 
 function boundsOf(v: Float32Array): { radius: number; w: number; d: number; h: number } {
@@ -58,15 +66,29 @@ const MESH_PROPS_VERSION = 7; // mesh-only form the host decoder accepts (<= 8)
 
 /** Encode resident meshes into a MESH_PROPS lump for __compiled_world_set_resident_meshes.
  *  instanceCount 0 (a catalog, not a baked scene); a mesh with a painted atlas embeds
- *  its PNG and optional door slot/meta; boxes remain derived by the loader.
+ *  its PNG, optional door slot/meta, and optional authored collision boxes.
  *  Empty list → a 12-byte header that clears residency. */
 export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Array {
   // Size pass.
   let total = 12; // header
   for (const m of meshes) {
     const slots = m.slots ?? [];
+    const boxes = m.collisionBoxes ?? [];
+    const vertexCount = m.vertices.length / 8;
+    if (!Number.isInteger(vertexCount)) throw new Error(`resident mesh '${m.key}' is not stride-8 geometry`);
+    for (const slot of slots) {
+      if (!Number.isInteger(slot.start) || !Number.isInteger(slot.count) || slot.start < 0 || slot.count <= 0 || slot.start + slot.count > vertexCount) {
+        throw new Error(`resident mesh '${m.key}' has a slot outside its ${vertexCount} vertices`);
+      }
+    }
     if (m.door && (m.door.leafSlot < 0 || m.door.leafSlot >= slots.length)) {
       throw new Error(`resident door '${m.key}' leaf slot ${m.door.leafSlot} is outside ${slots.length} slot(s)`);
+    }
+    for (const box of boxes) {
+      const values = [box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ];
+      if (!values.every(Number.isFinite) || box.maxX <= box.minX || box.maxY <= box.minY || box.maxZ <= box.minZ) {
+        throw new Error(`resident mesh '${m.key}' has an invalid authored collision box`);
+      }
     }
     const keyBytes = m.key.length; // keys are ASCII ids
     total += 4 + keyBytes;         // keyLen + key
@@ -75,7 +97,7 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     total += 4 + (m.png?.length ?? 0); // pngLen + encoded PNG bytes
     total += 4 + slots.length * 8; // slotCount + start/count rows
     total += 4 + (m.door ? 16 : 0); // doorFlag + optional door block
-    total += 4;                    // boxCount (0)
+    total += 4 + boxes.length * 24; // boxCount + 6×f32 rows
   }
   const buf = new ArrayBuffer(total);
   const dv = new DataView(buf);
@@ -117,7 +139,17 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
       dv.setUint32(o + 12, m.door.startOpen ? 1 : 0, true);
       o += 16;
     }
-    dv.setUint32(o, 0, true); o += 4; // boxCount
+    const boxes = m.collisionBoxes ?? [];
+    dv.setUint32(o, boxes.length, true); o += 4;
+    for (const box of boxes) {
+      dv.setFloat32(o, box.minX, true);
+      dv.setFloat32(o + 4, box.minY, true);
+      dv.setFloat32(o + 8, box.minZ, true);
+      dv.setFloat32(o + 12, box.maxX, true);
+      dv.setFloat32(o + 16, box.maxY, true);
+      dv.setFloat32(o + 20, box.maxZ, true);
+      o += 24;
+    }
   }
   return bytes;
 }

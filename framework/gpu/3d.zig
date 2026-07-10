@@ -3225,6 +3225,21 @@ fn editGlassFirstVert() u32 {
     return k * 3;
 }
 
+/// Durable model-document boundary: first vertex of the trailing per-face glass
+/// run. Meshdoc v2 stores this beside the source soup so an exported resident
+/// mesh can recreate the transparent, depth-write-off draw after leaving Studio.
+pub fn modelGlassFirstVertex() u32 {
+    const verts = model_source.verts() orelse return 0;
+    const face_count: usize = verts.len / 24;
+    const colors = model_source.colors() orelse return @intCast(face_count * 3);
+    if (colors.len < face_count * 4) return @intCast(face_count * 3);
+    var first = face_count;
+    while (first > 0) : (first -= 1) {
+        if (colors[(first - 1) * 4 + 3] >= 250) break;
+    }
+    return @intCast(first * 3);
+}
+
 /// Solidify the selected faces (face mode) IN PLACE: an inner skin offset along the
 /// per-vertex normals plus wall quads around the selection's boundary edges — the old
 /// studio's solidifyFaces on the resident soup. New triangles inherit their source

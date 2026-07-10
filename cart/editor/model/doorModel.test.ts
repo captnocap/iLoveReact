@@ -15,15 +15,15 @@ function test(name: string, fn: () => void) {
 }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
-function triangle(marker: number): number[] {
-  const vertex = (x: number) => [x, 0, 0, 0, 1, 0, 0, 0];
-  return [...vertex(marker), ...vertex(marker + 0.1), ...vertex(marker + 0.2)];
+function triangle(a: [number, number, number], b: [number, number, number], c: [number, number, number]): number[] {
+  const vertex = ([x, y, z]: [number, number, number]) => [x, y, z, 0, 1, 0, 0, 0];
+  return [...vertex(a), ...vertex(b), ...vertex(c)];
 }
 
 const vertices = new Float32Array([
-  ...triangle(10), // frame group 0
-  ...triangle(90), // leaf group 2, deliberately interleaved
-  ...triangle(20), // frame group 1
+  ...triangle([-2, 0, -0.2], [-1, 0, 0.2], [-1, 3, 0.2]), // left frame group 0
+  ...triangle([-1, 0, -0.05], [1, 0, 0.05], [1, 2.2, 0.05]), // leaf group 2, deliberately interleaved
+  ...triangle([1, 0, -0.2], [2, 0, 0.2], [2, 3, 0.2]), // right frame group 1
 ]);
 const doc: PackageMeshDoc = {
   vertices,
@@ -51,14 +51,37 @@ test('compiler moves interleaved leaf triangles into one trailing vertex slot', 
   if (!result.ok) return;
   assert(result.mesh.leaf.start === 6, `leaf starts at vertex ${result.mesh.leaf.start}, expected 6`);
   assert(result.mesh.leaf.count === 3, `leaf count ${result.mesh.leaf.count}, expected 3`);
-  assert(result.mesh.vertices[0] === 10, 'first frame triangle moved incorrectly');
-  assert(result.mesh.vertices[24] === 20, 'second frame triangle did not compact before leaf');
-  assert(result.mesh.vertices[48] === 90, 'leaf triangle is not trailing');
+  assert(result.mesh.vertices[0] === -2, 'first frame triangle moved incorrectly');
+  assert(result.mesh.vertices[24] === 1, 'second frame triangle did not compact before leaf');
+  assert(result.mesh.vertices[48] === -1, 'leaf triangle is not trailing');
+  assert(result.mesh.collisionBoxes.length === 3, `door frame should compile as two jambs + lintel, got ${result.mesh.collisionBoxes.length}`);
+  const groundBands = result.mesh.collisionBoxes.filter((box) => box.minY === 0 && box.maxY > 2);
+  assert(groundBands.length === 2, 'door aperture was sealed instead of leaving two ground-level jambs');
+});
+
+test('compiler keeps Studio glass as a separate trailing leaf slot', () => {
+  const glassVertices = new Float32Array([
+    ...triangle([-2, 0, -0.2], [-1, 0, 0.2], [-1, 3, 0.2]),
+    ...triangle([1, 0, -0.2], [2, 0, 0.2], [2, 3, 0.2]),
+    ...triangle([-1, 0, -0.05], [1, 0, 0.05], [1, 2.2, 0.05]), // opaque leaf
+    ...triangle([-0.5, 1, -0.051], [0.5, 1, -0.051], [0.5, 1.7, -0.051]), // glass window
+  ]);
+  const glassDoc: PackageMeshDoc = {
+    vertices: glassVertices,
+    faceGroups: new Uint32Array([0, 1, 2, 2]),
+    ranges: [{ lo: 0, hi: 2 }, { lo: 2, hi: 3 }],
+    glassFirstVertex: 9,
+  };
+  const result = compileDoorMesh(glassVertices, glassDoc, parts);
+  assert(result.ok, result.ok ? '' : result.error);
+  if (!result.ok) return;
+  assert(result.mesh.leaf.start === 6 && result.mesh.leaf.count === 6, 'combined leaf range changed');
+  assert(result.mesh.leafGlass?.start === 9 && result.mesh.leafGlass.count === 3, 'glass window did not become the final leaf slot');
 });
 
 test('compiler rejects an all-leaf model because a door also needs a static frame', () => {
   const onlyLeaf: PackageMeshDoc = {
-    vertices: new Float32Array(triangle(1)),
+    vertices: new Float32Array(triangle([-1, 0, -0.05], [1, 0, 0.05], [1, 2, 0.05])),
     faceGroups: new Uint32Array([0]),
     ranges: [{ lo: 0, hi: 1 }],
   };

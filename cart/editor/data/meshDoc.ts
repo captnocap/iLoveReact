@@ -6,7 +6,8 @@
 // doc switch rebuilt the seed (edits gone from view) and a restart re-armed the
 // primitive generator (cube, no outliner). The meshdoc is the durable, READABLE form:
 //
-//   mesh/doc.blob    RJMD v1 — verts + authored face groups + per-part group ranges,
+//   mesh/doc.blob    RJMD v2 — verts + authored face groups + per-part group ranges
+//                    + the trailing glass vertex boundary (v1 remains readable),
 //                    written by the host door __model_meshdoc_write (the format's twin
 //                    lives in framework/v8_bindings_core.zig hostModelMeshdocWrite).
 //   mesh/parts.json  rank-ordered part METADATA (name/color/visible/kind), matching
@@ -31,6 +32,8 @@ export type PackageMeshDoc = {
   faceGroups: Uint32Array | null;
   /** per-part [lo,hi) authored-group ranges, ascending lo; always ≥1 entry */
   ranges: { lo: number; hi: number }[];
+  /** First vertex in the stable trailing glass run; absent on legacy RJMD v1. */
+  glassFirstVertex?: number | null;
 };
 
 /** Part metadata row, rank-ordered to match PackageMeshDoc.ranges. */
@@ -95,14 +98,23 @@ function parseDocBlob(dir: string): PackageMeshDoc | null {
   if (!b64) return null;
   let bytes: Uint8Array;
   try { bytes = base64ToBytes(b64); } catch { return null; }
+  return parseMeshDocBytes(bytes);
+}
+
+/** Pure RJMD decoder used by disk reads and the version-compatibility tests. */
+export function parseMeshDocBytes(bytes: Uint8Array): PackageMeshDoc | null {
   if (bytes.length < 24) return null;
   const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
   const head = new Uint32Array(buf, 0, 6);
   const [magic, version, vertCount, faceCount, hasGroups, rangeCount] = [head[0]!, head[1]!, head[2]!, head[3]!, head[4]!, head[5]!];
-  if (magic !== RJMD_MAGIC || version !== 1 || vertCount === 0) return null;
-  const need = 24 + vertCount * 8 * 4 + (hasGroups ? faceCount * 4 : 0) + rangeCount * 8;
+  if (magic !== RJMD_MAGIC || (version !== 1 && version !== 2) || vertCount === 0) return null;
+  const headerBytes = version >= 2 ? 28 : 24;
+  if (bytes.length < headerBytes) return null;
+  const glassFirstVertex = version >= 2 ? new Uint32Array(buf, 24, 1)[0]! : null;
+  if (glassFirstVertex !== null && (glassFirstVertex > vertCount || glassFirstVertex % 3 !== 0)) return null;
+  const need = headerBytes + vertCount * 8 * 4 + (hasGroups ? faceCount * 4 : 0) + rangeCount * 8;
   if (bytes.length < need) return null;
-  let at = 24;
+  let at = headerBytes;
   const vertices = new Float32Array(buf, at, vertCount * 8);
   at += vertCount * 8 * 4;
   let faceGroups: Uint32Array | null = null;
@@ -116,7 +128,7 @@ function parseDocBlob(dir: string): PackageMeshDoc | null {
     for (let i = 0; i < rangeCount; i += 1) ranges.push({ lo: pairs[i * 2]!, hi: pairs[i * 2 + 1]! });
   }
   if (ranges.length === 0) ranges.push({ lo: 0, hi: groupSpanEnd(faceGroups, faceCount) });
-  return { vertices, faceGroups, ranges };
+  return { vertices, faceGroups, ranges, glassFirstVertex };
 }
 
 // Pre-meshdoc packages (bare verts, req_2533's writer): one recovered part covering

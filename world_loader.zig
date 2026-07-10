@@ -561,6 +561,11 @@ const COOKED_DOOR_OPEN_SECONDS: f32 = 0.4;
 /// opacity only; appendMeshPropNode tints it this blue so /compiled glass panes
 /// match the React play view instead of falling back to the prop's gray.
 const GLASS_TINT = [3]f32{ 169.0 / 255.0, 200.0 / 255.0, 216.0 / 255.0 }; // #a9c8d8
+// A textured Studio glass face already carries ~0.34 alpha in its atlas. The
+// node only needs to be below the transparent-pass cutoff; keeping this near 1
+// avoids multiplying that authored alpha down a second time.
+const LIVE_DOOR_TEXTURED_GLASS_ROUTE_ALPHA: f32 = 0.998;
+const LIVE_DOOR_FLAT_GLASS_ALPHA: f32 = 87.0 / 255.0;
 
 /// The world AABB of a cooked door's leaf panel (req_1864) — the leaf slot's
 /// local bounds, yawed + offset by the placed instance. Shared by the rect
@@ -4237,7 +4242,23 @@ pub const Runtime = struct {
             const mat_hash: u32 = if (si < r.mats.len) r.mats[si] else 0;
             const override: ?[]const u8 = if (mat_hash != 0) self.live_mat_keys.get(mat_hash) else null;
             const node_first = self.kid_list.items.len;
-            self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, 0, alpha, override) catch {};
+            // Door compiler convention: leaf_slot is opaque; every trailing slot
+            // is Studio-marked leaf glass. A placed live mesh has no baked material
+            // ref for that slot, so route it explicitly through the transparent
+            // depth-write-OFF pass. Its atlas alpha remains authoritative.
+            const live_door_glass = alpha == null and if (mesh.door) |door| si > door.leaf_slot else false;
+            const slot_alpha = if (live_door_glass)
+                (if (mesh.tex_rgba != null or override != null) LIVE_DOOR_TEXTURED_GLASS_ROUTE_ALPHA else LIVE_DOOR_FLAT_GLASS_ALPHA)
+            else
+                alpha;
+            self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, 0, slot_alpha, override) catch {};
+            if (live_door_glass and mesh.tex_rgba == null and override == null) {
+                for (self.kid_list.items[node_first..]) |*node| {
+                    node.scene3d_color_r = GLASS_TINT[0];
+                    node.scene3d_color_g = GLASS_TINT[1];
+                    node.scene3d_color_b = GLASS_TINT[2];
+                }
+            }
             if (live_door_index) |di| {
                 if (di < self.live_cooked_doors.len) {
                     if (mesh.door) |door| {
@@ -6628,11 +6649,11 @@ pub const Runtime = struct {
     /// to the candidate. Open doors dropped their solid flag in setDoorOpen,
     /// so they pass; a box containing the target itself (the aimed door's own
     /// panel) is skipped inside the query.
-    fn interactReachBlocked(self: *Runtime, target_x: f32, target_y: f32, target_z: f32) bool {
+    fn interactReachBlockedExceptRect(self: *Runtime, target_x: f32, target_y: f32, target_z: f32, skip_rect_index: ?usize) bool {
         if (!self.has_physics_colliders) return false;
         const colliders = &self.physics_colliders;
         if (colliders.rect_count == 0 and colliders.oriented_count == 0) return false;
-        return game_physics.reachBlockedStepColliders(
+        return game_physics.reachBlockedStepCollidersExceptRect(
             colliders.values[colliders.entity_capacity * game_physics.ENTITY_FLOATS ..],
             colliders.rect_count,
             colliders.oriented_count,
@@ -6643,7 +6664,16 @@ pub const Runtime = struct {
             target_y,
             target_z,
             INTERACT_BLOCKER_MAX_THICKNESS_METERS,
+            skip_rect_index,
         );
+    }
+
+    fn interactReachBlocked(self: *Runtime, target_x: f32, target_y: f32, target_z: f32) bool {
+        return self.interactReachBlockedExceptRect(target_x, target_y, target_z, null);
+    }
+
+    fn cookedDoorReachBlocked(self: *Runtime, cd: CookedDoor) bool {
+        return self.interactReachBlockedExceptRect(cd.cx, cd.base_y + cd.panel_h / 2, cd.cz, cd.rect_index);
     }
 
     /// PROPUSE req_0624 — /test's interact frame, native: resolve the nearest
@@ -6767,7 +6797,7 @@ pub const Runtime = struct {
                 const dz = cd.cz - self.player.z;
                 const distance = @sqrt(dx * dx + dz * dz);
                 if (distance > cd.reach or distance > best_distance) continue;
-                if (self.interactReachBlocked(cd.cx, cd.base_y + cd.panel_h / 2, cd.cz)) continue;
+                if (self.cookedDoorReachBlocked(cd)) continue;
                 best_distance = distance;
                 cooked_door_target = i;
             }
@@ -6794,7 +6824,7 @@ pub const Runtime = struct {
                 const dz = cd.cz - self.player.z;
                 const distance = @sqrt(dx * dx + dz * dz);
                 if (distance > cd.reach or distance > best_distance) continue;
-                if (self.interactReachBlocked(cd.cx, cd.base_y + cd.panel_h / 2, cd.cz)) continue;
+                if (self.cookedDoorReachBlocked(cd)) continue;
                 best_distance = distance;
                 live_cooked_door_target = i;
             }

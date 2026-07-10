@@ -1437,10 +1437,11 @@ fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     setReturnNumber(info, 1);
 }
 
-/// __model_meshdoc_write(path) → 1 on success. The model DOCUMENT blob (RJMD v1) — the
+/// __model_meshdoc_write(path) → 1 on success. The model DOCUMENT blob (RJMD v2) — the
 /// full editable state of the resident model, so a saved package reopens as the same
 /// multi-part document instead of re-arming its primitive seed (req_2753). Layout:
-/// header u32×6 [magic 'RJMD', version=1, vertCount, faceCount, hasGroups, rangeCount],
+/// header u32×7 [magic 'RJMD', version=2, vertCount, faceCount, hasGroups, rangeCount,
+/// glassFirstVertex],
 /// then vertCount×8 f32 source verts, then faceCount u32 authored-face-group ids (when
 /// hasGroups=1), then rangeCount×2 u32 flattened [lo,hi) per-part group ranges. All
 /// little-endian, no padding. The editor's meshDoc.ts reader is the format's twin.
@@ -1461,7 +1462,8 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     defer alloc.free(pathz);
     const file = std.fs.cwd().createFile(pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
     defer file.close();
-    const header = [6]u32{ 0x444D4A52, 1, vert_count, face_count, has_groups, range_count };
+    const glass_first_vertex = @min(scene3d.modelGlassFirstVertex(), vert_count);
+    const header = [7]u32{ 0x444D4A52, 2, vert_count, face_count, has_groups, range_count, glass_first_vertex };
     file.writeAll(std.mem.sliceAsBytes(header[0..])) catch return setReturnNumber(info, 0);
     file.writeAll(std.mem.sliceAsBytes(verts[0 .. @as(usize, vert_count) * 8])) catch return setReturnNumber(info, 0);
     if (has_groups == 1) {

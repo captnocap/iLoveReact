@@ -15,14 +15,19 @@ function test(name: string, fn: () => void) {
 }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
-const vertices = new Float32Array(6 * 8);
+const vertices = new Float32Array(9 * 8);
 
-test('door resident row carries one leaf slot and the v6 interaction block', () => {
+test('door resident row carries opaque/glass leaf slots, interaction metadata, and open-frame boxes', () => {
   const bytes = encodeResidentMeshes([{
     key: 'model:test-door',
     vertices,
-    slots: [{ start: 3, count: 3 }],
+    slots: [{ start: 3, count: 3 }, { start: 6, count: 3 }],
     door: { leafSlot: 0, reachMeters: 2.2, vehicle: false, startOpen: false },
+    collisionBoxes: [
+      { minX: -1.5, minY: 0, minZ: -0.15, maxX: -0.5, maxY: 2.2, maxZ: 0.15 },
+      { minX: 0.5, minY: 0, minZ: -0.15, maxX: 1.5, maxY: 2.2, maxZ: 0.15 },
+      { minX: -1.5, minY: 2.2, minZ: -0.15, maxX: 1.5, maxY: 3, maxZ: 0.15 },
+    ],
   }]);
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   assert(dv.getUint32(0, true) === 7, 'not MESH_PROPS v7');
@@ -30,16 +35,20 @@ test('door resident row carries one leaf slot and the v6 interaction block', () 
   const keyLength = dv.getUint32(12, true);
   let at = 16 + keyLength + 36 + vertices.length * 4;
   const pngLength = dv.getUint32(at, true); at += 4 + pngLength;
-  assert(dv.getUint32(at, true) === 1, 'leaf slot missing'); at += 4;
+  assert(dv.getUint32(at, true) === 2, 'opaque/glass leaf slots missing'); at += 4;
   assert(dv.getUint32(at, true) === 3 && dv.getUint32(at + 4, true) === 3, 'leaf slot range changed'); at += 8;
+  assert(dv.getUint32(at, true) === 6 && dv.getUint32(at + 4, true) === 3, 'leaf glass slot range changed'); at += 8;
   assert(dv.getUint32(at, true) === 1, 'door flag missing'); at += 4;
   assert(dv.getUint32(at, true) === 0, 'leaf slot index changed');
   assert(Math.abs(dv.getFloat32(at + 4, true) - 2.2) < 1e-5, 'interaction reach changed');
   assert(dv.getUint32(at + 8, true) === 0, 'walk door became vehicle door');
   assert(dv.getUint32(at + 12, true) === 0, 'door unexpectedly starts open');
   at += 16;
-  assert(dv.getUint32(at, true) === 0, 'unexpected authored collider boxes');
-  assert(at + 4 === bytes.byteLength, `encoder size drift: parsed ${at + 4}, wrote ${bytes.byteLength}`);
+  assert(dv.getUint32(at, true) === 3, 'portal-preserving frame boxes missing'); at += 4;
+  assert(Math.abs(dv.getFloat32(at, true) - (-1.5)) < 1e-5, 'left jamb minX changed');
+  assert(Math.abs(dv.getFloat32(at + 12, true) - (-0.5)) < 1e-5, 'left jamb maxX changed');
+  at += 3 * 24;
+  assert(at === bytes.byteLength, `encoder size drift: parsed ${at}, wrote ${bytes.byteLength}`);
 });
 
 test('encoder rejects a door whose leaf slot does not exist', () => {
@@ -51,6 +60,17 @@ test('encoder rejects a door whose leaf slot does not exist', () => {
     }]);
   } catch { threw = true; }
   assert(threw, 'invalid door metadata reached the host decoder');
+});
+
+test('encoder rejects a degenerate authored collision box', () => {
+  let threw = false;
+  try {
+    encodeResidentMeshes([{
+      key: 'model:bad-box', vertices,
+      collisionBoxes: [{ minX: 1, minY: 0, minZ: 0, maxX: 1, maxY: 2, maxZ: 0.2 }],
+    }]);
+  } catch { threw = true; }
+  assert(threw, 'degenerate collider reached the host decoder');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

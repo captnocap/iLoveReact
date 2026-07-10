@@ -899,6 +899,38 @@ pub fn reachBlockedStepColliders(
     target_z: f32,
     max_blocker_thickness: f32,
 ) bool {
+    return reachBlockedStepCollidersExceptRect(
+        step_input,
+        rect_count,
+        oriented_count,
+        eye_x,
+        eye_y,
+        eye_z,
+        target_x,
+        target_y,
+        target_z,
+        max_blocker_thickness,
+        null,
+    );
+}
+
+/// Door-aware reach query. `skip_rect_index` identifies the candidate door's
+/// own moving panel in the packed RECT section, so that panel cannot hide its
+/// close/open prompt after swinging away from the closed-position target.
+/// Every other thin wall remains an occluder.
+pub fn reachBlockedStepCollidersExceptRect(
+    step_input: []const f32,
+    rect_count: usize,
+    oriented_count: usize,
+    eye_x: f32,
+    eye_y: f32,
+    eye_z: f32,
+    target_x: f32,
+    target_y: f32,
+    target_z: f32,
+    max_blocker_thickness: f32,
+    skip_rect_index: ?usize,
+) bool {
     const dx = target_x - eye_x;
     const dy = target_y - eye_y;
     const dz = target_z - eye_z;
@@ -910,6 +942,7 @@ pub fn reachBlockedStepColliders(
 
     var r: usize = 0;
     while (r < rect_count) : (r += 1) {
+        if (skip_rect_index != null and r == skip_rect_index.?) continue;
         const at = rect_base + r * RECT_FLOATS;
         if (step_input[at + 5] <= 0.5) continue; // solid only
         const min_x = step_input[at];
