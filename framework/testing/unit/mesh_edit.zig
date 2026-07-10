@@ -111,6 +111,55 @@ test "masked plane cut cannot cross an outliner part boundary (req_2899)" {
     try testing.expectEqual(@as(u32, 2), untouched);
 }
 
+test "repeated masked cuts inherit sibling RGBA by source face (req_2906)" {
+    // This is the popup's two-cut preview in miniature: the first part is dark and
+    // editable, the coincident sibling part is grey and out of scope. Each plane changes
+    // the editable face count/order. The sibling must remain grey through both remaps.
+    const quad = [_]f32{
+        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 2, 0, 0, 2, 0,
+    };
+    var base_pos: [quad.len * 2]f32 = undefined;
+    @memcpy(base_pos[0..quad.len], quad[0..]);
+    @memcpy(base_pos[quad.len..], quad[0..]);
+    const base_groups = [_]u32{ 7, 7, 19, 19 };
+    const base_scope = [_]bool{ true, true, false, false };
+    const dark = [_]u8{ 12, 16, 24, 255 };
+    const grey = [_]u8{ 154, 163, 173, 255 };
+    const base_colors = dark ++ dark ++ grey ++ grey;
+
+    const first = mesh_edit.planeCutSoupMasked(base_pos[0..], 4, .{ 1, 0, 0 }, 2.0 / 3.0, base_groups[0..], base_scope[0..]).?;
+    defer {
+        std.heap.c_allocator.free(first.positions);
+        std.heap.c_allocator.free(first.src_face);
+        if (first.groups) |g| std.heap.c_allocator.free(g);
+    }
+    try testing.expectEqual(@as(u32, 6), first.tri_count);
+    var first_scope: [6]bool = undefined;
+    var first_colors: [6 * 4]u8 = undefined;
+    for (first.src_face, 0..) |src, i| first_scope[i] = base_scope[src];
+    try testing.expect(mesh_edit.inheritFaceRgba(base_colors[0..], first.src_face, first_colors[0..]));
+
+    const second = mesh_edit.planeCutSoupMasked(first.positions, first.tri_count, .{ 1, 0, 0 }, 4.0 / 3.0, first.groups, first_scope[0..]).?;
+    defer {
+        std.heap.c_allocator.free(second.positions);
+        std.heap.c_allocator.free(second.src_face);
+        if (second.groups) |g| std.heap.c_allocator.free(g);
+    }
+    try testing.expectEqual(@as(u32, 8), second.tri_count);
+    var second_colors: [8 * 4]u8 = undefined;
+    try testing.expect(mesh_edit.inheritFaceRgba(first_colors[0..], second.src_face, second_colors[0..]));
+
+    var sibling_faces: u32 = 0;
+    for (second.src_face, 0..) |src, i| {
+        if (first_scope[src]) continue;
+        sibling_faces += 1;
+        try testing.expectEqualSlices(u8, grey[0..], second_colors[i * 4 .. i * 4 + 4]);
+        try testing.expectEqualSlices(f32, first.positions[@as(usize, src) * 9 .. @as(usize, src) * 9 + 9], second.positions[i * 9 .. i * 9 + 9]);
+    }
+    try testing.expectEqual(@as(u32, 2), sibling_faces);
+}
+
 // Keep the mesh module's co-located lower-level tests in this unit target too.
 test {
     std.testing.refAllDecls(mesh_edit);

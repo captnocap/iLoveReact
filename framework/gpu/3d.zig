@@ -715,6 +715,20 @@ fn applyCarriedFaceColors(old_colors: ?[]const u8, new_fc: u32) void {
     }
 }
 
+/// Apply an already-parented face-colour table after a topology rebuild. The caller
+/// derives these rows through CutResult.src_face; unlike applyCarriedFaceColors this is
+/// independent of the previous resident preview's face order (req_2906).
+fn applyExactFaceColors(colors: []const u8, face_count: u32) bool {
+    const need = @as(usize, face_count) * 4;
+    if (colors.len != need) return false;
+    model_paint.applyColors(colors);
+    if (model_source.colors()) |dst| {
+        if (dst.len < need) return false;
+        @memcpy(dst[0..need], colors);
+    }
+    return true;
+}
+
 fn replaceActiveEditMesh(new_verts: []f32, count: u32) bool {
     const need = @as(usize, count) * 8;
     // count == 0 is a LEGITIMATE state (req_2806: deleting the last part empties the
@@ -1327,6 +1341,8 @@ pub fn meshTopoLoopCut() bool {
     const verts = g_edit_verts orelse return false;
     const tri_count = g_edit_count / 3;
     if (tri_count == 0) return false;
+    const base_colors = collectCurrentFaceColors() orelse return false;
+    defer std.heap.c_allocator.free(base_colors);
 
     // Extract a positions-only soup (9 f32/tri) from the interleaved edit mesh.
     const pos = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return false;
@@ -1375,6 +1391,9 @@ pub fn meshTopoLoopCut() bool {
     defer std.heap.c_allocator.free(cut.src_face);
     defer if (cut.groups) |g| std.heap.c_allocator.free(g);
     if (cut.tri_count <= tri_count) return false; // the plane missed every face → not a cut
+    const cut_colors = std.heap.c_allocator.alloc(u8, @as(usize, cut.tri_count) * 4) catch return false;
+    defer std.heap.c_allocator.free(cut_colors);
+    if (!mesh_edit.inheritFaceRgba(base_colors, cut.src_face, cut_colors)) return false;
 
     // Rebuild the interleaved edit mesh (appendTri recomputes normals; UVs are rewritten by
     // setPaintTarget on install), then re-apply the fresh grouping AFTER the retain (which
@@ -1400,6 +1419,7 @@ pub fn meshTopoLoopCut() bool {
     var snap = journalSnapshotCurrent("loop cut");
     const ok = replaceActiveEditMesh(owned, cut.tri_count * 3);
     if (ok) {
+        _ = applyExactFaceColors(cut_colors, cut.tri_count);
         if (cut.groups) |g| {
             model_source.setFaceGroups(g);
             _ = refreshPaintLayout(); // re-island by the fresh grouping (groups land after adopt)
@@ -1641,6 +1661,7 @@ const LcSession = struct {
     base_pos: []f32, // positions-only soup at begin (tri_count * 9)
     tri_count: u32,
     base_groups: ?[]u32, // per-tri authored groups at begin (null = ungrouped import)
+    base_colors: []u8, // true RGBA per base face; previews inherit through src_face
     // One bool per BASE face: the active outliner scope captured at begin. Cut planes
     // are infinite, so this explicit mutation mask keeps sibling parts intact (req_2899).
     base_scope: []bool,
@@ -1688,6 +1709,7 @@ fn lcFree() void {
     var s = g_lc orelse return;
     std.heap.c_allocator.free(s.base_pos);
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
+    std.heap.c_allocator.free(s.base_colors);
     std.heap.c_allocator.free(s.base_scope);
     if (s.base_face_part) |p| std.heap.c_allocator.free(p);
     if (s.last_face_part) |p| std.heap.c_allocator.free(p);
@@ -1861,7 +1883,8 @@ fn lcPlanes(lo: f32, hi: f32, cuts: u32, offset: f32, out: []f32) u32 {
 /// Rebuild the interleaved edit mesh from a positions-only soup and install it —
 /// the shared tail of every session step (preview, cancel-restore). appendTri
 /// recomputes normals; UVs are rewritten on adopt. Stays in face mode.
-fn lcInstallSoup(pos: []const f32, tri_count: u32, groups: ?[]const u32) bool {
+fn lcInstallSoup(pos: []const f32, tri_count: u32, groups: ?[]const u32, colors: []const u8) bool {
+    if (colors.len != @as(usize, tri_count) * 4) return false;
     var out = std.ArrayListUnmanaged(f32){};
     var t: u32 = 0;
     while (t < tri_count) : (t += 1) {
@@ -1880,6 +1903,7 @@ fn lcInstallSoup(pos: []const f32, tri_count: u32, groups: ?[]const u32) bool {
     };
     defer std.heap.c_allocator.free(owned);
     if (!replaceActiveEditMesh(owned, tri_count * 3)) return false;
+    if (!applyExactFaceColors(colors, tri_count)) return false;
     if (groups) |g| {
         model_source.setFaceGroups(g);
         _ = refreshPaintLayout(); // re-island by the fresh grouping (groups land after adopt)
@@ -2000,11 +2024,25 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
     };
     var scope_face: u32 = 0;
     while (scope_face < tri_count) : (scope_face += 1) base_scope[scope_face] = mesh_edit.faceInScopePub(scope_face);
+    const base_colors = collectCurrentFaceColors() orelse {
+        std.heap.c_allocator.free(pos);
+        if (groups) |g| std.heap.c_allocator.free(g);
+        std.heap.c_allocator.free(base_scope);
+        return null;
+    };
+    if (base_colors.len != @as(usize, tri_count) * 4) {
+        std.heap.c_allocator.free(pos);
+        if (groups) |g| std.heap.c_allocator.free(g);
+        std.heap.c_allocator.free(base_scope);
+        std.heap.c_allocator.free(base_colors);
+        return null;
+    }
 
     g_lc = .{
         .base_pos = pos,
         .tri_count = tri_count,
         .base_groups = groups,
+        .base_colors = base_colors,
         .base_scope = base_scope,
         .base_face_part = capturePartOfFaces(),
         .last_face_part = null, // no preview yet — commit falls back to the base parts
@@ -2047,6 +2085,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     // minted group ids back into contiguous per-part ranges (req_2644).
     var cur_pos: []const f32 = s.base_pos;
     var cur_groups: ?[]const u32 = if (s.base_groups) |g| g else null;
+    var cur_colors: []const u8 = s.base_colors;
     var cur_scope: []const bool = s.base_scope;
     var cur_part: ?[]const u32 = if (s.base_face_part) |p| p else null;
     var cur_count: u32 = s.tri_count;
@@ -2065,6 +2104,21 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
             const src = cut.src_face[scoped_tri];
             next_scope[scoped_tri] = src < cur_scope.len and cur_scope[src];
         }
+        const next_colors = std.heap.c_allocator.alloc(u8, @as(usize, cut.tri_count) * 4) catch {
+            std.heap.c_allocator.free(next_scope);
+            std.heap.c_allocator.free(cut.positions);
+            std.heap.c_allocator.free(cut.src_face);
+            if (cut.groups) |g| std.heap.c_allocator.free(g);
+            break;
+        };
+        if (!mesh_edit.inheritFaceRgba(cur_colors, cut.src_face, next_colors)) {
+            std.heap.c_allocator.free(next_colors);
+            std.heap.c_allocator.free(next_scope);
+            std.heap.c_allocator.free(cut.positions);
+            std.heap.c_allocator.free(cut.src_face);
+            if (cut.groups) |g| std.heap.c_allocator.free(g);
+            break;
+        }
         var next_part: ?[]const u32 = null;
         if (cur_part) |cp| {
             if (std.heap.c_allocator.alloc(u32, cut.tri_count)) |np| {
@@ -2080,11 +2134,13 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         if (owned) {
             std.heap.c_allocator.free(@constCast(cur_pos));
             if (cur_groups) |g| std.heap.c_allocator.free(@constCast(g));
+            std.heap.c_allocator.free(@constCast(cur_colors));
             std.heap.c_allocator.free(@constCast(cur_scope));
             if (cur_part) |p| std.heap.c_allocator.free(@constCast(p));
         }
         cur_pos = cut.positions;
         cur_groups = cut.groups;
+        cur_colors = next_colors;
         cur_scope = next_scope;
         cur_part = next_part;
         cur_count = cut.tri_count;
@@ -2093,6 +2149,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     defer if (owned) {
         std.heap.c_allocator.free(@constCast(cur_pos));
         if (cur_groups) |g| std.heap.c_allocator.free(@constCast(g));
+        std.heap.c_allocator.free(@constCast(cur_colors));
         std.heap.c_allocator.free(@constCast(cur_scope));
     };
     // Stash the FINAL preview's parentage on the session (commit renormalizes from it).
@@ -2105,7 +2162,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
             s.last_face_part = std.heap.c_allocator.dupe(u32, p) catch null; // still the base's
         }
     }
-    return lcInstallSoup(cur_pos, cur_count, cur_groups);
+    return lcInstallSoup(cur_pos, cur_count, cur_groups, cur_colors);
 }
 
 /// Close the session. commit keeps the previewed cut as ONE journal entry and re-selects
@@ -2142,11 +2199,12 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
         mesh_edit.setMode(.face);
     } else {
         const groups_arg: ?[]const u32 = if (s.base_groups) |g| g else null;
-        ok = lcInstallSoup(s.base_pos, s.tri_count, groups_arg);
+        ok = lcInstallSoup(s.base_pos, s.tri_count, groups_arg, s.base_colors);
         journalDiscard(&s.snap);
     }
     std.heap.c_allocator.free(s.base_pos);
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
+    std.heap.c_allocator.free(s.base_colors);
     std.heap.c_allocator.free(s.base_scope);
     if (s.base_face_part) |p| std.heap.c_allocator.free(p);
     if (s.last_face_part) |p| std.heap.c_allocator.free(p);

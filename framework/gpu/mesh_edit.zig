@@ -1612,6 +1612,24 @@ pub fn resumeFaceTint() void {
 // cut, since the group remap mints fresh ids the caller can't trace back on its own.
 pub const CutResult = struct { positions: []f32, groups: ?[]u32, src_face: []u32, tri_count: u32 };
 
+/// Inherit one RGBA row per output face through a topology result's `src_face` map.
+/// Validates the complete boundary before writing, so a bad parent index cannot leave a
+/// partially remapped attribute buffer. Loop-cut previews use this for every plane: face
+/// order/count may change, but paint identity follows geometry rather than array position.
+pub fn inheritFaceRgba(colors_in: []const u8, src_face: []const u32, colors_out: []u8) bool {
+    if (colors_in.len % 4 != 0 or colors_out.len % 4 != 0 or colors_out.len / 4 != src_face.len) return false;
+    const in_faces = colors_in.len / 4;
+    for (src_face) |src| {
+        if (src >= in_faces) return false;
+    }
+    for (src_face, 0..) |src, out_face| {
+        const from = @as(usize, src) * 4;
+        const to = out_face * 4;
+        @memcpy(colors_out[to .. to + 4], colors_in[from .. from + 4]);
+    }
+    return true;
+}
+
 const CUT_EPS: f32 = 1e-5;
 
 fn triArea2Local(a: [3]f32, b: [3]f32, c: [3]f32) f32 {
