@@ -2595,6 +2595,31 @@ pub fn meshJournalCounts() [2]u32 {
     return .{ @intCast(g_journal_undo.items.len), @intCast(g_journal_redo.items.len) };
 }
 
+/// The resident mesh-editor SESSION (req_2898 hot-reload resume). A dev hot reload
+/// tears down the JS world but this process — the live edit mesh, its journal, the
+/// paint atlas, and the orbit pose — all survive. This readback gives the remounted
+/// viewer everything it needs to decide "the host still holds my live document":
+/// adopt it instead of re-loading the stale seed (which would wipe the edits).
+/// Null when no edit mesh is resident (cold boot / viewer never loaded).
+pub fn modelSessionJson(alloc: std.mem.Allocator) ?[]u8 {
+    const key = g_edit_key orelse return null;
+    const j = meshJournalCounts();
+    var out = std.ArrayList(u8){};
+    errdefer out.deinit(alloc);
+    const w = out.writer(alloc);
+    w.writeAll("{\"key\":\"") catch return null;
+    for (key) |ch| switch (ch) {
+        '"' => w.writeAll("\\\"") catch return null,
+        '\\' => w.writeAll("\\\\") catch return null,
+        0...31 => w.print("\\u{x:0>4}", .{ch}) catch return null,
+        else => w.writeByte(ch) catch return null,
+    };
+    w.print("\",\"count\":{d},\"radius\":{d:.6},\"undo\":{d},\"redo\":{d},\"atlas\":{}}}", .{
+        g_edit_count, g_orbit.radius, j[0], j[1], model_paint.atlas() != null,
+    }) catch return null;
+    return out.toOwnedSlice(alloc) catch null;
+}
+
 pub fn meshUndoLabel() []const u8 {
     if (g_journal_undo.items.len == 0) return "";
     return g_journal_undo.items[g_journal_undo.items.len - 1].label;

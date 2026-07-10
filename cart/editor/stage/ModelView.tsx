@@ -28,6 +28,7 @@ import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { BackdropsPanel, BackdropSurface, backdropQuad, backdropTexKey, loadBackdrops, saveBackdrops, pickBackdrop, type Backdrop } from './Backdrops';
 import { useModifiers } from '@reactjit/runtime/hooks/useModifiers';
+import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import { callHost } from '@reactjit/runtime/ffi';
 import {
   loadLedger, putEntry, recordImport, exportCredits, pendingCount,
@@ -308,6 +309,31 @@ const meshFocusTool = (on: boolean) => host.__mesh_edit_focus?.(on ? 1 : 0);
 // Camera lock (req_2893): while on, the host no-ops EVERY orbit motion (drag/zoom/
 // pan/focus/compass) so a stray drag can't nudge the angle the user set.
 const orbitSetLocked = (on: boolean) => host.__model_orbit_lock?.(on ? 1 : 0);
+
+// ── Hot-reload survival (req_2898) ───────────────────────────────────────────────
+// A dev hot reload tears down the JS world but the HOST keeps everything that
+// matters: the live edit mesh, its undo journal, the paint atlas, and the orbit
+// camera. Two hot twigs (framework/state/hotstate.zig — in-process, gone on a cold
+// restart) let the remounted viewer pick that session back up instead of wiping it:
+//   DOC twig  — which document owns the host's resident mesh, and under what key.
+//               Matching doc + matching host key ⇒ ADOPT the live session (edits,
+//               selection, journal, atlas, camera all survive); mismatch ⇒ normal load.
+//   TOOL twig — how you were holding the tool (wire/lock/brush/palette/lights…),
+//               re-seeded into fresh React state on mount.
+const DOC_TWIG_KEY = 'editor:meshdoc:v1';
+const TOOL_TWIG_KEY = 'editor:meshtool:v1';
+type DocTwig = { docId: string; key: string };
+type ToolTwig = {
+  wire: boolean; camLock: boolean; gizmoTool: number; mirrorMask: number;
+  brush: Brush; brushTool: BrushTool; palette: Palette; safety: number; detail: number;
+  litFlat: boolean; litKey: boolean; litFill: boolean; paint: boolean;
+};
+type HostSession = { key: string; count: number; radius: number; undo: number; redo: number; atlas: boolean };
+const readModelSession = (): HostSession | null => {
+  const j = host.__model_session_json?.();
+  if (typeof j !== 'string' || !j) return null;
+  try { return JSON.parse(j) as HostSession; } catch { return null; }
+};
 const readSelInfo = (): SelInfo | null => {
   try {
     const j = host.__mesh_edit_counts?.();
@@ -524,17 +550,20 @@ const AP_DENS_W = 88;
 const AP_REC_W = 76;
 
 export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, paintTarget }: ModelViewProps = {}) {
+  // How you were holding the tool before the last hot reload (req_2898) — read ONCE
+  // per mount and used to seed the states below. Null on a cold process start.
+  const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
   const [model, setModel] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [wire, setWire] = useState(false);
-  const [paintMode, setPaintMode] = useState(false);
+  const [wire, setWire] = useState(toolTwig?.wire ?? false);
+  const [paintMode, setPaintMode] = useState(false); // twig-restored in the boot effect (needs the atlas)
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
-  const [camLock, setCamLock] = useState(false); // Camera lock (req_2893): view frozen where set
+  const [camLock, setCamLock] = useState(toolTwig?.camLock ?? false); // Camera lock (req_2893): view frozen where set
   const [selMode, setSelMode] = useState(0); // 0 view · 1 vertex · 2 edge · 3 face
-  const [gizmoTool, setGizmoTool] = useState(0); // 0 move · 1 scale · 2 rotate
+  const [gizmoTool, setGizmoTool] = useState(toolTwig?.gizmoTool ?? 0); // 0 move · 1 scale · 2 rotate
   // Live mirror editing (req_2758): enabled symmetry planes, bit 0/1/2 = X/Y/Z. The host
   // owns the reflection (mesh_edit.zig twin table); this is the toggle's UI truth.
-  const [mirrorMask, setMirrorMask] = useState(0);
+  const [mirrorMask, setMirrorMask] = useState(toolTwig?.mirrorMask ?? 0);
   // Reference-image backdrops (req_2758 — the studio's req_1280 tracing planes). TWIG:
   // localstore-backed working state, never model data. bdEpoch is a fresh nonce per
   // MOUNT folded into texture/geometry keys, so a remount re-bakes the static surfaces
@@ -560,18 +589,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Brush state (the ONE brush system). `brush`/`palette` are the shared kit model; `brushTool`
   // picks the behaviour ('fill' = per-face flood · 'brush' = free-form disc); `safety` is the
   // free-form face-safety mode (0 clip · 1 lock); `detail` is the patch resolution.
-  const [brush, setBrush] = useState<Brush>(() => ({ ...DEFAULT_BRUSH, ink: { kind: 'color', hex: '#e0463f' } }));
-  const [brushTool, setBrushTool] = useState<BrushTool>('fill');
-  const [palette, setPalette] = useState<Palette>(() => defaultPalette());
-  const [safety, setSafety] = useState(0); // 0 clip · 1 lock
-  const [detail, setDetail] = useState(1); // paint density, texels/meter (1 = fill-only look)
+  const [brush, setBrush] = useState<Brush>(() => toolTwig?.brush ?? { ...DEFAULT_BRUSH, ink: { kind: 'color', hex: '#e0463f' } });
+  const [brushTool, setBrushTool] = useState<BrushTool>(toolTwig?.brushTool ?? 'fill');
+  const [palette, setPalette] = useState<Palette>(() => toolTwig?.palette ?? defaultPalette());
+  const [safety, setSafety] = useState(toolTwig?.safety ?? 0); // 0 clip · 1 lock
+  const [detail, setDetail] = useState(toolTwig?.detail ?? 1); // paint density, texels/meter (1 = fill-only look)
   const [fit, setFit] = useState<number | null>(null); // the active atlas budget (null = explicit density)
   // Light rig — flip via the View menu / right-click Lighting flyout. Flat = even paint-true
   // light (no shading); otherwise a neutral ambient + a single Key directional, and Fill raises
   // ambient so the orbited-away side isn't black. (The shader supports one directional + ambient.)
-  const [litFlat, setLitFlat] = useState(false);
-  const [litKey, setLitKey] = useState(true);
-  const [litFill, setLitFill] = useState(true);
+  const [litFlat, setLitFlat] = useState(toolTwig?.litFlat ?? false);
+  const [litKey, setLitKey] = useState(toolTwig?.litKey ?? true);
+  const [litFill, setLitFill] = useState(toolTwig?.litFill ?? true);
   const [quality, setQuality] = useState(1); // slider 0..1; 1 = full detail on load
   // Attribution: the shared ledger + the current model's entry + the panel toggle.
   const [ledger, setLedger] = useState<Ledger>(() => loadLedger());
@@ -993,6 +1022,20 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // hot-reloaded cart (fresh false state) re-syncs a host that was left locked.
   const toggleCamLock = () => setCamLock((v) => !v);
   useEffect(() => { orbitSetLocked(camLock); }, [camLock]);
+
+  // Mirror the tool-holding state into its hot twig on every change (req_2898) —
+  // cheap (one small JSON into the host map), and the next mount seeds from it.
+  useEffect(() => {
+    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, camLock, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
+  }, [wire, camLock, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
+
+  // Stamp which document owns the host's resident mesh, under its CURRENT key —
+  // topology ops re-key the mesh, so this tracks every adopt. The next mount
+  // resumes the live session only when doc AND key both still match the host.
+  const hotDocId = paintTarget ? `${paintTarget.kind}:${paintTarget.id}` : initialPath ?? null;
+  useEffect(() => {
+    if (model && hotDocId) setHotState<DocTwig>(DOC_TWIG_KEY, { docId: hotDocId, key: model.key });
+  }, [model?.key, hotDocId]);
 
   // ── Brush behaviour handlers ─────────────────────────────────────────────────
   // Apply an exact density through the host (it rebuilds the paint atlas and re-uploads
@@ -1464,14 +1507,41 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // NOT per drag-move) so the count HUD refreshes without any JS in the interaction loop.
     (globalThis as any).__meshEditSelChanged = () => adoptHostSelection();
     (globalThis as any).__meshEditGuardChanged = () => setGuard(readGuard());
+    // Hot-reload resume (req_2898): if the host is STILL holding this document's live
+    // mesh from before the reload (doc twig matches AND the host session key matches),
+    // adopt it — edits, undo journal, selection, paint atlas, and camera all survive.
+    // Any mismatch (other doc, cold boot, saved-and-rekeyed) falls through to a normal
+    // load, exactly as before.
+    const resumeHostSession = (): boolean => {
+      if (!hotDocId) return false;
+      const twig = getHotState<DocTwig | null>(DOC_TWIG_KEY, null);
+      if (!twig || twig.docId !== hotDocId) return false;
+      const session = readModelSession();
+      if (!session || session.key !== twig.key) return false;
+      setModel({ key: session.key, count: session.count, radius: session.radius, name: initialTitle ?? initialMesh?.name ?? 'model' });
+      setError(null);
+      atlasReadyRef.current = session.atlas;
+      // Part ranges + selection are host truth — mirror them instead of re-seeding.
+      resyncPartRanges();
+      adoptHostSelection();
+      if (initialMesh?.faceGroups && initialMesh.faceGroups.length > 0) setAuthoredFaces(new Set(initialMesh.faceGroups).size);
+      // You were painting when the reload hit and the atlas is still live → go
+      // straight back to the brush instead of dropping to view mode.
+      if (toolTwig?.paint && session.atlas) enterPaint();
+      console.warn(`[modelview] resumed live host session for ${hotDocId} (${session.undo} undo · atlas ${session.atlas ? 'live' : 'none'})`);
+      return true;
+    };
     if (initialFileParts) {
-      applyFileParts(initialFileParts);
+      if (!resumeHostSession()) applyFileParts(initialFileParts);
     } else if (initialMesh) {
-      applyMesh(initialMesh);
+      if (!resumeHostSession()) applyMesh(initialMesh);
     } else {
       const path = initialPath ?? callHost<string | null>('__env_get', null, 'RJIT_MODEL');
-      if (path) applyPath(path);
+      if (path && !resumeHostSession()) applyPath(path);
     }
+    // Re-push the twig-seeded gizmo tool so the host matches the restored UI even
+    // when the host session did NOT survive (cold start with a warm twig).
+    meshGizmoTool(gizmoTool);
     // RJIT_WIRE=1 boots in wireframe mode — the headless self-shot path for it.
     if (callHost<string | null>('__env_get', null, 'RJIT_WIRE')) setWire(true);
     // RJIT_GIZMO=move|scale|rotate (or 0|1|2) selects the transform sub-tool at boot.
@@ -1735,6 +1805,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         // camlock:0|1 — the req_2893 camera lock, straight at the host gate (headless
         // proof: camlock:1;orbit:...;shot must equal the no-orbit shot).
         else if (name === 'camlock') orbitSetLocked(num(a[0]) !== 0);
+        // session — log the host's resident session + the hot doc twig (req_2898): the
+        // headless proof that the resume precondition (doc twig key == host session key)
+        // holds mid-edit, exactly what the next remount checks before adopting.
+        else if (name === 'session') {
+          const s = readModelSession();
+          const t = getHotState<DocTwig | null>(DOC_TWIG_KEY, null);
+          console.error(`[meshops] session=${JSON.stringify(s)} twig=${JSON.stringify(t)} match=${!!(s && t && s.key === t.key)}`);
+        }
         else if (name === 'atlas') dumpAtlasPng(a.join(','));
         else if (name !== 'wait') console.error(`[meshops] unknown op: ${name}`);
       };

@@ -23,6 +23,7 @@ import type {
 import { bake_geometry } from './records/bake_geometry';
 import { editor_face_paint } from './records/editor_face_paint';
 import { editor_flora } from './records/editor_flora';
+import { editor_hot_reload } from './records/editor_hot_reload';
 import { editor_map_documents } from './records/editor_map_documents';
 import { game_activities } from './records/game_activities';
 import { game_build } from './records/game_build';
@@ -41,7 +42,7 @@ export type {
 };
 
 export const ALL_DOCS: DocIndex[] = [
-  bake_geometry, editor_face_paint, editor_flora, editor_map_documents, game_activities, game_animation, game_build, game_cutscene,
+  bake_geometry, editor_face_paint, editor_flora, editor_hot_reload, editor_map_documents, game_activities, game_animation, game_build, game_cutscene,
   game_missions, game_world, hmsc_int, physics3d, skybox_void, request_ledger,
 ];
 

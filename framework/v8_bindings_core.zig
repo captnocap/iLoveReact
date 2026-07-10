@@ -460,6 +460,20 @@ fn hostModelOrbitLock(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     scene3d.orbitSetLocked(on);
 }
 
+/// __model_session_json() → {"key","count","radius","undo","redo","atlas"} | "".
+/// The resident mesh-editor session (req_2898): what model the host is STILL holding
+/// live across a hot reload — edit mesh key/count, orbit radius, journal depths, and
+/// whether a paint atlas exists. The remounted viewer compares this against its hot
+/// twig and ADOPTS the live session instead of re-loading the stale seed.
+fn hostModelSessionJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    if (scene3d.modelSessionJson(alloc)) |json| {
+        defer alloc.free(json);
+        setReturnString(info, json);
+    } else setReturnString(info, "");
+}
+
 /// __model_focus_at(x, y) → bool. Re-centre the orbit on whatever the viewport pixel
 /// (x,y) hits (double-click to recentre). Returns 1 on a hit (and repaints), 0 on a miss
 /// (empty space — focus unchanged). The programmatic counterpart drives the same path.
@@ -2588,6 +2602,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
     v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
     v8_runtime.registerHostFn("__model_orbit_lock", hostModelOrbitLock);
+    v8_runtime.registerHostFn("__model_session_json", hostModelSessionJson);
     v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
     v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);
     v8_runtime.registerHostFn("__mesh_edit_mirror", hostMeshEditMirror);

@@ -27,17 +27,18 @@ import { Box, Graph, Pressable } from '@reactjit/primitives';
 import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
 import { resolvePlacement, resolveMovedPlacement, resolveRunPlacements, supportsRunPlacement, pieceKindOf, pieceLook, pickAuthoredPlacement, PIECE_MODULE_METERS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
 import { encodeMeshGhost } from './meshProps';
-import { isAuthoredPiece, authoredModelIdOf, type AuthoredBuildPiece } from './authoredRegistry';
+import { isAuthoredPiece, authoredResidentKeyOf, type AuthoredBuildPiece } from './authoredRegistry';
 import { pushLiveWorld, pushResidentMeshes } from './livePush';
 import { pickBuildPieceHostHit } from '../../../runtime/game/build';
 import { faceRoleForHit } from './pieceSlots';
 import { ensureMapSeeded } from '../stage/mapPaint';
 import type { MapZoneDef } from '../stage/mapPaint';
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
+import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import type { WorldTool } from './worldTool';
 import { publishWorldHoverReadout } from '../data/worldHoverReadout';
 
-// `model:`/`prop:` id → stored model id: authoredModelIdOf (authoredRegistry).
+// authored placeable id → semantic resident key: authoredResidentKeyOf (authoredRegistry).
 
 // WASD camera pan. Distance-scaled so a keypress crosses the same fraction of the view whether
 // you're surveying a district or detailing a wall (matches the drag-pan feel). Per ~16ms tick.
@@ -55,6 +56,10 @@ const HOVER_READOUT_POLL_MS = 50;
 // target is recomputed at most 30Hz while dragging; mouse-up always resolves the
 // exact final target before committing it.
 const MOVE_PREVIEW_INTERVAL_MS = 33;
+
+// The iso camera pose's hot twig (req_2898 — framework/state/hotstate.zig): survives
+// dev hot reloads (in-process), resets on a cold launch. Written on every camera push.
+const ISO_POSE_TWIG_KEY = 'editor:isopose:v1';
 
 const g: any = globalThis;
 
@@ -130,7 +135,10 @@ export default function WorldViewport(props: {
   const loaderRef = useRef<any>(null);
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 1, height: 1 });
   const stageRef = useRef<IsoStage | null>(null);
-  if (!stageRef.current) stageRef.current = new IsoStage({ centerX: 0, centerZ: 0 });
+  // The iso pose survives hot reloads through its hot twig (req_2898): every camera
+  // push mirrors the pose into hotstate, and a remount seeds the stage from it — a
+  // code save no longer yanks the view back to the origin. Cold start = defaults.
+  if (!stageRef.current) stageRef.current = new IsoStage(getHotState(ISO_POSE_TWIG_KEY, { centerX: 0, centerZ: 0 }));
   const stage = stageRef.current;
   const [snap, setSnap] = useState<Snap | null>(null);
   // The click→drag RUN (req_2747 — drag-place is back): mousedown anchors, the
@@ -217,6 +225,7 @@ export default function WorldViewport(props: {
     if (!nodeId || typeof g.__compiled_world_set_camera !== 'function') return false;
     const s: any = stage.solve();
     g.__compiled_world_set_camera(nodeId, s.pos[0], s.pos[1], s.pos[2], s.target[0], s.target[1], s.target[2], s.fov);
+    setHotState(ISO_POSE_TWIG_KEY, stage.pose); // req_2898: the view survives the next hot reload
     return true;
   }, [stage]);
 
@@ -335,7 +344,7 @@ export default function WorldViewport(props: {
       : null;
     const ghost = placementGhost ?? (props.tool === 'move' && movePreview && isAuthoredPiece(movePreview.pieceId) ? movePreview : null);
     if (ghost && typeof g.__compiled_world_set_live_mesh_ghost === 'function') {
-      g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({ key: authoredModelIdOf(ghost.pieceId), x: ghost.x, y: ghost.y, z: ghost.z, yaw: ghost.yawDegrees }));
+      g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({ key: authoredResidentKeyOf(ghost.pieceId), x: ghost.x, y: ghost.y, z: ghost.z, yaw: ghost.yawDegrees }));
     } else if (typeof g.__compiled_world_clear_live_mesh_ghost === 'function') {
       g.__compiled_world_clear_live_mesh_ghost(nodeId);
     }
