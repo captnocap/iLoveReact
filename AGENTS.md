@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Context for AI agents working in this repository. Last updated: 2026-04-25.
+Context for AI agents working in this repository. Last updated: 2026-07-10.
 
 ## The Two Failure Modes
 
@@ -153,6 +153,15 @@ the Zig internals — TS-only coverage of Zig logic is green-at-wrong-layer. Use
 `framework/testing/unit/game_physics.zig` from commit `6d21dd74c` as the exemplar
 pattern: focused Zig tests beside the framework logic, with cart/TS tests only
 covering the higher-level consumption contract.
+
+## Visual Verification: Ask the User
+
+Do not spend time or tokens trying to perform visual verification yourself.
+After completing the relevant automated checks, ask the user to verify anything
+that requires looking at or interacting with the running UI. Give them a short,
+exact reproduction path and say what specific behavior or appearance to report
+back. Treat their report as the visual verification; do not independently
+reproduce it unless they explicitly ask you to.
 
 ## Frame-Time Gate
 
