@@ -1213,11 +1213,11 @@ pub fn roadDelete(id: u32) bool {
 // its population recipe id + density. The append-only id vocabulary lives in
 // framework/world/foliage.zig; this boundary validates it instead of clamping
 // unknown content into a different plant. `count` = rows per painted cell for
-// blade/clump families; `chance` = per-cell spawn gate for trees.
+// blade/clump families; `chance` = per-cell spawn gate for wrapped plants.
 
 pub const FloraSpec = struct {
     spec: u8,
-    /// rows per painted cell (unused for trees — their recipes size themselves)
+    /// rows per painted cell (unused for wrapped plants — recipes size themselves)
     count: u16,
     /// per-cell spawn chance 0..1 (1 = every painted cell grows)
     chance: f32,

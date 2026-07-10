@@ -1291,7 +1291,7 @@ pub fn build(b: *std.Build) void {
     const game_map_test_step = b.step("test-game-map", "Run the map painter engine tests");
     game_map_test_step.dependOn(&run_game_map_test.step);
 
-    // ── Painted flora recipe + shared tree geometry (req_2875) ─────────────
+    // ── Painted flora recipe + shared wrapped geometry (req_2875/2877) ─────
     // Pins the append-only recipe ids, deterministic transforms, 360-degree
     // wrapped meshes, and shader UV bands at the Zig layer that owns them.
     const flora_geometry_mod_t = b.createModule(.{
@@ -1315,7 +1315,7 @@ pub fn build(b: *std.Build) void {
     flora_test_mod.addImport("gpu_shaders", gpu_shaders_mod_t);
     const flora_test = b.addTest(.{ .name = "world-flora-test", .root_module = flora_test_mod });
     const run_flora_test = b.addRunArtifact(flora_test);
-    const flora_test_step = b.step("test-world-flora", "Run painted flora recipe and shared tree geometry tests");
+    const flora_test_step = b.step("test-world-flora", "Run painted flora recipe and shared wrapped geometry tests");
     flora_test_step.dependOn(&run_flora_test.step);
 
     // ── Game camera behavior tests (V23, P4) ───────────────────────

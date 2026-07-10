@@ -91,11 +91,11 @@ pub const LumpType = struct {
     /// The loader grounds each on the terrain and animates it. Layout:
     /// runtime/workspace/lumps.ts NPC_SPAWNS + compile/npcModels.ts.
     pub const npc_spawns: u32 = 25;
-    /// Foliage RECIPE (FOLIAGEFORMULA, req_1591): the painted grass/bush CELLS, not
-    /// the ~1M expanded blade rows. The loader expands blades at load via
+    /// Foliage RECIPE (FOLIAGEFORMULA, req_1591): painted flora CELLS, not
+    /// expanded blade/plant rows. The loader expands recipes at load via
     /// framework/world/foliage.zig. Layout: u32 version | f32 cellSizeMeters |
     /// u32 cellCount | per cell: u32 cellKey | f32 wx | f32 wz | f32 top |
-    /// u16 specId(0=grass,1=bush) | u16 count. runtime/workspace/lumps.ts FLORA.
+    /// u16 append-only specId | u16 count. runtime/workspace/lumps.ts FLORA.
     pub const flora: u32 = 26;
     /// Per-instance-row WALL flag (req_2053): u32 count | u8[count], 1 = wall
     /// piece. Parallel to the instance rows; the editor's build pane hides the

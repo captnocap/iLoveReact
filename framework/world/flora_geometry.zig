@@ -12,7 +12,10 @@ const foliage = @import("foliage.zig");
 pub const recipe = foliage;
 
 pub const FLOATS_PER_VERTEX: usize = 8; // position3, normal3, uv2
-pub const MAX_WRAPPED_VERTICES: usize = 768;
+// The frond pipeline culls NONE, so every leaf/bloom/spray card is one quad —
+// never duplicate coplanar back triangles. 512 covers the richest recipe
+// (wild weed: 486 verts) with a small, test-pinned ceiling.
+pub const MAX_WRAPPED_VERTICES: usize = 512;
 
 pub const UV_FEATHERED: f32 = 0;
 pub const UV_BROAD_LEAF: f32 = 10;
@@ -114,17 +117,14 @@ fn pushTriSmooth(mesh: *WrappedMesh, a: Vec3, b: Vec3, c: Vec3, na: Vec3, nb: Ve
     pushVertex(mesh, c, nc, uvc);
 }
 
-fn addDoubleQuad(mesh: *WrappedMesh, bl: Vec3, br: Vec3, tr: Vec3, tl: Vec3, uv_band: f32) void {
+fn addUnculledQuad(mesh: *WrappedMesh, bl: Vec3, br: Vec3, tr: Vec3, tl: Vec3, uv_band: f32) void {
     const n = normalize(cross(sub(br, bl), sub(tl, bl)));
-    const back = mul(n, -1);
     const uv0 = [2]f32{ uv_band, 0 };
     const uv1 = [2]f32{ uv_band + 1, 0 };
     const uv2 = [2]f32{ uv_band + 1, 1 };
     const uv3 = [2]f32{ uv_band, 1 };
     pushTri(mesh, bl, br, tr, n, uv0, uv1, uv2);
     pushTri(mesh, bl, tr, tl, n, uv0, uv2, uv3);
-    pushTri(mesh, bl, tr, br, back, uv0, uv2, uv1);
-    pushTri(mesh, bl, tl, tr, back, uv0, uv3, uv2);
 }
 
 /// The PathTube reference reduced to its strict native boundary: sweep one
@@ -202,7 +202,7 @@ fn addConifer(mesh: *WrappedMesh, species: foliage.WrappedSpecies) void {
             const br = add(root_center, mul(tangent, root_half));
             const tr = add(tip_center, mul(tangent, tip_half));
             const tl = sub(tip_center, mul(tangent, tip_half));
-            addDoubleQuad(mesh, bl, br, tr, tl, UV_CONIFER);
+            addUnculledQuad(mesh, bl, br, tr, tl, UV_CONIFER);
         }
     }
 }
@@ -237,7 +237,7 @@ fn addLeafCluster(mesh: *WrappedMesh, center: Vec3, radius: f32, phase: f32) voi
         const br = add(lower, mul(right, radius));
         const tr = add(upper, mul(right, radius * 0.72));
         const tl = sub(upper, mul(right, radius * 0.72));
-        addDoubleQuad(mesh, bl, br, tr, tl, UV_CROWN);
+        addUnculledQuad(mesh, bl, br, tr, tl, UV_CROWN);
     }
 }
 
@@ -271,7 +271,7 @@ fn addStandingCard(mesh: *WrappedMesh, center: Vec3, half_width: f32, half_heigh
     const forward = [3]f32{ -right[2], 0, right[0] };
     const lower = add(center, .{ 0, -half_height, 0 });
     const upper = add(add(center, .{ 0, half_height, 0 }), mul(forward, lean));
-    addDoubleQuad(
+    addUnculledQuad(
         mesh,
         sub(lower, mul(right, half_width)),
         add(lower, mul(right, half_width)),
@@ -288,7 +288,7 @@ fn addLeafCard(mesh: *WrappedMesh, base: Vec3, tip: Vec3, half_width: f32, uv_ba
     const direction = normalize(sub(tip, base));
     const reference: Vec3 = if (@abs(direction[1]) < 0.92) .{ 0, 1, 0 } else .{ 1, 0, 0 };
     const side = normalize(cross(direction, reference));
-    addDoubleQuad(
+    addUnculledQuad(
         mesh,
         sub(base, mul(side, half_width)),
         add(base, mul(side, half_width)),
@@ -313,19 +313,19 @@ fn addPanicleBloom(mesh: *WrappedMesh, center: Vec3, half_width: f32, half_heigh
         const right = [3]f32{ @cos(angle), 0, @sin(angle) };
         const lower = add(center, .{ 0, -half_height, 0 });
         const upper = add(center, .{ 0, half_height, 0 });
-        addDoubleQuad(
+        addUnculledQuad(
             mesh,
             sub(lower, mul(right, half_width)),
             add(lower, mul(right, half_width)),
-            add(upper, mul(right, half_width * 0.12)),
-            sub(upper, mul(right, half_width * 0.12)),
+            add(upper, mul(right, half_width * 0.30)),
+            sub(upper, mul(right, half_width * 0.30)),
             UV_PANICLE_BLOOM,
         );
     }
 }
 
 fn addMopheadHydrangea(mesh: *WrappedMesh) void {
-    const branches: usize = 8;
+    const branches: usize = 10;
     for (0..branches) |branch| {
         const fi: f32 = @floatFromInt(branch);
         const angle = fi / @as(f32, @floatFromInt(branches)) * TAU + @as(f32, @floatFromInt(branch % 2)) * 0.23;
@@ -342,13 +342,13 @@ fn addMopheadHydrangea(mesh: *WrappedMesh) void {
 }
 
 fn addPanicleHydrangea(mesh: *WrappedMesh) void {
-    const branches: usize = 9;
+    const branches: usize = 10;
     for (0..branches) |branch| {
         const fi: f32 = @floatFromInt(branch);
         const angle = fi / @as(f32, @floatFromInt(branches)) * TAU + @as(f32, @floatFromInt(branch % 2)) * 0.19;
         const radial = [3]f32{ @cos(angle), 0, @sin(angle) };
-        const reach = 0.28 + @as(f32, @floatFromInt(branch % 3)) * 0.055;
-        const end = add(mul(radial, reach), .{ 0, 0.54 + @as(f32, @floatFromInt(branch % 4)) * 0.045, 0 });
+        const reach = 0.36 + @as(f32, @floatFromInt(branch % 3)) * 0.07;
+        const end = add(mul(radial, reach), .{ 0, 0.50 + @as(f32, @floatFromInt(branch % 4)) * 0.04, 0 });
         addTaperedTube(mesh, mul(radial, 0.018), end, 0.016, 0.0045, 4, UV_GREEN_STEM);
         for (0..2) |leaf| {
             const t = 0.38 + @as(f32, @floatFromInt(leaf)) * 0.23;
@@ -356,10 +356,10 @@ fn addPanicleHydrangea(mesh: *WrappedMesh) void {
             const side_sign: f32 = if ((branch + leaf) % 2 == 0) 1 else -1;
             const leaf_angle = angle + side_sign * (0.48 + @as(f32, @floatFromInt(leaf)) * 0.12);
             const leaf_dir = [3]f32{ @cos(leaf_angle), 0.28, @sin(leaf_angle) };
-            addLeafCard(mesh, base, add(base, mul(leaf_dir, 0.22)), 0.078, UV_SHRUB_LEAF);
+            addLeafCard(mesh, base, add(base, mul(leaf_dir, 0.27)), 0.092, UV_SHRUB_LEAF);
         }
-        const bloom_half_width = 0.105 + @as(f32, @floatFromInt(branch % 3)) * 0.014;
-        const bloom_half_height = 0.175 + @as(f32, @floatFromInt(branch % 4)) * 0.015;
+        const bloom_half_width = 0.15 + @as(f32, @floatFromInt(branch % 3)) * 0.018;
+        const bloom_half_height = 0.13 + @as(f32, @floatFromInt(branch % 4)) * 0.012;
         addPanicleBloom(mesh, add(end, .{ 0, bloom_half_height * 0.88, 0 }), bloom_half_width, bloom_half_height, angle * 0.43);
     }
 }
@@ -373,7 +373,7 @@ fn addLeafyThicket(mesh: *WrappedMesh) void {
         const reach = 0.40 + @as(f32, @floatFromInt(branch % 3)) * 0.06;
         const end = add(mul(radial, reach), .{ 0, 0.48 + @as(f32, @floatFromInt(branch % 3)) * 0.08, 0 });
         addTaperedTube(mesh, mul(radial, 0.02), end, 0.019, 0.005, 4, UV_BARK);
-        for (0..3) |leaf| {
+        for (0..2) |leaf| {
             const t = 0.34 + @as(f32, @floatFromInt(leaf)) * 0.23;
             const base = pointOn(.{ 0, 0.04, 0 }, end, t);
             const side_sign: f32 = if ((branch + leaf) % 2 == 0) 1 else -1;
@@ -382,23 +382,19 @@ fn addLeafyThicket(mesh: *WrappedMesh) void {
             const leaf_len = 0.22 + @as(f32, @floatFromInt(leaf % 2)) * 0.035;
             addLeafCard(mesh, base, add(base, mul(leaf_dir, leaf_len)), 0.085 + @as(f32, @floatFromInt(leaf)) * 0.008, UV_SHRUB_LEAF);
         }
+        addLeafCluster(mesh, add(end, .{ 0, 0.07, 0 }), 0.18 + @as(f32, @floatFromInt(branch % 2)) * 0.018, angle * 0.31);
     }
-    const crown_leaves: usize = 8;
-    for (0..crown_leaves) |leaf| {
-        const angle = @as(f32, @floatFromInt(leaf)) / @as(f32, @floatFromInt(crown_leaves)) * TAU + 0.17;
-        const base = .{ 0, 0.48 + @as(f32, @floatFromInt(leaf % 3)) * 0.035, 0 };
-        const dir = [3]f32{ @cos(angle), 0.42, @sin(angle) };
-        addLeafCard(mesh, base, add(base, mul(dir, 0.28)), 0.10, UV_SHRUB_LEAF);
-    }
+    addLeafCluster(mesh, .{ 0, 0.49, 0 }, 0.28, 0.17);
+    addLeafCluster(mesh, .{ 0, 0.68, 0 }, 0.24, 0.61);
 }
 
 fn addWildWeed(mesh: *WrappedMesh) void {
-    const stems: usize = 7;
+    const stems: usize = 9;
     for (0..stems) |stem| {
         const fi: f32 = @floatFromInt(stem);
         const angle = fi / @as(f32, @floatFromInt(stems)) * TAU + @as(f32, @floatFromInt(stem % 2)) * 0.31;
         const radial = [3]f32{ @cos(angle), 0, @sin(angle) };
-        const reach = 0.19 + @as(f32, @floatFromInt(stem % 3)) * 0.055;
+        const reach = 0.28 + @as(f32, @floatFromInt(stem % 3)) * 0.075;
         const end = add(mul(radial, reach), .{ 0, 0.88 + @as(f32, @floatFromInt(stem % 4)) * 0.03, 0 });
         addTaperedTube(mesh, mul(radial, 0.018), end, 0.011, 0.0035, 4, UV_GREEN_STEM);
         for (0..4) |leaf| {
@@ -407,8 +403,8 @@ fn addWildWeed(mesh: *WrappedMesh) void {
             const side_sign: f32 = if ((stem + leaf) % 2 == 0) 1 else -1;
             const leaf_angle = angle + side_sign * (0.72 + @as(f32, @floatFromInt(leaf % 2)) * 0.18);
             const leaf_dir = [3]f32{ @cos(leaf_angle), 0.08 + @as(f32, @floatFromInt(leaf)) * 0.035, @sin(leaf_angle) };
-            const leaf_len = 0.19 + @as(f32, @floatFromInt(leaf % 3)) * 0.028;
-            addLeafCard(mesh, base, add(base, mul(leaf_dir, leaf_len)), 0.052 + @as(f32, @floatFromInt(leaf % 2)) * 0.012, UV_WEED_LEAF);
+            const leaf_len = 0.26 + @as(f32, @floatFromInt(leaf % 3)) * 0.038;
+            addLeafCard(mesh, base, add(base, mul(leaf_dir, leaf_len)), 0.072 + @as(f32, @floatFromInt(leaf % 2)) * 0.016, UV_WEED_LEAF);
         }
         const crown_dir = [3]f32{ radial[0] * 0.72, 0.46, radial[2] * 0.72 };
         addLeafCard(mesh, pointOn(.{ 0, 0.025, 0 }, end, 0.78), add(end, mul(crown_dir, 0.12)), 0.045, UV_WEED_LEAF);
@@ -442,5 +438,14 @@ test "all wrapped flora meshes fit their fixed shared-geometry allocation" {
         try std.testing.expect(mesh.vertex_count > 0);
         try std.testing.expect(mesh.vertex_count <= MAX_WRAPPED_VERTICES);
         try std.testing.expectEqual(@as(u32, 0), mesh.vertex_count % 3);
+    }
+}
+
+test "wrapped shrub cards pay one unculled quad, never duplicate back triangles" {
+    const expected = [_]u32{ 480, 480, 414, 486 };
+    const first: usize = @intFromEnum(foliage.WrappedSpecies.mophead_hydrangea);
+    for (expected, 0..) |vertices, offset| {
+        const mesh = buildWrapped(@enumFromInt(first + offset));
+        try std.testing.expectEqual(vertices, mesh.vertex_count);
     }
 }

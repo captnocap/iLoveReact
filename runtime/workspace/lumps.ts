@@ -140,14 +140,14 @@ export const MAP_LUMP = {
   // terrain (no baked y) and animates it; kind/faction are reserved for the
   // Stage-2 Zig combat AI. Layout: cart/hmsc-int/compile/npcModels.ts.
   NPC_SPAWNS: 25,
-  // Foliage RECIPE (FOLIAGEFORMULA, req_1588/1591): grass/bush cover is a pure
+  // Foliage RECIPE (FOLIAGEFORMULA, req_1588/1591): painted flora is a pure
   // deterministic formula, so instead of baking ~1M expanded blade rows into
   // INSTANCES (56MB of a 70MB file — 99.4% of the instances) we ship only the
-  // FACTORS — the painted foliage CELLS — and the loader expands blades at load
-  // via framework/world/foliage.zig (the bit-exact twin of grassPopulation.ts).
+  // FACTORS — the painted foliage CELLS — and the loader expands recipes at load
+  // via framework/world/foliage.zig (blades plus shared whole-plant meshes).
   // Layout: u32 version | f32 cellSizeMeters | u32 cellCount | per cell:
-  // u32 cellKey | f32 wx | f32 wz | f32 top | u16 specId(0=grass,1=bush) | u16
-  // count(blades). Absent → no recipe foliage (legacy bakes still ship blades in
+  // u32 cellKey | f32 wx | f32 wz | f32 top | u16 append-only specId | u16
+  // count (unused by whole plants). Absent → no recipe foliage (legacy bakes ship rows in
   // INSTANCES). See cart/hmsc-int/compile/worldGeometry.ts encodeFlora.
   FLORA: 26,
   // Per-instance-row WALL flag (u32 count | u8[count]); 1 = the row is a wall

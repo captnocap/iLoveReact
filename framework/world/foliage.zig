@@ -248,10 +248,10 @@ pub fn bladeRow(cfg: *const FoliageConfig, wx: f64, wz: f64, top: f64, c: f64, c
     const cg = lerp(cfg.root_lo[1], cfg.root_hi[1], tint);
     const cb = lerp(cfg.root_lo[2], cfg.root_hi[2], tint);
     return .{
-        @floatCast(px),         @floatCast(top),         @floatCast(pz),
-        0,                      @floatCast(yaw),         0,
-        @floatCast(width_scale), @floatCast(height),     @floatCast(width_scale),
-        @floatCast(cr),         @floatCast(cg),          @floatCast(cb),
+        @floatCast(px),          @floatCast(top),    @floatCast(pz),
+        0,                       @floatCast(yaw),    0,
+        @floatCast(width_scale), @floatCast(height), @floatCast(width_scale),
+        @floatCast(cr),          @floatCast(cg),     @floatCast(cb),
     };
 }
 
@@ -389,9 +389,9 @@ pub fn palmFrondRow(crown: *const PalmCrown, k: u32) [STRIDE]f32 {
     const len = ring_len * (0.8 + 0.2 * (@as(f64, @floatFromInt((i * 7) % 5)) / 4.0));
     const wide = len * 0.55;
     return .{
-        @floatCast(crown.px),     @floatCast(ring_top_y),   @floatCast(crown.pz),
-        @floatCast(pitch),        @floatCast(yaw),          0,
-        @floatCast(wide),         @floatCast(len),          @floatCast(wide),
+        @floatCast(crown.px),      @floatCast(ring_top_y),    @floatCast(crown.pz),
+        @floatCast(pitch),         @floatCast(yaw),           0,
+        @floatCast(wide),          @floatCast(len),           @floatCast(wide),
         @floatCast(crown.root[0]), @floatCast(crown.root[1]), @floatCast(crown.root[2]),
     };
 }
@@ -478,30 +478,30 @@ pub const WRAPPED_CONFIGS: [WRAPPED_SPECIES_COUNT]WrappedConfig = .{
         .cell_jitter = 0.58,
     },
     .{
-        .height_min = 1.75,
-        .height_max = 3.10,
-        .radius_min = 0.88,
-        .radius_max = 1.46,
+        .height_min = 1.80,
+        .height_max = 2.80,
+        .radius_min = 1.10,
+        .radius_max = 1.75,
         .root_lo = rgb(0.065, 0.17, 0.05),
         .root_hi = rgb(0.16, 0.32, 0.095),
         .seed_salt = 0x50414e49,
         .cell_jitter = 0.54,
     },
     .{
-        .height_min = 1.00,
-        .height_max = 1.90,
-        .radius_min = 1.05,
-        .radius_max = 1.72,
+        .height_min = 1.20,
+        .height_max = 2.10,
+        .radius_min = 1.25,
+        .radius_max = 1.95,
         .root_lo = rgb(0.055, 0.16, 0.045),
         .root_hi = rgb(0.14, 0.31, 0.085),
         .seed_salt = 0x54484943,
         .cell_jitter = 0.66,
     },
     .{
-        .height_min = 1.35,
-        .height_max = 2.85,
-        .radius_min = 0.52,
-        .radius_max = 0.96,
+        .height_min = 1.50,
+        .height_max = 3.00,
+        .radius_min = 0.68,
+        .radius_max = 1.18,
         .root_lo = rgb(0.075, 0.18, 0.055),
         .root_hi = rgb(0.20, 0.36, 0.10),
         .seed_salt = 0x57454544,

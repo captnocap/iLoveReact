@@ -49,6 +49,15 @@ test "shared meshes contain stems plus a 360-degree canopy" {
     }
 }
 
+test "wrapped shrub cards stay single-sided in the unculled pipeline" {
+    const shrub_first = @intFromEnum(foliage.WrappedSpecies.mophead_hydrangea);
+    const expected_vertices = [_]usize{ 480, 480, 414, 486 };
+    for (expected_vertices, 0..) |expected, offset| {
+        const mesh = geometry.buildWrappedByIndex(shrub_first + offset).?;
+        try std.testing.expectEqual(expected, mesh.vertex_count);
+    }
+}
+
 test "frond shader recognizes tree, shrub, bloom, and stem bands" {
     try std.testing.expect(std.mem.indexOf(u8, shaders.frond_wgsl, "2 conifer") != null);
     try std.testing.expect(std.mem.indexOf(u8, shaders.frond_wgsl, "3 crown") != null);

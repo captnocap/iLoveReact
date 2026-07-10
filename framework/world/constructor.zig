@@ -843,7 +843,7 @@ fn decodeInstances(allocator: std.mem.Allocator, data: []const u8) Error!Decoded
 }
 
 /// One painted foliage cell from the FLORA recipe lump — the factors the loader
-/// expands blades from (FOLIAGEFORMULA, req_1591).
+/// expands into blades or a shared whole-plant row (FOLIAGEFORMULA, req_1591).
 pub const FloraCell = struct { cell_key: u32, wx: f32, wz: f32, top: f32, spec_id: u16, count: u16 };
 pub const FloraCells = struct {
     cell_size: f32,

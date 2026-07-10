@@ -219,7 +219,7 @@ export function mapDropZone(index: number, record = true): void {
 /** Push the flora population contract: per kind [spec, count, chance] triples
  *  in append-only legend order. Recipe ids are validated by
  *  framework/world/foliage.zig; count is rows per painted cell for ground
- *  flora, chance is the per-cell tree spawn gate. The loader's LIVE preview
+ *  flora, chance is the per-cell whole-plant spawn gate. The loader's LIVE preview
  *  grows painted cells from this cart-owned content. */
 export function mapSetFloraSpecs(specs: Float32Array): void {
   callHost('__map_set_flora_specs', undefined, specs);

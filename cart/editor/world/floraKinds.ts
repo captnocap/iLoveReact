@@ -100,8 +100,8 @@ export const FLORA_KIND_DEFINITIONS: readonly FloraKindDefinition[] = [
 export const ZONE_COLORS = ['#a78bfa', '#f472b6', '#fb923c', '#34d399', '#60a5fa', '#facc15', '#f87171', '#22d3ee'];
 
 // Flat host-door payload, derived from the ONE catalog so palette order and
-// population order cannot drift. Trees count as one shared-mesh instance when
-// their chance gate wins; grass/bush counts are rows per painted cell.
+// population order cannot drift. Wrapped trees/shrubs count as one shared-mesh
+// instance when their chance gate wins; ground grass/bush counts are rows per cell.
 export const FLORA_SPECS: Float32Array = new Float32Array(
   FLORA_KIND_DEFINITIONS.flatMap(({ population }) => [population.spec, population.count, population.chance]),
 );
