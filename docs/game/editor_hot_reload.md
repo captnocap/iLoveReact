@@ -60,13 +60,29 @@ Three layers, smallest first:
   world save (SESSIONSAVE req_2765), model packages/meshdoc autosaves, and
   globals saves remain the durable layer, unchanged.
 
-## Headless proof
+## Headless proof — the reload torture harness (req_2914)
 
-`RJIT_MODELDOC=cube RJIT_MESHOPS="session;addpart:cylinder;session"` — the
-`session` op logs the host session beside the doc twig. Proven: after a
-topology op re-keys the mesh (`primitive:cube:19` →
-`modelview-edit-…-1`, undo=1), the twig tracks the new key and
-`match=true` — the exact precondition the next remount checks.
+In-process shots CANNOT prove reload-safety (req_2913's lesson). The real
+harness is a `-Ddev-mode=true` build of the editor whose bundle lives at a
+scratch path; touching that file fires the genuine watcher reload.
+`RJIT_MESHOPS=@/path/ops.txt` reads the op script from a FILE, re-read on
+every eval — rewrite it between touches to script a different phase per
+remount. The `session` op logs the host session beside the doc twig.
+
+The full suite, all green on 2026-07-10 (session key/undo/selection identical
+across every event, zero seed-resets):
+
+1. edit + face-mode selection → **plain reload**: resumed `1 undo · atlas
+   live · mode 3 · 2 selected` — even the selection survives.
+2. **rapid double reload** (3s apart): two resumes, session unchanged.
+3. **broken bundle** (syntax error → V8 compile fails → last_good recovery
+   eval): the session survives BOTH teardown cycles; resume fires after
+   recovery.
+4. **undo across a reload**: undo pops the op (312→36 verts), the twig tracks
+   the undo's re-key, and the reload resumes the UNDONE state (`0 undo`,
+   redo=1).
+5. **redo across a reload**: restores 312 verts, twig tracks again,
+   `match=true`.
 
 ## Known limits (this slice)
 

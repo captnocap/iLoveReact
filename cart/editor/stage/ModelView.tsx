@@ -1523,12 +1523,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       atlasReadyRef.current = session.atlas;
       // Part ranges + selection are host truth — mirror them instead of re-seeding.
       resyncPartRanges();
-      adoptHostSelection();
+      const sel = adoptHostSelection();
       if (initialMesh?.faceGroups && initialMesh.faceGroups.length > 0) setAuthoredFaces(new Set(initialMesh.faceGroups).size);
+      // A loop-cut POPUP can't survive the reload (its JS state died with the old
+      // world), so a still-armed host lc session is an orphan — cancel it rather
+      // than leave the input loop half-captured by a dialog that no longer exists.
+      try {
+        const lcj = host.__mesh_lc_state?.();
+        if (typeof lcj === 'string' && lcj && JSON.parse(lcj)?.ok === 1) host.__mesh_lc_end?.(0);
+      } catch { /* no lc door / malformed state — nothing to cancel */ }
       // You were painting when the reload hit and the atlas is still live → go
       // straight back to the brush instead of dropping to view mode.
       if (toolTwig?.paint && session.atlas) enterPaint();
-      console.warn(`[modelview] resumed live host session for ${hotDocId} (${session.undo} undo · atlas ${session.atlas ? 'live' : 'none'})`);
+      console.warn(`[modelview] resumed live host session for ${hotDocId} (${session.undo} undo · atlas ${session.atlas ? 'live' : 'none'} · mode ${sel.mode} · ${sel.sel} selected)`);
       return true;
     };
     if (initialFileParts) {
@@ -1641,7 +1648,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     //   lcbegin lcprev:dir,cuts,off lcend:0|1 lcstate  (loop-cut session; off = 0..1 frac)
     //   paintend paintundo paintredo painthist layers layerop:op,id[,arg] progread
     //   progapply  (stroke journal + paint layers, req_2672)
-    const opsText = callHost<string | null>('__env_get', null, 'RJIT_MESHOPS');
+    // `RJIT_MESHOPS=@/path/ops.txt` reads the script from a FILE — re-read on every
+    // eval, so a reload-torture run (req_2914) can rewrite the file between reloads
+    // and script a DIFFERENT phase per remount (env vars are fixed for the process).
+    const opsEnv = callHost<string | null>('__env_get', null, 'RJIT_MESHOPS');
+    const opsText = opsEnv?.startsWith('@')
+      ? callHost<string | null>('__fs_read', null, opsEnv.slice(1))
+      : opsEnv;
     if (opsText) {
       const num = (s: string | undefined) => Number(s ?? 0) || 0;
       // progread stashes the serialized stroke program here; progapply replays it —
