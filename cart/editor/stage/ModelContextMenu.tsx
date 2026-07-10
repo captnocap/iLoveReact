@@ -19,12 +19,12 @@ const LIGHT_ROWS: { id: LightId; label: string; field: 'litFlat' | 'litKey' | 'l
   { id: 'fill', label: 'Fill (lift shadows)', field: 'litFill' },
 ];
 
-export default function ModelContextMenu({ modelTool, hasActivePart, partCount, onCommand, onQuality, onToggleLight, onClose }: {
+export default function ModelContextMenu({ modelTool, hasActivePart, selectedPartCount, onCommand, onQuality, onToggleLight, onClose }: {
   modelTool: ModelToolSnapshot;
-  // Whether the outliner has a FOCUSED part (unlocks duplicate / mirror / merge-down)
-  // and how many parts the model carries (merge-down needs 2+).
+  // Whether the outliner has a FOCUSED part (unlocks duplicate / mirror) and how
+  // many rows are explicitly selected (2+ unlocks structural merge).
   hasActivePart: boolean;
-  partCount: number;
+  selectedPartCount: number;
   onCommand: (id: string, source: string) => void;
   onQuality: (quality: number) => void;
   onToggleLight: (which: LightId) => void;
@@ -46,7 +46,7 @@ export default function ModelContextMenu({ modelTool, hasActivePart, partCount, 
           </C.HW_ContextRow>
         );
       })}
-      {meshTopoCommands(modelTool).map((command) => (
+      {meshTopoCommands(modelTool, selectedPartCount).map((command) => (
         <C.HW_ContextRow key={command.id} onPress={() => { onCommand(command.id, 'context'); onClose(); }}>
           <Icon name={command.icon} size={12} color={accentFor('primary')} />
           <C.HW_ContextText>{command.name}</C.HW_ContextText>
@@ -55,8 +55,8 @@ export default function ModelContextMenu({ modelTool, hasActivePart, partCount, 
         </C.HW_ContextRow>
       ))}
       {/* Part verbs for the FOCUSED outliner part (duplicate / mirrored twin / merge
-          down) + the library import — the old studio's part toolset, host-native. */}
-      {meshPartCommands(hasActivePart, partCount).map((command) => (
+          the explicit selected set) + the library import — host-native. */}
+      {meshPartCommands(hasActivePart, selectedPartCount).map((command) => (
         <C.HW_ContextRow key={command.id} onPress={() => { onCommand(command.id, 'context'); onClose(); }}>
           <Icon name={command.icon} size={12} color={accentFor('primary')} />
           <C.HW_ContextText>{command.name}</C.HW_ContextText>

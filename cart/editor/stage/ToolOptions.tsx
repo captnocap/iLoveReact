@@ -1,7 +1,7 @@
 import { Fragment } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { COMMANDS, activeMenuFor, meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
+import { COMMANDS, activeMenuFor, commandById, meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
 import { SNAP_MODES } from '../data/content';
 import type { EditorState, ViewMode } from '../data/types';
 import MapPaintBar from './MapPaintBar';
@@ -27,9 +27,13 @@ export default function ToolOptions(props: {
    *  THIS action bar is the toolbar paint tools belong to (req_2552: the row where the
    *  Paint/Vertex/wireframe buttons live), rendered while painting a model. */
   paintBar?: any;
+  /** Explicit outliner selection size. A 2+ part selection owns Merge, so the generic
+   *  face-dissolve verb must not be offered for the same host face selection. */
+  selectedPartCount: number;
 }) {
   const activeDoc = props.state.workspaceDocuments.find((doc) => doc.id === props.state.activeWorkspaceDocumentId)
     ?? props.state.workspaceDocuments[0]!;
+  const mergePartsCommand = props.selectedPartCount >= 2 ? commandById('mesh-merge-down') : null;
 
   if (activeDoc.kind === 'model') {
     return (
@@ -52,7 +56,7 @@ export default function ToolOptions(props: {
         })}
         {/* Contextual topology ops — surface as quick icons only when the edge
             selection makes them valid (also in the right-click context menu). */}
-        {meshTopoCommands(props.state.modelTool).map((command) => (
+        {meshTopoCommands(props.state.modelTool, props.selectedPartCount).map((command) => (
           <Fragment key={command.id}>
             <C.HW_OptionDivider />
             <C.HW_IconButton tooltip={`${command.name} (${command.key})`} onPress={() => props.onCommand(command.id, 'action bar')}>
@@ -60,6 +64,14 @@ export default function ToolOptions(props: {
             </C.HW_IconButton>
           </Fragment>
         ))}
+        {mergePartsCommand ? (
+          <Fragment key={mergePartsCommand.id}>
+            <C.HW_OptionDivider />
+            <C.HW_IconButton tooltip={`${mergePartsCommand.name} (${props.selectedPartCount})`} onPress={() => props.onCommand(mergePartsCommand.id, 'action bar')}>
+              <Icon name={mergePartsCommand.icon} size={14} color={accentFor('primary')} />
+            </C.HW_IconButton>
+          </Fragment>
+        ) : null}
         {/* The PAINT segment (req_2552) — the full brush controls (fill/brush/pick, ink,
             size, flow, shape, resolution) live HERE in the action bar while painting,
             plus the face-safety pill (the one control the segment doesn't carry). The

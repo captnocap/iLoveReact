@@ -470,12 +470,19 @@ export default function AppFrame() {
     if (commandId === 'mesh-detach') { runDetachSelection(); return; }
     if (commandId === 'mesh-glass') { runFaceOp('glass'); return; }
     if (commandId === 'mesh-solidify') { runFaceOp('solidify'); return; }
-    if (commandId === 'mesh-merge-faces') { runFaceOp('merge-faces'); return; }
+    // Outliner multi-select is carried host-side as a face selection so the gizmo can
+    // move the union. In that state M / the face command means structural PART merge,
+    // never "turn every face in these parts into one face" (req_2870).
+    if (commandId === 'mesh-merge-faces') {
+      if (selectedPartCount >= 2) mergeSelectedParts();
+      else runFaceOp('merge-faces');
+      return;
+    }
     if (commandId === 'mesh-duplicate-part') { duplicatePartById(state.modelActivePartId, -1); return; }
     if (commandId === 'mesh-mirror-x') { duplicatePartById(state.modelActivePartId, 0); return; }
     if (commandId === 'mesh-mirror-y') { duplicatePartById(state.modelActivePartId, 1); return; }
     if (commandId === 'mesh-mirror-z') { duplicatePartById(state.modelActivePartId, 2); return; }
-    if (commandId === 'mesh-merge-down') { mergeActivePartDown(); return; }
+    if (commandId === 'mesh-merge-down') { mergeSelectedParts(); return; }
     if (commandId === 'mesh-import-part') {
       setImportPartOpen(true);
       setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: 'pick a library model to append as part(s)' }));
@@ -1854,6 +1861,12 @@ export default function AppFrame() {
     if (valid.length > 0) return valid;
     return s.modelActivePartId && parts.some((p) => p.id === s.modelActivePartId) ? [s.modelActivePartId] : [];
   };
+  const selectedPartsModelId = activePartsModelId(state);
+  const selectedPartCount = effectiveSelectedIds(
+    state,
+    selectedPartsModelId ? (state.modelParts[selectedPartsModelId] ?? []) : [],
+    selectedPartIds,
+  ).length;
   /** Row verbs act on the WHOLE selected set when the pressed row is in it (req_2659),
    *  else on just that row. */
   const verbTargets = (id: string, parts: ModelPart[]): string[] => {
@@ -2133,42 +2146,91 @@ export default function AppFrame() {
     }));
   };
 
-  // Merge the focused part DOWN into the part above it in the outliner (the old
-  // studio's durable re-attach path). Host fuses the ranges; seeds merge when both
-  // parts carry one so the union survives a remount.
-  const mergeActivePartDown = () => {
+  // Merge exactly the shift-selected outliner set into its PRIMARY (last-clicked) row.
+  // List order is irrelevant (req_2811): the explicit set is the whole target contract.
+  // The host op remaps every old authored group one-to-one into the fused part range, so
+  // a cube's six faces remain six faces instead of becoming one giant face (req_2870).
+  const mergeSelectedParts = () => {
     const mid = activePartsModelId(state);
     const api = modelToolApiRef.current;
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
-    const idx = parts.findIndex((p) => p.id === state.modelActivePartId);
-    if (!mid || !api || idx < 1) {
-      setState((prev) => ({ ...prev, status: 'merge down needs a focused part with another part above it' }));
+    const selectedIds = effectiveSelectedIds(state, parts, selectedPartIdsRef.current);
+    const selected = selectedIds.map((id) => parts.find((p) => p.id === id)).filter((p): p is ModelPart => Boolean(p));
+    if (!mid || !api || selected.length < 2) {
+      setState((prev) => ({ ...prev, status: 'merge parts: shift-select at least two outliner rows first' }));
       return;
     }
-    const above = parts[idx - 1]!;
-    const active = parts[idx]!;
-    const ra = partRange(above);
-    const rb = partRange(active);
-    if (!ra || !rb) {
-      setState((prev) => ({ ...prev, status: 'merge down: both parts need stamped host ranges' }));
+    const hidden = selected.filter((p) => !p.visible);
+    if (hidden.length > 0) {
+      setState((prev) => ({ ...prev, status: `merge parts: show ${hidden.map((p) => p.name).join(', ')} first` }));
       return;
     }
-    const r = api.mergeParts(ra.lo, ra.hi, rb.lo, rb.hi);
-    if (!r) {
-      setState((prev) => ({ ...prev, status: `could not merge ${active.name} into ${above.name} — host op failed` }));
+    const unstamped = selected.filter((p) => !partRange(p));
+    if (unstamped.length > 0) {
+      setState((prev) => ({ ...prev, status: `merge parts: ${unstamped.map((p) => p.name).join(', ')} need stamped host ranges` }));
       return;
     }
-    const seed = above.mesh && active.mesh
-      ? mergeMesh(above.mesh, active.mesh, [0, (active.lift ?? 0) - (above.lift ?? 0), 0])
-      : undefined;
-    const merged: ModelPart = { ...above, ...(seed ? { mesh: seed } : { mesh: undefined, kind: undefined }), lo: r.lo, hi: r.hi };
+
+    let survivor = selected.find((p) => p.id === state.modelActivePartId) ?? selected[selected.length - 1]!;
+    let survivorRange = partRange(survivor)!;
+    let survivorSeed = survivor.mesh;
+    let workingParts = parts.slice();
+    const consumed = new Set<string>();
+    const mergedNames: string[] = [];
+    let failedName: string | null = null;
+
+    for (const source of selected) {
+      if (source.id === survivor.id) continue;
+      const sourceRange = partRange(source)!;
+      const r = api.mergeParts(survivorRange.lo, survivorRange.hi, sourceRange.lo, sourceRange.hi);
+      if (!r) {
+        failedName = source.name;
+        break;
+      }
+      survivorSeed = survivorSeed && source.mesh
+        ? mergeMesh(survivorSeed, source.mesh, [0, (source.lift ?? 0) - (survivor.lift ?? 0), 0])
+        : undefined;
+      survivorRange = r;
+      survivor = {
+        ...survivor,
+        ...(survivorSeed ? { mesh: survivorSeed } : { mesh: undefined, kind: undefined }),
+        lo: r.lo,
+        hi: r.hi,
+      };
+      consumed.add(source.id);
+      mergedNames.push(source.name);
+      workingParts = workingParts
+        .filter((p) => p.id !== source.id)
+        .map((p) => (p.id === survivor.id ? survivor : p));
+
+      // A 3+ selection is intentionally one honest host journal entry per consumed
+      // part. Stamp the intermediate rows before the next op so undoing one step
+      // restores metadata matching that intermediate mesh, not the original N rows.
+      const lite = workingParts.map(({ mesh: _mesh, ...rest }) => rest);
+      (globalThis as any).__mesh_journal_note?.(JSON.stringify({ modelId: mid, parts: lite }));
+    }
+    if (consumed.size === 0) {
+      setState((prev) => ({ ...prev, status: `could not merge ${failedName ?? 'the selected parts'} — host op failed` }));
+      return;
+    }
+
+    selectedPartIdsRef.current = [survivor.id];
+    setSelectedPartIds([survivor.id]);
+    // The structural host op clears its old face selection. Re-scope AND re-select the
+    // fused row immediately so no highlighted-but-empty outliner residue survives.
+    pushPartSetToHost(state, workingParts, [survivor.id], survivor.id);
+    const status = failedName
+      ? `merged ${mergedNames.join(', ')} into ${survivor.name}; stopped before ${failedName} (host op failed)`
+      : `merged ${selected.length} selected parts into ${survivor.name} — authored faces preserved`;
     setState((prev) => {
-      const list = (prev.modelParts[mid] ?? []).filter((p) => p.id !== active.id).map((p) => (p.id === above.id ? merged : p));
+      const list = (prev.modelParts[mid] ?? [])
+        .filter((p) => !consumed.has(p.id))
+        .map((p) => (p.id === survivor.id ? survivor : p));
       return {
         ...prev,
         modelParts: { ...prev.modelParts, [mid]: list },
-        modelActivePartId: merged.id,
-        status: `merged ${active.name} into ${above.name} [${r.lo},${r.hi})`,
+        modelActivePartId: survivor.id,
+        status,
       };
     });
   };
@@ -2436,12 +2498,12 @@ export default function AppFrame() {
   // Drives the REAL outliner handlers by row index — the shell-side twin of
   // RJIT_MESHOPS (which drives host doors). ';'-separated ops:
   //   sel:i · shiftsel:i (the shift-click accumulate path, shift asserted on the live
-  //   modifier record for the call) · eye:i · dup:i · del:i · wait:frames ·
-  //   report (rows + selected set + primary as JSON on stderr).
+  //   modifier record for the call) · eye:i · dup:i · del:i · merge · undo · redo · wait:frames ·
+  //   report (rows + selected set + primary) · audit (adds face counts + host selection).
   // Handlers are per-render closures — the ref keeps the once-installed timer calling
   // the CURRENT ones (the same mount-frozen-closure trap as the meshops harness).
-  const partOpsRef = useRef({ selectPart, toggleVisiblePart, duplicatePartById, deletePart });
-  partOpsRef.current = { selectPart, toggleVisiblePart, duplicatePartById, deletePart };
+  const partOpsRef = useRef({ selectPart, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo });
+  partOpsRef.current = { selectPart, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo };
   useEffect(() => {
     const opsText = (globalThis as any).__env_get?.('RJIT_PARTOPS') as string | null | undefined;
     if (!opsText) return;
@@ -2463,10 +2525,23 @@ export default function AppFrame() {
       } else if (name === 'eye' && id) h.toggleVisiblePart(id);
       else if (name === 'dup' && id) h.duplicatePartById(id, -1);
       else if (name === 'del' && id) h.deletePart(id);
+      else if (name === 'merge') h.mergeSelectedParts();
+      else if (name === 'undo') h.meshUndoRedo(false);
+      else if (name === 'redo') h.meshUndoRedo(true);
       else if (name === 'report') {
         const sel = effectiveSelectedIds(s, parts, selectedPartIdsRef.current);
         const rows = parts.map((p) => ({ name: p.name, lo: p.lo ?? null, hi: p.hi ?? null, visible: p.visible, selected: sel.includes(p.id), primary: p.id === s.modelActivePartId }));
         console.error(`[partops] report → ${JSON.stringify(rows)}`);
+      } else if (name === 'audit') {
+        const host = globalThis as any;
+        const sel = effectiveSelectedIds(s, parts, selectedPartIdsRef.current);
+        const rows = parts.map((p) => {
+          const range = partRange(p);
+          return { name: p.name, lo: p.lo ?? null, hi: p.hi ?? null, faces: range ? Number(host.__mesh_group_face_count?.(range.lo, range.hi) ?? -1) : -1, selected: sel.includes(p.id), primary: p.id === s.modelActivePartId };
+        });
+        let selection = null;
+        try { selection = JSON.parse(host.__mesh_edit_counts?.() ?? 'null'); } catch { /* malformed host read stays null */ }
+        console.error(`[partops] audit → ${JSON.stringify({ rows, selection })}`);
       } else if (name !== 'wait') console.error(`[partops] unknown/invalid op: ${op}`);
     };
     const runNext = () => {
@@ -2964,6 +3039,7 @@ export default function AppFrame() {
           <Workspace
             state={workspaceState}
             activeAsset={activeAsset}
+            selectedPartCount={selectedPartCount}
             onCommand={runCommand}
             onModelToolApi={(api: ModelToolApi) => { modelToolApiRef.current = api; }}
             onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => ({ ...prev, modelTool }))}
@@ -3223,7 +3299,7 @@ export default function AppFrame() {
           <ModelContextMenu
             modelTool={state.modelTool}
             hasActivePart={Boolean(activePartsModelId(state) && state.modelActivePartId && (state.modelParts[activePartsModelId(state)!] ?? []).some((p) => p.id === state.modelActivePartId))}
-            partCount={(state.modelParts[activePartsModelId(state) ?? ''] ?? []).length}
+            selectedPartCount={selectedPartCount}
             onCommand={runCommand}
             onQuality={(quality: number) => modelToolApiRef.current?.setQuality(quality)}
             onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)}

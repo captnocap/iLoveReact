@@ -200,12 +200,14 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-glass', menu: 'Edit', scope: 'model', name: 'Glass Faces', icon: 'GlassWater', key: 'B', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-solidify', menu: 'Edit', scope: 'model', name: 'Solidify', icon: 'Boxes', key: 'O', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-merge-faces', menu: 'Edit', scope: 'model', name: 'Merge Faces', icon: 'Combine', key: 'M', context: true, native: true, undoable: true, tool: true },
-  // Part ops (the focused outliner part): duplicate / mirrored duplicate / merge down.
+  // Part ops (the focused outliner part): duplicate / mirrored duplicate / merge the
+  // exact shift-selected set. The id keeps its old spelling for persisted keymaps, but
+  // the operation is NEVER based on outliner order (req_2811 / req_2870).
   { id: 'mesh-duplicate-part', menu: 'Edit', scope: 'model', name: 'Duplicate Part', icon: 'CopyPlus', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-mirror-x', menu: 'Edit', scope: 'model', name: 'Mirror Part X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-mirror-y', menu: 'Edit', scope: 'model', name: 'Mirror Part Y', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-mirror-z', menu: 'Edit', scope: 'model', name: 'Mirror Part Z', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: true, tool: true },
-  { id: 'mesh-merge-down', menu: 'Edit', scope: 'model', name: 'Merge Part Down', icon: 'Merge', key: '', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-merge-down', menu: 'Edit', scope: 'model', name: 'Merge Selected Parts', icon: 'Merge', key: '', context: true, native: true, undoable: true, tool: true },
   // Cross-model reuse: append a saved library model into the OPEN model as new part(s).
   { id: 'mesh-import-part', menu: 'Edit', scope: 'model', name: 'Add From Library...', icon: 'PackagePlus', key: '', context: true, native: true, undoable: true, tool: true },
   // Paint sub-tools — the two brush behaviours plus the free-form face-safety and detail toggles.
@@ -384,7 +386,7 @@ export function meshToolCommands(): Command[] {
 // solidify/merge) in face mode — loop cut on a FACE is the studio's Blockbench treatment
 // (popup: direction/cuts/offset, live preview). Empty when nothing applies. Surfaces the
 // same way in the toolbar and context menu.
-export function meshTopoCommands(tool: { selMode: number; sel: number }): Command[] {
+export function meshTopoCommands(tool: { selMode: number; sel: number }, selectedPartCount = 0): Command[] {
   if (tool.sel < 1) return [];
   if (tool.selMode === 2) {
     return tool.sel === 1
@@ -392,17 +394,25 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }): Comman
       : [commandById('mesh-create-face')];
   }
   if (tool.selMode === 3) {
-    return [commandById('mesh-loopcut'), commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'), commandById('mesh-merge-faces')];
+    return [
+      commandById('mesh-loopcut'), commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'),
+      // Outliner multi-select is represented host-side by selecting every authored face
+      // in those parts. Offering Merge Faces here would collapse all of those groups to
+      // one face and strand zero-face outliner rows (req_2870). The parts command below
+      // owns that gesture instead and preserves each pre-merge authored face.
+      ...(selectedPartCount >= 2 ? [] : [commandById('mesh-merge-faces')]),
+    ];
   }
   return [];
 }
 
 // The part-level verbs for the FOCUSED outliner part plus the always-available library import.
-export function meshPartCommands(hasActivePart: boolean, partCount: number): Command[] {
+// Merge exists only for an explicit 2+ row selection: list adjacency is never a target rule.
+export function meshPartCommands(hasActivePart: boolean, selectedPartCount: number): Command[] {
   const out: Command[] = [];
   if (hasActivePart) {
     out.push(commandById('mesh-duplicate-part'), commandById('mesh-mirror-x'), commandById('mesh-mirror-y'), commandById('mesh-mirror-z'));
-    if (partCount >= 2) out.push(commandById('mesh-merge-down'));
+    if (selectedPartCount >= 2) out.push(commandById('mesh-merge-down'));
   }
   out.push(commandById('mesh-import-part'));
   return out;

@@ -23,6 +23,7 @@ export default function Workspace(props: {
   onViewMode: (mode: ViewMode) => void;
   /** The paint controls segment for the action bar (ToolOptions renders it while painting). */
   paintBar?: any;
+  selectedPartCount: number;
   onWorkspaceDocument: (id: string) => void;
   onCloseWorkspaceDocument: (id: string) => void;
   onStage: () => void;
