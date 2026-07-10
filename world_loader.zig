@@ -134,8 +134,8 @@ const PAINT_FOLIAGE_START_CAPS: [PAINT_FOLIAGE_FAMILY_COUNT]u32 = .{
     PAINT_WRAPPED_ROW_CAP,
 };
 const PAINT_FOLIAGE_NAMES: [PAINT_FOLIAGE_FAMILY_COUNT][]const u8 = .{
-    "grass", "flowers", "bush", "palm fronds", "palm trunks",
-    "pine", "maple", "oak", "cedar", "spruce",
+    "grass",             "flowers",           "bush",          "palm fronds", "palm trunks",
+    "pine",              "maple",             "oak",           "cedar",       "spruce",
     "mophead hydrangea", "panicle hydrangea", "leafy thicket", "wild weed",
 };
 comptime {
@@ -5854,7 +5854,17 @@ pub const Runtime = struct {
             try self.stream_protos.append(self.allocator, .{ .geom_key = geom.key, .verts = geom.verts, .tex_key = batch.key });
         }
         var total_rows: u64 = 0;
-        for (fams.items) |fam| total_rows += fam.rows.len / fam.stride;
+        for (fams.items, self.stream_protos.items) |fam, proto| {
+            // Foliage cards (~grass~/~frond~ tex keys) upload to their OWN slim
+            // instance pool (g_slim_*, req_2019) — they never touch the shared
+            // MAX_STATIC_INSTANCES buffer. Counting them here starved lod_budget
+            // to 0 on any big map (grass rows alone exceed the whole pool), which
+            // silently dropped the far LOD shell.
+            if (proto.tex_key) |tk| {
+                if (std.mem.eql(u8, tk, "~grass~") or std.mem.eql(u8, tk, "~frond~")) continue;
+            }
+            total_rows += fam.rows.len / fam.stride;
+        }
         // The LOD shell shares the retained static buffer with the detail rows —
         // budget it from what's left so the upload can never overflow.
         const lod_budget: u32 = if (total_rows < scene3d.MAX_STATIC_INSTANCES)
@@ -6393,8 +6403,8 @@ pub const Runtime = struct {
             if (box_n > 0) {
                 const o: usize = 0;
                 log.print("[traffic] v0 box0 pos=({d:.1},{d:.1},{d:.1}) scale=({d:.2},{d:.2},{d:.2}) color=({d:.2},{d:.2},{d:.2}) ry={d:.0}\n", .{
-                    self.traffic_box_buf[o + 0], self.traffic_box_buf[o + 1], self.traffic_box_buf[o + 2],
-                    self.traffic_box_buf[o + 6], self.traffic_box_buf[o + 7], self.traffic_box_buf[o + 8],
+                    self.traffic_box_buf[o + 0], self.traffic_box_buf[o + 1],  self.traffic_box_buf[o + 2],
+                    self.traffic_box_buf[o + 6], self.traffic_box_buf[o + 7],  self.traffic_box_buf[o + 8],
                     self.traffic_box_buf[o + 9], self.traffic_box_buf[o + 10], self.traffic_box_buf[o + 11],
                     self.traffic_box_buf[o + 4],
                 });
