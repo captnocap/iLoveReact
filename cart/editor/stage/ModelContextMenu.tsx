@@ -34,8 +34,12 @@ function CommandRow({ command, modelTool, indented = false, onPress }: {
   const color = STATEFUL_TOOL_IDS.has(command.id)
     ? accentFor(active ? 'primary' : 'textDim')
     : accentFor('primary');
+  // Classifier user props are authoritative: `style={undefined}` erases the
+  // classified row style instead of meaning "no override". Omit the prop for
+  // direct rows; only expanded submenu children receive an indent override.
+  const indentProps = indented ? { style: { paddingLeft: 26 } } : {};
   return (
-    <C.HW_ContextRow onPress={onPress} style={indented ? { paddingLeft: 26 } : undefined}>
+    <C.HW_ContextRow onPress={onPress} {...indentProps}>
       <Icon name={command.icon} size={12} color={color} />
       <C.HW_ContextText>{command.name}</C.HW_ContextText>
       <C.HW_Spacer />
