@@ -1047,6 +1047,31 @@ pub fn build(b: *std.Build) void {
     const pose_mailbox_test_step = b.step("test-pose-mailbox", "Run live pose worker mailbox tests");
     pose_mailbox_test_step.dependOn(&run_pose_mailbox_test.step);
 
+    // V4L2 camera discovery (req_2846): querycap filtering must never expose
+    // a camera's metadata companion as if it were a usable image source.
+    if (os_tag == .linux) {
+        const video_devices_mod_for_tests = b.createModule(.{
+            .root_source_file = b.path("framework/render/video_devices.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        const video_devices_test_mod = b.createModule(.{
+            .root_source_file = b.path("framework/testing/unit/video_devices.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        video_devices_test_mod.addImport("video_devices", video_devices_mod_for_tests);
+        const video_devices_test = b.addTest(.{
+            .name = "video-devices-test",
+            .root_module = video_devices_test_mod,
+        });
+        const run_video_devices_test = b.addRunArtifact(video_devices_test);
+        const video_devices_test_step = b.step("test-video-devices", "Run V4L2 camera discovery tests");
+        video_devices_test_step.dependOn(&run_video_devices_test.step);
+    }
+
     // ONNX-backed worker integration: explicit (not part of lean test steps),
     // because it links the vendored runtime and optionally loads the user's
     // MoveNet model. A missing model is a valid surfaced worker result.

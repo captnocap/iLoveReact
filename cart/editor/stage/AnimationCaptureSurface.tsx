@@ -11,9 +11,10 @@
 // multi-cam phase. RECORD grows from this surface next: the same solved
 // angles, keyframed + reduced into the clip stream.
 //
-// SELFSHOT law: this surface opens cam:0 ONLY — never a screen:/window: source.
+// SELFSHOT law: this surface opens V4L2 camera sources ONLY — never a
+// screen:/window: source.
 import { createElement, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Col, Row, Text } from '@reactjit/primitives';
+import { Box, Col, Pressable, Row, Text } from '@reactjit/primitives';
 import { RenderTarget } from '../../../runtime/primitives';
 import { C } from '../workspace.cls';
 import { EDITOR_GAME_FILE, EDITOR_STORE_DIR } from './WorldEditorSurface';
@@ -22,15 +23,25 @@ import { frontalPose, encodeLivePose } from '../world/playerAnimation';
 import { initialSolve, solveFrontal, MIN_SCORE } from '../world/poseSolve';
 import {
   POSE_CAPTURE_TUNING,
+  listPoseCameraDevices,
   poseDoorsAvailable,
   requestPose,
+  type PoseCameraDevice,
   type PoseKeypoint,
   type PoseResult,
 } from '../../../runtime/capture/pose';
 
 const g: any = globalThis;
 
-const CAM_SRC = 'cam:0';
+const DEFAULT_CAMERA_SOURCE = 'cam:0';
+const CAMERA_SOURCE_STORE_KEY = 'editor.animation.cameraSource';
+const DEFAULT_CAMERA: PoseCameraDevice = {
+  index: 0,
+  source: DEFAULT_CAMERA_SOURCE,
+  name: 'Default camera',
+  driver: '',
+  bus: '',
+};
 /** The fixed feed pane (fixed-region law): overlay dots position in RAW px
  *  against this box; a 4:3 cam fills it edge-to-edge (contain-fit). */
 const FEED_W = 640;
@@ -39,6 +50,21 @@ const DOT = 7;
 const FACE = new Set(['nose', 'eye_left', 'eye_right', 'ear_left', 'ear_right']);
 const LEGS = new Set(['hip_left', 'hip_right', 'knee_left', 'knee_right', 'ankle_left', 'ankle_right']);
 const dotColor = (name: string): string => (FACE.has(name) ? '#e8c14c' : LEGS.has(name) ? '#e8874c' : '#4cc9e8');
+
+function readStoredCameraSource(): string | null {
+  try {
+    const value = typeof g.__store_get === 'function' ? g.__store_get(CAMERA_SOURCE_STORE_KEY) : null;
+    return typeof value === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistCameraSource(source: string): void {
+  try {
+    if (typeof g.__store_set === 'function') g.__store_set(CAMERA_SOURCE_STORE_KEY, source);
+  } catch { /* selection still works for this session */ }
+}
 
 export default function AnimationCaptureSurface() {
   const loaderRef = useRef<any>(null);
@@ -49,6 +75,35 @@ export default function AnimationCaptureSurface() {
   const [trackError, setTrackError] = useState<string | null>(null);
   const [solveHz, setSolveHz] = useState(0);
   const solveRef = useRef(initialSolve());
+  const discoveredAtMount = useMemo(() => listPoseCameraDevices(), []);
+  const savedCameraAtMount = useMemo(readStoredCameraSource, []);
+  const savedCameraIsAvailable = typeof savedCameraAtMount === 'string'
+    && discoveredAtMount.some((device) => device.source === savedCameraAtMount);
+  const [cameras, setCameras] = useState<PoseCameraDevice[]>(discoveredAtMount);
+  const [cameraMenuOpen, setCameraMenuOpen] = useState(!savedCameraIsAvailable && discoveredAtMount.length > 1);
+  const [cameraSrc, setCameraSrc] = useState(() => {
+    if (savedCameraIsAvailable) return savedCameraAtMount as string;
+    return discoveredAtMount[0]?.source ?? DEFAULT_CAMERA_SOURCE;
+  });
+  const cameraChoices = cameras.length > 0 ? cameras : [DEFAULT_CAMERA];
+  const selectedCamera = cameraChoices.find((device) => device.source === cameraSrc)
+    ?? { ...DEFAULT_CAMERA, source: cameraSrc, name: 'Saved camera source' };
+
+  const chooseCamera = (source: string) => {
+    setCameraMenuOpen(false);
+    persistCameraSource(source);
+    setCameraSrc(source);
+  };
+  const rescanCameras = () => {
+    const next = listPoseCameraDevices();
+    setCameras(next);
+    setCameraSrc((current) => {
+      if (next.some((device) => device.source === current)) return current;
+      const replacement = next[0]?.source ?? DEFAULT_CAMERA_SOURCE;
+      persistCameraSource(replacement);
+      return replacement;
+    });
+  };
 
   // The live loop: snapshot → OFF-THREAD estimate → overlay → solve → push.
   // Exactly one request stays in flight; its cancel function detaches the
@@ -64,6 +119,10 @@ export default function AnimationCaptureSurface() {
     let cancelPending: (() => void) | null = null;
     let ticks = 0;
     let windowStart = Date.now();
+    setKeypoints(null);
+    setTrackError(null);
+    setSolveHz(0);
+    solveRef.current = initialSolve();
     const applyResult = (res: PoseResult) => {
       if (!live) return;
       if ('error' in res) {
@@ -92,7 +151,7 @@ export default function AnimationCaptureSurface() {
     const tick = () => {
       if (!live) return;
       const cycleStarted = Date.now();
-      cancelPending = requestPose(CAM_SRC, (res) => {
+      cancelPending = requestPose(cameraSrc, (res) => {
         cancelPending = null;
         if (!live) return;
         applyResult(res);
@@ -109,16 +168,16 @@ export default function AnimationCaptureSurface() {
       const nodeId = Number(loaderRef.current?.id ?? 0);
       if (nodeId) g.__compiled_world_clear_player_live_pose?.(nodeId);
     };
-  }, []);
+  }, [cameraSrc, playerModel]);
 
   const tracked = keypoints ? keypoints.filter((kp) => kp.score >= MIN_SCORE) : [];
   return (
     <C.HW_WorldEditorSurface>
       <Row style={{ width: '100%', height: '100%', backgroundColor: '#0a0c10' }}>
         {/* ── the camera pane ─────────────────────────────────────────── */}
-        <Col style={{ flexGrow: 1, flexBasis: 0, height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#07080b' }}>
+        <Col style={{ flexGrow: 1, flexBasis: 0, height: '100%', position: 'relative', alignItems: 'center', justifyContent: 'center', backgroundColor: '#07080b' }}>
           <Box style={{ width: FEED_W, height: FEED_H, position: 'relative', backgroundColor: '#000000', borderWidth: 1, borderColor: '#2a2c31', borderRadius: 6 }}>
-            <RenderTarget renderSrc={CAM_SRC} style={{ width: FEED_W, height: FEED_H }} />
+            <RenderTarget key={cameraSrc} renderSrc={cameraSrc} style={{ width: FEED_W, height: FEED_H }} />
             {tracked.map((kp) => (
               <Box
                 key={kp.name}
@@ -138,8 +197,42 @@ export default function AnimationCaptureSurface() {
             </Row>
           </Box>
           <Text style={{ color: '#9a9ea6', fontSize: 10, fontFamily: 'monospace', marginTop: 8 }}>
-            {`${CAM_SRC} — stand back until hips are in frame; frontal moves read best (raises, bends, leans, squats)`}
+            {`${selectedCamera.name} · ${cameraSrc} — stand back until hips are in frame; frontal moves read best`}
           </Text>
+          <Col style={{ position: 'absolute', right: 8, top: 8, width: 250 }}>
+            <Pressable
+              onPress={() => setCameraMenuOpen((open) => !open)}
+              style={{ height: 25, paddingLeft: 8, paddingRight: 8, justifyContent: 'center', backgroundColor: 'rgba(10,12,16,0.94)', borderRadius: 6, borderWidth: 1, borderColor: '#343943' }}
+            >
+              <Text numberOfLines={1} noWrap style={{ color: '#b9c8da', fontSize: 10, fontFamily: 'monospace' }}>
+                {`camera · ${selectedCamera.name}`}
+              </Text>
+            </Pressable>
+            {cameraMenuOpen ? (
+              <Col style={{ marginTop: 4, backgroundColor: '#11151c', borderRadius: 6, borderWidth: 1, borderColor: '#3c4655', overflow: 'hidden' }}>
+                {cameraChoices.map((device) => (
+                  <Pressable
+                    key={device.source}
+                    onPress={() => chooseCamera(device.source)}
+                    style={{ height: 38, paddingLeft: 9, paddingRight: 9, justifyContent: 'center', backgroundColor: device.source === cameraSrc ? '#182838' : '#11151c', borderBottomWidth: 1, borderBottomColor: '#252c36' }}
+                  >
+                    <Text numberOfLines={1} noWrap style={{ color: device.source === cameraSrc ? '#7fe89a' : '#d3d9e1', fontSize: 10, fontFamily: 'monospace' }}>
+                      {`${device.source === cameraSrc ? 'ACTIVE · ' : ''}${device.name}`}
+                    </Text>
+                    <Text numberOfLines={1} noWrap style={{ color: '#778391', fontSize: 9, fontFamily: 'monospace' }}>
+                      {device.source}
+                    </Text>
+                  </Pressable>
+                ))}
+                <Pressable
+                  onPress={() => { rescanCameras(); setCameraMenuOpen(false); }}
+                  style={{ height: 28, paddingLeft: 9, justifyContent: 'center', backgroundColor: '#0d1117' }}
+                >
+                  <Text style={{ color: '#9fc1ee', fontSize: 9, fontFamily: 'monospace' }}>rescan camera devices</Text>
+                </Pressable>
+              </Col>
+            ) : null}
+          </Col>
         </Col>
         {/* ── the body pane: the playtest world wearing the live pose ──── */}
         <Box style={{ flexGrow: 1, flexBasis: 0, height: '100%', position: 'relative', backgroundColor: '#0d141f' }}>

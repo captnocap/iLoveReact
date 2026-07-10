@@ -26,6 +26,13 @@ export type PoseKeypointName = typeof POSE_KEYPOINT_NAMES[number];
 export type PoseKeypoint = { name: PoseKeypointName; x: number; y: number; score: number };
 export type PoseFrame = { keypoints: PoseKeypoint[]; elapsedMs: number };
 export type PoseResult = PoseFrame | { error: string };
+export type PoseCameraDevice = {
+  index: number;
+  source: string;
+  name: string;
+  driver: string;
+  bus: string;
+};
 
 /** Live-capture cadence belongs here, beside the transport that enforces one
  * in-flight inference. `targetIntervalMs` is start-to-start, not an extra
@@ -55,6 +62,42 @@ function allocateRequestId(): number {
 
 export function poseDoorsAvailable(): boolean {
   return typeof g.__pose_estimate_async === 'function';
+}
+
+/** Validate the host's V4L2 discovery reply at the bridge. Invalid or
+ * duplicate rows never become selectable render sources. */
+export function parsePoseCameraDevicesReply(reply: unknown): PoseCameraDevice[] {
+  if (typeof reply !== 'string') return [];
+  try {
+    const parsed = JSON.parse(reply);
+    if (!parsed?.ok || !Array.isArray(parsed.devices)) return [];
+    const seen = new Set<string>();
+    const devices: PoseCameraDevice[] = [];
+    for (const row of parsed.devices) {
+      const source = typeof row?.source === 'string' ? row.source : '';
+      const match = /^\/dev\/video(\d+)$/.exec(source);
+      const index = Number(row?.index);
+      if (!match || !Number.isInteger(index) || index < 0 || Number(match[1]) !== index || seen.has(source)) continue;
+      const name = typeof row?.name === 'string' ? row.name.trim() : '';
+      if (!name) continue;
+      seen.add(source);
+      devices.push({
+        index,
+        source,
+        name,
+        driver: typeof row?.driver === 'string' ? row.driver : '',
+        bus: typeof row?.bus === 'string' ? row.bus : '',
+      });
+    }
+    return devices.sort((left, right) => left.index - right.index);
+  } catch {
+    return [];
+  }
+}
+
+export function listPoseCameraDevices(): PoseCameraDevice[] {
+  if (typeof g.__pose_camera_devices !== 'function') return [];
+  try { return parsePoseCameraDevicesReply(g.__pose_camera_devices()); } catch { return []; }
 }
 
 export function parsePoseReply(reply: unknown): PoseResult {

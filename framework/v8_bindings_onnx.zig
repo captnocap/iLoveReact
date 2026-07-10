@@ -27,6 +27,7 @@ const onnx = @import("ml/onnx.zig");
 const segment = @import("ml/segment.zig");
 const pose = @import("ml/pose.zig");
 const render_surfaces = @import("render/render_surfaces.zig");
+const video_devices = @import("render/video_devices.zig");
 
 const SCRATCH_DIR = "/tmp/_reactjit_cutout";
 
@@ -262,6 +263,8 @@ fn hostSegmentRefine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 //                               copied from a LIVE cam:N / /dev/video surface
 //                               (SELFSHOT: never screen:/window: sources).
 // __pose_estimate_image(path) → same, from an image file (headless verify).
+// __pose_camera_devices()     → named V4L2 image-capture nodes (metadata-only
+//                               companions are filtered by VIDIOC_QUERYCAP).
 // Keypoints are source-normalized 0..1, COCO order (nose, eyes, ears,
 // shoulders, elbows, wrists, hips, knees, ankles — L before R).
 
@@ -346,6 +349,37 @@ fn hostPoseEstimateImage(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     poseReply(info, alloc, pose.estimateImage(path_z.ptr));
 }
 
+fn hostPoseCameraDevices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    var devices = video_devices.list(alloc) catch {
+        setReturnString(info, "{\"ok\":false,\"error\":\"camera discovery failed\",\"devices\":[]}");
+        return;
+    };
+    defer devices.deinit();
+
+    var out = std.ArrayList(u8){};
+    out.appendSlice(alloc, "{\"ok\":true,\"devices\":[") catch return;
+    var emitted: usize = 0;
+    for (devices.items) |device| {
+        const source = jsonEscape(alloc, device.source) catch continue;
+        const name = jsonEscape(alloc, device.name) catch continue;
+        const driver = jsonEscape(alloc, device.driver) catch continue;
+        const bus = jsonEscape(alloc, device.bus) catch continue;
+        const row = std.fmt.allocPrint(
+            alloc,
+            "{s}{{\"index\":{d},\"source\":\"{s}\",\"name\":\"{s}\",\"driver\":\"{s}\",\"bus\":\"{s}\"}}",
+            .{ if (emitted == 0) "" else ",", device.index, source, name, driver, bus },
+        ) catch continue;
+        out.appendSlice(alloc, row) catch return;
+        emitted += 1;
+    }
+    out.appendSlice(alloc, "]}") catch return;
+    setReturnString(info, out.items);
+}
+
 pub fn registerOnnx(_: anytype) void {
     v8_runtime.registerHostFn("__onnx_test", hostTest);
     v8_runtime.registerHostFn("__segment_open", hostSegmentOpen);
@@ -353,6 +387,7 @@ pub fn registerOnnx(_: anytype) void {
     v8_runtime.registerHostFn("__segment_refine", hostSegmentRefine);
     v8_runtime.registerHostFn("__pose_estimate_async", hostPoseEstimateAsync);
     v8_runtime.registerHostFn("__pose_estimate_image", hostPoseEstimateImage);
+    v8_runtime.registerHostFn("__pose_camera_devices", hostPoseCameraDevices);
 }
 
 fn emitPoseResult(result: *const pose.AsyncResult) void {
