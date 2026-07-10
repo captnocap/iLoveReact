@@ -16,9 +16,9 @@
 //!       through V8.)
 //!   __segment_close(handle)                         → void
 //!
-//! Inference runs synchronously on the calling thread. Encoder is ~500ms
-//! one-shot per image; decoder is ~50-100ms per refine. Acceptable for
-//! interactive clicks. Phase 4 will move this onto a worker thread.
+//! Segmentation remains synchronous (one-shot image/refine interactions).
+//! Live pose inference is different: __pose_estimate_async snapshots a camera
+//! frame into pose.zig's bounded worker and tickDrain emits the result.
 
 const std = @import("std");
 const v8 = @import("v8");
@@ -256,9 +256,11 @@ fn hostSegmentRefine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 }
 
 // ── Pose host fns (req_2786 — the CAPTURE pipeline's per-frame tracker) ──────
-// __pose_estimate(src)        → JSON {ok, kp:[x,y,s ×17]} from a LIVE render
-//                               surface's CPU frame (cam:N / /dev/video only —
-//                               SELFSHOT: never screen:/window: sources).
+// __pose_estimate_async(src, requestId) → immediate numeric enqueue status;
+//                               result emits on `pose:<requestId>` as JSON
+//                               {ok, kp:[x,y,s ×17], elapsed_ms}. The frame is
+//                               copied from a LIVE cam:N / /dev/video surface
+//                               (SELFSHOT: never screen:/window: sources).
 // __pose_estimate_image(path) → same, from an image file (headless verify).
 // Keypoints are source-normalized 0..1, COCO order (nose, eyes, ears,
 // shoulders, elbows, wrists, hips, knees, ankles — L before R).
@@ -285,26 +287,47 @@ fn poseReply(info: v8.FunctionCallbackInfo, alloc: std.mem.Allocator, kps: ?[pos
     setReturnString(info, out.items);
 }
 
-fn hostPoseEstimate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+const PoseRequestStatus = enum(i32) {
+    queued = @intFromEnum(pose.SubmitStatus.queued),
+    busy = @intFromEnum(pose.SubmitStatus.busy),
+    worker_stopped = @intFromEnum(pose.SubmitStatus.stopped),
+    invalid_frame = @intFromEnum(pose.SubmitStatus.invalid_frame),
+    out_of_memory = @intFromEnum(pose.SubmitStatus.out_of_memory),
+    invalid_source = 5,
+    no_live_frame = 6,
+    bad_request = 7,
+};
+
+fn setPoseRequestStatus(info: v8.FunctionCallbackInfo, status: PoseRequestStatus) void {
+    info.getReturnValue().set(v8.Integer.initI32(info.getIsolate(), @intFromEnum(status)));
+}
+
+fn hostPoseEstimateAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
     const src = argString(info, 0, alloc) orelse {
-        setReturnString(info, "{\"ok\":false,\"error\":\"no source arg\"}");
+        setPoseRequestStatus(info, .bad_request);
         return;
     };
+    const request_i32 = argI32(info, 1, -1);
+    if (request_i32 < 0) {
+        setPoseRequestStatus(info, .bad_request);
+        return;
+    }
     // The camera-only law (SELFSHOT): the pose tracker reads the USER's cam
     // feed, never a desktop surface.
     if (!std.mem.startsWith(u8, src, "cam:") and !std.mem.startsWith(u8, src, "/dev/video")) {
-        setReturnString(info, "{\"ok\":false,\"error\":\"pose sources are cam:N / /dev/video only\"}");
+        setPoseRequestStatus(info, .invalid_source);
         return;
     }
     const frame = render_surfaces.latestCpuFrame(src) orelse {
-        setReturnString(info, "{\"ok\":false,\"error\":\"no live frame\"}");
+        setPoseRequestStatus(info, .no_live_frame);
         return;
     };
-    poseReply(info, alloc, pose.estimateRgba(frame.rgba, frame.width, frame.height));
+    const status = pose.enqueueRgba(@intCast(request_i32), frame.rgba, frame.width, frame.height);
+    setPoseRequestStatus(info, @enumFromInt(@intFromEnum(status)));
 }
 
 fn hostPoseEstimateImage(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -328,6 +351,48 @@ pub fn registerOnnx(_: anytype) void {
     v8_runtime.registerHostFn("__segment_open", hostSegmentOpen);
     v8_runtime.registerHostFn("__segment_close", hostSegmentClose);
     v8_runtime.registerHostFn("__segment_refine", hostSegmentRefine);
-    v8_runtime.registerHostFn("__pose_estimate", hostPoseEstimate);
+    v8_runtime.registerHostFn("__pose_estimate_async", hostPoseEstimateAsync);
     v8_runtime.registerHostFn("__pose_estimate_image", hostPoseEstimateImage);
+}
+
+fn emitPoseResult(result: *const pose.AsyncResult) void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    const payload = if (!result.ok) blk: {
+        const message = if (result.errorText().len > 0) result.errorText() else "pose inference failed";
+        const escaped = jsonEscape(alloc, message) catch message;
+        break :blk std.fmt.allocPrint(
+            alloc,
+            "{{\"ok\":false,\"error\":\"{s}\",\"elapsed_ms\":{d}}}",
+            .{ escaped, result.elapsed_ms },
+        ) catch return;
+    } else blk: {
+        var out = std.ArrayList(u8){};
+        out.appendSlice(alloc, "{\"ok\":true,\"kp\":[") catch return;
+        for (result.keypoints, 0..) |kp, i| {
+            const chunk = std.fmt.allocPrint(
+                alloc,
+                "{s}{d:.4},{d:.4},{d:.3}",
+                .{ if (i == 0) "" else ",", kp.x, kp.y, kp.score },
+            ) catch return;
+            out.appendSlice(alloc, chunk) catch return;
+        }
+        const tail = std.fmt.allocPrint(alloc, "],\"elapsed_ms\":{d}}}", .{result.elapsed_ms}) catch return;
+        out.appendSlice(alloc, tail) catch return;
+        break :blk out.toOwnedSlice(alloc) catch return;
+    };
+
+    var channel_buf: [64]u8 = undefined;
+    const channel = std.fmt.bufPrintZ(&channel_buf, "pose:{d}", .{result.request_id}) catch return;
+    const payload_z = alloc.dupeZ(u8, payload) catch return;
+    v8_runtime.callGlobal2Str("__ffiEmit", channel, payload_z);
+}
+
+pub fn tickDrain() void {
+    while (pose.pollAsync()) |result_value| {
+        const result = result_value;
+        emitPoseResult(&result);
+    }
 }

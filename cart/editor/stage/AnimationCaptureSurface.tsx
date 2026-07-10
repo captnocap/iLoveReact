@@ -20,7 +20,13 @@ import { EDITOR_GAME_FILE, EDITOR_STORE_DIR } from './WorldEditorSurface';
 import { pushPlayerModel } from '../world/playerModelPush';
 import { frontalPose, encodeLivePose } from '../world/playerAnimation';
 import { initialSolve, solveFrontal, MIN_SCORE } from '../world/poseSolve';
-import { estimatePose, poseDoorsAvailable, type PoseKeypoint } from '../../../runtime/capture/pose';
+import {
+  POSE_CAPTURE_TUNING,
+  poseDoorsAvailable,
+  requestPose,
+  type PoseKeypoint,
+  type PoseResult,
+} from '../../../runtime/capture/pose';
 
 const g: any = globalThis;
 
@@ -29,10 +35,6 @@ const CAM_SRC = 'cam:0';
  *  against this box; a 4:3 cam fills it edge-to-edge (contain-fit). */
 const FEED_W = 640;
 const FEED_H = 480;
-/** Solve cadence — MoveNet Lightning is ~10-20ms; ~11Hz leaves the frame
- *  loop breathing room while reading as live. */
-const TICK_MS = 90;
-
 const DOT = 7;
 const FACE = new Set(['nose', 'eye_left', 'eye_right', 'ear_left', 'ear_right']);
 const LEGS = new Set(['hip_left', 'hip_right', 'knee_left', 'knee_right', 'ankle_left', 'ankle_right']);
@@ -48,50 +50,62 @@ export default function AnimationCaptureSurface() {
   const [solveHz, setSolveHz] = useState(0);
   const solveRef = useRef(initialSolve());
 
-  // The live loop: estimate → overlay → solve → push. setTimeout chain (no
-  // requestAnimationFrame in this runtime); cleans up by clearing the live
-  // pose so the playtest body never stays frozen in the last captured frame.
+  // The live loop: snapshot → OFF-THREAD estimate → overlay → solve → push.
+  // Exactly one request stays in flight; its cancel function detaches the
+  // completion on unmount without waiting for ONNX. The live pose is cleared
+  // too, so the playtest body never freezes in its last captured frame.
   useEffect(() => {
     if (!poseDoorsAvailable()) {
-      setTrackError('this host build has no __pose_estimate door — re-ship the editor');
+      setTrackError('this host build has no __pose_estimate_async door — re-ship the editor');
       return;
     }
     let live = true;
     let timer: any = null;
+    let cancelPending: (() => void) | null = null;
     let ticks = 0;
     let windowStart = Date.now();
-    const tick = () => {
+    const applyResult = (res: PoseResult) => {
       if (!live) return;
-      const res = estimatePose(CAM_SRC);
       if ('error' in res) {
         setTrackError(res.error);
         setKeypoints(null);
-      } else {
-        setTrackError(null);
-        setKeypoints(res.keypoints);
-        if (playerModel && playerModel.nodes.length > 0) {
-          solveRef.current = solveFrontal(solveRef.current, res);
-          const transforms = frontalPose(playerModel.nodes, solveRef.current.angles);
-          const nodeId = Number(loaderRef.current?.id ?? 0);
-          if (nodeId && typeof g.__compiled_world_set_player_live_pose === 'function') {
-            g.__compiled_world_set_player_live_pose(nodeId, encodeLivePose(transforms));
-          }
-        }
-        ticks += 1;
-        const now = Date.now();
-        if (now - windowStart >= 1000) {
-          setSolveHz(ticks);
-          ticks = 0;
-          windowStart = now;
+        return;
+      }
+      setTrackError(null);
+      setKeypoints(res.keypoints);
+      if (playerModel && playerModel.nodes.length > 0) {
+        solveRef.current = solveFrontal(solveRef.current, res);
+        const transforms = frontalPose(playerModel.nodes, solveRef.current.angles);
+        const nodeId = Number(loaderRef.current?.id ?? 0);
+        if (nodeId && typeof g.__compiled_world_set_player_live_pose === 'function') {
+          g.__compiled_world_set_player_live_pose(nodeId, encodeLivePose(transforms));
         }
       }
-      timer = setTimeout(tick, TICK_MS);
+      ticks += 1;
+      const now = Date.now();
+      if (now - windowStart >= 1000) {
+        setSolveHz(ticks);
+        ticks = 0;
+        windowStart = now;
+      }
+    };
+    const tick = () => {
+      if (!live) return;
+      const cycleStarted = Date.now();
+      cancelPending = requestPose(CAM_SRC, (res) => {
+        cancelPending = null;
+        if (!live) return;
+        applyResult(res);
+        const spent = Date.now() - cycleStarted;
+        timer = setTimeout(tick, Math.max(0, POSE_CAPTURE_TUNING.targetIntervalMs - spent));
+      });
     };
     // First estimate waits a beat for the cam feed to open.
-    timer = setTimeout(tick, 400);
+    timer = setTimeout(tick, POSE_CAPTURE_TUNING.startupDelayMs);
     return () => {
       live = false;
       if (timer) clearTimeout(timer);
+      cancelPending?.();
       const nodeId = Number(loaderRef.current?.id ?? 0);
       if (nodeId) g.__compiled_world_clear_player_live_pose?.(nodeId);
     };

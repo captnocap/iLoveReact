@@ -10,15 +10,16 @@
 //! consumers never see the 192×192 model space.
 //!
 //! Model file: ~/.reactjit/models/movenet_lightning.onnx (vendored like the
-//! SlimSAM pair — any MoveNet-signature model drops in). Inference is
-//! synchronous on the calling thread: Lightning is ~10-20ms on CPU, fine for
-//! a 10-15Hz capture loop driven from the cart side.
+//! SlimSAM pair — any MoveNet-signature model drops in). Live inference owns a
+//! copied camera frame and runs on one bounded worker; the engine thread only
+//! submits/polls. Image-file verification remains synchronous by design.
 //!
 //! Same ORT discipline as segment.zig: onnx.c shared cimport, lazy init,
 //! init errors recorded once and surfaced through initError().
 
 const std = @import("std");
 const onnx = @import("onnx.zig");
+const pose_mailbox = @import("pose_mailbox.zig");
 const c = onnx.c;
 const stb = @cImport({
     @cInclude("stb/stb_image.h");
@@ -27,7 +28,10 @@ const stb = @cImport({
 const log = std.log.scoped(.pose);
 
 pub const INPUT_SIZE: usize = 192;
-pub const KEYPOINTS: usize = 17;
+pub const KEYPOINTS: usize = pose_mailbox.KEYPOINTS;
+pub const Keypoint = pose_mailbox.Keypoint;
+pub const AsyncResult = pose_mailbox.Result;
+pub const SubmitStatus = pose_mailbox.SubmitStatus;
 
 var g_env: ?*c.OrtEnv = null;
 var g_session: ?*c.OrtSession = null;
@@ -35,6 +39,11 @@ var g_mem_info: ?*c.OrtMemoryInfo = null;
 var g_init_done: bool = false;
 var g_init_failed: bool = false;
 var g_init_error: ?[]u8 = null;
+var g_inference_mutex: std.Thread.Mutex = .{};
+
+var g_async_initialized: bool = false;
+var g_async_queue: pose_mailbox.Queue = undefined;
+var g_async_thread: ?std.Thread = null;
 
 const page_alloc = std.heap.page_allocator;
 
@@ -44,17 +53,20 @@ pub fn initError() ?[]const u8 {
 
 fn recordInitErr(msg: []const u8) void {
     g_init_failed = true;
+    if (g_init_error) |old| page_alloc.free(old);
     g_init_error = page_alloc.dupe(u8, msg) catch null;
     log.err("init failed: {s}", .{msg});
 }
 
 fn recordOrtErr(api: *const c.OrtApi, status: ?*c.OrtStatus, where: []const u8) void {
+    defer if (api.ReleaseStatus) |fp| fp(status);
     var msg: []const u8 = "unknown";
     if (api.GetErrorMessage) |fp| {
         const cstr = fp(status);
         if (cstr != null) msg = std.mem.span(cstr);
     }
     g_init_failed = true;
+    if (g_init_error) |old| page_alloc.free(old);
     g_init_error = std.fmt.allocPrint(page_alloc, "{s}: {s}", .{ where, msg }) catch null;
     log.err("{s}: {s}", .{ where, msg });
 }
@@ -83,7 +95,10 @@ fn ensureInit() bool {
             recordInitErr("CreateEnv fn pointer null");
             return false;
         };
-        if (create_env(c.ORT_LOGGING_LEVEL_WARNING, "reactjit.pose", &g_env) != null) {
+        // This is a CPU-only session. ORT's warning-level Linux device probe
+        // reports stale /sys/class/drm entries even though no GPU provider is
+        // requested; errors still surface through our explicit result path.
+        if (create_env(c.ORT_LOGGING_LEVEL_ERROR, "reactjit.pose", &g_env) != null) {
             recordInitErr("CreateEnv failed");
             return false;
         }
@@ -130,12 +145,79 @@ fn ensureInit() bool {
     return true;
 }
 
-/// One keypoint: source-normalized x,y (0..1) + confidence score.
-pub const Keypoint = struct { x: f32, y: f32, score: f32 };
+// ── Bounded live-inference worker ──────────────────────────────────────
+
+pub fn init(allocator: std.mem.Allocator) void {
+    if (g_async_initialized) return;
+    g_async_queue = pose_mailbox.Queue.init(allocator);
+    g_async_thread = std.Thread.spawn(.{}, asyncWorkerLoop, .{}) catch null;
+    if (g_async_thread == null) {
+        g_async_queue.stop();
+        g_async_queue.deinit();
+        return;
+    }
+    g_async_initialized = true;
+}
+
+pub fn deinit() void {
+    if (!g_async_initialized) return;
+    g_async_queue.stop();
+    if (g_async_thread) |thread| thread.join();
+    g_async_thread = null;
+    g_async_queue.deinit();
+    releaseOrt();
+    g_async_initialized = false;
+}
+
+/// Main-thread boundary: validate + copy one render-surface frame, then return.
+/// Busy is backpressure, never an instruction to grow a frame queue.
+pub fn enqueueRgba(request_id: u32, rgba: []const u8, width: u32, height: u32) SubmitStatus {
+    if (!g_async_initialized) return .stopped;
+    return g_async_queue.submitCopy(request_id, rgba, width, height);
+}
+
+/// Engine-tick boundary: non-blocking take of the worker's completed result.
+pub fn pollAsync() ?AsyncResult {
+    if (!g_async_initialized) return null;
+    return g_async_queue.poll();
+}
+
+fn asyncWorkerLoop() void {
+    while (g_async_queue.waitTake()) |owned_frame_value| {
+        var owned_frame = owned_frame_value;
+        defer owned_frame.deinit();
+        const started_ms = std.time.milliTimestamp();
+        const estimate = estimateRgba(owned_frame.rgba, owned_frame.width, owned_frame.height);
+        const elapsed_i64 = @max(0, std.time.milliTimestamp() - started_ms);
+        const elapsed_ms: u32 = @intCast(@min(elapsed_i64, @as(i64, std.math.maxInt(u32))));
+        const result = if (estimate) |keypoints|
+            AsyncResult.success(owned_frame.request_id, keypoints, elapsed_ms)
+        else
+            AsyncResult.failure(owned_frame.request_id, initError() orelse "pose inference failed", elapsed_ms);
+        _ = g_async_queue.publish(result);
+    }
+}
+
+fn releaseOrt() void {
+    if (onnx.api()) |api| {
+        if (g_session) |session| if (api.ReleaseSession) |fp| fp(session);
+        if (g_mem_info) |mem_info| if (api.ReleaseMemoryInfo) |fp| fp(mem_info);
+        if (g_env) |env| if (api.ReleaseEnv) |fp| fp(env);
+    }
+    g_session = null;
+    g_mem_info = null;
+    g_env = null;
+    if (g_init_error) |message| page_alloc.free(message);
+    g_init_error = null;
+    g_init_done = false;
+    g_init_failed = false;
+}
 
 /// Estimate the pose in an RGBA frame (top-down, stride w*4). Returns the 17
 /// COCO keypoints in model order, or null when the model/init is unavailable.
 pub fn estimateRgba(rgba: []const u8, width: u32, height: u32) ?[KEYPOINTS]Keypoint {
+    g_inference_mutex.lock();
+    defer g_inference_mutex.unlock();
     if (!ensureInit()) return null;
     if (width == 0 or height == 0) return null;
     const api = onnx.api() orelse return null;

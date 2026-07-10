@@ -38,6 +38,13 @@ else
         pub fn deinit() void {}
         pub fn tick(_: u32) void {}
     };
+const pose = if (@hasDecl(build_options_for_whisper, "has_onnx") and build_options_for_whisper.has_onnx)
+    @import("ml/pose.zig")
+else
+    struct {
+        pub fn init(_: anytype) void {}
+        pub fn deinit() void {}
+    };
 const system_signals = @import("ifttt/system_signals.zig");
 const ifttt_zig = @import("ifttt/ifttt.zig");
 const sim = @import("sim/root.zig");
@@ -3997,6 +4004,7 @@ pub fn run(config_in: AppConfig) !void {
         // when shutdown started; this is the belt to SDL_Quit's suspenders.
         _ = c.SDL_CaptureMouse(false);
         if (g_chrome_dragging) endChromeDrag();
+        pose.deinit();
         whisper.deinit();
         voice.deinit();
         audio_input.deinit();
@@ -4011,6 +4019,7 @@ pub fn run(config_in: AppConfig) !void {
     // useVoiceInput() without scripts/ship needing to flip a fresh -Dhas-X.
     voice.init(std.heap.c_allocator);
     whisper.init(std.heap.c_allocator);
+    pose.init(std.heap.c_allocator);
     audio_input.init(std.heap.c_allocator);
 
     // Canvas system init

@@ -1022,6 +1022,63 @@ pub fn build(b: *std.Build) void {
     const system_memory_test_step = b.step("test-system-memory", "Run the system memory telemetry unit tests");
     system_memory_test_step.dependOn(&run_system_memory_test.step);
 
+    // ── pose worker mailbox tests (req_2845) ─────────────────────────
+    // Pins the live-inference boundary: camera bytes are copied before the
+    // render thread mutates them, only one frame may occupy the pipeline, and
+    // shutdown/result backpressure never grows a latent frame queue.
+    const pose_mailbox_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/ml/pose_mailbox.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const pose_mailbox_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/pose_mailbox.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    pose_mailbox_test_mod.addImport("pose_mailbox", pose_mailbox_mod_for_tests);
+    const pose_mailbox_test = b.addTest(.{
+        .name = "pose-mailbox-test",
+        .root_module = pose_mailbox_test_mod,
+    });
+    const run_pose_mailbox_test = b.addRunArtifact(pose_mailbox_test);
+    const pose_mailbox_test_step = b.step("test-pose-mailbox", "Run live pose worker mailbox tests");
+    pose_mailbox_test_step.dependOn(&run_pose_mailbox_test.step);
+
+    // ONNX-backed worker integration: explicit (not part of lean test steps),
+    // because it links the vendored runtime and optionally loads the user's
+    // MoveNet model. A missing model is a valid surfaced worker result.
+    if (os_tag == .linux) {
+        const pose_mod_for_tests = b.createModule(.{
+            .root_source_file = b.path("framework/ml/pose.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        pose_mod_for_tests.addIncludePath(b.path("deps/onnxruntime/include"));
+        pose_mod_for_tests.addIncludePath(b.path("."));
+        const pose_async_test_mod = b.createModule(.{
+            .root_source_file = b.path("framework/testing/unit/pose_async.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        pose_async_test_mod.addImport("pose", pose_mod_for_tests);
+        const pose_async_test = b.addTest(.{
+            .name = "pose-async-test",
+            .root_module = pose_async_test_mod,
+        });
+        pose_async_test.addLibraryPath(b.path("deps/onnxruntime/lib"));
+        pose_async_test.linkSystemLibrary("onnxruntime");
+        pose_async_test.addRPath(b.path("deps/onnxruntime/lib"));
+        const run_pose_async_test = b.addRunArtifact(pose_async_test);
+        run_pose_async_test.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/onnxruntime/lib"));
+        const pose_async_test_step = b.step("test-pose-async", "Run ONNX-backed live pose worker integration test");
+        pose_async_test_step.dependOn(&run_pose_async_test.step);
+    }
+
     // ── mesh import (GLB/OBJ) unit tests — headless, no GPU ────────────────────
     const mesh_import_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/world/mesh_import.zig"),
