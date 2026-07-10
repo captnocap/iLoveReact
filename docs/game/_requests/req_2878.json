@@ -3,7 +3,7 @@
   "at": "2026-07-10T09:59:11.733Z",
   "origin": "codex:019f4b76",
   "text": "Inside of cart/editor there is the file menu which has a new mesh nested menu, that shows Cube Cylinder Cone Pyramid, etc, and then also has an area for Player / NPC model, i want you to expand this and give me a starting point from the basic floor piece, wall piece, roof piece, stair piece, ramp piece, and whatever other build pieces there are. so i can use the base shape to build from without needing to construct the base shape from scratch every time to then build from",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f4b76-214a-7a90-b984-de971ce0ebd5",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-10T10:11:16.604Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Expanded File → New Mesh with a nested Build Pieces starter set covering every active semantic build kind: wall, floor, roof, ramp, stairs, elevator, pillar, corner, arch, fence, railing, trim, and sign. Each choice opens a uniquely identified, catalog-sized editable model derived from the existing build-piece shape decomposition, so authors start from the real game module instead of rebuilding it from generic primitives. Added durable starter package identity, preserved the Player / NPC entry, fixed the arch starter to be an open frame, added focused menu/identity/geometry tests, shipped the ReleaseFast editor, and visually smoke-tested the stair starter headlessly.",
+  "shas": [
+    "57c972bc1"
+  ],
+  "resolvedAt": "2026-07-10T10:11:16.604Z"
 }
