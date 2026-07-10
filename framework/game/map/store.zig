@@ -16,12 +16,15 @@
 const std = @import("std");
 const chunks = @import("chunks.zig");
 const roads = @import("roads.zig");
+const transport = @import("transport.zig");
 
 pub const MAGIC: u32 = 0x50414d52; // "RMAP"
 /// v2 (req_2693): + the tile-binding table (count u32, count×4 f32 rows right
 /// after the header) and a per-chunk MATERIALS cell channel (RLE, after tiles).
-/// v1 blobs still load: no bindings, materials all EMPTY (kind-default look).
-pub const VERSION: u32 = 2;
+/// v3 (req_2924): the trailing road-only recipes become tagged transport paths
+/// (road/light-rail/railway) and carry editable curve reach. v1/v2 still load
+/// as roads with their original 5 m fillet.
+pub const VERSION: u32 = 3;
 
 /// Floats per tile-binding row (engine.zig BINDING_FLOATS — kept in sync by
 /// the loadMap/saveMap call sites passing engine-owned buffers).
@@ -186,9 +189,9 @@ pub fn saveSizeUpperBound() usize {
     const per_cell_channel = 8 + chunks.TILE_CELLS * 4;
     const per_sample_channel = 8 + chunks.SAMPLE_CELLS * 4;
     const per_chunk = 8 + per_cell_channel * 6 + per_sample_channel * 2;
-    const road_bytes = 16 + roads.MAX_STROKES * (24 + roads.MAX_POINTS_PER_STROKE * 8);
+    const path_bytes = 16 + transport.MAX_PATHS * (32 + transport.MAX_POINTS_PER_PATH * 8);
     const binding_bytes = 8 + 256 * BINDING_FLOATS * 4;
-    return 16 + binding_bytes + chunks.chunkCount() * per_chunk + road_bytes;
+    return 16 + binding_bytes + chunks.chunkCount() * per_chunk + path_bytes;
 }
 
 /// Serialize the whole painting into dst. Returns bytes written, or 0 when dst
@@ -217,17 +220,29 @@ pub fn save(dst: []u8, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bind
         rleWriteQuantized(&sink, chunk.water[0..], g_cell_scratch[0..]);
     }
 
-    var stroke_buf: [roads.MAX_STROKES]roads.RoadStroke = undefined;
-    const stroke_count = roads.collectStrokes(stroke_buf[0..]);
-    sink.put(u32, @intCast(stroke_count));
-    for (stroke_buf[0..stroke_count]) |stroke| {
-        sink.put(u32, stroke.id);
-        sink.put(i32, stroke.profile.lanesF);
-        sink.put(i32, stroke.profile.lanesB);
-        sink.put(u8, if (stroke.profile.sidewalks) 1 else 0);
-        sink.put(f32, stroke.profile.speedLimitKph);
-        sink.put(u32, @intCast(stroke.points.len));
-        for (stroke.points) |pt| {
+    var path_buf: [transport.MAX_PATHS]transport.Path = undefined;
+    const path_count = transport.collectPaths(path_buf[0..]);
+    sink.put(u32, @intCast(path_count));
+    for (path_buf[0..path_count]) |path| {
+        sink.put(u32, path.id);
+        sink.put(u8, @intFromEnum(transport.kindOf(path.profile)));
+        sink.put(f32, path.curve_radius_m);
+        switch (path.profile) {
+            .road => |profile| {
+                sink.put(i32, profile.lanesF);
+                sink.put(i32, profile.lanesB);
+                sink.put(u8, if (profile.sidewalks) 1 else 0);
+                sink.put(f32, profile.speedLimitKph);
+            },
+            .light_rail, .railway => |profile| {
+                sink.put(i32, profile.tracks);
+                sink.put(i32, 0);
+                sink.put(u8, 0);
+                sink.put(f32, 0);
+            },
+        }
+        sink.put(u32, @intCast(path.points.len));
+        for (path.points) |pt| {
             sink.put(f32, pt.gx);
             sink.put(f32, pt.gz);
         }
@@ -242,7 +257,7 @@ pub fn save(dst: []u8, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bind
 /// on a malformed blob.
 pub fn load(bytes: []const u8, bindings_buf: [][BINDING_FLOATS]f32, bindings_count: *usize) bool {
     chunks.clearAll();
-    roads.clearAll();
+    transport.clearAll();
     bindings_count.* = 0;
     var src = Source{ .buf = bytes };
     if (src.get(u32) != MAGIC) return false;
@@ -278,35 +293,58 @@ pub fn load(bytes: []const u8, bindings_buf: [][BINDING_FLOATS]f32, bindings_cou
     }
 
     const stroke_count = src.get(u32);
-    if (stroke_count > roads.MAX_STROKES) return false;
+    if (stroke_count > transport.MAX_PATHS) return false;
     var si: u32 = 0;
     while (si < stroke_count) : (si += 1) {
         const id = src.get(u32);
         _ = id; // ids re-mint sequentially; recipes carry no cross-references yet
-        const profile = roads.RoadProfile{
-            .lanesF = src.get(i32),
-            .lanesB = src.get(i32),
-            .sidewalks = src.get(u8) != 0,
-            .speedLimitKph = src.get(f32),
-        };
+        var profile: transport.Profile = undefined;
+        var curve_radius_m = transport.TUNING.legacy_road_curve_radius_m;
+        if (version >= 3) {
+            const raw_kind = src.get(u8);
+            if (raw_kind > @intFromEnum(transport.Kind.railway)) return false;
+            const kind: transport.Kind = @enumFromInt(raw_kind);
+            curve_radius_m = src.get(f32);
+            const primary = src.get(i32);
+            const secondary = src.get(i32);
+            const flags = src.get(u8);
+            const speed = src.get(f32);
+            profile = switch (kind) {
+                .road => .{ .road = .{
+                    .lanesF = primary,
+                    .lanesB = secondary,
+                    .sidewalks = flags != 0,
+                    .speedLimitKph = speed,
+                } },
+                .light_rail => .{ .light_rail = .{ .tracks = primary } },
+                .railway => .{ .railway = .{ .tracks = primary } },
+            };
+        } else {
+            profile = .{ .road = .{
+                .lanesF = src.get(i32),
+                .lanesB = src.get(i32),
+                .sidewalks = src.get(u8) != 0,
+                .speedLimitKph = src.get(f32),
+            } };
+        }
         const point_count = src.get(u32);
-        if (point_count > roads.MAX_POINTS_PER_STROKE) return false;
-        roads.beginDraft(profile);
+        if (point_count > transport.MAX_POINTS_PER_PATH) return false;
+        transport.beginDraft(profile, curve_radius_m);
         var pi: u32 = 0;
         while (pi < point_count) : (pi += 1) {
             const gx = src.get(f32);
             const gz = src.get(f32);
-            roads.addDraftPoint(gx, gz);
+            transport.addDraftPoint(.{ .gx = gx, .gz = gz });
         }
         if (src.bad) return false;
-        _ = roads.commitDraft();
+        if (transport.commitDraft() == null) return false;
     }
     return !src.bad;
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
-test "save/load round-trips every channel and the road recipes" {
+test "save/load round-trips every channel and road plus rail recipes" {
     chunks.clearAll();
     roads.clearAll();
     defer chunks.clearAll();
@@ -324,6 +362,10 @@ test "save/load round-trips every channel and the road recipes" {
     roads.addDraftPoint(10.5, 20.5);
     roads.addDraftPoint(40.5, 20.5);
     _ = roads.commitDraft().?;
+    transport.beginDraft(.{ .light_rail = .{ .tracks = 2 } }, 18);
+    transport.addDraftPoint(.{ .gx = 10.5, .gz = 40.5 });
+    transport.addDraftPoint(.{ .gx = 40.5, .gz = 40.5 });
+    _ = transport.commitDraft().?;
 
     var empty_under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty;
     const bindings = [_][BINDING_FLOATS]f32{ .{ 41, 2, 1, 0 }, .{ 7, 0, 2, 1 } };
@@ -348,12 +390,18 @@ test "save/load round-trips every channel and the road recipes" {
     try std.testing.expectApproxEqAbs(@as(f32, 4.25), back.water[100], 0.005);
     try std.testing.expect(back.dirty.any());
     try std.testing.expectEqual(@as(usize, 1), roads.strokeCount());
+    try std.testing.expectEqual(@as(usize, 1), transport.railCount());
 
     var stroke_buf: [roads.MAX_STROKES]roads.RoadStroke = undefined;
     _ = roads.collectStrokes(stroke_buf[0..]);
     try std.testing.expectEqual(@as(i32, 2), stroke_buf[0].profile.lanesF);
     try std.testing.expectEqual(@as(i32, 0), stroke_buf[0].profile.lanesB);
     try std.testing.expectEqual(@as(usize, 2), stroke_buf[0].points.len);
+    var paths: [transport.MAX_PATHS]transport.Path = undefined;
+    const path_count = transport.collectPaths(paths[0..]);
+    try std.testing.expectEqual(@as(usize, 2), path_count);
+    try std.testing.expectEqual(transport.Kind.light_rail, transport.kindOf(paths[1].profile));
+    try std.testing.expectApproxEqAbs(@as(f32, 18), paths[1].curve_radius_m, 0.001);
 }
 
 test "save resolves road-stamped cells back to the undercoat base" {
@@ -388,7 +436,7 @@ test "load rejects garbage LOUDLY and leaves a clean world" {
     try std.testing.expectEqual(@as(usize, 0), chunks.chunkCount());
 }
 
-test "inspectHeader reads v1 and v2 chunk counts without loading the world" {
+test "inspectHeader reads v1 and current chunk counts without loading the world" {
     var v1: [12]u8 = @splat(0);
     std.mem.writeInt(u32, v1[0..4], MAGIC, .little);
     std.mem.writeInt(u32, v1[4..8], 1, .little);

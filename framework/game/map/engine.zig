@@ -24,6 +24,7 @@ const std = @import("std");
 const chunks = @import("chunks.zig");
 const stamps = @import("stamps.zig");
 const foliage = @import("../../world/foliage.zig");
+pub const transport = @import("transport.zig");
 pub const roads = @import("roads.zig");
 
 const DOT_M = chunks.DOT_M;
@@ -231,7 +232,7 @@ pub fn reset() void {
     // new document after seeding/loading it.
     g_autosave_len = 0;
     chunks.clearAll();
-    roads.clearAll();
+    transport.clearAll();
     g_road_under.clearRetainingCapacity();
     road_plan_truncated = false;
     g_tool = .{};
@@ -248,11 +249,19 @@ pub fn reset() void {
     g_tile_binding_count = 0;
 }
 
-/// The draft profile road clicks author with (set by chrome before drafting).
-var g_road_profile: roads.RoadProfile = .{ .lanesF = 1, .lanesB = 1, .sidewalks = true };
+/// The profile and turn reach authored by the shared road/rail path tool.
+var g_path_profile: transport.Profile = .{ .road = .{} };
+var g_path_curve_radius_m: f32 = transport.TUNING.default_road_curve_radius_m;
 
-pub fn setRoadProfile(p: roads.RoadProfile) void {
-    g_road_profile = roads.clampProfile(p);
+pub fn setPathProfile(profile: transport.Profile, curve_radius_m: f32) void {
+    g_path_profile = transport.clampProfile(profile);
+    g_path_curve_radius_m = transport.clampCurveRadius(curve_radius_m);
+    transport.updateDraftProfile(g_path_profile, g_path_curve_radius_m);
+}
+
+/// Compatibility door for callers that only know roads.
+pub fn setRoadProfile(profile: roads.RoadProfile) void {
+    setPathProfile(.{ .road = roads.clampProfile(profile) }, g_path_curve_radius_m);
 }
 
 // ── the stroke lifecycle ──────────────────────────────────────────────────────
@@ -282,12 +291,11 @@ pub fn strokeBegin(x: f32, z: f32) void {
         return;
     }
     if (g_tool.channel == .road) {
-        // roads are CLICK-authored strokes (painterBehavior 'click'): each
-        // press lays a draft centerline point at the cell center, in the
-        // global-tile frame the road compiler plans in. Commit stamps.
-        if (roads.draftPointCount() == 0) roads.beginDraft(g_road_profile);
-        const cell = cellCenter(x, z);
-        roads.addDraftPoint(cell[0] + chunks.CHUNK_METERS / 2, cell[1] + chunks.CHUNK_METERS / 2);
+        // One click accepts one semantic path anchor. The loader independently
+        // feeds the current hover into setPathHover, so after the FIRST anchor
+        // a full-width next piece is already visible before another click.
+        if (!transport.draftActive()) transport.beginDraft(g_path_profile, g_path_curve_radius_m);
+        transport.addDraftPoint(pathPointFromWorld(x, z));
         g_stats.stamps += 1;
         return;
     }
@@ -369,6 +377,21 @@ fn cellCenter(x: f32, z: f32) [2]f32 {
     const gtz: f32 = @floatFromInt(chunks.globalTile(z));
     const half = chunks.CHUNK_METERS / 2;
     return .{ gtx - half + 0.5, gtz - half + 0.5 };
+}
+
+/// World metres → the transport authoring frame. Unlike tile painting, paths
+/// use the grid only as a 25 cm snap substrate; their object model stays f32.
+fn pathPointFromWorld(x: f32, z: f32) transport.Point {
+    const half = chunks.CHUNK_METERS / 2;
+    return transport.snapPoint(x + half, z + half);
+}
+
+pub fn setPathHover(x: f32, z: f32) void {
+    transport.setDraftHover(pathPointFromWorld(x, z));
+}
+
+pub fn clearPathHover() void {
+    transport.clearDraftHover();
 }
 
 // ── sample dispatch ───────────────────────────────────────────────────────────
@@ -1193,27 +1216,46 @@ pub fn roadsRestamp() void {
     }
 }
 
-/// Commit the click-authored draft and restamp. Null = draft too short / table full.
-pub fn roadCommit() ?u32 {
-    const id = roads.commitDraft() orelse return null;
-    roadsRestamp();
+/// Commit the live-previewed transport draft. Roads recompile the lane grid;
+/// rail remains a semantic path rendered directly from its recipe.
+pub fn pathCommit() ?u32 {
+    const kind = transport.draftKind() orelse return null;
+    const id = transport.commitDraft() orelse return null;
+    if (kind == .road) roadsRestamp();
     _ = autosaveNow();
     pushAuthoringEvent(.{ .kind = .road_commit, .tool = g_tool, .id = id });
     return id;
 }
 
-pub fn roadCancel() void {
-    roads.cancelDraft();
+pub fn roadCommit() ?u32 {
+    return pathCommit();
 }
 
-pub fn roadDelete(id: u32) bool {
-    const ok = roads.deleteStroke(id);
+pub fn pathCancel() void {
+    transport.cancelDraft();
+}
+
+pub fn roadCancel() void {
+    pathCancel();
+}
+
+pub fn pathUndoPoint() bool {
+    return transport.undoDraftPoint();
+}
+
+pub fn pathDelete(id: u32) bool {
+    const kind = transport.kindForId(id) orelse return false;
+    const ok = transport.deletePath(id);
     if (ok) {
-        roadsRestamp();
+        if (kind == .road) roadsRestamp();
         _ = autosaveNow();
         pushAuthoringEvent(.{ .kind = .road_delete, .tool = g_tool, .id = id });
     }
     return ok;
+}
+
+pub fn roadDelete(id: u32) bool {
+    return pathDelete(id);
 }
 
 // ── flora specs (the population contract — req_2497) ─────────────────────────

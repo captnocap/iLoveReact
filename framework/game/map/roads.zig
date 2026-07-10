@@ -31,6 +31,7 @@
 // them natively — the tile PLAN never depends on them.
 
 const std = @import("std");
+const transport = @import("transport.zig");
 
 // ── the ruled constants (roadData.ts:74-88) ───────────────────────────────────
 
@@ -41,8 +42,8 @@ pub const SIDEWALK_TILES: i32 = 2;
 /// The zebra band reaches 2 cells into each leg, just outside the junction box.
 pub const CROSSWALK_DEPTH: usize = 2;
 pub const MAX_LANES_PER_SIDE: i32 = 3;
-/// Corner fillet radius (ROADCURVE-0610, roadData.ts:171).
-pub const ROAD_FILLET_TILES: f32 = 5;
+/// Legacy saves predate authored curve reach and keep their original 5 m turn.
+pub const ROAD_FILLET_TILES: f32 = transport.TUNING.legacy_road_curve_radius_m;
 
 /// Speed presets (ROADSPEED-0610, roadData.ts:86-88).
 pub const ROAD_SPEED_CITY_KPH: f32 = 50;
@@ -52,28 +53,17 @@ pub const SPEED_LIMIT_MAX_KPH: f32 = 130;
 
 // ── the authored objects (roadData.ts:35-63) ──────────────────────────────────
 
-pub const RoadProfile = struct {
-    /// lanes flowing WITH the stroke direction (the right side); 0 disables
-    lanesF: i32 = 1,
-    /// opposing lanes (the left side); 0 = a one-way road
-    lanesB: i32 = 1,
-    /// the locked 2-tile sidewalk ring on both outer edges
-    sidewalks: bool = true,
-    /// km/h; 0 = absent → clampProfile normalizes to the city preset
-    speedLimitKph: f32 = 0,
-};
+pub const RoadProfile = transport.RoadProfile;
 
 /// Global cell coords. Authored points are integer cells; fillet output is
 /// fractional (the arc samples).
-pub const RoadPoint = struct {
-    gx: f32,
-    gz: f32,
-};
+pub const RoadPoint = transport.Point;
 
 pub const RoadStroke = struct {
     id: u32,
     points: []const RoadPoint,
     profile: RoadProfile,
+    curve_radius_m: f32 = ROAD_FILLET_TILES,
 };
 
 /// Travel direction INTO a junction box, snapped to the dominant world axis
@@ -84,23 +74,13 @@ pub const JunctionSide = enum(u8) { N, E, S, W };
 
 // ── profile math (roadData.ts:90-122) ─────────────────────────────────────────
 
-fn clampSpeedLimit(kph: f32) f32 {
-    const v = if (std.math.isFinite(kph) and kph > 0) @round(kph / 5) * 5 else ROAD_SPEED_CITY_KPH;
-    return @max(SPEED_LIMIT_MIN_KPH, @min(SPEED_LIMIT_MAX_KPH, v));
-}
-
 pub fn clampProfile(p: RoadProfile) RoadProfile {
-    const lanesF = @max(0, @min(MAX_LANES_PER_SIDE, p.lanesF));
-    const lanesB = @max(0, @min(MAX_LANES_PER_SIDE, p.lanesB));
-    const speed = clampSpeedLimit(p.speedLimitKph);
-    // a road with no lanes at all is not a road; keep one forward lane (ts:100)
-    if (lanesF == 0 and lanesB == 0) return .{ .lanesF = 1, .lanesB = 0, .sidewalks = p.sidewalks, .speedLimitKph = speed };
-    return .{ .lanesF = lanesF, .lanesB = lanesB, .sidewalks = p.sidewalks, .speedLimitKph = speed };
+    return transport.clampRoadProfile(p);
 }
 
 /// The clamped limit in m/s — what motion planning consumes (ts:105).
 pub fn speedLimitMps(p: RoadProfile) f32 {
-    return clampSpeedLimit(p.speedLimitKph) / 3.6;
+    return clampProfile(p).speedLimitKph / 3.6;
 }
 
 pub fn isOneWay(p: RoadProfile) bool {
@@ -195,66 +175,10 @@ const CenterCell = struct { gx: i32, gz: i32, dir: Dir };
 /// of its shorter neighbour segment). Writes into `out`; returns the count.
 /// out.len must cover the worst case: 2 + (points-2)·(max(4,ceil(r·1.5))+1).
 pub fn filletPoints(points: []const RoadPoint, radius: f32, out: []RoadPoint) usize {
-    if (points.len < 3 or radius <= 0) {
-        const n = @min(points.len, out.len);
-        @memcpy(out[0..n], points[0..n]);
-        return n;
-    }
-    var n: usize = 0;
-    out[n] = points[0];
-    n += 1;
-    var i: usize = 1;
-    while (i + 1 < points.len) : (i += 1) {
-        const a = points[i - 1];
-        const v = points[i];
-        const b = points[i + 1];
-        const d1 = std.math.hypot(v.gx - a.gx, v.gz - a.gz);
-        const d2 = std.math.hypot(b.gx - v.gx, b.gz - v.gz);
-        const r = @min(radius, @min(d1 * 0.45, d2 * 0.45));
-        if (r < 0.75 or d1 == 0 or d2 == 0) {
-            if (n < out.len) {
-                out[n] = v;
-                n += 1;
-            }
-            continue;
-        }
-        const u1x = (v.gx - a.gx) / d1;
-        const u1z = (v.gz - a.gz) / d1;
-        const u2x = (b.gx - v.gx) / d2;
-        const u2z = (b.gz - v.gz) / d2;
-        if (u1x * u2x + u1z * u2z > 0.985) { // straight-through (ts:184)
-            if (n < out.len) {
-                out[n] = v;
-                n += 1;
-            }
-            continue;
-        }
-        const p1 = RoadPoint{ .gx = v.gx - u1x * r, .gz = v.gz - u1z * r };
-        const p2 = RoadPoint{ .gx = v.gx + u2x * r, .gz = v.gz + u2z * r };
-        const samples: usize = @max(4, @as(usize, @intFromFloat(@ceil(r * 1.5))));
-        var s: usize = 0;
-        while (s <= samples) : (s += 1) {
-            const t = @as(f32, @floatFromInt(s)) / @as(f32, @floatFromInt(samples));
-            const omt = 1 - t;
-            if (n < out.len) {
-                out[n] = .{
-                    .gx = omt * omt * p1.gx + 2 * omt * t * v.gx + t * t * p2.gx,
-                    .gz = omt * omt * p1.gz + 2 * omt * t * v.gz + t * t * p2.gz,
-                };
-                n += 1;
-            }
-        }
-    }
-    if (n < out.len) {
-        out[n] = points[points.len - 1];
-        n += 1;
-    }
-    return n;
+    return transport.curvePoints(points, radius, out);
 }
 
-/// Worst-case fillet output for MAX_POINTS_PER_STROKE authored points at the
-/// standard radius: samples = max(4, ceil(5·1.5)) = 8 → 9 per interior vertex.
-pub const MAX_FILLETED_POINTS: usize = 2 + (MAX_POINTS_PER_STROKE - 2) * 9;
+pub const MAX_FILLETED_POINTS: usize = transport.MAX_CURVE_POINTS;
 
 // ── centerline rasterization (roadData.ts:203-223) ────────────────────────────
 
@@ -367,7 +291,7 @@ fn rasterizeStroke(arena: std.mem.Allocator, stroke: RoadStroke) !StrokeRaster {
     const profile = clampProfile(stroke.profile);
     const xs = crossSection(profile);
     // stamp the FILLETED polyline — corners rasterize as arcs (ts:290)
-    const fcount = filletPoints(stroke.points, ROAD_FILLET_TILES, g_fillet_scratch[0..]);
+    const fcount = filletPoints(stroke.points, stroke.curve_radius_m, g_fillet_scratch[0..]);
     const center = try rasterizeCenterline(arena, g_fillet_scratch[0..fcount]);
     var r = StrokeRaster{
         .stroke = stroke,
@@ -707,98 +631,66 @@ fn deriveJunctionsArena(arena: std.mem.Allocator, strokes: []const RoadStroke, o
     return box_count;
 }
 
-// ── the host-owned stroke table ───────────────────────────────────────────────
-// The TS kept strokes in React state; here the module owns them (the
-// host-authoritative pattern). Draft flow mirrors the editor's click-to-lay:
-// beginDraft → addDraftPoint × N → commitDraft (mints sequential ids).
+// ── road views over the shared transport-path table ──────────────────────────
+// These wrappers preserve the road planner's strict surface while the authored
+// table also carries light-rail and railway paths. planRoads never sees rail.
 
-pub const MAX_STROKES: usize = 256;
-pub const MAX_POINTS_PER_STROKE: usize = 128;
-
-const StrokeSlot = struct {
-    used: bool = false,
-    id: u32 = 0,
-    profile: RoadProfile = .{},
-    count: usize = 0,
-    points: [MAX_POINTS_PER_STROKE]RoadPoint = undefined,
-};
-
-var g_strokes: [MAX_STROKES]StrokeSlot = @splat(.{});
-var g_next_id: u32 = 1;
-var g_draft: StrokeSlot = .{};
-var g_draft_active = false;
+pub const MAX_STROKES: usize = transport.MAX_PATHS;
+pub const MAX_POINTS_PER_STROKE: usize = transport.MAX_POINTS_PER_PATH;
 
 pub fn clearAll() void {
-    for (&g_strokes) |*slot| slot.used = false;
-    g_next_id = 1;
-    g_draft_active = false;
+    transport.clearAll();
 }
 
 pub fn beginDraft(profile: RoadProfile) void {
-    g_draft = .{ .used = true, .profile = clampProfile(profile), .count = 0 };
-    g_draft_active = true;
+    transport.beginDraft(.{ .road = clampProfile(profile) }, ROAD_FILLET_TILES);
 }
 
 /// Append a point to the draft (dedups an exact repeat of the last point).
 pub fn addDraftPoint(gx: f32, gz: f32) void {
-    if (!g_draft_active or g_draft.count >= MAX_POINTS_PER_STROKE) return;
-    if (g_draft.count > 0) {
-        const last = g_draft.points[g_draft.count - 1];
-        if (last.gx == gx and last.gz == gz) return;
-    }
-    g_draft.points[g_draft.count] = .{ .gx = gx, .gz = gz };
-    g_draft.count += 1;
+    transport.addDraftPoint(.{ .gx = gx, .gz = gz });
 }
 
 pub fn draftPointCount() usize {
-    return if (g_draft_active) g_draft.count else 0;
+    return transport.draftPointCount();
 }
 
 pub fn cancelDraft() void {
-    g_draft_active = false;
+    transport.cancelDraft();
 }
 
 /// Commit the draft as a stroke. Null when the draft has < 2 points or the
 /// table is full (LOUD contract: callers surface both, never drop silently).
 pub fn commitDraft() ?u32 {
-    if (!g_draft_active or g_draft.count < 2) return null;
-    for (&g_strokes) |*slot| {
-        if (slot.used) continue;
-        slot.* = g_draft;
-        slot.id = g_next_id;
-        g_next_id += 1;
-        g_draft_active = false;
-        return slot.id;
-    }
-    return null;
+    return transport.commitDraft();
 }
 
 pub fn deleteStroke(id: u32) bool {
-    for (&g_strokes) |*slot| {
-        if (slot.used and slot.id == id) {
-            slot.used = false;
-            return true;
-        }
-    }
-    return false;
+    return transport.kindForId(id) == .road and transport.deletePath(id);
 }
 
 pub fn strokeCount() usize {
-    var n: usize = 0;
-    for (&g_strokes) |*slot| {
-        if (slot.used) n += 1;
-    }
-    return n;
+    return transport.countKind(.road);
 }
 
 /// Materialize the table as RoadStroke views for planRoads/deriveJunctions.
 /// buf.len must be ≥ MAX_STROKES to never drop.
 pub fn collectStrokes(buf: []RoadStroke) usize {
+    var paths: [transport.MAX_PATHS]transport.Path = undefined;
+    const path_count = transport.collectPaths(paths[0..]);
     var n: usize = 0;
-    for (&g_strokes) |*slot| {
-        if (!slot.used) continue;
+    for (paths[0..path_count]) |path| {
+        const profile = switch (path.profile) {
+            .road => |road| road,
+            else => continue,
+        };
         if (n >= buf.len) break;
-        buf[n] = .{ .id = slot.id, .points = slot.points[0..slot.count], .profile = slot.profile };
+        buf[n] = .{
+            .id = path.id,
+            .points = path.points,
+            .profile = profile,
+            .curve_radius_m = path.curve_radius_m,
+        };
         n += 1;
     }
     return n;
