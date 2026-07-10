@@ -13,7 +13,9 @@
 // and the placement renders painted, exactly like a baked cooked prop (req_2832:
 // an exported model lost its paintings at placement). Door exports additionally
 // carry one named leaf slot + the v6 door block and portal-preserving authored
-// frame boxes in the v7 collision block.
+// frame boxes in the v7 collision block. Ordinary editor models use that same
+// v7 block for Outliner-part collision bands, so a rising bridge is not reduced
+// to one floor-to-peak AABB.
 // The ref hash is FNV-1a over the mesh key, the SAME hash the loader
 // keys residency on (world_loader.zig liveMeshHash).
 
@@ -40,7 +42,7 @@ export type ResidentMesh = {
   slots?: { start: number; count: number }[];
   /** MESH_PROPS v6 two-state panel declaration; leafSlot indexes `slots`. */
   door?: { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean };
-  /** Local-frame authored colliders; Door Walls use jamb/header bands around the portal. */
+  /** Local-frame authored colliders: Outliner bands, or door jamb/header bands. */
   collisionBoxes?: ResidentCollisionBox[];
 };
 

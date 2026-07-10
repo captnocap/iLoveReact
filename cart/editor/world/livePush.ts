@@ -19,6 +19,7 @@ import { resolvePackageDir } from '../data/modelPackageStore';
 import { bindPaintSkinToCurrentMesh, listPaintSkins, PAINT_MESH_VERTEX_BYTES, PAINT_MESH_VERTEX_FLOATS } from '../data/paintVariants';
 import { packageMeshDoc, packageMeshDocParts } from '../data/hmscAssetCatalog';
 import { compileDoorMesh, DOOR_EXPORT_TUNING } from '../model/doorModel';
+import { compileOutlinerCollisionBoxes } from '../model/meshCollision';
 import type { ModelPackage } from '../data/types';
 
 const g: any = globalThis;
@@ -65,7 +66,12 @@ function residentMeshFor(
   vertices: Float32Array,
   png?: Uint8Array,
 ): ResidentMesh | null {
-  if (ap.edit !== 'door' && ap.edit !== 'garageDoor') return { key, vertices, png };
+  if (ap.edit !== 'door' && ap.edit !== 'garageDoor') {
+    const doc = pkg ? packageMeshDoc(pkg) : null;
+    const parts = pkg ? packageMeshDocParts(pkg) : null;
+    const collisionBoxes = compileOutlinerCollisionBoxes(vertices, doc, parts);
+    return { key, vertices, png, ...(collisionBoxes.length > 0 ? { collisionBoxes } : {}) };
+  }
   if (!pkg) {
     console.warn(`[authored-door] '${ap.label}' has no model package; resident door skipped`);
     return null;
