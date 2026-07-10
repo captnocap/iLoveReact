@@ -1,0 +1,31 @@
+{
+  "id": "req_2890",
+  "at": "2026-07-10T16:30:45.075Z",
+  "origin": "codex:019f4b65",
+  "text": "you can just commit the entire file, the snippets is just dodging work uncommitted by other threads (which are inactive, so therefore you can sweep them)",
+  "status": "review",
+  "sessionId": "019f4b65-a93a-71a3-a333-4476f830a186",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T16:31:08.156Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T16:38:53.495Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Stopped partial hunk staging and swept the inactive shared-file work as requested. The complete map-document and Flip Face file sets were committed together, while unrelated generated model and screenshot artifacts remain untouched.",
+  "shas": [
+    "51100e49d",
+    "2d436d711"
+  ],
+  "resolvedAt": "2026-07-10T16:38:53.495Z"
+}

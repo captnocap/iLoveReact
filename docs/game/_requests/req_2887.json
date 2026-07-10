@@ -1,0 +1,28 @@
+{
+  "id": "req_2887",
+  "at": "2026-07-10T11:27:06.315Z",
+  "origin": "session:54e620c2",
+  "text": "hey we had a commit series not long ago that took our byte count on flora from something like 80 bytes per painted instance to a packed 24 byte which has brought great performance, a few things i want to ask, first is what was the shape of the code before and how does it compare to after, and then where else can we extend the same idea into other game shapes we are packing. i know claude said there was a lot of other places to get some wins with it, but for the time we mainly only did flora afaik. so check out what else we can hit and report back",
+  "status": "review",
+  "sessionId": "54e620c2-839a-4d1b-89bb-d585b2326ecf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T11:27:14.305Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T11:32:49.590Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Research/report ask, no code changed. Reconstructed the flora packing series: req_2016 d52881ea2 (palm fronds 80B InstanceData -> 24B FrondInstance + own GPU buffers, killed in-view despawn), req_2019 d990ee74f (generalized to SlimInstance for grass/bush/flower), req_2036 dc2b02dcc (universal InstanceData 80B->32B in place), req_2875/2876 930d61fbd (wrapped tree species on the 24B path). Surveyed the whole framework for remaining fat per-row structs and reported ranked candidates: Vertex 32B->20B (oct normals + f16 uv, the 256MiB retained vbuf, biggest win), TriInstance 80->36B, CapsuleInstance 48->24B (12B literal padding), GCurveFillInstance 40->28B, GlyphInstance 72->36B, yaw-only static InstanceData 32->24B, plus small pools (CurveInstance/RectInstance/SdfIcon). Universal easy win: every f32x4 color -> unorm8x4. Also confirmed the open leftover: world_loader.zig:5856 lod_budget still counts foliage rows against MAX_STATIC_INSTANCES so the far LOD shell clamps to 0 on big maps.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T11:32:49.590Z"
+}

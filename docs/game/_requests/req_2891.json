@@ -1,0 +1,28 @@
+{
+  "id": "req_2891",
+  "at": "2026-07-10T16:36:20.755Z",
+  "origin": "codex:019f4b65",
+  "text": "do you need me to test something is working for you, i see it destroyed the binary, i wouldnt use the shipping builds at this point in time, since everything is currently done on dev.",
+  "status": "review",
+  "sessionId": "019f4b65-a93a-71a3-a333-4476f830a186",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T16:36:49.093Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T16:38:53.503Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Stopped using the ship path for acceptance, treated its destroyed editor artifact as disposable, and provided a five-step dev-editor map-switch test covering clean creation, isolation, previous-map restore, and round-trip restore.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T16:38:53.503Z"
+}

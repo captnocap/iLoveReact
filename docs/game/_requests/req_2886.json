@@ -1,0 +1,30 @@
+{
+  "id": "req_2886",
+  "at": "2026-07-10T11:00:41.594Z",
+  "origin": "session:8452c1d5",
+  "text": "so there was a recent requst that claude landed where i asked about painting tooling, req_2879 and i am pretty sure i asked for it to be specific to the side i was painting on but it seems to be just consuming all the faces when i paint with it",
+  "status": "review",
+  "sessionId": "8452c1d5-9bbd-4caf-832a-8210fc1a5f17",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T11:00:51.684Z",
+      "actor": "fable-paint-faces",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T11:09:59.705Z",
+      "actor": "fable-paint-faces",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Found and fixed why Paint Faces (req_2879) looked like it painted every face: the per-face slot WRITE was always correct (piece.slots[role] per touched face), but the live-overlay renderer flattened it — pieceInstanceRows coloured EVERY decomposition box of a piece with the PRIMARY slot's material colour (pieceBaseHex), so painting one face recoloured the whole piece; only shader materials on the touched slab escaped via skin boxes. Fix: slotRefForBox (the role-explicit box→slot chain, back←bottom / sides←edges / front default / surface-covers-all) moved from pieceSkins.ts to pieceSlots.ts and now also drives pieces.ts pieceInstanceRows — each overlay box takes ITS OWN slot's colour, unpainted boxes keep the catalog look, door leaves and glass panes keep their fixed look, and shader slots still get real textures via skin boxes. Deleted the dead piece-wide tint (pieceBaseHex, primarySlotRole). Added 4 governance tests to pieceSlots.test.ts (11 total, all green: exterior brick + interior plaster on ONE wall stay independent); editor cart bundles clean; docs/game/editor_face_paint.md + _index record updated in the same commit.",
+  "shas": [
+    "c1e13cf44"
+  ],
+  "resolvedAt": "2026-07-10T11:09:59.705Z"
+}

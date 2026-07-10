@@ -1,0 +1,30 @@
+{
+  "id": "req_2881",
+  "at": "2026-07-10T10:32:47.485Z",
+  "origin": "codex:019f4b65",
+  "text": "the flora looks good, but i think you might have changed the map file out to get a test in, as loading back into it is blank but i see the painted patches you landed",
+  "status": "review",
+  "sessionId": "019f4b65-a93a-71a3-a333-4476f830a186",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T10:33:10.705Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T16:38:53.443Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the blank terrain plus surviving pieces as two fixed persistence files being reset independently, then replaced that setup with named map directories whose painting and world concerns switch through one transaction.",
+  "shas": [
+    "51100e49d"
+  ],
+  "resolvedAt": "2026-07-10T16:38:53.443Z"
+}

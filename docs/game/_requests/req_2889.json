@@ -1,0 +1,32 @@
+{
+  "id": "req_2889",
+  "at": "2026-07-10T11:35:47.360Z",
+  "origin": "session:54e620c2",
+  "text": "yes lets hit them, take out some big wins, they all seem rather straight forward",
+  "status": "review",
+  "sessionId": "54e620c2-839a-4d1b-89bb-d585b2326ecf",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T11:36:18.004Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T16:07:33.190Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Landed the packing series in three commits. (1) a561b6193: every per-frame 2D instance row slimmed — CapsuleInstance 48->24B, TriInstance 80->36B, GCurveFillInstance 40->28B, CurveInstance 64->32B (plus unreachable dash params stripped), GlyphInstance 72->48B, RectInstance 104->68B, SdfIconInstance 56->32B; new shared framework/gpu/pack.zig owns the quantizers; ~120MB reclaimed and dense-chart per-frame upload roughly halved. (2) 5d15ce41e: the universal mesh Vertex packed 32->20B (pos f32x3 + octahedral snorm16x2 normal + f16x2 uv) with packing at the upload boundary only — authoring/wire/mapfile stay raw f32 per V29; the 256MiB retained buffer now holds 13.4M verts instead of 8.4M, easing the cache-full silent mesh drops. (3) 0979c27cf: lod_budget stops counting slim-pool foliage rows against MAX_STATIC_INSTANCES, so the far LOD shell isn't clamped to 0 on big maps — the open tail of the flora series. Verified: editor builds green and full-scene self-shots render identical (shots/slim_pools_check.png, shots/slim_vertex_check.png).",
+  "shas": [
+    "a561b6193",
+    "5d15ce41e",
+    "0979c27cf"
+  ],
+  "resolvedAt": "2026-07-10T16:07:33.190Z"
+}

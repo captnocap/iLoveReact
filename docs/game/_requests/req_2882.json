@@ -1,0 +1,30 @@
+{
+  "id": "req_2882",
+  "at": "2026-07-10T10:36:16.790Z",
+  "origin": "codex:019f4b65",
+  "text": "its in a weird state of half-way reset and not. best way i can explain it is: build pieces/props, they are still placed it looks like. chunks are reset though, so that ends up with build pieces floating above nothing. because chunks are reset then the terrain/flora is reset. all in all, if for whatever reason the data is overwritten and gone, that is not really an issue, and i say this because the entire map i had saved was me over-painting flora to push the performance limits to make the performance better overall. so a new / clean map is not acctually a problem. but, whether or not this is the case, you should implement a more robust system in general that can handle generating a new map file, loading previous ones, and not carrying overing any authoring data from one to another (like how its clearly carrying build pieces into a new map file where the chunks were reset)",
+  "status": "review",
+  "sessionId": "019f4b65-a93a-71a3-a333-4476f830a186",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T10:36:35.406Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T16:38:53.452Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented isolated named map documents under zig-out/game/editor/maps: painting.rmap owns terrain/flora/roads/material bindings while world.json owns pieces, semantic objects, zones, and id sequence. New/Open flush, validate, bind, replace every authored slice, and roll back on failure; hot state is redacted; malformed saves are preserved and write-protected; the old fixed files migrate once into legacy.",
+  "shas": [
+    "51100e49d"
+  ],
+  "resolvedAt": "2026-07-10T16:38:53.451Z"
+}

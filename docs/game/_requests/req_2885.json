@@ -1,0 +1,36 @@
+{
+  "id": "req_2885",
+  "at": "2026-07-10T10:57:13.621Z",
+  "origin": "one-off",
+  "text": "hey can we adjust the agents md file or something to cover: codex keeps doing a lot of effort spent on trying to get visual verification for things that i can verify for them in like no t ime at all and will save us a lot of tokens, so when they need a visual verification, just ask me to get it for them",
+  "status": "review",
+  "sessionId": "019f4bab-c4f8-7782-9ad1-a1bce99f904d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T10:57:18.602Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    },
+    {
+      "at": "2026-07-10T16:37:30.292Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T16:38:53.477Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Updated the root AGENTS.md to stop agents spending time on self-directed visual verification: after automated checks they must give the user a short exact reproduction and ask for the visual/interactive acceptance result unless the user explicitly asks the agent to reproduce it.",
+  "shas": [
+    "2d436d711"
+  ],
+  "resolvedAt": "2026-07-10T16:38:53.477Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2883",
+  "at": "2026-07-10T10:40:57.677Z",
+  "origin": "codex:019f4b9c",
+  "text": "inside of the cart/editor when in the studio and i might extrude edge or i might create face between two edges, a lot of the time the face it makes is upsidedown to what i need and ive tried fighting with it now far too much for it to be worth my time, can u give me a simple flip face for this. so it literally just does a mirror of it on the opposite side please",
+  "status": "review",
+  "sessionId": "019f4b9c-7261-7f12-80ac-815143c753b3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T10:41:04.170Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T16:38:53.461Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Swept the completed Studio Flip Face path as whole files: selected face triangles reverse winding and normals while positions, UV corner attachment, grouping, paint, selection, and undo history stay intact; exposed through the host door, toolbar/menu/X binding, and Zig plus command tests.",
+  "shas": [
+    "51100e49d"
+  ],
+  "resolvedAt": "2026-07-10T16:38:53.461Z"
+}

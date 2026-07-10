@@ -1,0 +1,42 @@
+{
+  "id": "req_2884",
+  "at": "2026-07-10T10:53:48.352Z",
+  "origin": "codex:019f4ba1",
+  "text": "hey so there is in the framework regarding text rendering where the cursor follows the text being typed, and well the cursor from it seems doesnt know about a good number of characters so it falls behind when you add a space or some glyphs like {} [] \\ and what not",
+  "status": "review",
+  "sessionId": "019f4ba1-3139-7f92-835a-e187fcc056f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T10:53:54.369Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T11:05:50.551Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed in framework text metrics: caret/scroll/hit-test bypassed node font family and weight, omitted letter spacing, and the hit-test returned the prior byte. Styled glyph-advance unit test is green; ReleaseFast text_vs_input ship passes via isolated Zig cache. Running the required sustained frame-time gate next."
+    },
+    {
+      "at": "2026-07-10T11:25:57.797Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Frame-time gate: 60s text-heavy hidden run baseline ~4.16ms/240fps; text paint stayed 35-68us with no text/atlas/repaint spike class. Detector reported present/native scheduling spikes. An identical 60s empty control reproduced the same present/native ~100-frame spike classes with 2-8us paint, proving they are baseline environment noise rather than a regression from this change."
+    },
+    {
+      "at": "2026-07-10T16:38:53.470Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The inactive text-cursor fix was swept into the GPU packing commit: cursor advance now follows the same measured glyph/whitespace path as rendered text, with Zig coverage for spaces and punctuation such as braces, brackets, and backslashes.",
+  "shas": [
+    "a561b6193"
+  ],
+  "resolvedAt": "2026-07-10T16:38:53.470Z"
+}

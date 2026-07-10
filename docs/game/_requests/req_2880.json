@@ -1,0 +1,30 @@
+{
+  "id": "req_2880",
+  "at": "2026-07-10T10:28:10.314Z",
+  "origin": "session:0a537016",
+  "text": "hm. i am not really sure how to explain this problem other than for exactly what it is, but the agent who was just last doing the flora work, im pretty sure when testing, did something to spawn a new map file, and test on, well i dont really know how to switch back from the current editor, so uh can u help me haha",
+  "status": "review",
+  "sessionId": "0a537016-d7e6-44b6-b36d-e1c791a9e2a1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T10:28:25.439Z",
+      "actor": "fable-paint",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T16:38:53.435Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added an active-map pill and Map Workspaces dialog in cart/editor so the current named map is visible, previous maps can be reopened, and clean maps can be created without replacing files behind the editor.",
+  "shas": [
+    "51100e49d"
+  ],
+  "resolvedAt": "2026-07-10T16:38:53.435Z"
+}
