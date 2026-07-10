@@ -10,7 +10,8 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-pieceSlots.test.js
 
-import { faceRoleForHit, pieceSlotRoles } from './pieceSlots';
+import { faceRoleForHit, pieceSlotRoles, slotRefForBox } from './pieceSlots';
+import type { PlacedPiece } from './pieces';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -65,6 +66,41 @@ test('single-surface kinds take their one role from any face', () => {
 test('non-catalog ids expose no slots — nothing to paint', () => {
   assert(pieceSlotRoles('model:exported-wall').length === 0, 'authored ids have no catalog roles');
   assert(faceRoleForHit('model:exported-wall', 0, { x: 0, y: 0, z: 1 }) === null, 'authored hit is a no-op');
+});
+
+// ── slotRefForBox (req_2886) — a painted slot must govern ONLY its own box ──
+const pieceWith = (pieceId: string, slots: Record<string, { assetId: string }>): PlacedPiece =>
+  ({ id: 'p1', pieceId, x: 0, y: 0, z: 0, yawDegrees: 0, slots } as unknown as PlacedPiece);
+const govern = (p: PlacedPiece, slot: Parameters<typeof slotRefForBox>[1]): string | undefined => {
+  const ref = slotRefForBox(p, slot);
+  return ref && 'assetId' in ref ? ref.assetId : undefined;
+};
+
+test('painting a wall front governs the front slab ONLY — back/sides stay bare', () => {
+  const p = pieceWith(WALL, { front: { assetId: 'mat.red' } });
+  assert(govern(p, 'front') === 'mat.red', 'front slab wears the paint');
+  assert(govern(p, 'back') === undefined, 'back slab stays unpainted');
+  assert(govern(p, 'sides') === undefined, 'core stays unpainted');
+});
+
+test('exterior and interior of one wall hold DIFFERENT materials', () => {
+  const p = pieceWith(WALL, { front: { assetId: 'mat.brick' }, back: { assetId: 'mat.plaster' } });
+  assert(govern(p, 'front') === 'mat.brick', 'exterior keeps brick');
+  assert(govern(p, 'back') === 'mat.plaster', 'interior keeps plaster');
+});
+
+test('plate roles reach their boxes: bottom sliver is tagged back, edges are the core', () => {
+  const p = pieceWith(FLOOR, { top: { assetId: 'mat.tile' }, bottom: { assetId: 'mat.stucco' } });
+  assert(govern(p, 'top') === 'mat.tile', 'top sliver wears top');
+  assert(govern(p, 'back') === 'mat.stucco', "the plate's bottom sliver (tagged back) wears bottom");
+  assert(govern(p, 'sides') === undefined, 'unpainted edges stay bare');
+});
+
+test('single-surface slot covers every box; no slots at all governs nothing', () => {
+  const p = pieceWith('stairs.wood.common', { surface: { assetId: 'mat.wood' } });
+  assert(govern(p, 'top') === 'mat.wood', 'surface covers a top-tagged box');
+  assert(govern(p, 'front') === 'mat.wood', 'surface covers a front-tagged box');
+  assert(govern({ ...p, slots: undefined } as PlacedPiece, 'front') === undefined, 'bare piece has no governing ref');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

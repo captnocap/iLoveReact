@@ -30,6 +30,17 @@ export const editor_face_paint: DocIndex = {
       status: 'live',
     },
     {
+      name: 'slotRefForBox per-box overlay colours',
+      purpose: ['building', 'texture_bake'],
+      kind: 'utility',
+      sourceFile: 'cart/editor/world/pieceSlots.ts',
+      description:
+        'The role-explicit slot chain governing ONE decomposition box (back←bottom, sides←edges, front default, surface/face covers all) — moved from pieceSkins into pieceSlots and now ALSO drives pieces.ts pieceInstanceRows: each live-overlay box takes its OWN slot\'s material colour, unpainted boxes keep the catalog look. Fixes req_2886 — the old piece-wide pieceBaseHex (primary slot tints everything) made one painted face recolour the whole piece; primarySlotRole is deleted with it. Doors/glass keep their fixed look; shader slots additionally get real textures via pieceSkins skin boxes.',
+      dependsOn: ['pieceSlotRoles'],
+      consumers: ['cart/editor/world/pieces.ts', 'cart/editor/world/pieceSkins.ts'],
+      status: 'live',
+    },
+    {
       name: 'paint-faces tool (WorldViewport paint gesture)',
       purpose: ['ui', 'interaction', 'building'],
       kind: 'component',

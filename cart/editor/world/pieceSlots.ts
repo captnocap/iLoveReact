@@ -10,6 +10,8 @@
 // placed piece carry per-instance material assignments today.
 import { catalogRowFor } from './buildCatalog';
 import type { BuildKind } from './buildCatalog';
+import type { FaceSlot } from './pieceShapes';
+import type { MaterialRef, PlacedPiece } from './pieces';
 
 // Role sets mirror what the piece's decomposition can actually WEAR (pieceShapes
 // tags every box with a FaceSlot; pieceSkins maps role → box). Plates carry the
@@ -33,16 +35,33 @@ const SLOTS_BY_KIND: Record<BuildKind, string[]> = {
 };
 
 /** The material-slot roles a piece exposes, from its catalog kind (empty for a
- *  non-catalog id). The FIRST role is the piece's PRIMARY slot — the one whose
- *  assigned material tints the live-overlay box (Phase 4). */
+ *  non-catalog id). (The Phase-4 "primary slot tints the whole live box" rule
+ *  is gone — req_2886: overlay colours resolve per-box via slotRefForBox.) */
 export function pieceSlotRoles(pieceId: string): string[] {
   const row = catalogRowFor(pieceId);
   return row ? SLOTS_BY_KIND[row.kind] ?? ['surface'] : [];
 }
 
-/** The primary slot role (drives the overlay tint), or null if the piece has none. */
-export function primarySlotRole(pieceId: string): string | null {
-  return pieceSlotRoles(pieceId)[0] ?? null;
+/** The material governing a decomposition box: the piece's slot for that box's
+ *  face role. Chains are ROLE-EXPLICIT (req_2745): a plate's bottom sliver is
+ *  tagged 'back' and its core 'sides', so those boxes read the plate role names
+ *  (bottom/edges) too. A single-body piece's one slot (surface/face) covers
+ *  every box. The old cross-face tails (back ← front ← top …) are gone — they
+ *  made a targeted "just the top" assignment bleed onto every face, which is
+ *  exactly what face targeting rules out. Shared by the skin renderer
+ *  (pieceSkins) AND the flat live-overlay colours (pieces.pieceInstanceRows) so
+ *  a painted face lands on the same slab in both looks (req_2886). */
+export function slotRefForBox(piece: PlacedPiece, boxSlot: FaceSlot | undefined): MaterialRef | undefined {
+  const s = piece.slots;
+  if (!s) return undefined;
+  const any = s.surface ?? s.face;
+  switch (boxSlot) {
+    case 'back': return s.back ?? s.bottom ?? any;
+    case 'sides': return s.sides ?? s.edges ?? any;
+    case 'top': return s.top ?? any;
+    case 'front':
+    default: return s.front ?? any;
+  }
 }
 
 const DEG = Math.PI / 180;

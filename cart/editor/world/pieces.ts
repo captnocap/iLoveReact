@@ -15,8 +15,8 @@
 
 import { buildCatalogIndex, validateBuildPlacement } from '@reactjit/runtime/game/build';
 import { catalogRowFor, rowHex, type BuildKind } from './buildCatalog';
-import { primarySlotRole } from './pieceSlots';
-import { pieceVisualShapes } from './pieceShapes';
+import { slotRefForBox } from './pieceSlots';
+import { pieceVisualShapes, type FaceSlot } from './pieceShapes';
 import { authoredPieceFor, isAuthoredPiece, type PlaceableKind } from './authoredRegistry';
 import { authoredMeshBounds, type MeshBounds } from './authoredMesh';
 import { assetById } from '../data/catalog';
@@ -395,15 +395,14 @@ function hexToRgb(hex: string): [number, number, number] {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
-/** The base colour a placed piece's solid faces draw with: its PRIMARY material
- *  slot's assigned material colour (req_2563 Phase 4) when set, else the catalog
- *  look. Stage B replaces this flat colour with real textures via skin boxes. */
-export function pieceBaseHex(piece: PlacedPiece): string {
-  const role = primarySlotRole(piece.pieceId);
-  const ref = role ? piece.slots?.[role] : undefined;
-  if (ref && 'assetId' in ref) return assetById(ref.assetId).color;
-  const row = catalogRowFor(piece.pieceId);
-  return row ? rowHex(row) : '#aaaaaa';
+/** The flat colour ONE decomposition box draws with: the material bound to the
+ *  slot GOVERNING that box (the same slotRefForBox chain the skin renderer
+ *  reads), else the catalog look. This is per-box on purpose (req_2886): the
+ *  old piece-wide primary-slot colour meant painting one face recoloured every
+ *  face of the piece — exactly the bleed the Paint Faces tool rules out. */
+function boxColorHex(piece: PlacedPiece, slot: FaceSlot | undefined, catalogHex: string): string {
+  const ref = slotRefForBox(piece, slot);
+  return ref && 'assetId' in ref ? assetById(ref.assetId).color : catalogHex;
 }
 
 /** Pack placed pieces into the world_loader live-overlay rows — 12 floats each
@@ -416,7 +415,8 @@ export function pieceInstanceRows(pieces: readonly PlacedPiece[]): Float32Array 
   const rows: number[] = [];
   for (const piece of pieces) {
     if (isAuthoredPiece(piece.pieceId)) continue; // authored meshes render via the mesh-prop path
-    const shapes = pieceVisualShapes(piece, pieceBaseHex(piece));
+    const row = catalogRowFor(piece.pieceId);
+    const shapes = pieceVisualShapes(piece, row ? rowHex(row) : '#aaaaaa');
     if (!shapes.length) {
       console.warn(`[world] no shapes for piece '${piece.pieceId}' — not rendered live`);
       continue;
@@ -424,11 +424,14 @@ export function pieceInstanceRows(pieces: readonly PlacedPiece[]): Float32Array 
     for (const shape of shapes) {
       if (shape.kind === 'box') {
         const b = shape.box;
-        const rgb = hexToRgb(b.color);
+        // Door leaves and the glass pane keep their own fixed look; every other
+        // box takes ITS slot's material colour (per-face, req_2886).
+        const hex = b.door || b.opacity !== undefined ? b.color : boxColorHex(piece, b.slot, b.color);
+        const rgb = hexToRgb(hex);
         rows.push(b.cx, b.cy, b.cz, 0, b.yawDegrees, 0, b.sx, b.sy, b.sz, rgb[0], rgb[1], rgb[2]);
       } else {
         const r = shape.ramp;
-        const rgb = hexToRgb(r.color);
+        const rgb = hexToRgb(boxColorHex(piece, r.slot, r.color));
         // Bounding-box approximation for the live overlay (base at r.y, rises to height).
         rows.push(r.x, r.y + r.height / 2, r.z, 0, r.yawDegrees, 0, r.width, Math.max(r.height, r.slabThickness), r.depth, rgb[0], rgb[1], rgb[2]);
       }

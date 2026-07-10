@@ -11,8 +11,9 @@
 //      them) and emit a 32-byte skin box referencing that material's hash.
 //   3. WorldViewport pushes the materials via __compiled_world_set_live_material
 //      and the boxes via __compiled_world_set_live_skin_boxes.
-import { pieceVisualShapes, type FaceSlot } from './pieceShapes';
+import { pieceVisualShapes } from './pieceShapes';
 import type { MaterialRef, PlacedPiece } from './pieces';
+import { slotRefForBox } from './pieceSlots';
 import { assetById } from '../data/catalog';
 
 export type LiveMaterial = { hash: number; wgsl: string; data: number[]; opacity: number };
@@ -27,26 +28,6 @@ function fnv1a(s: string): number {
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
-}
-
-/** The material governing a decomposition box: the piece's slot for that box's
- *  face role. Chains are ROLE-EXPLICIT (req_2745): a plate's bottom sliver is
- *  tagged 'back' and its core 'sides', so those boxes read the plate role names
- *  (bottom/edges) too. A single-surface piece's one slot (surface/face) covers
- *  every box. The old cross-face tails (back ← front ← top …) are gone — they
- *  made a targeted "just the top" assignment bleed onto every face, which is
- *  exactly what face targeting rules out. */
-function slotRefForBox(piece: PlacedPiece, boxSlot: FaceSlot | undefined): MaterialRef | undefined {
-  const s = piece.slots;
-  if (!s) return undefined;
-  const any = s.surface ?? s.face;
-  switch (boxSlot) {
-    case 'back': return s.back ?? s.bottom ?? any;
-    case 'sides': return s.sides ?? s.edges ?? any;
-    case 'top': return s.top ?? any;
-    case 'front':
-    default: return s.front ?? any;
-  }
 }
 
 /** Resolve a slot material ref to a live WGSL material, or null if it isn't a

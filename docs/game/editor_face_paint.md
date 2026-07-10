@@ -33,8 +33,10 @@ never fight.
   single-surface kinds their one role, sign `face`. The host local frame at odd
   quarter turns lands on the SAME slab `pieceShapes` tags via its
   frontSlot/backSlot swap — so the painted role is exactly the slot the skin
-  renderer (`pieceSkins.ts slotRefForBox`) reads for the touched slab. Proven
-  by `cart/editor/world/pieceSlots.test.ts` (7 cases incl. the yaw-90 swap).
+  renderer reads for the touched slab (`slotRefForBox`, now home in
+  `pieceSlots.ts`, shared by skins + overlay colours). Proven by
+  `cart/editor/world/pieceSlots.test.ts` (11 cases incl. the yaw-90 swap and
+  the per-box governance suite).
 - `cart/editor/world/worldTool.ts` maps command `paint-faces` → tool
   `paintFace`; `cart/editor/data/commands.ts` registers the Build command
   (icon Paintbrush, key `N`, not selection-gated — the touch provides the
@@ -48,6 +50,15 @@ never fight.
   one write path `assignPieceSlotAsset` (req_2737) with the browser's
   `activeAssetId` — every paint records a real world-undo entry and feeds the
   RECENT materials row, same as the quick menu and Inspector.
+- `cart/editor/world/pieces.ts pieceInstanceRows` (req_2886): the live-overlay
+  flat colour resolves PER DECOMPOSITION BOX through the same
+  `pieceSlots.ts slotRefForBox` chain the skin renderer uses — a painted slot
+  recolours only its own slab. (Before this fix every box took the PRIMARY
+  slot's colour — `pieceBaseHex` — so painting one face looked like it consumed
+  the whole piece even though `piece.slots` was written per-face correctly.)
+  Door leaves and the glass pane keep their fixed look. Shader materials
+  additionally get their real texture via `pieceSkins.ts` skin boxes;
+  non-shader materials show as their per-face flat colour.
 
 ## Relationship to the other paint modes
 
