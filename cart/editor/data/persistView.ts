@@ -17,7 +17,7 @@
 import { getHotState, setHotState } from '../../../runtime/hooks/useHotState';
 import { initialState, defaultModelTool } from './initialState';
 import { readWorldSave } from './worldStore';
-import { createMapDocument, setActiveMapDocumentStem } from './mapDocuments';
+import { createMapDocument, mapDocumentName, setActiveMapDocumentStem } from './mapDocuments';
 import { loadGlobalsSave } from './globalsStore';
 import type { EditorState } from './types';
 
@@ -62,6 +62,7 @@ export function loadPersistedState(): EditorState {
       const recoveryStem = createMapDocument(`${damagedStem}-recovery`);
       if (!setActiveMapDocumentStem(recoveryStem)) throw new Error('could not commit the recovery pointer');
       base.activeMapStem = recoveryStem;
+      base.activeMapName = mapDocumentName(recoveryStem);
       bootStatus = `${damagedStem}/world.json is malformed and was preserved (${damageError}); opened clean recovery map ${recoveryStem}`;
       load = { status: 'missing', save: null, migratedLegacy: false };
     } catch (error) {
@@ -103,6 +104,7 @@ export function loadPersistedState(): EditorState {
     ...saved,
     ...RESET_ON_RELOAD,
     activeMapStem: base.activeMapStem,
+    activeMapName: base.activeMapName,
     worldPieces: base.worldPieces,
     objects: base.objects,
     selectedObjectId: base.selectedObjectId,

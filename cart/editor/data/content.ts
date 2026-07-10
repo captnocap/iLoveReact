@@ -5,7 +5,7 @@ import { isMaterialized, listPackageFiles, type PackageFile } from './modelPacka
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 import { allocateBuildStarterModelId, allocatePlayerModelId, allocatePrimitiveModelId, BUILD_STARTER_MODEL_ID_PREFIX, PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
 import { commandById, PRIMITIVE_MESHES } from './commands';
-import { buildPieceStarter } from './buildStarters';
+import { buildPieceStarter, type BuildPieceStarterId } from './buildStarters';
 import { playerStarterSkeleton } from '../model/playerStarter';
 import { INITIAL_OBJECTS } from './initialState';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, PrimitiveKind, WorkspaceDocument, WorldObject } from './types';
@@ -243,16 +243,16 @@ export function buildStarterModelPackage(id: string): ModelPackage {
   if (!id.startsWith(BUILD_STARTER_MODEL_ID_PREFIX)) throw new Error(`not a build starter id: ${id}`);
   const suffix = id.slice(BUILD_STARTER_MODEL_ID_PREFIX.length);
   const split = suffix.lastIndexOf(':');
-  const kind = (split >= 0 ? suffix.slice(0, split) : suffix) as BuildKind;
+  const starterId = (split >= 0 ? suffix.slice(0, split) : suffix) as BuildPieceStarterId;
   const seq = split >= 0 ? suffix.slice(split + 1) : '';
-  const starter = buildPieceStarter(kind);
-  if (!starter) throw new Error(`unknown build starter kind: ${kind}`);
+  const starter = buildPieceStarter(starterId);
+  if (!starter) throw new Error(`unknown build starter: ${starterId}`);
   const row = catalogRowFor(starter.catalogPieceId);
   return {
     id,
     folderId: 'models-build',
     name: seq ? `${starter.name} ${seq}` : starter.name,
-    path: `starter/build/${kind}`,
+    path: `starter/build/${starterId}`,
     kind: 'build',
     stage: 'wip',
     color: row ? rowHex(row) : '#8f99a5',
@@ -265,12 +265,12 @@ export function buildStarterModelPackage(id: string): ModelPackage {
     atlases: [],
     paints: [],
     sourceKind: 'build-starter',
-    semanticKind: kind,
+    semanticKind: starter.edit ?? starter.kind,
   };
 }
 
-export function nextBuildStarterDocId(kind: BuildKind, docs: WorkspaceDocument[]): string {
-  return allocateBuildStarterModelId(kind, docs, MODEL_PACKAGES, (id) => isMaterialized('build', id));
+export function nextBuildStarterDocId(starterId: BuildPieceStarterId, docs: WorkspaceDocument[]): string {
+  return allocateBuildStarterModelId(starterId, docs, MODEL_PACKAGES, (id) => isMaterialized('build', id));
 }
 
 export function modelPackageById(id: string): ModelPackage | null {

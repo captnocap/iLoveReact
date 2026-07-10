@@ -84,6 +84,8 @@ test('build starters reserve identities per semantic kind', () => {
   const floor = allocateBuildStarterModelId('floor', docs, [], (id) => id === 'starter:build:floor:1');
   assert(wall === 'starter:build:wall:2', `reused open wall starter id: ${wall}`);
   assert(floor === 'starter:build:floor:2', `reused stored floor starter id: ${floor}`);
+  const door = allocateBuildStarterModelId('door-wall', docs, [], (id) => id === 'starter:build:door-wall:1');
+  assert(door === 'starter:build:door-wall:2', `door variant collided with the base wall identity: ${door}`);
 });
 
 log(`\n${passed} passed, ${failed} failed`);

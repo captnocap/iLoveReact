@@ -10,7 +10,7 @@
 // (pieces.ts, WorldViewport) can resolve an authored piece by id without
 // threading EditorState through every call — the same module-level pattern
 // buildCatalog uses.
-import { catalogByKind, catalogRowFor, rowHex, KIND_LABEL, KIND_ORDER, type BuildKind } from './buildCatalog';
+import { catalogByKind, catalogRowFor, rowHex, KIND_LABEL, KIND_ORDER, type BuildKind, type WallEdit } from './buildCatalog';
 import { listPaintSkins, type PaintSkin } from '../data/paintVariants';
 import { modelPackageById } from '../data/content';
 
@@ -30,6 +30,8 @@ export type AuthoredBuildPiece = {
   label: string;
   /** base-piece affinity (drives grid snap, edge vs grid) — or 'prop' (free place). */
   kind: PlaceableKind;
+  /** Meaningful wall edit preserved by export (door/garageDoor are interactive). */
+  edit?: WallEdit;
   /** swatch colour for the build-bar chip. */
   hex: string;
 };
@@ -49,8 +51,8 @@ export function isAuthoredPiece(pieceId: string): boolean {
 // ── paint SKINS on placeable ids (req_2834) ───────────────────────────────────
 // A stored painting is catalog variety on the exported placeable (V24: "variety
 // lives in the CATALOG"): `prop:<modelId>#p<skinId>` places the model wearing
-// paint skin <skinId>. The suffix rides authoredModelIdOf's result, so the
-// resident-mesh key `<modelId>#p<skinId>` resolves the per-skin mesh everywhere
+// paint skin <skinId>. The suffix rides authoredResidentKeyOf's result, so the
+// resident-mesh key `<placeableId>#p<skinId>` resolves the per-skin mesh everywhere
 // (ghost, live refs, colliders) with no other id plumbing.
 const SKIN_MARK = '#p';
 
@@ -65,10 +67,14 @@ export function paintSkinIdOf(pieceId: string): string | null {
   return at >= 0 ? pieceId.slice(at + SKIN_MARK.length) : null;
 }
 
-/** `model:<modelId>` / `prop:<modelId>` (+ optional `#p<skin>`) → the resident-mesh
- *  + ref key. The skin suffix STAYS — `<modelId>#p<skin>` is the per-skin mesh key. */
-export function authoredModelIdOf(pieceId: string): string {
-  return pieceId.slice(pieceId.indexOf(':') + 1);
+/**
+ * The resident key keeps the EXPORTED MEANING (`model:` vs `prop:`), not just
+ * geometry identity. One mesh can be exported with different gameplay metadata
+ * (a Door Wall and a prop); collapsing both to the bare model id made whichever
+ * resident row decoded last silently win. Paint-skin suffixes remain part of it.
+ */
+export function authoredResidentKeyOf(pieceId: string): string {
+  return pieceId;
 }
 
 /** Mirror EditorState.authoredBuildPieces here (called from AppFrame on change). */

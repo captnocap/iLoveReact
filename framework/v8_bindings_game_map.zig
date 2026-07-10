@@ -20,6 +20,7 @@
 //!   __map_stroke_end() -> Float32 ArrayBuffer [samples, stamps, touched, waterDry]
 //!   __map_event_drain() -> Float32 ArrayBuffer [count, fixed event rows…]
 //!   __map_save_file(path) / __map_load_file(path) -> 0|1
+//!   __map_inspect_file(path) -> Float32 ArrayBuffer [version, chunkCount]
 //!   __map_set_autosave_file(path) -> 0|1        — micro-save target (req_2765)
 //!   __map_stats() -> Float32 ArrayBuffer [chunkCount, dirtyChunks]
 //!   __map_read_height(cx, cz) / __map_read_water(cx, cz)
@@ -488,6 +489,38 @@ fn hostSaveFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnF64(info, 1);
 }
 
+// __map_inspect_file(path) -> [version, chunkCount] — read only the bounded
+// RMAP header. This is deliberately separate from hostLoadFile: listing an
+// inactive workspace must never replace the live native map.
+var inspect_file_out: [2]f32 = undefined;
+
+fn hostInspectFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path = argStringAlloc(alloc, info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    defer alloc.free(path);
+    var file = std.fs.cwd().openFile(path, .{}) catch {
+        setReturnNull(info);
+        return;
+    };
+    defer file.close();
+    var prefix: [engine.store.INSPECT_PREFIX_BYTES]u8 = undefined;
+    const read = file.readAll(prefix[0..]) catch {
+        setReturnNull(info);
+        return;
+    };
+    const summary = engine.store.inspectHeader(prefix[0..read]) orelse {
+        setReturnNull(info);
+        return;
+    };
+    inspect_file_out[0] = @floatFromInt(summary.version);
+    inspect_file_out[1] = @floatFromInt(summary.chunk_count);
+    setReturnF32Buffer(info, inspect_file_out[0..]);
+}
+
 // __map_set_autosave_file(path) -> 0|1 — register the painting's micro-save
 // target (SESSIONSAVE req_2765): every mutating gesture from here on rewrites
 // this file atomically host-side. Empty string disables.
@@ -598,6 +631,7 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_road_delete", hostRoadDelete);
     v8_runtime.registerHostFn("__map_road_stats", hostRoadStats);
     v8_runtime.registerHostFn("__map_save_file", hostSaveFile);
+    v8_runtime.registerHostFn("__map_inspect_file", hostInspectFile);
     v8_runtime.registerHostFn("__map_set_autosave_file", hostSetAutosaveFile);
     v8_runtime.registerHostFn("__map_load_file", hostLoadFile);
     v8_runtime.registerHostFn("__map_stroke_begin", hostStrokeBegin);

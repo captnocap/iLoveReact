@@ -36,10 +36,17 @@ import { PIECE_ROTATION_STEP_DEGREES, placementSlotKey } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
-import type { BuildKind } from '../world/buildCatalog';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { emptyWorldSave, flushWorldSave, readWorldSave, saveWorldNow, scheduleWorldSave, type WorldSave } from '../data/worldStore';
-import { createMapDocument, listMapDocuments, setActiveMapDocumentStem } from '../data/mapDocuments';
+import {
+  createMapDocument,
+  deleteMapDocument,
+  listMapDocuments,
+  mapDocumentName,
+  recordMapDocumentRenderStats,
+  renameMapDocument,
+  setActiveMapDocumentStem,
+} from '../data/mapDocuments';
 import { mapAuthoringSlicesFor } from '../data/mapDocumentState';
 import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
@@ -65,7 +72,9 @@ import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor, resolveMateri
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
 import { playerStarterParts } from '../model/playerStarter';
 import { buildPieceStarterParts } from '../model/buildPieceStarter';
-import { buildPieceStarter } from '../data/buildStarters';
+import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarters';
+import { buildPieceExportTarget } from '../data/buildExports';
+import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
 import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage } from '../data/modelPackageStore';
 import { colorStudioSpec, colorStudioOverrideKey, paletteForSpecVariant, rgbToCss } from '../data/colorStudio';
@@ -339,7 +348,9 @@ export default function AppFrame() {
       const pkg = modelPackageById(p.pkgId);
       if (!pkg || !isMaterialized(pkg.kind, pkg.id)) continue;
       if (readManifest(pkg.kind, pkg.id)?.placeable) continue;
-      const placeable: ModelPlaceable = p.kind === 'prop' ? { as: 'prop' } : { as: 'build-piece', kind: p.kind };
+      const placeable: ModelPlaceable = p.kind === 'prop'
+        ? { as: 'prop' }
+        : { as: 'build-piece', kind: p.kind, ...(p.edit ? { edit: p.edit } : {}) };
       if (!updateManifestPlaceable(pkg.kind, pkg.id, { placeable })) {
         console.warn(`[export] placeable backfill FAILED for ${p.pkgId} — manifest not writable; this export stays localstore-only`);
       }
@@ -447,9 +458,16 @@ export default function AppFrame() {
   // replace the native painting → persist/point at target → replace every
   // React-authored map slice. Any failure reloads the just-flushed outgoing
   // painting and leaves the active pointer/state untouched.
-  const switchMapDocument = (stem: string, target: WorldSave, verb: 'opened' | 'created') => {
+  const switchMapDocument = (
+    stem: string,
+    target: WorldSave,
+    verb: 'opened' | 'created',
+    name = mapDocumentName(stem),
+    outgoingTriangles: number | null = null,
+  ) => {
+    if (outgoingTriangles !== null) recordMapDocumentRenderStats(state.activeMapStem, outgoingTriangles);
     if (stem === state.activeMapStem) {
-      setState((prev) => ({ ...prev, mapDocumentOpen: false, openMenu: null, status: `${stem} is already the active map` }));
+      setState((prev) => ({ ...prev, mapDocumentOpen: false, openMenu: null, status: `${name} is already the active map` }));
       return;
     }
     if (!mapHostLive()) {
@@ -492,24 +510,24 @@ export default function AppFrame() {
 
     setState((prev) => ({
       ...prev,
-      ...mapAuthoringSlicesFor(prev, stem, target, activation.bindings),
+      ...mapAuthoringSlicesFor(prev, stem, target, activation.bindings, name),
       openMenu: null,
       actionMenu: 'File',
-      status: `${verb} map ${stem} — ${activation.seeded ? 'clean seed chunk' : `${target.pieces.length} placed piece${target.pieces.length === 1 ? '' : 's'}`}; all map authoring switched together`,
+      status: `${verb} map ${name} — ${activation.seeded ? 'clean seed chunk' : `${target.pieces.length} placed piece${target.pieces.length === 1 ? '' : 's'}`}; all map authoring switched together`,
     }));
   };
 
-  const openMapDocument = (stem: string) => {
+  const openMapDocument = (stem: string, currentTriangles: number | null = null) => {
     const result = readWorldSave(stem);
     if (result.status === 'invalid') {
       setState((prev) => ({ ...prev, status: `cannot open ${stem} — ${result.error}; current map left untouched` }));
       return;
     }
     const target = result.save ?? emptyWorldSave(stem, state.seq);
-    switchMapDocument(stem, target, 'opened');
+    switchMapDocument(stem, target, 'opened', mapDocumentName(stem), currentTriangles);
   };
 
-  const createNewMap = (rawName = 'untitled') => {
+  const createNewMap = (rawName = 'untitled', currentTriangles: number | null = null) => {
     let stem: string;
     try {
       stem = createMapDocument(rawName);
@@ -517,7 +535,32 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: `could not create map — ${(error as Error).message}; current map left untouched` }));
       return;
     }
-    switchMapDocument(stem, emptyWorldSave(stem, state.seq), 'created');
+    switchMapDocument(stem, emptyWorldSave(stem, state.seq), 'created', mapDocumentName(stem), currentTriangles);
+  };
+
+  const renameExistingMap = (stem: string, rawName: string, currentTriangles: number | null): boolean => {
+    if (stem === state.activeMapStem && currentTriangles !== null) recordMapDocumentRenderStats(stem, currentTriangles);
+    const result = renameMapDocument(stem, rawName);
+    setState((prev) => ({
+      ...prev,
+      activeMapName: result.ok && stem === prev.activeMapStem ? result.name : prev.activeMapName,
+      status: result.ok ? `renamed map to ${result.name}` : `map rename failed — ${result.error}`,
+    }));
+    return result.ok;
+  };
+
+  const deleteExistingMap = (stem: string): boolean => {
+    const result = deleteMapDocument(stem, state.activeMapStem);
+    setState((prev) => ({
+      ...prev,
+      status: result.ok ? `deleted map ${result.name} entirely` : `map delete refused — ${result.error}`,
+    }));
+    return result.ok;
+  };
+
+  const closeMapDocuments = (currentTriangles: number | null) => {
+    if (currentTriangles !== null) recordMapDocumentRenderStats(state.activeMapStem, currentTriangles);
+    setState((prev) => ({ ...prev, mapDocumentOpen: false, status: 'map workspaces closed' }));
   };
 
   const runCommand = (commandId: string, source: string) => {
@@ -734,7 +777,14 @@ export default function AppFrame() {
       // key), stripped of the 'studio:' package prefix so residency + refs
       // agree. The status ALWAYS reports — a silent no-op is what made this
       // feel dead before.
-      const kind: PlaceableKind = command.id === 'export-prop' ? 'prop' : (command.id.slice('export-build-piece-'.length) as BuildKind);
+      const exportTarget = command.id === 'export-prop'
+        ? null
+        : buildPieceExportTarget(command.id.slice('export-build-piece-'.length));
+      const kind: PlaceableKind | null = command.id === 'export-prop' ? 'prop' : (exportTarget?.kind ?? null);
+      if (!kind) {
+        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `Unknown build-piece export target: ${command.id}` }));
+        return;
+      }
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
       // Effective package: the exported piece's label carries the renamed name (req_2620 S).
       const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
@@ -748,12 +798,34 @@ export default function AppFrame() {
       // and every future boot — resolves the mesh YOU SEE, never the parts' primitive
       // seeds. The manifest lands right after (firstMaterialize / placeable patch).
       const liveParts = state.modelParts[pkg.id];
+      // The declaration says this is a door; the named Outliner part says WHICH
+      // geometry moves. Keep both sides mandatory, exactly like the old Studio
+      // compiler, so a coincidental name never promotes a plain wall and an
+      // explicit Door Wall never silently cooks as a solid slab.
+      if (exportTarget?.edit === 'door' || exportTarget?.edit === 'garageDoor') {
+        const leaf = resolveDoorLeafPart(liveParts ?? []);
+        if (!leaf.ok) {
+          setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: leaf.error }));
+          return;
+        }
+      }
       const docWritten = writeModelArtifacts(pkg, partsMetaFromRows(liveParts ?? []));
       // Resolve the geometry through the ONE resolver the viewer uses — the package
       // meshdoc just written (host truth), else live seed parts, else the package
       // resolver. Cache it so the resident builder draws exactly what you see.
       const liveComposed = !docWritten && liveParts ? composeModelParts(liveParts).positions : null;
       const captured = (liveComposed && liveComposed.length >= 8 ? liveComposed : null) ?? modelPackageMeshData(pkg);
+      if (exportTarget?.edit === 'door' || exportTarget?.edit === 'garageDoor') {
+        const savedDoc = packageMeshDoc(pkg);
+        const savedParts = packageMeshDocParts(pkg);
+        const compiled = captured && savedDoc && savedParts
+          ? compileDoorMesh(captured, savedDoc, savedParts)
+          : { ok: false as const, error: 'Door Wall export could not read the saved mesh/Outliner document; Save Model to Library, then retry.' };
+        if (!compiled.ok) {
+          setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: compiled.error }));
+          return;
+        }
+      }
       if (captured && captured.length >= 8) cacheAuthoredMesh(modelId, captured);
       const verts = authoredMeshData(modelId, pkg.id);
       const vcount = verts ? Math.floor(verts.length / 8) : 0;
@@ -761,7 +833,9 @@ export default function AppFrame() {
       // Inspector's Rig section; else the stored skeleton re-projected) into the
       // exported skeleton — contact positions measured off the REAL mesh bounds,
       // never hand-typed. A build piece keeps whatever skeleton it already has.
-      const placeable: ModelPlaceable = kind === 'prop' ? { as: 'prop' } : { as: 'build-piece', kind };
+      const placeable: ModelPlaceable = kind === 'prop'
+        ? { as: 'prop' }
+        : { as: 'build-piece', kind, ...(exportTarget?.edit ? { edit: exportTarget.edit } : {}) };
       const bounds = authoredMeshBounds(modelId, pkg.id);
       const rig = state.modelRigs[pkg.id] ?? (pkg.skeleton ? skeletonToPropRig(pkg.skeleton) : {});
       const skeleton = kind === 'prop' && bounds ? propRigToSkeleton(modelId, modelId, rig, bounds) : pkg.skeleton;
@@ -781,13 +855,18 @@ export default function AppFrame() {
           : 'MANIFEST WRITE FAILED — export is session-only';
       }
       upsertSavedPackage(pkgExported); // the live roster carries the declaration this session
-      const piece: AuthoredBuildPiece = { id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color };
+      const piece: AuthoredBuildPiece = {
+        id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color,
+        ...(exportTarget?.edit ? { edit: exportTarget.edit } : {}),
+      };
       // A painted export contributes one palette tile per STORED painting, with
       // no extra mutable base duplicate. Arm the newest visible skin (or the
       // base fallback when there are no saved skins) so Export never arms a
       // hidden/stale entry that the tray itself does not offer.
       const armedPieceId = preferredAuthoredPaletteId(piece);
-      const kindLabel = kind === 'prop' ? `prop [${describePropRig(rig)}]` : `${kind} build piece`;
+      const kindLabel = kind === 'prop'
+        ? `prop [${describePropRig(rig)}]`
+        : `${exportTarget?.label ?? kind} build piece`;
       setState((prev) => ({
         ...prev,
         openMenu: null,
@@ -816,8 +895,8 @@ export default function AppFrame() {
       return;
     }
     if (command.id.startsWith('new-build-starter-')) {
-      const kind = command.id.slice('new-build-starter-'.length) as BuildKind;
-      createBuildPieceStarterDocument(kind);
+      const starterId = command.id.slice('new-build-starter-'.length) as BuildPieceStarterId;
+      createBuildPieceStarterDocument(starterId);
       return;
     }
     if (command.id === 'new-model-player') {
@@ -843,7 +922,7 @@ export default function AppFrame() {
         openMenu: null,
         actionMenu: 'File',
         mapDocumentOpen: true,
-        status: `map workspaces — ${prev.activeMapStem} is active`,
+        status: `map workspaces — ${prev.activeMapName} is active`,
       }));
       return;
     }
@@ -1799,6 +1878,7 @@ export default function AppFrame() {
   // A model in view is a list of PARTS (each its own mesh). These handlers own the parts
   // state; the surface composes them into the host mesh and reloads on change.
   const PART_TINTS = ['#c9b48f', '#8fb6c9', '#c98f9b', '#9cc98f', '#b49bc9', '#c9c08f', '#8fc9bb'];
+  const MODEL_PART_NAME_MAX_CHARS = 80;
   const activePartsModelId = (s: EditorState): string | null => {
     const doc = s.workspaceDocuments.find((d) => d.id === s.activeWorkspaceDocumentId);
     return doc?.kind === 'model' && doc.sourceId && s.modelParts[doc.sourceId] ? doc.sourceId : null;
@@ -1890,16 +1970,16 @@ export default function AppFrame() {
   // File → New Mesh → Build Pieces → <kind>: the catalog's canonical semantic
   // piece opened as one ordinary editable model part. No dimensions prompt: the
   // whole point is to start at the game's real module shape and build outward.
-  const createBuildPieceStarterDocument = (kind: BuildKind) => {
-    const starter = buildPieceStarter(kind);
+  const createBuildPieceStarterDocument = (starterId: BuildPieceStarterId) => {
+    const starter = buildPieceStarter(starterId);
     if (!starter) {
-      setState((prev) => ({ ...prev, openMenu: null, status: `unknown build-piece starter: ${kind}` }));
+      setState((prev) => ({ ...prev, openMenu: null, status: `unknown build-piece starter: ${starterId}` }));
       return;
     }
     setState((prev) => {
-      const mid = nextBuildStarterDocId(kind, prev.workspaceDocuments);
+      const mid = nextBuildStarterDocId(starterId, prev.workspaceDocuments);
       const doc = modelDocument(buildStarterModelPackage(mid));
-      const seeded = buildPieceStarterParts(kind);
+      const seeded = buildPieceStarterParts(starterId);
       if (seeded.length === 0) {
         return { ...prev, openMenu: null, status: `${starter.name} has no catalog geometry` };
       }
@@ -2058,8 +2138,8 @@ export default function AppFrame() {
         activeWorkspaceDocumentId: ANIMATION_DOCUMENT.id,
       }));
     } else if (kind?.startsWith('build:')) {
-      const buildKind = kind.slice('build:'.length) as BuildKind;
-      if (buildPieceStarter(buildKind)) createBuildPieceStarterDocument(buildKind);
+      const starterId = kind.slice('build:'.length) as BuildPieceStarterId;
+      if (buildPieceStarter(starterId)) createBuildPieceStarterDocument(starterId);
     } else if (kind && PRIMITIVE_MESHES.some((primitive) => primitive.kind === kind)) {
       createNewMeshDocument(kind as PrimitiveKind, { size: 1, height: 1, resolution: 1 });
     }
@@ -2166,6 +2246,26 @@ export default function AppFrame() {
     const part = mid ? (state.modelParts[mid] ?? []).find((p) => p.id === state.modelActivePartId) : null;
     (globalThis as any).__modelActivePartRange = part ? partRange(part) : null;
   }, [state.modelActivePartId, state.modelParts, state.activeWorkspaceDocumentId]);
+  const renamePart = (id: string, rawName: string) => {
+    const mid = activePartsModelId(state);
+    const name = rawName.trim().slice(0, MODEL_PART_NAME_MAX_CHARS);
+    if (!mid || !name) {
+      setState((prev) => ({ ...prev, status: !mid ? 'part not found' : 'part names cannot be blank' }));
+      return;
+    }
+    setState((prev) => {
+      const parts = prev.modelParts[mid] ?? [];
+      const part = parts.find((candidate) => candidate.id === id);
+      if (!part) return { ...prev, status: 'part not found' };
+      if (part.name === name) return prev;
+      return {
+        ...prev,
+        modelParts: { ...prev.modelParts, [mid]: parts.map((candidate) => (candidate.id === id ? { ...candidate, name } : candidate)) },
+        modelDirty: { ...prev.modelDirty, [mid]: true },
+        status: `renamed Outliner part "${part.name}" → "${name}"`,
+      };
+    });
+  };
   const toggleVisiblePart = (id: string) => {
     const mid = activePartsModelId(state);
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
@@ -2810,7 +2910,7 @@ export default function AppFrame() {
       if (key === 'escape') {
         if (block.id === 'new-mesh') setState((prev) => ({ ...prev, newMeshPrompt: null, status: `${prev.newMeshPrompt?.mode === 'add' ? 'add' : 'new'} mesh cancelled` }));
         else if (block.id === 'file-explorer') setState((prev) => ({ ...prev, fileExplorerOpen: false, status: 'asset explorer closed' }));
-        else if (block.id === 'map-documents') setState((prev) => ({ ...prev, mapDocumentOpen: false, status: 'map workspaces closed' }));
+        else if (block.id === 'map-documents') closeMapDocuments(null);
         else if (block.id === 'build-journal') setState((prev) => ({ ...prev, buildDialogOpen: false, status: 'build journal closed' }));
         else if (block.id === 'add-chunk') setState((prev) => ({ ...prev, addChunkOpen: false, status: 'add chunk closed' }));
         else if (block.id === 'import-image') setImportPlan(null);
@@ -3180,6 +3280,7 @@ export default function AppFrame() {
   // base mesh). onStampRanges stays unguarded — it's the viewer REPORTING ranges, not input.
   const outlinerHandlers = {
     onSelectPart: guarded(selectPart),
+    onRenamePart: guarded(renamePart),
     onToggleVisiblePart: guarded(toggleVisiblePart),
     onDeletePart: guarded(deletePart),
     onAddPart: guarded(addPart),
@@ -3464,9 +3565,12 @@ export default function AppFrame() {
           <MapDocumentsDialog
             current={state.activeMapStem}
             documents={listMapDocuments()}
+            measureCurrentTriangles={state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId)?.kind === 'world'}
             onOpen={openMapDocument}
             onNew={createNewMap}
-            onClose={() => setState((prev) => ({ ...prev, mapDocumentOpen: false, status: 'map workspaces closed' }))}
+            onRename={renameExistingMap}
+            onDelete={deleteExistingMap}
+            onClose={closeMapDocuments}
           />
         </RenderProbe>
       ) : null}

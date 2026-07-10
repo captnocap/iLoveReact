@@ -27,10 +27,27 @@ function minY(mesh: EditMesh): number {
 }
 
 test('starter registry covers the complete build-kind grammar in palette order', () => {
-  assert(BUILD_PIECE_STARTERS.map((starter) => starter.kind).join('|') === KIND_ORDER.join('|'), 'starter kind/order drift');
+  const base = BUILD_PIECE_STARTERS.filter((starter) => starter.id === starter.kind);
+  assert(base.map((starter) => starter.kind).join('|') === KIND_ORDER.join('|'), 'base starter kind/order drift');
   for (const starter of BUILD_PIECE_STARTERS) {
     const row = catalogRowFor(starter.catalogPieceId);
     assert(row?.kind === starter.kind, `${starter.name} points at ${row?.kind ?? 'missing'} catalog geometry`);
+  }
+});
+
+test('door variants are wall edits with a named frame and movable leaf', () => {
+  for (const id of ['door-wall', 'garage-door-wall'] as const) {
+    const starter = BUILD_PIECE_STARTERS.find((entry) => entry.id === id)!;
+    assert(starter.kind === 'wall', `${id} became a separate build kind`);
+    assert(starter.edit === (id === 'door-wall' ? 'door' : 'garageDoor'), `${id} lost its wall edit`);
+    const parts = buildPieceStarterParts(id);
+    assert(parts.length === 2, `${id} should seed frame + leaf, got ${parts.length}`);
+    assert(parts[0]?.name === 'Door Frame', `${id} frame is not meaningfully named`);
+    assert(parts[1]?.name === 'Door Leaf', `${id} leaf is not meaningfully named`);
+    for (const part of parts) {
+      assert(!!part.mesh && meshHealth(part.mesh).errors === 0, `${id}/${part.name} has invalid topology`);
+      assert(editMeshToGeometry(part.mesh!).positions.length > 0, `${id}/${part.name} emits no triangles`);
+    }
   }
 });
 

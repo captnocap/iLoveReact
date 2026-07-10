@@ -6,7 +6,16 @@
 //     --target=es2022 --alias:@reactjit/runtime=$ROOT/runtime \
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-map-documents.test.js
-import { MAP_DOCUMENT_STEM_MAX_CHARS, createMapDocument, mapDocumentPaths, sanitizeMapDocumentName } from './mapDocuments';
+import {
+  MAP_DOCUMENT_STEM_MAX_CHARS,
+  createMapDocument,
+  deleteMapDocument,
+  listMapDocuments,
+  mapDocumentPaths,
+  recordMapDocumentRenderStats,
+  renameMapDocument,
+  sanitizeMapDocumentName,
+} from './mapDocuments';
 import { emptyWorldSave, parseWorldSaveText, readWorldSave, saveWorldNow } from './worldStore';
 import { mapAuthoringSlicesFor } from './mapDocumentState';
 import { defaultMapPaint } from '../stage/mapPaint';
@@ -52,8 +61,29 @@ test('map names sanitize to isolated sibling directories', () => {
   const south = mapDocumentPaths('south-plaza');
   assert(north.painting !== south.painting, 'painting paths collided');
   assert(north.world !== south.world, 'world paths collided');
+  assert(north.metadata !== south.metadata, 'metadata paths collided');
   assert(north.painting.startsWith(`${north.dir}/`), 'painting escaped its document directory');
   assert(north.world.startsWith(`${north.dir}/`), 'world save escaped its document directory');
+});
+
+test('friendly rename and diagnostics retain a stable document id', () => {
+  const token = `${Date.now()}-${Math.trunc(Math.random() * 1_000_000)}`;
+  const kept = createMapDocument(`map-doc-meta-${token}`);
+  const removed = createMapDocument(`map-doc-delete-${token}`);
+  try {
+    const renamed = renameMapDocument(kept, 'North Plaza — Night');
+    assert(renamed.ok && renamed.name === 'North Plaza — Night', 'friendly title did not persist');
+    assert(recordMapDocumentRenderStats(kept, 123_456), 'render diagnostics did not persist');
+    const summary = listMapDocuments().find((document) => document.stem === kept);
+    assert(summary?.name === 'North Plaza — Night', 'catalog did not read friendly title');
+    assert(summary?.renderTriangles === 123_456, 'catalog did not read triangle snapshot');
+    assert(!deleteMapDocument(kept, kept).ok, 'active-map delete guard failed');
+    assert(deleteMapDocument(removed, kept).ok, 'inactive map directory was not removed');
+    assert(readFile(mapDocumentPaths(removed).metadata) === null, 'delete left metadata behind');
+  } finally {
+    remove(mapDocumentPaths(kept).dir);
+    remove(mapDocumentPaths(removed).dir);
+  }
 });
 
 test('world save rejects a document id from another directory', () => {
@@ -118,8 +148,9 @@ test('New/Open replaces every authored map slice instead of merging', () => {
   target.pieces = [piece('target-only')];
   target.objects = [object('target-trigger')];
   target.zones = [{ id: 'target-zone', name: 'Target', color: '#0f0' }];
-  const slices = mapAuthoringSlicesFor({ seq: 9, mapPaint: oldPaint }, 'clean-map', target, []);
+  const slices = mapAuthoringSlicesFor({ seq: 9, mapPaint: oldPaint }, 'clean-map', target, [], 'Clean Map');
   assert(slices.activeMapStem === 'clean-map', 'active stem not replaced');
+  assert(slices.activeMapName === 'Clean Map', 'active friendly name not replaced');
   assert(slices.worldPieces.length === 1 && slices.worldPieces[0]!.id === 'target-only', 'pieces merged or leaked');
   assert(slices.objects.length === 1 && slices.objects[0]!.id === 'target-trigger', 'semantic objects merged or leaked');
   assert(slices.selectedObjectId === 'target-trigger', 'selection did not move inside the target document');

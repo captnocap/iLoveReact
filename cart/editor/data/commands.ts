@@ -5,8 +5,8 @@
 // commandEnabled folds those into the sane-app "grayed-with-reason" state, and menuNodes
 // lays the registry out as the nested tree the dropdown renders. Pure data + pure helpers.
 import { activeSurface, hasSelection } from './surfaces';
-import { KIND_ORDER, KIND_LABEL } from '../world/buildCatalog';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
+import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
 export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Story', 'Globals', 'Window', 'Help'];
@@ -47,7 +47,7 @@ const NEW_PLAYER_MODEL_COMMAND: Command = {
 // Semantic building bases under File → New Mesh → Build Pieces. Unlike generic
 // primitives these open at the build catalog's real module dimensions and shape.
 const NEW_BUILD_STARTER_COMMANDS: Command[] = BUILD_PIECE_STARTERS.map((starter) => ({
-  id: `new-build-starter-${starter.kind}`,
+  id: `new-build-starter-${starter.id}`,
   menu: 'File',
   submenu: 'Build Pieces',
   name: starter.name,
@@ -73,8 +73,8 @@ const PAINT_RES_COMMANDS: Command[] = PAINT_RESOLUTIONS.map((px) => ({
 // Export → Build Piece → <kind> (req_2583): export the OPEN model as a placeable
 // build piece of the chosen base kind. One leaf per kind, under the nested Export
 // flyout — the parent grows as we add more export targets. Model scope.
-const EXPORT_BUILD_COMMANDS: Command[] = KIND_ORDER.map((k) => ({
-  id: `export-build-piece-${k}`, menu: 'File', submenu: 'Export Build Piece', name: KIND_LABEL[k], icon: 'PackagePlus',
+const EXPORT_BUILD_COMMANDS: Command[] = BUILD_PIECE_EXPORT_TARGETS.map((target) => ({
+  id: `export-build-piece-${target.id}`, menu: 'File', submenu: 'Export Build Piece', name: target.label, icon: 'PackagePlus',
   key: '', context: false, native: true, undoable: false, scope: 'model',
 }));
 

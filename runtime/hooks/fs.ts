@@ -78,7 +78,7 @@ export function mkdir(path: string): boolean {
   return callHost<boolean>('__fs_mkdir', false, path);
 }
 
-/** Remove a file or empty directory. */
+/** Remove a file or a directory tree recursively. */
 export function remove(path: string): boolean {
   return callHost<boolean>('__fs_remove', false, path);
 }

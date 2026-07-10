@@ -14,7 +14,7 @@ import type { EditMesh } from '../model/editMesh';
 import type { MapPaintState } from '../stage/mapPaint';
 import type { PlacedPiece } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
-import type { BuildKind } from '../world/buildCatalog';
+import type { BuildKind, WallEdit } from '../world/buildCatalog';
 import type { Skeleton, PropRig } from '../../../runtime/skeleton';
 import type { WorldGlobals } from './globals';
 
@@ -326,7 +326,9 @@ export type ModelOverride = { name?: string; favorite?: boolean; hidden?: boolea
 // the build palette: the compile bake is their consumer, not the build bar.
 export type CharacterRole = 'player' | 'npc';
 export type ModelPlaceable =
-  | { as: 'build-piece'; kind: BuildKind }
+  // A meaningful wall edit survives export as semantic data. Door/garageDoor
+  // additionally require the named Door Leaf Outliner contract at export.
+  | { as: 'build-piece'; kind: BuildKind; edit?: WallEdit }
   | { as: 'prop' }
   | { as: 'character'; role: CharacterRole };
 
@@ -453,6 +455,8 @@ export type EditorState = {
   mapDocumentOpen: boolean;
   /** Directory stem below zig-out/game/editor/maps/. */
   activeMapStem: string;
+  /** Friendly title from the stable document directory's metadata. */
+  activeMapName: string;
   /** Map → Add Chunk… topology dialog (req_2703) */
   addChunkOpen: boolean;
   eventbusPopoverOpen: boolean;

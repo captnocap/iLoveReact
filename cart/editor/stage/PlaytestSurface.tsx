@@ -11,8 +11,8 @@
 // The tab shows the authored world, not a stale bake: placed pieces + authored
 // meshes ride in through the SAME live doors the iso viewport pushes
 // (world/livePush.ts), and the painted map mirrors host-side automatically.
-// Live pieces are draw-only today (no colliders until the Compile bake), so the
-// walkable ground is the painted terrain — exactly what physics tuning needs.
+// Live pieces carry their colliders too; authored Door Walls additionally bring
+// the same movable leaf machine used by the compiled world.
 import { createElement, useEffect, useMemo, useRef } from 'react';
 import { Box, Row, Text } from '@reactjit/primitives';
 import { C } from '../workspace.cls';

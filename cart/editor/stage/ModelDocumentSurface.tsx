@@ -9,6 +9,7 @@ import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedM
 // the per-model parts from state.
 export type OutlinerHandlers = {
   onSelectPart: (id: string) => void;
+  onRenamePart: (id: string, name: string) => void;
   onToggleVisiblePart: (id: string) => void;
   onDeletePart: (id: string) => void;
   onAddPart: (kind: PrimitiveKind) => void;

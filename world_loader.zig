@@ -37,6 +37,7 @@ const constructor = @import("framework/world/constructor.zig");
 const foliage = @import("framework/world/foliage.zig");
 const flora_geometry = @import("framework/world/flora_geometry.zig");
 const instance_collider_policy = @import("framework/world/instance_collider_policy.zig");
+const live_mesh_doors = @import("framework/world/live_mesh_doors.zig");
 const streaming = @import("framework/world/streaming.zig");
 const game_physics = @import("framework/game/physics.zig");
 // MAPPAINT req_2473: the host-owned map painter. The loader renders its live
@@ -616,6 +617,35 @@ fn cookedDoorWorldBox(mesh: constructor.MeshPropMesh, inst: constructor.MeshProp
         .hinge_z = inst.z + (-hinge_lx * ss + lcz * cc),
         .reach = door.reach,
         .vehicle = door.vehicle,
+    };
+}
+
+/// Physics rect for a cooked door at its current swing progress. Shared by the
+/// editor-live generation builder and the per-frame baked/live door step so the
+/// panel cannot spawn closed for one physics frame after a state-preserving rebuild.
+fn cookedDoorRectFloats(cd: CookedDoor) [game_physics.RECT_FLOATS]f32 {
+    const theta = cd.progress * COOKED_DOOR_SWING_ARC_DEGREES * std.math.pi / 180.0;
+    const ct = @cos(theta);
+    const st = @sin(theta);
+    const ddx = cd.cx - cd.hinge_x;
+    const ddz = cd.cz - cd.hinge_z;
+    const scx = cd.hinge_x + (ddx * ct + ddz * st);
+    const scz = cd.hinge_z + (-ddx * st + ddz * ct);
+    const total = cd.yaw_degrees * std.math.pi / 180.0 + theta;
+    const tc = @abs(@cos(total));
+    const ts = @abs(@sin(total));
+    const hxw = tc * cd.half_w_local + ts * cd.half_d_local;
+    const hzw = ts * cd.half_w_local + tc * cd.half_d_local;
+    return .{
+        scx - hxw,
+        scz - hzw,
+        scx + hxw,
+        scz + hzw,
+        cd.base_y + cd.panel_h,
+        1,
+        DOOR_PANEL_FRICTION,
+        DOOR_PANEL_RESTITUTION,
+        cd.base_y,
     };
 }
 
@@ -3630,6 +3660,12 @@ pub const Runtime = struct {
     /// rects; the leaf is a mesh-prop slot node (custom art), not a box. The E
     /// toggle parks the rect + drops the node together. Owned slice.
     cooked_doors: []CookedDoor = &.{},
+    /// Door machines sourced from editor-live mesh refs (req_2895/req_2896).
+    /// Resident MESH_PROPS owns the same leaf-slot metadata as a baked door;
+    /// these parallel slices preserve transient state across live-ref rebuilds.
+    live_cooked_doors: []CookedDoor = &.{},
+    live_cooked_door_states: []live_mesh_doors.State = &.{},
+    live_cooked_door_by_identity: std.AutoHashMapUnmanaged(u64, usize) = .{},
     /// Live LED tickers (req_0893 #3): one MUTABLE instances node per ticker,
     /// whose lit-LED instance data we rebuild each frame as the scroll offset
     /// advances (the elevator-car live-node pattern, instanced). Buffers are
@@ -3662,6 +3698,10 @@ pub const Runtime = struct {
     /// live-mesh generation folded into the physics buffer, tracked separately so
     /// either overlay moving triggers the one shared rebuild.
     live_mesh_collider_gen: u64 = 0,
+    /// Resident metadata can change while placement refs stay identical (for
+    /// example re-exporting a wall as Door Wall), so it also invalidates the
+    /// live collider/door compilation boundary.
+    live_resident_collider_gen: u64 = 0,
     live_collider_warned: bool = false,
     // Live editor-placed MESH props (LIVEMESH req_1812): a just-placed imported/cooked
     // mesh prop renders instantly by REFERENCING an already-resident mesh (the user's
@@ -3932,6 +3972,7 @@ pub const Runtime = struct {
 
     pub fn deinit(self: *Runtime) void {
         self.mesh_by_hash.deinit(self.allocator);
+        self.live_cooked_door_by_identity.deinit(self.allocator);
         if (self.resident) |*res| res.deinit(self.allocator);
         self.resident_by_hash.deinit(self.allocator);
         self.baked_by_pos.deinit(self.allocator);
@@ -4002,6 +4043,10 @@ pub const Runtime = struct {
         if (self.interact.searched.len > 0) self.allocator.free(self.interact.searched);
         if (self.bodies.len > 0) self.allocator.free(self.bodies);
         if (self.cars.len > 0) self.allocator.free(self.cars);
+        if (self.doors_state.len > 0) self.allocator.free(self.doors_state);
+        if (self.cooked_doors.len > 0) self.allocator.free(self.cooked_doors);
+        if (self.live_cooked_doors.len > 0) self.allocator.free(self.live_cooked_doors);
+        if (self.live_cooked_door_states.len > 0) self.allocator.free(self.live_cooked_door_states);
         for (self.ticker_buffers) |buf| self.allocator.free(buf);
         if (self.ticker_buffers.len > 0) self.allocator.free(self.ticker_buffers);
         if (self.traffic_box_buf.len > 0) self.allocator.free(self.traffic_box_buf);
@@ -4141,6 +4186,17 @@ pub const Runtime = struct {
         return key;
     }
 
+    fn liveCookedDoorIndex(self: *Runtime, r: LiveMeshRef) ?usize {
+        const id = live_mesh_doors.identity(r.hash, r.x, r.y, r.z, r.yaw);
+        if (self.live_cooked_door_by_identity.get(id)) |index| return index;
+        // OOM while rebuilding the acceleration map must degrade to a small
+        // linear scan, never to a physical door whose visible leaf cannot move.
+        for (self.live_cooked_door_states, 0..) |state, index| {
+            if (state.identity == id) return index;
+        }
+        return null;
+    }
+
     // LIVEMESH req_1812: append draw node(s) for each live-placed mesh prop, referencing an
     // already-resident mesh. Called at the END of stepNow, after refreshStreamNodes rebuilt the
     // stream tail — so the streaming path truncated last frame's live nodes for us; the monolithic
@@ -4151,9 +4207,18 @@ pub const Runtime = struct {
     fn appendLiveMeshRef(self: *Runtime, r: LiveMeshRef, alpha: ?f32) void {
         const mesh = self.meshForHash(r.hash) orelse return;
         const inst: constructor.MeshPropInstance = .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw };
+        // A placement (never the translucent ghost) binds to the live two-state
+        // machine compiled by applyLiveColliders. Node indices are refreshed on
+        // every append because the live draw tail is rebuilt every frame.
+        const live_door_index = if (alpha == null and mesh.door != null) self.liveCookedDoorIndex(r) else null;
+        if (live_door_index) |di| {
+            if (di < self.live_cooked_doors.len) self.live_cooked_doors[di].node_child_count = 0;
+        }
         // No texture slots, or no per-slot mats (ghost / unskinned new placement) → the whole
         // mesh on one optional override (back-compat: a single-surface prop's lone skin).
-        if (mesh.slots.len == 0 or r.mats.len == 0) {
+        // A door MUST split even without material overrides: its leaf slot needs
+        // an independent node for the hinge animation.
+        if (mesh.door == null and (mesh.slots.len == 0 or r.mats.len == 0)) {
             const override: ?[]const u8 = if (r.mats.len > 0 and r.mats[0] != 0) self.live_mat_keys.get(r.mats[0]) else null;
             self.appendMeshPropNode(mesh, inst, mesh.key, 0, mesh.vertex_count, 0, alpha, override) catch {};
             return;
@@ -4171,7 +4236,24 @@ pub const Runtime = struct {
             const key = self.liveSlotKey(mesh, r.hash, @as(u32, @intCast(si + 1))) orelse mesh.key;
             const mat_hash: u32 = if (si < r.mats.len) r.mats[si] else 0;
             const override: ?[]const u8 = if (mat_hash != 0) self.live_mat_keys.get(mat_hash) else null;
+            const node_first = self.kid_list.items.len;
             self.appendMeshPropNode(mesh, inst, key, slot.start, slot.count, 0, alpha, override) catch {};
+            if (live_door_index) |di| {
+                if (di < self.live_cooked_doors.len) {
+                    if (mesh.door) |door| {
+                        if (si >= door.leaf_slot and self.kid_list.items.len > node_first) {
+                            if (self.live_cooked_doors[di].node_child_count == 0) {
+                                self.live_cooked_doors[di].node_child_first = node_first;
+                            }
+                            self.live_cooked_doors[di].node_child_count =
+                                self.kid_list.items.len - self.live_cooked_doors[di].node_child_first;
+                        }
+                    }
+                }
+            }
+        }
+        if (live_door_index) |di| {
+            if (di < self.live_cooked_doors.len) self.applyCookedDoorPose(&self.live_cooked_doors[di]);
         }
     }
 
@@ -6471,6 +6553,57 @@ pub const Runtime = struct {
         self.cooked_doors[index].open = !self.cooked_doors[index].open;
     }
 
+    /// Editor-live twin of toggleCookedDoor. The parallel State slice is the
+    /// reconciliation record carried across the next whole-ref replacement.
+    fn toggleLiveCookedDoor(self: *Runtime, index: usize) void {
+        if (index >= self.live_cooked_doors.len or index >= self.live_cooked_door_states.len) return;
+        const open = !self.live_cooked_doors[index].open;
+        self.live_cooked_doors[index].open = open;
+        self.live_cooked_door_states[index].open = open;
+    }
+
+    /// Apply one cooked door's current progress to its leaf nodes + physical
+    /// panel. Live nodes are rebuilt at the end of every frame, so this is also
+    /// called immediately after appendLiveMeshRef binds their fresh indices.
+    fn applyCookedDoorPose(self: *Runtime, cd: *CookedDoor) void {
+        const theta_deg = cd.progress * COOKED_DOOR_SWING_ARC_DEGREES;
+        const theta = theta_deg * std.math.pi / 180.0;
+        const ct = @cos(theta);
+        const st = @sin(theta);
+        const dx = cd.node_x - cd.hinge_x;
+        const dz = cd.node_z - cd.hinge_z;
+        // The leaf nodes (opaque frame + glass pane, req_2020) share one instance
+        // pose, so the SAME hinge swing applies to each: node_pos = hinge +
+        // Ry(theta)*(inst-hinge), matching the engine's m4rotateY.
+        const swung_x = cd.hinge_x + (dx * ct + dz * st);
+        const swung_z = cd.hinge_z + (-dx * st + dz * ct);
+        var ni: usize = 0;
+        while (ni < cd.node_child_count) : (ni += 1) {
+            const idx = cd.node_child_first + ni;
+            if (idx >= self.kid_list.items.len) break;
+            const node = &self.kid_list.items[idx];
+            node.scene3d_pos_x = swung_x;
+            node.scene3d_pos_z = swung_z;
+            node.scene3d_pos_y = cd.node_base_y;
+            node.scene3d_rot_y = cd.yaw_degrees + theta_deg;
+        }
+        // req_1960: the panel rect follows the swing and remains physical.
+        const at = self.physics_colliders.rectBase() + cd.rect_index * game_physics.RECT_FLOATS;
+        if (at + game_physics.RECT_FLOATS <= self.physics_colliders.values.len and cd.rect_index < self.physics_colliders.rect_count) {
+            @memcpy(self.physics_colliders.values[at .. at + game_physics.RECT_FLOATS], &cookedDoorRectFloats(cd.*));
+        }
+    }
+
+    fn stepCookedDoor(self: *Runtime, cd: *CookedDoor, rate: f32) void {
+        const target: f32 = if (cd.open) 1.0 else 0.0;
+        if (cd.progress < target) {
+            cd.progress = @min(target, cd.progress + rate);
+        } else if (cd.progress > target) {
+            cd.progress = @max(target, cd.progress - rate);
+        }
+        self.applyCookedDoorPose(cd);
+    }
+
     /// req_1908 — advance every cooked door's swing: ease `progress` toward the
     /// target, rotate the leaf NODE about its world hinge by `progress * arc`, and
     /// clear/raise its collision rect once it's past half-open (walk through the
@@ -6478,59 +6611,14 @@ pub const Runtime = struct {
     /// closed-pos rotates about the hinge, so node_pos = hinge + Ry(theta)*(inst-hinge)
     /// and node_rot_y = inst_yaw + theta.
     fn stepCookedDoors(self: *Runtime, dt: f32) void {
-        if (self.cooked_doors.len == 0) return;
+        if (self.cooked_doors.len == 0 and self.live_cooked_doors.len == 0) return;
         const rate = dt / COOKED_DOOR_OPEN_SECONDS;
-        for (self.cooked_doors) |*cd| {
-            const target: f32 = if (cd.open) 1.0 else 0.0;
-            if (cd.progress < target) {
-                cd.progress = @min(target, cd.progress + rate);
-            } else if (cd.progress > target) {
-                cd.progress = @max(target, cd.progress - rate);
-            }
-            const theta_deg = cd.progress * COOKED_DOOR_SWING_ARC_DEGREES;
-            const theta = theta_deg * std.math.pi / 180.0;
-            const ct = @cos(theta);
-            const st = @sin(theta);
-            const dx = cd.node_x - cd.hinge_x;
-            const dz = cd.node_z - cd.hinge_z;
-            // The leaf nodes (opaque frame + glass pane, req_2020) share one instance
-            // pose, so the SAME hinge swing applies to each: node_pos = hinge +
-            // Ry(theta)*(inst-hinge), Ry matching the engine's m4rotateY
-            // (x'=x·c+z·s, z'=-x·s+z·c) so the hinge edge stays fixed.
-            const swung_x = cd.hinge_x + (dx * ct + dz * st);
-            const swung_z = cd.hinge_z + (-dx * st + dz * ct);
-            var ni: usize = 0;
-            while (ni < cd.node_child_count) : (ni += 1) {
-                const idx = cd.node_child_first + ni;
-                if (idx >= self.kid_list.items.len) break;
-                const node = &self.kid_list.items[idx];
-                node.scene3d_pos_x = swung_x;
-                node.scene3d_pos_z = swung_z;
-                node.scene3d_pos_y = cd.node_base_y;
-                node.scene3d_rot_y = cd.yaw_degrees + theta_deg;
-            }
-            // req_1960: the leaf is a PHYSICAL object — its rect TRACKS the swinging
-            // panel every frame (always solid), so the sweeping door shoves the player
-            // out of the way (like the elevator car carries a standing player) instead
-            // of passing through. The swung world AABB: center pivots about the hinge,
-            // half-extents fold by the leaf's TOTAL angle (yaw + swing). Fully open the
-            // panel lies along the jamb, leaving the doorway clear.
-            const at = self.physics_colliders.rectBase() + cd.rect_index * game_physics.RECT_FLOATS;
-            if (at + game_physics.RECT_FLOATS <= self.physics_colliders.values.len and cd.rect_index < self.physics_colliders.rect_count) {
-                const ddx = cd.cx - cd.hinge_x;
-                const ddz = cd.cz - cd.hinge_z;
-                const scx = cd.hinge_x + (ddx * ct + ddz * st);
-                const scz = cd.hinge_z + (-ddx * st + ddz * ct);
-                const total = cd.yaw_degrees * std.math.pi / 180.0 + theta;
-                const tc = @abs(@cos(total));
-                const ts = @abs(@sin(total));
-                const hxw = tc * cd.half_w_local + ts * cd.half_d_local;
-                const hzw = ts * cd.half_w_local + tc * cd.half_d_local;
-                self.physics_colliders.values[at + 0] = scx - hxw;
-                self.physics_colliders.values[at + 1] = scz - hzw;
-                self.physics_colliders.values[at + 2] = scx + hxw;
-                self.physics_colliders.values[at + 3] = scz + hzw;
-                self.physics_colliders.values[at + 5] = 1; // always solid — a real door
+        for (self.cooked_doors) |*cd| self.stepCookedDoor(cd, rate);
+        for (self.live_cooked_doors, 0..) |*cd, index| {
+            self.stepCookedDoor(cd, rate);
+            if (index < self.live_cooked_door_states.len) {
+                self.live_cooked_door_states[index].open = cd.open;
+                self.live_cooked_door_states[index].progress = cd.progress;
             }
         }
     }
@@ -6574,7 +6662,7 @@ pub const Runtime = struct {
         // (the ELEVATORS lump) — either alone keeps the frame alive (req_0652).
         const ia_opt = self.scene.interactables;
         const has_props = if (ia_opt) |ia| ia.instances.len > 0 else false;
-        if (!has_props and self.cars.len == 0 and self.doors_state.len == 0 and self.cooked_doors.len == 0) return;
+        if (!has_props and self.cars.len == 0 and self.doors_state.len == 0 and self.cooked_doors.len == 0 and self.live_cooked_doors.len == 0) return;
 
         // 1. advance / cancel / finish an active search (props only)
         if (st.search_active) {
@@ -6694,6 +6782,33 @@ pub const Runtime = struct {
             }
         }
 
+        // 2a-live-cooked (req_2895/req_2896) — the editor's just-exported Door
+        // Wall rides resident mesh metadata + live refs before any map Compile.
+        // It uses the exact prompt/reach contract as a baked cooked door.
+        var live_cooked_door_target: ?usize = null;
+        if (self.player.posture == .none and !st.search_active and st.prompt_len == 0 and self.live_cooked_doors.len > 0) {
+            var best_distance: f32 = std.math.floatMax(f32);
+            for (self.live_cooked_doors, 0..) |cd, i| {
+                if (@abs(cd.base_y - self.player.y) > DOOR_Y_WINDOW_METERS) continue;
+                const dx = cd.cx - self.player.x;
+                const dz = cd.cz - self.player.z;
+                const distance = @sqrt(dx * dx + dz * dz);
+                if (distance > cd.reach or distance > best_distance) continue;
+                if (self.interactReachBlocked(cd.cx, cd.base_y + cd.panel_h / 2, cd.cz)) continue;
+                best_distance = distance;
+                live_cooked_door_target = i;
+            }
+            if (live_cooked_door_target) |i| {
+                const cd = self.live_cooked_doors[i];
+                const label: []const u8 = if (cd.vehicle) "garage door" else "door";
+                if (cd.open) {
+                    st.setPrompt("E — close the {s}", .{label});
+                } else {
+                    st.setPrompt("E — open the {s}", .{label});
+                }
+            }
+        }
+
         // 2b. the elevator (req_0652) — only when no prop claimed the prompt
         // (/test's priority: doors/props in reach win the E first).
         var elevator_ride: ?struct { index: usize, to_y: f32 } = null;
@@ -6747,6 +6862,10 @@ pub const Runtime = struct {
         }
         if (cooked_door_target) |i| {
             self.toggleCookedDoor(i);
+            return;
+        }
+        if (live_cooked_door_target) |i| {
+            self.toggleLiveCookedDoor(i);
             return;
         }
         if (elevator_ride) |ride| {
@@ -7518,7 +7637,10 @@ fn applyLiveColliders(runtime: *Runtime) void {
     if (p == null and pm == null) return;
     const piece_gen: u64 = if (p) |x| x.gen else 0;
     const mesh_gen: u64 = if (pm) |x| x.gen else 0;
-    if (runtime.live_collider_gen == piece_gen and runtime.live_mesh_collider_gen == mesh_gen) return;
+    const resident_gen: u64 = if (pendingResidentFor(runtime.node_id)) |x| x.gen else 0;
+    if (runtime.live_collider_gen == piece_gen and
+        runtime.live_mesh_collider_gen == mesh_gen and
+        runtime.live_resident_collider_gen == resident_gen) return;
     if (!runtime.has_physics_colliders) return;
     if (runtime.windowed) {
         // The huge-map window rebuild owns this buffer per frame; folding live
@@ -7529,6 +7651,7 @@ fn applyLiveColliders(runtime: *Runtime) void {
         }
         runtime.live_collider_gen = piece_gen;
         runtime.live_mesh_collider_gen = mesh_gen;
+        runtime.live_resident_collider_gen = resident_gen;
         return;
     }
     // A live MESH ref resolves through the resident catalog + baked hash map, which
@@ -7542,6 +7665,10 @@ fn applyLiveColliders(runtime: *Runtime) void {
     defer live_rects.deinit(alloc);
     var live_oriented: std.ArrayList(f32) = .{};
     defer live_oriented.deinit(alloc);
+    var next_live_doors: std.ArrayList(CookedDoor) = .{};
+    defer next_live_doors.deinit(alloc);
+    var next_live_door_states: std.ArrayList(live_mesh_doors.State) = .{};
+    defer next_live_door_states.deinit(alloc);
     var live_rect_count: usize = 0;
     var live_oriented_count: usize = 0;
     var clipped: usize = 0;
@@ -7608,6 +7735,38 @@ fn applyLiveColliders(runtime: *Runtime) void {
                 };
                 live_oriented_count += 1;
             }
+            // Resident Door Wall metadata uses the SAME cookedDoorWorldBox +
+            // swing machine as baked MESH_PROPS instances. Its static islands
+            // already exclude the leaf (solidVertexCount); add that leaf as one
+            // live rect and carry its transient state across generation rebuilds.
+            if (cookedDoorWorldBox(mesh, inst)) |initial_box| {
+                if (runtime.base_rect_count + live_rect_count >= game_physics.MAX_RECTS) {
+                    clipped += 1;
+                    continue;
+                }
+                const identity = live_mesh_doors.identity(r.hash, r.x, r.y, r.z, r.yaw);
+                const carried = live_mesh_doors.reconcile(identity, initial_box.open, runtime.live_cooked_door_states);
+                var box = initial_box;
+                box.open = carried.open;
+                box.progress = carried.progress;
+                box.rect_index = runtime.base_rect_count + live_rect_count;
+                live_rects.appendSlice(alloc, &cookedDoorRectFloats(box)) catch {
+                    clipped += 1;
+                    continue;
+                };
+                next_live_doors.append(alloc, box) catch {
+                    live_rects.shrinkRetainingCapacity(live_rects.items.len - game_physics.RECT_FLOATS);
+                    clipped += 1;
+                    continue;
+                };
+                next_live_door_states.append(alloc, carried) catch {
+                    _ = next_live_doors.pop();
+                    live_rects.shrinkRetainingCapacity(live_rects.items.len - game_physics.RECT_FLOATS);
+                    clipped += 1;
+                    continue;
+                };
+                live_rect_count += 1;
+            }
         }
     }
 
@@ -7622,6 +7781,7 @@ fn applyLiveColliders(runtime: *Runtime) void {
         log.print("[live] collider rebuild allocation failed — live pieces stay walk-through\n", .{});
         runtime.live_collider_gen = piece_gen;
         runtime.live_mesh_collider_gen = mesh_gen;
+        runtime.live_resident_collider_gen = resident_gen;
         return;
     };
     @memset(values[0..rect_base], 0);
@@ -7634,16 +7794,37 @@ fn applyLiveColliders(runtime: *Runtime) void {
     at += base_oriented_floats;
     @memcpy(values[at .. at + live_oriented.items.len], live_oriented.items);
 
+    const owned_live_doors = next_live_doors.toOwnedSlice(alloc) catch {
+        alloc.free(values);
+        log.print("[live] door state allocation failed — keeping previous live collider generation\n", .{});
+        return;
+    };
+    const owned_live_states = next_live_door_states.toOwnedSlice(alloc) catch {
+        if (owned_live_doors.len > 0) alloc.free(owned_live_doors);
+        alloc.free(values);
+        log.print("[live] door reconciliation allocation failed — keeping previous live collider generation\n", .{});
+        return;
+    };
+
     alloc.free(old.values);
     runtime.physics_colliders.values = values;
     runtime.physics_colliders.rect_count = runtime.base_rect_count + live_rect_count;
     runtime.physics_colliders.oriented_count = runtime.base_oriented_count + live_oriented_count;
+    if (runtime.live_cooked_doors.len > 0) alloc.free(runtime.live_cooked_doors);
+    if (runtime.live_cooked_door_states.len > 0) alloc.free(runtime.live_cooked_door_states);
+    runtime.live_cooked_doors = owned_live_doors;
+    runtime.live_cooked_door_states = owned_live_states;
+    runtime.live_cooked_door_by_identity.clearRetainingCapacity();
+    for (owned_live_states, 0..) |state, index| {
+        runtime.live_cooked_door_by_identity.put(alloc, state.identity, index) catch {};
+    }
     runtime.live_collider_gen = piece_gen;
     runtime.live_mesh_collider_gen = mesh_gen;
+    runtime.live_resident_collider_gen = resident_gen;
     if (clipped > 0) {
         log.print("[live] collider cap CLIPPED {d} live rows — distant pieces are walk-through\n", .{clipped});
     }
-    log.print("[live] colliders folded: {d} base + {d} live rects, {d} base + {d} live oriented\n", .{ runtime.base_rect_count, live_rect_count, runtime.base_oriented_count, live_oriented_count });
+    log.print("[live] colliders folded: {d} base + {d} live rects, {d} base + {d} live oriented, {d} live door(s)\n", .{ runtime.base_rect_count, live_rect_count, runtime.base_oriented_count, live_oriented_count, runtime.live_cooked_doors.len });
 }
 
 // ── MAPPAINT req_2473: the live map-paint layer ───────────────────────────────

@@ -10,6 +10,7 @@
 //   tools/v8cli /tmp/editor-commands.test.js
 
 import { menuNodes, meshPartCommands, meshTopoCommands, type MenuNode } from './commands';
+import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
 
 let passed = 0, failed = 0;
@@ -45,15 +46,26 @@ test('structural merge requires the explicit selected set, not list adjacency', 
   assert(many.includes('mesh-merge-down'), 'two selected rows expose structural merge');
 });
 
-test('New Mesh exposes every semantic build kind under one nested menu', () => {
+test('New Mesh exposes every semantic build starter under one nested menu', () => {
   const newMesh = menuNodes('File').find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'New Mesh');
   assert(!!newMesh, 'File menu lost New Mesh');
   const build = newMesh!.children.find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'Build Pieces');
   assert(!!build, 'New Mesh lost its Build Pieces submenu');
   const commandIds = build!.children.filter((node): node is Extract<MenuNode, { kind: 'cmd' }> => node.kind === 'cmd').map((node) => node.id);
-  const expected = BUILD_PIECE_STARTERS.map((starter) => `new-build-starter-${starter.kind}`);
+  const expected = BUILD_PIECE_STARTERS.map((starter) => `new-build-starter-${starter.id}`);
   assert(commandIds.join('|') === expected.join('|'), `starter menu drifted: ${commandIds.join(', ')}`);
   assert(newMesh!.children.some((node) => node.kind === 'cmd' && node.id === 'new-model-player'), 'Player / NPC starter disappeared');
+});
+
+test('Export Build Piece exposes explicit door-wall meanings without a door tile', () => {
+  const exportMenu = menuNodes('File').find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'Export');
+  const build = exportMenu?.children.find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'Export Build Piece');
+  assert(!!build, 'File menu lost Export Build Piece');
+  const commandIds = build!.children.filter((node): node is Extract<MenuNode, { kind: 'cmd' }> => node.kind === 'cmd').map((node) => node.id);
+  const expected = BUILD_PIECE_EXPORT_TARGETS.map((target) => `export-build-piece-${target.id}`);
+  assert(commandIds.join('|') === expected.join('|'), `build export menu drifted: ${commandIds.join(', ')}`);
+  assert(commandIds.includes('export-build-piece-door-wall'), 'Door Wall export is missing');
+  assert(!commandIds.includes('export-build-piece-door'), 'the unrelated door tile leaked into mesh export');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

@@ -7,6 +7,7 @@ import type { TileMaterialBinding } from '../render3d/groundFormula';
 
 export type MapAuthoringSlices = Pick<EditorState,
   | 'activeMapStem'
+  | 'activeMapName'
   | 'activeCommandId'
   | 'worldPieces'
   | 'objects'
@@ -28,11 +29,13 @@ export function mapAuthoringSlicesFor(
   stem: string,
   save: WorldSave,
   bindings: readonly TileMaterialBinding[],
+  name = stem,
 ): MapAuthoringSlices {
   const zones = save.zones.slice();
   const tileBindings = bindings.slice();
   return {
     activeMapStem: stem,
+    activeMapName: name,
     activeCommandId: 'select-tool',
     worldPieces: save.pieces.slice(),
     objects: save.objects.slice(),

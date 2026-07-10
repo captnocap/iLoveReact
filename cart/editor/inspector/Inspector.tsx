@@ -495,6 +495,7 @@ export default function Inspector(props: {
                 activeId={props.state.modelActivePartId}
                 selectedIds={selectedSet}
                 onSelect={props.outlinerHandlers.onSelectPart}
+                onRename={props.outlinerHandlers.onRenamePart}
                 onToggleVisible={props.outlinerHandlers.onToggleVisiblePart}
                 onDuplicate={props.outlinerHandlers.onDuplicatePart}
                 onDelete={props.outlinerHandlers.onDeletePart}

@@ -11,8 +11,9 @@
 // write the mesh-only form (instanceCount 0) at version 7. A mesh with a painted
 // atlas embeds its PNG in the v4+ pngLen block — the loader decodes it with stbi
 // and the placement renders painted, exactly like a baked cooked prop (req_2832:
-// an exported model lost its paintings at placement). No slots/door/collision
-// blocks. The ref hash is FNV-1a over the mesh key, the SAME hash the loader
+// an exported model lost its paintings at placement). Door exports additionally
+// carry one named leaf slot + the v6 door block; collision boxes stay derived.
+// The ref hash is FNV-1a over the mesh key, the SAME hash the loader
 // keys residency on (world_loader.zig liveMeshHash).
 
 /** FNV-1a 32-bit — MUST match world_loader.zig liveMeshHash so a key resolves to
@@ -34,6 +35,10 @@ export type ResidentMesh = {
   color?: [number, number, number];
   /** the model's painted atlas as ENCODED PNG bytes — absent = untextured (flat colour). */
   png?: Uint8Array;
+  /** Contiguous vertex sub-ranges. Door exports use one trailing leaf slot. */
+  slots?: { start: number; count: number }[];
+  /** MESH_PROPS v6 two-state panel declaration; leafSlot indexes `slots`. */
+  door?: { leafSlot: number; reachMeters: number; vehicle: boolean; startOpen: boolean };
 };
 
 function boundsOf(v: Float32Array): { radius: number; w: number; d: number; h: number } {
@@ -53,18 +58,23 @@ const MESH_PROPS_VERSION = 7; // mesh-only form the host decoder accepts (<= 8)
 
 /** Encode resident meshes into a MESH_PROPS lump for __compiled_world_set_resident_meshes.
  *  instanceCount 0 (a catalog, not a baked scene); a mesh with a painted atlas embeds
- *  its PNG, no slots/door/boxes. Empty list → a 12-byte header that clears residency. */
+ *  its PNG and optional door slot/meta; boxes remain derived by the loader.
+ *  Empty list → a 12-byte header that clears residency. */
 export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Array {
   // Size pass.
   let total = 12; // header
   for (const m of meshes) {
+    const slots = m.slots ?? [];
+    if (m.door && (m.door.leafSlot < 0 || m.door.leafSlot >= slots.length)) {
+      throw new Error(`resident door '${m.key}' leaf slot ${m.door.leafSlot} is outside ${slots.length} slot(s)`);
+    }
     const keyBytes = m.key.length; // keys are ASCII ids
     total += 4 + keyBytes;         // keyLen + key
     total += 36;                   // meta
     total += m.vertices.length * 4; // vertices
     total += 4 + (m.png?.length ?? 0); // pngLen + encoded PNG bytes
-    total += 4;                    // slotCount (0)
-    total += 4;                    // doorFlag (0)
+    total += 4 + slots.length * 8; // slotCount + start/count rows
+    total += 4 + (m.door ? 16 : 0); // doorFlag + optional door block
     total += 4;                    // boxCount (0)
   }
   const buf = new ArrayBuffer(total);
@@ -92,8 +102,21 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
     for (let i = 0; i < m.vertices.length; i += 1) { dv.setFloat32(o, m.vertices[i]!, true); o += 4; }
     dv.setUint32(o, m.png?.length ?? 0, true); o += 4; // pngLen
     if (m.png && m.png.length > 0) { bytes.set(m.png, o); o += m.png.length; }
-    dv.setUint32(o, 0, true); o += 4; // slotCount
-    dv.setUint32(o, 0, true); o += 4; // doorFlag
+    const slots = m.slots ?? [];
+    dv.setUint32(o, slots.length, true); o += 4;
+    for (const slot of slots) {
+      dv.setUint32(o, slot.start, true);
+      dv.setUint32(o + 4, slot.count, true);
+      o += 8;
+    }
+    dv.setUint32(o, m.door ? 1 : 0, true); o += 4;
+    if (m.door) {
+      dv.setUint32(o, m.door.leafSlot, true);
+      dv.setFloat32(o + 4, m.door.reachMeters, true);
+      dv.setUint32(o + 8, m.door.vehicle ? 1 : 0, true);
+      dv.setUint32(o + 12, m.door.startOpen ? 1 : 0, true);
+      o += 16;
+    }
     dv.setUint32(o, 0, true); o += 4; // boxCount
   }
   return bytes;

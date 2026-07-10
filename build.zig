@@ -1374,6 +1374,29 @@ pub fn build(b: *std.Build) void {
     const world_mapfile_test_step = b.step("test-world-mapfile", "Run the platform mapfile reader tests");
     world_mapfile_test_step.dependOn(&run_world_mapfile_test.step);
 
+    // ── Editor-live cooked-door state tests (req_2895/req_2896) ─────
+    // A resident Door Wall arrives as a live mesh reference before Compile. Its
+    // runtime open/progress state must survive whole-ref generation rebuilds and
+    // stay distinct across storeys/export meanings.
+    const world_live_mesh_doors_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/world/live_mesh_doors.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const world_live_mesh_doors_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_live_mesh_doors.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    world_live_mesh_doors_test_mod.addImport("world_live_mesh_doors", world_live_mesh_doors_mod_for_tests);
+    const world_live_mesh_doors_test = b.addTest(.{
+        .name = "world-live-mesh-doors-test",
+        .root_module = world_live_mesh_doors_test_mod,
+    });
+    const run_world_live_mesh_doors_test = b.addRunArtifact(world_live_mesh_doors_test);
+    const world_live_mesh_doors_test_step = b.step("test-world-live-mesh-doors", "Run editor-live cooked-door state tests");
+    world_live_mesh_doors_test_step.dependOn(&run_world_live_mesh_doors_test.step);
+
     // ── Platform game-file behavior tests (PLATMOD spine step 2, P4) ──────
     // Exercises framework/world/gamefile.zig: the three-stream game-file reader,
     // sha256 content-store install (atomic temp->fsync->rename), and the

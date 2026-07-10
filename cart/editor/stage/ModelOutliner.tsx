@@ -1,4 +1,5 @@
-import { Box, Col, Row, Text, Pressable, ScrollView } from '@reactjit/runtime/primitives';
+import { useState } from 'react';
+import { Box, Col, Row, Text, TextInput, Pressable, ScrollView } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { PRIMITIVE_MESHES } from '../data/commands';
 import { REGIONS } from '../shell/regions';
@@ -31,19 +32,33 @@ function partListHeight(count: number): number {
   return Math.min(count, PART_ROWS_VISIBLE) * PART_ROW_HEIGHT;
 }
 
-export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, onToggleVisible, onDuplicate, onDelete, onAdd, onImportModel }: {
+export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, onRename, onToggleVisible, onDuplicate, onDelete, onAdd, onImportModel }: {
   parts: ModelPart[];
   activeId: string | null;
   // Multi-select set (req_2659, shift-click accumulate): members highlight; the PRIMARY
   // (activeId) keeps the strong row. Optional — absent reads as single-select.
   selectedIds?: string[];
   onSelect: (id: string) => void;
+  onRename: (id: string, name: string) => void;
   onToggleVisible: (id: string) => void;
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
   onAdd: (kind: PrimitiveKind) => void;
   onImportModel: () => void;
 }) {
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const startRename = (part: ModelPart) => {
+    setRenamingId(part.id);
+    setRenameDraft(part.name);
+  };
+  const commitRename = (part: ModelPart) => {
+    const name = renameDraft.trim();
+    if (name && name !== part.name) onRename(part.id, name);
+    setRenamingId(null);
+    setRenameDraft('');
+  };
+
   return (
     <Col
       style={{
@@ -78,9 +93,32 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
               <Pressable style={ROW_CONTROL} onPress={() => onToggleVisible(part.id)} tooltip={part.visible ? 'Hide part' : 'Show part'}>
                 <Icon name={part.visible ? 'Eye' : 'EyeOff'} size={13} color={part.visible ? '#9db4d0' : '#4a5464'} />
               </Pressable>
-              <Pressable onPress={() => onSelect(part.id)} style={{ flexGrow: 1, minWidth: 0, height: PART_ROW_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Box style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: part.color }} />
-                <Text numberOfLines={1} noWrap style={{ color: active ? '#eaf2ff' : (part.visible ? '#cfe0f5' : '#6b7686'), fontSize: 12, fontWeight: active ? 700 : 500 }}>{part.name}</Text>
+              {renamingId === part.id ? (
+                <Row style={{ flexGrow: 1, minWidth: 0, height: PART_ROW_HEIGHT, alignItems: 'center', gap: 6 }}>
+                  <Box style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: part.color }} />
+                  <TextInput
+                    value={renameDraft}
+                    onChange={setRenameDraft}
+                    onKeyDown={(event: any) => {
+                      if (event?.key === 'Enter') commitRename(part);
+                      if (event?.key === 'Escape') { setRenamingId(null); setRenameDraft(''); }
+                    }}
+                    placeholder={part.name}
+                    style={{ flexGrow: 1, minWidth: 0, height: 21, paddingLeft: 6, paddingRight: 6, borderRadius: 4, borderWidth: 1, borderColor: '#5a86c0', backgroundColor: '#111a29', color: '#eaf2ff', fontSize: 11 }}
+                  />
+                </Row>
+              ) : (
+                <Pressable onPress={() => onSelect(part.id)} style={{ flexGrow: 1, minWidth: 0, height: PART_ROW_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Box style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: part.color }} />
+                  <Text numberOfLines={1} noWrap style={{ color: active ? '#eaf2ff' : (part.visible ? '#cfe0f5' : '#6b7686'), fontSize: 12, fontWeight: active ? 700 : 500 }}>{part.name}</Text>
+                </Pressable>
+              )}
+              <Pressable
+                style={ROW_CONTROL}
+                onPress={() => (renamingId === part.id ? commitRename(part) : startRename(part))}
+                tooltip={renamingId === part.id ? 'Save part name' : 'Rename part'}
+              >
+                <Icon name={renamingId === part.id ? 'Check' : 'Pencil'} size={12} color={renamingId === part.id ? '#9fc1ee' : '#6f8296'} />
               </Pressable>
               <Pressable style={ROW_CONTROL} onPress={() => onDuplicate(part.id)} tooltip="Duplicate part (paint carries; Mirror lives in the right-click menu)">
                 <Icon name="CopyPlus" size={12} color="#6f8296" />

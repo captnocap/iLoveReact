@@ -8,7 +8,7 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-authored-registry.test.js
 
-import { authoredPaletteEntries, preferredAuthoredPaletteId, type AuthoredBuildPiece } from './authoredRegistry';
+import { authoredPaletteEntries, authoredResidentKeyOf, preferredAuthoredPaletteId, type AuthoredBuildPiece } from './authoredRegistry';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -50,6 +50,12 @@ test('multiple saved paintings remain independently placeable', () => {
   assert(entries.map((entry) => entry.id).join(',') === 'prop:painted-model#p1,prop:painted-model#p2', 'only saved skin ids are exposed');
   assert(!entries.some((entry) => entry.id === exported.id), 'mutable base is absent when stored skins exist');
   assert(preferredAuthoredPaletteId(exported, skins) === 'prop:painted-model#p2', 'export arms the newest stored painting');
+});
+
+test('resident identity preserves exported meaning and paint skin', () => {
+  assert(authoredResidentKeyOf('model:shared') === 'model:shared', 'build meaning was stripped from resident key');
+  assert(authoredResidentKeyOf('prop:shared') === 'prop:shared', 'prop meaning was stripped from resident key');
+  assert(authoredResidentKeyOf('model:shared#p2') === 'model:shared#p2', 'paint skin was stripped from resident key');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

@@ -26,6 +26,11 @@ pub const VERSION: u32 = 2;
 /// Floats per tile-binding row (engine.zig BINDING_FLOATS — kept in sync by
 /// the loadMap/saveMap call sites passing engine-owned buffers).
 const BINDING_FLOATS: usize = 4;
+/// The editor's tile-binding legend is bounded by the map engine palette. Keep
+/// this public so a file-header reader can size one fixed, tiny prefix buffer
+/// without reading a potentially large painting just to count its chunks.
+pub const MAX_BINDINGS: usize = 256;
+pub const INSPECT_PREFIX_BYTES: usize = 16 + MAX_BINDINGS * BINDING_FLOATS * @sizeOf(f32);
 
 const HEIGHT_Q: f32 = 100; // meters → hundredths
 
@@ -98,6 +103,34 @@ const Source = struct {
         return @bitCast(v);
     }
 };
+
+/// Non-mutating facts available in the fixed RMAP header. Workspace catalogs
+/// use this instead of `load`: inspecting an inactive map must never replace
+/// the live authoring world.
+pub const HeaderSummary = struct {
+    version: u32,
+    chunk_count: u32,
+};
+
+/// Inspect only the fixed-size prefix of an RMAP. v2's variable binding rows
+/// are still header material and are capped at MAX_BINDINGS, so callers need
+/// at most INSPECT_PREFIX_BYTES regardless of map size.
+pub fn inspectHeader(bytes: []const u8) ?HeaderSummary {
+    var src = Source{ .buf = bytes };
+    if (src.get(u32) != MAGIC) return null;
+    const version = src.get(u32);
+    if (version < 1 or version > VERSION) return null;
+    if (version >= 2) {
+        const binding_count = src.get(u32);
+        if (binding_count > MAX_BINDINGS) return null;
+        const binding_bytes = @as(usize, binding_count) * BINDING_FLOATS * @sizeOf(f32);
+        if (src.n + binding_bytes > bytes.len) return null;
+        src.n += binding_bytes;
+    }
+    const chunk_count = src.get(u32);
+    if (src.bad or chunk_count > chunks.SLOT_COUNT) return null;
+    return .{ .version = version, .chunk_count = chunk_count };
+}
 
 fn rleReadCells(src: *Source, cells: []i16) void {
     const runs = src.get(u32);
@@ -353,4 +386,27 @@ test "load rejects garbage LOUDLY and leaves a clean world" {
     var bind_count: usize = 0;
     try std.testing.expect(!load(junk[0..], bind_back[0..], &bind_count));
     try std.testing.expectEqual(@as(usize, 0), chunks.chunkCount());
+}
+
+test "inspectHeader reads v1 and v2 chunk counts without loading the world" {
+    var v1: [12]u8 = @splat(0);
+    std.mem.writeInt(u32, v1[0..4], MAGIC, .little);
+    std.mem.writeInt(u32, v1[4..8], 1, .little);
+    std.mem.writeInt(u32, v1[8..12], 7, .little);
+    const first = inspectHeader(v1[0..]).?;
+    try std.testing.expectEqual(@as(u32, 1), first.version);
+    try std.testing.expectEqual(@as(u32, 7), first.chunk_count);
+
+    var v2: [48]u8 = @splat(0);
+    std.mem.writeInt(u32, v2[0..4], MAGIC, .little);
+    std.mem.writeInt(u32, v2[4..8], VERSION, .little);
+    std.mem.writeInt(u32, v2[8..12], 2, .little); // two 4-float bindings
+    std.mem.writeInt(u32, v2[44..48], 11, .little);
+    const second = inspectHeader(v2[0..]).?;
+    try std.testing.expectEqual(VERSION, second.version);
+    try std.testing.expectEqual(@as(u32, 11), second.chunk_count);
+
+    try std.testing.expect(inspectHeader(v2[0..47]) == null);
+    std.mem.writeInt(u32, v2[8..12], MAX_BINDINGS + 1, .little);
+    try std.testing.expect(inspectHeader(v2[0..]) == null);
 }

@@ -4,6 +4,7 @@
 //
 //   zig-out/game/editor/maps/<stem>/painting.rmap  host-owned terrain/flora/roads
 //   zig-out/game/editor/maps/<stem>/world.json     pieces + objects + zone legend + id seq
+//   zig-out/game/editor/maps/<stem>/meta.json      friendly title + render diagnostics
 //   zig-out/game/editor/maps/_last.txt             last-open document pointer
 //
 // The previous editor used two unrelated fixed files. On the first boot after
@@ -11,6 +12,7 @@
 // imported into the directory by its owning persistence layer. That migration
 // runs once and never becomes a fallback for later documents.
 import { exists, listDir, mkdir, readFile, remove, stat, writeFile, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { mapInspectFile } from '../../../runtime/game/map';
 import { textBytes } from '../../../runtime/workspace/lumps';
 
 export const MAP_DOCUMENT_ROOT = 'zig-out/game/editor/maps';
@@ -18,22 +20,42 @@ export const MAP_DOCUMENT_POINTER = `${MAP_DOCUMENT_ROOT}/_last.txt`;
 export const LEGACY_MAP_FILE = 'zig-out/game/editor/painted-map.rmap';
 export const LEGACY_WORLD_FILE = 'zig-out/game/editor/world-pieces.json';
 export const MAP_DOCUMENT_STEM_MAX_CHARS = 64;
+export const MAP_DOCUMENT_NAME_MAX_CHARS = 80;
 const LEGACY_IMPORT_MARKER = '.legacy-import';
+const MAP_DOCUMENT_META_VERSION = 1;
 
 export type MapDocumentPaths = {
   stem: string;
   dir: string;
   painting: string;
   world: string;
+  metadata: string;
   legacyMarker: string;
 };
 
 export type MapDocumentSummary = {
   stem: string;
+  name: string;
   hasPainting: boolean;
   hasWorld: boolean;
   modifiedMs: number;
+  chunkCount: number | null;
+  renderTriangles: number | null;
+  renderCapturedMs: number;
 };
+
+type MapDocumentMetadata = {
+  version: 1;
+  name: string;
+  createdMs: number;
+  renamedMs: number;
+  renderTriangles: number | null;
+  renderCapturedMs: number;
+};
+
+export type MapDocumentMutationResult =
+  | { ok: true; name: string }
+  | { ok: false; error: string };
 
 let activeStemCache: string | null = null;
 
@@ -55,6 +77,18 @@ export function sanitizeMapDocumentName(raw: string): string {
   return bounded || 'untitled';
 }
 
+/** Friendly title shown in chrome/cards. The directory stem stays a stable
+ * document id, so a rename cannot split world.json from painting.rmap. */
+export function normalizeMapDocumentTitle(raw: string): string | null {
+  const clean = raw
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAP_DOCUMENT_NAME_MAX_CHARS)
+    .trim();
+  return clean || null;
+}
+
 export function mapDocumentPaths(rawStem: string): MapDocumentPaths {
   const stem = sanitizeMapDocumentName(rawStem);
   const dir = `${MAP_DOCUMENT_ROOT}/${stem}`;
@@ -63,6 +97,7 @@ export function mapDocumentPaths(rawStem: string): MapDocumentPaths {
     dir,
     painting: `${dir}/painting.rmap`,
     world: `${dir}/world.json`,
+    metadata: `${dir}/meta.json`,
     legacyMarker: `${dir}/${LEGACY_IMPORT_MARKER}`,
   };
 }
@@ -77,6 +112,56 @@ function validStoredStem(raw: string): string | null {
   const trimmed = raw.trim();
   if (!trimmed || sanitizeMapDocumentName(trimmed) !== trimmed) return null;
   return trimmed;
+}
+
+function finiteTime(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
+function finiteTriangles(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.trunc(value) : null;
+}
+
+function defaultMetadata(stem: string, name = stem): MapDocumentMetadata {
+  return {
+    version: MAP_DOCUMENT_META_VERSION,
+    name: normalizeMapDocumentTitle(name) ?? stem,
+    createdMs: 0,
+    renamedMs: 0,
+    renderTriangles: null,
+    renderCapturedMs: 0,
+  };
+}
+
+function readMetadata(stem: string): MapDocumentMetadata {
+  const fallback = defaultMetadata(stem);
+  const text = readFile(mapDocumentPaths(stem).metadata);
+  if (!text) return fallback;
+  try {
+    const raw = JSON.parse(text) as Partial<MapDocumentMetadata>;
+    if (raw.version !== MAP_DOCUMENT_META_VERSION) return fallback;
+    return {
+      version: MAP_DOCUMENT_META_VERSION,
+      name: normalizeMapDocumentTitle(typeof raw.name === 'string' ? raw.name : '') ?? stem,
+      createdMs: finiteTime(raw.createdMs),
+      renamedMs: finiteTime(raw.renamedMs),
+      renderTriangles: finiteTriangles(raw.renderTriangles),
+      renderCapturedMs: finiteTime(raw.renderCapturedMs),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function writeMetadata(stem: string, metadata: MapDocumentMetadata): boolean {
+  const paths = mapDocumentPaths(stem);
+  if (!mapDocumentExists(paths.stem)) return false;
+  return writeTextAtomic(paths.metadata, JSON.stringify(metadata));
+}
+
+export function mapDocumentName(stem: string): string {
+  const valid = validStoredStem(stem);
+  return valid ? readMetadata(valid).name : sanitizeMapDocumentName(stem);
 }
 
 export function mapDocumentExists(stem: string): boolean {
@@ -94,11 +179,17 @@ export function listMapDocuments(): MapDocumentSummary[] {
       const paths = mapDocumentPaths(stem);
       const painting = stat(paths.painting);
       const world = stat(paths.world);
+      const metadata = readMetadata(stem);
+      const paintingSummary = painting ? mapInspectFile(paths.painting) : null;
       return {
         stem,
+        name: metadata.name,
         hasPainting: !!painting,
         hasWorld: !!world,
-        modifiedMs: Math.max(painting?.mtimeMs ?? 0, world?.mtimeMs ?? 0),
+        modifiedMs: Math.max(painting?.mtimeMs ?? 0, world?.mtimeMs ?? 0, metadata.createdMs, metadata.renamedMs),
+        chunkCount: paintingSummary?.chunkCount ?? null,
+        renderTriangles: metadata.renderTriangles,
+        renderCapturedMs: metadata.renderCapturedMs,
       };
     })
     .sort((a, b) => b.modifiedMs - a.modifiedMs || a.stem.localeCompare(b.stem));
@@ -127,7 +218,52 @@ export function createMapDocument(rawName = 'untitled'): string {
   if (!mkdir(dir) && !mapDocumentExists(stem)) {
     throw new Error(`could not create map document directory ${dir}`);
   }
+  const now = Date.now();
+  const metadata = { ...defaultMetadata(stem, rawName), createdMs: now };
+  if (!writeMetadata(stem, metadata)) {
+    remove(dir);
+    throw new Error(`could not initialize map document metadata ${dir}`);
+  }
   return stem;
+}
+
+/** Rename the user-facing title while retaining the stable on-disk document
+ * id. That makes active and inactive rename the same safe operation. */
+export function renameMapDocument(stem: string, rawName: string): MapDocumentMutationResult {
+  const valid = validStoredStem(stem);
+  if (!valid || !mapDocumentExists(valid)) return { ok: false, error: 'map document no longer exists' };
+  const name = normalizeMapDocumentTitle(rawName);
+  if (!name) return { ok: false, error: 'map name cannot be empty' };
+  const prior = readMetadata(valid);
+  if (!writeMetadata(valid, { ...prior, name, renamedMs: Date.now() })) {
+    return { ok: false, error: `could not write ${mapDocumentPaths(valid).metadata}` };
+  }
+  return { ok: true, name };
+}
+
+/** Store a last-render measurement separately from authored files. Capturing
+ * diagnostics never changes the map's last-edit timestamp. */
+export function recordMapDocumentRenderStats(stem: string, triangles: number | null): boolean {
+  const valid = validStoredStem(stem);
+  const count = finiteTriangles(triangles);
+  if (!valid || count === null || !mapDocumentExists(valid)) return false;
+  const prior = readMetadata(valid);
+  return writeMetadata(valid, { ...prior, renderTriangles: count, renderCapturedMs: Date.now() });
+}
+
+/** Permanently remove one INACTIVE document directory. The explicit active
+ * argument and persisted pointer are both checked so stale UI cannot erase the
+ * live map. */
+export function deleteMapDocument(stem: string, activeStem: string): MapDocumentMutationResult {
+  const valid = validStoredStem(stem);
+  if (!valid || !mapDocumentExists(valid)) return { ok: false, error: 'map document no longer exists' };
+  const persistedActive = validStoredStem(readFile(MAP_DOCUMENT_POINTER) ?? '');
+  if (valid === activeStem || valid === activeStemCache || valid === persistedActive) {
+    return { ok: false, error: 'open another map before deleting the active one' };
+  }
+  const name = readMetadata(valid).name;
+  if (!remove(mapDocumentPaths(valid).dir)) return { ok: false, error: `could not remove map document ${valid}` };
+  return { ok: true, name };
 }
 
 function writeActivePointer(stem: string): boolean {

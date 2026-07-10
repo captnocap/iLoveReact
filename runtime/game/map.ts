@@ -264,6 +264,16 @@ export function mapSaveFile(path: string): boolean {
   return callHost<number>('__map_save_file', 0, path) === 1;
 }
 
+/** Read inactive-map header stats without loading it into the host. */
+export function mapInspectFile(path: string): { version: number; chunkCount: number } | null {
+  if (!hasHost('__map_inspect_file')) return null;
+  const ab = callHost<ArrayBuffer | null>('__map_inspect_file', null, path);
+  if (!ab) return null;
+  const out = new Float32Array(ab);
+  if (out.length < 2 || !Number.isFinite(out[0]) || !Number.isFinite(out[1])) return null;
+  return { version: Math.trunc(out[0]!), chunkCount: Math.trunc(out[1]!) };
+}
+
 /** Load a painting from a file; the host rebuilds every channel and re-derives
  *  the road stamps. False = missing or malformed file. */
 export function mapLoadFile(path: string): boolean {

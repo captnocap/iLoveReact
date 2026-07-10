@@ -13,8 +13,8 @@ import {
   type EditMesh,
   type V3,
 } from './editMesh';
-import { buildPieceStarter } from '../data/buildStarters';
-import { catalogRowFor, rowHex, type BuildKind } from '../world/buildCatalog';
+import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarters';
+import { catalogRowFor, rowHex } from '../world/buildCatalog';
 import { pieceVisualShapes, type VisualBox, type VisualRamp, type VisualShape } from '../world/pieceShapes';
 import type { ModelPart } from '../data/types';
 
@@ -71,29 +71,62 @@ function editableShape(shape: VisualShape): EditMesh {
  * elevator stays a frame), so they are immediately selectable and sculptable
  * without filling the Outliner with renderer-internal rows.
  */
-export function buildPieceStarterParts(kind: BuildKind): ModelPart[] {
-  const starter = buildPieceStarter(kind);
+export function buildPieceStarterParts(starterId: BuildPieceStarterId): ModelPart[] {
+  const starter = buildPieceStarter(starterId);
   if (!starter) return [];
   const row = catalogRowFor(starter.catalogPieceId);
-  if (!row || row.kind !== kind) return [];
+  if (!row || row.kind !== starter.kind) return [];
 
   const shapes = pieceVisualShapes({
-    id: `build-starter:${kind}`,
+    id: `build-starter:${starterId}`,
     pieceId: row.id,
     x: 0,
     y: 0,
     z: 0,
     yawDegrees: 0,
   }, rowHex(row));
-  let mesh: EditMesh | null = null;
-  for (const shape of shapes) {
-    const next = editableShape(shape);
-    mesh = mesh ? mergeMesh(mesh, next, [0, 0, 0]) : next;
+  const mergeShapes = (source: readonly VisualShape[]): EditMesh | null => {
+    let mesh: EditMesh | null = null;
+    for (const shape of source) {
+      const next = editableShape(shape);
+      mesh = mesh ? mergeMesh(mesh, next, [0, 0, 0]) : next;
+    }
+    return mesh;
+  };
+
+  // Door variants preserve the old Studio compiler's deep contract: the static
+  // wall frame and movable panel are separate, meaningfully named Outliner parts.
+  // `VisualBox.door` comes from the semantic wall edit decomposition; no tile
+  // kind or geometry guess participates in this split.
+  if (starter.edit === 'door' || starter.edit === 'garageDoor') {
+    const leafShapes = shapes.filter((shape) => shape.kind === 'box' && shape.box.door === true);
+    const frameShapes = shapes.filter((shape) => !(shape.kind === 'box' && shape.box.door === true));
+    const frame = mergeShapes(frameShapes);
+    const leaf = mergeShapes(leafShapes);
+    if (!frame || !leaf) return [];
+    return [
+      {
+        id: `part:build-starter:${starterId}:frame`,
+        name: 'Door Frame',
+        mesh: frame,
+        visible: true,
+        color: rowHex(row),
+      },
+      {
+        id: `part:build-starter:${starterId}:leaf`,
+        name: 'Door Leaf',
+        mesh: leaf,
+        visible: true,
+        color: leafShapes[0]?.kind === 'box' ? leafShapes[0].box.color : '#0c1018',
+      },
+    ];
   }
+
+  const mesh = mergeShapes(shapes);
   if (!mesh) return [];
 
   return [{
-    id: `part:build-starter:${kind}`,
+    id: `part:build-starter:${starterId}`,
     name: starter.name.replace(/ Piece$/, ''),
     mesh,
     visible: true,

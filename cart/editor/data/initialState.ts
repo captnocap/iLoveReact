@@ -5,7 +5,7 @@ import type { EditorState, ModelToolSnapshot, WorldObject } from './types';
 import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
 import { DEFAULT_BRUSH, defaultPalette } from '../../../runtime/paint/model';
 import { defaultMapPaint } from '../stage/mapPaint';
-import { activeMapDocumentStem } from './mapDocuments';
+import { activeMapDocumentStem, mapDocumentName } from './mapDocuments';
 import { defaultWorldGlobals } from './globals';
 import { nsGet, nsSet } from '../../../runtime/hooks/localstore';
 import { authoredIdFor, type AuthoredBuildPiece } from '../world/authoredRegistry';
@@ -48,7 +48,10 @@ export function bootAuthoredPieces(): AuthoredBuildPiece[] {
     if (pkg.placeable.as === 'character') continue;
     const kind = pkg.placeable.as === 'prop' ? ('prop' as const) : pkg.placeable.kind;
     const modelId = authoredModelIdForPackage(pkg.id);
-    fromDisk.push({ id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color });
+    fromDisk.push({
+      id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color,
+      ...(pkg.placeable.as === 'build-piece' && pkg.placeable.edit ? { edit: pkg.placeable.edit } : {}),
+    });
   }
   const seen = new Set(fromDisk.map((p) => p.id));
   const legacy = loadAuthoredPieces().filter((p) => !seen.has(p.id) && MODEL_PACKAGES.some((m) => m.id === p.pkgId));
@@ -67,6 +70,7 @@ export function defaultModelTool(): ModelToolSnapshot {
 }
 
 export function initialState(): EditorState {
+  const activeMapStem = activeMapDocumentStem();
   return {
     openMenu: null,
     presetMenuOpen: false,
@@ -89,7 +93,8 @@ export function initialState(): EditorState {
     colorSpineScenePick: null,
     buildDialogOpen: false,
     mapDocumentOpen: false,
-    activeMapStem: activeMapDocumentStem(),
+    activeMapStem,
+    activeMapName: mapDocumentName(activeMapStem),
     addChunkOpen: false,
     eventbusPopoverOpen: false,
     perfPopoverOpen: false,

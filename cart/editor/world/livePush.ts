@@ -10,13 +10,16 @@
 import { pieceInstanceRows, type PlacedPiece } from './pieces';
 import { pieceSkinBoxes } from './pieceSkins';
 import { encodeResidentMeshes, encodeMeshRefs, type ResidentMesh, type MeshRef } from './meshProps';
-import { isAuthoredPiece, authoredModelIdOf, skinnedPieceId, type AuthoredBuildPiece } from './authoredRegistry';
+import { isAuthoredPiece, authoredResidentKeyOf, skinnedPieceId, type AuthoredBuildPiece } from './authoredRegistry';
 import { authoredMeshData } from './authoredMesh';
 import { exists, readFileBase64 } from '../../../runtime/hooks/fs';
 import { base64ToBytes } from '../../../runtime/workspace';
 import { modelPackageById } from '../data/content';
 import { resolvePackageDir } from '../data/modelPackageStore';
 import { bindPaintSkinToCurrentMesh, listPaintSkins, PAINT_MESH_VERTEX_BYTES, PAINT_MESH_VERTEX_FLOATS } from '../data/paintVariants';
+import { packageMeshDoc, packageMeshDocParts } from '../data/hmscAssetCatalog';
+import { compileDoorMesh, DOOR_EXPORT_TUNING } from '../model/doorModel';
+import type { ModelPackage } from '../data/types';
 
 const g: any = globalThis;
 
@@ -51,6 +54,43 @@ function packagePaintedForm(dir: string): PaintedForm | null {
   return readPaintedForm(dir, 'mesh/painted.blob', 'atlases/base.png');
 }
 
+/** Apply the semantic export declaration to one visual vertex form. Door meshes
+ *  compile into body-first + a trailing named leaf slot; ordinary pieces pass
+ *  through untouched. A broken door contract is rejected loudly, never flattened
+ *  into an apparently valid solid wall. */
+function residentMeshFor(
+  ap: AuthoredBuildPiece,
+  pkg: ModelPackage | null,
+  key: string,
+  vertices: Float32Array,
+  png?: Uint8Array,
+): ResidentMesh | null {
+  if (ap.edit !== 'door' && ap.edit !== 'garageDoor') return { key, vertices, png };
+  if (!pkg) {
+    console.warn(`[authored-door] '${ap.label}' has no model package; resident door skipped`);
+    return null;
+  }
+  const doc = packageMeshDoc(pkg);
+  const parts = packageMeshDocParts(pkg);
+  if (!doc || !parts) {
+    console.warn(`[authored-door] '${ap.label}' has no saved meshdoc/Outliner metadata; Save Model, then export Door Wall again`);
+    return null;
+  }
+  const compiled = compileDoorMesh(vertices, doc, parts);
+  if (!compiled.ok) {
+    console.warn(`[authored-door] '${ap.label}' rejected: ${compiled.error}`);
+    return null;
+  }
+  const tuning = ap.edit === 'garageDoor' ? DOOR_EXPORT_TUNING.garage : DOOR_EXPORT_TUNING.walk;
+  return {
+    key,
+    vertices: compiled.mesh.vertices,
+    png,
+    slots: [compiled.mesh.leaf],
+    door: { leafSlot: 0, reachMeters: tuning.reachMeters, vehicle: tuning.vehicle, startOpen: false },
+  };
+}
+
 /** Push the placed-piece world onto a mounted loader node: box instances, face
  *  skins, and authored mesh-prop refs. No-ops (loudly, when pieces exist) until
  *  the node id and the doors are live. */
@@ -77,7 +117,7 @@ export function pushLiveWorld(nodeId: number, pieces: readonly PlacedPiece[]): v
     const refs: MeshRef[] = [];
     for (const piece of pieces) {
       if (!isAuthoredPiece(piece.pieceId)) continue;
-      refs.push({ key: authoredModelIdOf(piece.pieceId), x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees });
+      refs.push({ key: authoredResidentKeyOf(piece.pieceId), x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees });
     }
     g.__compiled_world_set_live_mesh_props(nodeId, encodeMeshRefs(refs));
   }
@@ -105,7 +145,8 @@ export function pushResidentMeshes(nodeId: number, authoredPieces: readonly Auth
     const verts = currentPaintedVertices ?? currentGeometry;
     if (verts && verts.length >= 8) {
       if (currentPaintedVertices && paintedForm) painted += 1;
-      meshes.push({ key: ap.modelId, vertices: verts, png: currentPaintedVertices ? paintedForm?.png : undefined });
+      const resident = residentMeshFor(ap, pkg, ap.id, verts, currentPaintedVertices ? paintedForm?.png : undefined);
+      if (resident) meshes.push(resident);
     } else console.warn(`[authored] no mesh data for '${ap.modelId}' (${ap.label}) — not resident (re-open + re-export the model)`);
     // Every stored paint SKIN is its own resident mesh (req_2834): key
     // `<modelId>#p<skinId>` — the same key a skinned placeable id resolves to,
@@ -122,7 +163,9 @@ export function pushResidentMeshes(nodeId: number, authoredPieces: readonly Auth
           console.warn(`[authored] paint skin '${skin.id}' no longer fits '${ap.modelId}' — load + save the painting against the current topology`);
           continue;
         }
-        meshes.push({ key: skinnedPieceId(ap.modelId, skin.id), vertices: skinVertices, png: form.png });
+        const resident = residentMeshFor(ap, pkg, skinnedPieceId(ap.id, skin.id), skinVertices, form.png);
+        if (!resident) continue;
+        meshes.push(resident);
         skins += 1;
       }
     }
