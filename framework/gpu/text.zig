@@ -7,6 +7,7 @@ const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
+const pack = @import("pack.zig");
 const m = @import("../math/root.zig");
 const c = @import("../c.zig").imports;
 const shaders = @import("shaders.zig");
@@ -17,23 +18,20 @@ const rects = @import("rects.zig");
 // Types
 // ════════════════════════════════════════════════════════════════════════
 
-/// Per-instance glyph data — matches the text WGSL struct layout.
-/// The 2D affine matrix (m_a..m_ty) is applied to each glyph quad corner in
-/// the shader; default identity (m_a=m_d=1) is a no-op so the existing fast
-/// path for axis-aligned text remains free.
+/// Per-instance glyph data — 48 bytes (was 72). Size rides float16x2 (a
+/// glyph quad is a few hundred px at most — sub-pixel exact), atlas UVs
+/// unorm16x4 ([0,1] by construction, ≤1/16-texel error on the 4096 atlas),
+/// color unorm8x4; the vertex fetch widens them back so text_wgsl is
+/// unchanged. Position AND the 2D affine (m_a..m_ty) stay f32: the matrix
+/// multiplies full screen-pixel coordinates in the shader, so f16
+/// coefficients would jitter rotated/scaled text by whole pixels. Default
+/// identity (m_a=m_d=1) keeps the axis-aligned fast path free.
 pub const GlyphInstance = extern struct {
     pos_x: f32,
     pos_y: f32,
-    size_w: f32,
-    size_h: f32,
-    uv_x: f32,
-    uv_y: f32,
-    uv_w: f32,
-    uv_h: f32,
-    color_r: f32,
-    color_g: f32,
-    color_b: f32,
-    color_a: f32,
+    size: [2]f16,
+    uv: [4]u16,
+    color: [4]u8,
     m_a: f32 = 1,
     m_b: f32 = 0,
     m_c: f32 = 0,
@@ -41,6 +39,12 @@ pub const GlyphInstance = extern struct {
     m_tx: f32 = 0,
     m_ty: f32 = 0,
 };
+
+comptime {
+    if (@sizeOf(GlyphInstance) != 48 or @alignOf(GlyphInstance) != 4) {
+        @compileError("GlyphInstance must match text_wgsl per-instance vertex layout (48 bytes)");
+    }
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // Constants
@@ -574,16 +578,14 @@ pub fn drawTextLine(text: []const u8, x: f32, y: f32, size_px: u16, cr: f32, cg:
                     g_glyphs[g_glyph_count] = .{
                         .pos_x = gx,
                         .pos_y = gy,
-                        .size_w = sw,
-                        .size_h = sh,
-                        .uv_x = glyph.uv_x,
-                        .uv_y = glyph.uv_y,
-                        .uv_w = glyph.uv_w,
-                        .uv_h = glyph.uv_h,
-                        .color_r = if (ecol) |e| e[0] else cr,
-                        .color_g = if (ecol) |e| e[1] else cg,
-                        .color_b = if (ecol) |e| e[2] else cb,
-                        .color_a = ca,
+                        .size = .{ pack.f16FromF32(sw), pack.f16FromF32(sh) },
+                        .uv = .{ pack.unorm16(glyph.uv_x), pack.unorm16(glyph.uv_y), pack.unorm16(glyph.uv_w), pack.unorm16(glyph.uv_h) },
+                        .color = pack.rgba8(
+                            if (ecol) |e| e[0] else cr,
+                            if (ecol) |e| e[1] else cg,
+                            if (ecol) |e| e[2] else cb,
+                            ca,
+                        ),
                         .m_a = if (node_active) node_m.a else 1,
                         .m_b = if (node_active) node_m.b else 0,
                         .m_c = if (node_active) node_m.c else 0,
@@ -652,7 +654,10 @@ pub fn drawColorTextRow(spans: []const node_layout.ColorTextSpan, x: f32, y: f32
             @as(f32, @floatFromInt(color.b)) / 255.0,
             alpha,
         );
-        pen_x += measureTextLineWidth(span.text, size_px);
+        // Step to the next colored span exactly as drawTextLine stepped this
+        // one, including letter spacing and inline-glyph sentinels. Syntax
+        // token boundaries must not alter the geometry of the glyph run.
+        pen_x += subLineAdvance(span.text, size_px);
     }
 }
 
@@ -1049,16 +1054,12 @@ pub fn drawGlyphAt(char_buf: []const u8, x: f32, y: f32, size_px: u16, cr: f32, 
             g_glyphs[g_glyph_count] = .{
                 .pos_x = pen_x + @as(f32, @floatFromInt(glyph.bearing_x)),
                 .pos_y = pen_y + ascent - @as(f32, @floatFromInt(glyph.bearing_y)),
-                .size_w = @floatFromInt(glyph.width),
-                .size_h = @floatFromInt(glyph.height),
-                .uv_x = glyph.uv_x,
-                .uv_y = glyph.uv_y,
-                .uv_w = glyph.uv_w,
-                .uv_h = glyph.uv_h,
-                .color_r = cr,
-                .color_g = cg,
-                .color_b = cb,
-                .color_a = ca,
+                .size = .{
+                    pack.f16FromF32(@floatFromInt(glyph.width)),
+                    pack.f16FromF32(@floatFromInt(glyph.height)),
+                },
+                .uv = .{ pack.unorm16(glyph.uv_x), pack.unorm16(glyph.uv_y), pack.unorm16(glyph.uv_w), pack.unorm16(glyph.uv_h) },
+                .color = pack.rgba8(cr, cg, cb, ca),
             };
             g_glyph_count += 1;
         }
@@ -1285,15 +1286,15 @@ fn initPipeline(device: *wgpu.Device) void {
     }) orelse return;
     defer pipeline_layout.release();
 
-    // Glyph instance vertex attributes
+    // Glyph instance vertex attributes over the 48-byte row (see GlyphInstance)
     const glyph_attrs = [_]wgpu.VertexAttribute{
         .{ .format = .float32x2, .offset = 0, .shader_location = 0 }, // pos
-        .{ .format = .float32x2, .offset = 8, .shader_location = 1 }, // size
-        .{ .format = .float32x2, .offset = 16, .shader_location = 2 }, // uv_pos
-        .{ .format = .float32x2, .offset = 24, .shader_location = 3 }, // uv_size
-        .{ .format = .float32x4, .offset = 32, .shader_location = 4 }, // color
-        .{ .format = .float32x4, .offset = 48, .shader_location = 5 }, // m_abcd (linear part)
-        .{ .format = .float32x2, .offset = 64, .shader_location = 6 }, // m_txy (translation)
+        .{ .format = .float16x2, .offset = 8, .shader_location = 1 }, // size
+        .{ .format = .unorm16x2, .offset = 12, .shader_location = 2 }, // uv_pos
+        .{ .format = .unorm16x2, .offset = 16, .shader_location = 3 }, // uv_size
+        .{ .format = .unorm8x4, .offset = 20, .shader_location = 4 }, // color
+        .{ .format = .float32x4, .offset = 24, .shader_location = 5 }, // m_abcd (linear part)
+        .{ .format = .float32x2, .offset = 40, .shader_location = 6 }, // m_txy (translation)
     };
 
     const glyph_buffer_layout = wgpu.VertexBufferLayout{

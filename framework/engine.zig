@@ -1986,9 +1986,6 @@ var input_drag_node_x: f32 = 0; // node rect x (for computing local_x)
 var input_drag_node_y: f32 = 0; // node rect y (for computing local_y)
 var input_drag_node_pl: f32 = 0; // node padding-left
 var input_drag_node_pt: f32 = 0; // node padding-top
-var input_drag_max_width: f32 = 0;
-var input_drag_font_size: u16 = 0;
-var input_drag_line_height: f32 = 0; // node.line_height at drag-start — paint/hit-test must agree
 // Coalesced drag position — set per SDL_EVENT_MOUSE_MOTION, consumed once
 // per frame after the event pump. Avoids N hit-tests per frame when SDL
 // delivers a burst of motion events during rapid dragging.
@@ -2209,23 +2206,27 @@ fn paintScrollbars(node: *Node) void {
     }
 }
 
-fn hitTestInputByte(id: u8, local_x: f32, local_y: f32, font_size: u16, max_width: f32, line_height: f32) u32 {
+fn hitTestInputByte(node: *const Node, id: u8, local_x: f32, local_y: f32) u32 {
     const typed = input.getText(id);
     if (typed.len == 0) return 0;
 
     if (g_text_engine) |te| {
+        const scope = selection.applyNodeTextScope(node);
+        defer selection.restoreNodeTextScope(scope);
+        const max_width = node.computed.w - node.style.padLeft() - node.style.padRight();
         const idx = if (input.isMultiline(id))
-            te.hitTestWrappedAlignedLH(
+            te.hitTestWrappedAlignedStyledLH(
                 typed,
                 @max(@as(f32, 0), local_x),
                 @max(@as(f32, 0), local_y),
-                font_size,
+                node.font_size,
                 @max(@as(f32, 1), max_width),
                 .left,
-                line_height,
+                node.letter_spacing,
+                node.line_height,
             )
         else
-            te.hitTestWrappedAlignedLH(typed, @max(@as(f32, 0), local_x), 0, font_size, 0, .left, line_height);
+            te.hitTestWrappedAlignedStyledLH(typed, @max(@as(f32, 0), local_x), 0, node.font_size, 0, .left, node.letter_spacing, node.line_height);
         return @intCast(@min(idx, typed.len));
     }
 
@@ -2255,20 +2256,23 @@ fn handleInputVerticalKey(root: *Node, sym: c_int, mods: u16) bool {
     const pr = node.style.padRight();
     const max_w = @max(@as(f32, 1), node.computed.w - pl - pr);
     const cursor_pos = input.getCursorPos(id);
-    const point = te.byteToPosLH(typed, @as(usize, cursor_pos), node.font_size, max_w, node.line_height);
+    const scope = selection.applyNodeTextScope(node);
+    defer selection.restoreNodeTextScope(scope);
+    const point = te.byteToPosStyledLH(typed, @as(usize, cursor_pos), node.font_size, max_w, node.letter_spacing, node.line_height);
     const lm = te.lineMetrics(node.font_size);
     const line_h: f32 = if (node.line_height > 0) node.line_height else lm.height;
     const target_y = if (sym == c.SDLK_UP)
         point.y - line_h
     else
         point.y + line_h;
-    const next = te.hitTestWrappedAlignedLH(
+    const next = te.hitTestWrappedAlignedStyledLH(
         typed,
         point.x,
         @max(@as(f32, 0), target_y),
         node.font_size,
         max_w,
         .left,
+        node.letter_spacing,
         node.line_height,
     );
     const shift = (mods & c.SDL_KMOD_SHIFT) != 0;
@@ -3465,6 +3469,7 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
     const typed = input.getText(id);
     const is_placeholder = typed.len == 0;
     const is_multiline = input.isMultiline(id);
+    const is_focused = input.isFocused(id);
     const max_w = @max(@as(f32, 1), r.w - pl - pr);
     const cursor_pos = input.getCursorPos(id);
     var text_y = r.y + pt;
@@ -3486,6 +3491,40 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
     }
     text_y = @floor(text_y);
 
+    // Resolve every caret-dependent position under the same transient font
+    // style the painter uses. Without this scope, a monospace/bold input was
+    // measured with the default proportional face, so spaces and punctuation
+    // accumulated visible drift between the glyph run and the caret.
+    var caret_tx: f32 = 0;
+    var caret_ty: f32 = 0;
+    var text_w: f32 = 0;
+    if (!is_multiline or is_focused) {
+        if (g_text_engine) |te| {
+            const scope = selection.applyNodeTextScope(node);
+            defer selection.restoreNodeTextScope(scope);
+            const caret_point = te.byteToPosStyledLH(
+                typed,
+                @as(usize, cursor_pos),
+                node.font_size,
+                if (is_multiline) max_w else 0,
+                node.letter_spacing,
+                node.line_height,
+            );
+            caret_tx = caret_point.x;
+            caret_ty = caret_point.y;
+            if (!is_multiline) {
+                text_w = te.byteToPosStyledLH(
+                    typed,
+                    typed.len,
+                    node.font_size,
+                    0,
+                    node.letter_spacing,
+                    node.line_height,
+                ).x;
+            }
+        }
+    }
+
     // ── Single-line horizontal scroll (the "trailing" behavior) ──────────
     // A single-line input never wraps; its text slides left so the caret
     // stays inside the box as you type past the right edge. The paint pass
@@ -3494,16 +3533,8 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
     // glyph the user sees. Multiline inputs keep hscroll = 0 (they wrap).
     var hscroll: f32 = 0;
     if (!is_multiline) {
-        var caret_tx: f32 = 0;
-        var text_w: f32 = 0;
-        if (g_text_engine) |te| {
-            if (!is_placeholder) {
-                caret_tx = te.byteToPosLH(typed, @as(usize, cursor_pos), node.font_size, 0, node.line_height).x;
-                text_w = te.byteToPosLH(typed, typed.len, node.font_size, 0, node.line_height).x;
-            }
-        }
         hscroll = input.getScrollX(id);
-        if (input.isFocused(id)) {
+        if (is_focused) {
             // Keep a small margin of context on either side of the caret so
             // it never sits flush against the clipping edge.
             const margin: f32 = @min(max_w * 0.5, @as(f32, @floatFromInt(node.font_size)) * 0.4 + 2);
@@ -3536,6 +3567,10 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
     }
     if (!is_placeholder) {
         if (node.input_color_rows) |rows| {
+            // Syntax-colored rows bypass drawNodeTextCommon, so establish the
+            // node's family/weight/spacing explicitly for the whole row run.
+            const scope = selection.applyNodeTextScope(node);
+            defer selection.restoreNodeTextScope(scope);
             const line_h: f32 = if (node.line_height > 0) node.line_height else gpu.getLineHeight(node.font_size);
             var start_row: usize = 0;
             var end_row: usize = rows.len;
@@ -3585,21 +3620,14 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
             }
         }
     }
-    if (input.isFocused(id) and g_cursor_visible) {
-        var cursor_x: f32 = 0;
-        var cursor_y: f32 = 0;
-        if (g_text_engine) |te| {
-            const point = te.byteToPosLH(typed, @as(usize, cursor_pos), node.font_size, if (is_multiline) max_w else 0, node.line_height);
-            cursor_x = point.x;
-            cursor_y = point.y;
-        }
-        const cx = tx0 + cursor_x;
+    if (is_focused and g_cursor_visible) {
+        const cx = tx0 + caret_tx;
         // Match the caret to the line box the text and selection use — same
         // metric as the color-row path above and gpu.drawSelectionRects —
         // instead of a hardcoded 1.3×font_size, which left the caret a
         // different height from both the glyphs and the selection highlight.
         const line_h: f32 = if (node.line_height > 0) node.line_height else gpu.getLineHeight(node.font_size);
-        const cy = text_y + cursor_y;
+        const cy = text_y + caret_ty;
         gpu.drawRect(cx, @max(cy, text_y), 2, @max(@min(line_h, inner_h), 4), 1, 1, 1, 0.8, 0, 0, 0, 0, 0, 0);
     }
 }
@@ -4595,7 +4623,6 @@ pub fn run(config_in: AppConfig) !void {
                                 selection.clear();
                                 const pl = h.style.padLeft();
                                 const pt = h.style.padTop();
-                                const pr = h.style.padRight();
                                 var scroll_x: f32 = 0;
                                 var scroll_y: f32 = 0;
                                 _ = scrollOffsetForNode(config.root, h, &scroll_x, &scroll_y);
@@ -4603,7 +4630,7 @@ pub fn run(config_in: AppConfig) !void {
                                 // the glyph the user sees, not the one that would be there at scroll 0.
                                 const local_x = mx + scroll_x - h.computed.x - pl + input.getScrollX(id);
                                 const local_y = my + scroll_y - h.computed.y - pt;
-                                const cursor_pos = hitTestInputByte(id, local_x, local_y, h.font_size, h.computed.w - pl - pr, h.line_height);
+                                const cursor_pos = hitTestInputByte(h, id, local_x, local_y);
                                 if (clicks == 3) {
                                     input.selectAll(id);
                                 } else if (clicks == 2) {
@@ -4618,9 +4645,6 @@ pub fn run(config_in: AppConfig) !void {
                                     input_drag_node_y = h.computed.y - scroll_y;
                                     input_drag_node_pl = pl;
                                     input_drag_node_pt = pt;
-                                    input_drag_max_width = h.computed.w - pl - pr;
-                                    input_drag_font_size = h.font_size;
-                                    input_drag_line_height = h.line_height;
                                 }
                             } else if (h.handlers.on_mouse_down != null or h.handlers.js_on_mouse_down != null or h.handlers.lua_on_mouse_down != null) {
                                 input.unfocus();
@@ -4718,10 +4742,9 @@ pub fn run(config_in: AppConfig) !void {
                                     selection.clear();
                                     const pl = h.style.padLeft();
                                     const pt = h.style.padTop();
-                                    const pr = h.style.padRight();
                                     const local_x = gpos[0] - h.computed.x - pl + input.getScrollX(id);
                                     const local_y = gpos[1] - h.computed.y - pt;
-                                    const cursor_pos = hitTestInputByte(id, local_x, local_y, h.font_size, h.computed.w - pl - pr, h.line_height);
+                                    const cursor_pos = hitTestInputByte(h, id, local_x, local_y);
                                     input.setCursorPos(id, cursor_pos);
                                     input.startDrag(id);
                                     input_drag_active = true;
@@ -4730,9 +4753,6 @@ pub fn run(config_in: AppConfig) !void {
                                     input_drag_node_y = h.computed.y;
                                     input_drag_node_pl = pl;
                                     input_drag_node_pt = pt;
-                                    input_drag_max_width = h.computed.w - pl - pr;
-                                    input_drag_font_size = h.font_size;
-                                    input_drag_line_height = h.line_height;
                                     handled_interactive = true;
                                 } else if (h.handlers.on_mouse_down) |handler| {
                                     stampClickLatency();
@@ -5638,8 +5658,10 @@ pub fn run(config_in: AppConfig) !void {
             input_drag_pending = false;
             const local_x = input_drag_pending_x - input_drag_node_x - input_drag_node_pl + input.getScrollX(input_drag_id);
             const local_y = input_drag_pending_y - input_drag_node_y - input_drag_node_pt;
-            const cursor_pos = hitTestInputByte(input_drag_id, local_x, local_y, input_drag_font_size, input_drag_max_width, input_drag_line_height);
-            input.updateDragToPos(input_drag_id, cursor_pos);
+            if (findInputNode(config.root, input_drag_id)) |drag_node| {
+                const cursor_pos = hitTestInputByte(drag_node, input_drag_id, local_x, local_y);
+                input.updateDragToPos(input_drag_id, cursor_pos);
+            }
         }
 
         // Layout (main window) — skip full flex pass when nothing invalidated geometry

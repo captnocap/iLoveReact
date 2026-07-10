@@ -19,6 +19,7 @@ const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
+const pack = @import("pack.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 
@@ -26,28 +27,30 @@ const core = @import("gpu.zig");
 // Types
 // ════════════════════════════════════════════════════════════════════════
 
-/// Per-instance capsule data. 32 bytes.
+/// Per-instance capsule data — 24 bytes (was 48: f32x4 color + 12 bytes of
+/// literal padding). Endpoints and stroke keep full f32 (pixel precision);
+/// color rides unorm8x4, decoded back to vec4f by the vertex fetch.
 pub const CapsuleInstance = extern struct {
     p0_x: f32,
     p0_y: f32,
     p1_x: f32,
     p1_y: f32,
-    color_r: f32,
-    color_g: f32,
-    color_b: f32,
-    color_a: f32,
+    color: [4]u8,
     stroke_width: f32,
-    _pad0: f32 = 0,
-    _pad1: f32 = 0,
-    _pad2: f32 = 0,
 };
+
+comptime {
+    if (@sizeOf(CapsuleInstance) != 24 or @alignOf(CapsuleInstance) != 4) {
+        @compileError("CapsuleInstance must match capsule_wgsl per-instance vertex layout (24 bytes)");
+    }
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // Constants & State
 // ════════════════════════════════════════════════════════════════════════
 
 // Bumped 32K → 1M to support data-dense polyline workloads (chart_bench at
-// 100 charts × 5000 points = ~500K capsules/frame). 1M × 48 bytes = ~48 MB
+// 100 charts × 5000 points = ~500K capsules/frame). 1M × 24 bytes = ~24 MB
 // static state — fine on any modern desktop, and the GPU buffer of the same
 // size is well below typical VRAM headroom. Without this, polyline charts
 // silently truncate past ~6.5 fully-rendered cells in dense bench scenarios.
@@ -102,10 +105,7 @@ pub fn drawCapsule(
         .p0_y = t0y,
         .p1_x = t1x,
         .p1_y = t1y,
-        .color_r = r,
-        .color_g = g,
-        .color_b = b,
-        .color_a = a,
+        .color = pack.rgba8(r, g, b, a),
         .stroke_width = tw,
     };
     g_capsule_count += 1;
@@ -160,13 +160,12 @@ pub fn initPipeline(device: *wgpu.Device, globals_buffer: *wgpu.Buffer) void {
     }) orelse return;
     defer pipeline_layout.release();
 
-    // 5 attribute slots carrying 12 floats total (32 bytes).
+    // 4 attribute slots over the 24-byte row (see CapsuleInstance).
     const instance_attrs = [_]wgpu.VertexAttribute{
         .{ .format = .float32x2, .offset = 0, .shader_location = 0 }, // p0
         .{ .format = .float32x2, .offset = 8, .shader_location = 1 }, // p1
-        .{ .format = .float32x4, .offset = 16, .shader_location = 2 }, // color
-        .{ .format = .float32, .offset = 32, .shader_location = 3 }, // stroke_width
-        .{ .format = .float32, .offset = 36, .shader_location = 4 }, // _pad0 (unused)
+        .{ .format = .unorm8x4, .offset = 16, .shader_location = 2 }, // color
+        .{ .format = .float32, .offset = 20, .shader_location = 3 }, // stroke_width
     };
 
     const instance_buffer_layout = wgpu.VertexBufferLayout{

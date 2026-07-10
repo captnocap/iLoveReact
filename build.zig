@@ -1207,6 +1207,7 @@ pub fn build(b: *std.Build) void {
         .name = "gpu-attribution-test",
         .root_module = gpu_attribution_test_mod,
     });
+    gpu_attribution_test.linkSystemLibrary("freetype");
     const run_gpu_attribution_test = b.addRunArtifact(gpu_attribution_test);
     const gpu_attribution_test_step = b.step("test-gpu-attribution", "Run GPU attribution unit tests");
     gpu_attribution_test_step.dependOn(&run_gpu_attribution_test.step);

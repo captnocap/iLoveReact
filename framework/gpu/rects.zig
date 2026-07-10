@@ -8,6 +8,7 @@ const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
+const pack = @import("pack.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 
@@ -15,8 +16,11 @@ const core = @import("gpu.zig");
 // Types
 // ════════════════════════════════════════════════════════════════════════
 
-/// Per-instance rect data — matches the WGSL struct layout.
-/// 20 x f32 = 80 bytes (16-float aligned for GPU).
+/// Per-instance rect data — 68 bytes (was 104: three f32x4 colors). The
+/// three colors ride unorm8x4 and the vertex fetch widens them back to
+/// vec4f, so rect_wgsl is unchanged. Geometry, radii, and the visual
+/// transform stay f32 — rotation multiplies full screen coordinates, and a
+/// quantized angle would visibly wobble large rotated rects.
 pub const RectInstance = extern struct {
     // Position (top-left, screen pixels)
     pos_x: f32,
@@ -24,16 +28,9 @@ pub const RectInstance = extern struct {
     // Size (width, height in pixels)
     size_w: f32,
     size_h: f32,
-    // Background color RGBA [0..1]
-    color_r: f32,
-    color_g: f32,
-    color_b: f32,
-    color_a: f32,
-    // Border color RGBA [0..1]
-    border_color_r: f32,
-    border_color_g: f32,
-    border_color_b: f32,
-    border_color_a: f32,
+    // Background + border color RGBA (unorm8x4)
+    color: [4]u8,
+    border_color: [4]u8,
     // Border radius per corner: tl, tr, br, bl
     radius_tl: f32,
     radius_tr: f32,
@@ -48,13 +45,17 @@ pub const RectInstance = extern struct {
     // SDF shadow blur — widens the smoothstep falloff in the fragment shader.
     // 0 = normal sharp rect, >0 = soft shadow edge over blur_radius pixels.
     blur_radius: f32 = 0,
-    // Gradient: end color + direction (0=none, 1=vertical, 2=horizontal, 3=diagonal)
-    grad_r: f32 = 0,
-    grad_g: f32 = 0,
-    grad_b: f32 = 0,
-    grad_a: f32 = 0,
+    // Gradient: end color (unorm8x4) + direction (0=none, 1=vertical,
+    // 2=horizontal, 3=diagonal)
+    grad: [4]u8 = .{ 0, 0, 0, 0 },
     grad_dir: f32 = 0,
 };
+
+comptime {
+    if (@sizeOf(RectInstance) != 68 or @alignOf(RectInstance) != 4) {
+        @compileError("RectInstance must match rect_wgsl per-instance vertex layout (68 bytes)");
+    }
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // Constants & State
@@ -113,14 +114,8 @@ pub fn drawRect(
         .pos_y = tr.y,
         .size_w = tr.w,
         .size_h = tr.h,
-        .color_r = r,
-        .color_g = g,
-        .color_b = b,
-        .color_a = a,
-        .border_color_r = br,
-        .border_color_g = bg,
-        .border_color_b = bb,
-        .border_color_a = ba,
+        .color = pack.rgba8(r, g, b, a),
+        .border_color = pack.rgba8(br, bg, bb, ba),
         .radius_tl = border_radius,
         .radius_tr = border_radius,
         .radius_br = border_radius,
@@ -159,14 +154,8 @@ pub fn drawRectCorners(
         .pos_y = tr.y,
         .size_w = tr.w,
         .size_h = tr.h,
-        .color_r = r,
-        .color_g = g,
-        .color_b = b,
-        .color_a = a,
-        .border_color_r = br,
-        .border_color_g = bg,
-        .border_color_b = bb,
-        .border_color_a = ba,
+        .color = pack.rgba8(r, g, b, a),
+        .border_color = pack.rgba8(br, bg, bb, ba),
         .radius_tl = rtl,
         .radius_tr = rtr,
         .radius_br = rbr,
@@ -209,14 +198,8 @@ pub fn drawRectCornersTransformed(
         .pos_y = tr.y,
         .size_w = tr.w,
         .size_h = tr.h,
-        .color_r = r,
-        .color_g = g,
-        .color_b = b,
-        .color_a = a,
-        .border_color_r = br,
-        .border_color_g = bg,
-        .border_color_b = bb,
-        .border_color_a = ba,
+        .color = pack.rgba8(r, g, b, a),
+        .border_color = pack.rgba8(br, bg, bb, ba),
         .radius_tl = rtl,
         .radius_tr = rtr,
         .radius_br = rbr,
@@ -258,14 +241,8 @@ pub fn drawRectTransformed(
         .pos_y = tr.y,
         .size_w = tr.w,
         .size_h = tr.h,
-        .color_r = r,
-        .color_g = g,
-        .color_b = b,
-        .color_a = a,
-        .border_color_r = br,
-        .border_color_g = bg,
-        .border_color_b = bb,
-        .border_color_a = ba,
+        .color = pack.rgba8(r, g, b, a),
+        .border_color = pack.rgba8(br, bg, bb, ba),
         .radius_tl = border_radius,
         .radius_tr = border_radius,
         .radius_br = border_radius,
@@ -304,14 +281,8 @@ pub fn drawRectShadow(
         .pos_y = tr.y,
         .size_w = tr.w,
         .size_h = tr.h,
-        .color_r = r,
-        .color_g = g,
-        .color_b = b,
-        .color_a = a,
-        .border_color_r = 0,
-        .border_color_g = 0,
-        .border_color_b = 0,
-        .border_color_a = 0,
+        .color = pack.rgba8(r, g, b, a),
+        .border_color = .{ 0, 0, 0, 0 },
         .radius_tl = rtl,
         .radius_tr = rtr,
         .radius_br = rbr,
@@ -357,23 +328,14 @@ pub fn drawRectGradient(
         .pos_y = tr.y,
         .size_w = tr.w,
         .size_h = tr.h,
-        .color_r = r,
-        .color_g = g,
-        .color_b = b,
-        .color_a = a,
-        .border_color_r = br,
-        .border_color_g = bg,
-        .border_color_b = bb,
-        .border_color_a = ba,
+        .color = pack.rgba8(r, g, b, a),
+        .border_color = pack.rgba8(br, bg, bb, ba),
         .radius_tl = rtl,
         .radius_tr = rtr,
         .radius_br = rbr,
         .radius_bl = rbl,
         .border_width = border_width,
-        .grad_r = gr,
-        .grad_g = gg,
-        .grad_b = gb,
-        .grad_a = ga,
+        .grad = pack.rgba8(gr, gg, gb, ga),
         .grad_dir = dir,
         .rotation = tr.rotation_deg,
     };
@@ -434,20 +396,20 @@ pub fn initPipeline(device: *wgpu.Device, globals_buffer: *wgpu.Buffer) void {
     }) orelse return;
     defer pipeline_layout.release();
 
-    // Instance vertex attributes (12 locations for 26 floats)
+    // Instance vertex attributes (12 locations over the 68-byte row)
     const instance_attrs = [_]wgpu.VertexAttribute{
         .{ .format = .float32x2, .offset = 0, .shader_location = 0 }, // pos
         .{ .format = .float32x2, .offset = 8, .shader_location = 1 }, // size
-        .{ .format = .float32x4, .offset = 16, .shader_location = 2 }, // color
-        .{ .format = .float32x4, .offset = 32, .shader_location = 3 }, // border_color
-        .{ .format = .float32x4, .offset = 48, .shader_location = 4 }, // radii
-        .{ .format = .float32, .offset = 64, .shader_location = 5 }, // border_width
-        .{ .format = .float32, .offset = 68, .shader_location = 6 }, // rotation
-        .{ .format = .float32, .offset = 72, .shader_location = 7 }, // scale_x
-        .{ .format = .float32, .offset = 76, .shader_location = 8 }, // scale_y
-        .{ .format = .float32, .offset = 80, .shader_location = 9 }, // blur_radius
-        .{ .format = .float32x4, .offset = 84, .shader_location = 10 }, // grad_color
-        .{ .format = .float32, .offset = 100, .shader_location = 11 }, // grad_dir
+        .{ .format = .unorm8x4, .offset = 16, .shader_location = 2 }, // color
+        .{ .format = .unorm8x4, .offset = 20, .shader_location = 3 }, // border_color
+        .{ .format = .float32x4, .offset = 24, .shader_location = 4 }, // radii
+        .{ .format = .float32, .offset = 40, .shader_location = 5 }, // border_width
+        .{ .format = .float32, .offset = 44, .shader_location = 6 }, // rotation
+        .{ .format = .float32, .offset = 48, .shader_location = 7 }, // scale_x
+        .{ .format = .float32, .offset = 52, .shader_location = 8 }, // scale_y
+        .{ .format = .float32, .offset = 56, .shader_location = 9 }, // blur_radius
+        .{ .format = .unorm8x4, .offset = 60, .shader_location = 10 }, // grad_color
+        .{ .format = .float32, .offset = 64, .shader_location = 11 }, // grad_dir
     };
 
     const instance_buffer_layout = wgpu.VertexBufferLayout{

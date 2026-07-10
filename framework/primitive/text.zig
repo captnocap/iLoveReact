@@ -619,7 +619,12 @@ pub const TextEngine = struct {
             var char_count: usize = 0;
             while (i < text.len and text[i] != ' ' and text[i] != '\n') {
                 const sentinel_len = inlineGlyphSentinelLen(text, i);
-                if (sentinel_len > 0) { word_w += @floatFromInt(size_px); char_count += 1; i += sentinel_len; continue; }
+                if (sentinel_len > 0) {
+                    word_w += @floatFromInt(size_px);
+                    char_count += 1;
+                    i += sentinel_len;
+                    continue;
+                }
                 const ch = decodeUtf8(text[i..]);
                 word_w += self.cpAdvance(ch.codepoint, size_px);
                 char_count += 1;
@@ -679,11 +684,11 @@ pub const TextEngine = struct {
     /// index in the text. Accounts for word wrapping, UTF-8, and alignment.
     /// Returns the byte index closest to the click position.
     pub fn hitTestWrapped(self: *TextEngine, text: []const u8, local_x: f32, local_y: f32, size_px: u16, max_width: f32) usize {
-        return self.hitTestWrappedAlignedLH(text, local_x, local_y, size_px, max_width, .left, 0);
+        return self.hitTestWrappedAlignedStyledLH(text, local_x, local_y, size_px, max_width, .left, 0, 0);
     }
 
     pub fn hitTestWrappedAligned(self: *TextEngine, text: []const u8, local_x: f32, local_y: f32, size_px: u16, max_width: f32, text_align: layout.TextAlign) usize {
-        return self.hitTestWrappedAlignedLH(text, local_x, local_y, size_px, max_width, text_align, 0);
+        return self.hitTestWrappedAlignedStyledLH(text, local_x, local_y, size_px, max_width, text_align, 0, 0);
     }
 
     /// Hit-test with an explicit line-height override. When the caller has
@@ -693,12 +698,20 @@ pub const TextEngine = struct {
     /// divided into 17px-spaced lines puts the resolved line 2.4× below the
     /// actual click. Pass 0 to keep font-metric line height.
     pub fn hitTestWrappedAlignedLH(self: *TextEngine, text: []const u8, local_x: f32, local_y: f32, size_px: u16, max_width: f32, text_align: layout.TextAlign, line_height_override: f32) usize {
+        return self.hitTestWrappedAlignedStyledLH(text, local_x, local_y, size_px, max_width, text_align, 0, line_height_override);
+    }
+
+    /// Styled hit-test variant used by editable text. `letter_spacing` must
+    /// match the painter: drawTextLine advances by it after every rendered
+    /// glyph, so caret hit-testing must make the same step or drift farther
+    /// behind with every character.
+    pub fn hitTestWrappedAlignedStyledLH(self: *TextEngine, text: []const u8, local_x: f32, local_y: f32, size_px: u16, max_width: f32, text_align: layout.TextAlign, letter_spacing: f32, line_height_override: f32) usize {
         if (text.len == 0) return 0;
 
         const lm = self.lineMetrics(size_px);
         const effective_lh: f32 = if (line_height_override > 0) line_height_override else lm.height;
         const wrap = if (max_width > 0)
-            self.wordWrap(text, size_px, max_width, 0)
+            self.wordWrap(text, size_px, max_width, letter_spacing)
         else blk: {
             var w = WrapResult{};
             w.addLine(0, text.len);
@@ -720,13 +733,7 @@ pub const TextEngine = struct {
         // Compute alignment offset for this line
         var align_offset: f32 = 0;
         if (text_align != .left and max_width > 0) {
-            var line_w: f32 = 0;
-            var lj: usize = 0;
-            while (lj < line.len) {
-                const lch = decodeUtf8(line[lj..]);
-                line_w += self.cpAdvance(lch.codepoint, size_px);
-                lj += lch.len;
-            }
+            const line_w = self.measureLineWidth(line, size_px, letter_spacing);
             if (text_align == .center) {
                 align_offset = (max_width - line_w) / 2.0;
             } else {
@@ -739,20 +746,21 @@ pub const TextEngine = struct {
 
         var pen_x: f32 = 0;
         var i: usize = 0;
-        var last_byte: usize = 0;
 
         while (i < line.len) {
-            const ch = decodeUtf8(line[i..]);
-            const adv = self.cpAdvance(ch.codepoint, size_px);
+            const sentinel_len = inlineGlyphSentinelLen(line, i);
+            const adv: f32 = if (sentinel_len > 0)
+                @floatFromInt(size_px)
+            else
+                self.cpAdvance(decodeUtf8(line[i..]).codepoint, size_px);
 
             // If click is before the midpoint of this char, select before it
             if (pen_x + adv / 2.0 > adjusted_x) {
-                return line_start + last_byte;
+                return line_start + i;
             }
 
-            pen_x += adv;
-            last_byte = i;
-            i += ch.len;
+            pen_x += adv + letter_spacing;
+            i += if (sentinel_len > 0) sentinel_len else decodeUtf8(line[i..]).len;
         }
 
         // Past end of line — return end
@@ -762,7 +770,7 @@ pub const TextEngine = struct {
     /// Get the x offset of a byte index within the text, on its wrapped line.
     /// Returns {x_offset, line_y} relative to text origin.
     pub fn byteToPos(self: *TextEngine, text: []const u8, byte_idx: usize, size_px: u16, max_width: f32) struct { x: f32, y: f32 } {
-        return self.byteToPosLH(text, byte_idx, size_px, max_width, 0);
+        return self.byteToPosStyledLH(text, byte_idx, size_px, max_width, 0, 0);
     }
 
     /// Variant accepting an explicit line-height override. Callers with a
@@ -771,12 +779,19 @@ pub const TextEngine = struct {
     /// natural metric height instead of the stride the paint path uses —
     /// cursor caret drifts up off its line.
     pub fn byteToPosLH(self: *TextEngine, text: []const u8, byte_idx: usize, size_px: u16, max_width: f32, line_height_override: f32) struct { x: f32, y: f32 } {
+        return self.byteToPosStyledLH(text, byte_idx, size_px, max_width, 0, line_height_override);
+    }
+
+    /// Styled byte-position variant for editable text. The font family and
+    /// weight come from gpu_text's active text scope; letter spacing is an
+    /// explicit argument because it also participates in wrapping.
+    pub fn byteToPosStyledLH(self: *TextEngine, text: []const u8, byte_idx: usize, size_px: u16, max_width: f32, letter_spacing: f32, line_height_override: f32) struct { x: f32, y: f32 } {
         if (text.len == 0) return .{ .x = 0, .y = 0 };
 
         const lm = self.lineMetrics(size_px);
         const effective_lh: f32 = if (line_height_override > 0) line_height_override else lm.height;
         const wrap = if (max_width > 0)
-            self.wordWrap(text, size_px, max_width, 0)
+            self.wordWrap(text, size_px, max_width, letter_spacing)
         else blk: {
             var w = WrapResult{};
             w.addLine(0, text.len);
@@ -815,8 +830,14 @@ pub const TextEngine = struct {
         var pen_x: f32 = 0;
         var i: usize = 0;
         while (i < line.len and i < target) {
+            const sentinel_len = inlineGlyphSentinelLen(line, i);
+            if (sentinel_len > 0) {
+                pen_x += @as(f32, @floatFromInt(size_px)) + letter_spacing;
+                i += sentinel_len;
+                continue;
+            }
             const ch = decodeUtf8(line[i..]);
-            pen_x += self.cpAdvance(ch.codepoint, size_px);
+            pen_x += self.cpAdvance(ch.codepoint, size_px) + letter_spacing;
             i += ch.len;
         }
 

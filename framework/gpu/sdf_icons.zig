@@ -26,6 +26,7 @@ const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
+const pack = @import("pack.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 const atlas = @import("icon_atlas.zig");
@@ -34,24 +35,27 @@ const atlas = @import("icon_atlas.zig");
 // Types
 // ════════════════════════════════════════════════════════════════════════
 
-/// Per-instance icon quad. Vertex-attribute layout must match WGSL.
-/// 14 × f32 = 56 bytes. Padding pushes to 16-byte alignment.
+/// Per-instance icon quad — 32 bytes (was 56). Vertex-attribute layout must
+/// match WGSL. Atlas UVs ride unorm16x4 ([0,1] by construction), color
+/// unorm8x4, edge/smoothness float16x2 (both live near [0,1]); the vertex
+/// fetch widens them back so sdf_icon_wgsl is unchanged.
 pub const SdfIconInstance = extern struct {
     pos_x: f32,
     pos_y: f32,
     size_w: f32,
     size_h: f32,
-    uv_x: f32,
-    uv_y: f32,
-    uv_w: f32,
-    uv_h: f32,
-    color_r: f32,
-    color_g: f32,
-    color_b: f32,
-    color_a: f32,
-    edge: f32 = 0.5,        // smoothstep midpoint (0.5 = the natural threshold)
-    smoothness: f32 = 0.0,  // extra AA in atlas-UV units; 0 = use fwidth() only
+    uv: [4]u16,
+    color: [4]u8,
+    // smoothstep midpoint (0.5 = the natural threshold) + extra AA in
+    // atlas-UV units (0 = use fwidth() only)
+    edge_smooth: [2]f16 = .{ 0.5, 0.0 },
 };
+
+comptime {
+    if (@sizeOf(SdfIconInstance) != 32 or @alignOf(SdfIconInstance) != 4) {
+        @compileError("SdfIconInstance must match sdf_icon_wgsl per-instance vertex layout (32 bytes)");
+    }
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // Constants & state
@@ -245,10 +249,10 @@ fn initPipeline(device: *wgpu.Device) void {
     const attrs = [_]wgpu.VertexAttribute{
         .{ .format = .float32x2, .offset = 0,  .shader_location = 0 }, // pos
         .{ .format = .float32x2, .offset = 8,  .shader_location = 1 }, // size
-        .{ .format = .float32x2, .offset = 16, .shader_location = 2 }, // uv_pos
-        .{ .format = .float32x2, .offset = 24, .shader_location = 3 }, // uv_size
-        .{ .format = .float32x4, .offset = 32, .shader_location = 4 }, // color
-        .{ .format = .float32x2, .offset = 48, .shader_location = 5 }, // edge + smoothness
+        .{ .format = .unorm16x2, .offset = 16, .shader_location = 2 }, // uv_pos
+        .{ .format = .unorm16x2, .offset = 20, .shader_location = 3 }, // uv_size
+        .{ .format = .unorm8x4, .offset = 24, .shader_location = 4 }, // color
+        .{ .format = .float16x2, .offset = 28, .shader_location = 5 }, // edge + smoothness
     };
     const buffer_layout = wgpu.VertexBufferLayout{
         .step_mode = .instance,
@@ -323,14 +327,8 @@ pub fn queueIcon(
         .pos_y = py,
         .size_w = pw,
         .size_h = ph,
-        .uv_x = uv.u,
-        .uv_y = uv.v,
-        .uv_w = uv.w,
-        .uv_h = uv.h,
-        .color_r = r,
-        .color_g = g,
-        .color_b = b,
-        .color_a = a,
+        .uv = .{ pack.unorm16(uv.u), pack.unorm16(uv.v), pack.unorm16(uv.w), pack.unorm16(uv.h) },
+        .color = pack.rgba8(r, g, b, a),
     };
     g_icon_count += 1;
 }

@@ -9,6 +9,7 @@ const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
+const pack = @import("pack.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 
@@ -16,34 +17,27 @@ const core = @import("gpu.zig");
 // Types
 // ════════════════════════════════════════════════════════════════════════
 
-/// Per-instance triangle data — 3 vertices with per-vertex colors.
-/// 18 x f32 = 72 bytes. Padding to 20 x f32 = 80 bytes for GPU alignment.
+/// Per-instance triangle data — 3 vertices with per-vertex colors. 36 bytes
+/// (was 80: f32x4 per color + 8 bytes of padding). Positions keep full f32;
+/// each color rides unorm8x4 and the vertex fetch widens it back to vec4f,
+/// so poly_wgsl is unchanged.
 pub const TriInstance = extern struct {
-    // Vertex 0: position + color
     x0: f32,
     y0: f32,
-    r0: f32,
-    g0: f32,
-    b0: f32,
-    a0: f32,
-    // Vertex 1: position + color
+    c0: [4]u8,
     x1: f32,
     y1: f32,
-    r1: f32,
-    g1: f32,
-    b1: f32,
-    a1: f32,
-    // Vertex 2: position + color
+    c1: [4]u8,
     x2: f32,
     y2: f32,
-    r2: f32,
-    g2: f32,
-    b2: f32,
-    a2: f32,
-    // Padding
-    _pad0: f32 = 0,
-    _pad1: f32 = 0,
+    c2: [4]u8,
 };
+
+comptime {
+    if (@sizeOf(TriInstance) != 36 or @alignOf(TriInstance) != 4) {
+        @compileError("TriInstance must match poly_wgsl per-instance vertex layout (36 bytes)");
+    }
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // Constants & State
@@ -51,7 +45,7 @@ pub const TriInstance = extern struct {
 
 // Bumped 8K → 1M for dense filled-polygon workloads (chart_bench's
 // Graph.Polygon at 100 charts × 5000-point area-fills = ~500K triangles
-// per frame). 1M × 80 bytes = ~80 MB static. Fine on modern GPUs; matches
+// per frame). 1M × 36 bytes = ~36 MB static. Fine on modern GPUs; matches
 // the capsules cap (1M) so polyline + polygon pipelines have parity.
 pub const MAX_TRIS = 1_048_576;
 
@@ -122,22 +116,13 @@ pub fn drawTriColored(
     g_tris[g_tri_count] = .{
         .x0 = ta[0],
         .y0 = ta[1],
-        .r0 = r0,
-        .g0 = g0,
-        .b0 = b0,
-        .a0 = a0,
+        .c0 = pack.rgba8(r0, g0, b0, a0),
         .x1 = tb[0],
         .y1 = tb[1],
-        .r1 = r1,
-        .g1 = g1,
-        .b1 = b1,
-        .a1 = a1,
+        .c1 = pack.rgba8(r1, g1, b1, a1),
         .x2 = tc[0],
         .y2 = tc[1],
-        .r2 = r2,
-        .g2 = g2,
-        .b2 = b2,
-        .a2 = a2,
+        .c2 = pack.rgba8(r2, g2, b2, a2),
     };
     g_tri_count += 1;
 }
@@ -196,14 +181,15 @@ pub fn initPipeline(device: *wgpu.Device, globals_buffer: *wgpu.Buffer) void {
     }) orelse return;
     defer pipeline_layout.release();
 
-    // Instance vertex attributes: 3 vertices × (pos2 + color4) = 6 locations, 18 floats
+    // Instance vertex attributes: 3 vertices × (pos2 f32 + color unorm8x4)
+    // over the 36-byte row (see TriInstance).
     const instance_attrs = [_]wgpu.VertexAttribute{
         .{ .format = .float32x2, .offset = 0, .shader_location = 0 }, // v0 pos
-        .{ .format = .float32x4, .offset = 8, .shader_location = 1 }, // v0 color
-        .{ .format = .float32x2, .offset = 24, .shader_location = 2 }, // v1 pos
-        .{ .format = .float32x4, .offset = 32, .shader_location = 3 }, // v1 color
-        .{ .format = .float32x2, .offset = 48, .shader_location = 4 }, // v2 pos
-        .{ .format = .float32x4, .offset = 56, .shader_location = 5 }, // v2 color
+        .{ .format = .unorm8x4, .offset = 8, .shader_location = 1 }, // v0 color
+        .{ .format = .float32x2, .offset = 12, .shader_location = 2 }, // v1 pos
+        .{ .format = .unorm8x4, .offset = 20, .shader_location = 3 }, // v1 color
+        .{ .format = .float32x2, .offset = 24, .shader_location = 4 }, // v2 pos
+        .{ .format = .unorm8x4, .offset = 32, .shader_location = 5 }, // v2 color
     };
 
     const instance_buffer_layout = wgpu.VertexBufferLayout{

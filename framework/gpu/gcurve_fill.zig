@@ -30,6 +30,7 @@ const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
+const pack = @import("pack.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 
@@ -37,7 +38,9 @@ const core = @import("gpu.zig");
 // Types
 // ════════════════════════════════════════════════════════════════════════
 
-/// Per-instance g-curve triangle. 3 control points + RGBA = 10 f32 = 40 bytes.
+/// Per-instance g-curve triangle — 28 bytes (was 40: f32x4 color). Control
+/// points keep full f32; color rides unorm8x4, widened back to vec4f by the
+/// vertex fetch, so gcurve_fill_wgsl is unchanged.
 pub const GCurveFillInstance = extern struct {
     p0_x: f32,
     p0_y: f32,
@@ -45,11 +48,14 @@ pub const GCurveFillInstance = extern struct {
     p1_y: f32,
     p2_x: f32,
     p2_y: f32,
-    color_r: f32,
-    color_g: f32,
-    color_b: f32,
-    color_a: f32,
+    color: [4]u8,
 };
+
+comptime {
+    if (@sizeOf(GCurveFillInstance) != 28 or @alignOf(GCurveFillInstance) != 4) {
+        @compileError("GCurveFillInstance must match gcurve_fill_wgsl per-instance vertex layout (28 bytes)");
+    }
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // State
@@ -106,7 +112,7 @@ pub fn drawGCurveFill(
         .p0_x = t0x, .p0_y = t0y,
         .p1_x = t1x, .p1_y = t1y,
         .p2_x = t2x, .p2_y = t2y,
-        .color_r = r, .color_g = g, .color_b = b, .color_a = a,
+        .color = pack.rgba8(r, g, b, a),
     };
     g_count += 1;
 }
@@ -159,7 +165,7 @@ pub fn initPipeline(device: *wgpu.Device, globals_buffer: *wgpu.Buffer) void {
         .{ .format = .float32x2, .offset = 0,  .shader_location = 0 }, // p0
         .{ .format = .float32x2, .offset = 8,  .shader_location = 1 }, // p1
         .{ .format = .float32x2, .offset = 16, .shader_location = 2 }, // p2
-        .{ .format = .float32x4, .offset = 24, .shader_location = 3 }, // color
+        .{ .format = .unorm8x4, .offset = 24, .shader_location = 3 }, // color
     };
     const buffer_layout = wgpu.VertexBufferLayout{
         .step_mode = .instance,

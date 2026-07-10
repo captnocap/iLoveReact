@@ -8,6 +8,7 @@ const std = @import("std");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
+const pack = @import("pack.zig");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 
@@ -15,8 +16,9 @@ const core = @import("gpu.zig");
 // Types
 // ════════════════════════════════════════════════════════════════════════
 
-/// Per-instance curve data — matches the WGSL struct layout.
-/// 16 x f32 = 64 bytes (aligned for GPU).
+/// Per-instance curve data — 32 bytes (was 64: f32x4 color + 20 bytes of
+/// literal padding). Control points and stroke keep full f32; color rides
+/// unorm8x4, widened back to vec4f by the vertex fetch.
 pub const CurveInstance = extern struct {
     p0_x: f32,
     p0_y: f32,
@@ -24,17 +26,15 @@ pub const CurveInstance = extern struct {
     p1_y: f32,
     p2_x: f32,
     p2_y: f32,
-    color_r: f32,
-    color_g: f32,
-    color_b: f32,
-    color_a: f32,
+    color: [4]u8,
     stroke_width: f32,
-    _pad0: f32 = 0,
-    _pad1: f32 = 0,
-    _pad2: f32 = 0,
-    _pad3: f32 = 0,
-    _pad4: f32 = 0,
 };
+
+comptime {
+    if (@sizeOf(CurveInstance) != 32 or @alignOf(CurveInstance) != 4) {
+        @compileError("CurveInstance must match curve_wgsl per-instance vertex layout (32 bytes)");
+    }
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // Constants & State
@@ -97,10 +97,7 @@ pub fn drawCurve(
         .p1_y = t1y,
         .p2_x = t2x,
         .p2_y = t2y,
-        .color_r = r,
-        .color_g = g,
-        .color_b = b,
-        .color_a = a,
+        .color = pack.rgba8(r, g, b, a),
         .stroke_width = tw,
     };
     g_curve_count += 1;
@@ -207,16 +204,13 @@ pub fn initPipeline(device: *wgpu.Device, globals_buffer: *wgpu.Buffer) void {
     }) orelse return;
     defer pipeline_layout.release();
 
-    // Instance vertex attributes (8 locations for 16 floats)
+    // 5 attribute slots over the 32-byte row (see CurveInstance).
     const instance_attrs = [_]wgpu.VertexAttribute{
         .{ .format = .float32x2, .offset = 0, .shader_location = 0 }, // p0
         .{ .format = .float32x2, .offset = 8, .shader_location = 1 }, // p1
         .{ .format = .float32x2, .offset = 16, .shader_location = 2 }, // p2
-        .{ .format = .float32x4, .offset = 24, .shader_location = 3 }, // color
-        .{ .format = .float32, .offset = 40, .shader_location = 4 }, // stroke_width
-        .{ .format = .float32, .offset = 44, .shader_location = 5 }, // _pad0
-        .{ .format = .float32, .offset = 48, .shader_location = 6 }, // _pad1
-        .{ .format = .float32, .offset = 52, .shader_location = 7 }, // _pad2
+        .{ .format = .unorm8x4, .offset = 24, .shader_location = 3 }, // color
+        .{ .format = .float32, .offset = 28, .shader_location = 4 }, // stroke_width
     };
 
     const instance_buffer_layout = wgpu.VertexBufferLayout{

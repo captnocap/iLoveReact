@@ -407,15 +407,14 @@ pub const curve_wgsl =
     \\@group(0) @binding(0) var<uniform> globals: Globals;
     \\
     \\// ── Per-instance data ─────────────────────────────────────────
+    \\// 32-byte row (curves.zig CurveInstance) — color arrives unorm8x4,
+    \\// already widened to vec4f by the vertex fetch.
     \\struct CurveInstance {
     \\    @location(0) p0: vec2f,           // start point (screen pixels)
     \\    @location(1) p1: vec2f,           // control point
     \\    @location(2) p2: vec2f,           // end point
     \\    @location(3) color: vec4f,        // stroke RGBA [0..1]
     \\    @location(4) stroke_width: f32,   // stroke thickness in pixels
-    \\    @location(5) dash_len: f32,       // t-space dash period (0 = solid)
-    \\    @location(6) gap_ratio: f32,      // fraction that is gap (0.5 = equal)
-    \\    @location(7) time_offset: f32,    // animated offset for flow
     \\};
     \\
     \\struct VertexOutput {
@@ -426,9 +425,6 @@ pub const curve_wgsl =
     \\    @location(3) p2: vec2f,
     \\    @location(4) color: vec4f,
     \\    @location(5) stroke_width: f32,
-    \\    @location(6) dash_len: f32,
-    \\    @location(7) gap_ratio: f32,
-    \\    @location(8) time_offset: f32,
     \\};
     \\
     \\// ── Vertex shader ────────────────────────────────────────────
@@ -466,9 +462,6 @@ pub const curve_wgsl =
     \\    out.p2 = inst.p2;
     \\    out.color = inst.color;
     \\    out.stroke_width = inst.stroke_width;
-    \\    out.dash_len = inst.dash_len;
-    \\    out.gap_ratio = inst.gap_ratio;
-    \\    out.time_offset = inst.time_offset;
     \\    return out;
     \\}
     \\
@@ -558,7 +551,6 @@ pub const curve_wgsl =
     \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     \\    let result = sdf_bezier_t(in.pixel_pos, in.p0, in.p1, in.p2);
     \\    let dist = result.x;
-    \\    let t = result.y;
     \\    let half_w = in.stroke_width * 0.5;
     \\
     \\    // Anti-aliased stroke: smooth falloff over 1px at the edge
@@ -568,16 +560,7 @@ pub const curve_wgsl =
     \\        discard;
     \\    }
     \\
-    \\    var final_alpha = in.color.a * alpha;
-    \\
-    \\    // Animated dash pattern
-    \\    if in.dash_len > 0.0 {
-    \\        let pattern = fract((t + in.time_offset) / in.dash_len);
-    \\        let edge = 0.04;
-    \\        let threshold = 1.0 - in.gap_ratio;
-    \\        let dash_alpha = smoothstep(threshold - edge, threshold + edge, pattern);
-    \\        final_alpha *= (1.0 - dash_alpha);
-    \\    }
+    \\    let final_alpha = in.color.a * alpha;
     \\
     \\    if final_alpha <= 0.001 {
     \\        discard;
@@ -601,12 +584,13 @@ pub const capsule_wgsl =
     \\};
     \\@group(0) @binding(0) var<uniform> globals: Globals;
     \\
+    \\// 24-byte row (capsules.zig CapsuleInstance) — color arrives unorm8x4,
+    \\// already widened to vec4f by the vertex fetch.
     \\struct CapsuleInstance {
     \\    @location(0) p0: vec2f,
     \\    @location(1) p1: vec2f,
     \\    @location(2) color: vec4f,
     \\    @location(3) stroke_width: f32,
-    \\    @location(4) _pad0: f32,
     \\};
     \\
     \\struct VertexOutput {
@@ -1522,7 +1506,7 @@ pub const frond_wgsl =
     \\
     \\@fragment
     \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    \\    let style = floor(in.uv.x * 0.1);        // 0 palm · 1 broad · 2 conifer · 3 crown · 4 bark · 5..9 shrub bands
+    \\    let style = floor(in.uv.x * 0.1);        // 0 palm · 1 broad · 2 conifer · 3 crown · 4 bark · 5 shrub leaf · 6 mophead bloom · 7 panicle bloom · 8 weed leaf · 9 green stem
     \\    let u = in.uv.x - style * 10.0;          // 0..1 within the selected band
     \\    let v = clamp(in.uv.y, 0.0, 1.0);        // 0 base → 1 tip
     \\    let d = abs(u - 0.5);                // distance from the central rib
@@ -1579,14 +1563,14 @@ pub const frond_wgsl =
     \\    } else if (style < 7.5) {
     \\        // Panicle hydrangea: broad blush base tapering to a cream point.
     \\        // Geometry is also tapered, while this ragged cut keeps it floral.
-    \\        let reach = 0.5 * pow(max(0.0, 1.0 - v), 0.72);
+    \\        let reach = 0.5 * (1.0 - 0.55 * v);
     \\        let petal_edge = 0.88 + 0.12 * sin(v * 51.0 + u * 27.0);
     \\        let gap = step(0.965, fract(sin(dot(floor(vec2f(u, v) * 31.0), vec2f(23.3, 37.7))) * 43758.5));
     \\        keep = d < reach * petal_edge && gap < 0.5 && v < 0.995;
     \\    } else if (style < 8.5) {
     \\        // Opportunistic weed leaf: a long lanceolate blade with uneven
     \\        // teeth, kept narrow so a stem full of cards reads airy and wild.
-    \\        let spear = 0.27 * pow(max(0.0, sin(v * 3.14159265)), 0.72);
+    \\        let spear = 0.36 * pow(max(0.0, sin(v * 3.14159265)), 0.72);
     \\        let teeth = 0.82 + 0.18 * step(0.42, fract(v * 13.0 + u * 2.0));
     \\        keep = d < spear * teeth && v > 0.01 && v < 0.99;
     \\    } else if (style < 9.5) {
