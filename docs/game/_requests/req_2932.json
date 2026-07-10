@@ -1,0 +1,28 @@
+{
+  "id": "req_2932",
+  "at": "2026-07-10T23:33:28.940Z",
+  "origin": "codex:019f4ce0",
+  "text": "haha thanks so heres another anomoly im finding in the mesh editor is so heres just a basic cube and i selected all faces and then solidify, and the internal structure is... all over the place. why isnt it uniform?[Image #1][Image #2][Image #3]",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T23:33:39.665Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T23:35:29.520Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the non-uniform cube Solidify result in cart/editor. The native resident-mesh port accumulates one unit normal per selected triangle at each welded vertex, while a Studio cube stores each authored quad as two triangles. Diagonal endpoints therefore receive the same plane normal twice and other corners once, producing unequal offset vectors and a warped inner shell. The correct repair seam is to collapse selected triangles by authored-face group, derive each incident plane once, then solve an even-thickness miter/offset-plane intersection per welded vertex rather than normalizing a triangle-weighted sum. No code was changed because this request asked for the cause.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T23:35:29.520Z"
+}
