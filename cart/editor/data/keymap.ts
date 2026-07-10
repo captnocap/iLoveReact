@@ -32,6 +32,7 @@ const WORLD_KEYS: Record<string, string> = {
   b: 'place-piece',
   v: 'move-selection',
   p: 'paint-material',
+  n: 'paint-faces',
   c: 'open-color-studio',
   i: 'sample-material',
   t: 'add-trigger',

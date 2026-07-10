@@ -1,0 +1,18 @@
+{
+  "id": "req_2879",
+  "at": "2026-07-10T10:03:40.458Z",
+  "origin": "session:0a537016",
+  "text": "I have been thinking how to increase the work flow for paiting the build pieces after they land, and i think i have a strong suggestion here, so lets just look at this building [Image #9] you can see i have some walls painted, i ahve some floors painted, but i dont have everything painted, also if u get another angle. [Image #10] you can see the interrior walls are different than the exterior of them. alright, so what does this have to do with painting, the current approach asks the user to either pre define or to come back and then select, but i dont like that, because i am not sure what to do during predefine and then post-build is very slow and tedious, im thinking, give me a new paint mode that, if i just happen to touch a face that has a texture slot, whatever i have as the active paint/texture in the brush, applies to that face, this needs to explicitly be per-face slot because i will want to paint one side like the exterior and then the interior and not have to fight it to do so",
+  "status": "doing",
+  "sessionId": "0a537016-d7e6-44b6-b36d-e1c791a9e2a1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T10:03:49.514Z",
+      "actor": "fable-paint",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

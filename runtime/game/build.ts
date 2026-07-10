@@ -85,16 +85,18 @@ export function raycastBuild(ray: BuildRay, pieces: readonly BuildPieceLite[], m
 }
 
 /** Host-raycast a placed-piece list and return the HIT PIECE with its ray
- *  distance, or `null` for a genuine miss, or `undefined` when the host binding
- *  isn't live (the framework hasn't been built with -Dhas-game-build) — callers
- *  should keep their existing path in that case. Non-catalog pieces (authored/
- *  props/cooked ids) are skipped since the static catalog index doesn't cover
- *  them — callers with such pieces run their own pick and merge by distance. */
+ *  distance + the hit point/outward face normal (world space — what the face
+ *  painter classifies into a slot role), or `null` for a genuine miss, or
+ *  `undefined` when the host binding isn't live (the framework hasn't been
+ *  built with -Dhas-game-build) — callers should keep their existing path in
+ *  that case. Non-catalog pieces (authored/props/cooked ids) are skipped since
+ *  the static catalog index doesn't cover them — callers with such pieces run
+ *  their own pick and merge by distance. */
 export function pickBuildPieceHostHit<T extends { pieceId: string; x: number; y: number; z: number; yawDegrees: number }>(
   ray: BuildRay,
   pieces: readonly T[],
   maxDistance: number,
-): { piece: T; t: number } | null | undefined {
+): { piece: T; t: number; point: Vec3; normal: Vec3 } | null | undefined {
   if (!buildHostLive()) return undefined;
   const lite: BuildPieceLite[] = [];
   const orig: number[] = [];
@@ -107,7 +109,7 @@ export function pickBuildPieceHostHit<T extends { pieceId: string; x: number; y:
   const hit = raycastBuild(ray, lite, maxDistance);
   if (!hit) return null;
   const piece = pieces[orig[hit.pieceIndex]!];
-  return piece ? { piece, t: hit.t } : null;
+  return piece ? { piece, t: hit.t, point: hit.point, normal: hit.normal } : null;
 }
 
 /** pickBuildPieceHostHit without the distance — the original piece-only shape. */

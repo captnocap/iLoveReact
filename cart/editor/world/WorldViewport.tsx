@@ -30,6 +30,7 @@ import { encodeMeshGhost } from './meshProps';
 import { isAuthoredPiece, authoredModelIdOf, type AuthoredBuildPiece } from './authoredRegistry';
 import { pushLiveWorld, pushResidentMeshes } from './livePush';
 import { pickBuildPieceHostHit } from '../../../runtime/game/build';
+import { faceRoleForHit } from './pieceSlots';
 import { ensureMapSeeded } from '../stage/mapPaint';
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import type { WorldTool } from './worldTool';
@@ -110,6 +111,10 @@ export default function WorldViewport(props: {
    *  quick context menu opens at the cursor. Fires in ANY tool mode — the whole point is
    *  editing the piece under the mouse without disarming the current tool. */
   onPieceContext: (id: string, x: number, y: number) => void;
+  /** Paint Faces (req_2879): the touched face's slot role on the touched piece — the
+   *  owner binds the active material into piece.slots[role]. Fired once per face per
+   *  stroke (a drag sweeps across faces; each (piece, role) pair paints once). */
+  onPaintFace: (id: string, role: string) => void;
   /** everything ONE gesture placed: a click is a one-piece batch, a drag-run
    *  (req_2747) is the whole wall run / floor rect — one journal entry either way. */
   onPlace: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
@@ -160,6 +165,8 @@ export default function WorldViewport(props: {
   onSelectRef.current = props.onSelect;
   const onPieceContextRef = useRef(props.onPieceContext);
   onPieceContextRef.current = props.onPieceContext;
+  const onPaintFaceRef = useRef(props.onPaintFace);
+  onPaintFaceRef.current = props.onPaintFace;
 
   // The one placed-piece pick, from PANE-local coords: host raycast for catalog pieces,
   // JS slab-test for authored (model:) placements, nearest hit wins. Shared by the
@@ -172,6 +179,32 @@ export default function WorldViewport(props: {
     const best = host && authoredHit ? (host.t <= authoredHit.t ? host : authoredHit) : (host ?? authoredHit);
     return best ? best.piece.id : null;
   }, [stage]);
+
+  // Paint Faces (req_2879): the FACE under the cursor as (piece, slot role). The host
+  // raycast's hit normal names the face; faceRoleForHit turns it into the slot key the
+  // skin renderer reads. Null = miss, an occluding authored/model piece (no slots to
+  // paint), or a slotless kind — touching those is an intentional no-op, not an error.
+  const pickFaceAt = useCallback((lx: number, ly: number): { id: string; role: string } | null => {
+    const ray = stage.worldRay(lx, ly, rectRef.current);
+    if (!ray) return null;
+    const hostHit = pickBuildPieceHostHit(ray, piecesRef.current, 1000);
+    if (!hostHit) return null; // miss, or the host binding isn't live — no JS fallback carries a normal
+    const authoredHit = pickAuthoredPlacement(ray, piecesRef.current, 1000);
+    if (authoredHit && authoredHit.t < hostHit.t) return null; // a slotless mesh piece is in front
+    const role = faceRoleForHit(hostHit.piece.pieceId, hostHit.piece.yawDegrees, hostHit.normal);
+    return role ? { id: hostHit.piece.id, role } : null;
+  }, [stage]);
+
+  // One stroke's painted faces — each (piece, role) takes the brush ONCE per gesture,
+  // so a sweep doesn't re-write (and re-journal) the same face on every mousemove.
+  const paintFaceAt = useCallback((lx: number, ly: number, stroke: Set<string>): void => {
+    const hit = pickFaceAt(lx, ly);
+    if (!hit) return;
+    const key = `${hit.id}:${hit.role}`;
+    if (stroke.has(key)) return;
+    stroke.add(key);
+    onPaintFaceRef.current(hit.id, hit.role);
+  }, [pickFaceAt]);
 
   // Push the JS-solved iso pose to the native loader. Cheap (8 floats) — the only
   // per-interaction bridge traffic; the host re-applies it every embedded frame.
@@ -486,6 +519,9 @@ export default function WorldViewport(props: {
     runAnchor: { x: number; z: number; terrainY: number } | null;
     runCell: { x: number; z: number } | null;
     move: MoveDrag | null;
+    /** Paint Faces stroke (req_2879): the (piece:role) keys already painted this
+     *  gesture. Non-null = the down painted and the drag keeps sweeping. */
+    paint: Set<string> | null;
   } | null>(null);
   const local = useCallback((e: any) => {
     const r = rectRef.current;
@@ -510,6 +546,9 @@ export default function WorldViewport(props: {
     const movingPiece = movingId ? piecesRef.current.find((piece) => piece.id === movingId) ?? null : null;
     const moveGround = movingPiece ? groundUnder(p.x, p.y) : null;
     if (movingPiece) onSelectRef.current(movingPiece.id);
+    // Paint Faces (req_2879): the down IS the first touch — paint the face under it
+    // now; the stroke set keeps the drag sweeping new faces without re-painting.
+    const paint = !e?.shiftKey && toolRef.current === 'paintFace' ? new Set<string>() : null;
     setMovePreview(null);
     dragRef.current = {
       x: p.x,
@@ -522,8 +561,10 @@ export default function WorldViewport(props: {
       move: movingPiece && moveGround
         ? { piece: movingPiece, anchorX: moveGround.x, anchorZ: moveGround.z, target: null, previewAtMs: 0 }
         : null,
+      paint,
     };
-  }, [local, groundUnder, pickPieceAt]);
+    if (paint) paintFaceAt(p.x, p.y, paint);
+  }, [local, groundUnder, pickPieceAt, paintFaceAt]);
 
   const onMove = useCallback((e: any) => {
     const p = local(e);
@@ -544,6 +585,12 @@ export default function WorldViewport(props: {
         return;
       }
       d.x = p.x;
+      // A paint stroke sweeps: every face the pointer crosses takes the brush once
+      // (the stroke set dedupes). Nothing else in the drag machinery applies.
+      if (d.paint) {
+        paintFaceAt(p.x, p.y, d.paint);
+        return;
+      }
       if (d.move) {
         const now = Date.now();
         if (now - d.move.previewAtMs < MOVE_PREVIEW_INTERVAL_MS) return;
@@ -595,7 +642,7 @@ export default function WorldViewport(props: {
       }
     }
     if (armedRef.current) setSnap(resolveSnap(p.x, p.y));
-  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, props.floor]);
+  }, [local, stage, pushCamera, resolveSnap, reprojectOverlays, groundUnder, props.floor, paintFaceAt]);
 
   const onUp = useCallback((e: any) => {
     const d = dragRef.current;
@@ -617,6 +664,9 @@ export default function WorldViewport(props: {
       : null;
     setMovePreview(null);
     if (!d) { console.warn('[place] up with no down — click dropped'); return; }
+    // A paint gesture already landed everything on down/move — the up is inert
+    // (and never falls through to the select-click routing below).
+    if (d.paint) return;
     // req_2548 diagnostic — every way a click can silently place nothing.
     if (d.turned) {
       // Move commits precisely once on drop; its local preview never mutated the

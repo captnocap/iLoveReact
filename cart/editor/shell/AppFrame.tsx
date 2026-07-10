@@ -871,6 +871,10 @@ export default function AppFrame() {
           ...next,
           objects: prev.objects.map((item) => item.id === object.id ? { ...item, assetId: asset.id, name: item.kind === 'TILE' ? asset.name : item.name } : item),
         };
+      } else if (command.id === 'paint-faces') {
+        // req_2879: the brush is the browser's active material; the viewport's
+        // touch reports (piece, face role) up into assignPieceSlot.
+        next = { ...next, status: `Paint Faces armed — touch a piece face to apply ${asset.name}; each face slot paints separately (drag to sweep)` };
       } else if (command.id === 'open-color-studio') {
         const doc = materialDocument(asset);
         next = {
@@ -914,7 +918,7 @@ export default function AppFrame() {
 
       const target = command.id === 'paint-material' || command.id === 'place-piece' ? asset.name : object.name;
       const editMs = Date.now() - t0;
-      const event = command.id === 'sample-material' || command.id === 'place-piece' || command.id === 'move-selection'
+      const event = command.id === 'sample-material' || command.id === 'place-piece' || command.id === 'move-selection' || command.id === 'paint-faces'
         ? { history: prev.history, redo: prev.redo, seq: prev.seq }
         : pushHistory(prev, command, target, `${source} - ${command.native ? 'native-ready' : 'design-only'}`, editMs);
       // Any world slice this command touched becomes a REAL reversible entry
@@ -3219,6 +3223,7 @@ export default function AppFrame() {
             onMovePiece={movePiece}
             onSelectPiece={selectPiece}
             onPieceContext={openPieceQuickMenu}
+            onPaintFace={assignPieceSlot}
             onArmPiece={armPiece}
             onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
             onSelectColorStudioMaterial={selectColorStudioMaterial}

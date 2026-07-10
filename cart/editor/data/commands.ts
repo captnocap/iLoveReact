@@ -165,6 +165,11 @@ export const COMMANDS: Command[] = [
   // both routes discoverable on the world surface.
   { id: 'rotate-selection', menu: 'Build', name: 'Rotate Piece', icon: 'RotateCw', key: 'R', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
   { id: 'paint-material', menu: 'Build', name: 'Paint Material', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true, scope: 'world', needsSelection: true },
+  // Paint Faces (req_2879): an armable brush MODE — touch a placed piece's face and the
+  // browser's active material lands in THAT face's slot (front vs back stay separate, so the
+  // exterior and interior of one wall paint independently). A drag sweeps across faces. Not
+  // selection-gated — the touch provides the target, like Focus/Move.
+  { id: 'paint-faces', menu: 'Build', name: 'Paint Faces', icon: 'Paintbrush', key: 'N', context: true, native: true, undoable: true, tool: true, scope: 'world' },
   { id: 'open-color-studio', menu: 'Build', name: 'Open Color Studio', icon: 'Palette', key: 'C', context: true, native: true, undoable: false, tool: true, scope: 'world', needsSelection: true },
   { id: 'sample-material', menu: 'Build', name: 'Sample Material', icon: 'Pipette', key: 'I', context: true, native: true, undoable: false, tool: true, scope: 'world', needsSelection: true },
 
@@ -386,7 +391,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('delete-selection'), MESH_SUBMENU],
   View: [cmd('toggle-view-mode'), cmd('toggle-minimap'), cmd('focus-selection'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('add-trigger'), cmd('set-spawn'), cmd('cycle-floor')],
-  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-material'), cmd('open-color-studio'), cmd('sample-material')],
+  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-material'), cmd('paint-faces'), cmd('open-color-studio'), cmd('sample-material')],
   Story: [cmd('mission-point'), cmd('author-sequence')],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],

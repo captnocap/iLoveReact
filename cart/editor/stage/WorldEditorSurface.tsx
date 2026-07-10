@@ -43,6 +43,8 @@ export default function WorldEditorSurface(props: {
   onSelect: (id: string | null) => void;
   /** right-click hit a placed piece → open the quick context menu at window (x,y) (req_2733). */
   onPieceContext: (id: string, x: number, y: number) => void;
+  /** Paint Faces (req_2879): a touched face's slot role — the owner binds the active material. */
+  onPaintFace: (id: string, role: string) => void;
 }) {
   // The viewport is modal (req_2550): the armed command decides the click. The palette piece is
   // armed ONLY in Place mode, so Select/Move/Focus never drop a piece. The armed piece id is the
@@ -75,6 +77,7 @@ export default function WorldEditorSurface(props: {
         selectedId={props.selectedId}
         onSelect={props.onSelect}
         onPieceContext={props.onPieceContext}
+        onPaintFace={props.onPaintFace}
         onPlace={props.onPlace}
         onMove={props.onMove}
         floor={props.floor}

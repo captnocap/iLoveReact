@@ -33,6 +33,7 @@ export default function Stage(props: {
   onMovePiece: (id: string, destination: PlacedPiece) => void;
   onSelectPiece: (id: string | null) => void;
   onPieceContext: (id: string, x: number, y: number) => void;
+  onPaintFace: (id: string, role: string) => void;
   onArmPiece: (pieceId: string) => void;
   onExitMaterialFocus: () => void;
   onSelectColorStudioMaterial: (specId: string) => void;
@@ -95,6 +96,7 @@ export default function Stage(props: {
             onMove={props.onMovePiece}
             onSelect={props.onSelectPiece}
             onPieceContext={props.onPieceContext}
+            onPaintFace={props.onPaintFace}
           />
         ) : activeDocument.kind === 'model' ? (
           <ModelDocumentSurface

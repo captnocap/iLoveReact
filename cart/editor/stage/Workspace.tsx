@@ -34,6 +34,7 @@ export default function Workspace(props: {
   onMovePiece: (id: string, destination: PlacedPiece) => void;
   onSelectPiece: (id: string | null) => void;
   onPieceContext: (id: string, x: number, y: number) => void;
+  onPaintFace: (id: string, role: string) => void;
   onArmPiece: (pieceId: string) => void;
   onExitMaterialFocus: () => void;
   onSelectColorStudioMaterial: (specId: string) => void;
