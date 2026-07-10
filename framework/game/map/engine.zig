@@ -23,6 +23,7 @@
 const std = @import("std");
 const chunks = @import("chunks.zig");
 const stamps = @import("stamps.zig");
+const foliage = @import("../../world/foliage.zig");
 pub const roads = @import("roads.zig");
 
 const DOT_M = chunks.DOT_M;
@@ -1222,7 +1223,7 @@ pub const FloraSpec = struct {
     chance: f32,
 };
 
-const MAX_FLORA_RECIPE_ID: u16 = 12; // framework/world/foliage.zig Spec.dense_bush
+const MAX_FLORA_RECIPE_ID: u16 = foliage.SPEC_MAX;
 var g_flora_specs: [MAX_PALETTE]FloraSpec = @splat(FloraSpec{ .spec = 0, .count = 0, .chance = 0 });
 var g_flora_spec_count: usize = 0;
 
@@ -1668,7 +1669,7 @@ test "smooth eases spikes toward the local plane" {
 }
 
 test "flora population boundary accepts appended recipes and rejects unknown ids" {
-    setFloraSpecs(&.{ 4, 0, 0.25, 12, 9, 1, 99, 7, 1 });
+    setFloraSpecs(&.{ 4, 0, 0.25, 12, 9, 1, 16, 0, 0.8, 99, 7, 1 });
     defer setFloraSpecs(&.{});
 
     const pine = floraSpec(0).?;
@@ -1679,7 +1680,11 @@ test "flora population boundary accepts appended recipes and rejects unknown ids
     const dense_bush = floraSpec(1).?;
     try std.testing.expectEqual(@as(u8, 12), dense_bush.spec);
     try std.testing.expectEqual(@as(u16, 9), dense_bush.count);
-    try std.testing.expect(floraSpec(2) == null);
+    const wild_weed = floraSpec(2).?;
+    try std.testing.expectEqual(@as(u8, 16), wild_weed.spec);
+    try std.testing.expectEqual(@as(u16, 0), wild_weed.count);
+    try std.testing.expectEqual(@as(f32, 0.8), wild_weed.chance);
+    try std.testing.expect(floraSpec(3) == null);
 }
 
 test "flora paints its lane; zone paints membership; erase clears" {

@@ -1400,8 +1400,9 @@ pub const water_wgsl =
 /// leaf SHAPE from the card and the vertex bends it by wind (tip-weighted), so the
 /// whole crown sways like the grass field. The leaf STYLE is baked into 10-wide
 /// uv.u bands: 0 feathered coconut, 1 broad split leaf, 2 conifer spray, 3
-/// deciduous crown, 4 bark. Bands 2...4 let one baked wrapped/tree mesh carry
-/// canopy + trunk through ONE 24-byte slim instance; bark suppresses wind.
+/// deciduous crown, 4 bark, 5 shrub leaf, 6 mophead bloom, 7 panicle bloom,
+/// 8 weed leaf, 9 green stem. Bands 2...9 let one baked wrapped mesh carry an
+/// entire tree or shrub through ONE 24-byte slim instance; stems suppress wind.
 /// Instanced groups whose leader carries the "~frond~" tex key swap to this.
 pub const frond_wgsl =
     \\struct SceneUniforms {
@@ -1502,8 +1503,9 @@ pub const frond_wgsl =
     \\    // crown holds still rather than paying per-vertex wind across the whole map.
     \\    let anim_fade = smoothstep(60.0, 50.0, distance(S.camera_pos, world.xyz));
     \\    var wind_weight = 1.0;
-    \\    if (style >= 3.5) { wind_weight = 0.0; }       // bark stays planted
-    \\    else if (style >= 1.5) { wind_weight = 0.38; } // whole crown, not one loose frond
+    \\    if (style >= 3.5 && style < 4.5) { wind_weight = 0.0; } // woody bark stays planted
+    \\    else if (style >= 8.5) { wind_weight = 0.16; }          // green stems flex, but stay rooted
+    \\    else if (style >= 1.5) { wind_weight = 0.38; }          // whole crown/shrub, not one loose frond
     \\    let bend = sway * gust * tipw * anim_fade * wind_weight;
     \\    let wind_dir = normalize(vec2f(0.8, 0.6));
     \\    world.x = world.x + wind_dir.x * bend;
@@ -1520,7 +1522,7 @@ pub const frond_wgsl =
     \\
     \\@fragment
     \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    \\    let style = floor(in.uv.x * 0.1);        // 0 feathered · 1 broad · 2 conifer · 3 crown · 4 bark
+    \\    let style = floor(in.uv.x * 0.1);        // 0 palm · 1 broad · 2 conifer · 3 crown · 4 bark · 5..9 shrub bands
     \\    let u = in.uv.x - style * 10.0;          // 0..1 within the selected band
     \\    let v = clamp(in.uv.y, 0.0, 1.0);        // 0 base → 1 tip
     \\    let d = abs(u - 0.5);                // distance from the central rib
@@ -1556,29 +1558,74 @@ pub const frond_wgsl =
     \\        let scallop = 0.90 + 0.10 * sin(v * 31.0 + u * 17.0);
     \\        let pore = step(0.965, fract(sin(dot(floor(vec2f(u, v) * 29.0), vec2f(17.1, 31.7))) * 43758.5));
     \\        keep = d < round_reach * scallop && pore < 0.5;
-    \\    } else {
+    \\    } else if (style < 4.5) {
     \\        // Bark is real shared tube geometry, not a cutout card.
+    \\        keep = true;
+    \\    } else if (style < 5.5) {
+    \\        // Hydrangea/thicket leaf: a broad ovate blade with a lightly
+    \\        // serrated margin. Cards point out from the branch in 360°.
+    \\        let y = v * 2.0 - 1.0;
+    \\        let oval = 0.48 * pow(max(0.0, 1.0 - y * y), 0.62);
+    \\        let serration = 0.91 + 0.09 * sin(v * 62.0 + u * 11.0);
+    \\        keep = d < oval * serration && v > 0.015 && v < 0.985;
+    \\    } else if (style < 6.5) {
+    \\        // Mophead hydrangea: a round mass with a scalloped perimeter and
+    \\        // pinholes between the tiny four-petal florets.
+    \\        let y = v * 2.0 - 1.0;
+    \\        let round_reach = 0.5 * sqrt(max(0.0, 1.0 - y * y));
+    \\        let scallop = 0.88 + 0.12 * sin(v * 39.0 + u * 31.0);
+    \\        let floret = fract(sin(dot(floor(vec2f(u, v) * 34.0), vec2f(19.7, 43.1))) * 43758.5);
+    \\        keep = d < round_reach * scallop && floret < 0.94;
+    \\    } else if (style < 7.5) {
+    \\        // Panicle hydrangea: broad blush base tapering to a cream point.
+    \\        // Geometry is also tapered, while this ragged cut keeps it floral.
+    \\        let reach = 0.5 * pow(max(0.0, 1.0 - v), 0.72);
+    \\        let petal_edge = 0.88 + 0.12 * sin(v * 51.0 + u * 27.0);
+    \\        let gap = step(0.965, fract(sin(dot(floor(vec2f(u, v) * 31.0), vec2f(23.3, 37.7))) * 43758.5));
+    \\        keep = d < reach * petal_edge && gap < 0.5 && v < 0.995;
+    \\    } else if (style < 8.5) {
+    \\        // Opportunistic weed leaf: a long lanceolate blade with uneven
+    \\        // teeth, kept narrow so a stem full of cards reads airy and wild.
+    \\        let spear = 0.27 * pow(max(0.0, sin(v * 3.14159265)), 0.72);
+    \\        let teeth = 0.82 + 0.18 * step(0.42, fract(v * 13.0 + u * 2.0));
+    \\        keep = d < spear * teeth && v > 0.01 && v < 0.99;
+    \\    } else if (style < 9.5) {
+    \\        // Green stems are real tapered tube geometry.
     \\        keep = true;
     \\    }
     \\    if (!keep) { discard; }
-    \\    // Dark per-instance root → bright tip. Whole-tree leaf families keep
-    \\    // their species tint; bark uses its own stable woody palette.
+    \\    // Dark per-instance root → bright tip. Leaf families keep their
+    \\    // species tint; flowers and stems select stable band palettes.
     \\    let root_col = in.inst_color.rgb;
     \\    let tip_var = hash21(floor(in.world_pos.xz * 0.5));
     \\    var tip_col = mix(vec3f(0.32, 0.55, 0.22), vec3f(0.45, 0.62, 0.20), tip_var);
-    \\    if (style >= 1.5 && style < 3.5) {
+    \\    if ((style >= 1.5 && style < 3.5) || (style >= 4.5 && style < 5.5) || (style >= 7.5 && style < 8.5)) {
     \\        tip_col = clamp(root_col * (1.18 + 0.18 * tip_var) + vec3f(0.025, 0.035, 0.012), vec3f(0.0), vec3f(1.0));
     \\    }
     \\    var albedo = mix(root_col, tip_col, pow(v, 0.9));
-    \\    if (style >= 3.5) {
+    \\    if (style >= 3.5 && style < 4.5) {
     \\        let bark_noise = hash21(floor(in.world_pos.xz * 7.0 + in.world_pos.yy));
     \\        albedo = mix(vec3f(0.13, 0.075, 0.038), vec3f(0.29, 0.19, 0.10), bark_noise);
+    \\    } else if (style >= 5.5 && style < 6.5) {
+    \\        let bloom_var = hash21(floor(in.world_pos.xz * 3.2 + in.world_pos.yy * 2.7));
+    \\        let pink = vec3f(0.94, 0.20, 0.58);
+    \\        let violet = vec3f(0.46, 0.25, 0.84);
+    \\        let blue = vec3f(0.31, 0.42, 0.88);
+    \\        albedo = mix(mix(pink, violet, smoothstep(0.20, 0.62, bloom_var)), blue, smoothstep(0.70, 0.96, bloom_var));
+    \\        albedo = mix(albedo * 0.78, min(vec3f(1.0), albedo * 1.22 + vec3f(0.07)), v * 0.62 + tip_var * 0.16);
+    \\    } else if (style >= 6.5 && style < 7.5) {
+    \\        let blush = mix(vec3f(0.77, 0.22, 0.34), vec3f(0.98, 0.55, 0.62), tip_var);
+    \\        let cream = mix(vec3f(0.93, 0.89, 0.68), vec3f(1.0, 0.98, 0.84), tip_var);
+    \\        albedo = mix(blush, cream, smoothstep(0.08, 0.82, v));
+    \\    } else if (style >= 8.5 && style < 9.5) {
+    \\        albedo = clamp(root_col * (0.52 + 0.18 * v) + vec3f(0.015, 0.025, 0.005), vec3f(0.0), vec3f(1.0));
     \\    }
     \\    // Double-sided half-lambert + a touch of rib shading (darker near the rib).
     \\    let N = normalize(in.world_normal);
     \\    let L = normalize(S.light_dir);
     \\    let ndl = abs(dot(N, L)) * 0.5 + 0.5;
-    \\    let rib_shade = select(mix(0.82, 1.0, smoothstep(0.0, 0.12, d)), 1.0, style >= 3.5);
+    \\    let solid_stem = (style >= 3.5 && style < 4.5) || (style >= 8.5 && style < 9.5);
+    \\    let rib_shade = select(mix(0.82, 1.0, smoothstep(0.0, 0.12, d)), 1.0, solid_stem);
     \\    let lit = albedo * rib_shade * (S.ambient_color + S.light_color * ndl * 0.9);
     \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
     \\    let g = clamp(in.screen_y * 0.5 + 0.5, 0.0, 1.0);

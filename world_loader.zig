@@ -91,12 +91,12 @@ const PAINT_BUSH_ROW_CAP: u32 = 65536;
 const PAINT_FLOWER_ROW_CAP: u32 = 65536;
 const PAINT_FROND_ROW_CAP: u32 = 262144;
 const PAINT_TRUNK_ROW_CAP: u32 = 16384;
-const PAINT_TREE_ROW_CAP: u32 = 16384;
+const PAINT_WRAPPED_ROW_CAP: u32 = 16384;
 const FOLIAGE_SEGMENT_HEADROOM_M: f32 = 16;
 const FOLIAGE_SEGMENT_HORIZONTAL_RADIUS_M: f32 = 87; // 120 m chunk half-diagonal + row jitter
 
 /// Live-preview node/buffer order. Ground families retain distance-density LOD;
-/// palm parts and whole-tree silhouettes stay exact. Appending species here
+/// palm parts and whole wrapped-flora silhouettes stay exact. Appending species here
 /// keeps every row one existing 24-byte slim GPU instance.
 const PaintFoliageFamily = enum(usize) {
     grass,
@@ -109,25 +109,40 @@ const PaintFoliageFamily = enum(usize) {
     oak,
     cedar,
     spruce,
+    mophead_hydrangea,
+    panicle_hydrangea,
+    leafy_thicket,
+    wild_weed,
 };
-const PAINT_FOLIAGE_FAMILY_COUNT: usize = @intFromEnum(PaintFoliageFamily.spruce) + 1;
+const PAINT_FOLIAGE_FAMILY_COUNT: usize = @intFromEnum(PaintFoliageFamily.wild_weed) + 1;
 const PAINT_FOLIAGE_THINNABLE_COUNT: usize = @intFromEnum(PaintFoliageFamily.palm_fronds);
+const PAINT_WRAPPED_FAMILY_FIRST: usize = @intFromEnum(PaintFoliageFamily.pine);
 const PAINT_FOLIAGE_START_CAPS: [PAINT_FOLIAGE_FAMILY_COUNT]u32 = .{
     PAINT_GRASS_ROW_CAP,
     PAINT_FLOWER_ROW_CAP,
     PAINT_BUSH_ROW_CAP,
     PAINT_FROND_ROW_CAP,
     PAINT_TRUNK_ROW_CAP,
-    PAINT_TREE_ROW_CAP,
-    PAINT_TREE_ROW_CAP,
-    PAINT_TREE_ROW_CAP,
-    PAINT_TREE_ROW_CAP,
-    PAINT_TREE_ROW_CAP,
+    PAINT_WRAPPED_ROW_CAP,
+    PAINT_WRAPPED_ROW_CAP,
+    PAINT_WRAPPED_ROW_CAP,
+    PAINT_WRAPPED_ROW_CAP,
+    PAINT_WRAPPED_ROW_CAP,
+    PAINT_WRAPPED_ROW_CAP,
+    PAINT_WRAPPED_ROW_CAP,
+    PAINT_WRAPPED_ROW_CAP,
+    PAINT_WRAPPED_ROW_CAP,
 };
 const PAINT_FOLIAGE_NAMES: [PAINT_FOLIAGE_FAMILY_COUNT][]const u8 = .{
     "grass", "flowers", "bush", "palm fronds", "palm trunks",
     "pine", "maple", "oak", "cedar", "spruce",
+    "mophead hydrangea", "panicle hydrangea", "leafy thicket", "wild weed",
 };
+comptime {
+    if (PAINT_FOLIAGE_FAMILY_COUNT != PAINT_WRAPPED_FAMILY_FIRST + foliage.WRAPPED_SPECIES_COUNT) {
+        @compileError("paint foliage family order must end with WrappedSpecies in exact enum order");
+    }
+}
 // Verbatim palm trunk constants (render3d/palmPopulation.ts PALM_CONFIG +
 // PALM_TRUNK_UNIT_RADIUS) — the live trunk must roll the SAME hash chain the
 // crown does so bark and fronds agree per cell.
@@ -154,16 +169,16 @@ const SHAPE_CORNER_MITER_MIRROR: f32 = 13; // reflected wall L-corner miter pris
 const SHAPE_BOX_OPEN_RUN_MIN: f32 = 14; // cube without local -x face
 const SHAPE_BOX_OPEN_RUN_MAX: f32 = 15; // cube without local +x face
 const SHAPE_BOX_OPEN_RUN_BOTH: f32 = 16; // cube without local +/-x faces
-const SHAPE_TREE_FIRST: f32 = 17; // five contiguous whole-tree shapes, TreeSpecies order
+const SHAPE_WRAPPED_FIRST: f32 = 17; // contiguous whole-flora shapes, WrappedSpecies order
 
-fn treeShapeId(species: foliage.TreeSpecies) f32 {
-    return SHAPE_TREE_FIRST + @as(f32, @floatFromInt(@intFromEnum(species)));
+fn wrappedShapeId(species: foliage.WrappedSpecies) f32 {
+    return SHAPE_WRAPPED_FIRST + @as(f32, @floatFromInt(@intFromEnum(species)));
 }
 
-fn treeSpeciesForShape(shape: f32) ?foliage.TreeSpecies {
-    const rounded: i32 = @intFromFloat(@round(shape - SHAPE_TREE_FIRST));
-    if (rounded < 0 or rounded >= foliage.TREE_SPECIES_COUNT) return null;
-    if (@abs(shape - treeShapeId(@enumFromInt(rounded))) >= 0.5) return null;
+fn wrappedSpeciesForShape(shape: f32) ?foliage.WrappedSpecies {
+    const rounded: i32 = @intFromFloat(@round(shape - SHAPE_WRAPPED_FIRST));
+    if (rounded < 0 or rounded >= foliage.WRAPPED_SPECIES_COUNT) return null;
+    if (@abs(shape - wrappedShapeId(@enumFromInt(rounded))) >= 0.5) return null;
     return @enumFromInt(rounded);
 }
 // WALLHIDE req_2053: a marker stamped into the SHAPE slot (index 12) of a wall
@@ -1715,8 +1730,8 @@ const ShapeBatches = struct {
     frond_count: u32,
     palmtrunks: []f32,
     palmtrunk_count: u32,
-    trees: [foliage.TREE_SPECIES_COUNT][]f32,
-    tree_counts: [foliage.TREE_SPECIES_COUNT]u32,
+    wrapped: [foliage.WRAPPED_SPECIES_COUNT][]f32,
+    wrapped_counts: [foliage.WRAPPED_SPECIES_COUNT]u32,
 
     pub fn deinit(self: ShapeBatches, allocator: std.mem.Allocator) void {
         allocator.free(self.boxes);
@@ -1735,7 +1750,7 @@ const ShapeBatches = struct {
         allocator.free(self.bush);
         allocator.free(self.frond);
         allocator.free(self.palmtrunks);
-        for (self.trees) |tree| allocator.free(tree);
+        for (self.wrapped) |rows| allocator.free(rows);
     }
 };
 
@@ -1810,8 +1825,8 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     errdefer frond.deinit(allocator);
     var palmtrunks: std.ArrayList(f32) = .{};
     errdefer palmtrunks.deinit(allocator);
-    var trees: [foliage.TREE_SPECIES_COUNT]std.ArrayList(f32) = @splat(.{});
-    errdefer for (&trees) |*tree| tree.deinit(allocator);
+    var wrapped: [foliage.WRAPPED_SPECIES_COUNT]std.ArrayList(f32) = @splat(.{});
+    errdefer for (&wrapped) |*rows| rows.deinit(allocator);
     var box_count: u32 = 0;
     var box_open_run_min_count: u32 = 0;
     var box_open_run_max_count: u32 = 0;
@@ -1828,7 +1843,7 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
     var bush_count: u32 = 0;
     var frond_count: u32 = 0;
     var palmtrunk_count: u32 = 0;
-    var tree_counts: [foliage.TREE_SPECIES_COUNT]u32 = @splat(0);
+    var wrapped_counts: [foliage.WRAPPED_SPECIES_COUNT]u32 = @splat(0);
     var row: usize = 0;
     while (row < @as(usize, @intCast(inst_count))) : (row += 1) {
         if (row < material_refs.len and material_refs[row] != 0) continue; // textured batch
@@ -1884,10 +1899,10 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         } else if (@abs(shape - SHAPE_PALMTRUNK) < 0.5) {
             try palmtrunks.appendSlice(allocator, src);
             palmtrunk_count += 1;
-        } else if (treeSpeciesForShape(shape)) |species| {
+        } else if (wrappedSpeciesForShape(shape)) |species| {
             const si = @intFromEnum(species);
-            try trees[si].appendSlice(allocator, src);
-            tree_counts[si] += 1;
+            try wrapped[si].appendSlice(allocator, src);
+            wrapped_counts[si] += 1;
         } else {
             try appendInstanceRow(&boxes, allocator, src, is_wall, stride);
             box_count += 1;
@@ -1903,12 +1918,12 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         const c_size: f64 = fl.cell_size;
         for (fl.cells) |cell| {
             const spec = foliage.specFromWire(cell.spec_id) orelse continue;
-            if (foliage.treeSpecies(spec)) |species| {
+            if (foliage.wrappedSpecies(spec)) |species| {
                 const si = @intFromEnum(species);
-                const r = foliage.treeRow(species, @as(f64, cell.wx), @as(f64, cell.wz), @as(f64, cell.top), c_size, cell.cell_key);
-                try trees[si].appendSlice(allocator, &r);
-                try trees[si].append(allocator, treeShapeId(species));
-                tree_counts[si] += 1;
+                const r = foliage.wrappedRow(species, @as(f64, cell.wx), @as(f64, cell.wz), @as(f64, cell.top), c_size, cell.cell_key);
+                try wrapped[si].appendSlice(allocator, &r);
+                try wrapped[si].append(allocator, wrappedShapeId(species));
+                wrapped_counts[si] += 1;
                 continue;
             }
             switch (spec) {
@@ -1954,8 +1969,8 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
             }
         }
     }
-    var tree_slices: [foliage.TREE_SPECIES_COUNT][]f32 = undefined;
-    for (&trees, 0..) |*tree, i| tree_slices[i] = try tree.toOwnedSlice(allocator);
+    var wrapped_slices: [foliage.WRAPPED_SPECIES_COUNT][]f32 = undefined;
+    for (&wrapped, 0..) |*rows, i| wrapped_slices[i] = try rows.toOwnedSlice(allocator);
     return .{
         .boxes = try boxes.toOwnedSlice(allocator),
         .box_count = box_count,
@@ -1989,8 +2004,8 @@ fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_coun
         .frond_count = frond_count,
         .palmtrunks = try palmtrunks.toOwnedSlice(allocator),
         .palmtrunk_count = palmtrunk_count,
-        .trees = tree_slices,
-        .tree_counts = tree_counts,
+        .wrapped = wrapped_slices,
+        .wrapped_counts = wrapped_counts,
     };
 }
 
@@ -2179,7 +2194,7 @@ fn isNonCollidingFoliage(insts: []const f32, row: usize, stride: usize) bool {
     return @abs(s - SHAPE_GRASS) < 0.5 or @abs(s - SHAPE_BUSH) < 0.5 or
         @abs(s - SHAPE_FROND) < 0.5 or @abs(s - SHAPE_FLOWER) < 0.5 or
         @abs(s - SHAPE_PALMTRUNK) < 0.5 or
-        treeSpeciesForShape(s) != null or
+        wrappedSpeciesForShape(s) != null or
         // Decorative scenery (the void shell's distant skyline) renders but never
         // collides — same reason as foliage: thousands of rows would saturate the
         // collider cap and you're meant to walk past, not into, the horizon.
@@ -2204,8 +2219,8 @@ fn geomForShape(rt: *const Runtime, shape: f32) GeomPick {
     if (@abs(shape - SHAPE_GABLE) < 0.5) return .{ .key = "gable-prism", .verts = rt.gable_prism[0..], .vert_count = 24 };
     if (@abs(shape - SHAPE_CORNER_MITER) < 0.5) return .{ .key = "corner-miter-prism", .verts = rt.corner_miter_prism[0..], .vert_count = 12 };
     if (@abs(shape - SHAPE_CORNER_MITER_MIRROR) < 0.5) return .{ .key = "corner-miter-mirror-prism", .verts = rt.corner_miter_mirror_prism[0..], .vert_count = 12 };
-    if (treeSpeciesForShape(shape)) |species| {
-        const mesh = &rt.tree_meshes[@intFromEnum(species)];
+    if (wrappedSpeciesForShape(shape)) |species| {
+        const mesh = &rt.wrapped_meshes[@intFromEnum(species)];
         return .{ .key = flora_geometry.geometryKey(species), .verts = mesh.constFloats(), .vert_count = mesh.vertex_count };
     }
     return .{ .key = "box", .verts = rt.cube[0..], .vert_count = 36 };
@@ -3565,7 +3580,7 @@ pub const Runtime = struct {
     bush_clump: [60 * 8]f32 = undefined,
     frond_card: [144 * 8]f32 = undefined,
     palm_trunk: [1680 * 8]f32 = undefined,
-    tree_meshes: [foliage.TREE_SPECIES_COUNT]flora_geometry.TreeMesh = undefined,
+    wrapped_meshes: [foliage.WRAPPED_SPECIES_COUNT]flora_geometry.WrappedMesh = undefined,
     shape_batches: ShapeBatches = undefined,
     has_shape_batches: bool = false,
     // Per-material textured batches (geometry built at construct; the shaders are
@@ -3754,7 +3769,7 @@ pub const Runtime = struct {
     /// the water channel's mirror (chunkFloor.ts floorToWaterBody port): per-slot
     /// shore-culled depths + surface heights feeding a second "~water~" node
     /// live-foliage preview (req_2497/req_2875): ground flora, palm parts, and
-    /// five whole-tree species regenerated from
+    /// every whole wrapped tree/shrub species regenerated from
     /// the painted flora lanes whenever flora or terrain height changes —
     /// painting a tree paints a TREE, live. Buffers start at the family's
     /// ROW_CAP and DOUBLE when full (req_2843: elastic — the machine is the
@@ -4741,9 +4756,9 @@ pub const Runtime = struct {
         self.bush_clump = buildBushClump();
         self.frond_card = buildFrond();
         self.palm_trunk = buildPalmTrunk();
-        for (0..foliage.TREE_SPECIES_COUNT) |i| {
-            const species: foliage.TreeSpecies = @enumFromInt(i);
-            self.tree_meshes[i] = flora_geometry.buildTree(species);
+        for (0..foliage.WRAPPED_SPECIES_COUNT) |i| {
+            const species: foliage.WrappedSpecies = @enumFromInt(i);
+            self.wrapped_meshes[i] = flora_geometry.buildWrapped(species);
         }
         // Expanded foliage rows are stride-13 (transform12 + shape); if the INSTANCES
         // lump was empty (stride 0) but a FLORA recipe ships, the grass/bush draw
@@ -5378,10 +5393,10 @@ pub const Runtime = struct {
         while (paint_slot < MAX_PAINT_SLOTS) : (paint_slot += 1) {
             try self.kid_list.append(self.allocator, .{ .scene3d_mesh = false });
         }
-        // Live-foliage preview nodes (req_2497/req_2875): ground flora, the two
-        // palm parts, then five whole-tree species. Every non-palm tree routes
-        // its complete shared mesh through ~frond~, so ONE painted tree is ONE
-        // 24-byte slim GPU row. Inert until the worker supplies rows.
+        // Live-foliage preview nodes (req_2497/req_2875/req_2877): ground flora,
+        // the two palm parts, then every wrapped tree/shrub species. Each complete
+        // shared mesh routes through ~frond~, so ONE painted plant is ONE 24-byte
+        // slim GPU row. Inert until the worker supplies rows.
         self.paint_foliage_kids_first = self.kid_list.items.len;
         try self.kid_list.append(self.allocator, .{
             .scene3d_mesh = false,
@@ -5427,9 +5442,9 @@ pub const Runtime = struct {
             .scene3d_instance_stride = @intCast(foliage.STRIDE),
             .scene3d_instance_static = true,
         });
-        for (0..foliage.TREE_SPECIES_COUNT) |i| {
-            const species: foliage.TreeSpecies = @enumFromInt(i);
-            const mesh = &self.tree_meshes[i];
+        for (0..foliage.WRAPPED_SPECIES_COUNT) |i| {
+            const species: foliage.WrappedSpecies = @enumFromInt(i);
+            const mesh = &self.wrapped_meshes[i];
             try self.kid_list.append(self.allocator, .{
                 .scene3d_mesh = false,
                 .scene3d_geom_key = flora_geometry.geometryKey(species),
@@ -5621,19 +5636,19 @@ pub const Runtime = struct {
                 .scene3d_instance_stride = @intCast(self.stride),
                 .scene3d_instance_static = true,
             });
-            // Non-palm species: trunk + canopy are one immutable mesh and each
-            // placed tree is one ~frond~-routed 24-byte slim instance.
-            for (0..foliage.TREE_SPECIES_COUNT) |i| {
-                const species: foliage.TreeSpecies = @enumFromInt(i);
-                const mesh = &self.tree_meshes[i];
+            // Wrapped species: trunk/stems + leaves/blooms are one immutable mesh;
+            // each placed tree or shrub is one ~frond~-routed 24-byte instance.
+            for (0..foliage.WRAPPED_SPECIES_COUNT) |i| {
+                const species: foliage.WrappedSpecies = @enumFromInt(i);
+                const mesh = &self.wrapped_meshes[i];
                 try self.kid_list.append(self.allocator, .{
-                    .scene3d_mesh = self.shape_batches.tree_counts[i] > 0,
+                    .scene3d_mesh = self.shape_batches.wrapped_counts[i] > 0,
                     .scene3d_geom_key = flora_geometry.geometryKey(species),
                     .scene3d_tex_key = "~frond~",
                     .scene3d_vertices = mesh.constFloats(),
                     .scene3d_vert_count = mesh.vertex_count,
-                    .scene3d_instance_data = self.shape_batches.trees[i],
-                    .scene3d_instance_count = self.shape_batches.tree_counts[i],
+                    .scene3d_instance_data = self.shape_batches.wrapped[i],
+                    .scene3d_instance_count = self.shape_batches.wrapped_counts[i],
                     .scene3d_instance_stride = @intCast(self.stride),
                     .scene3d_instance_static = true,
                 });
@@ -5821,12 +5836,12 @@ pub const Runtime = struct {
         try self.stream_protos.append(self.allocator, .{ .geom_key = "frond-card", .verts = self.frond_card[0..], .tex_key = "~frond~" });
         try fams.append(self.allocator, .{ .rows = self.shape_batches.palmtrunks, .stride = @intCast(self.stride), .draw_radius = flora_radius });
         try self.stream_protos.append(self.allocator, .{ .geom_key = "palm-trunk", .verts = self.palm_trunk[0..], .tex_key = null });
-        for (0..foliage.TREE_SPECIES_COUNT) |i| {
-            const species: foliage.TreeSpecies = @enumFromInt(i);
-            try fams.append(self.allocator, .{ .rows = self.shape_batches.trees[i], .stride = @intCast(self.stride), .draw_radius = flora_radius });
+        for (0..foliage.WRAPPED_SPECIES_COUNT) |i| {
+            const species: foliage.WrappedSpecies = @enumFromInt(i);
+            try fams.append(self.allocator, .{ .rows = self.shape_batches.wrapped[i], .stride = @intCast(self.stride), .draw_radius = flora_radius });
             try self.stream_protos.append(self.allocator, .{
                 .geom_key = flora_geometry.geometryKey(species),
-                .verts = self.tree_meshes[i].constFloats(),
+                .verts = self.wrapped_meshes[i].constFloats(),
                 .tex_key = "~frond~",
             });
         }
@@ -8553,18 +8568,17 @@ fn applyFoliageResult(runtime: *Runtime, result: FoliageResult) void {
                 return if (maybe) |buf| buf.len / foliage.STRIDE else 0;
             }
         };
-        log.print("[paint] LIVE FOLIAGE PREVIEW at the MACHINE'S wall (grass {d}/{d}{s} flowers {d}/{d}{s} bush {d}/{d}{s} palm-fronds {d}/{d}{s} palm-trunks {d}/{d}{s} pine {d}/{d}{s} maple {d}/{d}{s} oak {d}/{d}{s} cedar {d}/{d}{s} spruce {d}/{d}{s}) — allocator refused further growth; nearest-first keeps clipping far from the brush. Compile grows the full population\n", .{
-            result.counts[0], cap.rows(set.rows[0]), clippedMark(result.fulls[0]),
-            result.counts[1], cap.rows(set.rows[1]), clippedMark(result.fulls[1]),
-            result.counts[2], cap.rows(set.rows[2]), clippedMark(result.fulls[2]),
-            result.counts[3], cap.rows(set.rows[3]), clippedMark(result.fulls[3]),
-            result.counts[4], cap.rows(set.rows[4]), clippedMark(result.fulls[4]),
-            result.counts[5], cap.rows(set.rows[5]), clippedMark(result.fulls[5]),
-            result.counts[6], cap.rows(set.rows[6]), clippedMark(result.fulls[6]),
-            result.counts[7], cap.rows(set.rows[7]), clippedMark(result.fulls[7]),
-            result.counts[8], cap.rows(set.rows[8]), clippedMark(result.fulls[8]),
-            result.counts[9], cap.rows(set.rows[9]), clippedMark(result.fulls[9]),
-        });
+        log.print("[paint] LIVE FOLIAGE PREVIEW at the MACHINE'S wall (", .{});
+        for (0..PAINT_FOLIAGE_FAMILY_COUNT) |fi| {
+            log.print("{s}{s} {d}/{d}{s}", .{
+                if (fi == 0) "" else " · ",
+                PAINT_FOLIAGE_NAMES[fi],
+                result.counts[fi],
+                cap.rows(set.rows[fi]),
+                clippedMark(result.fulls[fi]),
+            });
+        }
+        log.print(") — allocator refused further growth; nearest-first keeps clipping far from the brush. Compile grows the full population\n", .{});
     }
     runtime.paint_foliage_ver += 1;
     for (0..PAINT_FOLIAGE_FAMILY_COUNT) |fi| {
@@ -8587,7 +8601,7 @@ fn applyFoliageResult(runtime: *Runtime, result: FoliageResult) void {
         const segs = set.segs[fi].items;
         node.scene3d_instance_segments = if (result.segs_ok[fi] and segs.len > 0) segs else null;
         // req_2868: only ground flora is per-chunk shuffled. Palm parts and
-        // whole trees keep authored order and always draw their full silhouette.
+        // whole wrapped plants keep authored order and draw their full silhouette.
         node.scene3d_instance_lod_density = fi < PAINT_FOLIAGE_THINNABLE_COUNT and node.scene3d_instance_segments != null;
     }
 }
@@ -8671,19 +8685,12 @@ fn buildFoliageRows(runtime: *Runtime, job: FoliageJob) FoliageResult {
                         (@as(u32, @bitCast(gz)) *% 0x85EBCA77) ^
                         (@as(u32, @intCast(lane + 1)) *% 0xC2B2AE3D);
 
-                    if (foliage.treeSpecies(recipe)) |species| {
-                        if (foliage.treeSpawnRoll(species, cell_key) > spec.chance) continue;
-                        var tree_row = foliage.treeRow(species, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key);
-                        tree_row[1] += snapGroundY(&chunk_snap.floor, min_x, min_z, tree_row[0], tree_row[2]) - @as(f32, @floatCast(top));
-                        const family: PaintFoliageFamily = switch (species) {
-                            .pine => .pine,
-                            .maple => .maple,
-                            .oak => .oak,
-                            .cedar => .cedar,
-                            .spruce => .spruce,
-                        };
-                        const fi = @intFromEnum(family);
-                        if (!pushFoliageRow(alloc, &set.rows[fi], PAINT_FOLIAGE_NAMES[fi], &counts[fi], tree_row)) fulls[fi] = true;
+                    if (foliage.wrappedSpecies(recipe)) |species| {
+                        if (foliage.wrappedSpawnRoll(species, cell_key) > spec.chance) continue;
+                        var wrapped_row = foliage.wrappedRow(species, @as(f64, wx), @as(f64, wz), top, 1.0, cell_key);
+                        wrapped_row[1] += snapGroundY(&chunk_snap.floor, min_x, min_z, wrapped_row[0], wrapped_row[2]) - @as(f32, @floatCast(top));
+                        const fi = PAINT_WRAPPED_FAMILY_FIRST + @intFromEnum(species);
+                        if (!pushFoliageRow(alloc, &set.rows[fi], PAINT_FOLIAGE_NAMES[fi], &counts[fi], wrapped_row)) fulls[fi] = true;
                         continue;
                     }
                     switch (recipe) {
@@ -8750,13 +8757,13 @@ fn buildFoliageRows(runtime: *Runtime, job: FoliageJob) FoliageResult {
         // Close out this chunk's segments (req_2859): one {row range, sphere}
         // per family that grew rows here. Sphere = chunk half-diagonal (+
         // lateral jitter) horizontally, sampled ground span + tallest-plant
-        // headroom (the tallest painted tree is <16 m) vertically; conservative
+        // headroom (the tallest wrapped flora is <16 m) vertically; conservative
         // bounds only ever draw a little extra, never cull a visible plant.
         const seg_end = counts;
         // req_2868: shuffle each thin-able family's chunk rows (seeded per
         // chunk, IDENTICAL across regens — no distant shimmer while painting)
         // so a PREFIX of the range is a spatially uniform density subset; the
-        // renderer's distance LOD draws prefixes. Palm parts and whole-tree
+        // renderer's distance LOD draws prefixes. Palm parts and whole wrapped
         // species anchor the silhouette and always draw whole.
         const chunk_seed: u32 = (@as(u32, @bitCast(chunk_snap.cx)) *% 0x9E3779B1) ^
             (@as(u32, @bitCast(chunk_snap.cz)) *% 0x85EBCA77);

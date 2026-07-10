@@ -57,9 +57,13 @@ pub const Spec = enum(u8) {
     reeds = 10,
     low_bush = 11,
     dense_bush = 12,
+    mophead_hydrangea = 13,
+    panicle_hydrangea = 14,
+    leafy_thicket = 15,
+    wild_weed = 16,
 };
 
-pub const SPEC_MAX: u8 = @intFromEnum(Spec.dense_bush);
+pub const SPEC_MAX: u8 = @intFromEnum(Spec.wild_weed);
 
 pub fn specFromWire(value: u16) ?Spec {
     return switch (value) {
@@ -76,31 +80,56 @@ pub fn specFromWire(value: u16) ?Spec {
         10 => .reeds,
         11 => .low_bush,
         12 => .dense_bush,
+        13 => .mophead_hydrangea,
+        14 => .panicle_hydrangea,
+        15 => .leafy_thicket,
+        16 => .wild_weed,
         else => null,
     };
 }
 
-pub const TreeSpecies = enum(u8) { pine, maple, oak, cedar, spruce };
-pub const TREE_SPECIES_COUNT: usize = @intFromEnum(TreeSpecies.spruce) + 1;
+/// Species whose complete silhouette is immutable shared geometry. The first
+/// five values preserve the original whole-tree shape ids; shrubs append so an
+/// old compiled row still resolves to the same mesh.
+pub const WrappedSpecies = enum(u8) {
+    pine,
+    maple,
+    oak,
+    cedar,
+    spruce,
+    mophead_hydrangea,
+    panicle_hydrangea,
+    leafy_thicket,
+    wild_weed,
+};
+pub const WRAPPED_SPECIES_COUNT: usize = @intFromEnum(WrappedSpecies.wild_weed) + 1;
 
-pub fn treeSpecies(spec: Spec) ?TreeSpecies {
+pub fn wrappedSpecies(spec: Spec) ?WrappedSpecies {
     return switch (spec) {
         .pine => .pine,
         .maple => .maple,
         .oak => .oak,
         .cedar => .cedar,
         .spruce => .spruce,
+        .mophead_hydrangea => .mophead_hydrangea,
+        .panicle_hydrangea => .panicle_hydrangea,
+        .leafy_thicket => .leafy_thicket,
+        .wild_weed => .wild_weed,
         else => null,
     };
 }
 
-pub fn treeSpec(species: TreeSpecies) Spec {
+pub fn wrappedSpec(species: WrappedSpecies) Spec {
     return switch (species) {
         .pine => .pine,
         .maple => .maple,
         .oak => .oak,
         .cedar => .cedar,
         .spruce => .spruce,
+        .mophead_hydrangea => .mophead_hydrangea,
+        .panicle_hydrangea => .panicle_hydrangea,
+        .leafy_thicket => .leafy_thicket,
+        .wild_weed => .wild_weed,
     };
 }
 
@@ -367,96 +396,142 @@ pub fn palmFrondRow(crown: *const PalmCrown, k: u32) [STRIDE]f32 {
     };
 }
 
-/// One whole non-palm tree is ONE slim foliage instance. The shared baked mesh
-/// contains its trunk, branches, and wrapped canopy; this row supplies only the
-/// deterministic transform and leaf tint. The GPU pack therefore remains the
-/// existing 24-byte SlimInstance regardless of how detailed the shared mesh is.
-pub const TreeConfig = struct {
+/// One wrapped tree/shrub is ONE slim foliage instance. The shared baked mesh
+/// contains every trunk, stem, leaf, and bloom; this row supplies only the
+/// deterministic transform and foliage tint. The GPU pack therefore remains
+/// the existing 24-byte SlimInstance regardless of shared-mesh detail.
+pub const WrappedConfig = struct {
     height_min: f64,
     height_max: f64,
-    crown_radius_min: f64,
-    crown_radius_max: f64,
+    radius_min: f64,
+    radius_max: f64,
     root_lo: [3]f64,
     root_hi: [3]f64,
     seed_salt: u32,
+    cell_jitter: f64,
 };
 
-pub const TREE_CONFIGS: [TREE_SPECIES_COUNT]TreeConfig = .{
+pub const WRAPPED_CONFIGS: [WRAPPED_SPECIES_COUNT]WrappedConfig = .{
     // Pacific Northwest silhouettes, kept below the slim pack's 16 m scale
     // ceiling. Mature giants remain authored props; painted forests use this
     // urban/wildland band so the compact instance contract stays exact.
     .{
         .height_min = 10.5,
         .height_max = 15.5,
-        .crown_radius_min = 3.1,
-        .crown_radius_max = 4.5,
+        .radius_min = 3.1,
+        .radius_max = 4.5,
         .root_lo = rgb(0.055, 0.18, 0.075),
         .root_hi = rgb(0.12, 0.30, 0.12),
         .seed_salt = 0x7a6f13d1,
+        .cell_jitter = 0.72,
     },
     .{
         .height_min = 8.5,
         .height_max = 13.0,
-        .crown_radius_min = 3.5,
-        .crown_radius_max = 5.2,
+        .radius_min = 3.5,
+        .radius_max = 5.2,
         .root_lo = rgb(0.13, 0.28, 0.08),
         .root_hi = rgb(0.28, 0.48, 0.12),
         .seed_salt = 0x4d41504c,
+        .cell_jitter = 0.72,
     },
     .{
         .height_min = 9.5,
         .height_max = 15.0,
-        .crown_radius_min = 4.2,
-        .crown_radius_max = 6.2,
+        .radius_min = 4.2,
+        .radius_max = 6.2,
         .root_lo = rgb(0.10, 0.24, 0.07),
         .root_hi = rgb(0.24, 0.42, 0.11),
         .seed_salt = 0x0a4b51d3,
+        .cell_jitter = 0.72,
     },
     .{
         .height_min = 11.0,
         .height_max = 15.5,
-        .crown_radius_min = 2.6,
-        .crown_radius_max = 3.8,
+        .radius_min = 2.6,
+        .radius_max = 3.8,
         .root_lo = rgb(0.045, 0.16, 0.11),
         .root_hi = rgb(0.10, 0.28, 0.17),
         .seed_salt = 0xce4da219,
+        .cell_jitter = 0.72,
     },
     .{
         .height_min = 10.0,
         .height_max = 15.5,
-        .crown_radius_min = 3.3,
-        .crown_radius_max = 4.8,
+        .radius_min = 3.3,
+        .radius_max = 4.8,
         .root_lo = rgb(0.035, 0.13, 0.095),
         .root_hi = rgb(0.085, 0.24, 0.15),
         .seed_salt = 0x5f2c7e91,
+        .cell_jitter = 0.72,
+    },
+    // Garden shrubs and spontaneous brush use the identical wrapped path. The
+    // one scale pair sizes a whole plant, never an individual leaf or blossom.
+    .{
+        .height_min = 1.05,
+        .height_max = 1.85,
+        .radius_min = 0.72,
+        .radius_max = 1.18,
+        .root_lo = rgb(0.075, 0.19, 0.055),
+        .root_hi = rgb(0.17, 0.34, 0.10),
+        .seed_salt = 0x48594452,
+        .cell_jitter = 0.58,
+    },
+    .{
+        .height_min = 1.75,
+        .height_max = 3.10,
+        .radius_min = 0.88,
+        .radius_max = 1.46,
+        .root_lo = rgb(0.065, 0.17, 0.05),
+        .root_hi = rgb(0.16, 0.32, 0.095),
+        .seed_salt = 0x50414e49,
+        .cell_jitter = 0.54,
+    },
+    .{
+        .height_min = 1.00,
+        .height_max = 1.90,
+        .radius_min = 1.05,
+        .radius_max = 1.72,
+        .root_lo = rgb(0.055, 0.16, 0.045),
+        .root_hi = rgb(0.14, 0.31, 0.085),
+        .seed_salt = 0x54484943,
+        .cell_jitter = 0.66,
+    },
+    .{
+        .height_min = 1.35,
+        .height_max = 2.85,
+        .radius_min = 0.52,
+        .radius_max = 0.96,
+        .root_lo = rgb(0.075, 0.18, 0.055),
+        .root_hi = rgb(0.20, 0.36, 0.10),
+        .seed_salt = 0x57454544,
+        .cell_jitter = 0.82,
     },
 };
 
-const TREE_CELL_JITTER: f64 = 0.72;
-
-pub fn treeConfig(species: TreeSpecies) *const TreeConfig {
-    return &TREE_CONFIGS[@intFromEnum(species)];
+pub fn wrappedConfig(species: WrappedSpecies) *const WrappedConfig {
+    return &WRAPPED_CONFIGS[@intFromEnum(species)];
 }
 
-pub fn treeSeed(species: TreeSpecies, cell_key: u32) u32 {
-    return mix(cell_key ^ treeConfig(species).seed_salt);
+pub fn wrappedSeed(species: WrappedSpecies, cell_key: u32) u32 {
+    return mix(cell_key ^ wrappedConfig(species).seed_salt);
 }
 
-pub fn treeSpawnRoll(species: TreeSpecies, cell_key: u32) f64 {
-    return unit(treeSeed(species, cell_key));
+pub fn wrappedSpawnRoll(species: WrappedSpecies, cell_key: u32) f64 {
+    return unit(wrappedSeed(species, cell_key));
 }
 
-pub fn treeRow(species: TreeSpecies, wx: f64, wz: f64, top: f64, c: f64, cell_key: u32) [STRIDE]f32 {
-    const cfg = treeConfig(species);
-    const seed = treeSeed(species, cell_key);
+pub fn wrappedRow(species: WrappedSpecies, wx: f64, wz: f64, top: f64, c: f64, cell_key: u32) [STRIDE]f32 {
+    const cfg = wrappedConfig(species);
+    const seed = wrappedSeed(species, cell_key);
     const h0 = mix(seed ^ 0x1b56c4e9);
     const h1 = mix(h0 ^ 0x68bc21eb);
     const h2 = mix(h1 ^ 0x7feb352d);
     const h3 = mix(h2 ^ 0x846ca68b);
     const height = lerp(cfg.height_min, cfg.height_max, unit(h0));
-    const radius = lerp(cfg.crown_radius_min, cfg.crown_radius_max, unit(h1));
-    const px = wx + (unit(mix(h0 ^ 0xa5)) - 0.5) * c * TREE_CELL_JITTER;
-    const pz = wz + (unit(mix(h1 ^ 0xa5)) - 0.5) * c * TREE_CELL_JITTER;
+    const radius = lerp(cfg.radius_min, cfg.radius_max, unit(h1));
+    const px = wx + (unit(mix(h0 ^ 0xa5)) - 0.5) * c * cfg.cell_jitter;
+    const pz = wz + (unit(mix(h1 ^ 0xa5)) - 0.5) * c * cfg.cell_jitter;
     const yaw = unit(h2) * 360.0;
     const tint = unit(h3);
     const root = [3]f64{
@@ -532,27 +607,31 @@ test "flora spec wire ids are append-only and reject unknown content" {
     try std.testing.expectEqual(Spec.palm, specFromWire(3).?);
     try std.testing.expectEqual(Spec.pine, specFromWire(4).?);
     try std.testing.expectEqual(Spec.spruce, specFromWire(8).?);
-    try std.testing.expectEqual(Spec.dense_bush, specFromWire(SPEC_MAX).?);
+    try std.testing.expectEqual(Spec.dense_bush, specFromWire(12).?);
+    try std.testing.expectEqual(Spec.mophead_hydrangea, specFromWire(13).?);
+    try std.testing.expectEqual(Spec.wild_weed, specFromWire(SPEC_MAX).?);
     try std.testing.expect(specFromWire(SPEC_MAX + 1) == null);
     try std.testing.expect(specFromWire(std.math.maxInt(u16)) == null);
 }
 
-test "whole-tree rows stay inside the 24-byte slim instance scale contract" {
-    for (TREE_CONFIGS, 0..) |cfg, i| {
+test "whole wrapped-flora rows stay inside the 24-byte slim instance scale contract" {
+    for (WRAPPED_CONFIGS, 0..) |cfg, i| {
         try std.testing.expect(cfg.height_min > 0);
         try std.testing.expect(cfg.height_max >= cfg.height_min);
         try std.testing.expect(cfg.height_max < 16.0);
-        try std.testing.expect(cfg.crown_radius_min > 0);
-        try std.testing.expect(cfg.crown_radius_max >= cfg.crown_radius_min);
-        try std.testing.expect(cfg.crown_radius_max < 16.0);
-        const species: TreeSpecies = @enumFromInt(i);
-        const row = treeRow(species, 10.5, 20.5, 2.0, 1.0, 12345);
-        try std.testing.expect(row[0] >= 10.14 and row[0] <= 10.86);
+        try std.testing.expect(cfg.radius_min > 0);
+        try std.testing.expect(cfg.radius_max >= cfg.radius_min);
+        try std.testing.expect(cfg.radius_max < 16.0);
+        try std.testing.expect(cfg.cell_jitter >= 0 and cfg.cell_jitter <= 1);
+        const species: WrappedSpecies = @enumFromInt(i);
+        const row = wrappedRow(species, 10.5, 20.5, 2.0, 1.0, 12345);
+        const half_jitter: f32 = @floatCast(cfg.cell_jitter * 0.5);
+        try std.testing.expect(row[0] >= 10.5 - half_jitter and row[0] <= 10.5 + half_jitter);
         try std.testing.expectEqual(@as(f32, 2), row[1]);
-        try std.testing.expect(row[2] >= 20.14 and row[2] <= 20.86);
+        try std.testing.expect(row[2] >= 20.5 - half_jitter and row[2] <= 20.5 + half_jitter);
         try std.testing.expect(row[4] >= 0 and row[4] < 360);
-        try std.testing.expect(row[6] >= @as(f32, @floatCast(cfg.crown_radius_min)));
-        try std.testing.expect(row[6] <= @as(f32, @floatCast(cfg.crown_radius_max)));
+        try std.testing.expect(row[6] >= @as(f32, @floatCast(cfg.radius_min)));
+        try std.testing.expect(row[6] <= @as(f32, @floatCast(cfg.radius_max)));
         try std.testing.expect(row[7] >= @as(f32, @floatCast(cfg.height_min)));
         try std.testing.expect(row[7] <= @as(f32, @floatCast(cfg.height_max)));
         try std.testing.expectEqual(row[6], row[8]);

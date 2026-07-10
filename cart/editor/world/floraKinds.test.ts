@@ -52,5 +52,21 @@ test('grass and bush shape variants stay in their structural lanes', () => {
   }
 });
 
+test('wrapped shrub recipes append as one whole 24-byte instance per painted cell', () => {
+  const expected = [
+    ['hydrangeaMophead', FLORA_SPEC.hydrangeaMophead],
+    ['hydrangeaPanicle', FLORA_SPEC.hydrangeaPanicle],
+    ['leafyThicket', FLORA_SPEC.leafyThicket],
+    ['wildWeedBush', FLORA_SPEC.wildWeedBush],
+  ] as const;
+  const appended = FLORA_KIND_DEFINITIONS.slice(-expected.length);
+  assert(appended.map((d) => d.kind).join(',') === expected.map(([kind]) => kind).join(','), 'wrapped shrubs are not append-only');
+  appended.forEach((def, index) => {
+    assert(def.lane === 'bush', `${def.kind} left the bush lane`);
+    assert(def.population.spec === expected[index]![1], `${def.kind} recipe id drifted`);
+    assert(def.population.count === 0 && def.population.chance === 1, `${def.kind} must emit one shared-mesh row`);
+  });
+});
+
 log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) throw new Error(`${failed} test(s) failed`);

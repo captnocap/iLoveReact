@@ -26,7 +26,11 @@ export type FloraKind =
   | 'grassTall'
   | 'grassReeds'
   | 'bushLow'
-  | 'bushDense';
+  | 'bushDense'
+  | 'hydrangeaMophead'
+  | 'hydrangeaPanicle'
+  | 'leafyThicket'
+  | 'wildWeedBush';
 
 export type FloraLane = 'grass' | 'tree' | 'bush';
 /** Lane indices the host engine stores lanes by (chunks.zig flora[lane]). */
@@ -59,6 +63,10 @@ export const FLORA_SPEC = {
   reeds: 10,
   lowBush: 11,
   denseBush: 12,
+  hydrangeaMophead: 13,
+  hydrangeaPanicle: 14,
+  leafyThicket: 15,
+  wildWeedBush: 16,
 } as const;
 
 // Ordered definitions. ORDER IS THE RMAP WIRE LEGEND: append, never reorder.
@@ -82,6 +90,10 @@ export const FLORA_KIND_DEFINITIONS: readonly FloraKindDefinition[] = [
   { kind: 'grassReeds', label: 'Reeds', color: '#8b8a42', lane: 'grass', population: { spec: FLORA_SPEC.reeds, count: 6, chance: 1 } },
   { kind: 'bushLow', label: 'Low Bush', color: '#2f5e2a', lane: 'bush', population: { spec: FLORA_SPEC.lowBush, count: 10, chance: 1 } },
   { kind: 'bushDense', label: 'Dense Bush', color: '#214b23', lane: 'bush', population: { spec: FLORA_SPEC.denseBush, count: 22, chance: 1 } },
+  { kind: 'hydrangeaMophead', label: 'Hydrangea (Mophead)', color: '#b94fa9', lane: 'bush', population: { spec: FLORA_SPEC.hydrangeaMophead, count: 0, chance: 1 } },
+  { kind: 'hydrangeaPanicle', label: 'Hydrangea (Panicle)', color: '#e8b5b1', lane: 'bush', population: { spec: FLORA_SPEC.hydrangeaPanicle, count: 0, chance: 1 } },
+  { kind: 'leafyThicket', label: 'Leafy Thicket', color: '#245b2e', lane: 'bush', population: { spec: FLORA_SPEC.leafyThicket, count: 0, chance: 1 } },
+  { kind: 'wildWeedBush', label: 'Wild Weed Bush', color: '#39723b', lane: 'bush', population: { spec: FLORA_SPEC.wildWeedBush, count: 0, chance: 1 } },
 ];
 
 /** The zone authoring swatch palette (zoneData.ts ZONE_COLORS clone). */
