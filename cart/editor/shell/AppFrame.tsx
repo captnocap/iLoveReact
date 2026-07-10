@@ -59,8 +59,10 @@ import { subscribe } from '@reactjit/runtime/ffi';
 import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor, resolveMaterialRef } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, playerModelPackage, nextPlayerModelDocId, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
 import { playerStarterParts } from '../model/playerStarter';
+import { buildPieceStarterParts } from '../model/buildPieceStarter';
+import { buildPieceStarter } from '../data/buildStarters';
 import { MODEL_PACKAGES } from '../data/catalog';
 import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage } from '../data/modelPackageStore';
 import { colorStudioSpec, colorStudioOverrideKey, paletteForSpecVariant, rgbToCss } from '../data/colorStudio';
@@ -722,6 +724,11 @@ export default function AppFrame() {
       // it on confirm. (Appending a part to the model in view is the separate 'add' verb above.)
       const kind = command.id.slice('new-mesh-'.length) as PrimitiveKind;
       setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', newMeshPrompt: { kind, mode: 'new' } }));
+      return;
+    }
+    if (command.id.startsWith('new-build-starter-')) {
+      const kind = command.id.slice('new-build-starter-'.length) as BuildKind;
+      createBuildPieceStarterDocument(kind);
       return;
     }
     if (command.id === 'new-model-player') {
@@ -1777,6 +1784,43 @@ export default function AppFrame() {
     else createNewMeshDocument(prompt.kind, params);
   };
 
+  // File → New Mesh → Build Pieces → <kind>: the catalog's canonical semantic
+  // piece opened as one ordinary editable model part. No dimensions prompt: the
+  // whole point is to start at the game's real module shape and build outward.
+  const createBuildPieceStarterDocument = (kind: BuildKind) => {
+    const starter = buildPieceStarter(kind);
+    if (!starter) {
+      setState((prev) => ({ ...prev, openMenu: null, status: `unknown build-piece starter: ${kind}` }));
+      return;
+    }
+    setState((prev) => {
+      const mid = nextBuildStarterDocId(kind, prev.workspaceDocuments);
+      const doc = modelDocument(buildStarterModelPackage(mid));
+      const seeded = buildPieceStarterParts(kind);
+      if (seeded.length === 0) {
+        return { ...prev, openMenu: null, status: `${starter.name} has no catalog geometry` };
+      }
+      const rangeById = new Map(composeModelParts(seeded).ranges.map((range) => [range.id, range]));
+      const parts = seeded.map((part) => {
+        const range = rangeById.get(part.id);
+        return { ...part, lo: range?.lo ?? 0, hi: range?.hi ?? 0 };
+      });
+      return {
+        ...prev,
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
+        activeWorkspaceDocumentId: doc.id,
+        modelParts: { ...prev.modelParts, [mid]: parts },
+        modelActivePartId: parts[0]?.id ?? prev.modelActivePartId,
+        materialFocused: false,
+        contextOpen: false,
+        newMeshPrompt: null,
+        openMenu: null,
+        actionMenu: 'File',
+        status: `new ${starter.name.toLowerCase()} — catalog-sized and ready to edit`,
+      };
+    });
+  };
+
   // File → New Mesh → Player / NPC Model (req_2761): a fresh CHARACTER document
   // seeded with the whole humanoid starter — one part per body bone (the outliner
   // reads as the skeleton), the body formation riding the package as rig truth.
@@ -1882,9 +1926,10 @@ export default function AppFrame() {
     }));
   };
 
-  // RJIT_MODELDOC=<primitive kind> boots straight into a fresh model document seeded with
-  // that primitive — the headless gesture-repro path (`rjit shot editor` + RJIT_MESHOPS in
-  // ModelView drives real select gestures and captures the result). Unset = no-op.
+  // RJIT_MODELDOC=<primitive kind>|build:<piece kind> boots straight into a fresh
+  // model document — the headless gesture-repro path (`rjit shot editor` +
+  // RJIT_MESHOPS in ModelView drives real select gestures and captures the result).
+  // Unset or unknown = no-op; the harness never feeds an invalid kind to a generator.
   useEffect(() => {
     const kind = (globalThis as any).__env_get?.('RJIT_MODELDOC') as string | null | undefined;
     if (kind === 'player') createPlayerModelDocument();
@@ -1909,7 +1954,12 @@ export default function AppFrame() {
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, ANIMATION_DOCUMENT),
         activeWorkspaceDocumentId: ANIMATION_DOCUMENT.id,
       }));
-    } else if (kind) createNewMeshDocument(kind as PrimitiveKind, { size: 1, height: 1, resolution: 1 });
+    } else if (kind?.startsWith('build:')) {
+      const buildKind = kind.slice('build:'.length) as BuildKind;
+      if (buildPieceStarter(buildKind)) createBuildPieceStarterDocument(buildKind);
+    } else if (kind && PRIMITIVE_MESHES.some((primitive) => primitive.kind === kind)) {
+      createNewMeshDocument(kind as PrimitiveKind, { size: 1, height: 1, resolution: 1 });
+    }
   }, []);
   // ── Outliner multi-select (req_2659) ──────────────────────────────────────────
   // Shift-click accumulates parts into ONE selected set with a PRIMARY part (the last

@@ -3,11 +3,14 @@ import { MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
 import { HMSC_EDITOR_CATALOG, fileModelPackage, modelCategoryNodes } from './hmscAssetCatalog';
 import { isMaterialized, listPackageFiles, type PackageFile } from './modelPackageStore';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
-import { allocatePlayerModelId, allocatePrimitiveModelId, PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
+import { allocateBuildStarterModelId, allocatePlayerModelId, allocatePrimitiveModelId, BUILD_STARTER_MODEL_ID_PREFIX, PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
 import { commandById, PRIMITIVE_MESHES } from './commands';
+import { buildPieceStarter } from './buildStarters';
 import { playerStarterSkeleton } from '../model/playerStarter';
 import { INITIAL_OBJECTS } from './initialState';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelOverride, ModelPackage, PrimitiveKind, WorkspaceDocument, WorldObject } from './types';
+import type { BuildKind } from '../world/buildCatalog';
+import { catalogRowFor, rowHex } from '../world/buildCatalog';
 
 export const DOMAINS = [
   ['world', 'Eye'],
@@ -234,6 +237,42 @@ export function nextPlayerModelDocId(docs: WorkspaceDocument[]): string {
   return allocatePlayerModelId(docs, MODEL_PACKAGES, (id) => isMaterialized('character', id));
 }
 
+/** A fresh semantic build starter. Its mesh lives in AppFrame's modelParts until
+ *  first save, then the ordinary package meshdoc becomes disk truth. */
+export function buildStarterModelPackage(id: string): ModelPackage {
+  if (!id.startsWith(BUILD_STARTER_MODEL_ID_PREFIX)) throw new Error(`not a build starter id: ${id}`);
+  const suffix = id.slice(BUILD_STARTER_MODEL_ID_PREFIX.length);
+  const split = suffix.lastIndexOf(':');
+  const kind = (split >= 0 ? suffix.slice(0, split) : suffix) as BuildKind;
+  const seq = split >= 0 ? suffix.slice(split + 1) : '';
+  const starter = buildPieceStarter(kind);
+  if (!starter) throw new Error(`unknown build starter kind: ${kind}`);
+  const row = catalogRowFor(starter.catalogPieceId);
+  return {
+    id,
+    folderId: 'models-build',
+    name: seq ? `${starter.name} ${seq}` : starter.name,
+    path: `starter/build/${kind}`,
+    kind: 'build',
+    stage: 'wip',
+    color: row ? rowHex(row) : '#8f99a5',
+    source: 'starter',
+    rig: '-',
+    data: '-',
+    triangles: 0,
+    lods: 1,
+    decompositions: [],
+    atlases: [],
+    paints: [],
+    sourceKind: 'build-starter',
+    semanticKind: kind,
+  };
+}
+
+export function nextBuildStarterDocId(kind: BuildKind, docs: WorkspaceDocument[]): string {
+  return allocateBuildStarterModelId(kind, docs, MODEL_PACKAGES, (id) => isMaterialized('build', id));
+}
+
 export function modelPackageById(id: string): ModelPackage | null {
   // DISK-BACKED WINS (req_2620 S): a saved primitive doc has a real package in the
   // catalog (loadMaterializedPackages / a session save) — its manifest name is the
@@ -241,6 +280,7 @@ export function modelPackageById(id: string): ModelPackage | null {
   const registered = MODEL_PACKAGES.find((model) => model.id === id);
   if (registered) return registered;
   if (id.startsWith('primitive:')) return primitiveModelPackage(id);
+  if (id.startsWith(BUILD_STARTER_MODEL_ID_PREFIX)) return buildStarterModelPackage(id);
   if (id.startsWith(PLAYER_MODEL_ID_PREFIX)) return playerModelPackage(id);
   // A file-explorer / disk-picker open (`file:<path>`) re-synthesizes from the path in
   // the id — the file may live outside every indexed catalog dir.

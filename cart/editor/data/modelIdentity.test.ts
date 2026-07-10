@@ -8,6 +8,7 @@
 //   tools/v8cli /tmp/editor-model-identity.test.js
 
 import {
+  allocateBuildStarterModelId,
   allocatePlayerModelId,
   allocatePrimitiveModelId,
   mergeModelCatalogSources,
@@ -75,6 +76,14 @@ test('disk truth also reserves player starter identities', () => {
   const docs: WorkspaceDocument[] = [];
   const next = allocatePlayerModelId(docs, [], (id) => id === 'character:player:1');
   assert(next === 'character:player:2', `reused stored player id: ${next}`);
+});
+
+test('build starters reserve identities per semantic kind', () => {
+  const docs: WorkspaceDocument[] = [{ id: 'model:starter:build:wall:1', kind: 'model', title: 'Wall Piece 1', sourceId: 'starter:build:wall:1' }];
+  const wall = allocateBuildStarterModelId('wall', docs, [], () => false);
+  const floor = allocateBuildStarterModelId('floor', docs, [], (id) => id === 'starter:build:floor:1');
+  assert(wall === 'starter:build:wall:2', `reused open wall starter id: ${wall}`);
+  assert(floor === 'starter:build:floor:2', `reused stored floor starter id: ${floor}`);
 });
 
 log(`\n${passed} passed, ${failed} failed`);

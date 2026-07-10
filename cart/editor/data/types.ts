@@ -348,7 +348,7 @@ export type ModelPackage = {
   decompositions: string[];
   atlases: ModelAtlas[];
   paints: ModelPaintVariant[];
-  sourceKind?: 'cooked-asset' | 'studio-model' | 'imported-prop' | 'source-file' | 'primitive';
+  sourceKind?: 'cooked-asset' | 'studio-model' | 'imported-prop' | 'source-file' | 'primitive' | 'build-starter';
   semanticKind?: string;
   // Exported-as declaration + the RIG (req_2712/2713): what the model places as,
   // and the skeleton (bones + pockets/placements/seats/grips carried data) it

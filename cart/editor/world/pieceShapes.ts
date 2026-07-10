@@ -195,7 +195,10 @@ export function pieceVisualShapes(piece: PlacedPiece, color: string): VisualShap
     // The wall's opening, derived from the edit's PARAMETERS (window band vs
     // floor-standing doorway) — one cut for every edit; the fill distinguishes
     // them (req_2576). No edit ⇒ no opening ⇒ a solid band.
-    const opening = openingFor(def.edit, piece.y, size.h);
+    // An arch-kind row is intrinsically open even though it does not use the
+    // wall edit family. Treat its semantic KIND as the same opening profile as
+    // an open-doorway wall; otherwise "Concrete Arch" degenerates to a slab.
+    const opening = openingFor(def.kind === 'arch' ? 'arch' : def.edit, piece.y, size.h);
 
     // One full-width band [-w/2, w/2] at full height (no join trimming).
     const addWallRun = (label: string, u0: number, u1: number, baseY: number, h: number): void => {

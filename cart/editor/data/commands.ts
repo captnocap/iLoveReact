@@ -6,6 +6,7 @@
 // lays the registry out as the nested tree the dropdown renders. Pure data + pure helpers.
 import { activeSurface, hasSelection } from './surfaces';
 import { KIND_ORDER, KIND_LABEL } from '../world/buildCatalog';
+import { BUILD_PIECE_STARTERS } from './buildStarters';
 import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
 export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Story', 'Globals', 'Window', 'Help'];
@@ -42,6 +43,21 @@ const NEW_PLAYER_MODEL_COMMAND: Command = {
   id: 'new-model-player', menu: 'File', submenu: 'New Mesh', name: 'Player / NPC Model', icon: 'PersonStanding',
   key: '', context: false, native: true, undoable: false, scope: 'global',
 };
+
+// Semantic building bases under File → New Mesh → Build Pieces. Unlike generic
+// primitives these open at the build catalog's real module dimensions and shape.
+const NEW_BUILD_STARTER_COMMANDS: Command[] = BUILD_PIECE_STARTERS.map((starter) => ({
+  id: `new-build-starter-${starter.kind}`,
+  menu: 'File',
+  submenu: 'Build Pieces',
+  name: starter.name,
+  icon: starter.icon,
+  key: '',
+  context: false,
+  native: true,
+  undoable: false,
+  scope: 'global',
+}));
 
 // Paint resolution — texels per TRIANGLE patch for free-form model painting (a quad face is two
 // triangle patches; "face" would misread a cube's 6 as its 12 — req_2509). A MODEL-surface control
@@ -91,6 +107,7 @@ export const COMMANDS: Command[] = [
   // ── File ──────────────────────────────────────────────────────────────────────────────────
   { id: 'new-map', menu: 'File', name: 'New Map Workspace', icon: 'FilePlus2', key: 'Ctrl+N', context: false, native: true, undoable: false, scope: 'global' },
   ...NEW_MESH_COMMANDS,
+  ...NEW_BUILD_STARTER_COMMANDS,
   NEW_PLAYER_MODEL_COMMAND,
   { id: 'open-map', menu: 'File', name: 'Open Workspace', icon: 'FolderOpen', key: 'Ctrl+O', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'open-file-explorer', menu: 'File', name: 'Open Project Asset Explorer', icon: 'FolderSearch', key: 'Ctrl+P', context: false, native: true, undoable: false, scope: 'global' },
@@ -346,8 +363,13 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
     cmd('new-map'),
     {
       kind: 'sub', id: 'New Mesh', label: 'New Mesh', icon: 'Boxes', scope: 'global', children: [
+        section('Primitives'),
         ...NEW_MESH_COMMANDS.map((c) => cmd(c.id)),
-        section('Starters'), cmd('new-model-player'),
+        {
+          kind: 'sub', id: 'Build Pieces', label: 'Build Pieces', icon: 'Building2', scope: 'global',
+          children: NEW_BUILD_STARTER_COMMANDS.map((c) => cmd(c.id)),
+        },
+        section('Characters'), cmd('new-model-player'),
       ],
     },
     cmd('open-map'), cmd('open-file-explorer'), cmd('find-import-source'), cmd('import-model-file'), cmd('save-snapshot'),

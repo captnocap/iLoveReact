@@ -5,6 +5,7 @@
 // collapsing, but every materialized package is an independently saved model
 // and must survive even when another package has the same name.
 import type { ModelPackage, PrimitiveKind, WorkspaceDocument } from './types';
+import type { BuildKind } from '../world/buildCatalog';
 
 const normalizedModelName = (model: ModelPackage): string => model.name.trim().toLowerCase();
 
@@ -72,6 +73,27 @@ export function allocatePrimitiveModelId(
 }
 
 export const PLAYER_MODEL_ID_PREFIX = 'character:player:';
+
+export const BUILD_STARTER_MODEL_ID_PREFIX = 'starter:build:';
+
+/** Allocate a semantic build-starter id without trusting the visible catalog. */
+export function allocateBuildStarterModelId(
+  kind: BuildKind,
+  docs: readonly WorkspaceDocument[],
+  catalog: readonly ModelPackage[],
+  durableIdExists: DurableModelIdExists,
+): string {
+  const prefix = `${BUILD_STARTER_MODEL_ID_PREFIX}${kind}:`;
+  const taken = (n: number) => {
+    const id = `${prefix}${n}`;
+    return durableIdExists(id)
+      || catalog.some((model) => model.id === id)
+      || docs.some((doc) => doc.kind === 'model' && doc.sourceId === id);
+  };
+  let n = 1;
+  while (taken(n)) n += 1;
+  return `${prefix}${n}`;
+}
 
 /** Player/NPC starter twin of allocatePrimitiveModelId. */
 export function allocatePlayerModelId(
