@@ -1230,7 +1230,9 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     const replaced = replaceActiveEditMesh(owned, g_edit_count + added);
     if (replaced) {
         adoptAppendedFaces(old_groups, old_faces, src_part);
-        mesh_edit.setMode(.edge);
+        // Create Face hands the next edit to its result: Face mode + exactly the new
+        // authored face selected, so X can reverse an unlucky winding immediately.
+        _ = mesh_edit.focusCreatedFace(old_faces, added / 3);
         journalCommit(&snap);
     } else journalDiscard(&snap);
     return replaced;

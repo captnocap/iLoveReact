@@ -42,6 +42,32 @@ test "flipping winding rejects an undersized boundary without partial writes" {
     try testing.expectEqualSlices(f32, original[0..], verts[0..]);
 }
 
+test "created grouped face becomes the one active face ready to flip" {
+    var soup = [_]f32{0} ** (9 * 8); // one old triangle + a new split quad
+    mesh_edit.test_support.loadGroupedSoup(2921, soup[0..], 9, &.{ 3, 8, 8 });
+    defer mesh_edit.test_support.clear();
+
+    try testing.expectEqual(@as(u32, 1), mesh_edit.focusCreatedFace(1, 2));
+    try testing.expectEqual(mesh_edit.Mode.face, mesh_edit.mode());
+    try testing.expectEqual(@as(u32, 1), mesh_edit.selCount()); // authored face, not two triangles
+    var mask = [_]bool{ false, false, false };
+    try testing.expectEqual(@as(u32, 2), mesh_edit.buildDeleteMask(mask[0..]));
+    try testing.expectEqualSlices(bool, &.{ false, true, true }, mask[0..]);
+}
+
+test "created ungrouped quad focuses both appended triangles" {
+    var soup = [_]f32{0} ** (9 * 8);
+    const loose = std.math.maxInt(u32);
+    mesh_edit.test_support.loadGroupedSoup(2922, soup[0..], 9, &.{ loose, loose, loose });
+    defer mesh_edit.test_support.clear();
+
+    try testing.expectEqual(@as(u32, 2), mesh_edit.focusCreatedFace(1, 2));
+    try testing.expectEqual(mesh_edit.Mode.face, mesh_edit.mode());
+    var mask = [_]bool{ false, false, false };
+    try testing.expectEqual(@as(u32, 2), mesh_edit.buildDeleteMask(mask[0..]));
+    try testing.expectEqualSlices(bool, &.{ false, true, true }, mask[0..]);
+}
+
 test "merging authored faces dissolves their shared selectable edge (req_2871)" {
     // Two side-by-side quads, each represented by two render triangles. Before the
     // merge there are seven authored boundary segments: the six-segment outer rim plus

@@ -648,8 +648,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const applyTopo = (r: TopoResult | null, fail: string) => {
     if (r?.ok && typeof r.key === 'string' && typeof r.count === 'number') {
       setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
-      setSelMode(2);
       setWire(true);
+      // The host operation owns its result mode/selection (Create Face returns the
+      // new face focused; Face Extrude returns its cap; edge ops remain in Edge).
       adoptHostSelection({ mode: 2, verts: 0, edges: 0, sel: 0 });
       setError(null);
       resyncPartRanges(); // the op may have renumbered groups — mirror the host's ranges (req_2644)
@@ -1620,9 +1621,9 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       const r = edgeOp === 'face' ? meshCreateFace() : edgeOp === 'loopcut' ? meshLoopCut() : meshExtrudeEdge(0);
       if (r?.ok && r.key && typeof r.count === 'number') {
         setModel((m) => (m ? { ...m, key: r.key!, count: r.count! } : m));
-        setSelMode(2);
         setWire(true);
-        setSelInfo(readSelInfo() ?? { mode: 2, verts: 0, edges: 0, sel: 0 });
+        const fallbackMode = edgeOp === 'face' ? 3 : 2;
+        adoptHostSelection({ mode: fallbackMode, verts: 0, edges: 0, sel: edgeOp === 'face' ? 1 : 0 });
       }
     }
     // RJIT_NUDGE=x,0.25 (or y/z) translates the active selection headlessly after

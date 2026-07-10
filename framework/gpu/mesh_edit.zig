@@ -605,6 +605,27 @@ pub fn selectFacesByGroupRange(lo: u32, hi: u32, additive: bool) i32 {
     return @intCast(selCount());
 }
 
+/// Complete a Create Face operation by focusing exactly the appended authored face.
+/// Grouped meshes select the whole new group (both triangles of a bridged quad read as
+/// one face); ungrouped imports select every appended triangle. This is the native
+/// postcondition that makes the next X key flip the result without another pick.
+pub fn focusCreatedFace(first_triangle: u32, triangle_count: u32) u32 {
+    const face_count = model_paint.faceCount();
+    if (triangle_count == 0 or first_triangle >= face_count) return 0;
+    const group = model_source.faceGroupOf(first_triangle);
+    if (group != model_source.NO_FACE_GROUP) {
+        const selected = selectFacesByGroupRange(group, group + 1, false);
+        return if (selected > 0) @intCast(selected) else 0;
+    }
+
+    const end = @min(face_count, first_triangle +| triangle_count);
+    var face = first_triangle;
+    while (face < end) : (face += 1) {
+        if (!selectFaceByIndex(face, face != first_triangle)) break;
+    }
+    return selCount();
+}
+
 /// Ctrl+A for the mesh editor: select every element of the current mode that's in the active
 /// edit scope (whole model when no part is focused). Returns the selected count, -1 if no mesh
 /// or no mode. Edges select only boundary edges (diagonals aren't real edges).
