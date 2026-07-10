@@ -11,7 +11,7 @@
 //                             on load via __model_paint_program_apply.
 //   paints/paint_<id>.png   — the rasterized atlas, the EDITING SUBSTRATE / preview (what
 //                             you see). Written from the live atlas via __image_write_png.
-import { exists, listDir, mkdir, readFile, remove, writeFile } from '../../../runtime/hooks/fs';
+import { exists, listDir, mkdir, readFile, remove, stat, writeFile } from '../../../runtime/hooks/fs';
 import { claimPackageDir } from './modelPackageStore';
 import type { ModelPackage } from './types';
 
@@ -39,9 +39,11 @@ function pngPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg
 function blobPath(pkg: PaintTarget, id: string): string { return `${paintsDir(pkg)}/paint_${id}.blob`; }
 
 /** Persist the DISPLAYED paint-space mesh beside a variant (paints/paint_<id>.blob).
- *  The variant's .png maps ONLY onto these verts (req_2833: island-space UVs) — the
- *  pair is what makes the painting placeable in the world (req_2834). Call when the
- *  variant is the APPLIED painting (save writes what you see; load just applied it). */
+ *  The variant's .png maps through this blob's island-space UVs (req_2833). The
+ *  raw resident format also carries positions/normals, but those are only a save-
+ *  time snapshot; placement rebinds the UVs to the current model geometry. Call
+ *  when the variant is the APPLIED painting (save writes what you see; load just
+ *  applied it). */
 export function writePaintVariantMeshBlob(pkg: PaintTarget, id: string): boolean {
   const ok = host.__model_painted_mesh_write?.(blobPath(pkg, id)) === 1;
   if (ok) invalidatePaintSkins(pkg);
@@ -142,7 +144,39 @@ export function removePaintVariant(pkg: PaintTarget, id: string): void {
 
 export type PaintSkin = { id: string; name: string };
 
-const skinsCache = new Map<string, PaintSkin[]>();
+/** Paint blobs use the resident mesh contract: position3 + normal3 + uv2. */
+export const PAINT_MESH_VERTEX_FLOATS = 8;
+export const PAINT_MESH_VERTEX_BYTES = PAINT_MESH_VERTEX_FLOATS * Float32Array.BYTES_PER_ELEMENT;
+const PAINT_MESH_U_OFFSET = 6;
+const PAINT_MESH_V_OFFSET = 7;
+
+/** A skin is paint on the CURRENT model, never authority for an older geometry
+ *  snapshot. Matching vertex cardinality is the strict boundary that lets the
+ *  saved UV layout bind to today's positions/normals. A package without a base
+ *  blob keeps the legacy skin usable until the model is next saved. */
+export function paintSkinFitsCurrentMesh(currentMeshBytes: number | null, skinMeshBytes: number): boolean {
+  const validSkin = skinMeshBytes >= PAINT_MESH_VERTEX_BYTES * 3
+    && skinMeshBytes % PAINT_MESH_VERTEX_BYTES === 0;
+  return validSkin && (currentMeshBytes === null || currentMeshBytes === skinMeshBytes);
+}
+
+/** Rebind a saved skin's UV layout to the model's latest geometry. The skin
+ *  blob deliberately contributes ONLY uv2; current positions and normals stay
+ *  authoritative so scaling/moving/editing a model cannot resurrect the mesh
+ *  revision that happened to be present when the painting was saved. */
+export function bindPaintSkinToCurrentMesh(current: Float32Array, skin: Float32Array): Float32Array | null {
+  if (current.length !== skin.length || current.length < PAINT_MESH_VERTEX_FLOATS * 3) return null;
+  if (current.length % PAINT_MESH_VERTEX_FLOATS !== 0) return null;
+  const bound = new Float32Array(current);
+  for (let i = 0; i < bound.length; i += PAINT_MESH_VERTEX_FLOATS) {
+    bound[i + PAINT_MESH_U_OFFSET] = skin[i + PAINT_MESH_U_OFFSET]!;
+    bound[i + PAINT_MESH_V_OFFSET] = skin[i + PAINT_MESH_V_OFFSET]!;
+  }
+  return bound;
+}
+
+type PaintSkinCache = { currentMeshStamp: string; skins: PaintSkin[] };
+const skinsCache = new Map<string, PaintSkinCache>();
 
 function invalidatePaintSkins(pkg: PaintTarget): void {
   skinsCache.delete(paintsDir(pkg));
@@ -155,24 +189,34 @@ function sniffVariantName(text: string, fallback: string): string {
   return m ? m[1]!.replace(/\\(.)/g, '$1') : fallback;
 }
 
-/** The model's PLACEABLE paint skins: every variant with both its atlas png and its
- *  paint-space mesh blob on disk, sorted by id. */
+/** The model's PLACEABLE paint skins: every variant with an atlas png and a
+ *  paint-space UV blob whose vertex cardinality fits the current model. A
+ *  topology-stale skin stays stored but leaves the palette until Load + Save
+ *  rebuilds it against the current mesh. */
 export function listPaintSkins(pkg: PaintTarget): PaintSkin[] {
   const dir = paintsDir(pkg);
+  const currentMesh = stat(`${claimPackageDir(pkg)}/mesh/base.blob`);
+  const currentMeshBytes = currentMesh?.size ?? null;
+  // The stamp makes a Save/Export that changes topology invalidate the list
+  // without coupling modelPackageStore back to this module (which would form a
+  // circular dependency). Same-cardinality shape edits remain valid skins.
+  const currentMeshStamp = currentMesh ? `${currentMesh.size}:${currentMesh.mtimeMs}` : 'missing';
   const hit = skinsCache.get(dir);
-  if (hit) return hit;
+  if (hit?.currentMeshStamp === currentMeshStamp) return hit.skins;
   const out: PaintSkin[] = [];
   if (exists(dir)) {
     for (const name of listDir(dir)) {
       const m = /^paint_(\w+)\.blob$/.exec(name);
       if (!m) continue;
       const id = m[1]!;
+      const skinMesh = stat(blobPath(pkg, id));
+      if (!skinMesh || !paintSkinFitsCurrentMesh(currentMeshBytes, skinMesh.size)) continue;
       if (!exists(pngPath(pkg, id))) continue;
       const head = readFile(jsonPath(pkg, id));
       out.push({ id, name: head ? sniffVariantName(head, `Painting ${id}`) : `Painting ${id}` });
     }
   }
   out.sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
-  skinsCache.set(dir, out);
+  skinsCache.set(dir, { currentMeshStamp, skins: out });
   return out;
 }

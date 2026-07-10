@@ -16,7 +16,7 @@ import { exists, readFileBase64 } from '../../../runtime/hooks/fs';
 import { base64ToBytes } from '../../../runtime/workspace';
 import { modelPackageById } from '../data/content';
 import { resolvePackageDir } from '../data/modelPackageStore';
-import { listPaintSkins } from '../data/paintVariants';
+import { bindPaintSkinToCurrentMesh, listPaintSkins, PAINT_MESH_VERTEX_BYTES, PAINT_MESH_VERTEX_FLOATS } from '../data/paintVariants';
 
 const g: any = globalThis;
 
@@ -30,18 +30,18 @@ function readPackageBytes(dir: string, rel: string): Uint8Array | undefined {
 
 type PaintedForm = { vertices: Float32Array; png: Uint8Array };
 
-/** A paint-space mesh blob + its atlas png as one resident-mesh payload. The atlas
- *  maps ONLY onto the blob's island-space verts — pairing it with the source-UV doc
- *  verts scrambles the painting (req_2833) — so both halves or nothing. */
+/** Read a paint-space mesh blob + atlas png. The atlas maps through the blob's
+ *  island-space UV channels — pairing it with source UVs scrambles the painting
+ *  (req_2833). Callers rebind those UVs to current model geometry. */
 function readPaintedForm(dir: string, blobRel: string, pngRel: string): PaintedForm | null {
   const blob = readPackageBytes(dir, blobRel);
   if (!blob) return null;
-  const vertCount = Math.floor(blob.length / 32);
+  const vertCount = Math.floor(blob.length / PAINT_MESH_VERTEX_BYTES);
   if (vertCount < 3) return null;
   const png = readPackageBytes(dir, pngRel);
   if (!png) return null;
-  const buf = blob.buffer.slice(blob.byteOffset, blob.byteOffset + vertCount * 32);
-  return { vertices: new Float32Array(buf, 0, vertCount * 8), png };
+  const buf = blob.buffer.slice(blob.byteOffset, blob.byteOffset + vertCount * PAINT_MESH_VERTEX_BYTES);
+  return { vertices: new Float32Array(buf, 0, vertCount * PAINT_MESH_VERTEX_FLOATS), png };
 }
 
 /** The model's CURRENT painted form (mesh/painted.blob + atlases/base.png — the
@@ -94,22 +94,35 @@ export function pushResidentMeshes(nodeId: number, authoredPieces: readonly Auth
   for (const ap of authoredPieces) {
     const pkg = modelPackageById(ap.pkgId);
     const dir = pkg ? resolvePackageDir(pkg.kind, pkg.id) : null;
-    // The painted form rides the lump (req_2832/2833: a placed export lost its
-    // paintings): paint-space verts + atlas PNG together, or the doc mesh flat.
+    const currentGeometry = authoredMeshData(ap.modelId, ap.pkgId);
+    // Geometry comes from the CURRENT model resolver; the paint-space blob
+    // contributes its UV layout only (req_2832/2833). This keeps the rendered
+    // resident mesh and placement bounds on one model revision.
     const paintedForm = dir ? packagePaintedForm(dir) : null;
-    const verts = paintedForm?.vertices ?? authoredMeshData(ap.modelId, ap.pkgId);
+    const currentPaintedVertices = currentGeometry && paintedForm
+      ? bindPaintSkinToCurrentMesh(currentGeometry, paintedForm.vertices)
+      : paintedForm?.vertices ?? null;
+    const verts = currentPaintedVertices ?? currentGeometry;
     if (verts && verts.length >= 8) {
-      if (paintedForm) painted += 1;
-      meshes.push({ key: ap.modelId, vertices: verts, png: paintedForm?.png });
+      if (currentPaintedVertices && paintedForm) painted += 1;
+      meshes.push({ key: ap.modelId, vertices: verts, png: currentPaintedVertices ? paintedForm?.png : undefined });
     } else console.warn(`[authored] no mesh data for '${ap.modelId}' (${ap.label}) — not resident (re-open + re-export the model)`);
     // Every stored paint SKIN is its own resident mesh (req_2834): key
     // `<modelId>#p<skinId>` — the same key a skinned placeable id resolves to,
-    // so skinned ghosts/placements/colliders draw that painting.
+    // so skinned ghosts/placements/colliders draw that painting. Its saved blob
+    // owns UVs, not historical positions: bind it onto currentGeometry.
     if (pkg && dir) {
       for (const skin of listPaintSkins(pkg)) {
         const form = readPaintedForm(dir, `paints/paint_${skin.id}.blob`, `paints/paint_${skin.id}.png`);
         if (!form) continue;
-        meshes.push({ key: skinnedPieceId(ap.modelId, skin.id), vertices: form.vertices, png: form.png });
+        const skinVertices = currentGeometry
+          ? bindPaintSkinToCurrentMesh(currentGeometry, form.vertices)
+          : form.vertices;
+        if (!skinVertices) {
+          console.warn(`[authored] paint skin '${skin.id}' no longer fits '${ap.modelId}' — load + save the painting against the current topology`);
+          continue;
+        }
+        meshes.push({ key: skinnedPieceId(ap.modelId, skin.id), vertices: skinVertices, png: form.png });
         skins += 1;
       }
     }
