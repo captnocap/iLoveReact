@@ -1,0 +1,30 @@
+{
+  "id": "req_2908",
+  "at": "2026-07-10T18:35:37.834Z",
+  "origin": "codex:019f4ce0",
+  "text": "yeah its working good, one thing im notcing though because of it, so here i have a door that has a window on it[Image #1] and the map around it is genuinely empty, you can see through the window there the blank floor piece on the interior, but whats weird is if u get this at the right angle, you cant see the terrain layer through the window. granted it is just blank black grid in this scene but it is strange [Image #2][Image #3]",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T18:36:01.334Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T18:51:45.099Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the angle-sensitive missing terrain through the door window as a glass persistence and depth-pass bug: Studio partitioned glass faces, but RJMD v1 dropped the boundary and the live resident redrew those faces as opaque depth writers. RJMD v2 now preserves the trailing glass vertex boundary while remaining v1-compatible; the door compiler emits a distinct trailing glass leaf slot, and the live host routes it through the transparent depth-write-off pass so terrain and other opaque geometry remain visible behind it.",
+  "shas": [
+    "71afa1683"
+  ],
+  "resolvedAt": "2026-07-10T18:51:45.099Z"
+}

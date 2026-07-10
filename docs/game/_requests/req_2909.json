@@ -1,0 +1,30 @@
+{
+  "id": "req_2909",
+  "at": "2026-07-10T18:36:49.709Z",
+  "origin": "codex:019f4ce0",
+  "text": "oh, one thing i just noticed with the door, is that only one side of it triggers the open door dialog",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T18:37:57.456Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T18:51:45.108Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed one-sided Door Wall interaction by giving cooked doors an explicit reach query that excludes only their own moving panel rect by identity. Once a leaf swings away from its closed-position target it can no longer intersect one approach ray and suppress that side prompt, while every unrelated thin wall still blocks reach. Focused Zig coverage proves both approach directions and proves another wall remains an occluder.",
+  "shas": [
+    "71afa1683"
+  ],
+  "resolvedAt": "2026-07-10T18:51:45.108Z"
+}

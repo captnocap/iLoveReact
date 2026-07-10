@@ -1,0 +1,30 @@
+{
+  "id": "req_2910",
+  "at": "2026-07-10T18:37:34.024Z",
+  "origin": "codex:019f4ce0",
+  "text": "oh and i cant walk through it. i guess i didnt test much past the fact i saw the window and ground was strange lol. so tally that up, door open dialog is one sided, and i cant walk through the doorway",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T18:37:57.465Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T18:51:45.117Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the sealed open doorway at the live resident boundary. The previous path omitted authored collision boxes, then position-welded the U-shaped frame into one component and boxed its full bounds, filling the portal with an invisible wall. Door compilation now derives and transmits two jamb bands plus a lintel around the measured Door Leaf aperture; the moving leaf remains its own physical rect, so opening it leaves a genuinely traversable doorway.",
+  "shas": [
+    "71afa1683"
+  ],
+  "resolvedAt": "2026-07-10T18:51:45.117Z"
+}
