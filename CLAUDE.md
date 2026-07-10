@@ -120,7 +120,7 @@ The dev host is a single persistent ReleaseFast binary:
 - **Tabs in the titlebar** — borderless host, top strip IS window chrome. Click tab to switch. Double-click empty chrome toggles maximize. Drag to move.
 - **Debug builds silently crash on click.** Always use `ReleaseFast` (default in `rjit dev`).
 
-**State preservation across reloads is NOT working yet.** `useHotState` + `framework/hotstate.zig` are wired but state resets on every reload.
+**State preservation across reloads WORKS (req_2898).** `useHotState` / `framework/state/hotstate.zig` twigs survive the JS teardown, and `cart/editor` uses them for real: mesh edits + undo journal + paint atlas + both cameras + tool/brush state resume on reload (`docs/game/editor_hot_reload.md`). New editor working-state should join an existing twig or the `__model_session_json` resume path — never a parallel store. Twigs are in-process: cold restarts reset them by design.
 
 ---
 
