@@ -33,7 +33,7 @@ import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplore
 import type { PlacedPiece, PlacementGesture, MaterialRef } from '../world/pieces';
 import { placementSlotKey } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
-import { setAuthoredPieces, authoredIdFor, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
+import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
 import type { BuildKind } from '../world/buildCatalog';
 import { loadPersistedState, persistState } from '../data/persistView';
@@ -675,13 +675,18 @@ export default function AppFrame() {
       }
       upsertSavedPackage(pkgExported); // the live roster carries the declaration this session
       const piece: AuthoredBuildPiece = { id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color };
+      // A painted export contributes one palette tile per STORED painting, with
+      // no extra mutable base duplicate. Arm the newest visible skin (or the
+      // base fallback when there are no saved skins) so Export never arms a
+      // hidden/stale entry that the tray itself does not offer.
+      const armedPieceId = preferredAuthoredPaletteId(piece);
       const kindLabel = kind === 'prop' ? `prop [${describePropRig(rig)}]` : `${kind} build piece`;
       setState((prev) => ({
         ...prev,
         openMenu: null,
         actionMenu: 'Build',
         authoredBuildPieces: [...prev.authoredBuildPieces.filter((p) => p.id !== piece.id), piece],
-        armedPieceId: piece.id,
+        armedPieceId,
         // The gallery/tree memo keys off modelDupes: a first materialize joins it
         // (same move as Save); an existing dupe refreshes so it carries the
         // export declaration instead of shadowing the roster with a stale copy.

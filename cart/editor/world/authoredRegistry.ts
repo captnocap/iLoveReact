@@ -11,7 +11,7 @@
 // threading EditorState through every call — the same module-level pattern
 // buildCatalog uses.
 import { catalogByKind, catalogRowFor, rowHex, KIND_LABEL, KIND_ORDER, type BuildKind } from './buildCatalog';
-import { listPaintSkins } from '../data/paintVariants';
+import { listPaintSkins, type PaintSkin } from '../data/paintVariants';
 import { modelPackageById } from '../data/content';
 
 /** Everything a placeable can BE: a build-piece affinity, or a free-placing prop. */
@@ -99,10 +99,38 @@ export function placeableKind(pieceId: string): PlaceableKind | undefined {
 export type PlaceableEntry = { id: string; label: string; hex: string; authored: boolean };
 export type PlaceableGroup = { kind: PlaceableKind; label: string; entries: PlaceableEntry[] };
 
+/** The palette entries for ONE exported model. Stored paintings are the
+ *  exported catalog looks, so they REPLACE the mutable base entry rather than
+ *  sitting beside it. A model with no stored painting keeps one base fallback.
+ *  Passing `skins` makes this boundary independently testable; production reads
+ *  the package's placeable paint-skin pairs from disk. */
+export function authoredPaletteEntries(ap: AuthoredBuildPiece, skins?: readonly PaintSkin[]): PlaceableEntry[] {
+  const resolvedSkins = skins ?? (() => {
+    const pkg = modelPackageById(ap.pkgId);
+    return pkg ? listPaintSkins(pkg) : [];
+  })();
+  if (resolvedSkins.length === 0) {
+    return [{ id: ap.id, label: ap.label, hex: ap.hex, authored: true }];
+  }
+  return resolvedSkins.map((skin) => ({
+    id: skinnedPieceId(ap.id, skin.id),
+    label: `${ap.label} · ${skin.name}`,
+    hex: ap.hex,
+    authored: true,
+  }));
+}
+
+/** The visible entry Export arms. Paint skins are id-sorted, so the newest
+ *  stored painting is the default; the tray still exposes every saved look. */
+export function preferredAuthoredPaletteId(ap: AuthoredBuildPiece, skins?: readonly PaintSkin[]): string {
+  const entries = authoredPaletteEntries(ap, skins);
+  return entries[entries.length - 1]?.id ?? ap.id;
+}
+
 /** Every placeable grouped by kind: catalog rows first, then authored pieces of
- *  that same affinity (so an exported "wall piece" sits under Wall) — each
- *  followed by one entry per stored paint SKIN (req_2834) — and every exported
- *  PROP under its own trailing Props category. */
+ *  that same affinity (so an exported "wall piece" sits under Wall). An authored
+ *  model contributes exactly one tile per stored paint skin, or one base tile
+ *  when it has no skins (req_2834); exported props occupy the trailing group. */
 export function placeablesByKind(): PlaceableGroup[] {
   const byKind = new Map<PlaceableKind, PlaceableEntry[]>();
   for (const g of catalogByKind()) {
@@ -110,11 +138,7 @@ export function placeablesByKind(): PlaceableGroup[] {
   }
   for (const ap of AUTHORED) {
     const list = byKind.get(ap.kind) ?? [];
-    list.push({ id: ap.id, label: ap.label, hex: ap.hex, authored: true });
-    const pkg = modelPackageById(ap.pkgId);
-    for (const skin of pkg ? listPaintSkins(pkg) : []) {
-      list.push({ id: skinnedPieceId(ap.id, skin.id), label: `${ap.label} · ${skin.name}`, hex: ap.hex, authored: true });
-    }
+    list.push(...authoredPaletteEntries(ap));
     byKind.set(ap.kind, list);
   }
   const groups: PlaceableGroup[] = KIND_ORDER
