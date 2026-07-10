@@ -57,7 +57,7 @@ import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publ
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/hmscAssetCatalog';
 import { partsMetaFromRows, meshDocRangeCenters } from '../data/meshDoc';
-import { assignPartsToGroup, nextDuplicatePartName, nextModelGroupName, ungroupParts } from '../data/modelOutliner';
+import { assignPartsToGroup, nextDuplicateGroupName, nextDuplicatePartName, nextModelGroupName, ungroupParts } from '../data/modelOutliner';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
 // Key edges come straight off the ffi bus (not useModifiers.onKeyDown): the active key
@@ -2518,20 +2518,18 @@ export default function AppFrame() {
   }, [state.modelTool.tris]);
 
   // ── Studio-parity part ops (req_2520) ────────────────────────────────────────
-  // Duplicate a part (mirrorAxis 0/1/2 = mirrored twin across that origin plane;
-  // -1 = plain copy). The host copies geometry + paint and returns the new range;
-  // the outliner gains a row. A mirrored/cloned SEED mesh rides along when the
-  // source part has one, so the copy survives a document remount.
-  // Acts on the WHOLE selected set when the pressed row is in it (req_2659): each part
-  // duplicates as its own host op (its own journal entry — honest N entries, never a
-  // faked atomic one); the fresh twins become the selection afterwards.
-  const duplicatePartById = (id: string | null, mirrorAxis: number) => {
+  // Duplicate explicit part rows (mirrorAxis 0/1/2 = mirrored twin across that
+  // origin plane; -1 = plain copy). Each row is its own host op / journal entry —
+  // honest N entries, never a faked atomic one. `groupCopy` assigns the results to
+  // a NEW organizational folder without fusing their topology.
+  const duplicatePartRows = (
+    rows: ModelPart[],
+    mirrorAxis: number,
+    groupCopy?: { id: string; name: string; sourceName: string },
+  ) => {
     const mid = activePartsModelId(state);
     const api = modelToolApiRef.current;
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
-    const rows = id
-      ? verbTargets(id, parts).map((tid) => parts.find((p) => p.id === tid)).filter((p): p is ModelPart => Boolean(p))
-      : [];
     if (!mid || !api || rows.length === 0) {
       setState((prev) => ({ ...prev, status: 'duplicate needs a focused part with a stamped range' }));
       return;
@@ -2567,8 +2565,8 @@ export default function AppFrame() {
         visible: true,
         color: part.color,
         lift: part.lift,
-        groupId: part.groupId,
-        groupName: part.groupName,
+        groupId: groupCopy?.id ?? part.groupId,
+        groupName: groupCopy?.name ?? part.groupName,
         lo: r.lo,
         hi: r.hi,
       });
@@ -2578,14 +2576,73 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: lines.join(' · ') || 'duplicate needs a focused part with a stamped range' }));
       return;
     }
+    const nextParts = [...parts, ...placedRows];
+    const focusedIds = placedRows.map((part) => part.id);
+    const primaryId = placedRows[placedRows.length - 1]!.id;
+
+    // Duplication hands the edit transaction to its result. Updating only the
+    // highlighted row + selected-id set leaves the HOST scoped to the source,
+    // so the next gizmo/topology action edits the old part until the duplicate
+    // is clicked manually. Reuse the same complete focus push as an outliner
+    // click: active range, edit scope, face selection, and viewer counts.
+    selectedPartIdsRef.current = focusedIds;
+    setSelectedPartIds(focusedIds);
+    pushPartSetToHost(state, nextParts, focusedIds, primaryId);
+    const partialGroupReport = groupCopy && placedRows.length < rows.length ? ` · ${lines.join(' · ')}` : '';
+    const status = groupCopy
+      ? `duplicated group "${groupCopy.sourceName}" → "${groupCopy.name}" — ${placedRows.length}/${rows.length} parts focused${partialGroupReport}`
+      : lines.join(' · ');
     setState((prev) => ({
       ...prev,
       seq: seq + 1,
       modelParts: { ...prev.modelParts, [mid]: [...(prev.modelParts[mid] ?? []), ...placedRows] },
-      modelActivePartId: placedRows[placedRows.length - 1]!.id,
-      status: lines.join(' · '),
+      modelActivePartId: primaryId,
+      status,
     }));
-    setSelectedPartIds(placedRows.map((p) => p.id)); // the twins are the new working set
+    // Track the new primary immediately in the live UV preview too.
+    const bridge = (globalThis as any).__modelFocusBridge;
+    if (bridge?.paintLive) bridge.refreshUv?.();
+  };
+
+  // A row duplicate acts on the WHOLE selected set when the pressed row belongs
+  // to it (req_2659). The copied rows keep their existing folder membership.
+  const duplicatePartById = (id: string | null, mirrorAxis: number) => {
+    const mid = activePartsModelId(state);
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const rows = id
+      ? verbTargets(id, parts).map((tid) => parts.find((part) => part.id === tid)).filter((part): part is ModelPart => Boolean(part))
+      : [];
+    duplicatePartRows(rows, mirrorAxis);
+  };
+
+  // Folder duplicate = copy EVERY member, put the copies into a fresh folder,
+  // then focus that complete copied set. Predictable local blockers are rejected
+  // before the first host op so a hidden/unstamped member cannot create a partial
+  // folder. A host failure mid-batch still reports its honest partial result.
+  const duplicatePartGroup = (groupId: string) => {
+    const mid = activePartsModelId(state);
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const members = parts.filter((part) => part.groupId === groupId);
+    if (!mid || members.length === 0) {
+      setState((prev) => ({ ...prev, status: 'part group not found' }));
+      return;
+    }
+    const blocked = members.find((part) => !part.visible || !partRange(part));
+    if (blocked) {
+      setState((prev) => ({
+        ...prev,
+        status: !blocked.visible
+          ? `cannot duplicate ${members[0]!.groupName ?? 'group'} while ${blocked.name} is hidden — show the whole group first`
+          : `cannot duplicate ${members[0]!.groupName ?? 'group'} — ${blocked.name} has no stamped range`,
+      }));
+      return;
+    }
+    const sourceName = members[0]!.groupName ?? 'Group';
+    duplicatePartRows(members, -1, {
+      id: `part-group:${state.seq}`,
+      name: nextDuplicateGroupName(sourceName, parts),
+      sourceName,
+    });
   };
 
   // Detach the face-mode selection into a NEW part (host group remap — geometry and
@@ -3436,6 +3493,7 @@ export default function AppFrame() {
     onSelectPartGroup: guarded(selectPartGroup),
     onRenamePartGroup: guarded(renamePartGroup),
     onToggleVisiblePartGroup: guarded(toggleVisiblePartGroup),
+    onDuplicatePartGroup: guarded(duplicatePartGroup),
     onDissolvePartGroup: guarded(dissolvePartGroup),
     onGroupSelectedParts: guarded(groupSelectedParts),
     onUngroupSelectedParts: guarded(ungroupSelectedParts),

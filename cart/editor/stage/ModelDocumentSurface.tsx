@@ -16,6 +16,7 @@ export type OutlinerHandlers = {
   onSelectPartGroup: (groupId: string) => void;
   onRenamePartGroup: (groupId: string, name: string) => void;
   onToggleVisiblePartGroup: (groupId: string) => void;
+  onDuplicatePartGroup: (groupId: string) => void;
   onDissolvePartGroup: (groupId: string) => void;
   onGroupSelectedParts: () => void;
   onUngroupSelectedParts: () => void;

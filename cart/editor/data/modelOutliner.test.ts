@@ -1,4 +1,4 @@
-import { assignPartsToGroup, duplicateNameStem, modelOutlinerRoots, nextDuplicatePartName, nextModelGroupName, ungroupParts, withoutPartGroup } from './modelOutliner';
+import { assignPartsToGroup, duplicateNameStem, modelOutlinerRoots, nextDuplicateGroupName, nextDuplicatePartName, nextModelGroupName, ungroupParts, withoutPartGroup } from './modelOutliner';
 import type { ModelPart } from './types';
 
 let passed = 0, failed = 0;
@@ -30,6 +30,12 @@ test('duplicate names replace legacy copy chains with one numbered family', () =
   assert(duplicateNameStem('Cube (20)') === 'Cube', 'number suffix collapses to its family');
   assert(nextDuplicatePartName('Cube copy copy', names) === 'Cube (21)', 'next number follows the family maximum');
   assert(nextDuplicatePartName('Cube', names, 'mirror X') === 'Cube mirror X', 'first mirror has a clean qualifier');
+});
+
+test('duplicated folders receive their own collision-free numbered family', () => {
+  const grouped = [part('a', 'deck', 'g1', 'Bridge'), part('b', 'rail', 'g2', 'Bridge (2)')];
+  assert(nextDuplicateGroupName('Bridge', grouped) === 'Bridge (3)', 'folder copy follows the existing folder family');
+  assert(nextDuplicateGroupName('Bridge copy copy', grouped) === 'Bridge (3)', 'legacy folder copy chains normalize too');
 });
 
 test('group labels and dissolve semantics are collision-free and non-destructive', () => {

@@ -105,6 +105,12 @@ export function nextDuplicatePartName(sourceName: string, existingNames: readonl
   return max === 0 ? family : `${family} (${max + 1})`;
 }
 
+/** Name a copied folder from the existing folder family, independent of part names. */
+export function nextDuplicateGroupName(sourceName: string, parts: readonly ModelPart[]): string {
+  const groupNames = [...new Set(parts.map((part) => part.groupName?.trim()).filter((name): name is string => Boolean(name)))];
+  return nextDuplicatePartName(sourceName, groupNames);
+}
+
 /** Dissolve organizational membership while preserving the complete part row. */
 export function withoutPartGroup(part: ModelPart): ModelPart {
   const { groupId: _groupId, groupName: _groupName, ...rest } = part;

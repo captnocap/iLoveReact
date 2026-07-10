@@ -502,6 +502,7 @@ export default function Inspector(props: {
                 onSelectGroup={props.outlinerHandlers.onSelectPartGroup}
                 onRenameGroup={props.outlinerHandlers.onRenamePartGroup}
                 onToggleVisibleGroup={props.outlinerHandlers.onToggleVisiblePartGroup}
+                onDuplicateGroup={props.outlinerHandlers.onDuplicatePartGroup}
                 onDissolveGroup={props.outlinerHandlers.onDissolvePartGroup}
                 onGroupSelected={props.outlinerHandlers.onGroupSelectedParts}
                 onUngroupSelected={props.outlinerHandlers.onUngroupSelectedParts}

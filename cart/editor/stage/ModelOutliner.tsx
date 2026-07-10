@@ -33,7 +33,7 @@ function partListHeight(count: number): number {
   return Math.min(count, PART_ROWS_VISIBLE) * PART_ROW_HEIGHT;
 }
 
-export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, onRename, onToggleVisible, onDuplicate, onDelete, onSelectGroup, onRenameGroup, onToggleVisibleGroup, onDissolveGroup, onGroupSelected, onUngroupSelected, onAdd, onImportModel }: {
+export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, onRename, onToggleVisible, onDuplicate, onDelete, onSelectGroup, onRenameGroup, onToggleVisibleGroup, onDuplicateGroup, onDissolveGroup, onGroupSelected, onUngroupSelected, onAdd, onImportModel }: {
   parts: ModelPart[];
   activeId: string | null;
   // Multi-select set (req_2659, shift-click accumulate): members highlight; the PRIMARY
@@ -47,6 +47,7 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
   onSelectGroup: (groupId: string) => void;
   onRenameGroup: (groupId: string, name: string) => void;
   onToggleVisibleGroup: (groupId: string) => void;
+  onDuplicateGroup: (groupId: string) => void;
   onDissolveGroup: (groupId: string) => void;
   onGroupSelected: () => void;
   onUngroupSelected: () => void;
@@ -174,6 +175,9 @@ export default function ModelOutliner({ parts, activeId, selectedIds, onSelect, 
           )}
           <Pressable style={ROW_CONTROL} onPress={() => (isRenaming ? commitGroupRename(group) : startGroupRename(group))} tooltip={isRenaming ? 'Save group name' : 'Rename group'}>
             <Icon name={isRenaming ? 'Check' : 'Pencil'} size={12} color={isRenaming ? '#9fc1ee' : '#6f8296'} />
+          </Pressable>
+          <Pressable style={ROW_CONTROL} onPress={() => onDuplicateGroup(group.id)} tooltip="Duplicate group — copies every member into a new focused group">
+            <Icon name="CopyPlus" size={12} color="#6f8296" />
           </Pressable>
           <Pressable style={ROW_CONTROL} onPress={() => onDissolveGroup(group.id)} tooltip="Dissolve group — keeps every member part">
             <Icon name="FolderMinus" size={12} color="#8c735f" />
