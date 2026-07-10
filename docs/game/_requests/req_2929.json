@@ -1,0 +1,30 @@
+{
+  "id": "req_2929",
+  "at": "2026-07-10T23:20:07.321Z",
+  "origin": "codex:019f4d0a",
+  "text": "Nice, could you make it a bit easier to scale up when it comes, i realize that dragging this gizmo for 48 steps is ass because it goes out of the camera FoV like 4x over, i just need a value-passable option to tack onto the scaling ability, put it in the context menu since its not that common of a use",
+  "status": "review",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T23:20:20.262Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T23:37:03.628Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a nested Gizmo → Scale By… action with exact numeric entry (including ×48), presets, validation, atomic uniform scaling around the current selection pivot, automatic camera reframe unless locked, and one host journal entry. Added Zig/TypeScript coverage, a ReleaseFast editor build, and a headless ×48 → one Undo → exact restore smoke test.",
+  "shas": [
+    "f441cca8b"
+  ],
+  "resolvedAt": "2026-07-10T23:37:03.628Z"
+}

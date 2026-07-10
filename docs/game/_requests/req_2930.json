@@ -1,0 +1,30 @@
+{
+  "id": "req_2930",
+  "at": "2026-07-10T23:23:43.029Z",
+  "origin": "codex:019f4d0a",
+  "text": "oh also, so the curve is sick as fuck exactly what we wanted the problem though is that it takes the top point and the bottom point and depicts the entire range as its physics rect, so you cant get on it at all the moment it scales vertically, and the horizontal invisible walls on it are just as bad. and, this is also just a problem in general with exported props, so the both of them could be settled under the same agenda, especially i guess sense i litearlly exported it as a prop to see it in the game scale",
+  "status": "review",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T23:23:51.314Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T23:37:03.672Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Exported editor models now derive collision bands from their saved Outliner part ranges rather than collapsing a rising or curved multi-part prop into one whole-mesh AABB. Flat deck bands keep their visible top height, hidden parts emit no collider, and paths beyond the host's 24-box budget merge nearby same-family members locally so both endpoints remain covered without recreating a floor-to-peak wall. Added focused 33-member rising-path tests and kept the existing MESH_PROPS v7 host contract.",
+  "shas": [
+    "edf0b04fb"
+  ],
+  "resolvedAt": "2026-07-10T23:37:03.672Z"
+}
