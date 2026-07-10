@@ -112,7 +112,7 @@ export default function MapDocumentsDialog(props: {
                 return (
                   <Col
                     key={document.stem}
-                    style={{ minHeight: confirmingDelete ? 112 : 82, gap: 8, padding: 10, borderRadius: 8, backgroundColor: active ? '#20344f' : CARD, borderWidth: 1, borderColor: active ? ACCENT : BORDER }}
+                    style={{ minHeight: confirmingDelete ? 112 : 70, gap: 8, padding: 10, borderRadius: 8, backgroundColor: active ? '#20344f' : CARD, borderWidth: 1, borderColor: active ? ACCENT : BORDER }}
                   >
                     <Row style={{ alignItems: 'center', gap: 9 }}>
                       <Icon name={active ? 'MapPinned' : 'Map'} size={15} color={active ? ACCENT : DIM} />
@@ -124,10 +124,7 @@ export default function MapDocumentsDialog(props: {
                           style={{ flexGrow: 1, height: 28, color: TEXT, backgroundColor: '#101114', borderWidth: 1, borderColor: ACCENT, borderRadius: 6, paddingLeft: 8, paddingRight: 8, fontSize: 12 }}
                         />
                       ) : (
-                        <Col style={{ flexGrow: 1, gap: 2 }}>
-                          <Text style={{ color: TEXT, fontSize: 12, fontWeight: '700', fontFamily: MONO }}>{document.name}</Text>
-                          {document.name !== document.stem ? <Text style={{ color: FAINT, fontSize: 9, fontFamily: MONO }}>{`id ${document.stem}`}</Text> : null}
-                        </Col>
+                        <Text style={{ color: TEXT, fontSize: 12, fontWeight: '700', fontFamily: MONO, flexGrow: 1 }}>{document.name}</Text>
                       )}
                       {renaming ? (
                         <>
