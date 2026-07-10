@@ -1,0 +1,30 @@
+{
+  "id": "req_2745",
+  "at": "2026-07-06T02:40:25.894Z",
+  "origin": "session:c3a4627b",
+  "text": "nice that is working great the one thing though uh im only seeing top for floors which would mean the bottom is gone? and then that means how would i use floor pieces when i am placing lets say a floor as the roof when there are multiple stories in a building for example :? they use to have like 3 faces if i remember correctly",
+  "status": "review",
+  "sessionId": "c3a4627b-4b4e-419a-9f99-4f3727835827",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T02:41:03.956Z",
+      "actor": "c3a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T02:48:04.448Z",
+      "actor": "c3a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Restored the hmsc three-face model on plates: floors and roofs expose top/bottom/edges again, so a floor placed as a ceiling in a multi-story build paints its underside, and the edge band is its own face. The render side needed zero new geometry — pieceShapes has always decomposed a plate into a top sliver, bottom sliver, and core slab; the gap was authoring-side: pieceSlots only advertised the top role, and pieceSkins' resolution chains let any face bleed onto any other. Roles now mirror what each kind's decomposition can actually wear: floor/roof top+bottom+edges, the wall family (wall/arch/fence/railing) gains sides for the core and end caps, corner drops its dead back role for the single surface its one body box has. pieceSkins chains are role-explicit (bottom sliver reads bottom, core reads edges/sides, no cross-face tails), so targeting top and picking brick lands ONLY on top — the exact semantics the user ruled for the quick menu — while an untargeted pick still covers every face via the all-roles assign. Quick menu chips and Inspector slot rows widen automatically off pieceSlotRoles (three 68px chips fit the 240px menu exactly). Editor cart bundles clean; framework compile verified alongside req_2746 (rjit ship editor raw binary, exit 0).",
+  "shas": [
+    "996bb5b76"
+  ],
+  "resolvedAt": "2026-07-06T02:48:04.448Z"
+}

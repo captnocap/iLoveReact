@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "id": "primitive:cylinder:1",
+  "name": "stage",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "cylinder",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "placeable": {
+    "as": "prop"
+  },
+  "skeleton": {
+    "id": "primitive:cylinder:1",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "primitive:cylinder:1"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  }
+}

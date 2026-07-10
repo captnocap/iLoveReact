@@ -1,0 +1,28 @@
+{
+  "id": "req_2857",
+  "at": "2026-07-10T05:12:25.959Z",
+  "origin": "session:ef08aab4",
+  "text": "now i could be wrong but i think the whole world renders from a 360p and is then stretched? or maybe its just then standalone tools/rjit game play command that opens the world in that small resolution, im not actually sure, but i have to feel this if so, is a big portion of that. though, that is rendering on a 2k display, and if it was stretched i think it would look a lot worse",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T05:12:42.935Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T05:15:26.198Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's render-resolution question from source: NO 360p-and-stretch anywhere. The editor's Scene3D viewport renders offscreen at the node's exact layout size 1:1 (gpu/3d.zig render() acquireRt(w,h)) and the swapchain is configured at the SDL window size (gpu.zig:2063), so editor measurements are true native-resolution costs on the 2K display. The kernel of truth: the standalone no-V8 loader (rjit game play) opens a hardcoded, non-resizable 800x600 window (world_loader.zig:51 WIN_W/WIN_H, flags=0) rendered 1:1 — a genuinely small window, not a stretched low-res buffer. Noted that triangle-rate walls measured earlier are resolution-independent while fill cost scales with window pixels. Answer only; offered (not implemented) making the loader window sized/resizable.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T05:15:26.198Z"
+}

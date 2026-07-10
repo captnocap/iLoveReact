@@ -1,0 +1,28 @@
+{
+  "id": "req_2854",
+  "at": "2026-07-10T04:57:39.340Z",
+  "origin": "session:ef08aab4",
+  "text": "huh its not linear at all lol. [Image #3] [js.warn] [map-seed] ground seeded — 28 chunk(s) live\n[paint] LIVE FOLIAGE PREVIEW GREW: bush → 2097152 rows (96 MiB CPU) — elastic budget, the machine is the wall (req_2843)\n[r3d] render3d_slim_static_instances pool GREW to 4194304 rows (96 MiB) — elastic pools, the device is the wall (req_2843)\n[paint] LIVE FOLIAGE PREVIEW GREW: bush → 4194304 rows (192 MiB CPU) — elastic budget, the machine is the wall (req_2843)\n[r3d] render3d_slim_static_instances pool GREW to 8388608 rows (192 MiB) — elastic pools, the device is the wall (req_2843)\n[apptick-split] total=63.3ms | jsTick(+microtasks)=63.2 (of which GC=0.0ms x0) tickDrain=0.0 drainFlush=0.0 dirty(snap=0.0+rebuild=0.0)\n\n",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T04:58:29.841Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T04:59:29.734Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User's stress test falsified my linear FPS model: 54.9M tris at GPU 3.1ms (was 24.9M at 3.2ms). Explained from render architecture: the frame was fill/overhead-bound, not primitive-bound — pixels shaded are screen-capped (early-Z), distant sub-pixel triangles are rejected at fixed-function rate, so the per-triangle GPU term is still <0.5ms at 55M tris. Card is absorbing 13.2G submitted tris/sec. Revised walls in arrival order: (1) stroke-regen hitch, already visible as apptick jsTick=63.2ms, scales linearly with painted area; (2) user's 750MB-1GB RAM line at ~8-16x current paint (bush already 192MiB CPU + 192MiB GPU slim pool); (3) fps wall pushed out to ~1-1.5B tris, photo-finishing with the maxBufferSize hard wall (~2-4B). Told user GPU-ms slope is the tell for entering the triangle-bound regime. Answer only, no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T04:59:29.734Z"
+}

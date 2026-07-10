@@ -1,0 +1,28 @@
+{
+  "id": "req_2738",
+  "at": "2026-07-06T01:56:14.505Z",
+  "origin": "session:922efce7",
+  "text": "quick question is json the correct format to store in, i know that @GUIDING_LIGHT.md has things to say about this",
+  "status": "review",
+  "sessionId": "922efce7-f48c-4350-9978-1334e002b188",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T01:56:43.124Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T01:56:59.347Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the format question: JSON is correct for the package's authoring-side files (manifest.json, editmesh.json, stroke-program paints) — V29 explicitly keeps JSON as the SOURCE format (.vmf role) and rules binary for the COMPILED artifact; mesh/base.blob already follows the 'meshes are raw aligned f32' ruling. Flagged the real violations: the hmsc-int snapshots (33MB of JSON with mesh floats and base64 textures parsed every editor boot) and legacy base64-RGBA paint variants. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T01:56:59.347Z"
+}

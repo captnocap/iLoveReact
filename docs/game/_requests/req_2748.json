@@ -1,0 +1,36 @@
+{
+  "id": "req_2748",
+  "at": "2026-07-06T03:57:44.600Z",
+  "origin": "session:1ab7520a",
+  "text": "uh hm... you will see in recent request i said something about how water when painted on a raised terrain was going above it, that it had looked like. they made some edit, and now im looking at it again, and its like instead of hey heres a raised ground with then a crater of water inside of it its like more of a hey heres a glacier of water haha [Image #1] i mean cool effect for something else so maybe its worth saving but as for the goal of water which technically can only exist in areas where it is negative* height to the terrain because otherwise it doesnt really make much sense. anyways, got a fix for this one ?",
+  "status": "review",
+  "sessionId": "1ab7520a-270a-4938-bba3-21d7c85f03ef",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T03:57:53.009Z",
+      "actor": "1ab7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T04:04:30.147Z",
+      "actor": "1ab7",
+      "kind": "note",
+      "text": "Root cause: req_2701 brush filled water back to the PRE-STROKE surface, so a raised mound became water at the mound's grade (the glacier). Rewrote stampWaterAt: pass 1 finds the stamp LEVEL (lowest dry ground covered), pass 2 carves toward level (feathered by weight) and fills only up to it. Tests updated + glacier regression test. zig build test-game-map passes."
+    },
+    {
+      "at": "2026-07-06T04:04:30.155Z",
+      "actor": "1ab7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the water-glacier: the req_2701 self-carving water brush filled back to the pre-stroke surface, so painting water over raised terrain converted the mound's volume into water at the old grade. The brush now seeks a level — the lowest dry ground the stamp covers — carves its bed below that level (feathered by brush weight so crater walls taper), and fills only up to it, so water always sits at or below the surrounding terrain. Flat-ground ponds and rivers-down-hills behave as before; a mound now yields a crater with a pool at its base. Engine tests updated with a no-glacier regression case; needs a host rebuild to see in the editor.",
+  "shas": [
+    "fe62abddf"
+  ],
+  "resolvedAt": "2026-07-06T04:04:30.155Z"
+}

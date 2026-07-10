@@ -1,0 +1,18 @@
+{
+  "id": "req_2753",
+  "at": "2026-07-06T06:03:36.787Z",
+  "origin": "session:d236cd4c",
+  "text": "ok and then heres a real one i need you to help me with. so i made a model in the editor it had two meshes, i named it sign_p, and spent a few minutes touching it up. i saved the model at the end, so last step, so i made sure everything would be covered, then i pressed export to prop, went to the world builder, pulled up the prop menu, pulled it out, and it was one outliner of the two piece design, and then as i went back to make sure i maybe saved it early or something i had the tab open, went back to it, and both the outliners with both in their most primitive form, unedited. and so i thought hm ok well maybe because i saved it, thought it hasnt hydrated the content browser interface yet, il restart and it should show up. and it did, but now just a full sized cube but it has no outliners interface on the side of the editor so like the whole pipeline is very broken for exactly what i would expect it to be done in for authoring matters",
+  "status": "doing",
+  "sessionId": "d236cd4c-00aa-46a9-822a-2bbcafbe52bb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T06:03:54.080Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

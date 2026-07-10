@@ -1,0 +1,30 @@
+{
+  "id": "req_2847",
+  "at": "2026-07-10T01:48:26.667Z",
+  "origin": "codex:019f4985",
+  "text": "Nice that looks way better! Alright here is something else water related i came into the other day. So here is a prop i placed in some water, the prop is effectively a big ass rock (like haystack rock idea) [Image #1] ok and so if i go out to the rock and jump, and collide with it, i do collide into the prop and it has obvious physics rects./ However any of  the rock t hat is under water, seems to completely eliminate this physics rect and therefore i can walk through the prop [Image #2][Image #3][Image #4][Image #5]",
+  "status": "review",
+  "sessionId": "019f4985-42a1-7470-be99-4735c3ba89c0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T01:48:38.168Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T02:09:33.511Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the submerged-prop pass-through at the shared Zig physics boundary. collideSolidRects carried a legacy absolute-world guard (player head below Y=0 skipped every side collider), so the huge rock's oriented collider worked above sea level but vanished for a capsule fully on the -2.5m seabed. Collision now tests only capsule versus collider floor/top bands for both AABB and oriented rects; walk-under and top-clearance behavior stay unchanged. Added exact negative-elevation regressions for both paths and both pass. The ReleaseFast editor build and headless playtest smoke pass. A 60-second fixed-versus-legacy live gate over 573 rect plus 127 oriented colliders showed unchanged p99 (about 14.9ms) and no new tail; the full test-game-physics target retains one clean-HEAD ramp-speed assertion failure unrelated to this change.",
+  "shas": [
+    "60a416b7a"
+  ],
+  "resolvedAt": "2026-07-10T02:09:33.511Z"
+}

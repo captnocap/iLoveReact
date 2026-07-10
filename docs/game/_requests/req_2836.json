@@ -1,0 +1,29 @@
+{
+  "id": "req_2836",
+  "at": "2026-07-07T10:52:02.025Z",
+  "origin": "session:8b6e4e7c",
+  "text": "and then one more for you on top of that, if you look here [Image #11] this gap between me and the model is an invisible wall, the physics rect is not exact to the model",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-07-07T10:52:08.398Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T10:53:32.817Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the invisible wall: world_loader.zig's one-box mesh collider (meshFullBoundsIsland) built a box CENTERED on the mesh anchor from footprint w/d — assuming symmetry the authored rock doesn't have, so the collider overhung the visible face. New meshVertexBoundsIsland scans the actual solid vertices and boxes their true AABB; the single-island and degenerate fallbacks use it, and the centered footprint guess survives only for vertex-less meshes. Remaining honest caveat: colliders are still boxes — a sloped face keeps a small gap where the box meets its widest point, plus the player capsule's radius; making colliders hug slopes needs multi-slab decomposition (a follow-up if wanted). Rides the same pending dev-host rebuild as req_2832/2833.",
+  "shas": [
+    "432ff0cbd"
+  ],
+  "resolvedAt": "2026-07-07T10:53:32.817Z"
+}

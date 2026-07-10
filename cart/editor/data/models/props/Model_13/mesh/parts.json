@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Cube 1",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "cube"
+    },
+    {
+      "name": "Cube 1 copy",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "cube"
+    },
+    {
+      "name": "Cylinder 1",
+      "color": "#c98f9b",
+      "visible": true,
+      "kind": "cylinder"
+    },
+    {
+      "name": "Cylinder 1 copy",
+      "color": "#c98f9b",
+      "visible": true,
+      "kind": "cylinder"
+    },
+    {
+      "name": "Cylinder 1 copy copy",
+      "color": "#c98f9b",
+      "visible": true,
+      "kind": "cylinder"
+    },
+    {
+      "name": "Cylinder 1 copy copy copy",
+      "color": "#c98f9b",
+      "visible": true,
+      "kind": "cylinder"
+    }
+  ]
+}

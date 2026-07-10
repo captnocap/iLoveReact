@@ -1,0 +1,28 @@
+{
+  "id": "req_2775",
+  "at": "2026-07-07T01:38:45.840Z",
+  "origin": "codex:019f3a17",
+  "text": "the bus is catching not everything. infact for the world builder it only is catching the literal build pieces and none of t he terrain/tile/water/flora painting tools",
+  "status": "review",
+  "sessionId": "019f3a17-282b-7db2-832a-5295f7eab23a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T01:38:54.973Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T01:49:23.379Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wired the native world-builder paint path into the editor event bus instead of only watching React-side build-piece placement. The map engine now records completed terrain, tile, water, flora, zone, road, chunk, zone-drop, and tile-binding authoring events; the V8 binding exposes a drain door; the runtime decodes typed events; AppFrame enriches them with editor catalog labels, coordinates, brush stats, material names, and timing; and Eventbus Review renders those map.paint rows directly.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T01:49:23.379Z"
+}

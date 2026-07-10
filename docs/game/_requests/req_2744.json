@@ -1,0 +1,30 @@
+{
+  "id": "req_2744",
+  "at": "2026-07-06T02:35:37.903Z",
+  "origin": "session:f6c0eb00",
+  "text": "hey i got a real one for ya that is already annoying. but there is in the world editor control the ability to go up and down floors, and the cursor to ghost/wireframe sync is perfect on the ground level, the moment you go up one it completely desyncs and progressively gets worse as you go",
+  "status": "review",
+  "sessionId": "f6c0eb00-f4f0-4f02-949e-b77321f915f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T02:35:59.074Z",
+      "actor": "f6c0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T02:41:37.879Z",
+      "actor": "f6c0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the upper-floor cursor-to-ghost desync: the host placement pick door (__compiled_world_ground_hit) always raycast the painted TERRAIN with no idea a storey was active, while resolvePlacement based the piece at terrainY + floor*3m — so on Floor 1+ the ghost projected exactly one storey's iso slant away from the cursor, growing per floor. Fix is Zig-first: the door now accepts an optional levelY (metres) and intersects the terrain surface lifted by it, implemented by lowering the ray origin (the heightfield march itself never learns what a storey is); returned y stays true terrain height and the cart adds the storey back. Brush/paint paths pass 0. WorldViewport passes floor*METERS_PER_LEVEL through groundUnder, so snap, box ghost, mesh ghost, and the POS readout all land under the cursor on every floor. Needs a host rebuild (Zig change) to take effect.",
+  "shas": [
+    "2e214c322"
+  ],
+  "resolvedAt": "2026-07-06T02:41:37.879Z"
+}

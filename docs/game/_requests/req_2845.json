@@ -1,0 +1,36 @@
+{
+  "id": "req_2845",
+  "at": "2026-07-10T01:09:25.009Z",
+  "origin": "codex:019f498f",
+  "text": "hello, there was the start of a big feature the other day that i am not coming around to review, and as it stands, I think the whole thing is kinda broken, but i dont know the best way to explain it other than just giving you a flow of what happens. so, here it is. In cart/editor i click on the file menu for Globals -> Animation, this opens a new tab in the app with one side of it being a web camera tracking view, and the other side is a player model, that is suppose to update its animation state by tracking the user from their webcam. Well, I get this far, and when loading the feature my terminal gets hit with: [paint] LIVE FOLIAGE PREVIEW GREW: bush → 131072 rows (6 MiB CPU) — elastic budget, the machine is the wall (req_2843)\n2026-07-09 18:07:23.810399745 [W:onnxruntime:reactjit.pose, device_discovery.cc:283 GetGpuDevices] Failed to detect devices under \"/sys/class/drm/card5\": device_discovery.cc:93 ReadFileContents Failed to open file: \"/sys/class/drm/card5/device/vendor\"\n2026-07-09 18:07:23.810614864 [W:onnxruntime:reactjit.pose, device_discovery.cc:283 GetGpuDevices] Failed to detect devices under \"/sys/class/drm/card3\": device_discovery.cc:93 ReadFileContents Failed to open file: \"/sys/class/drm/card3/device/vendor\"\n2026-07-09 18:07:23.810890611 [W:onnxruntime:reactjit.pose, device_discovery.cc:283 GetGpuDevices] Failed to detect devices under \"/sys/class/drm/card6\": device_discovery.cc:93 ReadFileContents Failed to open file: \"/sys/class/drm/card6/device/vendor\"\n2026-07-09 18:07:23.810897228 [W:onnxruntime:reactjit.pose, device_discovery.cc:283 GetGpuDevices] Failed to detect devices under \"/sys/class/drm/card4\": device_discovery.cc:93 ReadFileContents Failed to open file: \"/sys/class/drm/card4/device/vendor\"\n[apptick-split] total=63.5ms | jsTick(+microtasks)=63.4 (of which GC=0.0ms x0) tickDrain=0.0 drainFlush=0.0 dirty(snap=0.0+rebuild=0.0)\n and then, the app itself starts to become unresponsive. I cant close it properly, i cant navigate to any other feature in the app, and to actually close the window i do have to run a kill -9 command on the process.",
+  "status": "review",
+  "sessionId": "019f498f-aa62-7f42-8a08-7ee563073a60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T01:09:32.877Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T01:14:20.019Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed: Globals → Animation calls MoveNet synchronously through __pose_estimate from a React timer. The reported ~63ms jsTick is ONNX inference monopolizing the sole V8/UI thread; ORT /sys/class/drm lines are warning noise and the one-time foliage allocation is a separate WorldLoader mount. Fixing at the Zig boundary with a bounded worker + async completion, owned camera snapshots, and unmount cancellation."
+    },
+    {
+      "at": "2026-07-10T01:28:59.745Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the Globals to Animation lockup at its root: MoveNet inference no longer runs synchronously inside the V8 UI tick. Live camera frames now cross a bounded, owned-snapshot Zig worker boundary, results return through correlated FFI events, and tab cleanup cancels listeners without waiting. The CPU-only ONNX session suppresses irrelevant DRM discovery warnings while retaining explicit errors. Added mailbox, bridge, ONNX integration, shutdown, and optional sustained frame-gate coverage; the 60-second gate completed 667 requests with 0.951 ms average and 1.160 ms worst submission time and zero frame-budget spikes.",
+  "shas": [
+    "bd902ca50"
+  ],
+  "resolvedAt": "2026-07-10T01:28:59.745Z"
+}

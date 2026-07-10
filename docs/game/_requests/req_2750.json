@@ -1,0 +1,18 @@
+{
+  "id": "req_2750",
+  "at": "2026-07-06T04:42:00.718Z",
+  "origin": "session:d236cd4c",
+  "text": "why does the paint layers have a tooltip on the layer visiblity that says 'undoable' ? why would it be undoable",
+  "status": "doing",
+  "sessionId": "d236cd4c-00aa-46a9-822a-2bbcafbe52bb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T04:42:08.090Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

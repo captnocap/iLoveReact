@@ -1,0 +1,18 @@
+{
+  "id": "req_2812",
+  "at": "2026-07-07T07:40:45.863Z",
+  "origin": "session:8efcaa11",
+  "text": "interesting. I was unaware of the shift clicking. so then, with that, i am now just testing the waters from what is here, and it does let me create faces between the two outliners without merging, but what doesnt make sense is where do those faces live, i dont see a 3rd outliner being made because of it",
+  "status": "doing",
+  "sessionId": "8efcaa11-bd96-4755-8820-5ff239454e8a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T07:40:58.016Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

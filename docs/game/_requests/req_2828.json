@@ -1,0 +1,28 @@
+{
+  "id": "req_2828",
+  "at": "2026-07-07T09:32:51.195Z",
+  "origin": "codex:019f3b65",
+  "text": "hey add in extrude face, i dont know why it doesnt exist, i see extrude edge but no face",
+  "status": "review",
+  "sessionId": "019f3b65-8538-7802-a8cf-ecc3d27cc8f4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T09:32:59.894Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T09:40:56.736Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added mode-aware Extrude Face command wiring for the model mesh editor: face mode now exposes Extrude Face when exactly one authored face is selected, E routes to face extrusion in face mode while preserving edge extrusion in edge mode, and the V8 host binding calls the native meshTopoExtrudeFace topology op. Verified with zig build test-mesh-edit and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T09:40:56.736Z"
+}

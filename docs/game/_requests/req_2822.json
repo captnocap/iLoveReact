@@ -1,0 +1,28 @@
+{
+  "id": "req_2822",
+  "at": "2026-07-07T08:42:17.327Z",
+  "origin": "session:154f33da",
+  "text": "the large problem is explore agents of any type if the request is to port something. because it makes no sense. for you to port it properly you need to read the code that exists. if you have another model do the searching they spent the tokens to then write a report that is shallow, and then even if the report is good, to technically be able to port something, you still need to go and read it, so now it just becomes 'token maxxing' of if you ask me its retard maxxing",
+  "status": "review",
+  "sessionId": "154f33da-c63e-4153-9471-78f88f88027e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T08:42:36.302Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T08:42:36.310Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User hardened the rule from req_2821: for PORT requests specifically, explore agents of ANY type are senseless — porting requires the implementer to read the source code regardless, so a prior explore pass is a strict double-spend (tokens to write a shallow report, then the same reading again to actually port). Updated the durable memory (no-subagent-relay-for-reference-work) to state the port-specific ban outright rather than just discouraging summaries. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T08:42:36.310Z"
+}

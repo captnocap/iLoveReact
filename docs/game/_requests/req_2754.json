@@ -1,0 +1,30 @@
+{
+  "id": "req_2754",
+  "at": "2026-07-06T06:14:02.404Z",
+  "origin": "session:e1cd106d",
+  "text": "here is a real stupid bug here is a basic cube [Image #102] and im going to select every face and turn on the rotate tool [Image #103] and now rotate it [Image #104] and for whatever reason im getting unsafe eddit, 8 triangles collapsed. ???? what",
+  "status": "review",
+  "sessionId": "e1cd106d-d9b2-4d2a-bf3b-d45bbc1338cd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T06:14:10.766Z",
+      "actor": "e1cd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T06:17:35.802Z",
+      "actor": "e1cd",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the false 'Unsafe face edit' on whole-selection rotates. Root cause: countUnsafeFaceEdits (framework/gpu/3d.zig) flagged a triangle as flipped when its after-normal pointed >~93deg away from its before-normal — but a rigid rotation swings every normal with it, so rotating a fully-selected cube far enough made 8/12 triangles read as flipped despite zero degeneration. Fix: a face whose three edge lengths survived the drag moved rigidly (rotate/translate of a full selection), and a proper rigid motion cannot flip or collapse a triangle — such faces are exempt from the flip test (2e-3 relative tolerance absorbs float drift from incremental per-mousemove rotation). Genuinely distorted faces (partial selections dragged through themselves) are still flagged. Needs a Zig rebuild to take effect.",
+  "shas": [
+    "c220da2f7"
+  ],
+  "resolvedAt": "2026-07-06T06:17:35.802Z"
+}

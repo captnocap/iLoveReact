@@ -1,0 +1,18 @@
+{
+  "id": "req_2752",
+  "at": "2026-07-06T05:53:59.771Z",
+  "origin": "session:d236cd4c",
+  "text": "yeah well it doesnt make sense. it technically, if you think about it im not sure how strokes are stored, but they should effectively work in some sense like id:stoke(layer id, color/shader id, brush id, size, faces[pixels])\nid:stoke(layer id, color/shader id, brush id, size, faces[pixels])\nid:stoke(layer id, color/shader id, brush id, size, faces[pixels])\n\n and i dont still see how visiblity has anything to do with this. undo is stored in growing set, and you never reconstruct anything",
+  "status": "doing",
+  "sessionId": "d236cd4c-00aa-46a9-822a-2bbcafbe52bb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T05:54:14.566Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

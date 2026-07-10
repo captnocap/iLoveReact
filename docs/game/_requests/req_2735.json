@@ -3,7 +3,7 @@
   "at": "2026-07-06T01:33:04.284Z",
   "origin": "session:922efce7",
   "text": "could we really not give them their actual names ? why is it all studiomdl",
-  "status": "doing",
+  "status": "review",
   "sessionId": "922efce7-f48c-4350-9978-1334e002b188",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-06T01:44:46.996Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Package folders now carry the model's actual name: props/studio_mdl-mqy4h5yb-enm became props/weiner, build pieces read as door/, stage/, vault_door/, etc. The dir slug derives from the model name while the id stays the key inside manifest.json; the store resolves id->dir by scanning manifests with an in-memory index, name collisions get _2/_3 suffixes, and renaming a model now moves its folder to match. All 119 existing packages were git-mv'd to their names with internal viewerPaths rewritten; verified live that the running editor resolved every package with zero re-materialization under old slugs.",
+  "shas": [
+    "39248516e"
+  ],
+  "resolvedAt": "2026-07-06T01:44:46.996Z"
 }

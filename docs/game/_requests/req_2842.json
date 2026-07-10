@@ -1,0 +1,28 @@
+{
+  "id": "req_2842",
+  "at": "2026-07-08T02:42:29.497Z",
+  "origin": "session:2a030fa3",
+  "text": "everything fits in 360mb like 360 would be the ceiling?",
+  "status": "review",
+  "sessionId": "2a030fa3-807c-4f93-9fff-ea45cb9c8e6d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-08T02:42:48.535Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-08T02:43:07.015Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarification of the 360 MiB figure from req_2841: YES it is the hard ceiling for world STRUCTURE today — the geometry (256 MiB), placement (32 MiB), foliage (24 MiB) and staging pools are fixed at creation and cannot grow; overflow degrades loudly (retained → per-frame staging → dropped groups), never crashes. NO it is not total app VRAM — textures (material tiles, paint atlases, model atlases), swapchain and depth are allocated on demand on top and grow with content. Net: built meshes/placements can never exceed ~360 MiB on any hardware until the elastic-pools + real-device-limits ruling (req_2839) is made. Answer only, no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-08T02:43:07.015Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_2831",
+  "at": "2026-07-07T09:42:14.242Z",
+  "origin": "session:154f33da",
+  "text": "man that hurts lol. alright so theres that and then the other one the thing you pointed out with the XYZ mirroring ui oh also, mirroring for painting which didnt ever land at all",
+  "status": "review",
+  "sessionId": "154f33da-c63e-4153-9471-78f88f88027e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T09:42:43.720Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T10:06:11.533Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The full three-slice batch shipped. (1) Brush footprints — see req_2829, commit d62539c6d. (2) Mirror painting (studio req_1538, never ported): stampGroupMirrored in 3d.zig reflects every dab across each non-empty subset of the ARMED mirror planes about the mirror frame center, maps images back via worldToFaceBary (localToFaceUV ported), and stamps each as its own recorded program dab so replay is mirror-state independent — verified in the same atlas dump, the green dab lands twice across the X plane. (3) Symmetry trust layer (studio req_1190-1192): host-native symmetryReport + symmetrize (planeCutSoup at the mirror plane, drop far half, emit reflected reverse-wound twins, loop-cut adoption path), doors __mesh_symmetry_report/__mesh_symmetrize, and the per-armed-axis strip in ModelView with the live '⚠ N off Y'/'✓ clean' badge + keep+/keep− verbs — verified headless: clean cube reads clean, a mirror-off nudge then arming Y reads '⚠ 6 off Y' (sym_off.png, sym_broken.png). Commits d62539c6d, e418524b1. Dev host needs a rebuild.",
+  "shas": [
+    "d62539c6d",
+    "e418524b1"
+  ],
+  "resolvedAt": "2026-07-07T10:06:11.532Z"
+}

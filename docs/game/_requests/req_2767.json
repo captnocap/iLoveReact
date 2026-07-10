@@ -1,0 +1,28 @@
+{
+  "id": "req_2767",
+  "at": "2026-07-07T01:10:27.270Z",
+  "origin": "codex:019f3a1f",
+  "text": "here is a little bug in the cart/editor when doing edge or vertex select, if the selection is on the other side, or is also inside of another outliner, it is in accessible to click, example: [Image #1] this top vertex is inaccessible because it is inside of other meshes.",
+  "status": "review",
+  "sessionId": "019f3a1f-336e-7a90-9c24-0ff9bf0dcdd5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T01:10:33.351Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T01:14:20.354Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed mesh editor vertex/edge picking so visible overlay handles remain clickable even when another outliner part or mesh surface occludes the underlying point. The picker now matches the overlay draw contract instead of depth-rejecting vertex/edge candidates, and mesh-edit unit coverage reproduces a scoped back part hidden behind a front part for both vertex and edge modes. Verified with zig build test-mesh-edit and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T01:14:20.354Z"
+}

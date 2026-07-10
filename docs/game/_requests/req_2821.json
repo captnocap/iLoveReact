@@ -1,0 +1,28 @@
+{
+  "id": "req_2821",
+  "at": "2026-07-07T08:39:06.767Z",
+  "origin": "session:154f33da",
+  "text": "right, and this is, actually why we use to enforce no explore agents or sub agents for that exact reason, all they do is go and read the material, spend ~100k tokens or so doing it, to relay a summary to the model that actually does it, which clearly doesnt work. so i guess that is my own fault for removing it, originally it just use to be haiku reporting shit that wasnt even true about the code back to opus and then him turning around and doing whatever the fuck he wanted to back in 4.6 era, thought maybe the times had changed. well they have in ways unexpected. its no longer a bunch of false reporting its just still useless reporting",
+  "status": "review",
+  "sessionId": "154f33da-c63e-4153-9471-78f88f88027e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T08:39:28.678Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T08:39:28.687Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Conversational continuation of the porting-fidelity thread (req_2816-2820): user recalls the old ban on explore/sub agents — 100k-token reference sweeps relayed as summaries to the implementing model never transferred the truth; haiku-era reports were false, current-era reports are accurate but still useless. Assessment given: the failure is structural, not model quality — a summary is lossy in exactly the dimension ports need (constants, predicates, shapes), so accurate summarization still drops the payload. Division of labor proposed: subagents for locating and verifying, never for transferring implementation truth; the implementing context reads the reference file itself (a few k tokens, cheaper than the sweep), and reference reading must emit the committed extraction spec from req_2819 rather than prose summary. Saved as durable feedback memory. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T08:39:28.687Z"
+}

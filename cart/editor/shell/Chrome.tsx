@@ -1,8 +1,25 @@
 import { Icon } from '../../../runtime/icons/Icon';
+import { callHost } from '../../../runtime/ffi';
 import { C, accentFor } from '../workspace.cls';
 import { activeMenuFor, commandById, commandEnabled, MENUS } from '../data/commands';
 import RouteToggle from '../RouteToggle';
 import type { Command, Menu, EditorState } from '../data/types';
+
+function WindowControls() {
+  return (
+    <C.HW_WindowControls>
+      <C.HW_WindowButton tooltip="Minimize" onPress={() => callHost<void>('__window_minimize', undefined)}>
+        <Icon name="Minus" size={13} color={accentFor('textSecondary')} />
+      </C.HW_WindowButton>
+      <C.HW_WindowButton tooltip="Maximize" onPress={() => callHost<void>('__window_maximize', undefined)}>
+        <Icon name="Square" size={11} color={accentFor('textSecondary')} />
+      </C.HW_WindowButton>
+      <C.HW_WindowClose tooltip="Close" onPress={() => callHost<void>('__window_close', undefined)}>
+        <Icon name="X" size={13} color={accentFor('textSecondary')} />
+      </C.HW_WindowClose>
+    </C.HW_WindowControls>
+  );
+}
 
 export default function Chrome(props: {
   state: EditorState;
@@ -15,7 +32,7 @@ export default function Chrome(props: {
   // pipeline isn't wired (available: false), instead of firing a "compile unavailable" no-op.
   const compile = commandEnabled(commandById('compile-rle'), props.state);
   return (
-    <C.HW_Chrome>
+    <C.HW_Chrome windowDrag>
       <C.HW_Brand>
         <Icon name="Box" size={15} color={accentFor('primary')} />
         <C.HW_BrandText>SHITTY GAMES</C.HW_BrandText>
@@ -40,6 +57,7 @@ export default function Chrome(props: {
         <C.HW_PillTextOn>Compile</C.HW_PillTextOn>
       </C.HW_Compile>
       <RouteToggle />
+      <WindowControls />
     </C.HW_Chrome>
   );
 }

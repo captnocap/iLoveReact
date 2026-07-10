@@ -18,6 +18,7 @@
 //!   __map_get_tile_bindings() -> Float32 ArrayBuffer [count, rows…]
 //!   __map_stroke_begin(x, z) / __map_stroke_move(x, z)
 //!   __map_stroke_end() -> Float32 ArrayBuffer [samples, stamps, touched, waterDry]
+//!   __map_event_drain() -> Float32 ArrayBuffer [count, fixed event rows…]
 //!   __map_save_file(path) / __map_load_file(path) -> 0|1
 //!   __map_set_autosave_file(path) -> 0|1        — micro-save target (req_2765)
 //!   __map_stats() -> Float32 ArrayBuffer [chunkCount, dirtyChunks]
@@ -116,6 +117,11 @@ fn argChunkCoords(info: v8.FunctionCallbackInfo) ?[2]i32 {
     return .{ @intFromFloat(cx), @intFromFloat(cz) };
 }
 
+fn argBool(info: v8.FunctionCallbackInfo, idx: u32, default: bool) bool {
+    const raw = argToF64(info, idx) orelse return default;
+    return std.math.isFinite(raw) and raw != 0;
+}
+
 // ── world / chunk doors ───────────────────────────────────────────────────────
 
 fn hostReset(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -130,7 +136,10 @@ fn hostGrowChunk(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     const grew = chunks.growChunk(at[0], at[1]) != null;
-    if (grew) _ = engine.autosaveNow();
+    if (grew) {
+        _ = engine.autosaveNow();
+        if (argBool(info, 2, true)) engine.recordChunkGrow(at[0], at[1]);
+    }
     setReturnF64(info, if (grew) 1 else 0);
 }
 
@@ -260,7 +269,9 @@ fn hostSetZonePalette(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 // or editing a binding re-encodes chunk D streams, never rebuilds the shader.
 fn hostSetTileBindings(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    engine.setTileBindings(argF32Slice(info, 0));
+    const rows = argF32Slice(info, 0);
+    engine.setTileBindings(rows);
+    if (argBool(info, 1, false)) engine.recordTileBindings(rows.len / engine.BINDING_FLOATS);
 }
 
 // __map_get_tile_bindings() -> Float32 ArrayBuffer [count, then count×4 rows] —
@@ -283,8 +294,10 @@ fn hostDropZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const idx = argToF64(info, 0) orelse return;
     if (idx < 0 or !std.math.isFinite(idx)) return;
-    chunks.dropZoneIndex(@intFromFloat(idx));
+    const zone_idx: i16 = @intFromFloat(@min(idx, @as(f64, @floatFromInt(std.math.maxInt(i16)))));
+    chunks.dropZoneIndex(zone_idx);
     _ = engine.autosaveNow();
+    if (argBool(info, 1, true)) engine.recordZoneDrop(@intCast(zone_idx));
 }
 
 // __map_set_flora_specs(f32 triples) — per flora kind [spec, count, chance]
@@ -383,6 +396,56 @@ fn hostStrokeEnd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     stroke_out[2] = @floatFromInt(stats.touched);
     stroke_out[3] = if (stats.water_dry) 1 else 0;
     setReturnF32Buffer(info, stroke_out[0..]);
+}
+
+const MAP_EVENT_FLOATS: usize = 32;
+var map_event_buf: [engine.AUTHORING_EVENT_CAP]engine.AuthoringEvent = undefined;
+var map_event_out: [1 + engine.AUTHORING_EVENT_CAP * MAP_EVENT_FLOATS]f32 = undefined;
+
+fn eventKind(e: engine.AuthoringEvent) f32 {
+    return @floatFromInt(@intFromEnum(e.kind));
+}
+
+fn hostEventDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const n = engine.drainAuthoringEvents(map_event_buf[0..]);
+    map_event_out[0] = @floatFromInt(n);
+    for (map_event_buf[0..n], 0..) |e, i| {
+        const base = 1 + i * MAP_EVENT_FLOATS;
+        map_event_out[base + 0] = eventKind(e);
+        map_event_out[base + 1] = @floatFromInt(@intFromEnum(e.tool.channel));
+        map_event_out[base + 2] = @floatFromInt(@intFromEnum(e.tool.mode));
+        map_event_out[base + 3] = @floatFromInt(@intFromEnum(e.tool.terrain_tool));
+        map_event_out[base + 4] = @floatFromInt(@intFromEnum(e.tool.shape));
+        map_event_out[base + 5] = @floatFromInt(@intFromEnum(e.tool.profile));
+        map_event_out[base + 6] = e.tool.radius_m;
+        map_event_out[base + 7] = e.tool.center_z;
+        map_event_out[base + 8] = e.tool.ramp_min;
+        map_event_out[base + 9] = e.tool.ramp_max;
+        map_event_out[base + 10] = e.tool.ramp_wide;
+        map_event_out[base + 11] = e.tool.ramp_long;
+        map_event_out[base + 12] = e.tool.ramp_angle_deg;
+        map_event_out[base + 13] = e.tool.smooth_strength;
+        map_event_out[base + 14] = @floatFromInt(e.tool.kind_idx);
+        map_event_out[base + 15] = @floatFromInt(e.tool.bind_idx);
+        map_event_out[base + 16] = @floatFromInt(e.tool.flora_kind_idx);
+        map_event_out[base + 17] = @floatFromInt(e.tool.flora_lane);
+        map_event_out[base + 18] = @floatFromInt(e.tool.zone_idx);
+        map_event_out[base + 19] = e.start_x;
+        map_event_out[base + 20] = e.start_z;
+        map_event_out[base + 21] = e.end_x;
+        map_event_out[base + 22] = e.end_z;
+        map_event_out[base + 23] = @floatFromInt(e.stats.samples);
+        map_event_out[base + 24] = @floatFromInt(e.stats.stamps);
+        map_event_out[base + 25] = @floatFromInt(e.stats.touched);
+        map_event_out[base + 26] = if (e.stats.water_dry) 1 else 0;
+        map_event_out[base + 27] = e.duration_ms;
+        map_event_out[base + 28] = @floatFromInt(e.id);
+        map_event_out[base + 29] = @floatFromInt(e.aux_a);
+        map_event_out[base + 30] = @floatFromInt(e.aux_b);
+        map_event_out[base + 31] = @floatFromInt(e.dropped_before);
+    }
+    setReturnF32Buffer(info, map_event_out[0 .. 1 + n * MAP_EVENT_FLOATS]);
 }
 
 var stats_out: [2]f32 = undefined;
@@ -540,6 +603,7 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_stroke_begin", hostStrokeBegin);
     v8_runtime.registerHostFn("__map_stroke_move", hostStrokeMove);
     v8_runtime.registerHostFn("__map_stroke_end", hostStrokeEnd);
+    v8_runtime.registerHostFn("__map_event_drain", hostEventDrain);
     v8_runtime.registerHostFn("__map_stats", hostStats);
     v8_runtime.registerHostFn("__map_read_height", hostReadHeight);
     v8_runtime.registerHostFn("__map_read_water", hostReadWater);

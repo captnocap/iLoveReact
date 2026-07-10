@@ -1,0 +1,18 @@
+{
+  "id": "req_2763",
+  "at": "2026-07-07T00:52:04.372Z",
+  "origin": "session:fc8c5862",
+  "text": "nice somehow in my set i didnt cover back which should be lol... especially since it is huge for interfacing how to rig like a backpack or sitting against the back of a chair",
+  "status": "doing",
+  "sessionId": "fc8c5862-b656-4dc7-864b-cbea2bb80407",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T00:52:13.802Z",
+      "actor": "fc8c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

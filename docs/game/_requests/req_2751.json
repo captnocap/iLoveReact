@@ -1,0 +1,30 @@
+{
+  "id": "req_2751",
+  "at": "2026-07-06T04:48:58.615Z",
+  "origin": "session:1ab7520a",
+  "text": "yeah ok so there is one thing about props that i am not so much a fan of that id like to address, so, if you look in the code, the physics rect for them and their placement against the current level in the world is based on the prop and how it sits in this editor, the ground being if i made a prop like a picture that goes on the wall, it would have to be saved above the ground and, usually guessed for placement. im thinking the better approach is to treat everything at the ground level and then when placing, we would end up treating the scroll wheel as a Z index modifier so we could for example, put things up on a wall or whatever, without ever needing  to think mentally about it from the mesh editing PoV; and only applicable to props because build pieces are on a grid",
+  "status": "review",
+  "sessionId": "1ab7520a-270a-4938-bba3-21d7c85f03ef",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T04:49:29.174Z",
+      "actor": "1ab7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T04:55:19.317Z",
+      "actor": "1ab7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Props no longer inherit their studio-editor height: authoredMeshData ground-rebases every authored placeable's mesh to base at y=0 (render, ghost outline, and pick box all flow from that one resolver, so they stay consistent), and while a prop is armed in Place mode the plain scroll wheel becomes a height dial — 0.25m per notch, clamped at ground, sticky across placements of the same prop so a gallery wall hangs at one height. Build pieces are untouched (grid + storeys own their verticality) and ctrl+wheel tilt is unchanged. Hot-reloads into the running dev host; no framework rebuild needed.",
+  "shas": [
+    "99c8cc33c"
+  ],
+  "resolvedAt": "2026-07-06T04:55:19.317Z"
+}

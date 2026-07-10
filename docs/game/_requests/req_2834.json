@@ -1,0 +1,30 @@
+{
+  "id": "req_2834",
+  "at": "2026-07-07T10:42:07.806Z",
+  "origin": "session:8b6e4e7c",
+  "text": "ok and then how do i for example use both paintings, or more. exporting i assume overwrites it if i go and load one painting and export then come back and do the other painting and export again",
+  "status": "review",
+  "sessionId": "8b6e4e7c-b729-4fdb-bf0d-24c9728dd002",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T10:42:55.058Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T10:51:14.320Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built paint skins as placeables (V24: variety lives in the CATALOG — a stored painting is a SKIN on the exported prop). Every saved paint variant now persists its own paint-space mesh blob (paints/paint_<id>.blob) beside its png — written on Save/Update and self-healed the first time you Load an older variant; the build palette's Props tray expands each exported model into one tile per stored painting (label: 'model · painting name'); arming that tile ghosts and places THAT painting, and the skinned id (prop:<modelId>#p<id>) rides the placed piece so saved worlds keep each placement's skin. Multiple paintings of the same model place side by side — exporting no longer overwrites the one look. Answering the verbatim concern: yes, before this the export carried only the last-saved painting; now each painting is its own placeable. To activate for the existing bridge_foot paintings: open the model, Load each painting once (heals the blob), then the Props tray shows both entries.",
+  "shas": [
+    "f002df0d6"
+  ],
+  "resolvedAt": "2026-07-07T10:51:14.320Z"
+}

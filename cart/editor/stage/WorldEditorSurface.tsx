@@ -35,9 +35,11 @@ export default function WorldEditorSurface(props: {
   pieces: readonly PlacedPiece[];
   selectedId: string | null;
   armedPieceId: string | null;
+  armedYawDegrees: number;
   authoredPieces: readonly AuthoredBuildPiece[];
   /** one gesture's placements: a click is a one-piece batch, a drag-run (req_2747) is the lot. */
   onPlace: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
+  onMove: (id: string, destination: PlacedPiece) => void;
   onSelect: (id: string | null) => void;
   /** right-click hit a placed piece → open the quick context menu at window (x,y) (req_2733). */
   onPieceContext: (id: string, x: number, y: number) => void;
@@ -46,7 +48,9 @@ export default function WorldEditorSurface(props: {
   // armed ONLY in Place mode, so Select/Move/Focus never drop a piece. The armed piece id is the
   // Build bar's pick (req_2563 Phase 2), defaulting to a concrete floor.
   const tool = props.paintActive ? 'select' : worldToolFor(props.activeCommandId);
-  const armed: ArmedPiece = tool === 'place' && props.armedPieceId ? { pieceId: props.armedPieceId } : null;
+  const armed: ArmedPiece = tool === 'place' && props.armedPieceId
+    ? { pieceId: props.armedPieceId, yawDegrees: props.armedYawDegrees }
+    : null;
 
   // Storey cutaway (req_2567): the viewport only ever sees the pieces the active
   // floor should show — everything ABOVE the storey is hidden (so editing Level 1
@@ -72,6 +76,7 @@ export default function WorldEditorSurface(props: {
         onSelect={props.onSelect}
         onPieceContext={props.onPieceContext}
         onPlace={props.onPlace}
+        onMove={props.onMove}
         floor={props.floor}
         paintActive={props.paintActive}
       />

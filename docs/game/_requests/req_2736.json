@@ -1,0 +1,28 @@
+{
+  "id": "req_2736",
+  "at": "2026-07-06T01:47:50.778Z",
+  "origin": "codex:019f351a",
+  "text": "hey inside of cart/editor there is the brushes and the wireframe outline that happen to be there when you are just mouse hovering around, and so i want you to link those coordinates of the map to the X Y Z that is in the app dock in the bottom [Image #1] right so that this [Image #2] or this [Image #3] or this [Image #4] and etc, any of the mouse postions it shows that as the position on the x y z please",
+  "status": "review",
+  "sessionId": "019f351a-122a-78e0-bbe6-bbb3fa49a918",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T01:48:01.182Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T01:53:39.012Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Linked the editor world hover point into the bottom dock POS readout. WorldViewport now publishes rounded terrain-aware hover coordinates using the same ground/snap paths that drive map paint and placement ghosts, and BuildDock prefers those hover coordinates while the cursor is over the world before falling back to the selected piece. Added a small non-persisted external store so hover updates only rerender the dock instead of churning EditorState.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T01:53:39.012Z"
+}

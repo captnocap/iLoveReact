@@ -1,0 +1,30 @@
+{
+  "id": "req_2747",
+  "at": "2026-07-06T03:53:11.297Z",
+  "origin": "session:f6c0eb00",
+  "text": "cool now the other thing with this kinda is the placing build pieces, we use to have and just have not yet reintroduced the capability to click -> drag -> place so you could cover large areas with a floor for example or the run of it with wall pieces, currently its just single piece and slow :(",
+  "status": "review",
+  "sessionId": "f6c0eb00-f4f0-4f02-949e-b77321f915f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T03:53:20.361Z",
+      "actor": "f6c0",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T04:07:02.825Z",
+      "actor": "f6c0",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reintroduced click→drag→place on the world editor's Place tool (the plain left drag was inert since the middle-drag orbit move, req_2704 — perfect slot). Mousedown anchors at the ground point under the cursor; dragging extends a RUN: edge kinds (walls/fences/railings/arches) lay a straight line of edge pieces along the dominant drag axis on the anchor's grid line, plate kinds rect-fill every cell between anchor and cursor; props and authored meshes stay single-placement. Each run cell resolves through the existing resolvePlacement (same snap, same host validator, same storey+terrain basing), the run stays level at the anchor's terrain height, all pieces ghost live mid-drag (re-resolved only on cell change so the validator door isn't hammered per pixel), and mouseup stamps the whole run as ONE journal entry via the new placePieces batch (single click = one-piece batch on the same door; slot-replace semantics preserved). Runs cap at 400 cells with a loud console warning. Verified headless: bundle-check clean + a v8cli geometry test (horizontal/vertical wall runs, rect fill, storey+terrain y, negative coords) ALL PASS. Pure TSX — hot reload picks it up, no rebuild needed.",
+  "shas": [
+    "12d7836c4"
+  ],
+  "resolvedAt": "2026-07-06T04:07:02.825Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2788",
+  "at": "2026-07-07T04:40:26.223Z",
+  "origin": "codex:019f3a3b",
+  "text": "hm not sure what happened but now none of the tooling works, but the buttons do. i cant raise or lower terrain, paint anything from any panel. but i can with build pieces just fine. when using the paint tools im seeing: js.warn] [map-seed] ground seeded — 3 chunk(s) live\n[js.warn] [place] click ate as DRAG (travel 114+206px from down)\n[js.warn] [place] click ate as DRAG (travel 160+8px from down)\n[js.warn] [place] click ate as DRAG (travel 98+173px from down)\n[js.warn] [place] click ate as DRAG (travel 83+67px from down)\n[js.warn] [place] click ate as DRAG (travel 45+29px from down)\n[js.warn] [place] click ate as DRAG (travel 120+21px from down)\n[js.warn] [place] click ate as DRAG (travel 4+2px from down)\n[js.warn] [place] click ate as DRAG (travel 96+66px from down)\n[js.warn] [place] click ate as DRAG (travel 45+28px from down)\n[js.warn] [place] click ate as DRAG (travel 108+4px from down)\n[js.warn] [place] click ate as DRAG (travel 218+15px from down)\n[js.warn] [place] click ate as DRAG (travel 71+53px from down)\n[js.warn] [place] click ate as DRAG (travel 36+119px from down)\n[js.warn] [place] click ate as DRAG (travel 148+40px from down)\n[js.warn] [place] click ate as DRAG (travel 113+67px from down)\n[js.warn] [place] click ate as DRAG (travel 217+134px from down)\n[js.warn] [place] click ate as DRAG (travel 180+17px from down)\n[js.warn] [place] click ate as DRAG (travel 287+33px from down)\n[js.warn] [place] click ate as DRAG (travel 101+50px from down)\n[js.warn] [place] click ate as DRAG (travel 198+50px from down)\n[js.warn] [place] click ate as DRAG (travel 241+68px from down)\n[js.warn] [place] click ate as DRAG (travel 366+23px from down)\n[js.warn] [place] click ate as DRAG (travel 308+104px from down)\n[js.warn] [place] click ate as DRAG (travel 392+43px from down)\n[js.warn] [place] click ate as DRAG (travel 481+67px from down)\n[js.warn] [place] drag-run -> place 4× wall.concrete.common\n[js.warn] [place] live push: 91 pieces (decomposed) + 0 materials -> loader node 1950",
+  "status": "review",
+  "sessionId": "019f3a3b-4b5d-7263-a77e-3766f3d10cac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T04:40:41.421Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T04:43:02.035Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed Map Paint strokes being intercepted by the world placement surface. The native map-paint input guard now ignores the WorldViewport's own full-screen input catcher (testID editor-world-input) while still yielding to real UI chrome such as the paint dock, action bar, sliders, inputs, and scrollbars. The cart also defensively preempts world placement while mapPaint.active is true and hides the BuildBar under the MapPaintDock, so stale Place mode cannot eat paint strokes as drag-place gestures. Verified with zig build test-game-map, git diff --check on touched files, and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T04:43:02.034Z"
+}

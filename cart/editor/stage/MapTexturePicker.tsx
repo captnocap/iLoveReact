@@ -19,6 +19,8 @@ import type { MapPaintState } from './mapPaint';
 
 const POP = '#17181b', LINE = '#242a33', TEXT = '#e8edf6', DIM = '#8b93a3', ACCENT = '#6ea8fe';
 const PAGE_SIZE = 15; // live-Effect budget, same as the ink popover
+const PICKER_LEFT = 410;
+const PICKER_BOTTOM = 126; // above the viewport bottom paint/build dock
 
 // Thumb data for a registry material: the standard D[] tuple at Std grade.
 // Seed 7 is arbitrary-but-fixed so thumbs are stable across opens.
@@ -55,10 +57,10 @@ export default function MapTexturePicker(props: {
   const arm = (fn: string, variant: number) => props.onPatch(armBindingPatch(s, fn, variant));
 
   return (
-    // Click-away scrim below the action bar; the panel drops from the bar.
-    <Box style={{ position: 'absolute', left: 0, top: 122, right: 0, bottom: 0 }}>
+    // Click-away scrim over the editor; the panel rises from the bottom paint dock.
+    <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}>
       <Pressable onPress={() => props.onPatch({ texturePickerOpen: false })} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }} />
-      <Col style={{ position: 'absolute', left: 410, top: 0, width: 320, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12, gap: 8 }}>
+      <Col style={{ position: 'absolute', left: PICKER_LEFT, bottom: PICKER_BOTTOM, width: 320, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12, gap: 8 }}>
         <Row style={{ alignItems: 'center', gap: 7 }}>
           <Icon name="SwatchBook" size={13} color={ACCENT} />
           <Text numberOfLines={1} noWrap style={{ color: TEXT, fontSize: 12, fontWeight: '700' }}>{def.label} brush paints:</Text>

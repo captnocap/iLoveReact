@@ -1,0 +1,18 @@
+{
+  "id": "req_2787",
+  "at": "2026-07-07T02:49:25.660Z",
+  "origin": "session:fc8c5862",
+  "text": "also, i will say, like the current SAM model isnt like a hard-must, we can literally download / vendor any model that could be more capable for the task",
+  "status": "doing",
+  "sessionId": "fc8c5862-b656-4dc7-864b-cbea2bb80407",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T02:49:52.179Z",
+      "actor": "fc8c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

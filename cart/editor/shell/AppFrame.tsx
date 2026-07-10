@@ -31,7 +31,7 @@ import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture, MaterialRef } from '../world/pieces';
-import { placementSlotKey } from '../world/pieces';
+import { PIECE_ROTATION_STEP_DEGREES, placementSlotKey } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
@@ -516,7 +516,8 @@ export default function AppFrame() {
         else if (commandId === 'mesh-sym-x') api.toggleMirror(0);
         else if (commandId === 'mesh-sym-y') api.toggleMirror(1);
         else if (commandId === 'mesh-sym-z') api.toggleMirror(2);
-        else if (commandId === 'mesh-extrude') api.extrudeEdge();
+        else if (commandId === 'mesh-extrude') (state.modelTool.selMode === 3 ? api.extrudeFace() : api.extrudeEdge());
+        else if (commandId === 'mesh-extrude-face') api.extrudeFace();
         else if (commandId === 'mesh-create-face') api.createFace();
         else if (commandId === 'mesh-loopcut') api.loopCut();
         else if (commandId === 'mesh-paint-fill') api.brushTool('fill');
@@ -529,7 +530,8 @@ export default function AppFrame() {
     }
     // World-piece quick verbs (req_2733): with a placed piece selected on the world
     // surface, Delete / Copy / Rotate act on THAT piece — the phantom `objects` path
-    // below never sees them. Rotate is piece-only, so without one it refuses honestly.
+    // below never sees them. R is mode-sensitive (req_0598): without a selection,
+    // an armed placement ghost turns in place before it is dropped.
     if (command.id === 'delete-selection' || command.id === 'duplicate-selection' || command.id === 'rotate-selection') {
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
       if (doc?.kind === 'world' && state.selectedPieceId) {
@@ -538,8 +540,15 @@ export default function AppFrame() {
         else rotatePiece(state.selectedPieceId);
         return;
       }
+      if (command.id === 'rotate-selection' && doc?.kind === 'world' && state.activeCommandId === 'place-piece' && state.armedPieceId) {
+        setState((prev) => {
+          const yaw = (prev.armedYawDegrees + PIECE_ROTATION_STEP_DEGREES) % 360;
+          return { ...prev, armedYawDegrees: yaw, status: `placement ghost rotated → ${yaw}°` };
+        });
+        return;
+      }
       if (command.id === 'rotate-selection') {
-        setState((prev) => ({ ...prev, status: 'select a placed piece to rotate — click one with the Select tool' }));
+        setState((prev) => ({ ...prev, status: 'select a placed piece, or arm one in Place mode, to rotate' }));
         return;
       }
     }
@@ -694,6 +703,7 @@ export default function AppFrame() {
         actionMenu: 'Build',
         authoredBuildPieces: [...prev.authoredBuildPieces.filter((p) => p.id !== piece.id), piece],
         armedPieceId,
+        armedYawDegrees: 0,
         // The gallery/tree memo keys off modelDupes: a first materialize joins it
         // (same move as Save); an existing dupe refreshes so it carries the
         // export declaration instead of shadowing the roster with a stale copy.
@@ -845,8 +855,9 @@ export default function AppFrame() {
       } else if (command.id === 'move-selection') {
         next = {
           ...next,
-          objects: prev.objects.map((item) => item.id === object.id ? { ...item, left: item.left + 18, top: item.top + 10 } : item),
-          cursor: { x: object.left + 18, y: 0, z: object.top + 10 },
+          status: prev.selectedPieceId
+            ? 'Move armed — drag the selected placed piece to reposition it'
+            : 'Move armed — drag a placed piece to reposition it',
         };
       } else if (command.id === 'paint-material') {
         next = {
@@ -896,7 +907,7 @@ export default function AppFrame() {
 
       const target = command.id === 'paint-material' || command.id === 'place-piece' ? asset.name : object.name;
       const editMs = Date.now() - t0;
-      const event = command.id === 'sample-material' || command.id === 'place-piece'
+      const event = command.id === 'sample-material' || command.id === 'place-piece' || command.id === 'move-selection'
         ? { history: prev.history, redo: prev.redo, seq: prev.seq }
         : pushHistory(prev, command, target, `${source} - ${command.native ? 'native-ready' : 'design-only'}`, editMs);
       // Any world slice this command touched becomes a REAL reversible entry
@@ -1053,6 +1064,57 @@ export default function AppFrame() {
     });
   };
 
+  /** Commit one viewport drag after its local snapped preview has settled. This
+   *  is deliberately one state transition on drop — WorldViewport owns the
+   *  per-pointer preview so dragging cannot put React/the live overlay on the
+   *  frame path. Destination collisions follow placement's existing slot policy:
+   *  moving a wall onto another wall replaces the destination, never duplicates. */
+  const movePiece = (id: string, destination: PlacedPiece) => {
+    setState((prev) => {
+      const piece = prev.worldPieces.find((item) => item.id === id);
+      if (!piece) return { ...prev, status: 'move: that piece is gone' };
+      const unchanged = piece.x === destination.x
+        && piece.y === destination.y
+        && piece.z === destination.z
+        && piece.yawDegrees === destination.yawDegrees
+        && piece.floor === destination.floor;
+      if (unchanged) return { ...prev, status: `${piece.pieceId} stayed put` };
+
+      const destinationSlot = placementSlotKey(destination);
+      const replaced = prev.worldPieces.filter((item) => item.id !== id && placementSlotKey(item) === destinationSlot);
+      const worldPieces = [
+        ...prev.worldPieces.filter((item) => item.id !== id && placementSlotKey(item) !== destinationSlot),
+        destination,
+      ];
+      const committedAtMs = Date.now();
+      const meta = [
+        `from=(${piece.x.toFixed(2)},${piece.y.toFixed(2)},${piece.z.toFixed(2)})`,
+        `to=(${destination.x.toFixed(2)},${destination.y.toFixed(2)},${destination.z.toFixed(2)})`,
+        `yaw=${Math.round(destination.yawDegrees)}`,
+        replaced.length ? `replaced=${replaced.length}` : '',
+      ].filter(Boolean).join(' ');
+      return recordWorldEdit(prev, {
+        ...prev,
+        seq: prev.seq + 1,
+        history: [{
+          id: `h-${prev.seq}`,
+          verb: 'move',
+          target: piece.pieceId,
+          meta,
+          undoable: true,
+          atMs: committedAtMs,
+          editMs: 0,
+          emptyMs: 0,
+          richMs: 0,
+        }, ...prev.history].slice(0, 8),
+        redo: [],
+        worldPieces,
+        selectedPieceId: id,
+        status: `moved ${piece.pieceId}${replaced.length ? ` (replaced ${replaced.length})` : ''}`,
+      }, `move ${piece.pieceId}`);
+    });
+  };
+
   const selectPiece = (id: string | null) => {
     setState((prev) => ({
       ...prev,
@@ -1065,6 +1127,7 @@ export default function AppFrame() {
     setState((prev) => ({
       ...prev,
       armedPieceId: pieceId,
+      armedYawDegrees: 0,
       // A palette arm drops any copy stamp (req_2733) — you're placing the
       // DEFINITION again, not the copied instance's materials.
       armedStamp: null,
@@ -1159,7 +1222,7 @@ export default function AppFrame() {
     setState((prev) => {
       const piece = prev.worldPieces.find((p) => p.id === id);
       if (!piece) return { ...prev, status: 'rotate: that piece is gone' };
-      const yaw = (piece.yawDegrees + 90) % 360;
+      const yaw = (piece.yawDegrees + PIECE_ROTATION_STEP_DEGREES) % 360;
       return recordWorldEdit(prev, {
         ...prev,
         worldPieces: prev.worldPieces.map((p) => (p.id === id ? { ...p, yawDegrees: yaw } : p)),
@@ -1193,6 +1256,7 @@ export default function AppFrame() {
       return {
         ...prev,
         armedPieceId: piece.pieceId,
+        armedYawDegrees: 0,
         armedStamp: piece.slots || piece.overrides ? { slots: piece.slots, overrides: piece.overrides } : null,
         selectedPieceId: null,
         activeCommandId: 'place-piece',
@@ -1900,6 +1964,9 @@ export default function AppFrame() {
     const m = s.modelTool.selMode;
     if (m === 0 || m === 3) ranges.forEach((r, i) => host.__mesh_edit_select_group_range?.(r.lo, r.hi, i === 0 ? 0 : 1));
     else host.__mesh_edit_clear?.();
+    // This selection is shell-driven, not an engine pointer event, so the native
+    // callback will not fire on its own. Ping the viewer to mirror host mode/counts.
+    host.__meshEditSelChanged?.();
   };
   const selectPart = (id: string) => {
     // Focus = SCOPE editing to the selected set. EXACTLY ONE primary is always focused
@@ -3099,6 +3166,7 @@ export default function AppFrame() {
             onContext={guarded(() => setState((prev) => ({ ...prev, contextOpen: !prev.contextOpen, openMenu: null, status: prev.contextOpen ? 'context menu closed' : 'context menu opened' })))}
             onObject={selectObject}
             onPlacePiece={placePieces}
+            onMovePiece={movePiece}
             onSelectPiece={selectPiece}
             onPieceContext={openPieceQuickMenu}
             onArmPiece={armPiece}

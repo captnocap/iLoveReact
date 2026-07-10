@@ -1,0 +1,36 @@
+{
+  "id": "req_2832",
+  "at": "2026-07-07T10:17:06.630Z",
+  "origin": "session:8b6e4e7c",
+  "text": "hey i made this mesh [Image #8] and painted it all up, i gave it two stored paintings actually one of them is clean the other is tagged up. for reuse, but ;_; i exported it into the world, and then when i pull it up to place it, it doesnt have either of the paintings D: [Image #9]",
+  "status": "review",
+  "sessionId": "8b6e4e7c-b729-4fdb-bf0d-24c9728dd002",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T10:17:16.789Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T10:28:39.105Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Root cause found: the live mesh-prop bridge (cart/editor/world/meshProps.ts) registered exported models UNTEXTURED (pngLen 0 — the file header literally said 'its own painted atlas is a later slice') and world_loader.zig applyLiveColliders only folded live BOX pieces into physics, never live MESH refs. Fixed both: resident push embeds atlases/base.png; live mesh refs emit per-island oriented colliders."
+    },
+    {
+      "at": "2026-07-07T10:28:39.113Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the two halves of the placed-export bug: (1) PAINT — pushResidentMeshes now reads the model package's atlases/base.png (resolvePackageDir by id) and embeds the PNG in the MESH_PROPS resident lump; the host decoder already supported the v4+ png block, so placements render painted exactly like baked cooked props. This half is pure JS and hot-reloads. (2) COLLISION — applyLiveColliders in world_loader.zig now also folds live MESH refs into the physics rebuild using the same per-island oriented boxes the baked mesh-prop path emits (walk-under banding preserved, ghost preview stays non-solid); needs a dev-host rebuild since it's Zig. Note: the placement wears the painting last saved on the model (base.png); per-placement CHOICE between stored paint variants (clean vs tagged) is a follow-up feature — today you'd apply the wanted painting in the mesh editor and re-export.",
+  "shas": [
+    "51da748eb"
+  ],
+  "resolvedAt": "2026-07-07T10:28:39.113Z"
+}

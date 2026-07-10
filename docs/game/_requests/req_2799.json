@@ -1,0 +1,30 @@
+{
+  "id": "req_2799",
+  "at": "2026-07-07T05:53:42.924Z",
+  "origin": "session:2c48a315",
+  "text": "this model isnt the model? or what am i misunderstanding [Image #5]",
+  "status": "review",
+  "sessionId": "2c48a315-d871-4ccd-acbe-e034005db39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T05:54:12.531Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T05:59:14.962Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered + fixed the silence that caused the question. The blocky figure is the loader's built-in STAND-IN (navy legs, green torso, skin head, dark visor — world_loader.zig fallbackPlayerModel), not any export. It mounts because no package on disk currently declares role:'player': Player_Model_2's manifest says role:'npc' (its latest character export picked the NPC card; player role is exclusive and lives in the manifest) and Player_Model_1 was only ever saved, never exported, so it has no placeable at all. The playtest chip only spoke when a model WAS worn — the empty case was silent, which is the real defect. The chip now always shows and names the cause: no-player-declared vs meshdoc-unreadable, each with the fix path (File → Export → Player Model); AnimationCaptureSurface wording aligned. Re-exporting the mannequin as Player makes the playtest wear it again (with bb1a43663's geom-key fix, without the stale-cube boxes).",
+  "shas": [
+    "2c14dbf4b"
+  ],
+  "resolvedAt": "2026-07-07T05:59:14.962Z"
+}

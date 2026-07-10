@@ -1,0 +1,17 @@
+{
+  "id": "req_2730",
+  "at": "2026-07-06T01:05:01.316Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>bg5zcgwt9</task-id>\n<tool-use-id>toolu_01FmtsN6pN8wUHPnZSqqvbKz</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/40eebdf5-ae0f-4114-b3f9-c2c8545b2b9f/tasks/bg5zcgwt9.output</output-file>\n<status>completed</status>\n<summary>Background command \"Push 406 scrubbed commits to GitHub main\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "946c6729-d313-4564-be06-7b2021c12c44",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T01:05:16.340Z",
+      "actor": "946c",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

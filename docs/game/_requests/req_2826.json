@@ -1,0 +1,17 @@
+{
+  "id": "req_2826",
+  "at": "2026-07-07T09:13:58.541Z",
+  "origin": "one-off",
+  "text": "damn. nice work! [Image #6] this is what it looks like",
+  "status": "new",
+  "sessionId": "66a26d90-4f55-4fd8-98b1-71444d8f155f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T09:14:12.425Z",
+      "actor": "fable-66a2",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_2858",
+  "at": "2026-07-10T05:15:53.901Z",
+  "origin": "codex:019f498f",
+  "text": "Cool yes, so i rebuilt, went into the correct view in the app, saw my webcam in the list, clicked it, and the video never ended up streaming in, it just stays black, and the app again, i have to kill -9 the process because it just entirely locks up",
+  "status": "doing",
+  "sessionId": "019f498f-aa62-7f42-8a08-7ee563073a60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T05:16:08.389Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

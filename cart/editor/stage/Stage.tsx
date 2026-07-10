@@ -30,6 +30,7 @@ export default function Stage(props: {
   onContext: () => void;
   onObject: (id: string) => void;
   onPlacePiece: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
+  onMovePiece: (id: string, destination: PlacedPiece) => void;
   onSelectPiece: (id: string | null) => void;
   onPieceContext: (id: string, x: number, y: number) => void;
   onArmPiece: (pieceId: string) => void;
@@ -88,8 +89,10 @@ export default function Stage(props: {
             pieces={props.state.worldPieces}
             selectedId={props.state.selectedPieceId}
             armedPieceId={props.state.armedPieceId}
+            armedYawDegrees={props.state.armedYawDegrees}
             authoredPieces={props.state.authoredBuildPieces}
             onPlace={props.onPlacePiece}
+            onMove={props.onMovePiece}
             onSelect={props.onSelectPiece}
             onPieceContext={props.onPieceContext}
           />

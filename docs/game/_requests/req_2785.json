@@ -1,0 +1,18 @@
+{
+  "id": "req_2785",
+  "at": "2026-07-07T02:41:48.578Z",
+  "origin": "session:fc8c5862",
+  "text": "Is it possible to just use also the onnx and SAM dependencies we have for an animation pipeline from webcam ?",
+  "status": "doing",
+  "sessionId": "fc8c5862-b656-4dc7-864b-cbea2bb80407",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T02:42:14.077Z",
+      "actor": "fc8c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2813",
+  "at": "2026-07-07T07:44:55.868Z",
+  "origin": "session:8efcaa11",
+  "text": "oh lmao ok there is a catastrophic failure haha. ok so as you can see. i started to make faces between the two parts, with no merging [Image #12] ok, the question is where do they land. but then i just was going further while you investigated, and came to a part where i needed to loop cut the upper leg to get the right geometry for edge matching faces, and when i did the loop cut, i now somehow only have 3 outliners, [Image #13] [Image #14] with the entire model also in view",
+  "status": "review",
+  "sessionId": "8efcaa11-bd96-4755-8820-5ff239454e8a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T07:45:37.475Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T08:02:14.714Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "DIAGNOSED (no code yet) — reproduced headless with RJIT_MODELDOC=player + RJIT_MESHOPS/PARTOPS. Root cause: every renormalizing topology op (create face, loop cut, extrude, delete) rebuilds the part-range partition from the DISPLAYED mesh only (renormalizePartRanges, 3d.zig). Any part hidden via the outliner eye at that moment collapses to a zero-width range — proven: hide head+chest, one create-face on a seam, ranges become [0,0) and the unhide is permanently dead because the hidden stash (g_hidden_groups) is keyed by the exact (lo,hi) at hide time and its faces keep OLD group ids that the renumber reassigns to live faces. reconcileEmptyParts (AppFrame) then auto-prunes any visible row whose range reads 0 faces on the next tri-count drop — the 28→3 outliner collapse. Also answered the original question: a bridge face joins the part of the FIRST selected edge (adoptAppendedFaces src_part) — no third outliner, verified abdomen [226,324)→[226,325). Fix scope proposed: stash by part identity not range, renormalize must partition stashed+live faces together, prune must check stashed count. Advised user NOT to save the broken doc.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T08:02:14.714Z"
+}

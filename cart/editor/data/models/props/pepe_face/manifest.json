@@ -30,5 +30,28 @@
       "color": "#9e43a3"
     }
   ],
-  "paints": []
+  "paints": [],
+  "placeable": {
+    "as": "prop"
+  },
+  "skeleton": {
+    "id": "cooked:studio.new_mesh_004",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "cooked:studio.new_mesh_004"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  }
 }

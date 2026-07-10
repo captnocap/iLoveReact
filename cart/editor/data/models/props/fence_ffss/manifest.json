@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "id": "primitive:cube:15",
+  "name": "fence_ffss",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "model-primitive_cube_15",
+  "semanticKind": "cube",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "placeable": {
+    "as": "build-piece",
+    "kind": "wall"
+  }
+}

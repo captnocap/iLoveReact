@@ -1,9 +1,10 @@
 // stage/mapPaint.ts — the Map Paint tool's state model + host-door controller
 // (MAPPAINT req_2473/req_2484). React owns only this chrome mirror; strokes,
-// stamps, render, and colliders are host-side (framework/game/map). The BAR
-// (MapPaintBar.tsx, in the workspace action bar) renders it; AppFrame owns the
-// state and calls applyMapPaintEffects on every patch so the host tool always
-// tracks the chrome.
+// stamps, render, and colliders are host-side (framework/game/map). The action
+// bar (MapPaintBar.tsx) owns the paint toggle; the viewport dock
+// (MapPaintDock.tsx) owns brush footprint and channel palettes/options.
+// AppFrame owns the state and calls applyMapPaintEffects on every patch so the
+// host tool tracks chrome.
 import {
   mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapSaveFile, mapSetAutosaveFile,
   mapSetGroundLook, mapSetTileBindings, mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds,
@@ -150,7 +151,7 @@ function pushMapTool(s: MapPaintState): void {
  *  when the host map doors aren't live yet (callers retry). */
 export function ensureMapSeeded(zones: readonly MapZoneDef[] = []): boolean {
   if (!mapHostLive()) return false;
-  if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0);
+  if (mapChunkCount() === 0 && !mapLoadFile(EDITOR_MAP_FILE)) mapGrowChunk(0, 0, false);
   // Micro-save from here on (req_2765): every gesture rewrites the map file
   // host-side — painting done without the Save button survives a restart.
   // False on a binary predating the door; the manual Save still covers those.
@@ -182,9 +183,9 @@ export function applyMapPaintEffects(prev: MapPaintState, next: MapPaintState): 
       return { tileBindings: hostBindings };
     }
     // A fresh map (or a chrome that already mirrors) — push the chrome's table.
-    if (next.tileBindings.length > 0) mapSetTileBindings(bindingsToFloats(next.tileBindings));
+    if (next.tileBindings.length > 0) mapSetTileBindings(bindingsToFloats(next.tileBindings), false);
   } else if (prev.tileBindings !== next.tileBindings) {
-    mapSetTileBindings(bindingsToFloats(next.tileBindings));
+    mapSetTileBindings(bindingsToFloats(next.tileBindings), true);
   } else if (prev.zones !== next.zones) {
     mapSetZonePalette(zonePaletteOf(next.zones));
   }

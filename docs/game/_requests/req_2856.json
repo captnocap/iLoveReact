@@ -1,0 +1,30 @@
+{
+  "id": "req_2856",
+  "at": "2026-07-10T05:03:34.637Z",
+  "origin": "session:ef08aab4",
+  "text": "oh and, to be clear i just tested, without moving at all, but if i just hold down my mouse button painting, i dropped to 14 fps, so i think its all in the actual mouse down placement logic and not in any of the panning",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T05:04:18.907Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T05:07:10.375Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the hold-still paint fps cliff (240→14fps with mouse held, no camera movement): engine.zig paintGlobalCell set ch.dirty.flora/tiles/zones UNCONDITIONALLY on every stamp, so a held brush re-stamping identical cells each frame triggered a full live-foliage-preview regen (all painted chunks, 4.2M+ rows, ~63ms measured in the user's apptick-split) every frame. Fixed by change-gating all three cell channels — dirty only when the cell value actually differs — the same guard stampHeightsAt already had ('if (wrote)'). Committed 0d049271e; needs a framework rebuild to take effect. Remaining known cost (separate arc if still needed after retest): dragging onto genuinely NEW cells still regens the whole preview monolithically; the pose_mailbox off-thread pattern (req_2845) is the identified follow-up.",
+  "shas": [
+    "0d049271e"
+  ],
+  "resolvedAt": "2026-07-10T05:07:10.375Z"
+}

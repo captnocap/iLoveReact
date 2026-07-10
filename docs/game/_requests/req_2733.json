@@ -1,0 +1,36 @@
+{
+  "id": "req_2733",
+  "at": "2026-07-06T01:26:47.132Z",
+  "origin": "session:c3a4627b",
+  "text": "hey claude so inside of the world editor ive been thinking up a best-approach kinda 'keep an edit within 200px of mouse movement space' thinking, and so heres a pitch, when building with build pieces, we should integrate a right click menu that opens up a quick context that: exposes texture slots in a quick select, copy, delete, rotate (which also, needs to be bound to the r key) and then eventually this same idea will help us when we get to the whole story world rigging systems",
+  "status": "review",
+  "sessionId": "c3a4627b-4b4e-419a-9f99-4f3727835827",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T01:26:52.795Z",
+      "actor": "c3a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T01:43:45.796Z",
+      "actor": "c3a4",
+      "kind": "note",
+      "text": "Built the world-piece right-click quick menu end to end: viewport right-click picks via the shared dual raycast (new pickPieceAt), WorldContextMenu mounts at app root (useContextMenu pattern), slot swatch grids bind through the new assignPieceSlotAsset, Copy arms + stamps slots/overrides on subsequent placements, Rotate/Delete route piece-first through runCommand, R joins WORLD_KEYS. Slice + AppFrame graphs bundle clean; full-cart bundle currently blocked by session 922e's in-flight modelPackage subDir refactor (paintVariants.ts still imports the removed subDir) — unrelated to this change."
+    },
+    {
+      "at": "2026-07-06T01:43:58.120Z",
+      "actor": "c3a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Placed build pieces now carry a right-click quick context menu in the world viewport (req_2733's 'keep an edit within 200px of the mouse'): right-click in ANY tool mode picks the piece under the cursor with the same host-raycast + authored slab-test Select uses, selects it, and opens a root-mounted menu at the cursor. It exposes the piece's TEXTURE SLOTS as inline quick-selects (each slot row expands to a swatch grid of the material catalog — one click binds, an X chip clears, truncation past 40 swatches is announced loudly), plus Copy, Rotate 90°, and Delete. Rotate is also bound to bare R on the world keymap as asked (model surface keeps its R gizmo — keys resolve per surface), and placing a piece selects it, so B-place then R spins the drop in place. Copy is the Fortnite pick-up: it arms the piece's definition in Place mode and stamps its slots/overrides onto every subsequent placement until a palette re-arm. Delete/Copy/Rotate all route piece-first through the one runCommand registry (Del key included), everything records into the real world undo stack, and the slot resolver is now shared between Inspector and menu. Verified by esbuild: the touched slice and the full AppFrame graph both bundle clean; the whole-cart bundle is momentarily blocked by session 922e's in-flight modelPackage refactor (paintVariants.ts imports the removed subDir), unrelated to this work.",
+  "shas": [
+    "e3ff87559"
+  ],
+  "resolvedAt": "2026-07-06T01:43:58.120Z"
+}

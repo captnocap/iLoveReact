@@ -1,0 +1,17 @@
+{
+  "id": "req_2861",
+  "at": "2026-07-10T05:20:00.956Z",
+  "origin": "one-off",
+  "text": "i think your bg terminal is causing churn",
+  "status": "new",
+  "sessionId": "019f498f-aa62-7f42-8a08-7ee563073a60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T05:20:09.143Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

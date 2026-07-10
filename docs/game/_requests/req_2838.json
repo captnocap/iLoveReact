@@ -1,0 +1,30 @@
+{
+  "id": "req_2838",
+  "at": "2026-07-08T01:09:07.685Z",
+  "origin": "session:2a030fa3",
+  "text": "hello. i am painting on the map and have hit [paint] LIVE FOLIAGE PREVIEW FULL (grass 54405/262144 flowers 0/65536 bush 65536/65536 CLIPPED fronds 0/262144 trunks 0/16384) ; it says the compile 'bakes the full population' but that is unhelpful when it treats me as painting it and it just starts to disappear because its at some cap. because then i can no longer see that im even painting it there, or another place. also, i was under the impression these caps were per-chunk but they are taking on the entire map",
+  "status": "review",
+  "sessionId": "2a030fa3-807c-4f93-9fff-ea45cb9c8e6d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-08T01:09:19.378Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-08T01:16:12.051Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The live foliage preview's row caps are map-wide by design (the five families share the GPU slim static pool, so the budget can't be per-chunk without blowing the pool) — but the regen walked chunks in raw slot order, so when a family (bush at 65536) saturated, the rows dropped were whatever chunks the walk reached LAST, which could be exactly where the user was painting: invisible strokes. Fixed in world_loader.zig regenPaintFoliage: the budget now spends NEAREST-FIRST from the author's anchor (brush hover point, else camera look target), so a saturated preview undresses only the FARTHEST chunks. Added a follow trigger: while clipped, drifting the anchor half a chunk quietly regrows around the new spot, so panning to another painted region re-dresses it. The saturation log now explains the behavior. Compile bake still grows the full population, unchanged. zig ast-check passes; needs the next rebuild to take effect (framework-side change, no hot reload).",
+  "shas": [
+    "0d102fb53"
+  ],
+  "resolvedAt": "2026-07-08T01:16:12.051Z"
+}

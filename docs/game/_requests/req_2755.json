@@ -1,0 +1,30 @@
+{
+  "id": "req_2755",
+  "at": "2026-07-06T06:52:13.603Z",
+  "origin": "session:e1cd106d",
+  "text": "it just literally happens on like any edit now i just moved around as mesh a few times and each time it said 72 collapsed and im literally jsut moving the model around / rotating it in full. i literrally ctrl + a so there is no chance im not",
+  "status": "review",
+  "sessionId": "e1cd106d-d9b2-4d2a-bf3b-d45bbc1338cd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T06:52:41.587Z",
+      "actor": "e1cd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T06:53:33.523Z",
+      "actor": "e1cd",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Second false-positive in the same guard (countUnsafeFaceEdits, framework/gpu/3d.zig), collapse branch this time: any triangle whose after-area was under the absolute 1e-12 floor counted as 'collapsed' — including triangles that were ALREADY zero-area before the drag. Imported/generated meshes carry degenerate tris, so every gizmo drag (even a pure translate of a Ctrl+A full selection) re-reported the same constant count (72 on the user's model). Fix: a face degenerate before the drag is skipped entirely; only a transition into degeneracy relative to its own before-area (a2 < b2*1e-6 with b2 above the floor) counts. Combined with req_2754's rigid-motion exemption, full-selection move/rotate can no longer trip the guard. Needs a Zig rebuild to take effect.",
+  "shas": [
+    "af2003396"
+  ],
+  "resolvedAt": "2026-07-06T06:53:33.523Z"
+}

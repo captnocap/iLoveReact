@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { useTelemetry } from '../../../runtime/hooks/useTelemetry';
+import { head, onEvent, since, type EditorEvent } from '../../../runtime/editorbus';
 import { C, accentFor } from '../workspace.cls';
-import { editTelemetry, formatMs } from '../data/telemetry';
+import { editTelemetry, editTelemetryFromEvents, formatMs } from '../data/telemetry';
 import { formatBytes, formatCount, formatMeters, selectedPieceReadout } from '../data/readouts';
+import { useWorldHoverReadout } from '../data/worldHoverReadout';
 import { PIECE_MODULE_METERS } from '../world/pieces';
 import type { BuildJournalSnapshot, EditorState } from '../data/types';
+
+const BUS_METRIC_TAIL = 256;
+
+function readBusTail(): { count: number; events: EditorEvent[] } {
+  const count = head();
+  return { count, events: count > 0 ? since(Math.max(0, count - BUS_METRIC_TAIL)) : [] };
+}
 
 export default function BuildDock({
   state,
@@ -26,7 +35,10 @@ export default function BuildDock({
   onPerf: () => void;
   onMemory: () => void;
 }) {
-  const telemetry = editTelemetry(state.history);
+  const [bus, setBus] = useState(readBusTail);
+  useEffect(() => onEvent(() => setBus(readBusTail())), []);
+  const telemetry = bus.events.length ? editTelemetryFromEvents(bus.events) : editTelemetry(state.history);
+  const busCount = bus.count || state.history.length;
   // Undo/redo TRUTH (req_2620 gap W): on a model doc the HOST mesh journal's depths
   // (__mesh_history — polled at 2Hz, because host-native gizmo drags journal without any
   // React render, so a state mirror would lie); on the world the real worldUndo/worldRedo
@@ -55,8 +67,9 @@ export default function BuildDock({
   }, [isModelDoc, painting]);
   const undoCount = isModelDoc ? meshDepths.undo : state.worldUndo.length;
   const redoCount = isModelDoc ? meshDepths.redo : state.worldRedo.length;
-  // The SELECTED world piece, or null — the dock shows dashes over phantom zeros.
-  const piece = selectedPieceReadout(state);
+  // Cursor hover wins while the mouse is over the world; selection is the fallback.
+  const hover = useWorldHoverReadout();
+  const piece = hover ?? selectedPieceReadout(state);
   // Real host telemetry — polled at 2Hz (cheap; never per-frame). Empty sources
   // render as 0/— instead of seeded historical data.
   const { value: fps } = useTelemetry({ kind: 'fps', pollMs: 500 });
@@ -85,13 +98,13 @@ export default function BuildDock({
         <C.HW_DockLabel>GRID</C.HW_DockLabel>
         <C.HW_DockValue>{formatMeters(PIECE_MODULE_METERS)}</C.HW_DockValue>
         <C.HW_DockLabel>ANG</C.HW_DockLabel>
-        <C.HW_DockValue>{piece ? `${piece.yawDegrees}deg` : '—'}</C.HW_DockValue>
+        <C.HW_DockValue>{!hover && piece && 'yawDegrees' in piece ? `${piece.yawDegrees}deg` : '—'}</C.HW_DockValue>
       </C.HW_DockGroup>
       <C.HW_DockDivider />
       <C.HW_DockBuild onPress={onEventbus}>
         <Icon name="Workflow" size={12} color={accentFor(state.eventbusPopoverOpen ? 'primary' : 'textSecondary')} />
         <C.HW_DockLabel>BUS</C.HW_DockLabel>
-        <C.HW_DockValue>{state.history.length}</C.HW_DockValue>
+        <C.HW_DockValue>{busCount}</C.HW_DockValue>
       </C.HW_DockBuild>
       <C.HW_DockBuild onPress={onUndo} tooltip={painting ? 'Undo (paint strokes)' : isModelDoc ? 'Undo (host mesh journal)' : 'Undo (world edits)'}>
         <Icon name="Undo2" size={12} color={accentFor(undoCount > 0 ? 'textSecondary' : 'textFaint')} />

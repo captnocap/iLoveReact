@@ -1,0 +1,18 @@
+{
+  "id": "req_2862",
+  "at": "2026-07-10T05:21:57.392Z",
+  "origin": "codex:019f498f",
+  "text": "ok so the camera is now setup as /dev/video42 i also checked with obs studio to see if it was responding and it is",
+  "status": "doing",
+  "sessionId": "019f498f-aa62-7f42-8a08-7ee563073a60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T05:22:04.260Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

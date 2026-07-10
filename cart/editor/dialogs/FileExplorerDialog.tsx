@@ -33,8 +33,6 @@ type Props = {
   onClose: () => void;
 };
 
-const RESULT_SLOTS = 9;
-
 function rankFile(file: ExplorerFile, query: string, recentIds: Set<string>): number {
   const q = query.trim().toLowerCase();
   const pathHit = q && file.path.toLowerCase().includes(q) ? 800 : 0;
@@ -59,7 +57,6 @@ export default function FileExplorerDialog(props: Props) {
     ?? files[0]
     ?? null;
   const recentIds = new Set(props.history.map((entry) => entry.fileId));
-  const slots = files.slice(0, RESULT_SLOTS);
   return (
     <C.HW_DialogScrim>
       <C.HW_FileExplorerDialog>
@@ -95,19 +92,21 @@ export default function FileExplorerDialog(props: Props) {
             <C.HW_FileResultsHead>
               <C.HW_Kicker>{explorerFolderLabel(props.selectedFolder).toUpperCase()}</C.HW_Kicker>
               <C.HW_Spacer />
-              <C.HW_StatusText>{slots.length} of {files.length}</C.HW_StatusText>
+              <C.HW_StatusText>{files.length} visible</C.HW_StatusText>
             </C.HW_FileResultsHead>
-            {slots.map((file) => (
-              <FileResultRow
-                key={file.id}
-                file={file}
-                active={selected?.id === file.id}
-                recent={recentIds.has(file.id)}
-                onSelectFile={props.onSelectFile}
-                onOpenFile={props.onOpenFile}
-              />
-            ))}
-            {slots.length === 0 ? (
+            <C.HW_FileResultsList>
+              {files.map((file) => (
+                <FileResultRow
+                  key={file.id}
+                  file={file}
+                  active={selected?.id === file.id}
+                  recent={recentIds.has(file.id)}
+                  onSelectFile={props.onSelectFile}
+                  onOpenFile={props.onOpenFile}
+                />
+              ))}
+            </C.HW_FileResultsList>
+            {files.length === 0 ? (
               <C.HW_FileResultEmpty>
                 <C.HW_StatusText>no assets match — clear the search or rescan</C.HW_StatusText>
               </C.HW_FileResultEmpty>

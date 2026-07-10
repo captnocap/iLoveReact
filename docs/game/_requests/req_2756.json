@@ -1,0 +1,28 @@
+{
+  "id": "req_2756",
+  "at": "2026-07-06T06:57:07.813Z",
+  "origin": "session:e1cd106d",
+  "text": "well the weird thing is if thts true, why then when i would have clicked split quads after the first one that it would re-appear for every further move?",
+  "status": "review",
+  "sessionId": "e1cd106d-d9b2-4d2a-bf3b-d45bbc1338cd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T06:58:00.614Z",
+      "actor": "e1cd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T06:58:13.808Z",
+      "actor": "e1cd",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's question: Split Quads reappearing on every move is fully consistent with the pre-existing-degeneracy diagnosis because Split Quads is a NO-OP host-side. meshEditGuardResolve (framework/gpu/3d.zig) only implements action 2 (Revert = restore pre-drag positions); actions 0 (Split Quads) and 1 (Ignore) both just dismiss the prompt via clearMeshGuardSnapshot without touching the mesh. So the 72 zero-area triangles stayed in the soup and the old counter re-flagged them on every drag. Finding surfaced for a ruling: Split Quads should either be implemented (split folded quad groups into per-triangle groups) or the button removed since it currently duplicates Ignore. No code change in this req; the false-positive itself was fixed in req_2754/req_2755 (pending rebuild).",
+  "shas": [],
+  "resolvedAt": "2026-07-06T06:58:13.808Z"
+}

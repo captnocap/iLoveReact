@@ -1,6 +1,7 @@
 {
   "name": "editor",
   "description": "Shitty Games — the editor + play shell (one cart, two routes)",
+  "customChrome": true,
   "width": 1536,
   "height": 940
 }

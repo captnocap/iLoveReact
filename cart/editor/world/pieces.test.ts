@@ -9,7 +9,7 @@
 //   tools/v8cli /tmp/editor-pieces.test.js
 
 import { setAuthoredPieces } from './authoredRegistry';
-import { resolveRunPlacements, supportsRunPlacement } from './pieces';
+import { resolveMovedPlacement, resolvePlacement, resolveRunPlacements, supportsRunPlacement, type PlacedPiece } from './pieces';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -45,6 +45,36 @@ test('exported prop remains a single free placement', () => {
   const run = resolveRunPlacements('prop:exported-chair', 1, 2, 8.25, 9.75, 0);
   assert(run.length === 1, `one prop placed, got ${run.length}`);
   assert(run[0]?.x === 8.25 && run[0]?.z === 9.75, 'prop lands at the cursor without grid tiling');
+});
+
+test('armed turn rotates the placement ghost and committed transform before drop', () => {
+  const floor = resolvePlacement('model:exported-floor', 1.5, 1.5, 0, 0, 0, 90);
+  assert(floor?.yawDegrees === 90, `floor turn carried into placement, got ${floor?.yawDegrees}`);
+  const wall = resolvePlacement('model:exported-wall', 1.5, 0, 0, 0, 0, 90);
+  assert(wall?.yawDegrees === 90, `edge base yaw plus turn carried into placement, got ${wall?.yawDegrees}`);
+  const prop = resolvePlacement('prop:exported-chair', 8.25, 9.75, 0, 0, 0, 270);
+  assert(prop?.yawDegrees === 270, `prop turn carried into placement, got ${prop?.yawDegrees}`);
+});
+
+test('move preserves instance identity and authored data while snapping its transform', () => {
+  const source: PlacedPiece = {
+    id: 'bp_keep',
+    pieceId: 'model:exported-wall',
+    x: 0,
+    y: 3,
+    z: 1.5,
+    yawDegrees: 90,
+    floor: 1,
+    slots: { wall: { assetId: 'skin.brick' } },
+    overrides: { collision: true },
+  };
+  const moved = resolveMovedPlacement(source, 7.2, 8.2, 2);
+  assert(!!moved, 'wall move resolved');
+  assert(moved!.id === source.id, 'move keeps the instance id');
+  assert(moved!.floor === 1 && moved!.y === 5, `move keeps storey and rebases terrain, got floor=${moved!.floor} y=${moved!.y}`);
+  assert(moved!.x === 6 && moved!.z === 7.5, `yaw-90 wall stays on its vertical edge family, got (${moved!.x},${moved!.z})`);
+  assert(moved!.yawDegrees === 90, 'move preserves yaw');
+  assert(moved!.slots === source.slots && moved!.overrides === source.overrides, 'move preserves instance slots and overrides');
 });
 
 setAuthoredPieces([]);

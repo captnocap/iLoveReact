@@ -1,0 +1,18 @@
+{
+  "id": "req_2814",
+  "at": "2026-07-07T07:56:54.574Z",
+  "origin": "codex:019f3b90",
+  "text": "inside of the cart/editor  when you are adjusting based on scale (and likely other movements included) they move on a fixed step size, that is smaller when you hold shift, and is free when you hold ctrl. ok but i am also finding that the default step size doesnt seem to be related to reality in any way at all, because when i scale in width a model, it passes over the edge of the stage [Image #1] without ever lannding directly on it before stepping over it. i can hit it with shift, but the steps at default should hit it indefinitely, which means that the current approach is doing some stupid fraction instead of 10 steps per tile distance its more like 9.2 or .3; does this make sense ?because it takes me 19 steps to overshoot the stage when 20 should land on the edge perfectly",
+  "status": "doing",
+  "sessionId": "019f3b90-83a0-7a31-bb83-ed7bdace1611",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T07:57:00.940Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

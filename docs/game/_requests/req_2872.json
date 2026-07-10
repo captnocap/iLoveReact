@@ -1,0 +1,36 @@
+{
+  "id": "req_2872",
+  "at": "2026-07-10T07:20:34.619Z",
+  "origin": "codex:019f4ae3",
+  "text": "There was a recent commit that fixed the broken export pipeline where it was exporting two of each piece into the build peice menu. however this brought a new problem. so, i have this model [Image #1] and i have re-exported it now to try and solve this problem, but for whatever reason it is latching onto the very first iteration of it and not catching the latest changes, however it kinda is. look, the outline of the placement shows the new model size, but the actual rendering of it is not. [Image #2] but you can also see that before the change landed, i was placing this at the larger size, so idk what to tell you but it got some problem [Image #3]",
+  "status": "review",
+  "sessionId": "019f4ae3-e6dd-7471-9e2b-2fa135487842",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T07:20:39.603Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T07:26:25.027Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed in fence_ffss: export rewrote mesh/base.blob + mesh/painted.blob at 00:21, but the dedupe change armed #p1 whose paints/paint_1.blob still held 00:17 positions. Fix in progress makes model geometry authoritative and saved skins contribute only their UV/paint; topology-incompatible skins fall back to the current base entry."
+    },
+    {
+      "at": "2026-07-10T07:31:19.590Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the dedupe regression selected a saved paint-skin mesh whose positions still described the first model iteration while bounds used the newly exported base. Paint skins now contribute only their saved UV layout and atlas; resident geometry always comes from the current model. Vertex-count-incompatible skins are withheld so the current base remains placeable, with focused regression coverage plus a passing ReleaseFast build and headless boot.",
+  "shas": [
+    "e051d1073"
+  ],
+  "resolvedAt": "2026-07-10T07:31:19.590Z"
+}

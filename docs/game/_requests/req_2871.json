@@ -1,0 +1,36 @@
+{
+  "id": "req_2871",
+  "at": "2026-07-10T07:12:54.729Z",
+  "origin": "codex:019f4ade",
+  "text": "in cart/editor when you select multiple faces to merge on an outliner, it merges the faces but retains all the previous edges which breaks a lot of the purpose of merging the faces together in the first place",
+  "status": "review",
+  "sessionId": "019f4ade-92ba-7ce2-a1db-d374982a4971",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T07:13:00.312Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T07:17:00.955Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed in the host-native face merge: selected triangle groups are relabeled into one authored face, but the welded topology cache is left alive, so its pre-merge boundary classification keeps every dissolved seam visible/selectable. Fixing group-only topology invalidation and adding a Zig regression that proves the shared seam disappears while the outer boundary remains."
+    },
+    {
+      "at": "2026-07-10T07:20:10.998Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed face merge at the host topology boundary: after selected authored groups fuse, the editor now invalidates its welded-edge cache so shared seams are rebuilt as internal, no longer drawn or edge-selectable. Added a focused Zig regression proving the seam count drops while render triangulation and the outer boundary remain intact, and kept the existing mesh-edit suite under the unit-test target.",
+  "shas": [
+    "d61e95517"
+  ],
+  "resolvedAt": "2026-07-10T07:20:10.998Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2849",
+  "at": "2026-07-10T04:38:44.067Z",
+  "origin": "session:ef08aab4",
+  "text": "hello. i have a question. so to my understanding the game / world is rendered on the gpu. but this log kinda conflicts that idea, that or my understanding of it is shallow. [paint] LIVE FOLIAGE PREVIEW GREW: bush → 131072 rows (6 MiB CPU) — elastic budget, the machine is the wall (req_2843)\n[paint] LIVE FOLIAGE PREVIEW GREW: bush → 262144 rows (12 MiB CPU) — elastic budget, the machine is the wall (req_2843)\n[paint] LIVE FOLIAGE PREVIEW GREW: bush → 524288 rows (24 MiB CPU) — elastic budget, the machine is the wall (req_2843)\n[paint] LIVE FOLIAGE PREVIEW GREW: bush → 1048576 rows (48 MiB CPU) — elastic budget, the machine is the wall (req_2843)\n\n",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T04:38:56.786Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T04:39:56.064Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Question, not a build ask: user saw '[paint] LIVE FOLIAGE PREVIEW GREW ... MiB CPU' and wondered if it contradicts GPU rendering. Answered from source: world_loader.zig pushFoliageRow builds 12-float per-instance rows in a CPU-side staging buffer (RAM), which is uploaded to the GPU instance pool (gpu/3d.zig growStaticPool logs the matching '[r3d] pool GREW ... device is the wall'). Rendering stays fully on GPU; the 'CPU' MiB is instance-data authoring memory for the live paint preview, deliberately labeled to distinguish it from VRAM. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T04:39:56.064Z"
+}

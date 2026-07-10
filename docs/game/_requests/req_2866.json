@@ -1,0 +1,40 @@
+{
+  "id": "req_2866",
+  "at": "2026-07-10T06:31:26.307Z",
+  "origin": "codex:019f4ab7",
+  "text": "In cart/editor when placing anything from the build menu, this is the current flow: select piece, place it, then after placing you can rotate it. but you cant move something placed around nor can you rotate a piece before placing, so its kinda this little shitshow between these two features that make building right now entirely unenjoyable.",
+  "status": "review",
+  "sessionId": "019f4ab7-81fb-7510-83dd-2d6f92dc49c0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T06:31:29.762Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T06:32:42.953Z",
+      "actor": "root",
+      "kind": "note",
+      "text": "Oracle and active cart/editor survey complete. The viewport already has modal Place/Move tools, but Move only selects and placement yaw is hard-coded; implementing a persistent ghost rotation plus a snapped placed-piece move interaction without touching unrelated in-flight editor work."
+    },
+    {
+      "at": "2026-07-10T06:48:03.094Z",
+      "actor": "root",
+      "kind": "note",
+      "text": "Implemented active cart/editor build interaction: R now follows the ruled mode-sensitive behavior (selected piece first, otherwise armed ghost); Move is a local 30Hz-preview, commit-on-drop transform that preserves instance data and uses the existing collision/undo policy. Verified with 5/5 focused tests, full bundle, ReleaseFast ship, and headless editor render."
+    },
+    {
+      "at": "2026-07-10T06:48:10.136Z",
+      "actor": "root",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the active cart/editor placement interaction: R now turns the armed ghost before a drop when no placed instance is selected, while retaining selected-piece rotation. Move now drags a picked placed piece through a throttled local preview and commits one undoable, collision-aware world edit on release, preserving its identity, transform facets, slots, and overrides. Focused placement tests, a ReleaseFast editor build, and an editor self-render smoke all pass. The shared worktree contains unrelated in-flight edits, so this review records no standalone commit SHA.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T06:48:10.136Z"
+}

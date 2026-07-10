@@ -90,19 +90,9 @@ export default function ToolOptions(props: {
     );
   }
 
-  // MAPPAINT req_2484: the Map Paint tool lives IN this action bar — the
-  // viewport stays clean (the brush beam is the only in-world chrome). While
-  // painting, its controls own the row (a modal bar, like the model branch);
-  // toggling PAINT off brings the build controls back.
+  // Map Paint is a tool toggle segment, not a replacement toolbar. Keep the
+  // world action bar visible while the viewport dock owns paint options.
   const mapPaint = props.state.mapPaint;
-  if (mapPaint.active) {
-    return (
-      <C.HW_ToolOptions>
-        <MapPaintBar state={mapPaint} onPatch={props.onMapPaint} />
-      </C.HW_ToolOptions>
-    );
-  }
-
   const activeMenu = activeMenuFor(props.state);
   // Submenu-nested commands (File → New Mesh → the seven primitives, etc.) stay in their
   // menus — mirroring them here dumped a row of context-free primitive icons onto the map

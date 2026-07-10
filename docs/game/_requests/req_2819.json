@@ -1,0 +1,18 @@
+{
+  "id": "req_2819",
+  "at": "2026-07-07T08:30:09.479Z",
+  "origin": "session:154f33da",
+  "text": "Well, no need to start defending their shit work. there is no time pressure presented, anywhere, ever. so its just a means of deciding to free style an approach which, with how much reference work we do have inside of that other directory, im honestly starting to believe a number of the porting is just free styling to be honest with you, if you just were to quite literally look at all the requests across time you would find that a number of these systems when asked for the first time in the original editor would land by opus with very few follow ups if any, a lot of follow ups were at large literally zig related code which is probably just the problem overall. there is a total loss in translation between porting and its obvious when you just look at some aesthetics. like for example the gizmo in js is very nice. the zig one is horribly ugly, looks like it was made for software 10 years ago or more. but i dont code so i couldnt really tell you why the difference is so great",
+  "status": "doing",
+  "sessionId": "154f33da-c63e-4153-9471-78f88f88027e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T08:30:29.896Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

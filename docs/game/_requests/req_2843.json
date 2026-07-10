@@ -1,0 +1,30 @@
+{
+  "id": "req_2843",
+  "at": "2026-07-08T02:56:17.238Z",
+  "origin": "session:2a030fa3",
+  "text": "I see, that is good to know, because we have some serious headroom and for my own machine with the 24gb of vram alone (and the other 12) is being completely unused. but otherwise 360mb is something like 1/25th or even more than modern games like base minimum and we arnt shipping AAA anyways so we could never reach that imo. but the 15.5mb cap on flora is fucking killing me man there have been more requests probably as collective text data to why the hell is it breaking than it consumes in megabytes of memory total which is problematic from my lens because i dont want to even think about it im barely painting any at all and then it just starts to disappear is annoying",
+  "status": "review",
+  "sessionId": "2a030fa3-807c-4f93-9fff-ea45cb9c8e6d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-08T02:57:21.593Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-08T03:09:55.043Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The user's word landed: fixed budgets are the disease, the machine should be the wall. Built it in three layers. (1) framework/gpu/gpu.zig: device creation now requests the ADAPTER'S real limits instead of WebGPU defaults (falls back to defaults if a driver refuses), logs the granted maxBufferSize, and exposes deviceMaxBufferSize() — on the user's 24GB card this turns the 256MiB per-buffer ceiling into gigabytes. (2) framework/gpu/3d.zig: both retained instance pools (standard 32B + slim foliage 24B) are ELASTIC — when a batch doesn't fit, growStaticPool doubles the buffer via GPU-side copy at the SAME offsets (all retained regions stay valid), up to the granted maxBufferSize; the 64-entry retain cache recycles its least-recently-seen slot so re-pointered grown batches don't strand it; growth logs loud, and the FULL warning now names the real refusal. (3) world_loader.zig: the five flora preview family buffers DOUBLE on fill (pushFoliageRow reallocs; ROW_CAPs are starting sizes); the clipped state and nearest-first/follow machinery from req_2838 now only engage at a genuine machine refusal. ast-check passes on all three; needs a rebuild to land — hand-verified every wgpu call shape against deps/wgpu_native_zig source since ast-check is syntax-only.",
+  "shas": [
+    "3e8086324"
+  ],
+  "resolvedAt": "2026-07-08T03:09:55.043Z"
+}

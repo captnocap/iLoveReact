@@ -1,0 +1,18 @@
+{
+  "id": "req_2781",
+  "at": "2026-07-07T02:25:22.309Z",
+  "origin": "session:fc8c5862",
+  "text": "Yeah so the animations was one that i had ideas for and so let me share them with you, also you might have some memory notes stored on it, but the idea was, first, port the basic animation shapes, but the goal would be to introduce a method that lets me put on my web cam, use some colored contruction paper or whatever it takes to properly track parts of the body, and then be able to make animations through this approach, like walking, running, holding items, punching, all the like",
+  "status": "doing",
+  "sessionId": "fc8c5862-b656-4dc7-864b-cbea2bb80407",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T02:25:47.000Z",
+      "actor": "fc8c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

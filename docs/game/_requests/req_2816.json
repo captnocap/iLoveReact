@@ -1,0 +1,34 @@
+{
+  "id": "req_2816",
+  "at": "2026-07-07T08:10:01.929Z",
+  "origin": "session:154f33da",
+  "text": "hey help me understand this problem because it happens at the weirdest damn times and i cant seem to understand why, and further more the previous javascript version of it had none of this problem. but lets look at a model i made. [Image #1] and looks very basic. ok, now the problem is the last edit i made (pulling the center face up) caused [Image #2] unsafe face edit. this makes no sense at all. and to prove it, i just remade the model in block bench with the exact same edits, [Image #3] which is where t he entire unsafe edit inspiration came from, and it doesnt throw the same error on the exact same edits. so what the hell is happening. I find this to occur at the most random times. Il rotate a model, then somehow 72 faces collapse because of it. which makes no sense. we chased part of this the other day and they fixed a good number of problems with it but what i dont quite understand is how do the problems exist at all. we have the perfectly working javascript version right there to reference from and it still is wrong. look at the studio in @cart/hmsc-int/ and compare the unsafe edit logic to that of the native zig code. it clearly wont align",
+  "status": "review",
+  "sessionId": "154f33da-c63e-4153-9471-78f88f88027e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T08:10:13.687Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T08:14:17.908Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Diagnosed: the hmsc-int JS studio has NO unsafe-edit guard at all (it's a native-era invention, guard dialog lives in cart/editor/stage/ModelView.tsx + framework/gpu/3d.zig collectUnsafeFaceEdits). The JS studio is immune BY REPRESENTATION: faces are polygon loops, normals via Newell's method (editMesh.ts faceNormal), and quadTriPositions re-picks the triangulation diagonal every lowering (req_2057) so a folded/non-planar quad silently re-triangulates — this class of error cannot exist there. The native editor edits frozen triangle soup and the guard measures per-triangle before/after cross products against 4 epsilon cliffs (1e-12 floor, 1e-6 relative collapse, -0.05 normal dot, 2e-3 rigid tolerance) — each prior fix (req_2754, req_2755) patched one cliff. Pulling a face folds neighbor quads across their FROZEN diagonal: the tris genuinely degenerate relative to a stale diagonal the JS version would simply have re-picked. Proposed fix: evaluate the guard per AUTHORED GROUP with Newell normals (captureFaceGroups already available at guard time) and/or auto re-pick the diagonal on fold like the JS did (Split Quads, but silent + automatic)."
+    },
+    {
+      "at": "2026-07-07T08:14:25.793Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Analysis ask: compared the hmsc-int JS studio unsafe-edit logic to the native Zig guard as requested. Finding: they cannot align because the JS studio HAS no unsafe-edit guard — the guard is a native-era invention (req_2199 lineage). Deeper: the JS studio is immune by representation — polygon-loop faces, Newell's-method normals, and per-lowering diagonal re-pick (quadTriPositions, req_2057) mean a folded quad silently re-triangulates instead of erroring. The native guard measures frozen triangle soup per-triangle against four epsilon cliffs; every false positive so far (req_2754 rotate, req_2755 pre-degenerate, today's pull-face fold) is the same disease. Recommended per-authored-group Newell check + automatic diagonal re-pick; awaiting user direction before implementing.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T08:14:25.793Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_2771",
+  "at": "2026-07-07T01:30:15.110Z",
+  "origin": "session:fc8c5862",
+  "text": "Great now lets build the export pipeline, there is an existing shape already, this is where you tag along, however this should come with a clear dialog between if the exported is the players played model or an npc model",
+  "status": "doing",
+  "sessionId": "fc8c5862-b656-4dc7-864b-cbea2bb80407",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T01:30:34.874Z",
+      "actor": "fc8c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -126,6 +126,7 @@ export function initialState(): EditorState {
     // Default armed piece = a concrete floor (the placeholder Place piece the
     // surface always dropped). The Build bar (Phase 2) overwrites this on pick.
     armedPieceId: 'floor.concrete.common',
+    armedYawDegrees: 0,
     armedStamp: null,
     recentMaterialIds: [],
     authoredBuildPieces: bootAuthoredPieces(),

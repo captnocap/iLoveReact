@@ -1,0 +1,28 @@
+{
+  "id": "req_2776",
+  "at": "2026-07-07T01:45:22.739Z",
+  "origin": "codex:019f3a3b",
+  "text": "hey you see inside of the cart/editor when im in the world builder and i hit the hotkey for build mode (b) it brings up this nice little menu for the tool [Image #1] well, i want to carry on that same idea for the other tools in this part of the editor because it just is really weird going back and forth between their locations and the other tool (the painting tool for terrain/water/tiles/flora/zones/roads) all lives up in the same toolbar as the actual tool toggle and so yeah its just annoying. so heres what i suggest, because it is significantly a bit different shape, see how this approach is doing like Wall Floor Roof categories and then the one in view has expanded previews of it, well this other set of tools right is modes and then has brushes, so really what we need to treat it from is you could effectively in some sense keep the actual like brush type up inside of the toolbar (like the crosshair, or the cone or beam cube, etc) and then down here you put for example Terrain and in that area you then put in some preview buttons for the toggles between ramp, slope, smoothing, or just brush strokes, and you can also put the height control down in here, and then move forward we get the tile tool and this one is really straight forward, and i think you are pretty smart, you will see the obvious fit when you dig into it, so check it out for me and lets try to make it feel less back and forth",
+  "status": "review",
+  "sessionId": "019f3a3b-4b5d-7263-a77e-3766f3d10cac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T01:45:34.594Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T01:53:48.863Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Split Map Paint chrome to match the BuildBar workflow: the action bar now keeps the paint toggle plus brush footprint/gizmo controls, while a new bottom viewport MapPaintDock provides channel tabs for Terrain/Tile/Water/Flora/Zone/Road and channel-specific trays for terrain tools/height, tile swatches + texture picker, flora/zone swatches, and road commit/profile controls. Re-anchored the tile texture picker above the bottom dock and updated comments to document the new split. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T01:53:48.863Z"
+}

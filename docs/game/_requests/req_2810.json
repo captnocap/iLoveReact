@@ -1,0 +1,28 @@
+{
+  "id": "req_2810",
+  "at": "2026-07-07T07:35:13.693Z",
+  "origin": "session:8efcaa11",
+  "text": "what is full weight painting? honestly im not really specific about how its done in a technical sense the constraints are effectively how i laid it out, needs to not be based on outliners, and i need to merge between pieces and make faces. the one caveat also is that if you go and just remove the outliners outright, and it comes in all at one mesh to edit from, that is worse because now i have to figure out every piece from a starting state. so the approach has to take that into account",
+  "status": "review",
+  "sessionId": "8efcaa11-bd96-4755-8820-5ff239454e8a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T07:35:23.805Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T07:35:48.641Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the two clarifications (no code): (1) explained weight painting — tier-3 skinning where a vertex follows multiple bones by painted percentages for smooth creases; recommended parking it since tier-2 sharp creases fit the low-poly look. (2) Confirmed the design honors the caveat: outliners are NOT removed or pre-merged — the model still starts as all 28 named parts; merge is a deliberate per-pair user gesture, faces keep bone provenance seeded from the outliner name at merge time, bridge faces get tagged to a bone. Outliner becomes pure editing convenience; binding truth moves to per-face bone tags. Proposed build order: merge-with-provenance, bridge edge loops, bone-tint face view, Zig skinned pose path.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T07:35:48.640Z"
+}

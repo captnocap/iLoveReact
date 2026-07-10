@@ -1,0 +1,28 @@
+{
+  "id": "req_2824",
+  "at": "2026-07-07T09:00:50.986Z",
+  "origin": "session:154f33da",
+  "text": "ok cool so on the basis of mismatching, here are some things you can review to see if it smells of freestyling or not for me. a lot of them are little things that matter a lot. the one was the gizmo, the next is the compass, then the reference image control, the outliner approach, mirroring X Y Z, and loop cut",
+  "status": "review",
+  "sessionId": "154f33da-c63e-4153-9471-78f88f88027e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T09:01:26.211Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T09:05:12.839Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fidelity audit of five studio→native ports as asked: compass, reference images (backdrops), outliner, mirror XYZ, loop cut — each read on both sides (JS studio files directly, per the no-relay rule). Verdicts: COMPASS near-faithful port (same basis math, dot/ring grammar, arm 25 = studio radius 25, margin 14, painter sort, click-snap) with two drifts — raw-RGB axis colors instead of the studio palette and the eased snap tween (req_0969) became an instant jump. BACKDROPS genuine clone+repurpose, one interaction downgrade the user flagged mid-audit and receipts confirm: the studio's per-backdrop Move verb (drag the transform gizmo in the viewport, Esc drops) was replaced by pos x/y/z sliders. OUTLINER half-port: the studio's outliner is BY RULING a thin adapter over LayerStackStrip (req_0961/0962) with rename/reorder/merge/meta-counts/color-swatch row verbs; the editor's ModelOutliner is bespoke with only select/visibility/duplicate/delete — and ExportCharacterDialog tells users to 'rename outliner parts to bone names' while NO part-rename path exists anywhere in the editor. MIRROR mechanics ported (req_2758 mask, planes, twin edits) but the studio's symmetry trust layer (live symmetryReport badge, symmetrize keep+/keep- buttons, req_1190-1192) exists only as cloned functions in cart/editor/model/editMesh.ts — never surfaced in UI. LOOP CUT textbook freestyle-then-storm: v1 world-axis planes shredded leaned meshes (req_2794), then polygon-cut fix (req_2802) re-learned the polygon lesson the JS representation embodied from day one; now at/beyond parity. Report delivered; no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T09:05:12.839Z"
+}

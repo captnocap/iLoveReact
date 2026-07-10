@@ -1,0 +1,28 @@
+{
+  "id": "req_2766",
+  "at": "2026-07-07T01:05:28.603Z",
+  "origin": "codex:019f3a17",
+  "text": "hello. in the cart/editor eventbus, it needs some actual work on what the hell is happening. i am over here just placing a bunch of empty floors, no shader on them or anything, and well for whatever reason it is saying im placing Abalone Shell which again, its a blank floor, dunno how that can be, but also, the data in this event bus preview is fucking ass [Image #1] it says hotkey which i dont even know what that means, im placing floors with clicking so its not even a hotkey, it says native-ready which again i dont even know what that means or why we are putting it here. but then more importantly the things it doesnt say. it doesnt say shit about where i placed it, what it really was, the time to place it, the delta between my action and it materializing entirely, a timestamp and such and such. the other thing i dont quite really get is that the bus says i have 0 redo and 2 undo but then literally next door to it all it says i have 11 undo and 0 redo. [Image #2] and then again, next to that these numbers are exactly where that eventbus numbers i just belched out go as a growing cumlative [Image #3] right so that then helps us with getting this interface deshitified. If you have to create proper tooling to get proper data, then do it. dont beat around the bush, dont fuck it off. The eventbus alone should have all the data in the world to share and its effectively giving me the middle finger",
+  "status": "review",
+  "sessionId": "019f3a17-282b-7db2-832a-5295f7eab23a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T01:05:38.694Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T01:16:04.105Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reworked cart/editor eventbus placement reporting. The old Place Piece command no longer creates mock WorldObject/history rows from the selected material asset, which was replaying stale Abalone Shell editor.edit events on real floor clicks. Real WorldViewport placements now carry gesture metadata into AppFrame, draft a typed piece.place payload with semantic piece id/label/kind/material, placed ids, slot keys, coordinates, floor/yaw, count/replacement, timestamp, apply timing, and input-to-materialized/render delta, then dispatch after the world commit. EventBusPopover now renders typed two-line rows with timestamp/type/origin/details and uses the same undoDepths source as the dock; BuildDock BUS/AVG/P95/DELTA read the editorbus head/tail instead of the capped history feed. Added cart/editor/data/editorEvents.test.ts to lock that floor placements describe Concrete Floor/floor.concrete.common rather than the selected browser material. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor, RJIT_EDKEYS=ctrl,h ./tools/rjit shot editor --out /tmp/editor-eventbus.png --frames 140 --timeout 20, and the new v8cli test.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T01:16:04.105Z"
+}

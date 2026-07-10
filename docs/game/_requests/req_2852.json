@@ -1,0 +1,28 @@
+{
+  "id": "req_2852",
+  "at": "2026-07-10T04:50:07.720Z",
+  "origin": "session:ef08aab4",
+  "text": "holy shit. and do you know how many rough triangles that would be? just because this current world i kidna just started to fart around with painting it to see if i would hit more caps, and never did. i have maybe 6 chunks total and not even fully covered but [Image #2] 24.9m triangles and id say its 40% bush 50% trees 10% anything else i have, if that",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T04:50:17.229Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T04:51:36.738Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Napkin math continued (req_2851 follow-on): triangles for the 750MB flora scenarios, plus sanity-check of user's live HUD (24.9M TRI, 3.2ms GPU, ~6 partial chunks, mostly bush+palm). Mesh tri counts from world_loader.zig builders: grass blade 12, flower 12, bush clump 20, frond 48, palm trunk 560 (~1,712 tris per whole palm). Per full chunk: med grass 1.2M, lush 2.8M, bush 4.0M, dense palm 17.3M tris. 750MB-RAM scenarios: bush ~290M, lush ~174M, dense palm ~990M (~1B) tris. HUD TRI is per-frame submitted (3d.zig recordDraw), and the editor preview draws per-family whole batches, so triangle throughput walls (GPU ms/frame) arrive an order of magnitude before the 750MB RAM wall. User's 24.9M@3.2ms ≈ 7.8G tri/s — extrapolates to ~100M tris around a 60fps budget. Answer only, no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T04:51:36.738Z"
+}

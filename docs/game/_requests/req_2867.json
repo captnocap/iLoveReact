@@ -1,0 +1,30 @@
+{
+  "id": "req_2867",
+  "at": "2026-07-10T06:39:54.910Z",
+  "origin": "codex:019f4ab1",
+  "text": "Cool now heres another thing with the export pipeline as it stands right now and where i think it went broken. so for whatever reason when i go into file -> export and then i select prop or even a build piece, the exported piece shows up twice in the build menu. And from the two of them, one of them is like entirely just wrong until you reset the app, which resetting the entire app makes both of them render ing fine, but if you just built it and export it in, one of them it will literally be missing parts / wrong painting, and then there is the one that is correct. Now, what i think this came from, and where you can look to properly fix is, the problem i was having was that so the current mesh painting approach lets you take a mesh, and then paint over it, however many times you want to. and each painting can be stored for the asset. And I had asked before like how do i eventually be able to export one painting versus another and i have to think this is the same time this first became introduced. Which, would mean that the whole question there of 'how would i export different painted types' still exists, and also i think it currently is exporting two of them even though its happening for models with only 1 painting",
+  "status": "review",
+  "sessionId": "019f4ab1-4f92-7763-b7c4-0efc14ea4de0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T06:39:59.713Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T06:50:08.701Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the painted export pipeline at the authored palette boundary. The bug was exactly base-plus-skins: every exported model always emitted a mutable base tile and then one tile per stored painting, so one saved painting appeared twice and the base could show stale geometry/atlas state until restart. Stored paintings now replace the base entry: zero paintings yields one base fallback, one painting yields one painted tile, and multiple paintings yield one independently placeable tile per saved look. Export arms the newest visible saved skin instead of the hidden mutable base. Added focused regression tests; surrounding placement/event tests and the ReleaseFast editor build pass.",
+  "shas": [
+    "4f2d09735"
+  ],
+  "resolvedAt": "2026-07-10T06:50:08.701Z"
+}

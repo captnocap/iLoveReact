@@ -1,0 +1,59 @@
+{
+  "id": "req_2873",
+  "at": "2026-07-10T07:52:35.757Z",
+  "origin": "codex:019f4ae3",
+  "text": "hm.... something is wrong now. I built a model called stage, it is a cylinder. I saved the model, i exported it. I did not paint it yet, i just wanted to see it scale, anyways, the export rendered a broken preview, so i exited the app, restarted it, and the prop is no longer there. i scratched my head, cant find it in the models on the side also, so i said whatever, il try again i guess. file -> new mesh -> cylinder -> and then it opened up the stage model. hm that is very strange. ok, anyways, save it under a new stage name, re-export it, and then now this export is showing me the correct model preview with the incorrent wireframe around the actual size of it,  thought maybe one more restart would fix the problem. so i quit the app, reset, went to the build piece prop menu, and its not there. I assume the whole loop of clicking new -> cylinder path is going to do the same as before, repopulate the scene with the lost model. and its not that its not just failing to store as a prop, the model entirely just isnt storing when i look in this content browser, there is no stage in the names [Image #1]",
+  "status": "review",
+  "sessionId": "019f4ae3-e6dd-7471-9e2b-2fa135487842",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T07:52:46.293Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T07:55:19.060Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed: props/stage is fully materialized and exported as primitive:cylinder:1, but an older build/stage shares the display name. Boot's dedupeModelsByName drops the durable prop from MODEL_PACKAGES while loadMaterializedPackages still indexes its mesh directory; New Cylinder then reallocates cylinder:1 and the resolver finds the orphaned indexed mesh, exactly producing the reported resurrection loop."
+    },
+    {
+      "at": "2026-07-10T07:59:31.140Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-10T08:00:04.432Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "Persistence/identity is fixed in c4bf175fb, but final review caught the second reported symptom: cacheAuthoredMesh replaces geometry without invalidating authoredMeshBounds, so an unpainted re-export can render the new model inside the previous wireframe. Rework must add bounds-cache invalidation and regression coverage before returning to review."
+    },
+    {
+      "at": "2026-07-10T08:00:08.661Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T08:03:18.724Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Fixed the complete stage-model loop. The model was already safely stored at props/stage, but boot dropped it because an older build/stage shared its display name; durable packages now merge by id, legacy aliases alone collapse by name, and new primitive/player allocation checks disk independently from the browser roster. Re-export now also clears the prior derived AABB whenever geometry under the same id changes, so the placement wireframe is measured from the current mesh. Five identity tests plus the bounds-revision regression pass, as do the ReleaseFast build and final hidden boot."
+    }
+  ],
+  "resolution": "Recovered the apparently lost stage model without rewriting its assets: props/stage was fully saved and exported, but boot deduplicated it by display name against the older build/stage package. Durable disk packages now merge by id while legacy source aliases alone retain name-based collapse. Fresh primitive and player IDs also query the package store directly, preventing a hidden catalog row from ever making an existing identity reusable. Added five identity regressions, passed the ReleaseFast editor build, and passed a hidden boot against the current package tree.",
+  "shas": [
+    "c4bf175fb"
+  ],
+  "resolvedAt": "2026-07-10T07:59:31.140Z"
+}

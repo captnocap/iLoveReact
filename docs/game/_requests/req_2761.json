@@ -1,0 +1,24 @@
+{
+  "id": "req_2761",
+  "at": "2026-07-07T00:48:02.273Z",
+  "origin": "session:fc8c5862",
+  "text": "hello. inside of the @cart/editor/ cart there are a few things remaining from @cart/hmsc-int/ to carry over that i will need your help with, so the first one is the player model, and if you look at the old approach, it took a interesting path of having some code-defined shapes, and then there was a tool that would let you effectively brush the height of the uv unwrapping. for what it was worth, it \"worked\" at the time being. However now because we want to unify everything under a similar pipeline, i am going to suggest the following: turn the player model into a mesh starting point, where every part is in its own outliner. at default, we get the shape in, and that ensures it transfers forward when we compile, but also this allows for us to further then make adjustments in the editor, and then, export the model in whole. This is one of the things, and its a good chunk of work to put in on, so start there, and lets get to the point where i can hit file -> new mesh -> player/npc model and that then opens into the model in the editor",
+  "status": "doing",
+  "sessionId": "fc8c5862-b656-4dc7-864b-cbea2bb80407",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T00:48:08.645Z",
+      "actor": "fc8c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T00:48:54.170Z",
+      "actor": "fc8c",
+      "kind": "note",
+      "text": "Claimed. Oracle consulted: V2 rules head_lab kit is THE figure stack (authoring in JS, baked into host); this ask evolves it into a mesh-package starting point in cart/editor. Mapping both sides (head_lab parts + editor model packages) before building File->New Mesh->Player/NPC."
+    }
+  ]
+}

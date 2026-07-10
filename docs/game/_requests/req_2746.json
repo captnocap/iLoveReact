@@ -1,0 +1,29 @@
+{
+  "id": "req_2746",
+  "at": "2026-07-06T02:46:52.287Z",
+  "origin": "session-c3a4-midturn",
+  "text": "oh haha also, just noticed when i type into that search bar it hits the wasd map panning and moves around lol probably would hit other keybindings if my search item was right",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-07-06T02:46:56.262Z",
+      "actor": "c3a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T02:48:04.458Z",
+      "actor": "c3a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the search-bar key leak at the root, in the engine's key dispatch gate (framework/engine.zig). Printable characters reach a focused text field via SDL_EVENT_TEXT_INPUT, so input.handleKey correctly returns false for the paired KEY_DOWN — but that keydown then fell through to the JS key bus (__ifttt_onKeyDown) and fired app hotkeys mid-typing: typing in the quick menu's skin search panned the world map through WASD, and any world single-key binding (R rotate, B place, Del delete...) would have fired the same way with the right search text. While a field is focused, a bare printable keydown now counts as consumed at the same gate that already swallows arrows/backspace; ctrl chords keep their existing routing untouched. This protects every text field in every cart, not just the search bar. Framework change verified end to end: zig ast-check clean and SHIP_RUN_PACKAGE=0 rjit ship editor compiles + links (exit 0) — the running dev host picks it up on its next rebuild-relaunch.",
+  "shas": [
+    "a6e512618"
+  ],
+  "resolvedAt": "2026-07-06T02:48:04.458Z"
+}

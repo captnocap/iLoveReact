@@ -1,0 +1,36 @@
+{
+  "id": "req_2790",
+  "at": "2026-07-07T05:04:31.820Z",
+  "origin": "session:2c48a315",
+  "text": "ah ahah alright so basically the player model was in a recent commit the export it step, the physics testing commit, and then get getting the model into the actual testing commit but all that its now landed and im looking at it, we have some problems. so heres the model [Image #2] ive not changed anything about it. click export player model and then load up the physics editor and oddly enough the feet and lower legs come in? i and the rest is rekt lol [Image #3] i dont really know how to describe it. its clearly pulling something from the data",
+  "status": "review",
+  "sessionId": "2c48a315-d871-4ccd-acbe-e034005db39b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T05:04:42.835Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T05:12:44.999Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Root cause: geometry intern cache never evicts + slot-named geom keys (player-model-{i}). The stand-in figure's seven cubes interned under keys 0-6 before the export existed; the exported body's first seven parts cache-hit those cubes. Fix: content-hash (Wyhash over verts) in the geom key for player + NPC figure loops, world_loader.zig. Needs host rebuild."
+    },
+    {
+      "at": "2026-07-07T05:12:45.009Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed and fixed the boxy exported player body in the playtest tab. The loader keyed each figure part's geometry by slot index (player-model-{i}) while the geometry intern cache never evicts — so the stand-in figure's seven cubes, interned by any construct that ran before the export was staged, were served forever to the exported body's first seven parts (giant skin-toned boxes over correct lower legs/feet, which sat at ranks past 6 and interned fresh). Fixed by hashing the part's vertex content into the geom key (geomContentHash, Wyhash) for both the player and NPC figure loops: a stand-in-to-export swap or a re-export now interns fresh geometry, an unchanged body still cache-hits. Zig-side change; requires a host rebuild to see it. The camera-inverted follow-up was retracted by the user.",
+  "shas": [
+    "bb1a43663"
+  ],
+  "resolvedAt": "2026-07-07T05:12:45.009Z"
+}

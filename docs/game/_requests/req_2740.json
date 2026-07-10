@@ -1,0 +1,28 @@
+{
+  "id": "req_2740",
+  "at": "2026-07-06T02:03:31.067Z",
+  "origin": "session:922efce7",
+  "text": "yeah ok so the one thing i would say to just be aware of is when i export a model, this comes with some of them i am hand painting (and a lot of them i will be now that i can paint  the literal shader) but i also can texture slot it, which then the slotting occurs when i am actually building the map, so theres technically two ways this flows and one of them would be the whole package and the other one has to be referenced from the game file itself for the texture slot",
+  "status": "review",
+  "sessionId": "922efce7-f48c-4350-9978-1334e002b188",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T02:04:03.662Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T02:04:51.704Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design constraint acknowledged and folded into the export/cook design (no code): the cooked asset format needs TWO surface flows. Hand-painted surfaces (including shader-ink strokes) are intrinsic and travel INSIDE the asset as the stroke-program lump, replayed at load per the paint ruling. Texture-slotted surfaces stay an open interface: the asset carries only the slot table per face group; the slot-to-material binding happens at map build and lives in the gamefile reference tape (V29 face-materials), with materials as their own content-addressed assets. Hybrid per-face-group coexistence noted; flagged the default-binding question (asset ships defaults, gamefile overrides) for the user to rule on. Saved as memory project_asset_cook_two_flows for the coming export slice.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T02:04:51.704Z"
+}

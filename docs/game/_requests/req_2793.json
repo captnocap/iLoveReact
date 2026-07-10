@@ -1,0 +1,17 @@
+{
+  "id": "req_2793",
+  "at": "2026-07-07T05:16:47.493Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>bghl2o0sx</task-id>\n<tool-use-id>toolu_01BdW4gnHhKc3vqJTj2wGEm6</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/01f755c2-cc69-4018-a4f4-0d842921a305/tasks/bghl2o0sx.output</output-file>\n<status>completed</status>\n<summary>Background command \"Ship editor with live-collider fold\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "e48518b6-f1b3-4c35-b43f-da91f8bd3fb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T05:17:18.943Z",
+      "actor": "e485",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

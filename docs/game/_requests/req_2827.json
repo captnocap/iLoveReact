@@ -1,0 +1,30 @@
+{
+  "id": "req_2827",
+  "at": "2026-07-07T09:25:25.827Z",
+  "origin": "session:154f33da",
+  "text": "ok now did you say you fixed the gizmo? because if that was the case then it doesnt look any different to me now from when i just said it already looked 10 years old here just compare the two, here is the current zig gizmo [Image #6] and the old one [Image #7] and if you REALLY want to compare, lets go through them, here is t he old ones again:\n[Image #8] [Image #9] [Image #10] [Image #11] and look at the size of it more importantly compared to the cube [Image #12] and again, when i pivot the camera [Image #13] it blows up, for much finer tuning on the rotate; now the zig: this is scale [Image #15] this is move [Image #16] (notice they look identical, this isnt the case from before) and here is the rotate [Image #17] and the rotate looks the best of all of them. also notice in the old gizmo, if you grab from the center vertex of the resize or the move tool, it controls all three ways at a time, the zig code to my understanding does not do this at all because it does not have a vertex, it just has 3 lines intersecting with no housing like the previous",
+  "status": "review",
+  "sessionId": "154f33da-c63e-4153-9471-78f88f88027e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T09:26:57.202Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T09:38:33.372Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ported the studio gizmo (meshGizmo.tsx) to the native editor verbatim, replacing the freestyle line+dot vocabulary the user compared side-by-side. Fixed screen sizing (armPx 48, zoom-independent — the compact-next-to-the-cube look from the reference shots; selection-scaled sizing deleted); MOVE gets chevron arrowheads + hollow-ring hub; SCALE gets double-ended arms with square handles + solid hub ball, visually distinct from move at last; the scale hub is the UNIFORM handle — grabbing it scales all three axes on the studio's 0.1 radial-factor grid (the 'controls all three ways at a time' behavior the user called out as missing); grabbed handles glow gold; rotate rings use the studio's ringRadiusWorld first-axis formula INCLUDING the blow-up-on-camera-pivot the user pinned as a precision feature; studio axis palette adopted, inherited by the compass and mirror planes. Verified headless via selfshot harness (RJIT_MODELDOC=cube + RJIT_MESHOPS gizmo:N, all three tools captured: gizmo_move/scale/rotate.png in the session scratchpad) — arrows, squares, hubs, palette all present. Commit d7279c153. Dev host needs a rebuild to show it live.",
+  "shas": [
+    "d7279c153"
+  ],
+  "resolvedAt": "2026-07-07T09:38:33.372Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2811",
+  "at": "2026-07-07T07:37:27.980Z",
+  "origin": "session:8efcaa11",
+  "text": "Yeah now the problem also is that i technically only know merging to happen when like you said they are next to one another, but this is not the case. [Image #11] this is going to merge left leg with the right knee for example because of the order (which, is not currently instrumented to reorder)",
+  "status": "review",
+  "sessionId": "8efcaa11-bd96-4755-8820-5ff239454e8a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T07:37:41.333Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T07:38:47.447Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the merge-target worry (no code): merge is NEVER based on outliner list order — 'adjacent' meant adjacent in 3D by the user's choice. Verified the outliner already has shift-click multi-select (req_2659, AppFrame selectPart) with group verbs acting on the selected SET and viewport highlight of the set. The merge gesture is: click part A, shift-click part B (any rows, any positions), hit Merge — acts on exactly the selection, same contract as duplicate/delete group verbs. knee_right + lower_leg_right merge cleanly even with lower_leg_left between them in the list. No reorder instrumentation required.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T07:38:47.447Z"
+}

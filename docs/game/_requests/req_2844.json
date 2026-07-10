@@ -1,0 +1,36 @@
+{
+  "id": "req_2844",
+  "at": "2026-07-10T00:57:48.621Z",
+  "origin": "codex:019f4985",
+  "text": "I am trying to figure out how we can utilize the water painting tool with the terrain painting tool, to be able to properly paint say a river in the side of a mountain, as it stands right now, it seems more or less the water when on a height field and especially the raising terrain, it is sitting taller than the terrain itself, like it is extruded up above the ground layer, but when painting the water on normal ground level, it is properly extruded below the surface, so it in part exists to do the right thing but the moment it hits positive height it seems to not know what to do. see if you can improve that logic between the two, that exist here in the cart/editor",
+  "status": "review",
+  "sessionId": "019f4985-42a1-7470-be99-4735c3ba89c0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T00:57:52.737Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T01:18:55.093Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed in active cart/editor native path: terrain and water depth were downsampled independently, allowing a dry +6m terrain sample to combine with a neighboring 2m depth as fake +8m water. Implemented terrain-coupled depth sampling and made every terrain sculpt mode preserve an existing water surface by adjusting/draining depth as the bed moves. Zig tests, ReleaseFast editor ship, raised-mountain river self-capture, and 60s frame gate completed."
+    },
+    {
+      "at": "2026-07-10T01:19:20.980Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the raised-terrain water extrusion at both sides of the native contract. Terrain brush, ramp, slope, and smooth edits now preserve an existing water surface by adjusting depth as the bed moves and draining water when raised terrain crosses that surface. The live loader now downsamples water depth from the exact fine sample selected for the terrain bed, preventing a dry positive-height sample from inheriting neighboring depth. Added focused Zig regressions, shipped the ReleaseFast editor successfully, captured a headless raised-mountain river visibly inset into the terrain, and completed a 60-second frame gate without a sustained or rhythmic regression.",
+  "shas": [
+    "68cc2220d"
+  ],
+  "resolvedAt": "2026-07-10T01:19:20.980Z"
+}

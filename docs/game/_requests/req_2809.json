@@ -1,0 +1,28 @@
+{
+  "id": "req_2809",
+  "at": "2026-07-07T07:28:23.033Z",
+  "origin": "session:8efcaa11",
+  "text": "alright so, you are going to see a recent commit for the player model port. It is a good landing, but there are things the moment i start editing the model im realizing we have a real gap, let me explain;\n\nso the outliners currently when you start from a player model, are all the parts, ok, this is good, the problem however is every part is based off an outliners name, remember this, its important in a moment.\n\nso this outliner right, lets look at the knee_left for example, [Image #6] so knee left is this sphere shape. thats a good start. and this leg. for the left leg [Image #7] also good start. however, you can see where this falls apart very quickly, in that the model has a lot of rough edges, but a strong baseline. alright, so extend this thought, and now look at just some of the modeling i started to do, its on the same parts, on the right side. so here is my right knee [Image #8] and you can see, the shape of it has changed, and i have cut some faces off of it. now, the current modeling approach here says this is all valid, i can export this model and it will work. the problem is thats clearly not where i want it to be. the exposed top (and bottom) clearly indicate that i am looking to connect them, so lets look at my leg then. [Image #9] and you can see same thing, its a bit different and again, exposed top and bottom. so you can clearly see here now between the two pieces, there is a real gap (literally) [Image #10] and metaphorically. because, well, how do we close it. \n\neffectively, the best way is through merging outliners, and then creating faces between the edges to seal it. the problem is that this requres merging outliners ( a feature that has not yet landed as far as im concerned) but further this instantly breaks the whole principle behind the part skeleton and how it is going  to identify for exporting. \n\neffectively, there are a strong number if not almost all of these outliners that are, from the nature of how im editing them, going to want to merge and then create faces between the edges to seal it. now i am naive and this is probably the longest possible path to doing so, but atleast i know how to do it. \n\nthis is the dilema we face. \n\nhow do we solve it. Well, I personally think that the skeleton is not based on outliners. it is based on selected faces. and that we need merge. \nhowever, again, im naive. i have 0 clue how this then comes to affect animations after it becomes merged down to the way i just explained it",
+  "status": "review",
+  "sessionId": "8efcaa11-bd96-4755-8820-5ff239454e8a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T07:28:35.407Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T07:30:26.850Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design assessment (no code): the gap is real — part-name→bone binding (rigs.ts partsToCharacterSkeleton) can't survive merging parts to seal seams. Ruled answer proposed: keep the bone FORMATION fixed (bodyRigBones stays the animation contract), move the BINDING from part-level to face-level — outliner names become the SEED of per-face bone tags that survive a merge; bridge faces get assigned/repainted. Animation unaffected at the bone level; three geometry tiers: (1) rigid per-bone split at export (no framework change, seams reopen in motion), (2) 1-bone-per-vertex skinned mesh in Zig (bridge faces stretch, seams stay sealed — the schema already reserves 'one skinned mesh'), (3) weighted skinning (later). Work items when ordered: merge op with provenance, bridge-edge-loops tool, bone-assignment face view, skinned pose path in Zig. Awaiting user's tier pick.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T07:30:26.850Z"
+}

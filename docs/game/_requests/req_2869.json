@@ -1,0 +1,42 @@
+{
+  "id": "req_2869",
+  "at": "2026-07-10T06:52:37.162Z",
+  "origin": "codex:019f4acb",
+  "text": "hey inside of the cart/editor  when on the stage like here [Image #1] i need some more stage cues for height, as currently as this stands, here is a fence for example right, and then here is the actual scale it renders [Image #2] and so yeah i just have like no visual cues when editing to give me any in-game reference for scale which makes authoring game models a bit of a pain in the ass",
+  "status": "review",
+  "sessionId": "019f4acb-1424-7460-ba20-74d2d24db930",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T06:52:42.087Z",
+      "actor": "/root",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T06:54:44.842Z",
+      "actor": "/root",
+      "kind": "note",
+      "text": "Oracle confirmed the ruled scale contract (1 tile = 1m; 1.65m collider; ~2.04m visual head top). The active cart's model stage is a native GPU overlay, so the cue will be added there instead of a React-only approximation."
+    },
+    {
+      "at": "2026-07-10T07:13:38.330Z",
+      "actor": "/root",
+      "kind": "note",
+      "text": "Added the native model-stage scale cue: camera-aware 0–3m ruler with quarter-metre ticks, a non-editable player outline, and separately labeled 1m, 1.65m collider, and ~2.04m visual-head references. Focused Zig coverage, editor type check, ReleaseFast ship, self-captures, and a 3,600-frame render pass are green."
+    },
+    {
+      "at": "2026-07-10T07:14:11.636Z",
+      "actor": "/root",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a persistent native scale cue to the cart/editor model stage so authored meshes read against actual game size: a camera-aware 0–3m ruler with quarter-metre ticks, a non-editable grounded player outline, and separate 1m, 1.65m collider, and ~2.04m visual-head marks. The values live in a tested Zig scale contract; tight small-model framing suppresses a clipped mannequin while retaining visible ruler marks. Verified with focused Zig coverage, editor type check, ReleaseFast ship, self-captures, and a 3,600-frame render pass.",
+  "shas": [
+    "01b047f75"
+  ],
+  "resolvedAt": "2026-07-10T07:14:11.636Z"
+}

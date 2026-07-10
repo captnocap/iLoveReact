@@ -1,0 +1,10 @@
+{
+  "id": "req_2760",
+  "at": "2026-07-07T00:36:53.000Z",
+  "origin": "session:ae81d73a",
+  "text": "<task-notification>\n<task-id>bmxjndqis</task-id>\n<tool-use-id>toolu_01T5gESShb7oB95xwtnERrEG</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/443cabd8-e601-4877-a6c5-a71f35720f59/tasks/bmxjndqis.output</output-file>\n<status>killed</status>\n<summary>Background command \"Wait for v7 bake+shot result\" was stopped</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "ae81d73a-006a-4c08-abbc-df81d4a7c032",
+  "captureMode": "hook",
+  "events": []
+}

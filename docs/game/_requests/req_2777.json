@@ -1,0 +1,18 @@
+{
+  "id": "req_2777",
+  "at": "2026-07-07T01:48:56.944Z",
+  "origin": "session:fc8c5862",
+  "text": "Great so let me just ask for edge cases what happens when: i delete a part and export. or i import an entirely arbitrary model, chop it up, rename the outliners to the parts and export. or i do an almagamation of the two",
+  "status": "doing",
+  "sessionId": "fc8c5862-b656-4dc7-864b-cbea2bb80407",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T01:49:42.081Z",
+      "actor": "fc8c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

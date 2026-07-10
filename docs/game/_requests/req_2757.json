@@ -1,0 +1,30 @@
+{
+  "id": "req_2757",
+  "at": "2026-07-06T06:59:33.518Z",
+  "origin": "session:e1cd106d",
+  "text": "-_- thats really lovely so even if i know im going to do an illegal edit, and i want it to split quads, its never going to actually do it",
+  "status": "review",
+  "sessionId": "e1cd106d-d9b2-4d2a-bf3b-d45bbc1338cd",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T07:00:04.474Z",
+      "actor": "e1cd",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T07:06:31.062Z",
+      "actor": "e1cd",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Split Quads is now real. Host side (framework/gpu/3d.zig): the guard records the indices of the offending tris at gizmo release (g_guard_bad_list); resolve action 0 renumbers every authored quad group containing an offending tri into per-triangle groups — pure group remap, no geometry moves, journaled as 'split quads' so undo restores groups and part ranges. Part membership survives: face-to-part is derived from the ORIGINAL group ids, then the contiguous per-part ranges renormalize (same machinery as detach). canSplit in the guard JSON is honest now — 1 only when a split would change topology (multi-tri group on a source-resident mesh). Cart side (ModelView.tsx): the prompt hides the Split Quads button and trims the message when canSplit=0, and a real split resyncs the outliner part-range mirror and live UV panel. Zig rebuild required; TSX hot-reloads.",
+  "shas": [
+    "f8f31b1f8"
+  ],
+  "resolvedAt": "2026-07-06T07:06:31.062Z"
+}

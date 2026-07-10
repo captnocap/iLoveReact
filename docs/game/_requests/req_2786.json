@@ -1,0 +1,18 @@
+{
+  "id": "req_2786",
+  "at": "2026-07-07T02:47:46.322Z",
+  "origin": "session:fc8c5862",
+  "text": "Yeah so i think if you could get it to a state where, and this is quite the ask im going to put on the table: in the file menu, have Globals -> Animation open up a side by side of the player model and a web cam feed, be able to (ideally) get some form of live sync as best you can for the identification of body parts. probably will take a lot of tweaking to get it right (unless we are lucky or its actually not as hard as i think it is) but this is a good start, and naturally lets us progress into a 'record' state from it",
+  "status": "doing",
+  "sessionId": "fc8c5862-b656-4dc7-864b-cbea2bb80407",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T02:48:39.613Z",
+      "actor": "fc8c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

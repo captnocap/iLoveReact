@@ -1,0 +1,36 @@
+{
+  "id": "req_2789",
+  "at": "2026-07-07T04:44:59.351Z",
+  "origin": "session:056fc3d4",
+  "text": "in the @cart/editor/ here is a scene. [Image #1] raised ground. and im on the ground level. when i go to place a floor on the lower ground (the default)  you can see it show up [Image #2] same for a wall [Image #3] now if i do the same on the raised ground, while still at the ground level, here is the floor [Image #4] (hint: there is no floor to see), and here is a wall [Image #5] (wall shows up)",
+  "status": "review",
+  "sessionId": "056fc3d4-4deb-4614-942b-2a5ccc21c8ae",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T04:45:15.012Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T04:56:35.379Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Root cause: placement ray (paintGroundHitAt -> map_paint.groundHit -> heightAt) marched the fine 241-grid brush field, but the rendered terrain is the 121-grid ABS-MAX floor mirror, up to ~0.5m higher on sculpted ground. The 5cm floor plate buried inside the visible hill; 3m walls poked through. Fixed by marching the rendered mirror surface (paintGroundY) in the pick ray. Needs host rebuild to verify."
+    },
+    {
+      "at": "2026-07-07T04:56:35.385Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Floor placed on raised ground was invisible while walls showed. Diagnosed a see-it-vs-sample-it split: the placement/brush pick ray intersected heightAt's fine 241-grid brush field while the terrain mesh + collider render the 121-grid abs-max floor mirror, which sits up to ~0.5m above it on sculpted ground — so the 5cm floor plate landed buried inside the visible hill while a 3m wall still poked through (the same class as the req_2704 drowned grass, which already had the mirror sampler). Fix: engine.zig groundHit generalized to surfaceHit over any height surface; world_loader's paintGroundHitAt now marches a RenderFloorSurface that bilinearly samples the per-chunk mirror via paintGroundY/paintSlotFloorFor, so placement, ghost, brush beam and hover readout all land on the drawn surface. Map engine unit tests pass; needs a host rebuild (Zig change) to see in the editor.",
+  "shas": [
+    "003fb89c9"
+  ],
+  "resolvedAt": "2026-07-07T04:56:35.385Z"
+}

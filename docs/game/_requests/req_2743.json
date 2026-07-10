@@ -1,0 +1,36 @@
+{
+  "id": "req_2743",
+  "at": "2026-07-06T02:27:16.661Z",
+  "origin": "session:c3a4627b",
+  "text": "oppa it didnt like that haha [js.warn] [place] click -> place floor.concrete.common at (7.5,-0.00042724609375,-7.5) yaw 0\n[js.warn] [place] live push: 1 pieces (decomposed) + 0 materials -> loader node 1912\n\nthread '<unnamed>' panicked at /root/.cargo/git/checkouts/wgpu-045f9a3b3e40a5c0/f35cf94/wgpu-core/src/storage.rs:131:9:\nassertion `left == right` failed: BindGroup[Id(1,0)] is no longer alive\n  left: 0\n right: 1\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n\nthread '<unnamed>' panicked at library/core/src/panicking.rs:218:5:\npanic in a function that cannot unwind\nstack backtrace:",
+  "status": "review",
+  "sessionId": "c3a4627b-4b4e-419a-9f99-4f3727835827",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T02:27:52.230Z",
+      "actor": "c3a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T02:35:30.714Z",
+      "actor": "c3a4",
+      "kind": "note",
+      "text": "Root-caused the wgpu panic: the quick menu's AssetPreview tiles shared the library's StaticSurface cache keys (editor:asset-preview:<id>) but at different content sizes (active ring borderWidth 2 vs 1 changes the inner box). ensureStaticEntry's resize path releases the entry's old bind group IMMEDIATELY, while image quads queued earlier in the SAME frame still hold the raw pointer (images.zig stores bare bind-group pointers) — wgpu asserts 'BindGroup is no longer alive' at render. Two fixes: (1) framework/gpu/gpu.zig — static-surface resource releases now park in a deferred graveyard drained in frame() AFTER queue.submit (same point scene3d frees deferred targets), killing the whole use-after-release class; (2) cart — AssetPreview grows a  mode that skips the StaticSurface wrapper, and the quick menu uses it (transient popover = live Effect thumbs, the ink-popover pattern; no cache-key fights, no pool growth). Cart bundles clean; zig ast-check clean; raw-binary compile verification running (SHIP_RUN_PACKAGE=0 rjit ship editor)."
+    },
+    {
+      "at": "2026-07-06T02:36:31.551Z",
+      "actor": "c3a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused and fixed the wgpu panic (BindGroup no longer alive). Cause: the new quick menu's material tiles reused the content browser's StaticSurface cache keys (editor:asset-preview:<id>) at slightly different content sizes — the active-ring border (2px vs 1px) changes the inner box, and ensureStaticEntry's resize path released the cache entry's old bind group IMMEDIATELY while image quads queued earlier in the SAME frame still held the raw pointer (images.zig stores bare bind-group pointers), so wgpu asserted at render and took the whole app down. Fixed at both layers. Engine (framework/gpu/gpu.zig): static-surface resource releases now park in a deferred graveyard drained in frame() AFTER queue.submit — the same point scene3d frees its deferred render targets — killing the entire same-frame use-after-release class, with an explicit drain on teardown. Cart: AssetPreview grows a live mode that skips the StaticSurface wrapper, and the quick menu renders its thumbnails live (the proven ink-popover pattern: bounded page of live Effect quads, trivially inside the 4096-instance / 1.5G-pixel budgets) — no more cache-key fights with the library and no growth of the never-evicted 2048-entry static pool from transient popover pages. Verified: editor cart bundles clean via esbuild, zig ast-check clean, and the full framework compiles and links (SHIP_RUN_PACKAGE=0 rjit ship editor, exit 0). Framework changed, so the running dev host needs its normal rebuild-relaunch to pick it up.",
+  "shas": [
+    "17e304ae0"
+  ],
+  "resolvedAt": "2026-07-06T02:36:31.551Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2737",
+  "at": "2026-07-06T01:51:50.125Z",
+  "origin": "session:c3a4627b",
+  "text": "cool nice start [Image #33] can we get it to surface a 'recently used' and actual searching like this behaves [Image #34] i want the texture slots to look like an empty slot / default slot, because if you look at the piece i placed, it is blank, take a bit of inspiration from @cart/hmsc-int/ in how if you selected a piece it would bring up this [Image #35] for example and if you didnt click like top, but you click brick, brick applies to all the faces. but if you click top, then brick, it only applies to the top face for example",
+  "status": "review",
+  "sessionId": "c3a4627b-4b4e-419a-9f99-4f3727835827",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T01:52:20.986Z",
+      "actor": "c3a4",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T01:59:39.207Z",
+      "actor": "c3a4",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rebuilt the quick menu's slot section into a real skin picker on the hmsc-int FacePainter pattern the user pointed at. FACES row: one chip per slot role rendered as its ACTUAL wear — an unskinned slot draws as an empty dark 'default' slot (matching the blank placed piece), a skinned one draws the material's real preview. Clicking a face TARGETS it (click again to untarget); picking a material with no target paints EVERY face, with a target it paints only that face — the exact hmsc-int semantics (brick on all faces vs top-then-brick). Search ('search skins…') narrows the ranked catalog live, and a RECENT row surfaces the last-used materials from the new EditorState.recentMaterialIds, written by the single slot-assign path so Inspector assigns feed it too. Tiles are real rendered previews (AssetPreview Effect thumbs, StaticSurface-cached) paged 12 at a time under the same live-Effect budget as the ink popover; the footer mirrors the map texture picker with pager arrows, an honest 'N materials · page' count, and a 'default' chip that resets the targeted face (or all faces when untargeted) to the kind look. Verified: slice, AppFrame graph, and the FULL editor cart all bundle clean through esbuild.",
+  "shas": [
+    "f57f28521"
+  ],
+  "resolvedAt": "2026-07-06T01:59:39.207Z"
+}

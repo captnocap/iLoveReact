@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "id": "primitive:sphere:1",
+  "name": "mossy_boulder",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "sphere",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "placeable": {
+    "as": "prop"
+  },
+  "skeleton": {
+    "id": "primitive:sphere:1",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "primitive:sphere:1"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  }
+}

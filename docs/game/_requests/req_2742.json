@@ -1,0 +1,28 @@
+{
+  "id": "req_2742",
+  "at": "2026-07-06T02:25:15.624Z",
+  "origin": "session:922efce7",
+  "text": "ok cool now ive been doing some forward thinking and while we arnt there yet this is something we can think about i like the idea of im thinking im going to do my mission / story / objective system authoring (like dialog, and title, and overview) as a markdown file that can parse into json and append all the game data to it when it comes to rigging so t hat i can collectively over time even before any of that gets set up be writing up all the ideas i do have into actual artifacts to be used and for future case is a great way to treat how they can be made by anyone via markdown as t he stepping stone. thinking it might be more up my own alley to actually use something like a <block> format that the authoring by hand and in editor both append to, and overtime this could technically teach someone how to do it all by hand\n<npc>\n<name>Claude</name>\n<bio>A Smart Fella</bio>\n<ref>myfriendclaude</ref>\n<model>@[link]</model>\n.\n.\n.\n</npc>\n\nand then in a mission file do \n\n<mission>\n<name>Something Clever</name>\n<desc>Learn something about a friend.</desc>\n<offered_by>@[myfriendclaude]</offered_by> #mainnpc\n<dialog>\n<mainnpc>Hello friend</mainnpc>\n.\n.\n.\n.\n\nas a quick and dirty idea to spit ball for you",
+  "status": "review",
+  "sessionId": "922efce7-f48c-4350-9978-1334e002b188",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T02:25:50.609Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T02:26:50.767Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design answer, no code: endorsed the markdown-with-block mission/NPC authoring format as the human text SOURCE tier the rulings already reserved — V22 rules missions as rows over a CLOSED schema (LLM dailies write the same rows, so hand/editor/LLM become three producers of one compile) and V29 rules text keyvalue entities as platform-opaque. Gave format guardrails: blocks stay declarative (branching = objective graph refs, never inline conditionals per GUIDING_LIGHT), stable ref vs mutable display name (the req_2735 id-vs-name lesson), effects as closed-schema world_deltas, prose between blocks = designer notes the parser ignores. Encouraged starting to write artifacts NOW; saved memory project_mission_block_authoring so the eventual parser/compile slice inherits the intent.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T02:26:50.767Z"
+}

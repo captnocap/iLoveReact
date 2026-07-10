@@ -1,0 +1,17 @@
+{
+  "id": "req_2825",
+  "at": "2026-07-07T09:08:32.940Z",
+  "origin": "one-off",
+  "text": "damn, i just saw some of the coolest terrain for 3d ive seen in a while, check this out https://github.com/erosiv/geotransport https://erosiv.studio/publications/stochastic-geomorphological-transport \n\nhow does it work",
+  "status": "new",
+  "sessionId": "66a26d90-4f55-4fd8-98b1-71444d8f155f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T09:08:43.780Z",
+      "actor": "fable-66a2",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

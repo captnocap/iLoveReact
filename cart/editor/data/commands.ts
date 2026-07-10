@@ -142,10 +142,10 @@ export const COMMANDS: Command[] = [
   { id: 'select-tool', menu: 'Build', name: 'Select', icon: 'MousePointer2', key: '', context: false, native: true, undoable: false, tool: true, scope: 'world' },
   { id: 'place-piece', menu: 'Build', name: 'Place Piece', icon: 'Pencil', key: 'B', context: true, native: true, undoable: true, tool: true, scope: 'world' },
   // Move is an armable mode: click a piece to grab it. Not selection-gated — the click selects.
-  { id: 'move-selection', menu: 'Build', name: 'Move Selection', icon: 'Move', key: 'V', context: true, native: true, undoable: true, tool: true, scope: 'world' },
-  // Rotate spins the SELECTED placed piece 90° about its point (req_2733). Bare R on the world
-  // surface (the model surface's R is the rotate gizmo — keys resolve per surface); placing a
-  // piece selects it, so B-place → R → R reorients the drop without leaving the mouse.
+  { id: 'move-selection', menu: 'Build', name: 'Move Selection', icon: 'Move', key: 'V', context: true, native: true, undoable: false, tool: true, scope: 'world' },
+  // R is mode-sensitive (req_0598): it spins the selected placed piece when one
+  // exists, otherwise the armed placement ghost. The enablement gate below keeps
+  // both routes discoverable on the world surface.
   { id: 'rotate-selection', menu: 'Build', name: 'Rotate Piece', icon: 'RotateCw', key: 'R', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
   { id: 'paint-material', menu: 'Build', name: 'Paint Material', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true, scope: 'world', needsSelection: true },
   { id: 'open-color-studio', menu: 'Build', name: 'Open Color Studio', icon: 'Palette', key: 'C', context: true, native: true, undoable: false, tool: true, scope: 'world', needsSelection: true },
@@ -190,8 +190,9 @@ export const COMMANDS: Command[] = [
   { id: 'mesh-sym-x', menu: 'Edit', scope: 'model', name: 'Mirror Edit X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-sym-y', menu: 'Edit', scope: 'model', name: 'Mirror Edit Y', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
   { id: 'mesh-sym-z', menu: 'Edit', scope: 'model', name: 'Mirror Edit Z', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
-  // Contextual topology ops — only valid on an edge selection (1 edge → extrude, 2+ → create face).
+  // Contextual topology ops — edge mode has edge extrude/create-face; face mode has face extrude.
   { id: 'mesh-extrude', menu: 'Edit', scope: 'model', name: 'Extrude Edge', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
+  { id: 'mesh-extrude-face', menu: 'Edit', scope: 'model', name: 'Extrude Face', icon: 'ArrowUpFromLine', key: 'E', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-create-face', menu: 'Edit', scope: 'model', name: 'Create Face', icon: 'SquarePlus', key: 'C', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-loopcut', menu: 'Edit', scope: 'model', name: 'Loop Cut', icon: 'Scissors', key: 'L', context: true, native: true, undoable: true, tool: true },
   // Face-selection ops: detach peels the selection into a NEW part; glass toggles translucency;
@@ -289,7 +290,13 @@ export function commandEnabled(cmd: Command, state: EditorState): { on: boolean;
   if (cmd.scope !== 'global' && cmd.scope !== surface) {
     return { on: false, reason: `only in the ${cmd.scope} editor` };
   }
-  if (cmd.needsSelection && !hasSelection(state, surface)) {
+  // R follows the ruled build convention: selection turns first; with no
+  // selection, an armed placement ghost turns in place before it is dropped.
+  const canRotateArmedGhost = cmd.id === 'rotate-selection'
+    && surface === 'world'
+    && state.activeCommandId === 'place-piece'
+    && state.armedPieceId !== null;
+  if (cmd.needsSelection && !hasSelection(state, surface) && !canRotateArmedGhost) {
     return { on: false, reason: 'select something first' };
   }
   if (cmd.id === 'undo-local' || cmd.id === 'redo-local') {
@@ -325,7 +332,7 @@ const MESH_SUBMENU: MenuNode = {
   children: [
     section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'),
     section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'),
-    section('Topology'), cmd('mesh-extrude'), cmd('mesh-create-face'), cmd('mesh-loopcut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
+    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-loopcut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
     cmd('mesh-duplicate-part'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
@@ -395,6 +402,7 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
   }
   if (tool.selMode === 3) {
     return [
+      ...(tool.sel === 1 ? [commandById('mesh-extrude-face')] : []),
       commandById('mesh-loopcut'), commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'),
       // Outliner multi-select is represented host-side by selecting every authored face
       // in those parts. Offering Merge Faces here would collapse all of those groups to

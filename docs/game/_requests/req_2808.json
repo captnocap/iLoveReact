@@ -1,0 +1,28 @@
+{
+  "id": "req_2808",
+  "at": "2026-07-07T07:07:01.268Z",
+  "origin": "codex:019f3b65",
+  "text": "in cart/editor there is a real problem with state between when a mode is actually active versus what is displayed in the mesh editor. heres a demonstration, you can see here that i have [Image #1] none of the tools active, and yet [Image #2][Image #3] i can face select [Image #4] all while they show as inactive",
+  "status": "review",
+  "sessionId": "019f3b65-8538-7802-a8cf-ecc3d27cc8f4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T07:07:10.312Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T07:11:34.676Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed mesh editor mode/state drift: ModelView now adopts the host's authoritative selection mode from __mesh_edit_counts whenever native selection changes, and AppFrame pings that callback after shell-driven part face selection so toolbar highlights track the active face/edge/vertex mode. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T07:11:34.676Z"
+}

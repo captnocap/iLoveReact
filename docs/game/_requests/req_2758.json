@@ -1,0 +1,36 @@
+{
+  "id": "req_2758",
+  "at": "2026-07-06T20:12:32.281Z",
+  "origin": "session:ccc45fc7",
+  "text": "inside of the mesh editor in the @cart/editor/ i asked for porting of mirroring of edits, and it landed, in a way that i didnt expect. i wouldnt necessairly say to remove what was added for it but its not exactly the same as it was from the previous editor. basically, from as it seems in here, it spawns a new outliner that clones the X Y or Z but what i need is to toggle on X Y or Z mirror and then in real time if i edit on one side with it toggled on, it mirrors it for the mirror edge/face/vertex on the other side. and then also if you look at the previous mesh studio, there is the capability to add an image to use for tracing, but we lack it now, so please readd it",
+  "status": "review",
+  "sessionId": "ccc45fc7-3da9-456c-bfdb-ede244ea498c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T20:12:40.565Z",
+      "actor": "fable-mesh-mirror",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T20:37:23.432Z",
+      "actor": "fable-mesh-mirror",
+      "kind": "note",
+      "text": "Live mirror editing built HOST-NATIVE (mesh_edit.zig twin table; __mesh_edit_mirror door; X/Y/Z letter toggles in the model tool row + Edit→Mesh→Transform; axis-colored plane outlines in the viewport). The old mirrored-twin duplicate stays as-is. Tracing backdrops ported from the old studio as cart/editor/stage/Backdrops.tsx (View → Reference Images...): native file picker, six cardinal planes, size/opacity/pos sliders, localstore twig. Verifying with zig test-mesh-edit (4 new tests green) + SHIP_RUN_PACKAGE=0 ship editor."
+    },
+    {
+      "at": "2026-07-06T20:41:12.889Z",
+      "actor": "fable-mesh-mirror",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built LIVE mirror editing host-native and re-added tracing reference images. (1) Mirror: mesh_edit.zig grows a position-matched twin table (built once per topology/toggle, subsets cover the diagonal reflections when 2-3 planes are on); applyTransform reflects every moved vertex's edit onto its twin, so with X/Y/Z toggled in the tool row (new letter chips after the gizmo group, also Edit→Mesh→Transform) a drag/nudge/scale/rotate on one side lands live on the mirror vertex/edge/face on the other — plane at 0, same convention as Center/mirror-duplicate. New __mesh_edit_mirror door; axis-colored plane outlines draw in the viewport while editing; undo covers mirrored writes (they ride the same gizmo journal snapshot); the existing mirrored-twin duplicate in the outliner/context menu was left in place per the ask. 4 new zig unit tests green (test-mesh-edit). (2) Reference images: the old studio's Backdrops (req_1280) cloned+repurposed as cart/editor/stage/Backdrops.tsx — View → Reference Images... opens a floating card: native file picker, six cardinal planes, size/opacity/pos-XYZ sliders, flip, show/hide; translucent quads via Scene3D textureKey sampling offscreen StaticSurface bakes; localstore twig (inline/cache split keeps big images out of the 4MB cap). Verified: SHIP_RUN_PACKAGE=0 rjit ship editor PASS, rjit shot editor PASS, headless RJIT_MESHOPS mirror+nudge gesture replay clean with the X-plane outline visible in the self-shot.",
+  "shas": [
+    "9c38372ed"
+  ],
+  "resolvedAt": "2026-07-06T20:41:12.889Z"
+}

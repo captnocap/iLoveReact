@@ -1,0 +1,36 @@
+{
+  "id": "req_2870",
+  "at": "2026-07-10T07:08:12.905Z",
+  "origin": "codex:019f4ad9",
+  "text": "ok so in cart/editor you can select multiple outliners, and when you do this, you can then right click and merge them. Ok, but when this happens, you end up with a lingering outliner and selects nothing, and then the outliner the two of them merged into, all becomes one face, so you have no ability to retain the face shape that is on the outliner pre-merge",
+  "status": "review",
+  "sessionId": "019f4ad9-9408-7a12-93d0-6660cf2cd0fb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T07:08:18.143Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T07:12:02.547Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed: outliner multi-select is represented as additive face selection, so the generic Merge Faces command collapses all selected authored groups to one group; one part then owns every face while the other row becomes a zero-face ghost. Fixing command routing/menu semantics to structural selected-part merge, preserving face groups and restoring a single coherent selected row."
+    },
+    {
+      "at": "2026-07-10T07:26:52.493Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the outliner/face-selection boundary: a 2+ outliner selection now exposes and runs Merge Selected Parts instead of dissolving every selected face into one. The exact selected rows merge into the primary row regardless of list order, consumed rows are removed, the survivor is reselected, authored face groups remain distinct, and multi-part undo metadata stays aligned. Added command regression tests and verified two-, non-adjacent-, and three-part merges headlessly.",
+  "shas": [
+    "8f4944007"
+  ],
+  "resolvedAt": "2026-07-10T07:26:52.493Z"
+}

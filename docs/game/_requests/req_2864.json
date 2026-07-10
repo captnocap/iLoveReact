@@ -1,0 +1,30 @@
+{
+  "id": "req_2864",
+  "at": "2026-07-10T05:47:59.510Z",
+  "origin": "session:ef08aab4",
+  "text": "alright so the culling or whateveru call it, the render what is in view part landed, however still when placing flora, 240fps -> 10fps, and now it is directly linked to movement, so when i hold the mouse button down and dont move it, it holds at 240, move the mouse -> 10fps. i actually do better by not moving the mouse and doing wasd movement that atleast gets more frames, but it also chokes",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T05:50:00.706Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T06:04:34.707Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User isolated the remaining paint fps cliff: hold-still now holds 240 (req_2856 change-gate working) but MOVING the brush dropped to 10fps — every stroke frame covering new cells ran the whole-preview foliage regen (~5M rows, tens of ms) synchronously inside applyPaintLayer on the frame thread. Moved the regen to a worker thread behind a strictly serial mailbox cloned from the req_2845 pose_mailbox pattern: main thread flags a want, snapshots painted chunks (flora lanes + 121-grid render floor, ~150KB/chunk, floorless chunks sampled from heightAt at snapshot time so the worker never reads live engine state), and applies finished results as a pointer swap + version bump; the worker builds rows + req_2859 frustum segments into the off-display half of a ping-pong row-set pair using the thread-safe c_allocator. Stroke bursts coalesce (latest snapshot wins); preview lags the brush by one regen (~tens of ms), fps does not. Teardown stops the box and joins before freeing. Verified: full no-V8 loader compile passes (zig build app -Dapp-source=world_loader.zig). Commit 9b285aa48; rebuild required to test — expect 240fps while drag-painting, plants materializing a beat behind the brush.",
+  "shas": [
+    "9b285aa48"
+  ],
+  "resolvedAt": "2026-07-10T06:04:34.707Z"
+}

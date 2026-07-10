@@ -1,0 +1,24 @@
+{
+  "id": "req_2762",
+  "at": "2026-07-07T00:50:25.860Z",
+  "origin": "session:fc8c5862",
+  "text": "you are going to find the old player model has a skeleton, and this transfers directly with the @framework/skeleton/bones_loader.zig approach, and here is a document of shape skeleton for body\nhead mouth(lips, teeth?) hair eyes(left, right) nose chest shoulder(left, right) upper_arm(left, right) elbow(left, right) lower_arm(left, right) hand(left, right) wrist(left, right) fingers?(left, right) chest breast? abdomen hips(left, right) crotch? butt upper_leg(left, right) knee(left, right) lower_leg(left, right) feet(left, right) toes?(left, right)\n\nskeleton for car\nbumper(front, back) door(driver, passenger) hood wheel(front_left, front_right, back_left, back_right) trunk lights(front, back) gas windshield window seat(driver, passenger)\n\nskeleton for props\npockets?(slot #)[can this thing hold items / is it searchable] placements?[can this thing have items placed ontop of it like a tabletop, where is the table top(s)]\n\nskeleton for items\ngrip(left? right?)[where does the player model grab this thing at and with which hand?] ammo?[the place where ammo is reloaded] projectile?[the area it shoots a bullet out of] physical?[the area that makes contact with another model, think slashing with a knife, the blade is the physical]\n\n the props have already taken this shape (or started to) so its not something foreign",
+  "status": "doing",
+  "sessionId": "fc8c5862-b656-4dc7-864b-cbea2bb80407",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T00:50:44.625Z",
+      "actor": "fc8c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T00:50:44.633Z",
+      "actor": "fc8c",
+      "kind": "note",
+      "text": "Same work item as req_2761 (player model as mesh starting point). This adds the authoritative spec: player model = skeleton formation per framework/skeleton/bones_loader.zig; body bone vocabulary given verbatim (head/mouth/hair/eyes/nose/chest/shoulder/upper_arm/elbow/lower_arm/hand/wrist/fingers?/breast?/abdomen/hips/crotch?/butt/upper_leg/knee/lower_leg/feet/toes? with left/right pairs); car/props/items vocabularies also given. Props already started this shape (rigs vocabulary)."
+    }
+  ]
+}

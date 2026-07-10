@@ -142,6 +142,7 @@ export type ModelToolApi = {
   focus: () => void;
   wire: () => void;
   extrudeEdge: () => void;
+  extrudeFace: () => void;
   createFace: () => void;
   loopCut: () => void;
   deleteSelection: () => void;
@@ -488,6 +489,9 @@ export type EditorState = {
   worldPieces: PlacedPiece[];
   selectedPieceId: string | null;
   armedPieceId: string | null;
+  /** User turn applied to the next placement ghost (R). Edge snaps add this
+   *  to their natural edge-facing instead of losing their snap orientation. */
+  armedYawDegrees: number;
   // Copy stamp (req_2733): Copy on a placed piece arms its definition AND carries its
   // per-instance slots/overrides here, so every subsequent placement drops a true clone
   // (a copy that loses its materials isn't a copy). Cleared by a palette arm.

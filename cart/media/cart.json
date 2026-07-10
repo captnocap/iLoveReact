@@ -1,7 +1,0 @@
-{
-  "name": "Media",
-  "description": "Image gallery with router, thumbnails, and detail view",
-  "customChrome": true,
-  "width": 980,
-  "height": 680
-}

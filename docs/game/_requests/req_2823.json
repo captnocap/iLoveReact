@@ -1,0 +1,30 @@
+{
+  "id": "req_2823",
+  "at": "2026-07-07T08:43:57.322Z",
+  "origin": "session:154f33da",
+  "text": "cool now that we clarified that the original problem needs the actual fix to it because its maddening",
+  "status": "review",
+  "sessionId": "154f33da-c63e-4153-9471-78f88f88027e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T08:45:00.939Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T08:52:26.737Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ported the studio's concave Auto-Fix guard (req_0949) to the native mesh editor, replacing the invented differential heuristics that caused the maddening false 'Unsafe face edit' dialogs. mesh_edit.zig gains loopNewellNormal/loopIsConcave/newlyConcaveGroups — a verbatim port of editMesh.ts isFaceConcave/newConcaveFaces judging each authored face's chained boundary polygon (reuses chainGroupLoop from the loop-cut polygon work); only a face NEWLY buckled into a reflex corner fires. Rigid rotates, loop-cut slivers, hinge edits, and pre-degenerate meshes are silent by mathematical construction, not by tolerance exemptions. 3d.zig's meshGizmoFinish now calls the port; faceEdgeLensSq/faceMovedRigidly/collectUnsafeFaceEdits deleted. Dialog now speaks studio: 'Concave face / N face(s) buckled — not convex / Split Quads is recommended', counting authored faces not triangles. 4 new unit tests; zig build test-mesh-edit passes; SHIP_RUN_PACKAGE=0 rjit ship editor compiles clean. Dev host needs its rebuild to pick up the framework change. Known non-parity left open: Split Quads still splits along the frozen diagonal (JS re-picks the convex one) — separate follow-up if wanted.",
+  "shas": [
+    "0817df5fa"
+  ],
+  "resolvedAt": "2026-07-07T08:52:26.737Z"
+}

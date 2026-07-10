@@ -20,12 +20,12 @@
 //              click (req_2550).
 //
 // Deliberately NOT here (they die with hmsc-int or arrive by door): the TS build
-// brain (host-ported, req_2349), prefab stamping, skins, cooked-asset residency,
-// piece MOVE (the drag slice lands next) — each returns as a door-driven slice.
+// brain (host-ported, req_2349), prefab stamping, skins, cooked-asset residency
+// beyond the local snapped Move drag — each returns as a door-driven slice.
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable } from '@reactjit/primitives';
 import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
-import { resolvePlacement, resolveRunPlacements, supportsRunPlacement, pieceKindOf, pieceLook, pickAuthoredPlacement, PIECE_MODULE_METERS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
+import { resolvePlacement, resolveMovedPlacement, resolveRunPlacements, supportsRunPlacement, pieceKindOf, pieceLook, pickAuthoredPlacement, PIECE_MODULE_METERS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
 import { encodeMeshGhost } from './meshProps';
 import { isAuthoredPiece, authoredModelIdOf, type AuthoredBuildPiece } from './authoredRegistry';
 import { pushLiveWorld, pushResidentMeshes } from './livePush';
@@ -49,10 +49,24 @@ const WHEEL_PITCH_STEP_DEG = 3;
 // picture goes UP THE WALL at place time — never authored floating in the studio.
 const PROP_LIFT_STEP_M = 0.25;
 const HOVER_READOUT_POLL_MS = 50;
+// Move previews are interactive but never belong on the frame path. A snapped
+// target is recomputed at most 30Hz while dragging; mouse-up always resolves the
+// exact final target before committing it.
+const MOVE_PREVIEW_INTERVAL_MS = 33;
 
 const g: any = globalThis;
 
 type Snap = { x: number; y: number; z: number; pieceId: string; yaw: number; floor: number };
+
+function samePieceTransform(a: PlacedPiece | null, b: PlacedPiece | null): boolean {
+  return a === b || (!!a && !!b
+    && a.id === b.id
+    && a.x === b.x
+    && a.y === b.y
+    && a.z === b.z
+    && a.yawDegrees === b.yawDegrees
+    && a.floor === b.floor);
+}
 
 /** Project a box's 12 edges into pane-space polyline segments (the ghost),
  *  rotated by yawDeg about its centre so an edge-snapped wall's ghost lays along
@@ -99,6 +113,8 @@ export default function WorldViewport(props: {
   /** everything ONE gesture placed: a click is a one-piece batch, a drag-run
    *  (req_2747) is the whole wall run / floor rect — one journal entry either way. */
   onPlace: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
+  /** Commit a snapped preview after one Move-tool drag. */
+  onMove: (id: string, destination: PlacedPiece) => void;
   /** the active storey (0 = Ground) — owned by the action bar's floor control */
   floor: number;
   paintActive: boolean;
@@ -115,6 +131,9 @@ export default function WorldViewport(props: {
   // (state written mid-gesture isn't readable in the same event's handlers).
   const [run, setRun] = useState<PlacedPiece[] | null>(null);
   const runRef = useRef<PlacedPiece[] | null>(null);
+  // Move previews remain LOCAL while the pointer travels. The world model only
+  // changes once on drop, keeping live-push and React off the per-frame path.
+  const [movePreview, setMovePreview] = useState<PlacedPiece | null>(null);
   // Bumped on every camera move (zoom/rotate/pan) to force the overlays to RE-PROJECT. The
   // placement ghost re-renders for free via setSnap, but the selection box has no such trigger
   // when the tool isn't armed — without this it freezes at its last projection while the world
@@ -129,6 +148,7 @@ export default function WorldViewport(props: {
   // pictures hangs at one height); re-arming a different piece resets to ground.
   const propLiftRef = useRef(0);
   const armedPieceId = props.armed?.pieceId ?? null;
+  const armedYawDegrees = props.armed?.yawDegrees ?? 0;
   useEffect(() => { propLiftRef.current = 0; }, [armedPieceId]);
   // Live refs so the once-created pointer callbacks read the current tool / piece list / selection
   // sink without being torn down and rebuilt every render.
@@ -268,20 +288,22 @@ export default function WorldViewport(props: {
     return () => clearInterval(t);
   }, [props.authoredPieces]);
 
-  // Mesh GHOST: while an authored piece is armed in Place mode, preview its real
-  // mesh translucently at the snapped cell (the box-outline ghost can't show a
-  // mesh). Cleared otherwise. (Catalog pieces keep the projected box ghost.)
+  // Mesh GHOST: an authored piece previews as its real translucent mesh while
+  // it is armed OR being moved. Catalog pieces keep the projected box ghost.
   useEffect(() => {
     const nodeId = Number(loaderRef.current?.id ?? 0);
     if (!nodeId) return;
     const armed = props.armed;
-    const show = armed && isAuthoredPiece(armed.pieceId) && props.tool === 'place' && snap;
-    if (show && typeof g.__compiled_world_set_live_mesh_ghost === 'function') {
-      g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({ key: authoredModelIdOf(armed.pieceId), x: snap!.x, y: snap!.y, z: snap!.z, yaw: snap!.yaw }));
+    const placementGhost = armed && isAuthoredPiece(armed.pieceId) && props.tool === 'place' && snap
+      ? { pieceId: armed.pieceId, x: snap.x, y: snap.y, z: snap.z, yawDegrees: snap.yaw }
+      : null;
+    const ghost = placementGhost ?? (props.tool === 'move' && movePreview && isAuthoredPiece(movePreview.pieceId) ? movePreview : null);
+    if (ghost && typeof g.__compiled_world_set_live_mesh_ghost === 'function') {
+      g.__compiled_world_set_live_mesh_ghost(nodeId, encodeMeshGhost({ key: authoredModelIdOf(ghost.pieceId), x: ghost.x, y: ghost.y, z: ghost.z, yaw: ghost.yawDegrees }));
     } else if (typeof g.__compiled_world_clear_live_mesh_ghost === 'function') {
       g.__compiled_world_clear_live_mesh_ghost(nodeId);
     }
-  }, [snap, props.armed, props.tool]);
+  }, [snap, movePreview, props.armed, props.tool]);
 
   // Unmount: drop the loader runtime + its pending camera.
   useEffect(() => () => {
@@ -327,9 +349,28 @@ export default function WorldViewport(props: {
     // The floor INDEX threads through whole (req_2676): resolvePlacement records
     // it on the piece so the storey cutaway never re-derives storey from a y that
     // now carries the terrain base too (a mesa-top Ground piece is storey 0).
-    const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, props.floor, gp.terrainY, propLiftRef.current);
+    const placed = resolvePlacement(armed.pieceId, gp.x, gp.z, props.floor, gp.terrainY, propLiftRef.current, armed.yawDegrees);
     return placed ? { x: placed.x, y: placed.y, z: placed.z, pieceId: placed.pieceId, yaw: placed.yawDegrees, floor: placed.floor ?? props.floor } : null;
   }, [groundUnder, props.floor]);
+
+  // R changes the armed turn in AppFrame. Re-resolve immediately at the live
+  // cursor so the user sees the ghost spin in place, rather than waiting for the
+  // next 50ms hover poll or mouse movement.
+  useEffect(() => {
+    if (props.tool !== 'place' || !armedPieceId) return;
+    const r = rectRef.current;
+    const mx = Number(g.getMouseX?.() ?? NaN);
+    const my = Number(g.getMouseY?.() ?? NaN);
+    if (Number.isFinite(mx) && Number.isFinite(my) && mx >= r.x && mx < r.x + r.width && my >= r.y && my < r.y + r.height) {
+      setSnap(resolveSnap(mx - r.x, my - r.y));
+    }
+  }, [armedPieceId, armedYawDegrees, props.tool, resolveSnap]);
+
+  // Leaving Move mode (including Esc) abandons an in-flight local preview. The
+  // source instance remains authoritative until onMouseUp commits a destination.
+  useEffect(() => {
+    if (props.tool !== 'move') setMovePreview(null);
+  }, [props.tool]);
 
   const publishHoverAt = useCallback((px: number, py: number): Snap | null => {
     const snap = props.tool === 'place' && armedRef.current ? resolveSnap(px, py) : null;
@@ -429,7 +470,23 @@ export default function WorldViewport(props: {
   useEffect(() => () => {
     if (orbitTimerRef.current) { clearTimeout(orbitTimerRef.current); orbitTimerRef.current = null; }
   }, []);
-  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean; pan: boolean; runAnchor: { x: number; z: number; terrainY: number } | null; runCell: { x: number; z: number } | null } | null>(null);
+  type MoveDrag = {
+    piece: PlacedPiece;
+    anchorX: number;
+    anchorZ: number;
+    target: PlacedPiece | null;
+    previewAtMs: number;
+  };
+  const dragRef = useRef<{
+    x: number;
+    x0: number;
+    y0: number;
+    turned: boolean;
+    pan: boolean;
+    runAnchor: { x: number; z: number; terrainY: number } | null;
+    runCell: { x: number; z: number } | null;
+    move: MoveDrag | null;
+  } | null>(null);
   const local = useCallback((e: any) => {
     const r = rectRef.current;
     return { x: Number(e?.x ?? 0) - r.x, y: Number(e?.y ?? 0) - r.y };
@@ -446,8 +503,27 @@ export default function WorldViewport(props: {
     const runnable = !e?.shiftKey && toolRef.current === 'place' && !!armed
       && supportsRunPlacement(armed.pieceId);
     const anchor = runnable ? groundUnder(p.x, p.y) : null;
-    dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false, pan: !!e?.shiftKey, runAnchor: anchor, runCell: null };
-  }, [local, groundUnder]);
+    // Move captures a placed instance plus the ground point under the cursor.
+    // Subsequent pointer travel becomes a world-space delta, so grabbing a wall
+    // by one end does not make its centre jump underneath the pointer.
+    const movingId = !e?.shiftKey && toolRef.current === 'move' ? pickPieceAt(p.x, p.y) : null;
+    const movingPiece = movingId ? piecesRef.current.find((piece) => piece.id === movingId) ?? null : null;
+    const moveGround = movingPiece ? groundUnder(p.x, p.y) : null;
+    if (movingPiece) onSelectRef.current(movingPiece.id);
+    setMovePreview(null);
+    dragRef.current = {
+      x: p.x,
+      x0: p.x,
+      y0: p.y,
+      turned: false,
+      pan: !!e?.shiftKey,
+      runAnchor: anchor,
+      runCell: null,
+      move: movingPiece && moveGround
+        ? { piece: movingPiece, anchorX: moveGround.x, anchorZ: moveGround.z, target: null, previewAtMs: 0 }
+        : null,
+    };
+  }, [local, groundUnder, pickPieceAt]);
 
   const onMove = useCallback((e: any) => {
     const p = local(e);
@@ -455,7 +531,7 @@ export default function WorldViewport(props: {
     if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
       d.turned = true;
       // Rotation moved to middle-drag (req_2704); shift-drag pans; a plain left
-      // drag with a grid piece armed extends the placement RUN (req_2747).
+      // drag either moves its picked instance or extends a placement RUN.
       if (d.pan) {
         stage.dragPan(d.x, d.y0, p.x, p.y, rectRef.current);
         d.y0 = p.y;
@@ -468,6 +544,25 @@ export default function WorldViewport(props: {
         return;
       }
       d.x = p.x;
+      if (d.move) {
+        const now = Date.now();
+        if (now - d.move.previewAtMs < MOVE_PREVIEW_INTERVAL_MS) return;
+        d.move.previewAtMs = now;
+        const gp = groundUnder(p.x, p.y);
+        if (gp) {
+          const target = resolveMovedPlacement(
+            d.move.piece,
+            d.move.piece.x + (gp.x - d.move.anchorX),
+            d.move.piece.z + (gp.z - d.move.anchorZ),
+            gp.terrainY,
+          );
+          if (!samePieceTransform(d.move.target, target)) {
+            d.move.target = target;
+            setMovePreview(target);
+          }
+        }
+        return;
+      }
       const armed = armedRef.current;
       if (d.runAnchor && armed) {
         const gp = groundUnder(p.x, p.y);
@@ -482,7 +577,16 @@ export default function WorldViewport(props: {
           // The run stays LEVEL at the anchor's terrain height (resolveRunPlacements)
           // — only the anchor ever sampled the ground, so a run across a slope is
           // one flat wall/plate, not a stairstep.
-          const pieces = resolveRunPlacements(armed.pieceId, d.runAnchor.x, d.runAnchor.z, gp.x, gp.z, props.floor, d.runAnchor.terrainY);
+          const pieces = resolveRunPlacements(
+            armed.pieceId,
+            d.runAnchor.x,
+            d.runAnchor.z,
+            gp.x,
+            gp.z,
+            props.floor,
+            d.runAnchor.terrainY,
+            armed.yawDegrees,
+          );
           runRef.current = pieces;
           setRun(pieces);
           setSnap(null); // the run ghosts own the overlay while dragging
@@ -499,9 +603,28 @@ export default function WorldViewport(props: {
     const runPieces = runRef.current;
     runRef.current = null;
     setRun(null);
+    const movePointer = d?.move ? local(e) : null;
+    const moveGround = d?.move && movePointer ? groundUnder(movePointer.x, movePointer.y) : null;
+    // Commit the exact release point even when the bounded preview has not yet
+    // sampled this last mouse event.
+    const moveTarget = d?.move && moveGround
+      ? resolveMovedPlacement(
+        d.move.piece,
+        d.move.piece.x + (moveGround.x - d.move.anchorX),
+        d.move.piece.z + (moveGround.z - d.move.anchorZ),
+        moveGround.terrainY,
+      )
+      : null;
+    setMovePreview(null);
     if (!d) { console.warn('[place] up with no down — click dropped'); return; }
     // req_2548 diagnostic — every way a click can silently place nothing.
     if (d.turned) {
+      // Move commits precisely once on drop; its local preview never mutated the
+      // authoring state while the pointer was travelling.
+      if (d.move && moveTarget && toolRef.current === 'move') {
+        props.onMove(d.move.piece.id, moveTarget);
+        return;
+      }
       // A drag that grew a run stamps the whole run (req_2747); any other drag
       // is still inert.
       if (runPieces && runPieces.length && toolRef.current === 'place') {
@@ -515,7 +638,8 @@ export default function WorldViewport(props: {
       return;
     }
     // Modal click routing (req_2550): OFF the Place tool a click PICKS the piece under it via the
-    // host raycast and highlights it — Select/Move/Focus all just select for now — and never places.
+    // host raycast and highlights it — Select/Move/Focus never place. Move turns
+    // into a real transform only after travel from a picked instance (above).
     // This is what makes turning on Focus (etc.) stop dropping pieces. (Focus does NOT pan the
     // camera on the pick: that shifted the JS pose the overlay projects through while the native
     // frame lagged, so the outline landed a tile off, req_2554. Camera-frame is a deferred slice
@@ -537,7 +661,7 @@ export default function WorldViewport(props: {
       [{ id: '', pieceId: target.pieceId, x: target.x, y: target.y, z: target.z, yawDegrees: target.yaw, floor: target.floor }],
       { mode: 'click', inputAtMs: Date.now(), pointerX: d.x0, pointerY: d.y0 },
     );
-  }, [resolveSnap, groundUnder, props.onPlace, local, stage, pickPieceAt]);
+  }, [resolveSnap, groundUnder, props.onPlace, props.onMove, local, stage, pickPieceAt]);
 
   // Right-click quick context (req_2733): pick the piece under the cursor in ANY tool
   // mode and report it up with the WINDOW coords (the root-mounted menu lands at the
@@ -588,8 +712,7 @@ export default function WorldViewport(props: {
   // loader renders with (2D overlay, no second 3D surface).
   const rect = rectRef.current;
   const ghostSegs: number[] = [];
-  // Only the Place tool shows the placement ghost — otherwise the last snap would linger as a
-  // stale outline after switching to Select/Focus/Move (armed is null in those modes).
+  // Only Place shows its armed ghost; Move supplies its own local candidate below.
   if (snap && props.tool === 'place') {
     const look = pieceLook(snap.pieceId);
     if (look) ghostSegs.push(...boxSegments(stage, rect, snap.x, snap.y, snap.z, look.w, look.h, look.d, snap.yaw));
@@ -599,6 +722,13 @@ export default function WorldViewport(props: {
   if (run && run.length && props.tool === 'place') {
     const look = pieceLook(run[0]!.pieceId);
     if (look) for (const rp of run) ghostSegs.push(...boxSegments(stage, rect, rp.x, rp.y, rp.z, look.w, look.h, look.d, rp.yawDegrees));
+  }
+  // A Move-tool drag previews the committed transform without pushing the world
+  // list each frame. The selected source remains cyan below; this green outline
+  // is the destination that will land on mouse-up.
+  if (movePreview && props.tool === 'move') {
+    const look = pieceLook(movePreview.pieceId);
+    if (look) ghostSegs.push(...boxSegments(stage, rect, movePreview.x, movePreview.y, movePreview.z, look.w, look.h, look.d, movePreview.yawDegrees));
   }
   // The selection highlight: the same projected box around the selected piece (req_2550), so a
   // Select/Move/Focus click shows what it grabbed. Same overlay technique as the ghost. NOT shown

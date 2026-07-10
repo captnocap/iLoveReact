@@ -1,0 +1,28 @@
+{
+  "id": "req_2853",
+  "at": "2026-07-10T04:54:34.941Z",
+  "origin": "session:ef08aab4",
+  "text": "thats a good test. you reckon it will fail at how many triangles? il just keep painting til i cant anymore and find it",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T04:55:19.734Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T04:56:29.458Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Prediction for the user's paint-until-it-breaks stress test (follow-on to req_2851/2852 napkin math). From code: foliage rides the slim retained pool (24B rows, grass/bush/flower/frond shared, 3d.zig), doubling up to the ADAPTER-granted maxBufferSize (gpu.zig:2040 requests full adapter limits; granted value logged at launch). Failure is staged, never a crash: (1) fps melt — at their measured 7.8G tri/s, 60fps dies ~130M tris, 30fps ~260M, slideshow ~500M+; (2) stroke regen hitches grow linearly (whole-preview regen per stroke); (3) hard wall = slim pool refuses growth at maxBufferSize, batch degrades to per-frame staging (262,144-row scratch), overflow DROPS groups — foliage visibly vanishes with loud [r3d] FULL warnings; CPU-side allocator refusal separately CLIPs with follow-the-brush (req_2838). With a typical 2GB grant: ~89M slim rows ≈ 1.8-4B tris — unreachable at usable framerates, so predicted 'give-up' point is 200-500M tris. Answer only, no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T04:56:29.458Z"
+}

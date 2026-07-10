@@ -1,0 +1,30 @@
+{
+  "id": "req_2759",
+  "at": "2026-07-06T22:34:30.618Z",
+  "origin": "session:ccc45fc7",
+  "text": "ok the next thing was if you look again at the old editor it, when making adjustments, would do it in fixed steps, and then allow for finer control with shift and free control with ctrl, the current approach is just free control",
+  "status": "review",
+  "sessionId": "ccc45fc7-3da9-456c-bfdb-ede244ea498c",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T22:34:40.966Z",
+      "actor": "fable-mesh-mirror",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T22:42:24.615Z",
+      "actor": "fable-mesh-mirror",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made every mesh-editor gizmo drag STEPPED by default, host-native in 3d.zig (this is the studio's req_1023 ruling the new editor had lost — it was pure freeform). The drag now accumulates a raw cumulative value from the grab, snaps that cumulative target to the step grid, and applies only the difference to the mesh, so vertices/edges/faces click along the grid instead of drifting. Steps: move = 1 modeling unit (1/16 m, the stage's fine sub-grid pitch) with Shift = quarter unit; rotate = 15° with Shift = 1°; scale = ×0.1 with Shift = ×0.05. Ctrl frees the drag to continuous (the user's word this time) and Alt also frees it (the old studio's key, kept for muscle memory). The pivot freezes at grab so cumulative rotate/scale stay exact, a live orange readout beside the pivot shows the current snapped value (+3.00u / +15° / ×1.20) during the drag and disappears at release, and live-mirror editing rides the same stepped deltas. engine.zig passes the SDL modifier state into the drag; nudges and the loop-cut handle keep their existing conventions. Verified: SHIP_RUN_PACKAGE=0 rjit ship editor PASS, rjit shot editor PASS, zig build test-mesh-edit green.",
+  "shas": [
+    "534b4e304"
+  ],
+  "resolvedAt": "2026-07-06T22:42:24.615Z"
+}

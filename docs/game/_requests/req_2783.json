@@ -1,0 +1,28 @@
+{
+  "id": "req_2783",
+  "at": "2026-07-07T02:28:09.887Z",
+  "origin": "codex:019f3a3b",
+  "text": "also, your sliders are not hittable. actually none of your buttons are still",
+  "status": "review",
+  "sessionId": "019f3a3b-4b5d-7263-a77e-3766f3d10cac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T02:28:26.810Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T02:32:52.173Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed Map Paint dock controls not being hittable by adding a native map-paint chrome guard in framework/engine.zig. The world-loader paint claim now yields when the pointer is over interactive chrome, blockers, inputs, scrollbars, or sliders, and active paint drags end when crossing into chrome. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T02:32:52.173Z"
+}

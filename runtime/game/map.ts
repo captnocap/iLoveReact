@@ -27,6 +27,11 @@ const TERRAIN_TOOL_INDEX: Record<MapTerrainTool, number> = { brush: 0, ramp: 1, 
 const SHAPE_INDEX: Record<MapBrushShape, number> = { circle: 0, square: 1, diamond: 2 };
 const PROFILE_INDEX: Record<MapBrushProfile, number> = { cone: 0, flat: 1, dome: 2 };
 const GIZMO_INDEX: Record<MapBrushGizmo, number> = { beam: 0, decal: 1, rings: 2, profile: 3, handles: 4 };
+const CHANNELS: readonly MapChannel[] = ['terrain', 'tile', 'water', 'flora', 'zone', 'road'];
+const MODES: readonly MapMode[] = ['paint', 'erase'];
+const TERRAIN_TOOLS: readonly MapTerrainTool[] = ['brush', 'ramp', 'slope', 'smooth'];
+const SHAPES: readonly MapBrushShape[] = ['circle', 'square', 'diamond'];
+const PROFILES: readonly MapBrushProfile[] = ['cone', 'flat', 'dome'];
 
 export interface MapTool {
   channel: MapChannel;
@@ -66,6 +71,32 @@ export interface MapStrokeStats {
   waterDry: boolean;
 }
 
+export type MapAuthoringEventKind = 'stroke' | 'road.commit' | 'road.delete' | 'chunk.grow' | 'zone.drop' | 'tile.bindings';
+export type MapAuthoringEvent = {
+  kind: MapAuthoringEventKind;
+  tool: Required<MapTool>;
+  stats: MapStrokeStats;
+  start: { x: number; z: number };
+  end: { x: number; z: number };
+  durationMs: number;
+  id: number;
+  auxA: number;
+  auxB: number;
+  droppedBefore: number;
+};
+
+const AUTHORING_EVENT_KINDS: readonly MapAuthoringEventKind[] = ['stroke', 'road.commit', 'road.delete', 'chunk.grow', 'zone.drop', 'tile.bindings'];
+const MAP_EVENT_FLOATS = 32;
+
+function enumValue<T>(items: readonly T[], raw: number | undefined, fallback: T): T {
+  const idx = Math.max(0, Math.min(items.length - 1, Number.isFinite(raw) ? Math.trunc(raw!) : 0));
+  return items[idx] ?? fallback;
+}
+
+function intValue(raw: number | undefined): number {
+  return Number.isFinite(raw) ? Math.trunc(raw!) : 0;
+}
+
 /** Whether the host map binding is live (built with -Dhas-game-map). */
 export function mapHostLive(): boolean {
   return hasHost('__map_stroke_begin');
@@ -76,8 +107,8 @@ export function mapReset(): void {
 }
 
 /** Allocate the chunk at (cx,cz). Returns false out-of-window. */
-export function mapGrowChunk(cx: number, cz: number): boolean {
-  return callHost<number>('__map_grow_chunk', 0, cx, cz) === 1;
+export function mapGrowChunk(cx: number, cz: number, record = true): boolean {
+  return callHost<number>('__map_grow_chunk', 0, cx, cz, record ? 1 : 0) === 1;
 }
 
 export function mapChunkCount(): number {
@@ -161,8 +192,8 @@ export function mapSetGroundLook(
  *  formula dispatches on ([materialId, boardIndex, variant, jointFlag] for the
  *  editor catalog). Pure DATA — re-encodes chunk streams, never a shader
  *  rebuild. Persisted in the map file; mirror with mapGetTileBindings. */
-export function mapSetTileBindings(rows: Float32Array): void {
-  callHost('__map_set_tile_bindings', undefined, rows);
+export function mapSetTileBindings(rows: Float32Array, record = false): void {
+  callHost('__map_set_tile_bindings', undefined, rows, record ? 1 : 0);
 }
 
 /** Read the live tile-binding table back (count×4 rows) — the chrome's mirror
@@ -181,8 +212,8 @@ export function mapSetZonePalette(zonePaletteRgb: Float32Array): void {
 }
 
 /** Delete zone list entry `index`: unzones its cells, shifts higher indices down. */
-export function mapDropZone(index: number): void {
-  callHost('__map_drop_zone', undefined, index);
+export function mapDropZone(index: number, record = true): void {
+  callHost('__map_drop_zone', undefined, index, record ? 1 : 0);
 }
 
 /** Push the flora population contract: per kind [spec, count, chance] triples
@@ -265,6 +296,58 @@ export function mapStrokeEnd(): MapStrokeStats {
   if (!ab) return { samples: 0, stamps: 0, touched: 0, waterDry: false };
   const out = new Float32Array(ab);
   return { samples: out[0]!, stamps: out[1]!, touched: out[2]!, waterDry: out[3]! >= 0.5 };
+}
+
+/** Completed native map-authoring actions since the last drain. Strokes land
+ *  here whether they came through the JS stroke doors or the host-native
+ *  WorldLoader pointer path. */
+export function mapEventDrain(): MapAuthoringEvent[] {
+  if (!hasHost('__map_event_drain')) return [];
+  const ab = callHost<ArrayBuffer | null>('__map_event_drain', null);
+  if (!ab) return [];
+  const raw = new Float32Array(ab);
+  const count = Math.max(0, Math.min(intValue(raw[0]), Math.floor((raw.length - 1) / MAP_EVENT_FLOATS)));
+  const events: MapAuthoringEvent[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const base = 1 + i * MAP_EVENT_FLOATS;
+    events.push({
+      kind: enumValue(AUTHORING_EVENT_KINDS, raw[base + 0], 'stroke'),
+      tool: {
+        channel: enumValue(CHANNELS, raw[base + 1], 'terrain'),
+        mode: enumValue(MODES, raw[base + 2], 'paint'),
+        terrainTool: enumValue(TERRAIN_TOOLS, raw[base + 3], 'brush'),
+        shape: enumValue(SHAPES, raw[base + 4], 'circle'),
+        profile: enumValue(PROFILES, raw[base + 5], 'cone'),
+        radiusM: raw[base + 6] ?? 0,
+        centerZ: raw[base + 7] ?? 0,
+        rampMin: raw[base + 8] ?? 0,
+        rampMax: raw[base + 9] ?? 0,
+        rampWide: raw[base + 10] ?? 0,
+        rampLong: raw[base + 11] ?? 0,
+        rampAngleDeg: raw[base + 12] ?? 0,
+        smoothStrength: raw[base + 13] ?? 0,
+        kindIdx: intValue(raw[base + 14]),
+        bindIdx: intValue(raw[base + 15]),
+        floraKindIdx: intValue(raw[base + 16]),
+        floraLane: intValue(raw[base + 17]),
+        zoneIdx: intValue(raw[base + 18]),
+      },
+      start: { x: raw[base + 19] ?? 0, z: raw[base + 20] ?? 0 },
+      end: { x: raw[base + 21] ?? 0, z: raw[base + 22] ?? 0 },
+      stats: {
+        samples: intValue(raw[base + 23]),
+        stamps: intValue(raw[base + 24]),
+        touched: intValue(raw[base + 25]),
+        waterDry: (raw[base + 26] ?? 0) >= 0.5,
+      },
+      durationMs: raw[base + 27] ?? 0,
+      id: intValue(raw[base + 28]),
+      auxA: intValue(raw[base + 29]),
+      auxB: intValue(raw[base + 30]),
+      droppedBefore: intValue(raw[base + 31]),
+    });
+  }
+  return events;
 }
 
 export function mapStats(): { chunkCount: number; dirtyChunks: number } {

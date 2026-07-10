@@ -1,0 +1,30 @@
+{
+  "id": "req_2865",
+  "at": "2026-07-10T06:24:57.343Z",
+  "origin": "codex:019f4ab1",
+  "text": "in cart/editor inside of the build paint tooling, where you can place walls, floors, props, etc. Well, so with standard walls like the concrete wall you can click mouse down, drag some distance, and release mouse, and it will paint a line of walls, or you can take a floor and get a wide area of ground coverage in one go, alright, so then there is the portion of this where i can export a build piece i make, and this goes into the same menu, but from this menu, even though they both are considered to be lets say a wall, i can only paint the multiple of them in one stroke on the pre-existing pieces, and not on the pieces i export in as a build piece",
+  "status": "review",
+  "sessionId": "019f4ab1-4f92-7763-b7c4-0efc14ea4de0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T06:25:01.622Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T06:29:25.644Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Exported build pieces now inherit drag-stroke behavior from their semantic kind instead of being excluded because they came from an authored model. Wall-affinity exports paint snapped wall runs, floor-affinity exports fill rectangular areas, and exported props remain single free placements. Added focused regression coverage for all three cases; the placement-event tests and ReleaseFast editor build pass.",
+  "shas": [
+    "a27ff16de"
+  ],
+  "resolvedAt": "2026-07-10T06:29:25.644Z"
+}

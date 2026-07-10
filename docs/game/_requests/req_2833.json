@@ -1,0 +1,30 @@
+{
+  "id": "req_2833",
+  "at": "2026-07-07T10:31:08.058Z",
+  "origin": "session:8b6e4e7c",
+  "text": "haha rats.... the entire painting is fucked [Image #10] but it is stored correctly in the editor still, i did just check",
+  "status": "review",
+  "sessionId": "8b6e4e7c-b729-4fdb-bf0d-24c9728dd002",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T10:31:36.765Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T10:37:19.636Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the scrambled placed painting: the paint island layout rewrites the DISPLAYED mesh's UVs into atlas space (framework/gpu/3d.zig setPaintDetail 'rewrites the resident mesh UVs in place'), but the package's mesh blobs (base.blob/doc.blob via __model_mesh_write/__model_meshdoc_write) persist model_source verts with ORIGINAL UVs — two different UV spaces, so req_2832's atlas embed sampled the island-packed base.png through source UVs and produced the squashed strip. Fix: new host door __model_painted_mesh_write writes the displayed paint-space verts; writeModelArtifacts persists them as mesh/painted.blob beside atlases/base.png on every save/export; pushResidentMeshes pairs painted.blob verts with the PNG (and for packages saved before the writer existed ships the doc mesh FLAT — honest fallback, never scrambled). Needs a dev-host rebuild (new Zig door), then one re-save/re-export of bridge_foot to materialize painted.blob.",
+  "shas": [
+    "dee2ea9bd"
+  ],
+  "resolvedAt": "2026-07-07T10:37:19.636Z"
+}

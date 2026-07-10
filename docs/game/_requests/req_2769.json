@@ -1,0 +1,10 @@
+{
+  "id": "req_2769",
+  "at": "2026-07-07T01:25:07.612Z",
+  "origin": "session:e48518b6",
+  "text": "Hey so heres a real challenge probably, maybe not, but lets look at moment at our world values and how they were exposed to us inside of @cart/hmsc-int/ and how we currently lack this inside of @cart/editor/ ; ok now long story short those world values, the globals, whatever you want to call them, for physics, player speed, yada yada, we need to bring them over, but heres the monkey wrench, so as the interface right now stands, its a two route system, the play route and the editor route, the editor route is a huge state machine. this is where globals will lay. How i want it to work though is that ok so the world editor spawns a real birds eye view of the game world already. and we can interface with it this way its clear, so then its technically going to be possible for you to quite literally treat this feature to where i say click on (a non-existing file menu right now) and go Globals -> Physics for example, i want it to take this interface you see here",
+  "status": "new",
+  "sessionId": "e48518b6-f1b3-4c35-b43f-da91f8bd3fb1",
+  "captureMode": "hook",
+  "events": []
+}

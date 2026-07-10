@@ -1,0 +1,36 @@
+{
+  "id": "req_2846",
+  "at": "2026-07-10T01:36:07.123Z",
+  "origin": "codex:019f498f",
+  "text": "Ok, uh, so can you instrument it to let me pick a camera source or something to that effect? From as it seems, this loads up like so [Image #1] and it says cam 0 but i dont know if that is my actual webcam or not. if you could get it to list my devices to pick from  that would be great",
+  "status": "review",
+  "sessionId": "019f498f-aa62-7f42-8a08-7ee563073a60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T01:36:15.136Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T01:45:40.977Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implemented V4L2 capability-based discovery: /dev/video1 and /dev/video3 are correctly filtered as metadata-only; usable choices are USB3 Video (/dev/video0) and OBSBOT Tiny 2 (/dev/video2). The Animation surface now has a named device menu, opens it on first visit when multiple cameras exist, persists the chosen source, rescans on demand, and remounts both RenderTarget + pose loop on switch."
+    },
+    {
+      "at": "2026-07-10T01:52:23.688Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a real camera-source chooser to Globals to Animation. The Zig host now enumerates Linux V4L2 nodes, validates VIDIOC_QUERYCAP capabilities, and filters metadata-only companions, so this machine presents USB3 Video at /dev/video0 and OBSBOT Tiny 2 at /dev/video2. The first visit opens the named picker automatically when multiple cameras exist; selection persists, can be rescanned, and cleanly remounts both RenderTarget and the async pose loop. Added framework and bridge coverage, a passing ReleaseFast editor build, an end-to-end self-capture of the open menu, and a 60-second 667-request gate with zero frame-budget spikes.",
+  "shas": [
+    "d9cd70622"
+  ],
+  "resolvedAt": "2026-07-10T01:52:23.688Z"
+}

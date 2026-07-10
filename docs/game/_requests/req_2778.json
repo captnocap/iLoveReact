@@ -1,0 +1,28 @@
+{
+  "id": "req_2778",
+  "at": "2026-07-07T01:59:34.849Z",
+  "origin": "codex:019f3a3b",
+  "text": "yeah actually lets move all the brush control down, this is nice, also, one thing you need to take into account is when overlays on top of the game world the hits pass through, you need to do some sort of trick that is shown inside of for example the texture/color picker or the other build menu i cant click anything on your menu. and then when it comes to the height and size, can i get you to give me it in 2 ways: i want a notched slider that steps in 0.5 and not the current +/- in whole 1.0 steps. and then secondly i want to be able to quickly also just type in the value by hand at the same time. but yeah your menu looks nice but i cant click any of it yet",
+  "status": "review",
+  "sessionId": "019f3a3b-4b5d-7263-a77e-3766f3d10cac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T01:59:51.655Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T02:06:53.538Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Moved the remaining Map Paint brush controls into the bottom dock: gizmo tiles, shape/profile cycles, size, and channel-specific scalar controls now sit with the channel trays. Added dock-level pointer blocking so active world painting does not swallow clicks in the dock while child buttons/inputs still receive hits. Replaced height/depth/ramp/size whole-step +/- controls with snapped sliders plus typed numeric fields; size/height/depth/ramp values quantize to 0.5m, smooth strength remains 0.1. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T02:06:53.538Z"
+}

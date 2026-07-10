@@ -57,7 +57,16 @@ export type PlacedPiece = {
   overrides?: Record<string, number | boolean>;
 };
 
-export type ArmedPiece = { pieceId: string } | null;
+/** The build-bar selection carried by Place mode. `yawDegrees` is the user's
+ *  turn from the snap's natural facing: edge pieces still align to the picked
+ *  edge first, then R applies this turn. */
+export type ArmedPiece = { pieceId: string; yawDegrees: number } | null;
+export type PlacementGesture = {
+  mode: 'click' | 'drag-run';
+  inputAtMs: number;
+  pointerX: number;
+  pointerY: number;
+};
 
 export type PieceLook = { w: number; h: number; d: number; rgb: [number, number, number]; label: string; opacity?: number };
 
@@ -138,6 +147,8 @@ function rayAabbEntry(
 
 /** The grid module placements snap to (the catalog's 3m piece module). */
 export const PIECE_MODULE_METERS = 3;
+/** One press of R turns an armed ghost or a selected instance by a quarter turn. */
+export const PIECE_ROTATION_STEP_DEGREES = 90;
 
 /** Snap a ground point to the module grid: the CENTER of the 3m cell under it. */
 export function snapToModule(v: number): number {
@@ -171,6 +182,11 @@ function snapToEdge(wx: number, wz: number): { x: number; z: number; yaw: number
   return { x: cx, z: cellZ * M + M, yaw: 0 };
 }
 
+function normalizeYawDegrees(yawDegrees: number): number {
+  const normalized = yawDegrees % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+}
+
 /** Resolve a click into a placement for the armed piece on the active storey.
  *  Honours the piece's snap mode: edge-snap kinds (walls, fences, …) land on the
  *  nearest CELL EDGE, oriented along it; plates centre-snap. Returns null when
@@ -184,8 +200,18 @@ function snapToEdge(wx: number, wz: number): { x: number; z: number; yaw: number
  *  `lift` (req_2751) is the prop-only scroll-wheel height: metres ABOVE the
  *  terrain/storey base the prop hangs (a wall picture is ground-based geometry
  *  + a 1.5m lift, never a floating mesh). Grid pieces ignore it — their
- *  verticality is storeys. */
-export function resolvePlacement(pieceId: string, wx: number, wz: number, floor: number, terrainY = 0, lift = 0): PlacedPiece | null {
+ *  verticality is storeys. `yawTurnDegrees` is the user-controlled quarter-turn
+ *  offset (R); edge snap supplies its natural facing first, then this offset
+ *  is applied. */
+export function resolvePlacement(
+  pieceId: string,
+  wx: number,
+  wz: number,
+  floor: number,
+  terrainY = 0,
+  lift = 0,
+  yawTurnDegrees = 0,
+): PlacedPiece | null {
   const catalogIndex = buildCatalogIndex(pieceId);
   const kind = pieceKindOf(pieceId);
   const levelY = floor > 0 ? floor * METERS_PER_LEVEL : 0;
@@ -194,15 +220,52 @@ export function resolvePlacement(pieceId: string, wx: number, wz: number, floor:
   // the terrain/storey — a bench is not a 3m plate. No host validate either (the
   // build validator indexes only the catalog grid pieces).
   if (kind === 'prop') {
-    return { id: '', pieceId, x: wx, y: y + lift, z: wz, yawDegrees: 0, floor };
+    return { id: '', pieceId, x: wx, y: y + lift, z: wz, yawDegrees: normalizeYawDegrees(yawTurnDegrees), floor };
   }
   const edge = kind ? EDGE_SNAP_KINDS.has(kind) : false;
-  const { x, z, yaw } = edge ? snapToEdge(wx, wz) : { x: snapToModule(wx), z: snapToModule(wz), yaw: 0 };
+  const snapped = edge ? snapToEdge(wx, wz) : { x: snapToModule(wx), z: snapToModule(wz), yaw: 0 };
+  const { x, z } = snapped;
+  const yaw = normalizeYawDegrees(snapped.yaw + yawTurnDegrees);
   if (catalogIndex >= 0) {
     const v = validateBuildPlacement(catalogIndex, x, y, z, yaw);
     if (!v.valid) return null;
   }
   return { id: '', pieceId, x, y, z, yawDegrees: yaw, floor };
+}
+
+/** Resolve a horizontal move for one existing instance. The result keeps the
+ *  instance identity and authored facets (slots/overrides/yaw); only its valid
+ *  landing transform changes. Grid pieces rebase to the destination terrain on
+ *  their recorded storey. Props preserve their current y so a deliberately
+ *  lifted prop does not fall when dragged; storing terrain-relative prop lift is
+ *  a separate data-contract slice.
+ *
+ *  Edge pieces use their CURRENT yaw to choose the matching grid-line family.
+ *  A north/south wall therefore stays on a north/south edge while it moves,
+ *  rather than snapping to the nearest perpendicular edge under the cursor. */
+export function resolveMovedPlacement(piece: PlacedPiece, wx: number, wz: number, terrainY = 0): PlacedPiece | null {
+  const kind = pieceKindOf(piece.pieceId);
+  const floor = piece.floor ?? Math.round(piece.y / METERS_PER_LEVEL);
+  const yawDegrees = normalizeYawDegrees(piece.yawDegrees);
+  if (kind === 'prop') {
+    return { ...piece, x: wx, z: wz, yawDegrees, floor };
+  }
+
+  const edge = kind ? EDGE_SNAP_KINDS.has(kind) : false;
+  let x = snapToModule(wx);
+  let z = snapToModule(wz);
+  if (edge) {
+    const alongX = yawDegrees === 0 || yawDegrees === 180;
+    if (alongX) z = Math.round(wz / PIECE_MODULE_METERS) * PIECE_MODULE_METERS;
+    else x = Math.round(wx / PIECE_MODULE_METERS) * PIECE_MODULE_METERS;
+  }
+  const y = terrainY + (floor > 0 ? floor * METERS_PER_LEVEL : 0);
+  const catalogIndex = buildCatalogIndex(piece.pieceId);
+  if (catalogIndex >= 0) {
+    const validation = validateBuildPlacement(catalogIndex, x, y, z, yawDegrees);
+    if (!validation.valid) return null;
+  }
+  return { ...piece, x, y, z, yawDegrees, floor };
 }
 
 /** The biggest single drag-run (req_2747): 20×20 cells of floor. A drag past
@@ -229,10 +292,19 @@ export function supportsRunPlacement(pieceId: string): boolean {
  *  cells drop out of the run. The whole run is LEVEL at the ANCHOR's terrain
  *  height — a dragged wall or floor plate is flat by construction, it does not
  *  stairstep over terrain bumps mid-run. */
-export function resolveRunPlacements(pieceId: string, ax: number, az: number, bx: number, bz: number, floor: number, terrainY = 0): PlacedPiece[] {
+export function resolveRunPlacements(
+  pieceId: string,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  floor: number,
+  terrainY = 0,
+  yawTurnDegrees = 0,
+): PlacedPiece[] {
   const kind = pieceKindOf(pieceId);
   if (!supportsRunPlacement(pieceId)) {
-    const single = resolvePlacement(pieceId, bx, bz, floor, terrainY);
+    const single = resolvePlacement(pieceId, bx, bz, floor, terrainY, 0, yawTurnDegrees);
     return single ? [single] : [];
   }
   const M = PIECE_MODULE_METERS;
@@ -266,7 +338,7 @@ export function resolveRunPlacements(pieceId: string, ax: number, az: number, bx
   }
   const out: PlacedPiece[] = [];
   for (const pt of points) {
-    const placed = resolvePlacement(pieceId, pt.x, pt.z, floor, terrainY);
+    const placed = resolvePlacement(pieceId, pt.x, pt.z, floor, terrainY, 0, yawTurnDegrees);
     if (placed) out.push(placed);
   }
   return out;

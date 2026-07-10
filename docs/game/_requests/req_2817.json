@@ -1,0 +1,24 @@
+{
+  "id": "req_2817",
+  "at": "2026-07-07T08:16:29.593Z",
+  "origin": "session:154f33da",
+  "text": "you didnt look in the right code then. i wouldnt hallucinate it. look. its happening right here when i load it up [Image #4] [Image #5]",
+  "status": "doing",
+  "sessionId": "154f33da-c63e-4153-9471-78f88f88027e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T08:16:39.981Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T08:18:08.034Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "CORRECTION to req_2816 analysis: the JS studio DOES have the guard — the Concave-face Auto-Fix (req_0949): isFaceConcave/newConcaveFaces in cart/hmsc-int/editors/model/editMesh.ts:952, fired from studiokit/StudioViewport.tsx:2371 on gizmo release, dialog ConcaveFixPopup.tsx ('N faces buckled — not convex', Split Quads/Ignore/Revert). The real divergence: the native port kept the DIALOG but replaced the PREDICATE. JS tests an exact state property — does the authored polygon loop have a reflex corner (turn-sign test against the Newell normal), diffed per-face so only NEWLY concave faces fire; convexity is rigid-motion invariant so rotations mathematically cannot false-positive, and collinear corners are skipped so slivers cannot either. Zig (collectUnsafeFaceEdits, 3d.zig:2734) instead measures a per-TRIANGLE differential heuristic between snapshots (area ratio 1e-6, normal dot -0.05, rigid exemption 2e-3) — no concavity test exists anywhere in it. req_2754/2755 patched the invented predicate's cliffs; the sliver-conditioning failure mode remains. Fix: port isFaceConcave/newConcaveFaces semantics to authored groups in Zig (boundary loops already derivable — mesh_edit.zig edgeIsBoundaryPub), and make Split Quads pick the convex diagonal like JS splitQuad instead of keeping the frozen one."
+    }
+  ]
+}

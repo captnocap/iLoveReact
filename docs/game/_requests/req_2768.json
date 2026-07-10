@@ -1,0 +1,18 @@
+{
+  "id": "req_2768",
+  "at": "2026-07-07T01:11:50.530Z",
+  "origin": "session:fc8c5862",
+  "text": "weird i could have sword we had fingers did we not. oh maybe i didnt include them in my parts list D: the old model definitely had fingers because it had emotes of flying the bird",
+  "status": "doing",
+  "sessionId": "fc8c5862-b656-4dc7-864b-cbea2bb80407",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T01:12:23.441Z",
+      "actor": "fc8c",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

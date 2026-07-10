@@ -1,0 +1,30 @@
+{
+  "id": "req_2765",
+  "at": "2026-07-07T00:55:20.129Z",
+  "origin": "session:01f755c2",
+  "text": "hey in the editor we never locked in any capability yet to store map edits over sessions. they store in memory, and then wipe on restart. here for example: [Image #1] [Image #2]",
+  "status": "review",
+  "sessionId": "01f755c2-cc69-4018-a4f4-0d842921a305",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T00:55:27.895Z",
+      "actor": "01f7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T01:14:16.651Z",
+      "actor": "01f7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Locked in cross-session persistence for map edits in cart/editor, per V20's micro-save law. Two gaps existed: placed build pieces lived only in EditorState JS memory (hot-state mirror dies on cold restart), and the painted map's RMAP save only fired from the manual Save button / add-chunk. Both now micro-save on every edit. Zig side: framework/game/map/engine.zig gained setAutosaveFile/autosaveNow — once the editor registers the path, every stroke end, road commit/delete, binding-table edit, zone drop, and chunk growth atomically rewrites zig-out/game/editor/painted-map.rmap host-side (tmp+rename); new __map_set_autosave_file door + mapSetAutosaveFile wrapper; ensureMapSeeded registers it at boot. JS side: new cart/editor/data/worldStore.ts persists placed pieces + zone defs + the id seq to zig-out/game/editor/world-pieces.json with debounced micro-saves fired from AppFrame on every worldPieces/zones change (placements, quick verbs, undo/redo); persistView.loadPersistedState materializes the save into EditorState at boot, so a cold relaunch restores the built world and the map reloads from its RMAP as before. Verified: zig test on the map module 43/43, tools/tsc-check editor clean. NOTE: the pieces half works on the current binary (fs doors already live); the map micro-save needs the next host rebuild — until then the code warns once and the manual Save button still covers painting. Out of scope, flagged for later: V20's total cross-session undo chain (append-only streams) — this slice persists the materialized world, undo history remains per-session.",
+  "shas": [
+    "dc0b944ed"
+  ],
+  "resolvedAt": "2026-07-07T01:14:16.650Z"
+}

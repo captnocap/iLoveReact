@@ -1,0 +1,36 @@
+{
+  "id": "req_2855",
+  "at": "2026-07-10T05:02:02.100Z",
+  "origin": "session:ef08aab4",
+  "text": "i think that apptick line though happens because i was doing: brush size 29 and i added up to 28 chunks and then was just wasd painting. which, when that is happening, i do drop to like 29-20-18 fps, so, that is actually something if possible to find a performance gain that is probably a great start since otherwise it just sits at 240 fps",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T05:02:39.046Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T05:02:55.632Z",
+      "actor": "fable-perf",
+      "kind": "note",
+      "text": "profiling: paint-while-WASD drops 240fps to ~18; apptick jsTick=63ms during strokes at 28 chunks / 4.2M bush rows"
+    },
+    {
+      "at": "2026-07-10T05:07:10.385Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The requested performance gain for paint-time fps drops (29-20-18fps while WASD-painting) was found and shipped under req_2856 (same root cause, clarified repro): unconditional dirty flags in engine.zig paintGlobalCell made no-op re-stamps of unchanged cells regenerate the entire foliage preview every frame. Change-gated flora/tile/zone stamps, commit 0d049271e, rebuild required. If drag-painting new ground still drops fps after retest, the follow-up lever is moving regenPaintFoliage off the frame thread (pose_mailbox pattern, req_2845) and/or per-chunk incremental regen.",
+  "shas": [
+    "0d049271e"
+  ],
+  "resolvedAt": "2026-07-10T05:07:10.385Z"
+}

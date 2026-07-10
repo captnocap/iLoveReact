@@ -1,0 +1,28 @@
+{
+  "id": "req_2782",
+  "at": "2026-07-07T02:27:13.313Z",
+  "origin": "codex:019f3a3b",
+  "text": "hm. erase mode for terrain is just continuing to paint it, make the erase button exist the same as everything else and not off to the side",
+  "status": "review",
+  "sessionId": "019f3a3b-4b5d-7263-a77e-3766f3d10cac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T02:27:20.638Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T02:32:52.129Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed Map Paint terrain erase so erase mode clears terrain even when Ramp or Slope is the selected terrain subtool; those gesture tools now only claim ramp/slope strokes while mode is paint, and erase uses the height erase stamp. Moved Erase from the dock header into the normal brush tile group so it behaves like the other dock controls. Added a Zig regression test covering ramp/slope-selected terrain erase. Verified with zig build test-game-map and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T02:32:52.129Z"
+}

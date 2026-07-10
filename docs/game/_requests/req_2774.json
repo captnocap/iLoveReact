@@ -1,0 +1,28 @@
+{
+  "id": "req_2774",
+  "at": "2026-07-07T01:34:40.464Z",
+  "origin": "codex:019f3a1f",
+  "text": "cool now the X Y Z mirror toggles, got me kinda fucked up. i only now realized it has nothing to do with the outliner and has to do with the position on the workspace, which is wrong. let me show you why. same example on that same set of verts from before if i enable this mirror [Image #1] and then pull this vert long [Image #2] like so, because this piece is identical across its outliner it should identify the other vertex at the bottom and pull it out. the mirroring is treating based on the entire workspace it should be a per-outliner thing, and if there is no matching edge/face/vert on the opposite then it doesnt worry about it",
+  "status": "review",
+  "sessionId": "019f3a1f-336e-7a90-9c24-0ff9bf0dcdd5",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T01:34:57.809Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T01:41:48.742Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Changed live X/Y/Z mirror editing to pair vertices within the same outliner part and reflect around that part's current bounds center instead of workspace/model zero. The mirror overlay now draws through the scoped part center, comments match the new contract, and regression coverage verifies an offset part's Y mirror drags its bottom twin. Verified with zig build test-mesh-edit and SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T01:41:48.742Z"
+}

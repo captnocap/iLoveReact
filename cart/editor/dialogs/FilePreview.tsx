@@ -17,6 +17,7 @@ export default function FilePreview(props: {
     );
   }
   const file = props.file;
+  const visualPreview = file.category === 'model' || file.category === 'texture';
   return (
     <C.HW_FilePreview>
       <C.HW_FilePreviewHead>
@@ -47,7 +48,7 @@ export default function FilePreview(props: {
             </C.HW_StatCell>
           </C.HW_FileMetaGrid>
         )}
-        <C.HW_Spacer />
+        {visualPreview ? null : <C.HW_Spacer />}
         <C.HW_ButtonRow>
           {file.importable ? (
             <C.HW_SmallButton onPress={() => props.onOpenFile(file.id, 'opened')}>

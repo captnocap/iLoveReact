@@ -1,0 +1,28 @@
+{
+  "id": "req_2841",
+  "at": "2026-07-08T02:37:28.742Z",
+  "origin": "session:2a030fa3",
+  "text": "oh dude are we joking.... wait ok so how much total memory is lets just say what is possible to be 'built' ? dude 15mb is offensively low",
+  "status": "review",
+  "sessionId": "2a030fa3-807c-4f93-9fff-ea45cb9c8e6d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-08T02:37:47.000Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-08T02:38:37.001Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Follow-up audit: tallied EVERY fixed wall bounding what can be built. GPU: 256 MiB geometry buffer (112 MiB retained unique meshes = 3.67M verts + 144 MiB dyn tail), 32 MiB static instance pool (1,048,576 placed pieces), 24 MiB slim foliage pool, 2,048 interned shapes, 32,768 scene meshes — ~360 MiB total fixed budget. Physics: 16,384 rect + 16,384 oriented colliders, 256 heightfields, 128 entities. Map: 1,377-chunk address space (18.4km x 1.1km), 64-chunk live paint mirror, ~640 KB CPU per painted chunk (on-demand, unbounded). Root finding: gpu.zig passes NULL device limits so the whole stack sits under WebGPU's DEFAULT 256 MiB maxBufferSize — a default nobody chose, not VRAM. Reported to user with the counterweight that instancing multiplies buildable world beyond raw MB (Vice City pattern). Awaiting the user's elastic-pools + real-device-limits ruling (req_2839/2840/2841 all point at it); no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-08T02:38:37.001Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_2863",
+  "at": "2026-07-10T05:23:33.148Z",
+  "origin": "codex:019f498f",
+  "text": "ah, i see. Yes, i actually use some repo that made a linux port of the OBSBOT control, and so from that interface i can make it a virtual camera, I can also, go the route of passing it through OBS studio and then a virtual camera from OBS studio if that would change its capability",
+  "status": "doing",
+  "sessionId": "019f498f-aa62-7f42-8a08-7ee563073a60",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T05:23:41.324Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

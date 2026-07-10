@@ -1,0 +1,28 @@
+{
+  "id": "req_2839",
+  "at": "2026-07-08T02:30:11.873Z",
+  "origin": "session:2a030fa3",
+  "text": "rebuilt, the change landed. though i guess my only question for follow up is why do we have to do any of this at all. It is hard for me to still comprehend, over the dozens of requests related to this same problem  showing up in different manners and i honestly i just dont get why it matters, meaning like if i want to blow up my machine because of my excessive grass and bush painting, and learn the hard way as to why it matters, then idk i just feel like that feels a lot more reasonable because from the other direction of always incrementing it up, every time we do, its not like all of a sudden the world is unloadable or unplayable.",
+  "status": "review",
+  "sessionId": "2a030fa3-807c-4f93-9fff-ea45cb9c8e6d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-08T02:30:57.336Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-08T02:31:49.153Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design-question ask: why do foliage preview caps exist at all instead of letting the machine be the limit. Answered with the engineering truth: the caps are not user-protection, they are a consequence of the retained GPU architecture — static instance batches reserve fixed regions in a fixed-size 24MB slim pool (bump allocator, offsets must stay valid forever, no realloc), the preview already reserves 62% of the pool shared with the compiled world's foliage, and the preview path draws everything with no streaming/LOD so frame time is the eventual honest wall. Recommended ruling: replace guessed budgets with elastic pools (geometric buffer growth + region relocation) so the only remaining walls are the device's real ones (WebGPU 256MiB buffer cap ≈ 11M slim rows, and FPS). No code changed; awaiting the user's ruling on whether to build the elastic-pool refactor.",
+  "shas": [],
+  "resolvedAt": "2026-07-08T02:31:49.153Z"
+}

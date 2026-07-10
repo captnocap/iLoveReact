@@ -1,0 +1,29 @@
+{
+  "id": "req_2829",
+  "at": "2026-07-07T09:38:51.853Z",
+  "origin": "session-fable-main",
+  "text": "lmao dude this is sad no way that all the brushes in the mesh painter are just still the basic brush, they really went all the way to port the icon for the brush shape and not put in the actual brush? just now finding this out",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-07-07T09:38:58.856Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T10:06:11.525Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Ported the real brushes into the mesh painter: model_paint.zig gains a CPU port of paintable.zig's brush fragment — the exact WGSL formulas for all 11 BRUSH_SHAPE_ID kinds (round/soft/square/flat/angle/filbert/rake/fan/dry/spray/knife), coverage modulating flow per texel with the door's default hardness 1 preserving the req_2538 hard binary dab. __model_paint_stamp grows an optional footprint tail (kind, hardness, angleDeg, aspect, scatter) — old callers untouched; ModelView passes the live Brush's real fields so the preset icon finally IS the stroke. Stroke-program v3 adds OP_DAB_SHAPED so replay reproduces shapes exactly (grain seeds derive from dab u/v); v1/v2 blobs replay unchanged. Verified headless via meshops stamps + atlas dump: a 30-degree square lands as a crisp tilted rectangle, spray as scatter grain (brush_atlas.png). Commit d62539c6d.",
+  "shas": [
+    "d62539c6d"
+  ],
+  "resolvedAt": "2026-07-07T10:06:11.525Z"
+}

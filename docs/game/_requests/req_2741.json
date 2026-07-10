@@ -1,0 +1,28 @@
+{
+  "id": "req_2741",
+  "at": "2026-07-06T02:05:17.897Z",
+  "origin": "codex:019f351a",
+  "text": "cool. another thing for me you can do is in the actual top chrome, we need the window controls. like the x and the square and the line for minimize and maximize and close",
+  "status": "review",
+  "sessionId": "019f351a-122a-78e0-bbe6-bbb3fa49a918",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T02:05:24.684Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T02:08:31.257Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added real host-backed window controls to the editor top chrome: minimize, maximize, and close buttons now sit at the far right of Chrome.tsx and call the runtime window FFI functions. Marked the editor manifest customChrome=true and made the top chrome windowDrag so packaged editor builds run borderless with the editor-owned titlebar. Added matching classifier styles for neutral min/max hover and red close hover. Verified ship detects customChrome/windowDrag and built the editor; also captured a headless screenshot showing the controls render without overlap.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T02:08:31.257Z"
+}

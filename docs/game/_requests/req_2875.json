@@ -1,0 +1,18 @@
+{
+  "id": "req_2875",
+  "at": "2026-07-10T09:00:22.970Z",
+  "origin": "codex:019f4b3f",
+  "text": "i have been wanting to   \n  add variety of flora like trees and grass and bush    \n  shape, but to be honest i dont really know how to     \n  propose it, so here goes nothing. here is a really    \n  shitty drawing  [Image #1] how i think about it is     \n  like you have something like this and u could use     \n  this as a plane, but then effectively like, uh, build \n  it into a cylinder basically, so that it can sit      \n  wrapped around like a base of a tree. but i           \n  technically only know how to do that with a solid 3d  \n  and not exactly like as a shader that could do the    \n  360 wrapping effect or even however the lathe effect  \n  that is already used to do something the like. ; basically, take a look at the current pipeline for the palm tree flora painting, and yeah idk give me something like some NW pines, or some maples, oaks, conifers like cedars or spruce, and then we already have palm trees which idk i guess im told are the more complicated. whatever it is, we need it to be just as performant as the existing flora system demands in its byte size per painted instance which if i remember correctly, is 24 bytes",
+  "status": "doing",
+  "sessionId": "019f4b3f-0348-7b32-bf2b-e020ee09c9e4",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T09:00:28.607Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

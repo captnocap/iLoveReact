@@ -1,0 +1,28 @@
+{
+  "id": "req_2734",
+  "at": "2026-07-06T01:29:12.689Z",
+  "origin": "codex:019f34da",
+  "text": "hey pretty good a few things the actual list is like a hard cap of 9 and no scroll or ability to page it forward which is silly, but also the preview you can actually use more of the space il show you what it looks like for me [Image #1] you can give it a more column approach that takes the full width but the viewer zoom and move around is excellent",
+  "status": "review",
+  "sessionId": "019f34da-bc30-71e2-a571-d554cad411f8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-06T01:29:21.252Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-06T01:31:52.281Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the asset-result hard cap by replacing the 9-row slice with a scrollable full result list, and changed the file preview layout so image/model previews fill the preview column width and vertical space with metadata below the viewport.",
+  "shas": [],
+  "resolvedAt": "2026-07-06T01:31:52.281Z"
+}

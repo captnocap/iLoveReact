@@ -1,0 +1,28 @@
+{
+  "id": "req_2784",
+  "at": "2026-07-07T02:29:57.067Z",
+  "origin": "codex:019f3a3b",
+  "text": "also the paint mode seems to make the rest of the action bar up here just condition away [Image #1] [Image #2]",
+  "status": "review",
+  "sessionId": "019f3a3b-4b5d-7263-a77e-3766f3d10cac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T02:30:03.665Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T02:32:52.212Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed active Map Paint hiding the rest of the action bar by removing ToolOptions' mapPaint.active early return. Map Paint now remains a toggle segment while the normal world action bar commands, snap, floor, walls, and view controls stay visible. Verified with SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T02:32:52.212Z"
+}

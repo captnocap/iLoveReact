@@ -1,0 +1,30 @@
+{
+  "id": "req_2859",
+  "at": "2026-07-10T05:18:02.439Z",
+  "origin": "session:ef08aab4",
+  "text": "damn ok now the one question i have, shouldnt my performance change drastically from when like lets say my camera view looks like this: [Image #6] versus this: [Image #7] because it genuinely doesnt move the needle between the two, which i have to feel is another area for performance gains",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T05:18:34.863Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T05:29:57.692Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User measured identical fps looking at 143M tris of foliage vs looking at empty ground — correct diagnosis, and the code confirmed it: the draw walk's only cull was distance-based AND explicitly skipped instanced batches (3d.zig 'an instance batch carries many positions'), so the five whole-world foliage family batches submitted every triangle every frame regardless of camera. Built chunk-granular frustum culling: regenPaintFoliage records one {row range, bounding sphere} segment per chunk per family (rows are already chunk-contiguous from the walk), a new scene3d_instance_segments field carries them, and the static draw path extracts Gribb-Hartmann frustum planes from the vp and draws only surviving segments, coalescing adjacent visible ranges into single draws. Segmentless batches draw whole (unchanged); shadow staging is a separate loop, untouched. Commit 040223366; needs rebuild. Verification signal for the user: after rebuild, the HUD TRI counter should crater when looking away from the painted area, and fps should rise correspondingly at high paint densities.",
+  "shas": [
+    "040223366"
+  ],
+  "resolvedAt": "2026-07-10T05:29:57.692Z"
+}

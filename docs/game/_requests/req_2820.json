@@ -1,0 +1,28 @@
+{
+  "id": "req_2820",
+  "at": "2026-07-07T08:33:21.642Z",
+  "origin": "session:154f33da",
+  "text": "which, like, you know free styling is what got us there in the first place anyways, so its not like im against it but the thing that confuses me more is if were going to free style then why do we spend so much damn tokens literally investigating the reference material",
+  "status": "review",
+  "sessionId": "154f33da-c63e-4153-9471-78f88f88027e",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T08:33:52.791Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T08:33:52.801Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Conversational follow-up to req_2819: user asks why heavy token spend investigating reference material coexists with freestyled output. Answer given: reference reading in the current workflow is a ritual with no consumer — investigation happens in sessions that die, fidelity to the reference is never a completion criterion, so reading buys confidence rather than constraints. The JS studio era worked because its reference (Blockbench) was in front of the user's eyes daily, making the user the conformance test; the Zig port's reference is code only agents see, and no process step makes them extract or honor it. Proposed the same fix as req_2819: reference reading must produce a committed spec/checklist that review checks against, giving the token spend a sink. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-07T08:33:52.801Z"
+}

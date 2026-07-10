@@ -1,0 +1,590 @@
+{
+  "version": 1,
+  "id": "character:player:1",
+  "name": "Player Model 1",
+  "kind": "character",
+  "stage": "wip",
+  "folderId": "models-characters",
+  "semanticKind": "player",
+  "color": "#d9b08c",
+  "rig": "body",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "skeleton": {
+    "id": "character:player:1",
+    "bones": [
+      {
+        "id": "body",
+        "transform": {
+          "pos": [
+            0,
+            0.9,
+            0
+          ]
+        }
+      },
+      {
+        "id": "abdomen",
+        "parent": "body",
+        "transform": {
+          "pos": [
+            0,
+            0.16000000000000003,
+            0
+          ]
+        }
+      },
+      {
+        "id": "butt",
+        "parent": "abdomen",
+        "transform": {
+          "pos": [
+            0,
+            -0.18000000000000005,
+            0
+          ]
+        }
+      },
+      {
+        "id": "crotch",
+        "parent": "abdomen",
+        "transform": {
+          "pos": [
+            0,
+            -0.26,
+            0
+          ]
+        }
+      },
+      {
+        "id": "chest",
+        "parent": "abdomen",
+        "transform": {
+          "pos": [
+            0,
+            0.31999999999999984,
+            0
+          ]
+        }
+      },
+      {
+        "id": "breast",
+        "parent": "chest",
+        "transform": {
+          "pos": [
+            0,
+            0.06000000000000005,
+            -0.17
+          ]
+        }
+      },
+      {
+        "id": "back",
+        "parent": "chest",
+        "transform": {
+          "pos": [
+            0,
+            0.020000000000000018,
+            0.17
+          ]
+        }
+      },
+      {
+        "id": "head",
+        "parent": "chest",
+        "transform": {
+          "pos": [
+            0,
+            0.42000000000000015,
+            0
+          ]
+        }
+      },
+      {
+        "id": "mouth",
+        "parent": "head",
+        "transform": {
+          "pos": [
+            0,
+            -0.06000000000000005,
+            -0.18
+          ]
+        }
+      },
+      {
+        "id": "lips",
+        "parent": "mouth",
+        "transform": {
+          "pos": [
+            0,
+            0,
+            -0.010000000000000009
+          ]
+        }
+      },
+      {
+        "id": "teeth",
+        "parent": "mouth",
+        "transform": {
+          "pos": [
+            0,
+            0,
+            0.009999999999999981
+          ]
+        }
+      },
+      {
+        "id": "hair",
+        "parent": "head",
+        "transform": {
+          "pos": [
+            0,
+            0.11999999999999988,
+            0
+          ]
+        }
+      },
+      {
+        "id": "nose",
+        "parent": "head",
+        "transform": {
+          "pos": [
+            0,
+            0,
+            -0.21
+          ]
+        }
+      },
+      {
+        "id": "eye_left",
+        "parent": "head",
+        "transform": {
+          "pos": [
+            -0.08,
+            0.040000000000000036,
+            -0.18
+          ]
+        }
+      },
+      {
+        "id": "eye_right",
+        "parent": "head",
+        "transform": {
+          "pos": [
+            0.08,
+            0.040000000000000036,
+            -0.18
+          ]
+        }
+      },
+      {
+        "id": "shoulder_left",
+        "parent": "chest",
+        "transform": {
+          "pos": [
+            -0.3,
+            0.14000000000000012,
+            0
+          ]
+        }
+      },
+      {
+        "id": "shoulder_right",
+        "parent": "chest",
+        "transform": {
+          "pos": [
+            0.3,
+            0.14000000000000012,
+            0
+          ]
+        }
+      },
+      {
+        "id": "upper_arm_left",
+        "parent": "shoulder_left",
+        "transform": {
+          "pos": [
+            -0.024400000000000033,
+            -0.19850000000000012,
+            0
+          ]
+        }
+      },
+      {
+        "id": "upper_arm_right",
+        "parent": "shoulder_right",
+        "transform": {
+          "pos": [
+            0.024400000000000033,
+            -0.19850000000000012,
+            0
+          ]
+        }
+      },
+      {
+        "id": "elbow_left",
+        "parent": "upper_arm_left",
+        "transform": {
+          "pos": [
+            -0.02429999999999999,
+            -0.1984999999999999,
+            0
+          ]
+        }
+      },
+      {
+        "id": "elbow_right",
+        "parent": "upper_arm_right",
+        "transform": {
+          "pos": [
+            0.02429999999999999,
+            -0.1984999999999999,
+            0
+          ]
+        }
+      },
+      {
+        "id": "lower_arm_left",
+        "parent": "elbow_left",
+        "transform": {
+          "pos": [
+            -0.02579999999999999,
+            -0.16300000000000003,
+            0
+          ]
+        }
+      },
+      {
+        "id": "lower_arm_right",
+        "parent": "elbow_right",
+        "transform": {
+          "pos": [
+            0.02579999999999999,
+            -0.16300000000000003,
+            0
+          ]
+        }
+      },
+      {
+        "id": "wrist_left",
+        "parent": "lower_arm_left",
+        "transform": {
+          "pos": [
+            -0.03520000000000001,
+            -0.22199999999999998,
+            0
+          ]
+        }
+      },
+      {
+        "id": "wrist_right",
+        "parent": "lower_arm_right",
+        "transform": {
+          "pos": [
+            0.03520000000000001,
+            -0.22199999999999998,
+            0
+          ]
+        }
+      },
+      {
+        "id": "hand_left",
+        "parent": "wrist_left",
+        "transform": {
+          "pos": [
+            -0.009299999999999975,
+            -0.0595,
+            0
+          ]
+        }
+      },
+      {
+        "id": "hand_right",
+        "parent": "wrist_right",
+        "transform": {
+          "pos": [
+            0.009299999999999975,
+            -0.0595,
+            0
+          ]
+        }
+      },
+      {
+        "id": "fingers_left",
+        "parent": "hand_left",
+        "transform": {
+          "pos": [
+            -0.01100000000000001,
+            -0.08850000000000002,
+            -0.028
+          ]
+        }
+      },
+      {
+        "id": "fingers_right",
+        "parent": "hand_right",
+        "transform": {
+          "pos": [
+            0.01100000000000001,
+            -0.08850000000000002,
+            -0.028
+          ]
+        }
+      },
+      {
+        "id": "hip_left",
+        "parent": "abdomen",
+        "transform": {
+          "pos": [
+            -0.17,
+            -0.2400000000000001,
+            0
+          ]
+        }
+      },
+      {
+        "id": "hip_right",
+        "parent": "abdomen",
+        "transform": {
+          "pos": [
+            0.17,
+            -0.2400000000000001,
+            0
+          ]
+        }
+      },
+      {
+        "id": "upper_leg_left",
+        "parent": "hip_left",
+        "transform": {
+          "pos": [
+            -0.0068000000000000005,
+            -0.18999999999999995,
+            0
+          ]
+        }
+      },
+      {
+        "id": "upper_leg_right",
+        "parent": "hip_right",
+        "transform": {
+          "pos": [
+            0.0068000000000000005,
+            -0.18999999999999995,
+            0
+          ]
+        }
+      },
+      {
+        "id": "knee_left",
+        "parent": "upper_leg_left",
+        "transform": {
+          "pos": [
+            -0.0068000000000000005,
+            -0.19,
+            0
+          ]
+        }
+      },
+      {
+        "id": "knee_right",
+        "parent": "upper_leg_right",
+        "transform": {
+          "pos": [
+            0.0068000000000000005,
+            -0.19,
+            0
+          ]
+        }
+      },
+      {
+        "id": "lower_leg_left",
+        "parent": "knee_left",
+        "transform": {
+          "pos": [
+            0,
+            -0.185,
+            -0.0275
+          ]
+        }
+      },
+      {
+        "id": "lower_leg_right",
+        "parent": "knee_right",
+        "transform": {
+          "pos": [
+            0,
+            -0.185,
+            -0.0275
+          ]
+        }
+      },
+      {
+        "id": "foot_left",
+        "parent": "lower_leg_left",
+        "transform": {
+          "pos": [
+            0,
+            -0.18,
+            -0.0625
+          ]
+        }
+      },
+      {
+        "id": "foot_right",
+        "parent": "lower_leg_right",
+        "transform": {
+          "pos": [
+            0,
+            -0.18,
+            -0.0625
+          ]
+        }
+      },
+      {
+        "id": "toes_left",
+        "parent": "foot_left",
+        "transform": {
+          "pos": [
+            0,
+            -0.034999999999999996,
+            -0.15
+          ]
+        }
+      },
+      {
+        "id": "toes_right",
+        "parent": "foot_right",
+        "transform": {
+          "pos": [
+            0,
+            -0.034999999999999996,
+            -0.15
+          ]
+        }
+      }
+    ],
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "head",
+          "geometryKey": "head"
+        },
+        {
+          "boneId": "chest",
+          "geometryKey": "chest"
+        },
+        {
+          "boneId": "abdomen",
+          "geometryKey": "abdomen"
+        },
+        {
+          "boneId": "butt",
+          "geometryKey": "butt"
+        },
+        {
+          "boneId": "shoulder_left",
+          "geometryKey": "shoulder_left"
+        },
+        {
+          "boneId": "shoulder_right",
+          "geometryKey": "shoulder_right"
+        },
+        {
+          "boneId": "upper_arm_left",
+          "geometryKey": "upper_arm_left"
+        },
+        {
+          "boneId": "upper_arm_right",
+          "geometryKey": "upper_arm_right"
+        },
+        {
+          "boneId": "elbow_left",
+          "geometryKey": "elbow_left"
+        },
+        {
+          "boneId": "elbow_right",
+          "geometryKey": "elbow_right"
+        },
+        {
+          "boneId": "lower_arm_left",
+          "geometryKey": "lower_arm_left"
+        },
+        {
+          "boneId": "lower_arm_right",
+          "geometryKey": "lower_arm_right"
+        },
+        {
+          "boneId": "wrist_left",
+          "geometryKey": "wrist_left"
+        },
+        {
+          "boneId": "wrist_right",
+          "geometryKey": "wrist_right"
+        },
+        {
+          "boneId": "hand_left",
+          "geometryKey": "hand_left"
+        },
+        {
+          "boneId": "fingers_left",
+          "geometryKey": "fingers_left"
+        },
+        {
+          "boneId": "hand_right",
+          "geometryKey": "hand_right"
+        },
+        {
+          "boneId": "fingers_right",
+          "geometryKey": "fingers_right"
+        },
+        {
+          "boneId": "hip_left",
+          "geometryKey": "hip_left"
+        },
+        {
+          "boneId": "hip_right",
+          "geometryKey": "hip_right"
+        },
+        {
+          "boneId": "upper_leg_left",
+          "geometryKey": "upper_leg_left"
+        },
+        {
+          "boneId": "upper_leg_right",
+          "geometryKey": "upper_leg_right"
+        },
+        {
+          "boneId": "knee_left",
+          "geometryKey": "knee_left"
+        },
+        {
+          "boneId": "knee_right",
+          "geometryKey": "knee_right"
+        },
+        {
+          "boneId": "lower_leg_left",
+          "geometryKey": "lower_leg_left"
+        },
+        {
+          "boneId": "lower_leg_right",
+          "geometryKey": "lower_leg_right"
+        },
+        {
+          "boneId": "foot_left",
+          "geometryKey": "foot_left"
+        },
+        {
+          "boneId": "foot_right",
+          "geometryKey": "foot_right"
+        }
+      ]
+    }
+  }
+}

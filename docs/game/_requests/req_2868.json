@@ -1,0 +1,30 @@
+{
+  "id": "req_2868",
+  "at": "2026-07-10T06:42:35.132Z",
+  "origin": "session:ef08aab4",
+  "text": "nice that was a big performance gain, it went from ~15fps to now hovers around 90 when moving around the brush and painting, any way to make it more optimisitic ?",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T06:44:56.809Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T06:49:13.837Z",
+      "actor": "fable-perf",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "User confirmed req_2864 shipped a 15fps→90fps gain while drag-painting and asked for more. Diagnosis: the remaining cost is the VIEW, not the paint path — their own HUD showed 109fps/8.2ms GPU just standing in the 143M-triangle view, so painting itself now only costs ~2ms. Built distance-density LOD on top of the req_2859 segment machinery: the regen worker Fisher-Yates shuffles each chunk's grass/flower/bush rows (seeded per chunk, stable across regens so the distant subset never shimmers), making any prefix of a segment a spatially uniform density sample; the segmented draw path thins far segments to a prefix — full density inside 150m, linear falloff to a 15% floor at 480m (named constants FOLIAGE_LOD_* in 3d.zig). Fronds/trunks always draw whole (thinned crowns read as half-bald palms; trunks anchor the skyline). Near field stays EXACT. New Node flag scene3d_instance_lod_density gates it; only the foliage preview sets it. Verified with full no-V8 loader compile. Commit 9f22bb21f; rebuild required. Expected: submitted TRI drops hard in dense views (most painted area sits past 150m), GPU ms falls proportionally — rough estimate 90fps → 150-190 while painting, and standing views rise too. If the user notices distant thinning they can say so — the FLOOR/FAR constants are the dials.",
+  "shas": [
+    "9f22bb21f"
+  ],
+  "resolvedAt": "2026-07-10T06:49:13.837Z"
+}

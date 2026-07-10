@@ -3,7 +3,7 @@
   "at": "2026-07-06T01:20:32.503Z",
   "origin": "session:922efce7",
   "text": "yes. i do need to have them all materialized into an actual file. [Image #98] [Image #99] [Image #100] all of these",
-  "status": "doing",
+  "status": "review",
   "sessionId": "922efce7-f48c-4350-9978-1334e002b188",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,18 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-06T01:31:22.477Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Materialized the entire visible model library into real on-disk packages. New materializeSnapshotPackage writer in modelPackageStore.ts lays down mesh/base.blob (cooked content-addressed blob or studio baked verts), the copied .glb/.obj for file-backed models with the manifest viewerPath repointed inside the package, mesh/editmesh.json carrying the authored studio parts, and atlases/base.png from cooked texture blobs — manifest written last as the commit point. hmscAssetCatalog runs it idempotently on every catalog load for any roster model without a package. Verified live: the running dev host hot-reloaded and wrote ~100 packages (props 17→89 dirs, build 1→30), zero empty mesh dirs, all file-backed manifests point inside their package. Committed 72MB library + code.",
+  "shas": [
+    "22b00daed"
+  ],
+  "resolvedAt": "2026-07-06T01:31:22.477Z"
 }

@@ -1,0 +1,36 @@
+{
+  "id": "req_2792",
+  "at": "2026-07-07T05:09:30.308Z",
+  "origin": "session:e48518b6",
+  "text": "so ok the problem im having is that this is clearly not the same as the game loader because i can walk through every wall in here",
+  "status": "review",
+  "sessionId": "e48518b6-f1b3-4c35-b43f-da91f8bd3fb1",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T05:10:15.471Z",
+      "actor": "e485",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T05:16:11.583Z",
+      "actor": "e485",
+      "kind": "note",
+      "text": "Root cause: the playtest tab IS the same loader as the game — but the game collides against the baked COLLIDERS lump, and the editor's placed pieces reach the loader through the LIVE overlay doors (req_1798), which were draw-only. Only painted terrain had colliders. Fix (world_loader.zig applyLiveColliders): when the live overlay generation moves, the physics step buffer rebuilds as BASE (build-time rects/oriented, door/elevator in-place state preserved) + LIVE (the same floors-first two-pass instance derivation the pre-lump path uses, over the 12-stride live rows; yawed rows become oriented rects). Heightfields untouched (a full rebuild would clearHeightfields and drop the painted terrain). Decomposed stair steps land as walkable bands, so live stairs climb via step-up. Known follow-up gap: live MESH-prop placements (palette props referencing resident meshes) are still walk-through — their island colliders need the mesh vertex pass, a separate slice. Shipping to verify."
+    },
+    {
+      "at": "2026-07-07T05:19:23.242Z",
+      "actor": "e485",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Walk-through-walls in the playtest tab fixed. It was the same loader as the game — the difference was data: the shipped game collides against the baked COLLIDERS lump, but the editor's placed pieces arrive through the LIVE overlay doors (req_1798), which were draw-only, so only painted terrain collided. world_loader.zig applyLiveColliders now folds the live rows into the physics step buffer whenever the overlay generation moves: base rects/oriented (build-time sections, door/elevator in-place state preserved, indices stable) + live-derived colliders using the same floors-first two-pass the pre-lump instance path uses — walls solid by height, floors standable bands, decomposed stair steps climbable via step-up, yawed rows become oriented rects. Heightfields deliberately untouched (a full rebuild would clearHeightfields and drop painted terrain). Verified headless on the blank editor world: 182 placed pieces folded to 345 rect + 110 oriented physics colliders in the boot log. Known follow-up: live MESH-prop placements (resident-mesh refs) still walk-through — their island collider pass is a separate slice.",
+  "shas": [
+    "0fea10e14"
+  ],
+  "resolvedAt": "2026-07-07T05:19:23.242Z"
+}

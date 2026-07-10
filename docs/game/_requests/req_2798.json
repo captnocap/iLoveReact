@@ -1,0 +1,10 @@
+{
+  "id": "req_2798",
+  "at": "2026-07-07T05:33:22.362Z",
+  "origin": "session:aa097d45",
+  "text": "it breaks in really weird ways actually, sorry to keep cutting you off but heres a better look. [Image #9] [Image #10] [Image #11] [Image #12] [Image #13] [Image #14] from what it looks like. every single 'long edge' that should have came from the cut, is segmented in 3 and none of it is normalized, all at different cut lengths",
+  "status": "new",
+  "sessionId": "aa097d45-9eb1-4d3a-b247-55e427b8a265",
+  "captureMode": "hook",
+  "events": []
+}

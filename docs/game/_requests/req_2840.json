@@ -1,0 +1,28 @@
+{
+  "id": "req_2840",
+  "at": "2026-07-08T02:34:07.424Z",
+  "origin": "session:2a030fa3",
+  "text": "and thats gpu memory it is stored in then yes ok, but how much total memory is that even",
+  "status": "review",
+  "sessionId": "2a030fa3-807c-4f93-9fff-ea45cb9c8e6d",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-08T02:34:26.269Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-08T02:35:31.534Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Factual follow-up: how much GPU memory the foliage preview actually occupies. Tallied from framework/gpu/3d.zig buffer creations: the preview's five families reserve ~15.5 MiB VRAM (655,360 slim rows x 24 B + 16,384 trunk rows x 32 B) inside a 24 MiB slim static pool; the renderer's entire fixed GPU footprint is ~360 MiB (256 MiB retained geometry pool at the WebGPU default 256 MiB maxBufferSize, 32 MiB static instance pool, 24 MiB slim pool, ~30 MiB per-frame staging, 16 MiB shadow map). On an 8-24 GB GPU the contested budget is ~0.2% of VRAM; the 256 MiB per-buffer ceiling is a WebGPU DEFAULT raisable at device creation. Reported to the user; strengthens the pending elastic-pool ruling from req_2839. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-08T02:35:31.534Z"
+}

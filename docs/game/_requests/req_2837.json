@@ -1,0 +1,30 @@
+{
+  "id": "req_2837",
+  "at": "2026-07-07T11:02:35.284Z",
+  "origin": "session:b5324d7d",
+  "text": "we have yet another loop cut problem. so evaluate this shape. [Image #19] and then im going to loop cut it and notice how the cut does this [Image #20] it slants and you cant unslant it",
+  "status": "review",
+  "sessionId": "b5324d7d-86ca-4ed6-8bd5-60c084cf067a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-07T11:02:46.057Z",
+      "actor": "fable-loopcut",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-07T11:05:56.869Z",
+      "actor": "fable-loopcut",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the slanted loop cut on the tapered obelisk: the edge-mode loop cut (framework/gpu/3d.zig meshTopoLoopCut) built its cut plane perpendicular to the raw selected-edge direction, so a leaning side edge produced a tilted plane and a slanted ring that no gizmo move could level. Fixed by snapping the plane normal to the edge's dominant world axis (through the edge midpoint) — a mostly-vertical leaning edge now cuts a flat horizontal ring, axis-aligned edges behave exactly as before, matching the axis-aligned face-popup loop cut family. Needs a Zig rebuild to take effect.",
+  "shas": [
+    "a8b6382bc"
+  ],
+  "resolvedAt": "2026-07-07T11:05:56.869Z"
+}

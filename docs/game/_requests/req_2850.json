@@ -1,0 +1,28 @@
+{
+  "id": "req_2850",
+  "at": "2026-07-10T04:42:12.273Z",
+  "origin": "session:ef08aab4",
+  "text": "ok so thats 48mb of RAM for bushes then, which mirrors into the gpu just for the sake of edit time? so it would effectively go away in the final product",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T04:42:23.108Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T04:43:33.069Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Follow-up comprehension question on req_2849: does the 48 MiB CPU foliage buffer vanish in the final product? Answered from source: yes for the elastic PREVIEW buffer (req_2497 live paint preview in world_loader.zig paint slots — regenerated whole while painting, edit-time only). The shipped map carries only a tiny FLORA recipe (per-cell spec/count/chance); at load the same framework/world/foliage.zig generators expand it once into stride-13 instance rows (world_loader.zig ~4650), uploaded to GPU, with streaming gating residency. So a CPU instance array still exists at play, but expanded once at load and sized by the bake, not the continuously-regrowing paint preview. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T04:43:33.069Z"
+}

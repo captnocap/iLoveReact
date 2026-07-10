@@ -1,0 +1,28 @@
+{
+  "id": "req_2851",
+  "at": "2026-07-10T04:46:32.563Z",
+  "origin": "session:ef08aab4",
+  "text": "hm ok so then lets just run some napkin math on that, i would say that the point where it starts to become a problem would be probably if it required 750mb-1gb of memory for it to exist. so just based on that rough number, and the way the world scales, how many chunks of strictly flora would it take to hit those ranges",
+  "status": "review",
+  "sessionId": "ef08aab4-8e25-41e4-8bdf-15a98477620f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T04:46:45.869Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T04:47:42.725Z",
+      "actor": "fable-explainer",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Napkin math for req_2851: at what flora scale does instance-row RAM hit the user's 750MB-1GB concern line. Pulled real constants: chunk = 120x120m = 14,400 one-metre cells (chunks.zig), rows/cell from FLORA_SPECS (floraKinds.ts: grass 3/7/16, bush 14, flowers 6, palm chance 0.08/0.22/0.7 at ~25 rows/palm from foliage.zig PalmCrown), play-path rows = stride-13 = 52 B. Per-chunk fully painted: med grass 5.2MB, lush 12MB, bush 10.5MB, dense palm ~13MB, all-3-lanes-stacked ~36MB. 750MB is hit at ~143 med-grass chunks, ~63 lush, ~72 bush, ~57 dense palm, ~21 fully-stacked; 1GB at ~195/85/98/78/29. GPU mirror doubles the footprint. Answer only, no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-10T04:47:42.725Z"
+}
