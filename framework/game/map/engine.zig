@@ -764,22 +764,36 @@ fn paintGlobalCell(gtx: i32, gtz: i32, erase: bool) void {
     const cz = chunks.chunkOfGlobalTile(gtz);
     const ch = chunks.chunkAt(cx, cz) orelse return; // paint only grown chunks
     const idx = chunks.cellIndex(gtx - cx * CHUNK_TILES, gtz - cz * CHUNK_TILES) orelse return;
+    // Dirty only on a REAL value change (req_2856): a held brush re-stamps the
+    // same cells every frame, and an unconditional dirty made each of those
+    // no-op stamps regenerate the whole foliage preview (240fps → 14fps while
+    // holding the mouse). Same change-gate the height stamp already had.
     switch (g_tool.channel) {
         .tile => {
             // TODO(phase 5): road-owned cells become immutable to paint/erase
             // once the road recipe layer lands (USER RULING req_0795).
-            ch.tiles[idx] = if (erase) chunks.EMPTY_CELL else g_tool.kind_idx;
-            ch.materials[idx] = if (erase) chunks.EMPTY_CELL else g_tool.bind_idx;
-            ch.dirty.tiles = true;
+            const tile: i16 = if (erase) chunks.EMPTY_CELL else g_tool.kind_idx;
+            const mat: i16 = if (erase) chunks.EMPTY_CELL else g_tool.bind_idx;
+            if (ch.tiles[idx] != tile or ch.materials[idx] != mat) {
+                ch.tiles[idx] = tile;
+                ch.materials[idx] = mat;
+                ch.dirty.tiles = true;
+            }
         },
         .flora => {
             const lane = @min(g_tool.flora_lane, chunks.FLORA_LAYER_COUNT - 1);
-            ch.flora[lane][idx] = if (erase) chunks.EMPTY_CELL else g_tool.flora_kind_idx;
-            ch.dirty.flora = true;
+            const kind: i16 = if (erase) chunks.EMPTY_CELL else g_tool.flora_kind_idx;
+            if (ch.flora[lane][idx] != kind) {
+                ch.flora[lane][idx] = kind;
+                ch.dirty.flora = true;
+            }
         },
         .zone => {
-            ch.zones[idx] = if (erase) chunks.EMPTY_CELL else g_tool.zone_idx;
-            ch.dirty.zones = true;
+            const zone: i16 = if (erase) chunks.EMPTY_CELL else g_tool.zone_idx;
+            if (ch.zones[idx] != zone) {
+                ch.zones[idx] = zone;
+                ch.dirty.zones = true;
+            }
         },
         else => {},
     }
