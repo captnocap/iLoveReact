@@ -1134,6 +1134,29 @@ pub fn build(b: *std.Build) void {
     const model_paint_test_step = b.step("test-model-paint", "Run the model-paint raycast/atlas unit tests");
     model_paint_test_step.dependOn(&run_model_paint_test.step);
 
+    // ── model-stage scale cue unit tests — headless, no GPU ───────────────────
+    // Pins the ruled metre contract consumed by the native modeling-stage overlay:
+    // coarse tile, collider, visual head top, and ruler tick cadence.
+    const stage_scale_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/stage_scale.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    stage_scale_test_mod.addImport("stage_scale", b.createModule(.{
+        .root_source_file = b.path("framework/gpu/stage_scale.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    }));
+    const stage_scale_test = b.addTest(.{
+        .name = "stage-scale-test",
+        .root_module = stage_scale_test_mod,
+    });
+    const run_stage_scale_test = b.addRunArtifact(stage_scale_test);
+    const stage_scale_test_step = b.step("test-stage-scale", "Run the model-stage scale cue unit tests");
+    stage_scale_test_step.dependOn(&run_stage_scale_test.step);
+
     // ── mesh edit (welded topology + vertex/edge/face selection) unit tests ───
     const mesh_edit_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/gpu/mesh_edit.zig"),

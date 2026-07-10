@@ -21,6 +21,7 @@ const paint_islands_mod = @import("paint_islands.zig");
 const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
 const mesh_edit = @import("mesh_edit.zig");
+const stage_scale = @import("stage_scale.zig");
 const capsules = @import("capsules.zig");
 const polys = @import("polys.zig");
 const Node = layout.Node;
@@ -3535,15 +3536,56 @@ const OV_LC_HANDLE_PX: f32 = 34; // translate-style handle half-length on the cu
 // density uses (model_paint: detail is texels per METER, 16x = 16 to the meter) and the
 // studio grid pinned (unitsPerTile 16, tileMeters 1, gridTiles 3, fineDivisions 16).
 // This is tile SPACE, not decoration: a part spanning one panel is one tile in-game.
-const STAGE_TILE_M: f32 = 1.0; // one panel = one game tile = 1 m
+const STAGE_TILE_M: f32 = stage_scale.Tuning.tile_meters; // one panel = one game tile = 1 m
 const STAGE_TILES: u32 = 3; // 3×3 panels on the ground plane
 const STAGE_FINE_DIV: u32 = 16; // center panel sub-grid: 1 u = 1/16 m pitch
-const STAGE_AXIS_M: f32 = 1.0; // world axis lines from origin (studio axisLengthMeters)
+const STAGE_AXIS_M: f32 = STAGE_TILE_M; // one game metre from origin
 const STAGE_PANEL = [4]f32{ 0.30, 0.40, 0.62, 0.09 }; // faint blue-grey tile panel
 const STAGE_PANEL_CENTER = [4]f32{ 0.36, 0.48, 0.72, 0.13 }; // brighter fine center cell
 const STAGE_LINE = [4]f32{ 0.46, 0.56, 0.78, 0.38 }; // tile boundary lines
 const STAGE_FINE_LINE = [4]f32{ 0.46, 0.56, 0.78, 0.16 }; // center sub-grid (dimmer)
 const STAGE_AXIS_ALPHA: f32 = 0.55;
+// Player-scale cue (req_2869): the floor grid tells width/depth, but it has no honest
+// height reference. This compact ruler + mannequin lives in the native stage overlay so
+// it follows the same camera and metre contract as the mesh and never becomes model data.
+const STAGE_SCALE_CUE = struct {
+    // The cue sits on the ground plane beside the camera target, not at a fixed stage
+    // corner. Small models frame tightly, so a corner ruler would fall offscreen just
+    // when its scale reference is most needed.
+    const ruler_side_min_m: f32 = 0.36;
+    const ruler_side_radius_fraction: f32 = 0.40;
+    const ruler_side_max_m: f32 = 0.70;
+    const mannequin_ruler_gap_m: f32 = 0.34;
+    const ruler_minor_tick_length_m: f32 = 0.10;
+    const ruler_major_tick_length_m: f32 = 0.18;
+    const ruler_reference_tick_length_m: f32 = 0.28;
+    const ruler_width_px: f32 = 2.0;
+    const tick_width_px: f32 = 1.3;
+    const reference_width_px: f32 = 2.2;
+    const guide_width_px: f32 = 1.1;
+    const label_pad_px: f32 = 8;
+    const label_font_px: u16 = 11;
+    const label_top_rise_px: f32 = 11;
+    const label_center_rise_px: f32 = 5.5;
+    const mannequin_shoulder_height_m: f32 = 1.43;
+    const mannequin_hip_height_m: f32 = 0.84;
+    const mannequin_hand_height_m: f32 = 0.92;
+    const mannequin_shoulder_half_width_m: f32 = 0.20;
+    const mannequin_hand_half_width_m: f32 = 0.32;
+    const mannequin_foot_half_width_m: f32 = 0.13;
+    const mannequin_head_radius_m: f32 = 0.16;
+    const mannequin_line_width_px: f32 = 2.2;
+    const mannequin_head_min_diameter_px: f32 = 7;
+    const mannequin_head_max_diameter_px: f32 = 42;
+    const mannequin_viewport_margin_px: f32 = 16;
+    const ruler = [4]f32{ 0.63, 0.75, 0.98, 0.80 };
+    const meter = [4]f32{ 0.66, 0.80, 1.0, 0.88 };
+    const collider = [4]f32{ 1.0, 0.67, 0.32, 0.96 };
+    const visual_head = [4]f32{ 0.78, 0.56, 1.0, 0.96 };
+    const mannequin = [4]f32{ 0.71, 0.84, 1.0, 0.78 };
+    const guide_alpha: f32 = 0.54;
+    const text_shadow = [4]f32{ 0.02, 0.03, 0.07, 0.90 };
+};
 // ── Viewport orientation compass (req_2643 gap LL) ─────────────────────────────────
 // The old studio's bottom-left nav ball, host-native: a small ball whose three axis
 // arms are the CURRENT camera's rotation applied to the world basis (rotation only —
@@ -4087,6 +4129,136 @@ fn drawStageLines(cam: model_paint.Camera, ox: f32, oy: f32) void {
         stageLine(cam, .{ 0, 0, 0 }, vmul(axisVec(a), STAGE_AXIS_M), .{ c[0], c[1], c[2], STAGE_AXIS_ALPHA }, 1.8, ox, oy);
     }
 }
+
+fn stageScaleCameraRight(cam: model_paint.Camera) [3]f32 {
+    const forward = vnorm(vsub(cam.target, cam.eye));
+    const right = vcross(forward, .{ 0, 1, 0 });
+    return if (vdot(right, right) < 1e-8) .{ 1, 0, 0 } else vnorm(right);
+}
+
+fn stageScalePoint(origin: [3]f32, right: [3]f32, lateral_m: f32, height_m: f32) [3]f32 {
+    return .{ origin[0] + right[0] * lateral_m, height_m, origin[2] + right[2] * lateral_m };
+}
+
+fn stageScaleRulerOrigin(cam: model_paint.Camera, right: [3]f32) [3]f32 {
+    const side_m = std.math.clamp(
+        g_orbit.radius * STAGE_SCALE_CUE.ruler_side_radius_fraction,
+        STAGE_SCALE_CUE.ruler_side_min_m,
+        STAGE_SCALE_CUE.ruler_side_max_m,
+    );
+    return stageScalePoint(.{ cam.target[0], 0, cam.target[2] }, right, -side_m, 0);
+}
+
+fn stageScaleMannequinOrigin(ruler: [3]f32, right: [3]f32) [3]f32 {
+    return stageScalePoint(ruler, right, -STAGE_SCALE_CUE.mannequin_ruler_gap_m, 0);
+}
+
+fn stageScaleMarkColor(tone: stage_scale.MarkTone) [4]f32 {
+    return switch (tone) {
+        .meter => STAGE_SCALE_CUE.meter,
+        .collider => STAGE_SCALE_CUE.collider,
+        .visual_head => STAGE_SCALE_CUE.visual_head,
+    };
+}
+
+fn stageScaleTickEnd(ruler: [3]f32, right: [3]f32, height_m: f32, length_m: f32) [3]f32 {
+    return stageScalePoint(ruler, right, length_m, height_m);
+}
+
+fn stageScalePointInViewport(p: [2]f32) bool {
+    const margin = STAGE_SCALE_CUE.mannequin_viewport_margin_px;
+    return p[0] >= g_paint_vp_x + margin and p[0] <= g_paint_vp_x + g_paint_vp_w - margin and
+        p[1] >= g_paint_vp_y + margin and p[1] <= g_paint_vp_y + g_paint_vp_h - margin;
+}
+
+/// A lightweight standing player reference. It is deliberately an overlay—not a scene
+/// mesh—so it can never be selected, baked, painted, or confused with the authored model.
+fn drawStageScaleMannequin(cam: model_paint.Camera, origin: [3]f32, right: [3]f32, ox: f32, oy: f32) void {
+    const col = STAGE_SCALE_CUE.mannequin;
+    const feet = ovProject(cam, origin, ox, oy) orelse return;
+    const visual_head_top = ovProject(cam, stageScalePoint(origin, right, 0, stage_scale.Tuning.player_visual_head_top_meters), ox, oy) orelse return;
+    // A player taller than the current zoom should not leave a broken half-figure
+    // on the edge of the stage. The ruler still shows every in-frame meter mark;
+    // zoom out a notch and the full physical reference appears.
+    if (!stageScalePointInViewport(feet) or !stageScalePointInViewport(visual_head_top)) return;
+    const shoulder = stageScalePoint(origin, right, 0, STAGE_SCALE_CUE.mannequin_shoulder_height_m);
+    const hip = stageScalePoint(origin, right, 0, STAGE_SCALE_CUE.mannequin_hip_height_m);
+    const head_center = stageScalePoint(origin, right, 0, stage_scale.Tuning.player_visual_head_top_meters - STAGE_SCALE_CUE.mannequin_head_radius_m);
+    const head_base = stageScalePoint(origin, right, 0, stage_scale.Tuning.player_visual_head_top_meters - STAGE_SCALE_CUE.mannequin_head_radius_m * 2);
+    const left_shoulder = stageScalePoint(origin, right, -STAGE_SCALE_CUE.mannequin_shoulder_half_width_m, shoulder[1]);
+    const right_shoulder = stageScalePoint(origin, right, STAGE_SCALE_CUE.mannequin_shoulder_half_width_m, shoulder[1]);
+    const left_hand = stageScalePoint(origin, right, -STAGE_SCALE_CUE.mannequin_hand_half_width_m, STAGE_SCALE_CUE.mannequin_hand_height_m);
+    const right_hand = stageScalePoint(origin, right, STAGE_SCALE_CUE.mannequin_hand_half_width_m, STAGE_SCALE_CUE.mannequin_hand_height_m);
+    const left_foot = stageScalePoint(origin, right, -STAGE_SCALE_CUE.mannequin_foot_half_width_m, 0);
+    const right_foot = stageScalePoint(origin, right, STAGE_SCALE_CUE.mannequin_foot_half_width_m, 0);
+
+    stageLine(cam, hip, shoulder, col, STAGE_SCALE_CUE.mannequin_line_width_px, ox, oy);
+    stageLine(cam, shoulder, head_base, col, STAGE_SCALE_CUE.mannequin_line_width_px, ox, oy);
+    stageLine(cam, left_shoulder, right_shoulder, col, STAGE_SCALE_CUE.mannequin_line_width_px, ox, oy);
+    stageLine(cam, left_shoulder, left_hand, col, STAGE_SCALE_CUE.mannequin_line_width_px, ox, oy);
+    stageLine(cam, right_shoulder, right_hand, col, STAGE_SCALE_CUE.mannequin_line_width_px, ox, oy);
+    stageLine(cam, hip, left_foot, col, STAGE_SCALE_CUE.mannequin_line_width_px, ox, oy);
+    stageLine(cam, hip, right_foot, col, STAGE_SCALE_CUE.mannequin_line_width_px, ox, oy);
+
+    const head = ovProject(cam, head_center, ox, oy) orelse return;
+    const units_per_px = @max(@as(f32, 0.0001), worldUnitsPerPixel(cam, head_center));
+    const raw_head_diameter_px = STAGE_SCALE_CUE.mannequin_head_radius_m * 2 / units_per_px;
+    const head_diameter_px = @max(
+        STAGE_SCALE_CUE.mannequin_head_min_diameter_px,
+        @min(STAGE_SCALE_CUE.mannequin_head_max_diameter_px, raw_head_diameter_px),
+    );
+    capsules.drawCapsule(head[0], head[1], head[0], head[1], OV_HALO[0], OV_HALO[1], OV_HALO[2], OV_HALO[3], head_diameter_px + 3.5);
+    capsules.drawCapsule(head[0], head[1], head[0], head[1], col[0], col[1], col[2], col[3], head_diameter_px);
+}
+
+/// Height cues beside the existing 1m floor grid: a 0–3m ruler, distinct collider and
+/// visual-head guides, and a passive mannequin whose feet sit on the same y=0 plane.
+fn drawStageScaleCue(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const right = stageScaleCameraRight(cam);
+    const ruler = stageScaleRulerOrigin(cam, right);
+    const mannequin = stageScaleMannequinOrigin(ruler, right);
+    const ruler_top = [3]f32{ ruler[0], stage_scale.Tuning.ruler_height_meters, ruler[2] };
+    stageLine(cam, ruler, ruler_top, STAGE_SCALE_CUE.ruler, STAGE_SCALE_CUE.ruler_width_px, ox, oy);
+
+    var tick_index: u32 = 0;
+    while (tick_index <= stage_scale.minorTickCount()) : (tick_index += 1) {
+        const height_m = stage_scale.tickMeters(tick_index);
+        const major = stage_scale.isMajorTick(tick_index);
+        const tick_length_m = if (major) STAGE_SCALE_CUE.ruler_major_tick_length_m else STAGE_SCALE_CUE.ruler_minor_tick_length_m;
+        const tick_col = if (major) STAGE_SCALE_CUE.meter else STAGE_SCALE_CUE.ruler;
+        stageLine(cam, .{ ruler[0], height_m, ruler[2] }, stageScaleTickEnd(ruler, right, height_m, tick_length_m), tick_col, STAGE_SCALE_CUE.tick_width_px, ox, oy);
+    }
+
+    for (stage_scale.reference_marks) |mark| {
+        const col = stageScaleMarkColor(mark.tone);
+        const tick_end = stageScaleTickEnd(ruler, right, mark.meters, STAGE_SCALE_CUE.ruler_reference_tick_length_m);
+        const guide_start = stageScalePoint(mannequin, right, STAGE_SCALE_CUE.mannequin_shoulder_half_width_m, mark.meters);
+        const guide_col = [4]f32{ col[0], col[1], col[2], STAGE_SCALE_CUE.guide_alpha };
+        stageLine(cam, .{ ruler[0], mark.meters, ruler[2] }, tick_end, col, STAGE_SCALE_CUE.reference_width_px, ox, oy);
+        stageLine(cam, guide_start, .{ ruler[0], mark.meters, ruler[2] }, guide_col, STAGE_SCALE_CUE.guide_width_px, ox, oy);
+    }
+    drawStageScaleMannequin(cam, mannequin, right, ox, oy);
+}
+
+fn drawStageScaleLabel(label: []const u8, x: f32, y: f32, col: [4]f32) void {
+    core.drawTextLine(label, x + 1, y + 1, STAGE_SCALE_CUE.label_font_px, STAGE_SCALE_CUE.text_shadow[0], STAGE_SCALE_CUE.text_shadow[1], STAGE_SCALE_CUE.text_shadow[2], STAGE_SCALE_CUE.text_shadow[3]);
+    core.drawTextLine(label, x, y, STAGE_SCALE_CUE.label_font_px, col[0], col[1], col[2], col[3]);
+}
+
+/// Text rides a later overlay segment than the ruler capsules, keeping labels readable on
+/// either dark stage space or a bright model face.
+fn drawStageScaleText(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const right = stageScaleCameraRight(cam);
+    const ruler = stageScaleRulerOrigin(cam, right);
+    const title = ovProject(cam, .{ ruler[0], stage_scale.Tuning.ruler_height_meters, ruler[2] }, ox, oy);
+    if (title) |p| drawStageScaleLabel("PLAYER SCALE", p[0] + STAGE_SCALE_CUE.label_pad_px, p[1] - STAGE_SCALE_CUE.label_top_rise_px, STAGE_SCALE_CUE.meter);
+    for (stage_scale.reference_marks) |mark| {
+        const tick_end = stageScaleTickEnd(ruler, right, mark.meters, STAGE_SCALE_CUE.ruler_reference_tick_length_m);
+        const p = ovProject(cam, tick_end, ox, oy) orelse continue;
+        const col = stageScaleMarkColor(mark.tone);
+        drawStageScaleLabel(mark.label, p[0] + STAGE_SCALE_CUE.label_pad_px, p[1] - STAGE_SCALE_CUE.label_center_rise_px, col);
+    }
+}
 /// Faces the current selection touches (any mode) — alloc'd, caller frees. Null when
 /// nothing is selected (or allocation fails), so callers can skip the lookup entirely.
 fn selectionFaceMaskAlloc(fc: u32) ?[]bool {
@@ -4532,12 +4704,20 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     drawLoopCutOverlay(cam, ox, oy);
     if (mode != 0) drawMirrorPlanesOverlay(cam, ox, oy); // req_2758: edit dressing, quiet in paint/view
     drawGizmoOverlay(cam, ox, oy);
+    // Scale ladder + mannequin (req_2869): passive stage furniture, always present even
+    // in paint/view mode so the author can judge an asset before it ever reaches play.
+    drawStageScaleCue(cam, ox, oy);
     drawMarqueeOverlay();
+    // Text needs a later segment than the ruler capsules; otherwise the batch's glyph
+    // flush lands under them and the numerical height marks become unreadable.
+    overlayLayerBreak(ox, oy);
+    drawStageScaleText(cam, ox, oy);
     // Layer 5: the orientation compass — always-on view furniture like the stage
     // (req_2643 gap LL). Ball/arms/dots ride this capsule segment (on top of the mesh
     // dressing); the break puts labels + the angle readout in a LATER segment so the
     // glyphs land ON the dots (within one segment text flushes before capsules).
     if (compassVisible()) {
+        overlayLayerBreak(ox, oy);
         drawCompassBall(cam);
         overlayLayerBreak(ox, oy);
         drawCompassText(cam);
