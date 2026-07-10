@@ -26,6 +26,12 @@
       "kind": "state",
       "from": "doing",
       "to": "review"
+    },
+    {
+      "at": "2026-07-10T17:49:10.130Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "User visually confirmed the workspace stats, rename, open, and map isolation are working in the rebuilt dev host."
     }
   ],
   "resolution": "Instrumented Map Workspaces with live/last-render triangle counts, non-mutating on-disk RMAP chunk counts, and modification timestamps. Added stable-id friendly renaming (including the chrome title) plus an explicit two-step recursive delete for inactive maps, with backend guards against deleting the active pointer. Map lifecycle tests pass 8/8, native map tests pass, the editor dev bundle compiles, and the full ReleaseFast host compile is green; the remaining gate is the requested user visual check in the dev host.",

@@ -1,0 +1,30 @@
+{
+  "id": "req_2900",
+  "at": "2026-07-10T17:47:41.978Z",
+  "origin": "codex:019f4b65",
+  "text": "[Image #1][Image #2] ya it works now. the id untitled-2 tho is hella tacky on the renamed map file",
+  "status": "review",
+  "sessionId": "019f4b65-a93a-71a3-a333-4476f830a186",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T17:47:59.978Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T17:49:10.073Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the stable on-disk stem from renamed Map Workspace cards; cards now show only the friendly map name while retaining the stable id invisibly for safe persistence. Tightened the normal card height to reclaim the space, and the editor dev bundle remains green.",
+  "shas": [
+    "64f7e837a"
+  ],
+  "resolvedAt": "2026-07-10T17:49:10.073Z"
+}
