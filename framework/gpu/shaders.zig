@@ -724,10 +724,26 @@ pub const image_wgsl =
     \\}
 ;
 
+/// Decode the snorm16x2 octahedral vertex normal of the 20-byte packed Vertex
+/// (encode side: pack.octEncodeSnorm16 — keep in lockstep). Prepended to every
+/// shader that reads vbuf0's noct; WGSL module declarations are order-free.
+const oct_decode_wgsl =
+    \\fn oct_decode(e: vec2f) -> vec3f {
+    \\    var n = vec3f(e.xy, 1.0 - abs(e.x) - abs(e.y));
+    \\    if n.z < 0.0 {
+    \\        let fx = (1.0 - abs(n.y)) * select(-1.0, 1.0, n.x >= 0.0);
+    \\        let fy = (1.0 - abs(n.x)) * select(-1.0, 1.0, n.y >= 0.0);
+    \\        n = vec3f(fx, fy, n.z);
+    \\    }
+    \\    return normalize(n);
+    \\}
+    \\
+;
+
 /// 3D mesh pipeline: perspective projection + Blinn-Phong lighting.
-/// Vertex: position(vec3f), normal(vec3f), uv(vec2f) = 32 bytes.
+/// Vertex: position f32x3 + oct normal snorm16x2 + uv f16x2 = 20 bytes (3d.zig Vertex).
 /// Uniforms: MVP, model matrix, lighting, material color.
-pub const scene3d_wgsl =
+pub const scene3d_wgsl = oct_decode_wgsl ++
     \\// ── Scene-wide uniforms (one set per frame, no dynamic offset) ──
     \\struct SceneUniforms {
     \\    vp: mat4x4f,
@@ -794,7 +810,7 @@ pub const scene3d_wgsl =
     \\// group — the N→1 draw-call collapse.
     \\struct VertexInput {
     \\    @location(0) position: vec3f,
-    \\    @location(1) normal: vec3f,
+    \\    @location(1) noct: vec2f, // snorm16x2 octahedral normal (oct_decode)
     \\    @location(2) uv: vec2f,
     \\    @location(3) inst_pos: vec3f,
     \\    @location(4) inst_euler: vec4u,   // rx, ry, rz (u16 deg ring) + pad
@@ -866,7 +882,7 @@ pub const scene3d_wgsl =
     \\    let world = model * vec4f(in.position, 1.0);
     \\    out.clip_pos = S.vp * world;
     \\    out.world_pos = world.xyz;
-    \\    out.world_normal = normalize((model * vec4f(in.normal, 0.0)).xyz);
+    \\    out.world_normal = normalize((model * vec4f(oct_decode(in.noct), 0.0)).xyz);
     \\    out.uv = in.uv;
     \\    out.inst_color = in.inst_color;
     \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
@@ -977,7 +993,7 @@ pub const shadow_depth_wgsl =
     \\@group(0) @binding(0) var<uniform> LVP: mat4x4f;
     \\struct VertexInput {
     \\    @location(0) position: vec3f,
-    \\    @location(1) normal: vec3f,
+    \\    @location(1) noct: vec2f, // snorm16x2 octahedral normal (oct_decode)
     \\    @location(2) uv: vec2f,
     \\    @location(3) inst_pos: vec3f,
     \\    @location(4) inst_euler: vec4u,
@@ -1019,7 +1035,7 @@ pub const shadow_depth_wgsl =
 ///   3. FRAGMENT gradient — dark per-instance root tint -> bright lime tip, with
 ///      per-blade tip-colour variation, lit with a soft half-lambert (double-sided
 ///      blades shouldn't go black on their back).
-pub const grass_wgsl =
+pub const grass_wgsl = oct_decode_wgsl ++
     \\struct SceneUniforms {
     \\    vp: mat4x4f,
     \\    light_dir: vec3f,
@@ -1050,7 +1066,7 @@ pub const grass_wgsl =
     \\// deg = u16/65536*360, scale m = unorm*16.
     \\struct VertexInput {
     \\    @location(0) position: vec3f,
-    \\    @location(1) normal: vec3f,
+    \\    @location(1) noct: vec2f, // snorm16x2 octahedral normal (oct_decode)
     \\    @location(2) uv: vec2f,
     \\    @location(3) inst_pos: vec3f,
     \\    @location(4) inst_angles: vec2u,   // pitch, yaw (u16 ring)
@@ -1102,7 +1118,7 @@ pub const grass_wgsl =
     \\    world.y = world.y - abs(bend) * 0.12;
     \\    out.clip_pos = S.vp * world;
     \\    out.world_pos = world.xyz;
-    \\    out.world_normal = normalize((model * vec4f(in.normal, 0.0)).xyz);
+    \\    out.world_normal = normalize((model * vec4f(oct_decode(in.noct), 0.0)).xyz);
     \\    out.uv = in.uv;
     \\    out.inst_color = in.inst_color;
     \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
@@ -1176,7 +1192,7 @@ pub const grass_wgsl =
 /// Ported from the beach-viewer water shader (Water_GetWaves / Water_WaveShape),
 /// adapted from UV-space to world-space and from GLSL gl_FragCoord to WGSL's
 /// @builtin(position).
-pub const water_wgsl =
+pub const water_wgsl = oct_decode_wgsl ++
     \\struct SceneUniforms {
     \\    vp: mat4x4f,
     \\    light_dir: vec3f,
@@ -1203,7 +1219,7 @@ pub const water_wgsl =
     \\
     \\struct VertexInput {
     \\    @location(0) position: vec3f,
-    \\    @location(1) normal: vec3f,
+    \\    @location(1) noct: vec2f, // snorm16x2 octahedral normal (oct_decode)
     \\    @location(2) uv: vec2f,
     \\    @location(3) inst_pos: vec3f,
     \\    @location(4) inst_euler: vec4u,
@@ -1290,7 +1306,7 @@ pub const water_wgsl =
     \\    var out: VertexOutput;
     \\    let model = rebuild_model(in.inst_pos, in.inst_euler, in.inst_scale);
     \\    var world = model * vec4f(in.position, 1.0);
-    \\    let wn = normalize((model * vec4f(in.normal, 0.0)).xyz);
+    \\    let wn = normalize((model * vec4f(oct_decode(in.noct), 0.0)).xyz);
     \\    // Only the up-facing top surface rides the waves; the skirt (horizontal
     \\    // normal) stays anchored so the volume edge holds.
     \\    let top_w = clamp(wn.y, 0.0, 1.0);
@@ -1388,7 +1404,7 @@ pub const water_wgsl =
 /// 8 weed leaf, 9 green stem. Bands 2...9 let one baked wrapped mesh carry an
 /// entire tree or shrub through ONE 24-byte slim instance; stems suppress wind.
 /// Instanced groups whose leader carries the "~frond~" tex key swap to this.
-pub const frond_wgsl =
+pub const frond_wgsl = oct_decode_wgsl ++
     \\struct SceneUniforms {
     \\    vp: mat4x4f,
     \\    light_dir: vec3f,
@@ -1419,7 +1435,7 @@ pub const frond_wgsl =
     \\// match makeFrondInstance: angle deg = u16/65536*360, scale m = unorm*16.
     \\struct VertexInput {
     \\    @location(0) position: vec3f,
-    \\    @location(1) normal: vec3f,
+    \\    @location(1) noct: vec2f, // snorm16x2 octahedral normal (oct_decode)
     \\    @location(2) uv: vec2f,
     \\    @location(3) inst_pos: vec3f,
     \\    @location(4) inst_angles: vec2u,   // pitch, yaw (u16 ring)
@@ -1497,7 +1513,7 @@ pub const frond_wgsl =
     \\    world.y = world.y - abs(bend) * 0.20;
     \\    out.clip_pos = S.vp * world;
     \\    out.world_pos = world.xyz;
-    \\    out.world_normal = normalize((model * vec4f(in.normal, 0.0)).xyz);
+    \\    out.world_normal = normalize((model * vec4f(oct_decode(in.noct), 0.0)).xyz);
     \\    out.uv = in.uv;
     \\    out.inst_color = in.inst_color;
     \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
@@ -1631,7 +1647,7 @@ pub const frond_wgsl =
 /// = the chunk's `D` storage buffer (the reference stream, not pixels). The vertex
 /// stage and lighting/fog mirror scene3d_wgsl so a formula floor lights and fogs
 /// identically to a textured one; only the base colour comes from the formula.
-pub const scene3d_ground_prefix =
+pub const scene3d_ground_prefix = oct_decode_wgsl ++
     \\struct SceneUniforms {
     \\    vp: mat4x4f,
     \\    light_dir: vec3f,
@@ -1657,7 +1673,7 @@ pub const scene3d_ground_prefix =
     \\
     \\struct VertexInput {
     \\    @location(0) position: vec3f,
-    \\    @location(1) normal: vec3f,
+    \\    @location(1) noct: vec2f, // snorm16x2 octahedral normal (oct_decode)
     \\    @location(2) uv: vec2f,
     \\    @location(3) inst_pos: vec3f,
     \\    @location(4) inst_euler: vec4u,
@@ -1695,7 +1711,7 @@ pub const scene3d_ground_prefix =
     \\    let world = model * vec4f(in.position, 1.0);
     \\    out.clip_pos = S.vp * world;
     \\    out.world_pos = world.xyz;
-    \\    out.world_normal = normalize((model * vec4f(in.normal, 0.0)).xyz);
+    \\    out.world_normal = normalize((model * vec4f(oct_decode(in.noct), 0.0)).xyz);
     \\    out.uv = in.uv;
     \\    out.inst_color = in.inst_color;
     \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;

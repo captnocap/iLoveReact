@@ -24,21 +24,32 @@ const mesh_edit = @import("mesh_edit.zig");
 const stage_scale = @import("stage_scale.zig");
 const capsules = @import("capsules.zig");
 const polys = @import("polys.zig");
+const pack = @import("pack.zig");
 const Node = layout.Node;
 
 // ════════════════════════════════════════════════════════════════════════
-// Vertex format: position(3) + normal(3) + uv(2) = 32 bytes
+// Vertex format: position f32x3 + oct normal snorm16x2 + uv f16x2 = 20 bytes
 // ════════════════════════════════════════════════════════════════════════
-
+//
+// The GPU-resident mesh vertex — the slim-instance treatment applied to the
+// vertex itself (was 32 B: pos/normal/uv all f32). Positions stay f32 (world
+// scale needs the range). The normal is a direction, not a point — octahedral
+// snorm16x2 keeps ~0.003° accuracy in 4 bytes (pack.octEncodeSnorm16 encodes,
+// oct_decode in each consuming shader decodes — keep in lockstep). UVs ride
+// f16: NOT unorm, because flora's uv_band tiling runs past 1.0 — f16 is exact
+// to 2048 texels and full-range beyond. The wire/authoring format everywhere
+// else (JS geometry registry, mesh_import, world_loader rows, mapfile lumps —
+// V29: raw aligned f32) is UNCHANGED stride-8 f32; packing happens once at the
+// upload boundary (stageVertexRows), exactly like makeInstance does for
+// instance rows. Net: the 256 MiB retained buffer now holds 13.4M verts
+// instead of 8.4M, and every dynamic mesh upload ships 37.5% fewer bytes.
 const Vertex = extern struct {
     px: f32,
     py: f32,
     pz: f32,
-    nx: f32,
-    ny: f32,
-    nz: f32,
-    u: f32,
-    v: f32,
+    noct: [2]i16, // snorm16x2 octahedral normal
+    u: f16,
+    v: f16,
 };
 
 // ════════════════════════════════════════════════════════════════════════
@@ -110,6 +121,9 @@ const SlimInstance = extern struct {
 };
 
 comptime {
+    if (@sizeOf(Vertex) != 20 or @alignOf(Vertex) != 4) {
+        @compileError("Vertex must match the packed vbuf0 vertex layout (20 bytes)");
+    }
     if (@sizeOf(SceneUniforms) != 192 or @alignOf(SceneUniforms) != 16) {
         @compileError("SceneUniforms must match scene3d_wgsl uniform layout (192 bytes, align 16)");
     }
@@ -254,7 +268,7 @@ const MAX_FRAME_VERTS = 262144;
 // null limits (gpu.zig), so we never raise maxBufferSize. This is a single-buffer
 // API cap, NOT the machine's VRAM — a beefy GPU does not change it.
 const MAX_BUFFER_BYTES = 268_435_456; // 256 MiB — WebGPU default maxBufferSize
-const MAX_BUFFER_VERTS = MAX_BUFFER_BYTES / @sizeOf(Vertex); // 8,388,608 verts at 32 B/vert
+const MAX_BUFFER_VERTS = MAX_BUFFER_BYTES / @sizeOf(Vertex); // 13,421,772 verts at 20 B/vert
 const MAX_RETAINED_VERTS = MAX_BUFFER_VERTS - DYN_REGION_VERTS; // fills the buffer up to the 256 MiB cap
 const GEO_CACHE_SIZE = 2048;
 const GeoEntry = struct {
@@ -562,11 +576,12 @@ fn patchActiveEditMesh(first_face: u32, last_face: u32) bool {
         for (g_geo_cache[0..g_geo_cache_len]) |*e| {
             if (!e.present or e.hash != g_edit_key_hash) continue;
             if (first_vert + vert_count > e.count) continue;
-            queue.?.writeBuffer(
+            stageVertexRows(
+                queue.?,
                 buf.?,
                 e.offset_bytes + @as(u64, first_vert) * @sizeOf(Vertex),
-                @ptrCast(verts[start_f32..].ptr),
-                bu.bytesOfCount(Vertex, vert_count),
+                verts[start_f32 .. start_f32 + len_f32],
+                vert_count,
             );
             patched = true;
         }
@@ -2847,6 +2862,55 @@ pub fn meshMergeGroupRanges(a_lo: u32, a_hi: u32, b_lo: u32, b_hi: u32) AppendRe
     _ = refreshPaintLayout();
     journalCommit(&snap);
     return .{ .ok = true, .lo = offset, .hi = next, .count = g_edit_count };
+}
+
+/// Reverse the selected authored face(s) so their normals point to the opposite side.
+/// This is the host-native port of Studio's `flipFace` (req_1182 / req_2883): every
+/// member triangle reverses winding with its interleaved UV row, while face groups,
+/// part ownership, paint, and triangle order remain unchanged. The selection is restored
+/// after the resident mesh rekeys, so X can be tapped again to flip back immediately.
+pub fn meshFlipSelectionWinding() bool {
+    if (!model_paint.hasTarget()) return false;
+    if (mesh_edit.mode() != .face) return false;
+    const cur_verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0) return false;
+
+    const mask = jalloc.alloc(bool, tri_count) catch return false;
+    defer jalloc.free(mask);
+    if (mesh_edit.buildDeleteMask(mask) == 0) return false;
+
+    const needed = @as(usize, g_edit_count) * 8;
+    if (cur_verts.len < needed) return false;
+    const flipped_verts = jalloc.dupe(f32, cur_verts[0..needed]) catch return false;
+    defer jalloc.free(flipped_verts);
+    if (mesh_edit.flipSelectedTriangleWinding(flipped_verts, tri_count, mask) == 0) return false;
+
+    // retain() inside replaceActiveEditMesh deliberately clears authored groups. Capture
+    // and restore them around the replace; unchanged group ids also let the atlas carry
+    // put every painted island back exactly where it was.
+    const grouped = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+    const groups: ?[]u32 = if (grouped) (captureFaceGroups() orelse return false) else null;
+    defer if (groups) |g| jalloc.free(g);
+
+    var snap = journalSnapshotCurrent("flip faces");
+    mesh_edit.suspendFaceTint();
+    model_paint.snapshotAtlasForCarry();
+    mesh_edit.clearSelection();
+    mesh_edit.resumeFaceTint();
+
+    if (!replaceActiveEditMesh(flipped_verts, g_edit_count)) {
+        model_paint.dropAtlasCarry();
+        _ = mesh_edit.selectFacesByTriangleMask(mask);
+        journalDiscard(&snap);
+        return false;
+    }
+    if (groups) |g| model_source.setFaceGroups(g);
+    _ = refreshPaintLayout();
+    model_paint.dropAtlasCarry(); // refresh consumes it; this also clears a failed rebuild's stash
+    _ = mesh_edit.selectFacesByTriangleMask(mask);
+    journalCommit(&snap);
+    return true;
 }
 
 /// Fuse the selected faces (face mode, spanning 2+ authored groups) into ONE authored
@@ -5973,8 +6037,8 @@ pub fn init() void {
     // Per-vertex attributes (vertex buffer 0, step=vertex) — position/normal/uv.
     const vert_attrs = [_]wgpu.VertexAttribute{
         .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
-        .{ .format = .float32x3, .offset = 12, .shader_location = 1 },
-        .{ .format = .float32x2, .offset = 24, .shader_location = 2 },
+        .{ .format = .snorm16x2, .offset = 12, .shader_location = 1 }, // oct normal
+        .{ .format = .float16x2, .offset = 16, .shader_location = 2 }, // uv
     };
     // Per-instance attributes (vertex buffer 1, step=instance) — packed TRS+rgba
     // (32-byte InstanceData): pos f32x3 @3, euler u16x4 @4, scale f16x4 @5, rgba
@@ -6792,13 +6856,48 @@ fn lookupGeometry(key: []const u8) ?GeoSlice {
     return null;
 }
 
+/// Pack one stride-8 f32 vertex row (pos3 + normal3 + uv2, the wire format
+/// every generator/importer ships) into the 20-byte GPU Vertex.
+fn packVertexRow(src: []const f32) Vertex {
+    return .{
+        .px = src[0],
+        .py = src[1],
+        .pz = src[2],
+        .noct = pack.octEncodeSnorm16(src[3], src[4], src[5]),
+        .u = @floatCast(src[6]),
+        .v = @floatCast(src[7]),
+    };
+}
+
+// Fixed staging window for pack-at-upload: big meshes stream through in
+// chunks (same pattern as stageStaticInstanceBytes), so the scratch stays a
+// bounded 1.3 MB regardless of mesh size.
+const VERT_PACK_CHUNK = 65536;
+var g_vert_pack_scratch: [VERT_PACK_CHUNK]Vertex = undefined;
+
+/// Pack + upload `count` stride-8 f32 vertex rows to `buf` starting at byte
+/// `dst_offset`. This is THE write boundary between the f32 wire format and
+/// the packed GPU Vertex — every vbuf0 upload routes through here.
+fn stageVertexRows(queue: *wgpu.Queue, buf: *wgpu.Buffer, dst_offset: u64, verts: []const f32, count: u32) void {
+    var done: u32 = 0;
+    while (done < count) {
+        const chunk: u32 = @min(VERT_PACK_CHUNK, count - done);
+        for (0..chunk) |k| {
+            const s = (@as(usize, done) + k) * 8;
+            g_vert_pack_scratch[k] = packVertexRow(verts[s .. s + 8]);
+        }
+        bu.writeTypedBuffer(queue, buf, dst_offset + bu.bytesOfCount(Vertex, done), Vertex, g_vert_pack_scratch[0..chunk]);
+        done += chunk;
+    }
+}
+
 fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count: u32) ?GeoSlice {
     if (lookupGeometry(key)) |slot| return slot;
     if (g_geo_cache_len >= GEO_CACHE_SIZE) return null;
     const buf = g_retained_vbuf orelse return null;
     const bytes = bu.bytesOfCount(Vertex, count);
     if (g_retained_top + bytes > @as(u64, MAX_RETAINED_VERTS) * @sizeOf(Vertex)) return null;
-    queue.writeBuffer(buf, g_retained_top, @ptrCast(verts.ptr), bytes);
+    stageVertexRows(queue, buf, g_retained_top, verts, count);
     const off = g_retained_top;
     g_retained_top += bytes;
     g_geo_cache[g_geo_cache_len] = .{ .hash = hashKey(key), .offset_bytes = off, .count = count, .present = true };
@@ -6889,7 +6988,7 @@ fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, 
         // Growth hint ×2: a live-edited mesh that grew will grow again; geometric
         // reservation bounds the total leaked bytes to ~one extra copy.
         const off = dynEnsureRegion(s, count, count *| 2) orelse return existingDyn(s);
-        queue.writeBuffer(buf, off, @ptrCast(v.ptr), bu.bytesOfCount(Vertex, count));
+        stageVertexRows(queue, buf, off, v, count);
         s.version_hash = loc.ver_hash;
         s.count = count;
     }
@@ -6917,7 +7016,7 @@ pub fn patchDynSlotById(id: []const u8, verts: []const f32, count: u32) bool {
         if (s.capacity < count) return false;
         const queue = core.getQueue() orelse return false;
         const buf = g_retained_vbuf orelse return false;
-        queue.writeBuffer(buf, s.offset_bytes, @ptrCast(verts.ptr), bu.bytesOfCount(Vertex, count));
+        stageVertexRows(queue, buf, s.offset_bytes, verts, count);
         s.count = count;
         return true;
     }
@@ -6981,7 +7080,14 @@ fn hfPos(hs: []const f32, cols: usize, i: usize, j: usize, x0: f32, dx: f32, z0:
 
 fn hfPush(n: *usize, p: [3]f32, nrm: [3]f32, u: f32, vv: f32) void {
     if (n.* >= MAX_DYN_VERTS) return;
-    g_hf_scratch[n.*] = .{ .px = p[0], .py = p[1], .pz = p[2], .nx = nrm[0], .ny = nrm[1], .nz = nrm[2], .u = u, .v = vv };
+    g_hf_scratch[n.*] = .{
+        .px = p[0],
+        .py = p[1],
+        .pz = p[2],
+        .noct = pack.octEncodeSnorm16(nrm[0], nrm[1], nrm[2]),
+        .u = @floatCast(u),
+        .v = @floatCast(vv),
+    };
     n.* += 1;
 }
 
@@ -7259,10 +7365,6 @@ fn drawSky(pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_po
     pass.draw(3, 1, 0, 0);
 }
 
-fn quantColor(c: f32) u8 {
-    return @intFromFloat(@round(std.math.clamp(c, 0.0, 1.0) * 255.0));
-}
-
 /// Quantize a degree angle onto the u16 ring (0..65536 ≡ 0..360°). Axis-aligned
 /// 0/90/180/270 land on exact integers (a wall/floor's rotation is lossless). Round
 /// can hit 65536 for an angle a hair under 360° — mask through u32 so it wraps to 0
@@ -7282,7 +7384,7 @@ fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, s
         .pos = .{ px, py, pz },
         .euler = .{ quantAngleU16(rx), quantAngleU16(ry), quantAngleU16(rz), 0 },
         .scale = .{ @floatCast(sx), @floatCast(sy), @floatCast(sz), 0 },
-        .color = .{ quantColor(cr), quantColor(cg), quantColor(cb), quantColor(ca) },
+        .color = pack.rgba8(cr, cg, cb, ca),
     };
 }
 
@@ -7302,7 +7404,7 @@ fn makeSlimInstance(px: f32, py: f32, pz: f32, pitch: f32, yaw: f32, wide: f32, 
         .pos = .{ px, py, pz },
         .angles = .{ quantAngleU16(pitch), quantAngleU16(yaw) },
         .scale = .{ scl.q(wide), scl.q(len) },
-        .color = .{ quantColor(cr), quantColor(cg), quantColor(cb), 255 },
+        .color = .{ pack.unorm8(cr), pack.unorm8(cg), pack.unorm8(cb), 255 },
     };
 }
 
@@ -7529,8 +7631,8 @@ fn ensureGroundPipeline(formula: []const u8) void {
     defer pl.release();
     const vert_attrs = [_]wgpu.VertexAttribute{
         .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
-        .{ .format = .float32x3, .offset = 12, .shader_location = 1 },
-        .{ .format = .float32x2, .offset = 24, .shader_location = 2 },
+        .{ .format = .snorm16x2, .offset = 12, .shader_location = 1 }, // oct normal
+        .{ .format = .float16x2, .offset = 16, .shader_location = 2 }, // uv
     };
     const inst_attrs = [_]wgpu.VertexAttribute{
         .{ .format = .float32x3, .offset = 0, .shader_location = 3 },
