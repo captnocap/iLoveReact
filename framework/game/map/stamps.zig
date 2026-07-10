@@ -17,7 +17,33 @@ pub const FieldView = struct {
     z: []f32,
     cols: usize,
     rows: usize,
+    /// Optional water DEPTH field coupled to this terrain field. Terrain edits
+    /// preserve each wet sample's pre-edit surface (bed + depth), reducing the
+    /// depth as the bed rises and draining it once the bed reaches the surface.
+    water_depths: ?[]f32 = null,
+    water_changed: ?*bool = null,
 };
+
+/// Apply one terrain height while keeping an existing water surface fixed in
+/// world space. The water brush is the operation that establishes a new level;
+/// later terrain sculpting edits the bed beneath that level instead of carrying
+/// an unchanged water column upward with the ground.
+pub fn setTerrainHeight(f: FieldView, idx: usize, next_height: f32) void {
+    const previous_height = f.z[idx];
+    if (previous_height == next_height) return;
+    if (f.water_depths) |depths| {
+        std.debug.assert(depths.len >= f.z.len);
+        const previous_depth = depths[idx];
+        if (previous_depth > 0) {
+            const next_depth = @max(0, previous_height + previous_depth - next_height);
+            if (next_depth != previous_depth) {
+                depths[idx] = next_depth;
+                if (f.water_changed) |changed| changed.* = true;
+            }
+        }
+    }
+    f.z[idx] = next_height;
+}
 
 // ── the brush footprint (brush.ts) ────────────────────────────────────────────
 
@@ -180,7 +206,7 @@ pub fn stampBrush(f: FieldView, cix: i32, ciy: i32, opts: StampOpts) void {
             if (weight <= 0) continue;
             const idx = @as(usize, @intCast(jy)) * f.cols + @as(usize, @intCast(jx));
             if (opts.erase) {
-                f.z[idx] = 0;
+                setTerrainHeight(f, idx, 0);
                 continue;
             }
             const mag = peak * weight;
@@ -188,7 +214,7 @@ pub fn stampBrush(f: FieldView, cix: i32, ciy: i32, opts: StampOpts) void {
             // Raise toward the signed target: re-stamping / overlap never climbs
             // past centerZ (heightData.ts:106).
             const target = sign * @min(mag, HEIGHT_LIMIT);
-            f.z[idx] = if (sign > 0) @max(f.z[idx], target) else @min(f.z[idx], target);
+            setTerrainHeight(f, idx, if (sign > 0) @max(f.z[idx], target) else @min(f.z[idx], target));
         }
     }
 }
@@ -234,7 +260,8 @@ pub fn stampRamp(f: FieldView, cix: f32, ciy: f32, opts: RampStampOpts) void {
             const across = mx * px + my * py;
             if (@abs(along) > hl or @abs(across) > hw) continue;
             const t = if (longM <= 0) 0 else (along + hl) / longM;
-            f.z[jy * f.cols + jx] = clampHeight(z0 + (z1 - z0) * @max(0, @min(1, t)));
+            const idx = jy * f.cols + jx;
+            setTerrainHeight(f, idx, clampHeight(z0 + (z1 - z0) * @max(0, @min(1, t))));
         }
     }
 }
@@ -258,9 +285,9 @@ pub fn slopeHeightAtDistance(startZ: f32, endZ: f32, runM: f32, distanceM: f32) 
 
 fn applySignedTarget(f: FieldView, idx: usize, target: f32) void {
     if (target >= 0) {
-        f.z[idx] = @max(f.z[idx], target);
+        setTerrainHeight(f, idx, @max(f.z[idx], target));
     } else {
-        f.z[idx] = @min(f.z[idx], target);
+        setTerrainHeight(f, idx, @min(f.z[idx], target));
     }
 }
 
@@ -298,7 +325,7 @@ pub fn stampSlopeSegment(f: FieldView, ax: f32, ay: f32, bx: f32, by: f32, opts:
             if (acrossM > radiusM) continue;
             const idx = jy * f.cols + jx;
             if (opts.erase) {
-                f.z[idx] = 0;
+                setTerrainHeight(f, idx, 0);
                 touched = true;
                 continue;
             }

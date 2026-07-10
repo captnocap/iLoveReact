@@ -397,7 +397,8 @@ fn stampHeightAt(x: f32, z: f32) void {
         const edge: f32 = @floatFromInt(chunks.SAMPLE_COLS - 1);
         // skip chunks the brush can't reach (cheap; avoids dirtying them) (:884)
         if (cix + rd < 0 or cix - rd > edge or ciz + rd < 0 or ciz - rd > edge) continue;
-        stamps.stampBrush(fieldOf(&ch.height), @intFromFloat(cix), @intFromFloat(ciz), .{
+        var water_changed = false;
+        stamps.stampBrush(terrainFieldOf(ch, &water_changed), @intFromFloat(cix), @intFromFloat(ciz), .{
             .centerZ = g_tool.center_z,
             .radiusM = radiusM,
             .shape = g_tool.shape,
@@ -406,11 +407,18 @@ fn stampHeightAt(x: f32, z: f32) void {
             .erase = g_tool.mode == .erase,
         });
         ch.dirty.height = true;
+        if (water_changed) ch.dirty.water = true;
     }
 }
 
-fn fieldOf(z: *[chunks.SAMPLE_CELLS]f32) stamps.FieldView {
-    return .{ .z = z[0..], .cols = chunks.SAMPLE_COLS, .rows = chunks.SAMPLE_COLS };
+fn terrainFieldOf(ch: *chunks.Chunk, water_changed: *bool) stamps.FieldView {
+    return .{
+        .z = ch.height[0..],
+        .cols = chunks.SAMPLE_COLS,
+        .rows = chunks.SAMPLE_COLS,
+        .water_depths = ch.water[0..],
+        .water_changed = water_changed,
+    };
 }
 
 // ── water (self-carving brush — req_2701, leveled — req_2748) ─────────────────
@@ -610,8 +618,14 @@ fn stampSmoothAt(x: f32, z: f32) void {
     const strength = @max(0.05, @min(1, g_tool.smooth_strength));
     for (g_smooth_scratch[0..count]) |s| {
         const target = stamps.clampHeight(a * s.x + b * s.y + c);
-        s.chunk.height[s.idx] = stamps.clampHeight(s.z + (target - s.z) * strength * s.falloff);
+        var water_changed = false;
+        stamps.setTerrainHeight(
+            terrainFieldOf(s.chunk, &water_changed),
+            s.idx,
+            stamps.clampHeight(s.z + (target - s.z) * strength * s.falloff),
+        );
         s.chunk.dirty.height = true;
+        if (water_changed) s.chunk.dirty.water = true;
     }
 }
 
@@ -660,8 +674,10 @@ fn stampRampAt(x: f32, z: f32, opts: stamps.RampStampOpts) void {
         const local = chunks.localSampleF(ch, x, z);
         const edge: f32 = @floatFromInt(chunks.SAMPLE_COLS - 1);
         if (local[0] + rd < 0 or local[0] - rd > edge or local[1] + rd < 0 or local[1] - rd > edge) continue;
-        stamps.stampRamp(fieldOf(&ch.height), local[0], local[1], opts);
+        var water_changed = false;
+        stamps.stampRamp(terrainFieldOf(ch, &water_changed), local[0], local[1], opts);
         ch.dirty.height = true;
+        if (water_changed) ch.dirty.water = true;
     }
 }
 
@@ -709,7 +725,8 @@ fn stampSlopeSegmentAt(from: [2]f32, to: [2]f32, distanceStartM: f32, runM: f32)
         const edge: f32 = @floatFromInt(chunks.SAMPLE_COLS - 1);
         if (@max(a[0], b[0]) + rd < 0 or @min(a[0], b[0]) - rd > edge or
             @max(a[1], b[1]) + rd < 0 or @min(a[1], b[1]) - rd > edge) continue;
-        const wrote = stamps.stampSlopeSegment(fieldOf(&ch.height), a[0], a[1], b[0], b[1], .{
+        var water_changed = false;
+        const wrote = stamps.stampSlopeSegment(terrainFieldOf(ch, &water_changed), a[0], a[1], b[0], b[1], .{
             .startZ = g_tool.ramp_min,
             .endZ = g_tool.ramp_max,
             .runM = runM,
@@ -718,6 +735,7 @@ fn stampSlopeSegmentAt(from: [2]f32, to: [2]f32, distanceStartM: f32, runM: f32)
             .profile = g_tool.profile,
         });
         if (wrote) ch.dirty.height = true;
+        if (water_changed) ch.dirty.water = true;
     }
 }
 
@@ -856,34 +874,65 @@ pub fn groundHit(ox: f32, oy: f32, oz: f32, dx: f32, dy: f32, dz: f32, max_dist:
 pub const FLOOR_RES: usize = @as(usize, @intCast(chunks.CHUNK_TILES)) + 1; // 121
 pub const FLOOR_CELLS: usize = FLOOR_RES * FLOOR_RES;
 
-/// Downsample a chunk's 241×241 sample grid into a 121×121 mirror, taking the
-/// ABS-MAX over each cell's window so thin ridges/pits survive the resample
-/// (chunkFloor.ts:52). dst.len must be FLOOR_CELLS.
-pub fn downsampleFloorHeights(src: *const [chunks.SAMPLE_CELLS]f32, dst: []f32) void {
+/// Source sample selected for one 121-grid floor vertex. Terrain owns this
+/// decision: every dependent field must use the same index or independently
+/// downsampled water depth can be added to a neighbouring dry/high bed.
+fn floorSourceIndex(src: *const [chunks.SAMPLE_CELLS]f32, i: usize, j: usize) usize {
     const cols = chunks.SAMPLE_COLS;
     const res = FLOOR_RES;
     const s = @as(f32, @floatFromInt(cols - 1)) / @as(f32, @floatFromInt(res - 1));
     const h: i32 = @max(1, @as(i32, @intFromFloat(@ceil(s / 2))));
+    const cyi: i32 = @intFromFloat(@round(@as(f32, @floatFromInt(j)) * s));
+    const cxi: i32 = @intFromFloat(@round(@as(f32, @floatFromInt(i)) * s));
+    var best: f32 = 0;
+    var best_idx = @as(usize, @intCast(cyi)) * cols + @as(usize, @intCast(cxi));
+    var dy: i32 = -h;
+    while (dy <= h) : (dy += 1) {
+        const yy = cyi + dy;
+        if (yy < 0 or yy >= cols) continue;
+        var dx: i32 = -h;
+        while (dx <= h) : (dx += 1) {
+            const xx = cxi + dx;
+            if (xx < 0 or xx >= cols) continue;
+            const idx = @as(usize, @intCast(yy)) * cols + @as(usize, @intCast(xx));
+            const v = src[idx];
+            if (@abs(v) > @abs(best)) {
+                best = v;
+                best_idx = idx;
+            }
+        }
+    }
+    return best_idx;
+}
+
+/// Downsample a chunk's 241×241 sample grid into a 121×121 mirror, taking the
+/// ABS-MAX over each cell's window so thin ridges/pits survive the resample
+/// (chunkFloor.ts:52). dst.len must be FLOOR_CELLS.
+pub fn downsampleFloorHeights(src: *const [chunks.SAMPLE_CELLS]f32, dst: []f32) void {
+    const res = FLOOR_RES;
     var j: usize = 0;
     while (j < res) : (j += 1) {
-        const cyi: i32 = @intFromFloat(@round(@as(f32, @floatFromInt(j)) * s));
         var i: usize = 0;
         while (i < res) : (i += 1) {
-            const cxi: i32 = @intFromFloat(@round(@as(f32, @floatFromInt(i)) * s));
-            var best: f32 = 0;
-            var dy: i32 = -h;
-            while (dy <= h) : (dy += 1) {
-                const yy = cyi + dy;
-                if (yy < 0 or yy >= cols) continue;
-                var dx: i32 = -h;
-                while (dx <= h) : (dx += 1) {
-                    const xx = cxi + dx;
-                    if (xx < 0 or xx >= cols) continue;
-                    const v = src[@as(usize, @intCast(yy)) * cols + @as(usize, @intCast(xx))];
-                    if (@abs(v) > @abs(best)) best = v;
-                }
-            }
-            dst[j * res + i] = best;
+            dst[j * res + i] = src[floorSourceIndex(src, i, j)];
+        }
+    }
+}
+
+/// Downsample water depth through the terrain field's winning source samples.
+/// This preserves the authored pair (bed, depth) on the coarser render grid;
+/// maximizing depth independently can fabricate a surface above positive land.
+pub fn downsampleFloorWaterDepths(
+    terrain: *const [chunks.SAMPLE_CELLS]f32,
+    water: *const [chunks.SAMPLE_CELLS]f32,
+    dst: []f32,
+) void {
+    const res = FLOOR_RES;
+    var j: usize = 0;
+    while (j < res) : (j += 1) {
+        var i: usize = 0;
+        while (i < res) : (i += 1) {
+            dst[j * res + i] = water[floorSourceIndex(terrain, i, j)];
         }
     }
 }
@@ -1307,6 +1356,59 @@ test "downsampleFloorHeights keeps ridge peaks through the resample" {
     try std.testing.expectApproxEqAbs(@as(f32, 9), peak, 0.0001);
 }
 
+test "floor water downsample keeps depth paired with its terrain bed" {
+    reset();
+    defer reset();
+    const ch = chunks.growChunk(0, 0).?;
+    const fine_x: i32 = 120;
+    const fine_z: i32 = 120;
+
+    // One coarse vertex covers this 3x3 fine-sample window. Most samples are a
+    // dry +6 m bank; one neighbouring sample is a -2 m wet channel. Separate
+    // abs-max passes select +6 for terrain and 2 for water, fabricating +8.
+    var dz: i32 = -1;
+    while (dz <= 1) : (dz += 1) {
+        var dx: i32 = -1;
+        while (dx <= 1) : (dx += 1) {
+            const idx = @as(usize, @intCast(fine_z + dz)) * chunks.SAMPLE_COLS + @as(usize, @intCast(fine_x + dx));
+            ch.height[idx] = 6;
+            ch.water[idx] = 0;
+        }
+    }
+    const wet_idx = @as(usize, @intCast(fine_z)) * chunks.SAMPLE_COLS + @as(usize, @intCast(fine_x + 1));
+    ch.height[wet_idx] = -2;
+    ch.water[wet_idx] = 2;
+
+    var floor: [FLOOR_CELLS]f32 = undefined;
+    var paired_depths: [FLOOR_CELLS]f32 = undefined;
+    var independent_depths: [FLOOR_CELLS]f32 = undefined;
+    downsampleFloorHeights(&ch.height, floor[0..]);
+    downsampleFloorWaterDepths(&ch.height, &ch.water, paired_depths[0..]);
+    downsampleFloorHeights(&ch.water, independent_depths[0..]);
+    const coarse = 60 * FLOOR_RES + 60;
+    try std.testing.expectApproxEqAbs(@as(f32, 6), floor[coarse], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), independent_depths[coarse], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), paired_depths[coarse], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 6), floor[coarse] + paired_depths[coarse], 0.0001);
+
+    // Inside the channel, the winning terrain sample is wet: its bed and depth
+    // survive together and resolve to the authored +6 m water surface.
+    dz = -1;
+    while (dz <= 1) : (dz += 1) {
+        var dx: i32 = -1;
+        while (dx <= 1) : (dx += 1) {
+            const idx = @as(usize, @intCast(fine_z + dz)) * chunks.SAMPLE_COLS + @as(usize, @intCast(fine_x + dx));
+            ch.height[idx] = 4;
+            ch.water[idx] = 2;
+        }
+    }
+    downsampleFloorHeights(&ch.height, floor[0..]);
+    downsampleFloorWaterDepths(&ch.height, &ch.water, paired_depths[0..]);
+    try std.testing.expectApproxEqAbs(@as(f32, 4), floor[coarse], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), paired_depths[coarse], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 6), floor[coarse] + paired_depths[coarse], 0.0001);
+}
+
 test "height stroke stamps seam-free across the shared border" {
     reset();
     defer reset();
@@ -1419,6 +1521,42 @@ test "water over a mound pools below the surrounding grade — no glacier (req_2
     try std.testing.expectApproxEqAbs(@as(f32, -2), ch.height[center], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 2), ch.water[center], 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0), ch.height[center] + ch.water[center], 0.0001);
+}
+
+test "terrain sculpt adjusts water depth instead of lifting the water column" {
+    reset();
+    defer reset();
+    _ = chunks.growChunk(0, 0).?;
+    const ch = chunks.chunkAt(0, 0).?;
+    const center = 120 * chunks.SAMPLE_COLS + 120;
+
+    // Establish a 2 m pool at world level 0: bed -2, depth 2.
+    setTool(.{ .channel = .water, .radius_m = 2, .center_z = 2, .profile = .flat });
+    strokeBegin(0, 0);
+    _ = strokeEnd();
+    try std.testing.expectApproxEqAbs(@as(f32, -2), ch.height[center], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 2), ch.water[center], 0.0001);
+
+    // Digging the terrain under existing water deepens the column while its
+    // surface remains at 0.
+    clearDirty();
+    setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 2, .center_z = -4, .profile = .flat });
+    strokeBegin(0, 0);
+    _ = strokeEnd();
+    try std.testing.expectApproxEqAbs(@as(f32, -4), ch.height[center], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 4), ch.water[center], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), ch.height[center] + ch.water[center], 0.0001);
+    try std.testing.expect(ch.dirty.water);
+
+    // Raising the bed through that surface displaces/drains the water. Keeping
+    // the old 4 m depth here would render a +7 m tower over +3 m terrain.
+    clearDirty();
+    setTool(.{ .channel = .terrain, .terrain_tool = .brush, .radius_m = 2, .center_z = 3, .profile = .flat });
+    strokeBegin(0, 0);
+    _ = strokeEnd();
+    try std.testing.expectApproxEqAbs(@as(f32, 3), ch.height[center], 0.0001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), ch.water[center], 0.0001);
+    try std.testing.expect(ch.dirty.water);
 }
 
 test "ramp drag stamps the lerped grade between anchor and release" {

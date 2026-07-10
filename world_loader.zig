@@ -7994,8 +7994,10 @@ fn applyPaintLayer(runtime: *Runtime) void {
                 runtime.paint_slot_surface[i] = buf;
                 break :blk buf;
             };
-            // raw depths ride the same abs-max downsample the beds use
-            map_paint.downsampleFloorHeights(&chunk.water, depths);
+            // Depth must ride the EXACT source sample selected for the terrain
+            // bed. Independent abs-max passes can combine a dry +6 m bank with
+            // a neighbouring 2 m depth and invent an 8 m water surface.
+            map_paint.downsampleFloorWaterDepths(&chunk.height, &chunk.water, depths);
             const wet = paintWaterSurface(depths, floor, depths, surface);
             if (!wet) {
                 wnode.scene3d_mesh = false;
