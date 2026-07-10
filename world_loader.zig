@@ -3688,6 +3688,10 @@ pub const Runtime = struct {
     paint_bush_rows: ?[]f32 = null,
     paint_frond_rows: ?[]f32 = null,
     paint_trunk_rows: ?[]f32 = null,
+    /// Per-chunk row ranges of each family, in kid order (grass, flowers,
+    /// bush, fronds, trunks) — the renderer frustum-culls these so foliage
+    /// behind the camera submits nothing (req_2859). Rebuilt every regen.
+    paint_foliage_segs: [5]std.ArrayListUnmanaged(layout.InstanceSegment) = .{ .{}, .{}, .{}, .{}, .{} },
     paint_foliage_ver: u32 = 0,
     /// req_2838: preview-budget attention tracking. The regen spends the row
     /// budget NEAREST-FIRST from the anchor (brush hover, else camera look).
@@ -3873,6 +3877,7 @@ pub const Runtime = struct {
         if (self.paint_bush_rows) |buf| self.allocator.free(buf);
         if (self.paint_frond_rows) |buf| self.allocator.free(buf);
         if (self.paint_trunk_rows) |buf| self.allocator.free(buf);
+        for (&self.paint_foliage_segs) |*segs| segs.deinit(self.allocator);
         {
             var it = self.live_slot_keys.valueIterator();
             while (it.next()) |key| self.allocator.free(key.*);
@@ -8172,6 +8177,12 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
     var bush_n: u32 = 0;
     var frond_n: u32 = 0;
     var trunk_n: u32 = 0;
+    // Per-chunk segment recording (req_2859): each family's rows land
+    // chunk-contiguously (the cell walk finishes a chunk before the next), so
+    // one {row range, chunk sphere} per family per chunk is exact. On any
+    // append failure the family keeps NO segment table and draws whole.
+    for (&runtime.paint_foliage_segs) |*segs| segs.clearRetainingCapacity();
+    var segs_ok = [_]bool{ true, true, true, true, true };
     // Per-family saturation flags: the regen-end log names WHICH family
     // clipped (a saturated frond budget with trunk headroom = topless palms).
     var grass_full = false;
@@ -8207,6 +8218,9 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
     for (order[0..order_n]) |entry| {
         const chunk = entry.chunk;
         const slot_floor = paintSlotFloorFor(runtime, chunk.cx, chunk.cz);
+        const seg_start = [5]u32{ grass_n, flower_n, bush_n, frond_n, trunk_n };
+        var seg_ymin: f32 = std.math.floatMax(f32);
+        var seg_ymax: f32 = -std.math.floatMax(f32);
         var lz: i32 = 0;
         while (lz < map_chunks.CHUNK_TILES) : (lz += 1) {
             var lx: i32 = 0;
@@ -8220,6 +8234,8 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                     const wx = chunk.minX() + @as(f32, @floatFromInt(lx)) + 0.5;
                     const wz = chunk.minZ() + @as(f32, @floatFromInt(lz)) + 0.5;
                     const top: f64 = paintGroundY(slot_floor, chunk, wx, wz);
+                    seg_ymin = @min(seg_ymin, @as(f32, @floatCast(top)));
+                    seg_ymax = @max(seg_ymax, @as(f32, @floatCast(top)));
                     const gx = chunk.cx * map_chunks.CHUNK_TILES + lx;
                     const gz = chunk.cz * map_chunks.CHUNK_TILES + lz;
                     const cell_key: u32 = (@as(u32, @bitCast(gx)) *% 0x9E3779B1) ^
@@ -8288,6 +8304,32 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
                 }
             }
         }
+        // Close out this chunk's segments: one {row range, sphere} per family
+        // that grew rows here. Sphere = chunk half-diagonal (+ lateral jitter)
+        // horizontally, sampled ground span + tallest-plant headroom (palm
+        // trunk + crown ≈ 11 m) vertically; conservative bounds only ever
+        // draw a little extra, never cull a visible plant.
+        const seg_end = [5]u32{ grass_n, flower_n, bush_n, frond_n, trunk_n };
+        const seg_cx = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS;
+        const seg_cz = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS;
+        const seg_grounded = seg_ymax >= seg_ymin;
+        const seg_cy: f32 = if (seg_grounded) (seg_ymin + seg_ymax) * 0.5 else 0;
+        const seg_yhalf: f32 = (if (seg_grounded) (seg_ymax - seg_ymin) * 0.5 else 0) + 14.0;
+        const seg_radius: f32 = @sqrt(87.0 * 87.0 + seg_yhalf * seg_yhalf);
+        for (0..5) |fi| {
+            const added = seg_end[fi] - seg_start[fi];
+            if (added == 0 or !segs_ok[fi]) continue;
+            runtime.paint_foliage_segs[fi].append(runtime.allocator, .{
+                .first = seg_start[fi],
+                .count = added,
+                .cx = seg_cx,
+                .cy = seg_cy,
+                .cz = seg_cz,
+                .radius = seg_radius,
+            }) catch {
+                segs_ok[fi] = false;
+            };
+        }
     }
 
     // Re-read the family slices from the runtime — a push may have GROWN
@@ -8327,6 +8369,10 @@ fn regenPaintFoliage(runtime: *Runtime, log_full: bool) void {
         node.scene3d_instance_count = n;
         node.scene3d_instance_version = runtime.paint_foliage_ver;
         node.scene3d_mesh = n > 0;
+        // req_2859: hand the renderer this family's per-chunk ranges so it can
+        // frustum-cull them. A family whose segment append failed draws whole.
+        const segs = runtime.paint_foliage_segs[fi].items;
+        node.scene3d_instance_segments = if (segs_ok[fi] and segs.len > 0) segs else null;
     }
 }
 

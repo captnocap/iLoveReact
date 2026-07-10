@@ -5393,6 +5393,30 @@ fn recordDraw(vertex_count: u32, instance_count: u32) void {
     g_telemetry.triangles += (@as(u64, vertex_count) / 3) * @as(u64, instance_count);
 }
 
+/// Sphere-vs-frustum: true when the sphere at (cx,cy,cz) touches the frustum
+/// described by six normalized inward-facing planes (req_2859).
+fn sphereInFrustum(planes: *const [6][4]f32, cx: f32, cy: f32, cz: f32, radius: f32) bool {
+    for (planes) |p| {
+        if (p[0] * cx + p[1] * cy + p[2] * cz + p[3] < -radius) return false;
+    }
+    return true;
+}
+
+/// One instanced draw of rows [first, first+count) from a retained static
+/// instance pool (slim or standard) — the shared tail of the whole-batch and
+/// per-segment (req_2859) static draw paths. Vertex buffer 0 and the bind
+/// group must already be set.
+fn drawStaticInstanceRange(pass: *wgpu.RenderPassEncoder, group_verts: u32, sd_offset: u64, is_slim: bool, first: u32, count: u32) void {
+    if (count == 0 or group_verts == 0) return;
+    if (is_slim) {
+        pass.setVertexBuffer(1, g_slim_static_buf.?, sd_offset + bu.bytesOfCount(SlimInstance, first), bu.bytesOfCount(SlimInstance, count));
+    } else {
+        pass.setVertexBuffer(1, g_static_inst_buf.?, sd_offset + bu.bytesOfCount(InstanceData, first), bu.bytesOfCount(InstanceData, count));
+    }
+    pass.draw(group_verts, count, 0, 0);
+    recordDraw(group_verts, count);
+}
+
 // Opt-in per-frame perf readout (RJIT_PERFLOG=1). cpu_draw_us measures CPU command
 // encoding + instance re-staging only — async GPU shading (overdraw) is NOT in it, so
 // the two numbers together separate a CPU re-stage choke from a GPU overdraw choke.
@@ -7535,6 +7559,29 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
     const view = math.m4lookAt(cam_pos, cam_look, .{ .x = 0, .y = 1, .z = 0 });
     const vp = math.m4multiply(projection, view);
 
+    // Camera frustum planes (Gribb–Hartmann on the row-major vp; normalized,
+    // inward-facing) — used to cull per-chunk instance segments (req_2859).
+    var frustum_planes: [6][4]f32 = undefined;
+    {
+        inline for (0..4) |i| {
+            frustum_planes[0][i] = vp[12 + i] + vp[0 + i]; // left
+            frustum_planes[1][i] = vp[12 + i] - vp[0 + i]; // right
+            frustum_planes[2][i] = vp[12 + i] + vp[4 + i]; // bottom
+            frustum_planes[3][i] = vp[12 + i] - vp[4 + i]; // top
+            frustum_planes[4][i] = vp[12 + i] + vp[8 + i]; // near
+            frustum_planes[5][i] = vp[12 + i] - vp[8 + i]; // far
+        }
+        for (&frustum_planes) |*p| {
+            const plane_len = @sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+            if (plane_len > 1e-6) {
+                p[0] /= plane_len;
+                p[1] /= plane_len;
+                p[2] /= plane_len;
+                p[3] /= plane_len;
+            }
+        }
+    }
+
     // Only the scene that actually holds the mesh-edit / paint target may publish the
     // viewport globals below. These are single process-wide vars read by the mesh-edit
     // overlay projection (drawEditorOverlay) and by paint/pick raycasts; in a multi-Scene3D
@@ -8064,13 +8111,31 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
                     if (count > 0 and group_slot.count > 0) {
                         if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
                         pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, bu.bytesOfCount(Vertex, group_slot.count));
-                        if (is_slim) {
-                            pass.setVertexBuffer(1, g_slim_static_buf.?, sd.offset + bu.bytesOfCount(SlimInstance, first), bu.bytesOfCount(SlimInstance, count));
+                        if (leader.scene3d_instance_segments) |segments| {
+                            // req_2859: chunk-granular frustum culling — draw only
+                            // the segments whose sphere survives the frustum, and
+                            // coalesce adjacent survivors into one draw. Segment
+                            // ranges are absolute rows of the batch, clamped to
+                            // what actually staged.
+                            var run_first: u32 = 0;
+                            var run_count: u32 = 0;
+                            for (segments) |seg| {
+                                const sfirst = @min(seg.first, count);
+                                const scount = @min(seg.count, count - sfirst);
+                                if (scount == 0) continue;
+                                if (!sphereInFrustum(&frustum_planes, seg.cx, seg.cy, seg.cz, seg.radius)) continue;
+                                if (run_count > 0 and run_first + run_count == sfirst) {
+                                    run_count += scount;
+                                } else {
+                                    drawStaticInstanceRange(pass, group_slot.count, sd.offset, is_slim, run_first, run_count);
+                                    run_first = sfirst;
+                                    run_count = scount;
+                                }
+                            }
+                            drawStaticInstanceRange(pass, group_slot.count, sd.offset, is_slim, run_first, run_count);
                         } else {
-                            pass.setVertexBuffer(1, g_static_inst_buf.?, sd.offset + bu.bytesOfCount(InstanceData, first), bu.bytesOfCount(InstanceData, count));
+                            drawStaticInstanceRange(pass, group_slot.count, sd.offset, is_slim, first, count);
                         }
-                        pass.draw(group_slot.count, count, 0, 0);
-                        recordDraw(group_slot.count, count);
                     }
                     continue;
                 }

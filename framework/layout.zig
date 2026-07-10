@@ -52,6 +52,18 @@ const effect_shader = @import("gpu/effect_shader.zig");
 const context_menu = @import("primitive/context_menu.zig");
 
 // ── Type definitions ────────────────────────────────
+/// One contiguous row range of a STATIC instance batch plus its world
+/// bounding sphere — the frustum-cullable unit of scene3d_instance_segments
+/// (req_2859). `first`/`count` index rows of the node's uploaded batch.
+pub const InstanceSegment = extern struct {
+    first: u32,
+    count: u32,
+    cx: f32,
+    cy: f32,
+    cz: f32,
+    radius: f32,
+};
+
 pub const FlexDirection = enum { row, column, row_reverse, column_reverse };
 pub const JustifyContent = enum { start, center, end, space_between, space_around, space_evenly };
 pub const AlignItems = enum { start, center, end, stretch, baseline };
@@ -587,6 +599,12 @@ pub const Node = struct {
     // Streaming emits many nodes over one instance_data array, each drawing
     // [first, first+count) — the whole array uploads once regardless.
     scene3d_instance_first: u32 = 0,
+    // Per-chunk sub-ranges of a STATIC batch for frustum culling (req_2859):
+    // each segment is a contiguous row range of the uploaded batch plus its
+    // world bounding sphere. When present, the renderer draws only segments
+    // whose sphere survives the camera frustum — foliage behind the camera
+    // costs zero. Absent (null) = the whole batch draws as one range.
+    scene3d_instance_segments: ?[]const InstanceSegment = null,
     // Physics 2D — inline in the 2D tree, driven by framework/physics2d.zig
     physics_world_id: u8 = 0, // multi-physics-world instance index (0..MAX_PHYSICS_WORLDS-1)
     physics_world: bool = false, // true = Physics.World container
