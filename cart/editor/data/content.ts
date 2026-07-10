@@ -1,8 +1,9 @@
 // editor/data/content.ts - content tree, navigation enums, and folder helpers.
 import { MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
 import { HMSC_EDITOR_CATALOG, fileModelPackage, modelCategoryNodes } from './hmscAssetCatalog';
-import { listPackageFiles, type PackageFile } from './modelPackageStore';
+import { isMaterialized, listPackageFiles, type PackageFile } from './modelPackageStore';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
+import { allocatePlayerModelId, allocatePrimitiveModelId, PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
 import { commandById, PRIMITIVE_MESHES } from './commands';
 import { playerStarterSkeleton } from '../model/playerStarter';
 import { INITIAL_OBJECTS } from './initialState';
@@ -203,7 +204,7 @@ export function primitiveModelPackage(id: string): ModelPackage {
 // it is fully described by its id until first save; the skeleton (bodyRigBones
 // formation + per-bone mesh assignments) rides the package so Save writes it
 // into the manifest as the rig truth (req_2718 pattern).
-export const PLAYER_MODEL_ID_PREFIX = 'character:player:';
+export { PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
 export function playerModelPackage(id: string): ModelPackage {
   const seq = id.slice(PLAYER_MODEL_ID_PREFIX.length);
   return {
@@ -230,12 +231,7 @@ export function playerModelPackage(id: string): ModelPackage {
 // The next pristine player-model doc id — same collision rules as
 // nextPrimitiveDocId (open docs AND saved packages AND synthesized names).
 export function nextPlayerModelDocId(docs: WorkspaceDocument[]): string {
-  const taken = (n: number) =>
-    MODEL_PACKAGES.some((model) => model.id === `${PLAYER_MODEL_ID_PREFIX}${n}` || model.name === `Player Model ${n}`)
-    || docs.some((doc) => doc.kind === 'model' && doc.sourceId?.startsWith(PLAYER_MODEL_ID_PREFIX) && doc.sourceId.endsWith(`:${n}`));
-  let n = 1;
-  while (taken(n)) n += 1;
-  return `${PLAYER_MODEL_ID_PREFIX}${n}`;
+  return allocatePlayerModelId(docs, MODEL_PACKAGES, (id) => isMaterialized('character', id));
 }
 
 export function modelPackageById(id: string): ModelPackage | null {
@@ -269,19 +265,11 @@ export function effectiveModelPackage(
   return { ...base, name: override.name ?? base.name, favorite: override.favorite ?? base.favorite };
 }
 
-// The next pristine `primitive:<kind>:<n>` document id. Skips open documents AND
-// library packages: once `primitive:cube:1` is saved to disk it is a real model
-// forever, and a fresh File → New Mesh must never collide with it (the old
-// open-doc count reused saved ids after a restart). <n> is also skipped when any
-// saved model already answers to the synthesized "Model <n>" name — the boot
-// roster dedupes by NAME, so two saved "Model 1"s would silently drop one.
+// The next pristine `primitive:<kind>:<n>` document id. The package store is
+// queried independently from the browser catalog: a presentation filter may
+// never make a durable identity reusable (req_2873).
 export function nextPrimitiveDocId(kind: PrimitiveKind, docs: WorkspaceDocument[]): string {
-  const taken = (n: number) =>
-    MODEL_PACKAGES.some((model) => model.id === `primitive:${kind}:${n}` || model.name === `Model ${n}`)
-    || docs.some((doc) => doc.kind === 'model' && doc.sourceId?.startsWith('primitive:') && doc.sourceId.endsWith(`:${n}`));
-  let n = 1;
-  while (taken(n)) n += 1;
-  return `primitive:${kind}:${n}`;
+  return allocatePrimitiveModelId(kind, docs, MODEL_PACKAGES, (id) => isMaterialized('prop', id));
 }
 
 // Register a first-saved package into the live catalog roster so THIS session's

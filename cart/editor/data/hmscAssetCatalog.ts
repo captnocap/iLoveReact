@@ -11,6 +11,7 @@ import type { Asset, ContentFolderId, ContentNode, ModelAtlas, ModelPackage, Mod
 import { MODELS_HOME, MODEL_PACKAGE_SUBDIRS, modelFolderIdFor, modelSlug } from './modelPackage';
 import { isMaterialized, loadMaterializedPackages, materializeSnapshotPackage, resolvePackageDir, type PackageBlobs } from './modelPackageStore';
 import { readMeshDoc, readMeshDocParts, type MeshDocPartMeta, type PackageMeshDoc } from './meshDoc';
+import { mergeModelCatalogSources } from './modelIdentity';
 
 const MODEL_SNAPSHOT = 'cart/hmsc-int/data/domains/model/snapshots/model.snapshot.json';
 const COOKED_SNAPSHOT = 'cart/hmsc-int/data/domains/cooked-asset/snapshots/cooked-asset.snapshot.json';
@@ -440,15 +441,19 @@ function loadHmscEditorCatalog(): HmscEditorCatalog {
   const importedViewerSources = importedPropViewerSources(importedProps);
   const looseViewerSources = looseModelSources(importedViewerSources);
   const viewerModelCount = importedViewerSources.size + looseViewerSources.length;
-  const modelPackages = dedupeModelsByName([
-    // Materialized on-disk packages FIRST (they win a name collision): the durable
-    // per-model directories under cart/editor/data/models — imported files land here.
-    ...loadMaterializedPackages(),
-    ...importedPropModelPackages(importedProps),
-    ...looseModelFilePackages(looseViewerSources),
-    ...cookedModelPackages(cooked),
-    ...storedModelPackages(models),
-  ])
+  const modelPackages = mergeModelCatalogSources(
+    // Materialized packages are durable identities. Two independently saved
+    // models may share a display name; neither is allowed to disappear.
+    loadMaterializedPackages(),
+    [
+      // Legacy source aliases still collapse by name/priority so a Studio model
+      // and its imported/cooked copy remain one browser row (req_2294).
+      ...importedPropModelPackages(importedProps),
+      ...looseModelFilePackages(looseViewerSources),
+      ...cookedModelPackages(cooked),
+      ...storedModelPackages(models),
+    ],
+  )
     // Canonical per-model folder id (SSOT): every model gets its OWN home node.
     // Sources used to seed folderId per kind, so imported props shared one id and
     // clicking one opened another's context menu (req_2523). Derive from the id here.
@@ -1216,33 +1221,6 @@ function displayName(asset: CookedAsset): string {
 
 function modelFolderId(seed: string): `model-${string}` {
   return `model-${slug(seed)}`;
-}
-
-// A single model can exist in more than one source: you author it in the studio
-// mesh editor (studio-model), then export it as a prop to get it into the game
-// (imported-prop / cooked-asset / source-file). Those are the SAME model, so the
-// browser must show one row, not two. Collapse by name, keeping the most-editable
-// source (the studio original) over its exported/baked copies.
-function modelSourcePriority(model: ModelPackage): number {
-  switch (model.sourceKind) {
-    case 'studio-model': return 0;  // the editable original you authored
-    case 'source-file': return 1;   // a raw imported mesh file
-    case 'imported-prop': return 2; // an exported/imported prop
-    case 'cooked-asset': return 3;  // the baked game output
-    default: return 4;
-  }
-}
-
-function dedupeModelsByName(models: ModelPackage[]): ModelPackage[] {
-  const byName = new Map<string, ModelPackage>();
-  for (const model of models) {
-    const key = model.name.trim().toLowerCase();
-    const existing = byName.get(key);
-    if (!existing || modelSourcePriority(model) < modelSourcePriority(existing)) {
-      byName.set(key, model);
-    }
-  }
-  return [...byName.values()];
 }
 
 function modelRank(model: ModelPackage): number {
