@@ -84,6 +84,21 @@ across every event, zero seed-resets):
 5. **redo across a reload**: restores 312 verts, twig tracks again,
    `match=true`.
 
+PAINT suite (req_2916), all green the same day — pixel-level, via the
+`atlas:/path.png` dump op:
+
+6. **baseline honesty**: the pre-stamp atlas dump hashes DIFFERENTLY from the
+   stamped one — the strokes really changed pixels (guards against a suite
+   that "passes" because nothing painted).
+7. **painted pixels across a reload**: two real committed strokes
+   (`paint:1;stamp;paintend` ×2), then reload — the atlas PNG is
+   byte-identical before/after (`39afcdec…` both sides), the stroke journal
+   holds `{undo:2}`, and the serialized stroke program is the same 204 b64
+   chars. The GPU side re-uploads by construction: `g_paint_tex` is recreated
+   from the CPU atlas whenever it's missing.
+8. **paint-undo after a reload**: `paintundo` still drives the surviving
+   stroke journal (`undo:1 · redo:1`) — replay works on the resumed session.
+
 ## Known limits (this slice)
 
 - The resume is per-document and single-session (the host holds ONE edit mesh);
