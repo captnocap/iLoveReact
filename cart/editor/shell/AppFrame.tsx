@@ -57,6 +57,7 @@ import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publ
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/hmscAssetCatalog';
 import { partsMetaFromRows, meshDocRangeCenters } from '../data/meshDoc';
+import { assignPartsToGroup, nextDuplicatePartName, nextModelGroupName, ungroupParts } from '../data/modelOutliner';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
 // Key edges come straight off the ffi bus (not useModifiers.onKeyDown): the active key
@@ -2115,6 +2116,11 @@ export default function AppFrame() {
   // Unset or unknown = no-op; the harness never feeds an invalid kind to a generator.
   useEffect(() => {
     const kind = (globalThis as any).__env_get?.('RJIT_MODELDOC') as string | null | undefined;
+    if (!kind) return;
+    // A hot reload re-runs this effect, but the view atom already restored the doc
+    // the first eval created — minting ANOTHER fresh doc would switch documents and
+    // defeat the host-session resume (req_2913's reload proof rides this harness).
+    if (stateRef.current.workspaceDocuments.some((d) => d.kind === 'model')) return;
     if (kind === 'player') createPlayerModelDocument();
     else if (kind === 'player-export') {
       // Headless repro of the character-export dialog (req_2771): boot the player
@@ -2266,6 +2272,151 @@ export default function AppFrame() {
       };
     });
   };
+
+  // ── Organizational part groups (req_2911) ───────────────────────────────────
+  // A group is ONLY repeated metadata on its member rows. Host ranges, geometry,
+  // authored groups, and individual part ids stay untouched, so expanding/dissolving
+  // the folder always returns the exact independently-editable parts.
+  const selectPartGroup = (groupId: string) => {
+    const mid = activePartsModelId(state);
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const members = parts.filter((part) => part.groupId === groupId);
+    const visibleIds = members.filter((part) => part.visible).map((part) => part.id);
+    if (!mid || members.length === 0) {
+      setState((prev) => ({ ...prev, status: 'part group not found' }));
+      return;
+    }
+    if (visibleIds.length === 0) {
+      setState((prev) => ({ ...prev, status: `${members[0]!.groupName ?? 'group'} is hidden — show it before editing` }));
+      return;
+    }
+    const primary = visibleIds.includes(state.modelActivePartId ?? '') ? state.modelActivePartId! : visibleIds[visibleIds.length - 1]!;
+    setSelectedPartIds(visibleIds);
+    pushPartSetToHost(state, parts, visibleIds, primary);
+    setState((prev) => ({
+      ...prev,
+      modelActivePartId: primary,
+      status: `selected ${visibleIds.length} part${visibleIds.length === 1 ? '' : 's'} in ${members[0]!.groupName ?? 'group'}${visibleIds.length < members.length ? ' — hidden members excluded' : ''}`,
+    }));
+  };
+
+  const groupSelectedParts = () => {
+    const mid = activePartsModelId(state);
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const ids = effectiveSelectedIds(state, parts, selectedPartIdsRef.current);
+    const selected = ids.map((id) => parts.find((part) => part.id === id)).filter((part): part is ModelPart => Boolean(part));
+    if (!mid || selected.length < 2) {
+      setState((prev) => ({ ...prev, status: 'group parts: Shift-click at least two outliner rows first' }));
+      return;
+    }
+    const existingGroupIds = [...new Set(selected.map((part) => part.groupId).filter((id): id is string => Boolean(id)))];
+    const addToExisting = existingGroupIds.length === 1 && selected.some((part) => part.groupId !== existingGroupIds[0]);
+    if (existingGroupIds.length === 1 && !addToExisting && selected.every((part) => part.groupId === existingGroupIds[0])) {
+      const name = selected[0]!.groupName ?? 'group';
+      setState((prev) => ({ ...prev, status: `${selected.length} selected parts are already in ${name}` }));
+      return;
+    }
+    const groupId = addToExisting ? existingGroupIds[0]! : `part-group:${state.seq}`;
+    const groupName = addToExisting
+      ? (parts.find((part) => part.groupId === groupId)?.groupName ?? nextModelGroupName(parts))
+      : nextModelGroupName(parts);
+    setState((prev) => ({
+      ...prev,
+      seq: addToExisting ? prev.seq : prev.seq + 1,
+      modelParts: {
+        ...prev.modelParts,
+        [mid]: assignPartsToGroup(prev.modelParts[mid] ?? [], ids, groupId, groupName),
+      },
+      modelDirty: { ...prev.modelDirty, [mid]: true },
+      status: addToExisting ? `added selected parts to ${groupName}` : `grouped ${selected.length} parts as ${groupName}`,
+    }));
+  };
+
+  const ungroupSelectedParts = () => {
+    const mid = activePartsModelId(state);
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const ids = new Set(effectiveSelectedIds(state, parts, selectedPartIdsRef.current));
+    const count = parts.filter((part) => ids.has(part.id) && part.groupId).length;
+    if (!mid || count === 0) {
+      setState((prev) => ({ ...prev, status: 'ungroup parts: the selected parts are already at the root' }));
+      return;
+    }
+    setState((prev) => ({
+      ...prev,
+      modelParts: { ...prev.modelParts, [mid]: ungroupParts(prev.modelParts[mid] ?? [], [...ids]) },
+      modelDirty: { ...prev.modelDirty, [mid]: true },
+      status: `moved ${count} selected part${count === 1 ? '' : 's'} to the outliner root — geometry kept`,
+    }));
+  };
+
+  const renamePartGroup = (groupId: string, rawName: string) => {
+    const mid = activePartsModelId(state);
+    const name = rawName.trim().slice(0, MODEL_PART_NAME_MAX_CHARS);
+    if (!mid || !name) {
+      setState((prev) => ({ ...prev, status: !mid ? 'part group not found' : 'group names cannot be blank' }));
+      return;
+    }
+    setState((prev) => {
+      const parts = prev.modelParts[mid] ?? [];
+      const members = parts.filter((part) => part.groupId === groupId);
+      if (members.length === 0) return { ...prev, status: 'part group not found' };
+      if (parts.some((part) => part.groupId !== groupId && part.groupName?.toLowerCase() === name.toLowerCase())) {
+        return { ...prev, status: `group name already in use: ${name}` };
+      }
+      return {
+        ...prev,
+        modelParts: { ...prev.modelParts, [mid]: parts.map((part) => (part.groupId === groupId ? { ...part, groupName: name } : part)) },
+        modelDirty: { ...prev.modelDirty, [mid]: true },
+        status: `renamed group "${members[0]!.groupName ?? 'Group'}" → "${name}"`,
+      };
+    });
+  };
+
+  const dissolvePartGroup = (groupId: string) => {
+    const mid = activePartsModelId(state);
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const members = parts.filter((part) => part.groupId === groupId);
+    if (!mid || members.length === 0) {
+      setState((prev) => ({ ...prev, status: 'part group not found' }));
+      return;
+    }
+    const name = members[0]!.groupName ?? 'Group';
+    setState((prev) => ({
+      ...prev,
+      modelParts: { ...prev.modelParts, [mid]: ungroupParts(prev.modelParts[mid] ?? [], members.map((part) => part.id)) },
+      modelDirty: { ...prev.modelDirty, [mid]: true },
+      status: `dissolved ${name} — kept ${members.length} independent part${members.length === 1 ? '' : 's'}`,
+    }));
+  };
+
+  const applyPartVisibility = (mid: string, parts: ModelPart[], targetIds: string[], hide: boolean, label: string) => {
+    const targetSet = new Set(targetIds);
+    const targets = parts.filter((part) => targetSet.has(part.id) && part.visible === hide);
+    const flipped = new Set<string>();
+    const lines: string[] = [];
+    for (const part of targets) {
+      const range = partRange(part);
+      if (!range) {
+        lines.push(`cannot ${hide ? 'hide' : 'show'} ${part.name} — its host range is not stamped yet`);
+        continue;
+      }
+      // Write the synchronous mirror BEFORE the host changes displayed triangle count.
+      if (hide) hiddenPartIdsRef.current.add(part.id);
+      else hiddenPartIdsRef.current.delete(part.id);
+      const result = modelToolApiRef.current?.setPartHidden(range.lo, range.hi, hide);
+      if (result?.ok) {
+        flipped.add(part.id);
+        lines.push(`${hide ? 'hid' : 'showed'} ${part.name} [${range.lo},${range.hi}) — ${result.count} tris remain`);
+      } else {
+        if (hide) hiddenPartIdsRef.current.delete(part.id);
+        else hiddenPartIdsRef.current.add(part.id);
+        lines.push(`could not ${hide ? 'hide' : 'show'} ${part.name} [${range.lo},${range.hi}) — host op failed`);
+      }
+    }
+    const status = lines.length > 0 ? lines.join(' · ') : `${label} is already ${hide ? 'hidden' : 'shown'}`;
+    setState((prev) => ({ ...prev, status, modelParts: { ...prev.modelParts, [mid]: (prev.modelParts[mid] ?? []).map((part) => (flipped.has(part.id) ? { ...part, visible: !hide } : part)) } }));
+  };
+
   const toggleVisiblePart = (id: string) => {
     const mid = activePartsModelId(state);
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
@@ -2277,37 +2428,19 @@ export default function AppFrame() {
     // The pressed row picks the DIRECTION for the whole set (req_2659): hiding a visible
     // row hides every visible member; showing a hidden row shows every hidden member.
     const hide = pressed.visible;
-    const targets = verbTargets(id, parts)
-      .map((tid) => parts.find((p) => p.id === tid))
-      .filter((p): p is ModelPart => Boolean(p && p.visible === hide));
-    const flipped = new Set<string>();
-    const lines: string[] = [];
-    for (const part of targets) {
-      const range = partRange(part);
-      if (!range) {
-        lines.push(`cannot ${hide ? 'hide' : 'show'} ${part.name} — its host range is not stamped yet`);
-        continue;
-      }
-      // Mark the part hidden in the ref BEFORE the host op: the hide drops the displayed
-      // tri count, which fires reconcileEmptyParts against state where this part still
-      // reads visible:true — without the ref it prunes the just-hidden part like a delete.
-      if (hide) hiddenPartIdsRef.current.add(part.id);
-      else hiddenPartIdsRef.current.delete(part.id);
-      // The outcome is reported LOUDLY: a silent no-op here reads as "everything
-      // vanished" with no trail. verb+range+remaining tris tell the story per part.
-      const r = modelToolApiRef.current?.setPartHidden(range.lo, range.hi, hide);
-      if (r?.ok) {
-        flipped.add(part.id);
-        lines.push(`${hide ? 'hid' : 'showed'} ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`);
-      } else {
-        // Host op failed — undo the ref move so reconcile semantics match reality.
-        if (hide) hiddenPartIdsRef.current.delete(part.id);
-        else hiddenPartIdsRef.current.add(part.id);
-        lines.push(`could not ${hide ? 'hide' : 'show'} ${part.name} [${range.lo},${range.hi}) — host op failed`);
-      }
+    applyPartVisibility(mid, parts, verbTargets(id, parts), hide, pressed.name);
+  };
+
+  const toggleVisiblePartGroup = (groupId: string) => {
+    const mid = activePartsModelId(state);
+    const parts = mid ? (state.modelParts[mid] ?? []) : [];
+    const members = parts.filter((part) => part.groupId === groupId);
+    if (!mid || members.length === 0) {
+      setState((prev) => ({ ...prev, status: 'part group not found' }));
+      return;
     }
-    const status = lines.length > 0 ? lines.join(' · ') : `${pressed.name} is already ${hide ? 'hidden' : 'shown'}`;
-    setState((prev) => ({ ...prev, status, modelParts: { ...prev.modelParts, [mid]: (prev.modelParts[mid] ?? []).map((p) => (flipped.has(p.id) ? { ...p, visible: !hide } : p)) } }));
+    const hide = members.some((part) => part.visible);
+    applyPartVisibility(mid, parts, members.map((part) => part.id), hide, members[0]!.groupName ?? 'group');
   };
   const deletePart = (id: string) => {
     const mid = activePartsModelId(state);
@@ -2405,6 +2538,7 @@ export default function AppFrame() {
     }
     const placedRows: ModelPart[] = [];
     const lines: string[] = [];
+    const usedNames = parts.map((part) => part.name);
     let seq = state.seq;
     for (const part of rows) {
       const range = partRange(part);
@@ -2421,9 +2555,23 @@ export default function AppFrame() {
         lines.push(`could not duplicate ${part.name} [${range.lo},${range.hi}) — host op failed`);
         continue;
       }
-      const axisName = mirrorAxis >= 0 ? ` mirror ${'XYZ'[mirrorAxis]}` : ' copy';
+      const qualifier = mirrorAxis >= 0 ? `mirror ${'XYZ'[mirrorAxis]}` : undefined;
+      const duplicateName = nextDuplicatePartName(part.name, usedNames, qualifier);
+      usedNames.push(duplicateName);
       const seed = part.mesh ? (mirrorAxis >= 0 ? mirrorMesh(part.mesh, mirrorAxis as 0 | 1 | 2) : cloneMesh(part.mesh)) : undefined;
-      placedRows.push({ id: `part:dup:${seq++}`, name: `${part.name}${axisName}`, kind: part.kind, ...(seed ? { mesh: seed } : {}), visible: true, color: part.color, lift: part.lift, lo: r.lo, hi: r.hi });
+      placedRows.push({
+        id: `part:dup:${seq++}`,
+        name: duplicateName,
+        kind: part.kind,
+        ...(seed ? { mesh: seed } : {}),
+        visible: true,
+        color: part.color,
+        lift: part.lift,
+        groupId: part.groupId,
+        groupName: part.groupName,
+        lo: r.lo,
+        hi: r.hi,
+      });
       lines.push(`${mirrorAxis >= 0 ? 'mirrored' : 'duplicated'} ${part.name} → [${r.lo},${r.hi})`);
     }
     if (placedRows.length === 0) {
@@ -3036,6 +3184,8 @@ export default function AppFrame() {
           kind: meta[i]?.kind as PrimitiveKind | undefined,
           visible: true, // the doc mounts every part; visibility is a live host op, not mount state
           color: meta[i]?.color ?? PART_TINTS[i % PART_TINTS.length],
+          groupId: meta[i]?.groupId,
+          groupName: meta[i]?.groupName,
           lo: r.lo,
           hi: r.hi,
         }));
@@ -3283,6 +3433,12 @@ export default function AppFrame() {
     onRenamePart: guarded(renamePart),
     onToggleVisiblePart: guarded(toggleVisiblePart),
     onDeletePart: guarded(deletePart),
+    onSelectPartGroup: guarded(selectPartGroup),
+    onRenamePartGroup: guarded(renamePartGroup),
+    onToggleVisiblePartGroup: guarded(toggleVisiblePartGroup),
+    onDissolvePartGroup: guarded(dissolvePartGroup),
+    onGroupSelectedParts: guarded(groupSelectedParts),
+    onUngroupSelectedParts: guarded(ungroupSelectedParts),
     onAddPart: guarded(addPart),
     onDuplicatePart: guarded((id: string) => duplicatePartById(id, -1)),
     onImportModel: guarded(() => setImportPartOpen(true)),

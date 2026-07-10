@@ -29,6 +29,11 @@ export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' |
 export type ModelPart = {
   id: string;
   name: string;
+  // Organizational outliner folder only — never topology. Members stay independent
+  // authored-group ranges and may be selected/edited alone after expanding the folder.
+  // The label is repeated so parts.json + the host journal need no parallel group table.
+  groupId?: string;
+  groupName?: string;
   // The primitive it was spawned from (naming/icons); absent for a Studio-authored part,
   // which is an arbitrary mesh, not a primitive.
   kind?: PrimitiveKind;

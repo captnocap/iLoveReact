@@ -1,6 +1,6 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
-import type { ModelPackage, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
+import type { ModelPackage, ModelPart, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
 import ModelView, { type PartRange } from './ModelView';
 import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData, primitiveMeshData, composeModelParts, packageMeshDoc } from '../data/hmscAssetCatalog';
 
@@ -12,6 +12,13 @@ export type OutlinerHandlers = {
   onRenamePart: (id: string, name: string) => void;
   onToggleVisiblePart: (id: string) => void;
   onDeletePart: (id: string) => void;
+  // Organizational folders reference part ids only; none of these verbs fuse topology.
+  onSelectPartGroup: (groupId: string) => void;
+  onRenamePartGroup: (groupId: string, name: string) => void;
+  onToggleVisiblePartGroup: (groupId: string) => void;
+  onDissolvePartGroup: (groupId: string) => void;
+  onGroupSelectedParts: () => void;
+  onUngroupSelectedParts: () => void;
   onAddPart: (kind: PrimitiveKind) => void;
   // Duplicate a part in place (host copies geometry + paint; the row gains a twin).
   onDuplicatePart: (id: string) => void;

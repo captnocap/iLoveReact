@@ -10,7 +10,7 @@
 //                    + the trailing glass vertex boundary (v1 remains readable),
 //                    written by the host door __model_meshdoc_write (the format's twin
 //                    lives in framework/v8_bindings_core.zig hostModelMeshdocWrite).
-//   mesh/parts.json  rank-ordered part METADATA (name/color/visible/kind), matching
+//   mesh/parts.json  rank-ordered part METADATA (name/color/visible/kind/group), matching
 //                    doc.blob's ranges ascending — names are cart truth, geometry is
 //                    host truth, the rank ties them together.
 //
@@ -37,7 +37,7 @@ export type PackageMeshDoc = {
 };
 
 /** Part metadata row, rank-ordered to match PackageMeshDoc.ranges. */
-export type MeshDocPartMeta = { name: string; color: string; visible: boolean; kind?: string };
+export type MeshDocPartMeta = { name: string; color: string; visible: boolean; kind?: string; groupId?: string; groupName?: string };
 
 const RJMD_MAGIC = 0x444d4a52; // 'RJMD' little-endian
 const DOC_BLOB = 'mesh/doc.blob';
@@ -161,11 +161,11 @@ function groupSpanEnd(groups: Uint32Array | null, faceCount: number): number {
 
 /** Rank-order live outliner rows into meshdoc part metadata (ascending lo — the same
  *  order the host reports ranges in). */
-export function partsMetaFromRows(rows: readonly { name: string; color: string; visible: boolean; kind?: string; lo?: number }[]): MeshDocPartMeta[] {
+export function partsMetaFromRows(rows: readonly { name: string; color: string; visible: boolean; kind?: string; groupId?: string; groupName?: string; lo?: number }[]): MeshDocPartMeta[] {
   return rows
     .slice()
     .sort((a, b) => (a.lo ?? Number.MAX_SAFE_INTEGER) - (b.lo ?? Number.MAX_SAFE_INTEGER))
-    .map((p) => ({ name: p.name, color: p.color, visible: p.visible, kind: p.kind }));
+    .map((p) => ({ name: p.name, color: p.color, visible: p.visible, kind: p.kind, groupId: p.groupId, groupName: p.groupName }));
 }
 
 /** Per-range bounds centers, rank-ordered to match `doc.ranges` — the MEASURED

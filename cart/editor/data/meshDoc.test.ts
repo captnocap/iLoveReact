@@ -5,7 +5,7 @@
 //     --outfile=/tmp/editor-meshdoc.test.js --format=iife --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-meshdoc.test.js
-import { parseMeshDocBytes } from './meshDoc';
+import { parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -48,6 +48,15 @@ test('RJMD v2 preserves the trailing glass vertex boundary', () => {
 
 test('RJMD v2 rejects a non-triangle-aligned glass boundary', () => {
   assert(parseMeshDocBytes(docBlob(2, 2)) === null, 'misaligned glass boundary passed');
+});
+
+test('parts metadata preserves organizational groups while ranking by host range', () => {
+  const rows = partsMetaFromRows([
+    { name: 'divider', color: '#bbb', visible: true, lo: 8, groupId: 'bridge', groupName: 'Bridge deck' },
+    { name: 'deck', color: '#aaa', visible: true, lo: 2, groupId: 'bridge', groupName: 'Bridge deck' },
+  ]);
+  assert(rows[0]?.name === 'deck' && rows[1]?.name === 'divider', 'host-range ranking changed');
+  assert(rows.every((row) => row.groupId === 'bridge' && row.groupName === 'Bridge deck'), 'group metadata was stripped from parts.json rows');
 });
 
 log(`\n${passed} passed, ${failed} failed`);
