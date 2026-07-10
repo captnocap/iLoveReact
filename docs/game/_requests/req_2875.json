@@ -13,6 +13,12 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-10T09:28:14.389Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Implementation landed in 930d61fbd: active Map Paint now appends NW pine, maple, oak, western red cedar, spruce, tall grass, reeds, low bush, and dense bush. Non-palm trees use one shared wrapped mesh plus one existing 24-byte slim GPU instance; original legend ids stay fixed. Native/unit/catalog/build checks are green; sustained frame gate and final visual review remain."
     }
   ]
 }
