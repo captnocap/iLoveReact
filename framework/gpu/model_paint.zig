@@ -89,7 +89,9 @@ pub fn consumeDirtyRows() ?[2]u32 {
 }
 
 /// Wipe the atlas back to the default face colour on every texel (all rows dirty) — the
-/// blank canvas a paint-program replay paints onto. No-op if there's no atlas.
+/// blank canvas a paint-program replay paints onto. No-op if there's no atlas. COLOUR
+/// only: the alpha channel is the per-face glass state and survives the wipe (req_2928 —
+/// Create Paint Atlas was un-glassing every glass face).
 pub fn clearAtlas() void {
     const buf = g_rgba orelse return;
     var i: usize = 0;
@@ -97,7 +99,6 @@ pub fn clearAtlas() void {
         buf[i + 0] = DEFAULT_FACE[0];
         buf[i + 1] = DEFAULT_FACE[1];
         buf[i + 2] = DEFAULT_FACE[2];
-        buf[i + 3] = DEFAULT_FACE[3];
     }
     g_has_dirty = false;
     if (g_atlas_h > 0) markRows(0, g_atlas_h - 1);
@@ -488,11 +489,13 @@ pub fn clear() void {
     // g_density_req deliberately survives — edits/reloads keep their chosen density.
 }
 
-/// Paint one face — rasterizes its TRIANGLE in island space (the per-face fill
-/// behaviour). The centroid texel is always written, so a sliver face still takes the
-/// colour (and faceColor reads it back). `face` out of range is ignored (a raycast
-/// miss passes -1 up the stack, never here).
-pub fn paintFace(face: u32, rgba: [4]u8) void {
+/// Rasterize one face's TRIANGLE in island space (the per-face fill behaviour). The
+/// centroid texel is always written, so a sliver face still takes the colour (and
+/// faceColor reads it back). `face` out of range is ignored (a raycast miss passes -1
+/// up the stack, never here). Null rgb/alpha leaves that part of each texel untouched —
+/// the atlas alpha channel IS the per-face glass state (editGlassFirstVert derives the
+/// transparent-run split from it), so USER paint must write rgb only.
+fn paintFaceTexels(face: u32, rgb: ?[3]u8, alpha: ?u8) void {
     const buf = g_rgba orelse return;
     const lay = &(g_layout orelse return);
     if (face >= g_facecount) return;
@@ -506,19 +509,43 @@ pub fn paintFace(face: u32, rgba: [4]u8) void {
             const fy: f32 = @floatFromInt(ty);
             if (!pointInTri(c, fx + 0.5, fy + 0.5, PAINT_EPS)) continue;
             const dst = (@as(usize, ty) * g_atlas_w + tx) * 4;
-            buf[dst + 0] = rgba[0];
-            buf[dst + 1] = rgba[1];
-            buf[dst + 2] = rgba[2];
-            buf[dst + 3] = rgba[3];
+            if (rgb) |col| {
+                buf[dst + 0] = col[0];
+                buf[dst + 1] = col[1];
+                buf[dst + 2] = col[2];
+            }
+            if (alpha) |a| buf[dst + 3] = a;
         }
     }
     const ct = faceCentroidTexel(lay, face);
     const dc = (@as(usize, ct[1]) * g_atlas_w + ct[0]) * 4;
-    buf[dc + 0] = rgba[0];
-    buf[dc + 1] = rgba[1];
-    buf[dc + 2] = rgba[2];
-    buf[dc + 3] = rgba[3];
+    if (rgb) |col| {
+        buf[dc + 0] = col[0];
+        buf[dc + 1] = col[1];
+        buf[dc + 2] = col[2];
+    }
+    if (alpha) |a| buf[dc + 3] = a;
     markRows(@min(bb[1], ct[1]), @max(bb[3], ct[1]));
+}
+
+/// Paint one face's full RGBA — the AUTHORITATIVE fill (colour-table apply, layout
+/// carry, glass toggle). Alpha is the glass channel; user paint goes through
+/// paintFaceRgb instead so it never un-glasses a face.
+pub fn paintFace(face: u32, rgba: [4]u8) void {
+    paintFaceTexels(face, .{ rgba[0], rgba[1], rgba[2] }, rgba[3]);
+}
+
+/// Paint one face's COLOUR only, preserving each texel's alpha — the user-paint fill
+/// (fill brush, part tints, atlas bases). A glass face painted this way stays glass:
+/// stained glass, not un-glassed (req_2928).
+pub fn paintFaceRgb(face: u32, rgb: [3]u8) void {
+    paintFaceTexels(face, rgb, null);
+}
+
+/// Rewrite one face's ALPHA only, preserving the painted colour — re-asserts the glass
+/// state over an atlas blit (a saved painting knows nothing about the mesh's glass).
+pub fn paintFaceAlpha(face: u32, alpha: u8) void {
+    paintFaceTexels(face, null, alpha);
 }
 
 // ── Texture template (req_2537) ─────────────────────────────────────────────────────
@@ -556,10 +583,14 @@ fn templateColor(island_idx: u32) [4]u8 {
 }
 
 /// Paint every island its template colour (the Create-Texture "Texture Template" type).
+/// RGB only — a glass face gets a translucent pastel, it does not turn opaque.
 pub fn fillTemplate() void {
     const lay = &(g_layout orelse return);
     var f: u32 = 0;
-    while (f < g_facecount) : (f += 1) paintFace(f, templateColor(lay.tri_island[f]));
+    while (f < g_facecount) : (f += 1) {
+        const c = templateColor(lay.tri_island[f]);
+        paintFaceRgb(f, .{ c[0], c[1], c[2] });
+    }
 }
 
 // The atlas base type the user picks in Create Paint Atlas — the same gate as the size, since
@@ -594,7 +625,7 @@ fn applyBase() void {
         .template => fillTemplate(),
         .solid => {
             var f: u32 = 0;
-            while (f < g_facecount) : (f += 1) paintFace(f, g_base_color);
+            while (f < g_facecount) : (f += 1) paintFaceRgb(f, .{ g_base_color[0], g_base_color[1], g_base_color[2] });
         },
         .blank => {}, // leave the neutral background bare
     }
@@ -1261,14 +1292,15 @@ fn brushCoverage(spec: BrushShape, dx: f32, dy: f32, r_raw: f32, flow: f32, wx: 
     return satf(coverage) * satf(flow);
 }
 
-/// Blend one texel toward `ink` by `amt` (alpha snaps opaque — paint is paint).
+/// Blend one texel toward `ink` by `amt` — COLOUR only. The alpha channel is the
+/// per-face glass state, so a brush stroke never touches it: painting a glass face
+/// gives stained glass, not un-glassed (req_2928).
 fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32) void {
     inline for (0..3) |c| {
         const base: f32 = @floatFromInt(buf[d + c]);
         const tc: f32 = @floatFromInt(ink[c]);
         buf[d + c] = @intFromFloat(std.math.clamp(base + (tc - base) * amt, 0.0, 255.0));
     }
-    buf[d + 3] = 255;
 }
 
 /// Stamp a brush dab: a disc of `radius` texels around the hit, in the face's ISLAND

@@ -912,7 +912,8 @@ fn runStrokeOps(ops: []const u8, res: *const Resolver, ink: *ReplayInk, dabs: *u
                 const ord = c.u32v() orelse return;
                 dabs.* += 1;
                 const face = resolveFace(res, group, ord) orelse continue;
-                if (ink.mat_active) model_paint.paintFaceTex(face) else model_paint.paintFace(face, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2], 255 });
+                // RGB-only fill: replay must not un-glass a face any more than the live fill does (req_2928).
+                if (ink.mat_active) model_paint.paintFaceTex(face) else model_paint.paintFaceRgb(face, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2] });
             },
             else => return,
         }

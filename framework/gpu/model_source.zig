@@ -154,6 +154,8 @@ pub fn faceGroupOf(displayed_face: u32) u32 {
 }
 
 /// Write a painted DISPLAYED face's colour back to the authoritative source paint.
+/// COLOUR only — the alpha channel is the face's glass state (modelGlassFirstVertex
+/// derives the meshdoc's transparent run from it), so painting never un-glasses (req_2928).
 pub fn writeColor(displayed_face: i32, r: u8, g: u8, b: u8) void {
     if (displayed_face < 0) return;
     const map = g_face_to_source orelse return;
@@ -165,7 +167,6 @@ pub fn writeColor(displayed_face: i32, r: u8, g: u8, b: u8) void {
     cols[sf * 4 + 0] = r;
     cols[sf * 4 + 1] = g;
     cols[sf * 4 + 2] = b;
-    cols[sf * 4 + 3] = 255;
 }
 
 /// Copy changed DISPLAYED face positions back onto their mapped source faces. Full-res

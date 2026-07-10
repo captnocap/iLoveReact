@@ -5256,7 +5256,7 @@ pub fn meshPaintGroupRange(lo: u32, hi: u32, r: u8, g: u8, b: u8) u32 {
     while (f < fc) : (f += 1) {
         const grp = model_source.faceGroupOf(f);
         if (grp == model_source.NO_FACE_GROUP or grp < lo or grp >= hi) continue;
-        model_paint.paintFace(f, .{ r, g, b, 255 });
+        model_paint.paintFaceRgb(f, .{ r, g, b });
         model_source.writeColor(@intCast(f), r, g, b);
         painted += 1;
     }
@@ -5298,7 +5298,7 @@ pub fn paintAt(mx: f32, my: f32, r: u8, g: u8, b: u8) i32 {
         if (mat) {
             model_paint.paintFaceTex(f);
         } else {
-            model_paint.paintFace(f, .{ r, g, b, 255 });
+            model_paint.paintFaceRgb(f, .{ r, g, b });
             model_source.writeColor(@intCast(f), r, g, b);
         }
         paint_program.recordFill(f, mat, .{ r, g, b }); // the stroke program is the durable form, not the atlas
@@ -5434,7 +5434,7 @@ pub fn paintFaceByIndex(face: u32, r: u8, g: u8, b: u8) bool {
     if (face >= model_paint.faceCount()) return false;
     mesh_edit.suspendFaceTint(); // paint lands under any selection tint, never mixed with it
     defer mesh_edit.resumeFaceTint();
-    model_paint.paintFace(face, .{ r, g, b, 255 });
+    model_paint.paintFaceRgb(face, .{ r, g, b });
     return true;
 }
 
@@ -5660,7 +5660,19 @@ pub fn applyPaintAtlas(detail_px: i32, rgba: []const u8) bool {
     mesh_edit.suspendFaceTint();
     defer mesh_edit.resumeFaceTint();
     _ = setPaintDetail(detail_px);
-    return model_paint.setAtlas(rgba);
+    if (!model_paint.setAtlas(rgba)) return false;
+    // The saved painting knows nothing about the mesh's glass — its alpha is whatever
+    // was live at save time. Re-assert the per-face glass state from the source colour
+    // table (the durable truth meshdoc exports), colour untouched (req_2928).
+    if (model_source.colors()) |src| {
+        const fc = model_paint.faceCount();
+        var f: u32 = 0;
+        while (f < fc) : (f += 1) {
+            if (@as(usize, f) * 4 + 3 >= src.len) break;
+            model_paint.paintFaceAlpha(f, src[f * 4 + 3]);
+        }
+    }
+    return true;
 }
 
 /// Lift / re-apply the mesh-editor selection tint around an atlas READ done outside this

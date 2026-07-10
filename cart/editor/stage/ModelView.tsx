@@ -1685,7 +1685,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // headless repro harness for selection/tint bugs (req_2613). Each op waits a few
     // frames so camera-dependent doors (pick/box) act on a drawn viewport. Ops:
     //   mode:N sel:N add:N range:lo,hi pick:x,y pickadd:x,y box:x0,y0,x1,y1 snap revert
-    //   clear scope:lo,hi nudge:axis,amt gizmo:N undo redo del flip spiketrace:0|1
+    //   clear scope:lo,hi nudge:axis,amt gizmo:N undo redo del flip glass spiketrace:0|1
     //   grouppaint:lo,hi,r,g,b
     //   detail:px wait:frames report atlas:/path.png parts addpart:kind orbit:dx,dy
     //   lcbegin lcprev:dir,cuts,off lcend:0|1 lcstate  (loop-cut session; off = 0..1 frac)
@@ -1779,6 +1779,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'lcstate') console.error(`[meshops] lcstate → ${host.__mesh_lc_state?.() ?? 'n/a'}`);
         else if (name === 'del') adoptMesh(meshDeleteSelection());
         else if (name === 'flip') { const r = meshFlipFaces(); adoptMesh(r); console.error(`[meshops] flip → ${JSON.stringify(r)}`); }
+        // glass — toggle the selected faces as glass through the real door (req_2928's
+        // headless repro: glass must survive atlas creation/re-island/painting; the
+        // atlas:<path> dump's ALPHA channel is the assertion).
+        else if (name === 'glass') { const r = meshGlass(); adoptMesh(r); console.error(`[meshops] glass → ${JSON.stringify(r)}`); }
         else if (name === 'spiketrace') host.__hmsc_spike_trace?.(num(a[0]) === 1 ? 1 : 0);
         else if (name === 'grouppaint') host.__model_paint_group_range?.(num(a[0]), num(a[1]), num(a[2]), num(a[3]), num(a[4]));
         else if (name === 'patharc') {
