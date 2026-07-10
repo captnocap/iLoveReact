@@ -460,6 +460,63 @@ export function meshPartCommands(hasActivePart: boolean, selectedPartCount: numb
   return out;
 }
 
+// The model right-click menu is deliberately shallower than the full Edit → Mesh
+// catalog: frequent/contextual verbs stay one click away while stable tool families
+// collapse behind four small rows. Keep this layout in data so a presentation cleanup
+// can never silently lose a command from the canonical mesh tool/part lists.
+export type ModelContextMenuGroupId = 'select' | 'gizmo' | 'mirror' | 'view';
+
+export type ModelContextMenuGroup = {
+  id: ModelContextMenuGroupId;
+  label: string;
+  icon: string;
+  commands: Command[];
+};
+
+export type ModelContextMenuLayout = {
+  groups: ModelContextMenuGroup[];
+  directToolCommands: Command[];
+  directPartCommands: Command[];
+};
+
+const MODEL_CONTEXT_GROUPS: {
+  id: ModelContextMenuGroupId;
+  label: string;
+  icon: string;
+  commandIds: string[];
+}[] = [
+  { id: 'select', label: 'Select Mode', icon: 'Grip', commandIds: ['mesh-vertex', 'mesh-edge', 'mesh-face'] },
+  { id: 'gizmo', label: 'Gizmo', icon: 'Move', commandIds: ['mesh-move', 'mesh-scale', 'mesh-rotate'] },
+  { id: 'mirror', label: 'Mirror', icon: 'FlipHorizontal2', commandIds: ['mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z'] },
+  { id: 'view', label: 'View', icon: 'Grid3x3', commandIds: ['mesh-focus', 'mesh-wire', 'mesh-cam-lock'] },
+];
+
+const MODEL_CONTEXT_MIRROR_PART_IDS = new Set(['mesh-mirror-x', 'mesh-mirror-y', 'mesh-mirror-z']);
+const MODEL_CONTEXT_GROUPED_TOOL_IDS = new Set(MODEL_CONTEXT_GROUPS.flatMap((group) => group.commandIds));
+
+export function modelContextMenuLayout(hasActivePart: boolean, selectedPartCount: number): ModelContextMenuLayout {
+  const partCommands = meshPartCommands(hasActivePart, selectedPartCount);
+  const mirrorPartCommands = partCommands.filter((command) => MODEL_CONTEXT_MIRROR_PART_IDS.has(command.id));
+
+  return {
+    groups: MODEL_CONTEXT_GROUPS.map((group) => ({
+      id: group.id,
+      label: group.label,
+      icon: group.icon,
+      commands: [
+        ...group.commandIds.map(commandById),
+        ...(group.id === 'mirror' ? mirrorPartCommands : []),
+      ],
+    })),
+    // Paint Faces stays direct. Any future always-on tool also stays visible until
+    // it is intentionally assigned to a family above.
+    directToolCommands: meshToolCommands().filter((command) => !MODEL_CONTEXT_GROUPED_TOOL_IDS.has(command.id)),
+    // Duplicate / structural merge / import are primary part verbs. Only mirrored
+    // duplication moves into Mirror, where all six axis controls live together.
+    directPartCommands: partCommands.filter((command) => !MODEL_CONTEXT_MIRROR_PART_IDS.has(command.id)),
+  };
+}
+
 // The two brush behaviours (fill · free-form), surfaced as toolbar icon buttons only while painting.
 export function meshPaintCommands(tool: { paint: boolean }): Command[] {
   if (!tool.paint) return [];
