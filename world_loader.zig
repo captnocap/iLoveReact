@@ -4246,7 +4246,10 @@ pub const Runtime = struct {
             // is Studio-marked leaf glass. A placed live mesh has no baked material
             // ref for that slot, so route it explicitly through the transparent
             // depth-write-OFF pass. Its atlas alpha remains authoritative.
-            const live_door_glass = alpha == null and if (mesh.door) |door| si > door.leaf_slot else false;
+            const live_door_glass = alpha == null and if (mesh.door) |door|
+                live_mesh_doors.routeSlotTransparent(si, door.leaf_slot, mesh.slots.len, mesh.texture_has_translucency)
+            else
+                false;
             const slot_alpha = if (live_door_glass)
                 (if (mesh.tex_rgba != null or override != null) LIVE_DOOR_TEXTURED_GLASS_ROUTE_ALPHA else LIVE_DOOR_FLAT_GLASS_ALPHA)
             else

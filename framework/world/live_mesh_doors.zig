@@ -47,6 +47,24 @@ pub fn reconcile(id: u64, start_open: bool, previous: []const State) State {
     };
 }
 
+/// Live door slot transparency contract. RJMD v2 emits opaque leaf then glass
+/// slots, so every slot after `leaf_slot` is transparent. A legacy v1 door has
+/// only one mixed leaf slot; when its atlas contains alpha, route that entire
+/// slot through the transparent pass so its opaque texels still draw normally
+/// while glass texels cannot depth-block the later ground pass.
+pub fn routeSlotTransparent(slot_index: usize, leaf_slot: usize, slot_count: usize, texture_has_translucency: bool) bool {
+    if (slot_index > leaf_slot) return true;
+    return texture_has_translucency and slot_index == leaf_slot and slot_count == leaf_slot + 1;
+}
+
+pub fn rgbaHasTranslucency(rgba: []const u8) bool {
+    var alpha_at: usize = 3;
+    while (alpha_at < rgba.len) : (alpha_at += 4) {
+        if (rgba[alpha_at] < 250) return true;
+    }
+    return false;
+}
+
 test "identity separates storeys and mesh meanings while tolerating float noise below quantization" {
     const base = identity(11, 3.0, 0.0, 6.0, 90.0);
     try std.testing.expectEqual(base, identity(11, 3.0001, 0.0001, 6.0001, 90.001));
@@ -61,4 +79,16 @@ test "reconcile carries transient state and initializes a new door from authored
         State{ .identity = 99, .open = true, .progress = 1 },
         reconcile(99, true, &old),
     );
+}
+
+test "legacy mixed leaf and v2 glass tail both route through the transparent pass" {
+    try std.testing.expect(routeSlotTransparent(0, 0, 1, true));
+    try std.testing.expect(!routeSlotTransparent(0, 0, 1, false));
+    try std.testing.expect(!routeSlotTransparent(0, 0, 2, true));
+    try std.testing.expect(routeSlotTransparent(1, 0, 2, true));
+}
+
+test "atlas alpha detection finds the Studio glass value without flagging opaque paint" {
+    try std.testing.expect(rgbaHasTranslucency(&.{ 10, 20, 30, 255, 40, 50, 60, 87 }));
+    try std.testing.expect(!rgbaHasTranslucency(&.{ 10, 20, 30, 255, 40, 50, 60, 255 }));
 }

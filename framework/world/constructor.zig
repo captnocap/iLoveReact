@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const gamefile = @import("gamefile.zig");
+const live_mesh_doors = @import("live_mesh_doors.zig");
 const mapfile = gamefile.mapfile;
 // stb_image — decode the cooked-prop paint PNG at load (req_1544, MESH_PROPS v4),
 // the same decoder the decal raster uses (gpu/decal_raster.zig). The bake passes
@@ -152,6 +153,10 @@ pub const MeshPropMesh = struct {
     tex_w: u32 = 0,
     tex_h: u32 = 0,
     tex_rgba: ?[]u8 = null,
+    // True when the decoded atlas contains any non-opaque texel. Legacy RJMD v1
+    // doors have a single mixed opaque/glass leaf slot; the live loader uses
+    // this bit to route that whole slot through the depth-write-off pass.
+    texture_has_translucency: bool = false,
     slots: []MeshPropSlot = &.{},
     // DOOR (req_1864, MESH_PROPS v6) — a cooked door names which slot is its
     // toggleable leaf + the two-state interaction contract. null = not a door.
@@ -1080,6 +1085,7 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
         var tex_w: u32 = 0;
         var tex_h: u32 = 0;
         var tex_rgba: ?[]u8 = null;
+        var texture_has_translucency = false;
         var slots = try allocator.alloc(MeshPropSlot, 0);
         errdefer if (slots.len > 0) allocator.free(slots);
         if (version == 3) {
@@ -1123,6 +1129,7 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
                 }
             }
         }
+        if (tex_rgba) |rgba| texture_has_translucency = live_mesh_doors.rgbaHasTranslucency(rgba);
         if (version >= 5) {
             if (at + 4 > data.len) return Error.BadMeshProps;
             const slot_count: usize = @intCast(std.mem.readInt(u32, data[at..][0..4], .little));
@@ -1191,6 +1198,7 @@ pub fn decodeMeshProps(allocator: std.mem.Allocator, data: []const u8) Error!Mes
             .tex_w = tex_w,
             .tex_h = tex_h,
             .tex_rgba = tex_rgba,
+            .texture_has_translucency = texture_has_translucency,
             .slots = slots,
             .door = door,
             .collision_boxes = collision_boxes,
