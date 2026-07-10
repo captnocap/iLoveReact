@@ -50,6 +50,14 @@ export const editor_hot_reload: DocIndex = {
   ],
   hazards: [
     {
+      name: 'reload-time host cleanup must not touch the mesh session',
+      purpose: ['persistence'],
+      description:
+        'resetForReload (gpu/3d.zig) flushes the GPU intern caches on every dev reload — and used to ALSO clearActiveEditMesh, wiping g_edit_key so the resume readback came back empty and the remount re-seeded primitives over live edits (req_2913, caught on the first real session). It now re-stashes the session mesh from g_edit_verts instead. Any future reload cleanup must leave g_edit_*, mesh_edit selection, the journal, model_paint, and g_orbit alone — prove changes with the dev-mode reload test (dev build + touch the bundle + meshops session op), not just an in-process shot.',
+      evidence: ['framework/gpu/3d.zig'],
+      severity: 'high',
+    },
+    {
       name: 'doc twig must track every mesh re-key',
       purpose: ['persistence'],
       description:

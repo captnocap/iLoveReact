@@ -6561,7 +6561,6 @@ pub fn frameCleanup() void {
 pub fn resetForReload() void {
     g_geo_cache_len = 0;
     g_retained_top = 0;
-    clearActiveEditMesh();
     for (&g_geo_cache) |*e| e.* = .{};
     g_static_inst_cache_len = 0;
     g_static_inst_top = 0;
@@ -6587,6 +6586,18 @@ pub fn resetForReload() void {
     // it (the fingerprint guards the rare same-address+len case, but a clean memo
     // is free and removes all doubt — every texture just re-walks once).
     for (&g_tex_hash_memo) |*e| e.* = .{};
+    // The mesh-editor SESSION survives the reload (req_2913 — this line was the bug
+    // that broke the req_2898 resume: clearActiveEditMesh() here wiped g_edit_key,
+    // so the remounted viewer's session readback came back empty and it fell back
+    // to re-loading seed geometry over your edits). The session's CPU copy
+    // (g_edit_verts, duped by setPaintTarget) is the durable truth: the GPU intern
+    // + the consumed stash copy died with the cache clears above, so RE-STASH it —
+    // the first post-reload draw re-interns it into the fresh cache exactly like a
+    // fresh load. Selection (mesh_edit), journal, paint atlas, and orbit were never
+    // cleared here and keep surviving untouched.
+    if (g_edit_key) |key| {
+        if (g_edit_verts) |verts| _ = stashHostMesh(key, verts, g_edit_count);
+    }
 }
 
 /// Acquire the next RT slot for this frame. Returns null on pool exhaustion

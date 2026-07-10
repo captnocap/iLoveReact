@@ -21,6 +21,15 @@ Three layers, smallest first:
   `__model_session_json`, `framework/v8_bindings_core.zig`): the resident edit
   mesh's key/count, orbit radius, journal depths, and whether a paint atlas
   exists. Null when nothing is loaded. This is pure readback — no new state.
+- **The reload path must not eat the session** (req_2913 — the first live test
+  caught this): `resetForReload` (gpu/3d.zig), which flushes the append-only
+  GPU intern caches on every dev reload, was ALSO calling `clearActiveEditMesh`
+  — wiping the session identity the resume checks, so the remount fell back to
+  seed geometry (the "everything turned into its most primitive shape" report).
+  It now PRESERVES the session and re-stashes the mesh from the session's own
+  CPU copy (`g_edit_verts`) so the first post-reload draw re-interns it into
+  the fresh cache. Any future reload-time cleanup must leave `g_edit_*`,
+  `mesh_edit` selection, the journal, `model_paint`, and `g_orbit` alone.
 - **DOC twig** (`editor:meshdoc:v1`) — `cart/editor/stage/ModelView.tsx`
   stamps `{docId, key}` on every mesh adopt (topology ops re-key the host
   mesh; an effect on `model.key` tracks each one). On mount,
