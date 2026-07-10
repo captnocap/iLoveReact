@@ -25,7 +25,7 @@
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable } from '@reactjit/primitives';
 import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';
-import { resolvePlacement, resolveRunPlacements, pieceKindOf, pieceLook, pickAuthoredPlacement, PIECE_MODULE_METERS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
+import { resolvePlacement, resolveRunPlacements, supportsRunPlacement, pieceKindOf, pieceLook, pickAuthoredPlacement, PIECE_MODULE_METERS, type ArmedPiece, type PlacedPiece, type PlacementGesture } from './pieces';
 import { encodeMeshGhost } from './meshProps';
 import { isAuthoredPiece, authoredModelIdOf, type AuthoredBuildPiece } from './authoredRegistry';
 import { pushLiveWorld, pushResidentMeshes } from './livePush';
@@ -439,12 +439,12 @@ export default function WorldViewport(props: {
     const p = local(e);
     // Drag-run anchor (req_2747): a left-down on the Place tool with a grid
     // piece armed remembers the ground point under it — if the gesture turns
-    // into a drag, that point anchors the wall run / floor rect. Props and
-    // authored meshes stay single-placement (a bench is not a tiling), and
+    // into a drag, that point anchors the wall run / floor rect. Exported build
+    // pieces inherit this from their semantic affinity; props stay single, and
     // shift keeps meaning pan.
     const armed = armedRef.current;
     const runnable = !e?.shiftKey && toolRef.current === 'place' && !!armed
-      && !isAuthoredPiece(armed.pieceId) && pieceKindOf(armed.pieceId) !== 'prop';
+      && supportsRunPlacement(armed.pieceId);
     const anchor = runnable ? groundUnder(p.x, p.y) : null;
     dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false, pan: !!e?.shiftKey, runAnchor: anchor, runCell: null };
   }, [local, groundUnder]);

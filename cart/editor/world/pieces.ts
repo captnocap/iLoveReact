@@ -210,19 +210,28 @@ export function resolvePlacement(pieceId: string, wx: number, wz: number, floor:
  *  silently stamping thousands of pieces from one wild gesture. */
 export const RUN_PLACEMENT_CAP = 400;
 
+/** Whether a placeable participates in a drag run. This is a semantic-kind
+ *  capability: exported build pieces inherit it from their wall/floor/etc.
+ *  affinity exactly like catalog pieces; only free-placing props stay single. */
+export function supportsRunPlacement(pieceId: string): boolean {
+  const kind = pieceKindOf(pieceId);
+  return kind !== undefined && kind !== 'prop';
+}
+
 /** Resolve a click→drag RUN into every placement it stamps (req_2747 — the
  *  reintroduced drag-place): edge kinds (walls, fences, railings, …) lay a
  *  straight run of edge pieces along the DOMINANT drag axis, on the grid line
  *  nearest the anchor; plates fill the whole cell rect between anchor and
- *  cursor. Props and authored meshes stay single-placement at the cursor — a
- *  bench is not a tiling. Every cell resolves through resolvePlacement, so the
- *  run gets the same snap, host validation, and storey/terrain basing as a
- *  single click; validator-rejected cells drop out of the run. The whole run is
- *  LEVEL at the ANCHOR's terrain height — a dragged wall or floor plate is flat
- *  by construction, it does not stairstep over terrain bumps mid-run. */
+ *  cursor. Exported build pieces follow their semantic affinity; props stay
+ *  single-placement at the cursor because a bench is not a tiling. Every cell
+ *  resolves through resolvePlacement, so the run gets the same snap, host
+ *  validation, and storey/terrain basing as a single click; validator-rejected
+ *  cells drop out of the run. The whole run is LEVEL at the ANCHOR's terrain
+ *  height — a dragged wall or floor plate is flat by construction, it does not
+ *  stairstep over terrain bumps mid-run. */
 export function resolveRunPlacements(pieceId: string, ax: number, az: number, bx: number, bz: number, floor: number, terrainY = 0): PlacedPiece[] {
   const kind = pieceKindOf(pieceId);
-  if (kind === 'prop' || isAuthoredPiece(pieceId)) {
+  if (!supportsRunPlacement(pieceId)) {
     const single = resolvePlacement(pieceId, bx, bz, floor, terrainY);
     return single ? [single] : [];
   }
