@@ -77,6 +77,40 @@ test "merging authored faces dissolves their shared selectable edge (req_2871)" 
     try testing.expectEqual(@as(u32, 6), mesh_edit.boundaryEdgeCount());
 }
 
+test "masked plane cut cannot cross an outliner part boundary (req_2899)" {
+    // Two coincident quads represent separate outliner parts. Both cross x=1, but only
+    // the first part is inside the edit scope. The scoped cut must split that quad while
+    // leaving the second quad's two triangles and authored group completely untouched.
+    const quad = [_]f32{
+        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 2, 0, 0, 2, 0,
+    };
+    var pos: [quad.len * 2]f32 = undefined;
+    @memcpy(pos[0..quad.len], quad[0..]);
+    @memcpy(pos[quad.len..], quad[0..]);
+    const groups = [_]u32{ 7, 7, 19, 19 };
+    const editable = [_]bool{ true, true, false, false };
+
+    const cut = mesh_edit.planeCutSoupMasked(pos[0..], 4, .{ 1, 0, 0 }, 1.0, groups[0..], editable[0..]).?;
+    defer {
+        std.heap.c_allocator.free(cut.positions);
+        std.heap.c_allocator.free(cut.src_face);
+        if (cut.groups) |g| std.heap.c_allocator.free(g);
+    }
+
+    try testing.expectEqual(@as(u32, 6), cut.tri_count); // 4 cut tris + 2 untouched tris
+    var untouched: u32 = 0;
+    for (cut.src_face, 0..) |src, i| {
+        if (src < 2) continue;
+        untouched += 1;
+        try testing.expectEqual(@as(u32, 19), cut.groups.?[i]);
+        const out = cut.positions[i * 9 .. i * 9 + 9];
+        const original = pos[@as(usize, src) * 9 .. @as(usize, src) * 9 + 9];
+        try testing.expectEqualSlices(f32, original, out);
+    }
+    try testing.expectEqual(@as(u32, 2), untouched);
+}
+
 // Keep the mesh module's co-located lower-level tests in this unit target too.
 test {
     std.testing.refAllDecls(mesh_edit);

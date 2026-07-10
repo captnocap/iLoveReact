@@ -1362,8 +1362,15 @@ pub fn meshTopoLoopCut() bool {
     defer if (base_part) |bp| std.heap.c_allocator.free(bp);
     const part_count = hostPartCount();
 
+    // A plane is infinite, but an edit scope is not: faces belonging to another outliner
+    // part must pass through byte-for-byte even when the plane crosses them (req_2899).
+    const cut_scope = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
+    defer std.heap.c_allocator.free(cut_scope);
+    var scope_face: u32 = 0;
+    while (scope_face < tri_count) : (scope_face += 1) cut_scope[scope_face] = mesh_edit.faceInScopePub(scope_face);
+
     const groups_arg: ?[]const u32 = if (groups_buf) |g| g else null;
-    const cut = mesh_edit.planeCutSoup(pos, tri_count, nrm, d, groups_arg) orelse return false;
+    const cut = mesh_edit.planeCutSoupMasked(pos, tri_count, nrm, d, groups_arg, cut_scope) orelse return false;
     defer std.heap.c_allocator.free(cut.positions);
     defer std.heap.c_allocator.free(cut.src_face);
     defer if (cut.groups) |g| std.heap.c_allocator.free(g);
@@ -1634,6 +1641,9 @@ const LcSession = struct {
     base_pos: []f32, // positions-only soup at begin (tri_count * 9)
     tri_count: u32,
     base_groups: ?[]u32, // per-tri authored groups at begin (null = ungrouped import)
+    // One bool per BASE face: the active outliner scope captured at begin. Cut planes
+    // are infinite, so this explicit mutation mask keeps sibling parts intact (req_2899).
+    base_scope: []bool,
     // Part parentage (req_2644): one part index per BASE face at begin, and the same
     // carried through the LAST installed preview — commit renormalizes the minted
     // group ids back into contiguous per-part ranges from this.
@@ -1678,6 +1688,7 @@ fn lcFree() void {
     var s = g_lc orelse return;
     std.heap.c_allocator.free(s.base_pos);
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
+    std.heap.c_allocator.free(s.base_scope);
     if (s.base_face_part) |p| std.heap.c_allocator.free(p);
     if (s.last_face_part) |p| std.heap.c_allocator.free(p);
     journalDiscard(&s.snap);
@@ -1895,6 +1906,15 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
     const mask = std.heap.c_allocator.alloc(bool, model_paint.faceCount()) catch return null;
     defer std.heap.c_allocator.free(mask);
     if (mesh_edit.buildDeleteMask(mask) == 0) return null;
+    // Selection sets can outlive a scope change. The topology session starts from the
+    // intersection, never from stale selected faces in sibling outliner parts.
+    var selected_in_scope: u32 = 0;
+    var scoped_face: u32 = 0;
+    while (scoped_face < tri_count) : (scoped_face += 1) {
+        mask[scoped_face] = mask[scoped_face] and mesh_edit.faceInScopePub(scoped_face);
+        if (mask[scoped_face]) selected_in_scope += 1;
+    }
+    if (selected_in_scope == 0) return null;
 
     // Extract a positions-only soup (9 f32/tri) from the interleaved edit mesh.
     const pos = std.heap.c_allocator.alloc(f32, @as(usize, tri_count) * 9) catch return null;
@@ -1973,10 +1993,19 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
         groups = g;
     }
 
+    const base_scope = std.heap.c_allocator.alloc(bool, tri_count) catch {
+        std.heap.c_allocator.free(pos);
+        if (groups) |g| std.heap.c_allocator.free(g);
+        return null;
+    };
+    var scope_face: u32 = 0;
+    while (scope_face < tri_count) : (scope_face += 1) base_scope[scope_face] = mesh_edit.faceInScopePub(scope_face);
+
     g_lc = .{
         .base_pos = pos,
         .tri_count = tri_count,
         .base_groups = groups,
+        .base_scope = base_scope,
         .base_face_part = capturePartOfFaces(),
         .last_face_part = null, // no preview yet — commit falls back to the base parts
         .part_count = hostPartCount(),
@@ -2018,12 +2047,24 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     // minted group ids back into contiguous per-part ranges (req_2644).
     var cur_pos: []const f32 = s.base_pos;
     var cur_groups: ?[]const u32 = if (s.base_groups) |g| g else null;
+    var cur_scope: []const bool = s.base_scope;
     var cur_part: ?[]const u32 = if (s.base_face_part) |p| p else null;
     var cur_count: u32 = s.tri_count;
     var owned = false; // false while cur_* still aliases the session base
     var pi: u32 = 0;
     while (pi < n_planes) : (pi += 1) {
-        const cut = mesh_edit.planeCutSoup(cur_pos, cur_count, s.dirs[d], planes[pi], cur_groups) orelse break;
+        const cut = mesh_edit.planeCutSoupMasked(cur_pos, cur_count, s.dirs[d], planes[pi], cur_groups, cur_scope) orelse break;
+        const next_scope = std.heap.c_allocator.alloc(bool, cut.tri_count) catch {
+            std.heap.c_allocator.free(cut.positions);
+            std.heap.c_allocator.free(cut.src_face);
+            if (cut.groups) |g| std.heap.c_allocator.free(g);
+            break;
+        };
+        var scoped_tri: u32 = 0;
+        while (scoped_tri < cut.tri_count) : (scoped_tri += 1) {
+            const src = cut.src_face[scoped_tri];
+            next_scope[scoped_tri] = src < cur_scope.len and cur_scope[src];
+        }
         var next_part: ?[]const u32 = null;
         if (cur_part) |cp| {
             if (std.heap.c_allocator.alloc(u32, cut.tri_count)) |np| {
@@ -2039,10 +2080,12 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
         if (owned) {
             std.heap.c_allocator.free(@constCast(cur_pos));
             if (cur_groups) |g| std.heap.c_allocator.free(@constCast(g));
+            std.heap.c_allocator.free(@constCast(cur_scope));
             if (cur_part) |p| std.heap.c_allocator.free(@constCast(p));
         }
         cur_pos = cut.positions;
         cur_groups = cut.groups;
+        cur_scope = next_scope;
         cur_part = next_part;
         cur_count = cut.tri_count;
         owned = true;
@@ -2050,6 +2093,7 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     defer if (owned) {
         std.heap.c_allocator.free(@constCast(cur_pos));
         if (cur_groups) |g| std.heap.c_allocator.free(@constCast(g));
+        std.heap.c_allocator.free(@constCast(cur_scope));
     };
     // Stash the FINAL preview's parentage on the session (commit renormalizes from it).
     if (s.last_face_part) |p| std.heap.c_allocator.free(p);
@@ -2103,6 +2147,7 @@ pub fn meshLoopCutFaceEnd(commit: bool) bool {
     }
     std.heap.c_allocator.free(s.base_pos);
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
+    std.heap.c_allocator.free(s.base_scope);
     if (s.base_face_part) |p| std.heap.c_allocator.free(p);
     if (s.last_face_part) |p| std.heap.c_allocator.free(p);
     journalDiscard(&s.snap); // no-op when committed

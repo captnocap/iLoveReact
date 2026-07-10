@@ -1879,6 +1879,18 @@ fn emitLoopFan(out_pos: *std.ArrayListUnmanaged(f32), out_src: *std.ArrayListUnm
 /// across shapes — the user's unchanging number). Ungrouped tris, non-straddling groups,
 /// and groups whose boundary won't chain (holes/pinches) keep the per-tri path.
 pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_in: ?[]const u32) ?CutResult {
+    return planeCutSoupMasked(pos, tri_count, n, d, groups_in, null);
+}
+
+/// The scoped plane-cut boundary. `cut_mask_in`, when present, has one entry per INPUT
+/// triangle and is the strict mutation boundary: false triangles are copied byte-for-byte
+/// in position/group space even when they cross the plane. An authored polygon is cut only
+/// when ALL of its triangles are eligible, so a malformed partial group mask cannot tear an
+/// n-gon. `src_face` lets callers carry this mask through a multi-plane cut.
+pub fn planeCutSoupMasked(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_in: ?[]const u32, cut_mask_in: ?[]const bool) ?CutResult {
+    if (cut_mask_in) |mask| {
+        if (mask.len < tri_count) return null;
+    }
     var out_pos = std.ArrayListUnmanaged(f32){};
     var out_grp = std.ArrayListUnmanaged(u32){};
     var out_src = std.ArrayListUnmanaged(u32){};
@@ -1923,6 +1935,16 @@ pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_
         }
         for (order.items) |og| {
             const tris = buckets.getPtr(og).?.items;
+            if (cut_mask_in) |mask| {
+                var group_eligible = true;
+                for (tris) |tf| {
+                    if (!mask[tf]) {
+                        group_eligible = false;
+                        break;
+                    }
+                }
+                if (!group_eligible) continue;
+            }
             var any_neg = false;
             var any_pos = false;
             for (tris) |tf| {
@@ -1963,6 +1985,14 @@ pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_
             .{ pos[base + 3], pos[base + 4], pos[base + 5] },
             .{ pos[base + 6], pos[base + 7], pos[base + 8] },
         };
+        const eligible = if (cut_mask_in) |mask| mask[f] else true;
+        const og: u32 = if (groups_in) |g| (if (f < g.len) g[f] else model_source.NO_FACE_GROUP) else 0;
+        if (!eligible) {
+            if (!emitTriPos(&out_pos, p[0], p[1], p[2])) return null;
+            out_src.append(alloc, f) catch return null;
+            if (want_groups) out_grp.append(alloc, og) catch return null;
+            continue;
+        }
         const s = [3]f32{
             n[0] * p[0][0] + n[1] * p[0][1] + n[2] * p[0][2] - d,
             n[0] * p[1][0] + n[1] * p[1][1] + n[2] * p[1][2] - d,
@@ -1974,8 +2004,6 @@ pub fn planeCutSoup(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, groups_
             if (v > CUT_EPS) strict_pos += 1;
             if (v < -CUT_EPS) strict_neg += 1;
         }
-        const og: u32 = if (groups_in) |g| (if (f < g.len) g[f] else model_source.NO_FACE_GROUP) else 0;
-
         if (strict_pos == 0 or strict_neg == 0) {
             // Entirely on one side (or coplanar) — copy unchanged, grouped by side.
             if (!emitTriPos(&out_pos, p[0], p[1], p[2])) return null;
@@ -2650,7 +2678,7 @@ test "concave guard: dragging a corner into the quad interior buckles it — 1 f
         0, 0, 0, 2, 2, 0, 0, 2, 0,
     };
     const after = [_]f32{
-        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 0, 0, 2,   2,   0,
         0, 0, 0, 2, 2, 0, 1.5, 0.5, 0,
     };
     const groups = [_]u32{ 7, 7 };
@@ -2666,11 +2694,11 @@ test "concave guard: a face that was ALREADY concave stays quiet (newConcaveFace
     // didn't buckle it, so an organic mesh that legitimately contains concave faces
     // never re-alarms on every drag (editMesh.ts newConcaveFaces semantics).
     const before = [_]f32{
-        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 0, 0, 2,   2,   0,
         0, 0, 0, 2, 2, 0, 1.5, 0.5, 0,
     };
     const after = [_]f32{
-        0, 0, 0, 2, 0, 0, 2, 2, 0,
+        0, 0, 0, 2, 0, 0, 2,   2,   0,
         0, 0, 0, 2, 2, 0, 1.4, 0.6, 0,
     };
     const groups = [_]u32{ 7, 7 };
