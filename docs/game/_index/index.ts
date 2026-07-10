@@ -21,6 +21,7 @@ import type {
 } from './types';
 
 import { bake_geometry } from './records/bake_geometry';
+import { editor_flora } from './records/editor_flora';
 import { game_activities } from './records/game_activities';
 import { game_build } from './records/game_build';
 import { game_animation } from './records/game_animation';
@@ -38,7 +39,7 @@ export type {
 };
 
 export const ALL_DOCS: DocIndex[] = [
-  bake_geometry, game_activities, game_animation, game_build, game_cutscene,
+  bake_geometry, editor_flora, game_activities, game_animation, game_build, game_cutscene,
   game_missions, game_world, hmsc_int, physics3d, skybox_void, request_ledger,
 ];
 

@@ -17,7 +17,16 @@ export type FloraKind =
   | 'palmMed'
   | 'palmDense'
   | 'bush'
-  | 'grassFlowers';
+  | 'grassFlowers'
+  | 'pine'
+  | 'maple'
+  | 'oak'
+  | 'cedar'
+  | 'spruce'
+  | 'grassTall'
+  | 'grassReeds'
+  | 'bushLow'
+  | 'bushDense';
 
 export type FloraLane = 'grass' | 'tree' | 'bush';
 /** Lane indices the host engine stores lanes by (chunks.zig flora[lane]). */
@@ -29,42 +38,58 @@ export type FloraKindDefinition = {
   /** authoring swatch / overlay tint (distinct from ground tile colours) */
   color: string;
   lane: FloraLane;
+  /** append-only host recipe id + authored density tuning */
+  population: Readonly<{ spec: number; count: number; chance: number }>;
 };
 
-// Ordered definitions — verbatim labels/colors/lanes from hmsc floraData.ts.
+// The numeric ids mirror framework/world/foliage.zig Spec. Existing 0...3 are
+// permanent; new recipes append. Keeping the ids named here makes the cart's
+// content contract readable while the Zig boundary rejects unknown values.
+export const FLORA_SPEC = {
+  grass: 0,
+  bush: 1,
+  flowers: 2,
+  palm: 3,
+  pine: 4,
+  maple: 5,
+  oak: 6,
+  cedar: 7,
+  spruce: 8,
+  tallGrass: 9,
+  reeds: 10,
+  lowBush: 11,
+  denseBush: 12,
+} as const;
+
+// Ordered definitions. ORDER IS THE RMAP WIRE LEGEND: append, never reorder.
+// The first nine are the original editor flora contract.
 export const FLORA_KIND_DEFINITIONS: readonly FloraKindDefinition[] = [
-  { kind: 'grassSparse', label: 'Grass (Sparse)', color: '#6f9a52', lane: 'grass' },
-  { kind: 'grassMed', label: 'Grass', color: '#4f8a34', lane: 'grass' },
-  { kind: 'grassLush', label: 'Grass (Lush)', color: '#2f6b28', lane: 'grass' },
-  { kind: 'grassDry', label: 'Dry Grass', color: '#9a8f4a', lane: 'grass' },
-  { kind: 'palmSparse', label: 'Palm Tree (Sparse)', color: '#3f7a4a', lane: 'tree' },
-  { kind: 'palmMed', label: 'Palm Trees', color: '#2f6b3a', lane: 'tree' },
-  { kind: 'palmDense', label: 'Palm Tree (Dense)', color: '#1f5230', lane: 'tree' },
-  { kind: 'bush', label: 'Bush', color: '#356326', lane: 'bush' },
-  { kind: 'grassFlowers', label: 'Flower Grass', color: '#d77ab6', lane: 'grass' },
+  { kind: 'grassSparse', label: 'Grass (Sparse)', color: '#6f9a52', lane: 'grass', population: { spec: FLORA_SPEC.grass, count: 3, chance: 1 } },
+  { kind: 'grassMed', label: 'Grass', color: '#4f8a34', lane: 'grass', population: { spec: FLORA_SPEC.grass, count: 7, chance: 1 } },
+  { kind: 'grassLush', label: 'Grass (Lush)', color: '#2f6b28', lane: 'grass', population: { spec: FLORA_SPEC.grass, count: 16, chance: 1 } },
+  { kind: 'grassDry', label: 'Dry Grass', color: '#9a8f4a', lane: 'grass', population: { spec: FLORA_SPEC.grass, count: 7, chance: 1 } },
+  { kind: 'palmSparse', label: 'Palm Tree (Sparse)', color: '#3f7a4a', lane: 'tree', population: { spec: FLORA_SPEC.palm, count: 0, chance: 0.08 } },
+  { kind: 'palmMed', label: 'Palm Trees', color: '#2f6b3a', lane: 'tree', population: { spec: FLORA_SPEC.palm, count: 0, chance: 0.22 } },
+  { kind: 'palmDense', label: 'Palm Tree (Dense)', color: '#1f5230', lane: 'tree', population: { spec: FLORA_SPEC.palm, count: 0, chance: 0.7 } },
+  { kind: 'bush', label: 'Bush', color: '#356326', lane: 'bush', population: { spec: FLORA_SPEC.bush, count: 14, chance: 1 } },
+  { kind: 'grassFlowers', label: 'Flower Grass', color: '#d77ab6', lane: 'grass', population: { spec: FLORA_SPEC.flowers, count: 6, chance: 1 } },
+  { kind: 'pine', label: 'NW Pine', color: '#245d35', lane: 'tree', population: { spec: FLORA_SPEC.pine, count: 0, chance: 0.22 } },
+  { kind: 'maple', label: 'Maple Tree', color: '#4f7f32', lane: 'tree', population: { spec: FLORA_SPEC.maple, count: 0, chance: 0.18 } },
+  { kind: 'oak', label: 'Oak Tree', color: '#3f6c2b', lane: 'tree', population: { spec: FLORA_SPEC.oak, count: 0, chance: 0.14 } },
+  { kind: 'cedar', label: 'Western Red Cedar', color: '#1f5b4a', lane: 'tree', population: { spec: FLORA_SPEC.cedar, count: 0, chance: 0.2 } },
+  { kind: 'spruce', label: 'Spruce Tree', color: '#1c5144', lane: 'tree', population: { spec: FLORA_SPEC.spruce, count: 0, chance: 0.22 } },
+  { kind: 'grassTall', label: 'Tall Grass', color: '#5c8738', lane: 'grass', population: { spec: FLORA_SPEC.tallGrass, count: 8, chance: 1 } },
+  { kind: 'grassReeds', label: 'Reeds', color: '#8b8a42', lane: 'grass', population: { spec: FLORA_SPEC.reeds, count: 6, chance: 1 } },
+  { kind: 'bushLow', label: 'Low Bush', color: '#2f5e2a', lane: 'bush', population: { spec: FLORA_SPEC.lowBush, count: 10, chance: 1 } },
+  { kind: 'bushDense', label: 'Dense Bush', color: '#214b23', lane: 'bush', population: { spec: FLORA_SPEC.denseBush, count: 22, chance: 1 } },
 ];
 
 /** The zone authoring swatch palette (zoneData.ts ZONE_COLORS clone). */
 export const ZONE_COLORS = ['#a78bfa', '#f472b6', '#fb923c', '#34d399', '#60a5fa', '#facc15', '#f87171', '#22d3ee'];
 
-// The flora POPULATION CONTRACT (req_2497) — per kind [spec, count, chance]
-// triples in FLORA_KIND_DEFINITIONS order, pushed to the host so painting a
-// kind grows LITERAL blades/bushes/flowers/palms live in the viewport.
-// spec: 0 grass · 1 bush · 2 flowers · 3 palm. Values verbatim from the hmsc
-// population configs: grass blades/cell sparse 3 / med 7 / lush 16
-// (grassPopulation GRASS_CONFIG.density; dry rides med), bush clumps med 14
-// (BUSH_CONFIG.density), palm per-cell spawn chance sparse 0.08 / med 0.22 /
-// dense 0.7 (PALM_CONFIG.density — most palm cells stay bare, that's the
-// grove look). grassFlowers previews as flower heads; its lush grass bed
-// joins at Compile.
-export const FLORA_SPECS: Float32Array = new Float32Array([
-  0, 3, 1, //  grassSparse
-  0, 7, 1, //  grassMed
-  0, 16, 1, // grassLush
-  0, 7, 1, //  grassDry
-  3, 0, 0.08, // palmSparse
-  3, 0, 0.22, // palmMed
-  3, 0, 0.7, //  palmDense
-  1, 14, 1, // bush
-  2, 6, 1, //  grassFlowers
-]);
+// Flat host-door payload, derived from the ONE catalog so palette order and
+// population order cannot drift. Trees count as one shared-mesh instance when
+// their chance gate wins; grass/bush counts are rows per painted cell.
+export const FLORA_SPECS: Float32Array = new Float32Array(
+  FLORA_KIND_DEFINITIONS.flatMap(({ population }) => [population.spec, population.count, population.chance]),
+);

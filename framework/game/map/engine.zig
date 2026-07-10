@@ -1209,20 +1209,20 @@ pub fn roadDelete(id: u32) bool {
 
 // ── flora specs (the population contract — req_2497) ─────────────────────────
 // Flora KINDS are cart content; what the loader's live preview needs per kind is
-// its population FAMILY + density: spec 0 grass blades, 1 bush clumps, 2 flower
-// heads, 3 palms (trunk + frond crown). `count` = rows per painted cell (grass/
-// bush/flowers); `chance` = per-cell spawn gate (palms — most cells stay bare,
-// the palmPopulation.ts density rule). Pushed once at UI rate with the look.
+// its population recipe id + density. The append-only id vocabulary lives in
+// framework/world/foliage.zig; this boundary validates it instead of clamping
+// unknown content into a different plant. `count` = rows per painted cell for
+// blade/clump families; `chance` = per-cell spawn gate for trees.
 
 pub const FloraSpec = struct {
-    /// 0 grass · 1 bush · 2 flowers · 3 palm
     spec: u8,
-    /// rows per painted cell (unused for palms — the crown sizes itself)
+    /// rows per painted cell (unused for trees — their recipes size themselves)
     count: u16,
     /// per-cell spawn chance 0..1 (1 = every painted cell grows)
     chance: f32,
 };
 
+const MAX_FLORA_RECIPE_ID: u16 = 12; // framework/world/foliage.zig Spec.dense_bush
 var g_flora_specs: [MAX_PALETTE]FloraSpec = @splat(FloraSpec{ .spec = 0, .count = 0, .chance = 0 });
 var g_flora_spec_count: usize = 0;
 
@@ -1230,8 +1230,13 @@ var g_flora_spec_count: usize = 0;
 pub fn setFloraSpecs(vals: []const f32) void {
     g_flora_spec_count = @min(MAX_PALETTE, vals.len / 3);
     for (0..g_flora_spec_count) |i| {
+        const raw: u16 = @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(std.math.maxInt(u16))), vals[i * 3])));
+        if (raw > MAX_FLORA_RECIPE_ID) {
+            g_flora_specs[i] = .{ .spec = 0, .count = 0, .chance = 0 };
+            continue;
+        }
         g_flora_specs[i] = .{
-            .spec = @intFromFloat(@max(0, @min(3, vals[i * 3]))),
+            .spec = @intCast(raw),
             .count = @intFromFloat(@max(0, @min(65535, vals[i * 3 + 1]))),
             .chance = @max(0, @min(1, vals[i * 3 + 2])),
         };
@@ -1660,6 +1665,21 @@ test "smooth eases spikes toward the local plane" {
     _ = strokeEnd();
     // the spike collapses toward the (near-flat) fitted plane
     try std.testing.expect(ch.height[spike] < 1.0);
+}
+
+test "flora population boundary accepts appended recipes and rejects unknown ids" {
+    setFloraSpecs(&.{ 4, 0, 0.25, 12, 9, 1, 99, 7, 1 });
+    defer setFloraSpecs(&.{});
+
+    const pine = floraSpec(0).?;
+    try std.testing.expectEqual(@as(u8, 4), pine.spec);
+    try std.testing.expectEqual(@as(u16, 0), pine.count);
+    try std.testing.expectEqual(@as(f32, 0.25), pine.chance);
+
+    const dense_bush = floraSpec(1).?;
+    try std.testing.expectEqual(@as(u8, 12), dense_bush.spec);
+    try std.testing.expectEqual(@as(u16, 9), dense_bush.count);
+    try std.testing.expect(floraSpec(2) == null);
 }
 
 test "flora paints its lane; zone paints membership; erase clears" {

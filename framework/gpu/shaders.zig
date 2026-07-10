@@ -1398,10 +1398,10 @@ pub const water_wgsl =
 /// PALM/LEAF cards: a tree crown is many Frond instances radiating from the trunk
 /// top, each a dumb arched card this shader paints. The fragment alpha-cuts the
 /// leaf SHAPE from the card and the vertex bends it by wind (tip-weighted), so the
-/// whole crown sways like the grass field. The leaf STYLE is baked into uv.u's
-/// integer part (runtime/geometries/Frond.ts): floor(u)==0 → feathered coconut
-/// frond (a rachis + tapering leaflets), floor(u)==1 → a broad split leaf. ONE
-/// pipeline serves every tree shape; variety is geometry + per-instance scale/yaw.
+/// whole crown sways like the grass field. The leaf STYLE is baked into 10-wide
+/// uv.u bands: 0 feathered coconut, 1 broad split leaf, 2 conifer spray, 3
+/// deciduous crown, 4 bark. Bands 2...4 let one baked wrapped/tree mesh carry
+/// canopy + trunk through ONE 24-byte slim instance; bark suppresses wind.
 /// Instanced groups whose leader carries the "~frond~" tex key swap to this.
 pub const frond_wgsl =
     \\struct SceneUniforms {
@@ -1457,6 +1457,7 @@ pub const frond_wgsl =
     \\@vertex
     \\fn vs_main(in: VertexInput) -> VertexOutput {
     \\    var out: VertexOutput;
+    \\    let style = floor(in.uv.x * 0.1); // 10-wide bands; see flora_geometry.zig
     \\    // Rebuild model = T · Ry(yaw) · Rx(pitch) · S(wide,len,wide), column-major to
     \\    // match makeInstance's row-major T·Ry·Rx·Rz·S (rz=0) after its transpose.
     \\    let deg = 360.0 / 65536.0;
@@ -1482,12 +1483,14 @@ pub const frond_wgsl =
     \\    let t = clamp(in.uv.y, 0.0, 1.0);   // true base→tip param (pos.y now sags via geometry)
     \\    let t2 = t * t;
     \\    let wig = sin(t * (2.5 + 4.0 * seed2) + seed2 * 6.283) + 0.45 * sin(t * (5.5 + 3.0 * seed) + seed * 3.1);
-    \\    // The geometry preset carries the BASE curve (arc + sag = palm vs weeping);
-    \\    // the shader adds only per-frond VARIETY so no two fronds match — a little
-    \\    // extra arch + sag jitter, plus the sideways snake.
-    \\    pos.z = pos.z + (0.1 + 0.6 * seed) * t2;                          // per-frond arch jitter
-    \\    pos.y = pos.y - (0.05 + 0.4 * seed) * t2;                         // per-frond sag jitter
-    \\    pos.x = pos.x + wig * (0.16 + 0.5 * seed2) * t;                   // sideways snake (2 harmonics)
+    \\    // Individual palm/broad fronds keep the spaghetti variation. Whole-tree
+    \\    // meshes (styles 2+) already carry their authored wrapped silhouette;
+    \\    // re-curving every component would shear the trunk and tear branch joins.
+    \\    if (style < 1.5) {
+    \\        pos.z = pos.z + (0.1 + 0.6 * seed) * t2;
+    \\        pos.y = pos.y - (0.05 + 0.4 * seed) * t2;
+    \\        pos.x = pos.x + wig * (0.16 + 0.5 * seed2) * t;
+    \\    }
     \\    var world = model * vec4f(pos, 1.0);
     \\    // Tip-weighted wind: the frond base is anchored to the crown, the tip
     \\    // swings. A slower, wider sway than grass (a frond is heavy).
@@ -1498,7 +1501,10 @@ pub const frond_wgsl =
     \\    // req_1665: same 60m animation cut as grass (faded 50..60) — a distant palm
     \\    // crown holds still rather than paying per-vertex wind across the whole map.
     \\    let anim_fade = smoothstep(60.0, 50.0, distance(S.camera_pos, world.xyz));
-    \\    let bend = sway * gust * tipw * anim_fade;
+    \\    var wind_weight = 1.0;
+    \\    if (style >= 3.5) { wind_weight = 0.0; }       // bark stays planted
+    \\    else if (style >= 1.5) { wind_weight = 0.38; } // whole crown, not one loose frond
+    \\    let bend = sway * gust * tipw * anim_fade * wind_weight;
     \\    let wind_dir = normalize(vec2f(0.8, 0.6));
     \\    world.x = world.x + wind_dir.x * bend;
     \\    world.z = world.z + wind_dir.y * bend;
@@ -1514,8 +1520,8 @@ pub const frond_wgsl =
     \\
     \\@fragment
     \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
-    \\    let style = step(5.0, in.uv.x);          // 0 = feathered (u~0..1), 1 = broad (u~10..11)
-    \\    let u = in.uv.x - style * 10.0;          // 0..1 across the leaf width (no fract wrap)
+    \\    let style = floor(in.uv.x * 0.1);        // 0 feathered · 1 broad · 2 conifer · 3 crown · 4 bark
+    \\    let u = in.uv.x - style * 10.0;          // 0..1 within the selected band
     \\    let v = clamp(in.uv.y, 0.0, 1.0);        // 0 base → 1 tip
     \\    let d = abs(u - 0.5);                // distance from the central rib
     \\    var keep = false;
@@ -1529,24 +1535,50 @@ pub const frond_wgsl =
     \\        let leaflet = reach * (1.0 - 0.62 * cell);   // fatter leaflets (shrink less)
     \\        let gap = step(0.9, cell);                   // thinner seam = denser frond
     \\        keep = (d < rachis) || (d < leaflet && gap < 0.5 && v < 0.99);
-    \\    } else {
+    \\    } else if (style < 1.5) {
     \\        // Broad split leaf: one tapering blade with a few deep slits cut from
     \\        // the edge toward the midrib (banana/fan read).
     \\        let reach = 0.5 * (1.0 - 0.65 * v);
     \\        let slit = step(0.86, fract(v * 5.0)) * step(0.18, d); // edge-in slits
     \\        keep = (d < reach) && (slit < 0.5) && (v < 0.99);
+    \\    } else if (style < 2.5) {
+    \\        // Conifer spray: a tapered central branch with dense alternating
+    \\        // needle breaks. Geometry repeats this plane around the trunk.
+    \\        let reach = 0.5 * (1.0 - 0.74 * v);
+    \\        let tooth = fract(v * 19.0 + u * 2.0);
+    \\        let ragged = 0.88 + 0.12 * sin(v * 71.0 + u * 9.0);
+    \\        keep = (d < 0.045) || (d < reach * ragged && tooth < 0.82 && v < 0.995);
+    \\    } else if (style < 3.5) {
+    \\        // Broad deciduous crown card: rounded/scalloped rather than a
+    \\        // rectangular billboard. Crossed clusters form the canopy lobes.
+    \\        let y = v * 2.0 - 1.0;
+    \\        let round_reach = 0.5 * sqrt(max(0.0, 1.0 - y * y));
+    \\        let scallop = 0.90 + 0.10 * sin(v * 31.0 + u * 17.0);
+    \\        let pore = step(0.965, fract(sin(dot(floor(vec2f(u, v) * 29.0), vec2f(17.1, 31.7))) * 43758.5));
+    \\        keep = d < round_reach * scallop && pore < 0.5;
+    \\    } else {
+    \\        // Bark is real shared tube geometry, not a cutout card.
+    \\        keep = true;
     \\    }
     \\    if (!keep) { discard; }
-    \\    // Dark per-instance root → bright tip, varied per frond by world position.
+    \\    // Dark per-instance root → bright tip. Whole-tree leaf families keep
+    \\    // their species tint; bark uses its own stable woody palette.
     \\    let root_col = in.inst_color.rgb;
     \\    let tip_var = hash21(floor(in.world_pos.xz * 0.5));
-    \\    let tip_col = mix(vec3f(0.32, 0.55, 0.22), vec3f(0.45, 0.62, 0.20), tip_var);
-    \\    let albedo = mix(root_col, tip_col, pow(v, 0.9));
+    \\    var tip_col = mix(vec3f(0.32, 0.55, 0.22), vec3f(0.45, 0.62, 0.20), tip_var);
+    \\    if (style >= 1.5 && style < 3.5) {
+    \\        tip_col = clamp(root_col * (1.18 + 0.18 * tip_var) + vec3f(0.025, 0.035, 0.012), vec3f(0.0), vec3f(1.0));
+    \\    }
+    \\    var albedo = mix(root_col, tip_col, pow(v, 0.9));
+    \\    if (style >= 3.5) {
+    \\        let bark_noise = hash21(floor(in.world_pos.xz * 7.0 + in.world_pos.yy));
+    \\        albedo = mix(vec3f(0.13, 0.075, 0.038), vec3f(0.29, 0.19, 0.10), bark_noise);
+    \\    }
     \\    // Double-sided half-lambert + a touch of rib shading (darker near the rib).
     \\    let N = normalize(in.world_normal);
     \\    let L = normalize(S.light_dir);
     \\    let ndl = abs(dot(N, L)) * 0.5 + 0.5;
-    \\    let rib_shade = mix(0.82, 1.0, smoothstep(0.0, 0.12, d));
+    \\    let rib_shade = select(mix(0.82, 1.0, smoothstep(0.0, 0.12, d)), 1.0, style >= 3.5);
     \\    let lit = albedo * rib_shade * (S.ambient_color + S.light_color * ndl * 0.9);
     \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
     \\    let g = clamp(in.screen_y * 0.5 + 0.5, 0.0, 1.0);
