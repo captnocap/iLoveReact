@@ -7,6 +7,7 @@
 import { activeSurface, hasSelection } from './surfaces';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
+import { PROP_EXPORT_TARGETS, propExportCommandId } from './propExports';
 import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
 export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Story', 'Globals', 'Window', 'Help'];
@@ -78,13 +79,13 @@ const EXPORT_BUILD_COMMANDS: Command[] = BUILD_PIECE_EXPORT_TARGETS.map((target)
   key: '', context: false, native: true, undoable: false, scope: 'model',
 }));
 
-// Export → Prop (req_2712): export the OPEN model as a free-placing PROP,
-// carrying its rig (pockets/placements/seats — the Inspector's Rig section) in
-// the package manifest. One leaf — props have no snap-affinity flyout.
-const EXPORT_PROP_COMMAND: Command = {
-  id: 'export-prop', menu: 'File', submenu: 'Export', name: 'Prop', icon: 'Armchair',
+// Export → Prop → <role>: the OPEN model remains a free-placing prop carrying
+// its rig, while the manifest role lets derived intersections/transit stops
+// request the correct model without name heuristics (req_2938).
+const EXPORT_PROP_COMMANDS: Command[] = PROP_EXPORT_TARGETS.map((target) => ({
+  id: propExportCommandId(target), menu: 'File', submenu: 'Export Prop', name: target.label, icon: target.icon,
   key: '', context: false, native: true, undoable: false, scope: 'model',
-};
+}));
 
 // Export → Player / NPC Model (req_2771): export the OPEN model as a CHARACTER.
 // Opens the role dialog — the game's ONE played model vs an NPC population
@@ -118,7 +119,7 @@ export const COMMANDS: Command[] = [
   // Save writes the ACTIVE model to the library → only meaningful on a model surface.
   { id: 'save-snapshot', menu: 'File', name: 'Save Model to Library', icon: 'Save', key: 'Ctrl+S', context: false, native: true, undoable: false, scope: 'model' },
   ...EXPORT_BUILD_COMMANDS,
-  EXPORT_PROP_COMMAND,
+  ...EXPORT_PROP_COMMANDS,
   EXPORT_CHARACTER_COMMAND,
   // Compile bakes the WORLD to RLE game data; the pipeline isn't wired yet (returns 0/0).
   { id: 'compile-rle', menu: 'File', name: 'Compile RLE Game Data', icon: 'PackageCheck', key: 'F9', context: false, native: true, undoable: false, scope: 'world', available: false },
@@ -391,7 +392,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
     {
       kind: 'sub', id: 'Export', label: 'Export', icon: 'Upload', scope: 'model', children: [
         { kind: 'sub', id: 'Export Build Piece', label: 'Build Piece', icon: 'PackagePlus', scope: 'model', children: EXPORT_BUILD_COMMANDS.map((c) => cmd(c.id)) },
-        cmd('export-prop'),
+        { kind: 'sub', id: 'Export Prop', label: 'Prop', icon: 'Armchair', scope: 'model', children: EXPORT_PROP_COMMANDS.map((c) => cmd(c.id)) },
         cmd('export-character'),
       ],
     },

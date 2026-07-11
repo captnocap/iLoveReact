@@ -13,6 +13,7 @@
 import { catalogByKind, catalogRowFor, rowHex, KIND_LABEL, KIND_ORDER, type BuildKind, type WallEdit } from './buildCatalog';
 import { listPaintSkins, type PaintSkin } from '../data/paintVariants';
 import { modelPackageById } from '../data/content';
+import type { PropExportRole } from '../data/propExports';
 
 /** Everything a placeable can BE: a build-piece affinity, or a free-placing prop. */
 export type PlaceableKind = BuildKind | 'prop';
@@ -32,6 +33,8 @@ export type AuthoredBuildPiece = {
   kind: PlaceableKind;
   /** Meaningful wall edit preserved by export (door/garageDoor are interactive). */
   edit?: WallEdit;
+  /** Semantic prop role consumed by derived intersections/transit stops. */
+  propRole?: PropExportRole;
   /** swatch colour for the build-bar chip. */
   hex: string;
 };

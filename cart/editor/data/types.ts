@@ -18,6 +18,7 @@ import type { BuildKind, WallEdit } from '../world/buildCatalog';
 import type { Skeleton, PropRig } from '../../../runtime/skeleton';
 import type { WorldGlobals } from './globals';
 import type { PathArrayParams } from './pathArray';
+import type { PropExportRole } from './propExports';
 
 export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Globals' | 'Window' | 'Help';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
@@ -342,7 +343,8 @@ export type ModelPlaceable =
   // A meaningful wall edit survives export as semantic data. Door/garageDoor
   // additionally require the named Door Leaf Outliner contract at export.
   | { as: 'build-piece'; kind: BuildKind; edit?: WallEdit }
-  | { as: 'prop' }
+  // Role defaults to scenery for manifests written before semantic prop export.
+  | { as: 'prop'; role?: PropExportRole }
   | { as: 'character'; role: CharacterRole };
 
 export type ModelPackage = {

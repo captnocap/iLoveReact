@@ -15,6 +15,7 @@ import {
 } from './commands';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
+import { PROP_EXPORT_TARGETS, propExportCommandId } from './propExports';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -96,6 +97,18 @@ test('Export Build Piece exposes explicit door-wall meanings without a door tile
   assert(commandIds.join('|') === expected.join('|'), `build export menu drifted: ${commandIds.join(', ')}`);
   assert(commandIds.includes('export-build-piece-door-wall'), 'Door Wall export is missing');
   assert(!commandIds.includes('export-build-piece-door'), 'the unrelated door tile leaked into mesh export');
+});
+
+test('Export Prop exposes gameplay roles for intersections and transit stops', () => {
+  const exportMenu = menuNodes('File').find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'Export');
+  const props = exportMenu?.children.find((node): node is Extract<MenuNode, { kind: 'sub' }> => node.kind === 'sub' && node.id === 'Export Prop');
+  assert(!!props, 'File menu lost Export Prop');
+  const commandIds = props!.children.filter((node): node is Extract<MenuNode, { kind: 'cmd' }> => node.kind === 'cmd').map((node) => node.id);
+  const expected = PROP_EXPORT_TARGETS.map(propExportCommandId);
+  assert(commandIds.join('|') === expected.join('|'), `prop export menu drifted: ${commandIds.join(', ')}`);
+  for (const id of ['export-prop-stop-sign', 'export-prop-traffic-light', 'export-prop-bus-stop', 'export-prop-train-stop']) {
+    assert(commandIds.includes(id), `${id} is missing`);
+  }
 });
 
 log(`\n${passed} passed, ${failed} failed`);

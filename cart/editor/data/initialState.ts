@@ -51,6 +51,7 @@ export function bootAuthoredPieces(): AuthoredBuildPiece[] {
     fromDisk.push({
       id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color,
       ...(pkg.placeable.as === 'build-piece' && pkg.placeable.edit ? { edit: pkg.placeable.edit } : {}),
+      ...(pkg.placeable.as === 'prop' ? { propRole: pkg.placeable.role ?? 'scenery' } : {}),
     });
   }
   const seen = new Set(fromDisk.map((p) => p.id));

@@ -56,6 +56,7 @@ import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPain
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacement, draftPiecePlacementEvent, finalizePiecePlacementEvent, type MapPaintPayload, type PiecePlacementDraftPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
+import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/hmscAssetCatalog';
 import { partsMetaFromRows, meshDocRangeCenters } from '../data/meshDoc';
@@ -372,7 +373,7 @@ export default function AppFrame() {
       if (!pkg || !isMaterialized(pkg.kind, pkg.id)) continue;
       if (readManifest(pkg.kind, pkg.id)?.placeable) continue;
       const placeable: ModelPlaceable = p.kind === 'prop'
-        ? { as: 'prop' }
+        ? { as: 'prop', role: p.propRole ?? 'scenery' }
         : { as: 'build-piece', kind: p.kind, ...(p.edit ? { edit: p.edit } : {}) };
       if (!updateManifestPlaceable(pkg.kind, pkg.id, { placeable })) {
         console.warn(`[export] placeable backfill FAILED for ${p.pkgId} — manifest not writable; this export stays localstore-only`);
@@ -834,7 +835,7 @@ export default function AppFrame() {
       }));
       return;
     }
-    if (command.id.startsWith('export-build-piece-') || command.id === 'export-prop') {
+    if (command.id.startsWith('export-build-piece-') || command.id.startsWith('export-prop')) {
       // Export → Build Piece → <kind> (req_2583) / Export → Prop (req_2712):
       // register the OPEN model as a placeable and arm it. THE MANIFEST IS THE
       // RECORD (USER RULING req_2718): the export writes `placeable` (+ the
@@ -844,10 +845,11 @@ export default function AppFrame() {
       // key), stripped of the 'studio:' package prefix so residency + refs
       // agree. The status ALWAYS reports — a silent no-op is what made this
       // feel dead before.
-      const exportTarget = command.id === 'export-prop'
+      const propTarget = propExportTargetForCommand(command.id);
+      const exportTarget = propTarget
         ? null
         : buildPieceExportTarget(command.id.slice('export-build-piece-'.length));
-      const kind: PlaceableKind | null = command.id === 'export-prop' ? 'prop' : (exportTarget?.kind ?? null);
+      const kind: PlaceableKind | null = propTarget ? 'prop' : (exportTarget?.kind ?? null);
       if (!kind) {
         setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: `Unknown build-piece export target: ${command.id}` }));
         return;
@@ -901,7 +903,7 @@ export default function AppFrame() {
       // exported skeleton — contact positions measured off the REAL mesh bounds,
       // never hand-typed. A build piece keeps whatever skeleton it already has.
       const placeable: ModelPlaceable = kind === 'prop'
-        ? { as: 'prop' }
+        ? { as: 'prop', role: propTarget?.role ?? 'scenery' }
         : { as: 'build-piece', kind, ...(exportTarget?.edit ? { edit: exportTarget.edit } : {}) };
       const bounds = authoredMeshBounds(modelId, pkg.id);
       const rig = state.modelRigs[pkg.id] ?? (pkg.skeleton ? skeletonToPropRig(pkg.skeleton) : {});
@@ -925,6 +927,7 @@ export default function AppFrame() {
       const piece: AuthoredBuildPiece = {
         id: authoredIdFor(modelId, kind), modelId, pkgId: pkg.id, label: pkg.name, kind, hex: pkg.color,
         ...(exportTarget?.edit ? { edit: exportTarget.edit } : {}),
+        ...(propTarget ? { propRole: propTarget.role } : {}),
       };
       // A painted export contributes one palette tile per STORED painting, with
       // no extra mutable base duplicate. Arm the newest visible skin (or the
@@ -932,7 +935,7 @@ export default function AppFrame() {
       // hidden/stale entry that the tray itself does not offer.
       const armedPieceId = preferredAuthoredPaletteId(piece);
       const kindLabel = kind === 'prop'
-        ? `prop [${describePropRig(rig)}]`
+        ? `${propTarget?.label ?? 'Scenery Prop'} [${describePropRig(rig)}]`
         : `${exportTarget?.label ?? kind} build piece`;
       setState((prev) => ({
         ...prev,
