@@ -1,0 +1,551 @@
+#!/usr/bin/env bun
+/*
+ * Tiny LAN sync service for cart/editor.
+ *
+ * Desktop: tools/editor-sync serve
+ * Mac:     tools/editor-sync pull
+ * Mac:     tools/editor-sync push
+ *
+ * The desktop is authoritative for code. The Mac may push only editor-owned
+ * models, future local asset directories, maps, and content-addressed data.
+ */
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+} from "node:fs/promises";
+import { networkInterfaces } from "node:os";
+import { basename, dirname, resolve, sep } from "node:path";
+
+const TUNING = Object.freeze({
+  port: Number(process.env.EDITOR_SYNC_PORT || 7337),
+  defaultServer: process.env.EDITOR_SYNC_SERVER || "http://busiah.local:7337",
+  hashConcurrency: 8,
+  transferConcurrency: 4,
+  progressPathLimit: 24,
+});
+
+const ROOT = resolve(process.env.EDITOR_SYNC_ROOT || import.meta.dir + "/..");
+const LOCAL_SERVER_FILE = ".editor-sync-server";
+const BACKUP_ROOT = ".rjit-sync-backup";
+const ASSET_ROOTS = Object.freeze([
+  "cart/editor/data/models",
+  "cart/editor/data/assets",
+  "cart/editor/data/textures",
+  "cart/editor/data/materials",
+  "zig-out/game/editor",
+  "zig-out/game/contentstore",
+]);
+const EXCLUDED_TOP_LEVEL = new Set([
+  ".git",
+  ".zig-cache",
+  ".cache",
+  BACKUP_ROOT,
+  "deps",
+  "archive",
+  "love2d",
+  "tsz",
+  "os",
+  "images",
+  "shots",
+  "pics",
+  "recovered-models",
+  "tmp",
+  "_MODEL_RECOVERY_BACKUP_20260629",
+]);
+
+const hashCache = new Map();
+
+function fail(message) {
+  throw new Error(message);
+}
+
+function normalizeRelative(input) {
+  const value = String(input || "").replaceAll("\\", "/").replace(/^\.\//, "");
+  if (!value || value.startsWith("/") || value.includes("\0")) {
+    fail(`unsafe path: ${input}`);
+  }
+  const parts = value.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === "..")) {
+    fail(`unsafe path: ${input}`);
+  }
+  return parts.join("/");
+}
+
+function absolutePath(path) {
+  const clean = normalizeRelative(path);
+  const result = resolve(ROOT, clean);
+  if (!result.startsWith(ROOT + sep)) fail(`path escapes repository: ${path}`);
+  return result;
+}
+
+function isAssetPath(path) {
+  return ASSET_ROOTS.some((root) => path === root || path.startsWith(root + "/"));
+}
+
+function isManagedFile(path) {
+  const clean = normalizeRelative(path);
+  const first = clean.split("/", 1)[0];
+  if (EXCLUDED_TOP_LEVEL.has(first)) return false;
+  if (basename(clean) === ".DS_Store") return false;
+  if (basename(clean).includes(".editor-sync-")) return false;
+  if (clean === LOCAL_SERVER_FILE) return false;
+  if (clean === "cart/hmsc-int" || clean.startsWith("cart/hmsc-int/")) return false;
+  if (clean === "tools/esbuild" || clean === "tools/v8cli") return false;
+  if (clean === "tools/zig" || clean.startsWith("tools/zig/")) return false;
+  if (!clean.includes("/") && /^bundle.*\.(js|json)$/.test(clean)) return false;
+  if ((clean === "zig-out" || clean.startsWith("zig-out/")) && !isAssetPath(clean)) {
+    return false;
+  }
+  return true;
+}
+
+function shouldTraverseDirectory(path) {
+  const clean = normalizeRelative(path);
+  const first = clean.split("/", 1)[0];
+  if (EXCLUDED_TOP_LEVEL.has(first)) return false;
+  if (clean === "cart/hmsc-int" || clean.startsWith("cart/hmsc-int/")) return false;
+  if (clean === "tools/zig" || clean.startsWith("tools/zig/")) return false;
+  if (clean === "zig-out" || clean === "zig-out/game") return true;
+  if (clean.startsWith("zig-out/")) {
+    return ASSET_ROOTS.some(
+      (root) => root === clean || root.startsWith(clean + "/") || clean.startsWith(root + "/"),
+    );
+  }
+  return true;
+}
+
+function matchesScope(path, scope) {
+  if (scope === "all") return true;
+  if (scope === "assets") return isAssetPath(path);
+  if (scope === "code") return !isAssetPath(path);
+  fail(`unknown scope: ${scope}`);
+}
+
+async function mapLimit(items, limit, callback) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await callback(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+async function discoverFiles(directory = ROOT, prefix = "", output = []) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (shouldTraverseDirectory(path)) {
+        await discoverFiles(resolve(directory, entry.name), path, output);
+      }
+      continue;
+    }
+    if (entry.isSymbolicLink()) {
+      if (isManagedFile(path)) fail(`managed symlinks are not supported: ${path}`);
+      continue;
+    }
+    if (entry.isFile() && isManagedFile(path)) output.push(path);
+  }
+  return output;
+}
+
+async function sha256Absolute(path) {
+  const hasher = new Bun.CryptoHasher("sha256");
+  for await (const chunk of Bun.file(path).stream()) hasher.update(chunk);
+  return hasher.digest("hex");
+}
+
+async function sha256File(path, fileStat) {
+  const cached = hashCache.get(path);
+  if (cached && cached.size === fileStat.size && cached.mtimeMs === fileStat.mtimeMs) {
+    return cached.sha256;
+  }
+  const sha256 = await sha256Absolute(absolutePath(path));
+  hashCache.set(path, { size: fileStat.size, mtimeMs: fileStat.mtimeMs, sha256 });
+  return sha256;
+}
+
+async function manifestEntry(path) {
+  const fileStat = await lstat(absolutePath(path));
+  if (!fileStat.isFile()) fail(`not a regular file: ${path}`);
+  return {
+    sha256: await sha256File(path, fileStat),
+    size: fileStat.size,
+    mode: fileStat.mode & 0o777,
+  };
+}
+
+async function buildManifest(scope) {
+  const paths = (await discoverFiles()).filter((path) => matchesScope(path, scope));
+  const rows = await mapLimit(paths, TUNING.hashConcurrency, async (path) => [path, await manifestEntry(path)]);
+  return {
+    version: 1,
+    scope,
+    files: Object.fromEntries(rows),
+  };
+}
+
+function planChanges(source, destination) {
+  const changed = [];
+  const removed = [];
+  let bytes = 0;
+  for (const [path, entry] of Object.entries(source.files)) {
+    const current = destination.files[path];
+    if (
+      !current ||
+      current.sha256 !== entry.sha256 ||
+      current.size !== entry.size ||
+      current.mode !== entry.mode
+    ) {
+      changed.push(path);
+      bytes += entry.size;
+    }
+  }
+  for (const path of Object.keys(destination.files)) {
+    if (!source.files[path]) removed.push(path);
+  }
+  changed.sort();
+  removed.sort();
+  return { changed, removed, bytes };
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+}
+
+function syncId(label) {
+  return `${label}-${new Date().toISOString().replace(/[-:]/g, "").replace(/\..*/, "Z")}`;
+}
+
+function validateSyncId(value) {
+  if (!/^[A-Za-z0-9._-]{1,96}$/.test(value)) fail("invalid sync id");
+  return value;
+}
+
+async function backupFile(path, id) {
+  const source = absolutePath(path);
+  try {
+    const fileStat = await lstat(source);
+    if (!fileStat.isFile()) return;
+    const destination = resolve(ROOT, BACKUP_ROOT, validateSyncId(id), path);
+    await mkdir(dirname(destination), { recursive: true });
+    await copyFile(source, destination);
+    await chmod(destination, fileStat.mode & 0o777);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
+async function atomicWrite(path, bytes, entry, id) {
+  const destination = absolutePath(path);
+  await mkdir(dirname(destination), { recursive: true });
+  await backupFile(path, id);
+  const temporary = `${destination}.editor-sync-${process.pid}-${crypto.randomUUID()}`;
+  await Bun.write(temporary, bytes);
+  const actual = await sha256Absolute(temporary);
+  if (actual !== entry.sha256) {
+    await rm(temporary, { force: true });
+    fail(`SHA-256 mismatch while writing ${path}`);
+  }
+  await chmod(temporary, entry.mode);
+  await rename(temporary, destination);
+  hashCache.delete(path);
+}
+
+async function removeManagedFile(path, id) {
+  await backupFile(path, id);
+  await rm(absolutePath(path), { force: true });
+  hashCache.delete(path);
+}
+
+function json(data, status = 200) {
+  return Response.json(data, { status, headers: { "cache-control": "no-store" } });
+}
+
+function privateAddress(address) {
+  const value = String(address || "").replace(/^::ffff:/, "").toLowerCase();
+  if (value === "::1" || value.startsWith("127.")) return true;
+  if (value.startsWith("10.") || value.startsWith("192.168.")) return true;
+  const second = Number(value.split(".")[1]);
+  if (value.startsWith("172.") && second >= 16 && second <= 31) return true;
+  return value.startsWith("fc") || value.startsWith("fd") || value.startsWith("fe80:");
+}
+
+function safeRequestPath(url) {
+  const value = url.searchParams.get("path");
+  if (!value) fail("missing path");
+  const path = normalizeRelative(value);
+  if (!isManagedFile(path)) fail(`path is outside the sync surface: ${path}`);
+  return path;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'\"'\"'`)}'`;
+}
+
+function installerScript(origin) {
+  const quotedOrigin = shellQuote(origin);
+  return `#!/bin/sh
+set -eu
+root="\${RJIT_ROOT:-$HOME/reactjit}"
+command -v bun >/dev/null 2>&1 || { echo "Bun is required on the Mac" >&2; exit 1; }
+mkdir -p "$root/tools"
+curl -fsS ${quotedOrigin}/client -o "$root/tools/editor-sync"
+chmod +x "$root/tools/editor-sync"
+printf '%s\\n' ${quotedOrigin} > "$root/${LOCAL_SERVER_FILE}"
+cd "$root"
+exec tools/editor-sync pull ${quotedOrigin}
+`;
+}
+
+async function serve() {
+  let server;
+  server = Bun.serve({
+    hostname: "0.0.0.0",
+    port: TUNING.port,
+    async fetch(request, requestServer) {
+      try {
+        const address = requestServer.requestIP(request)?.address;
+        if (!privateAddress(address)) return json({ error: "LAN clients only" }, 403);
+        const url = new URL(request.url);
+
+        if (request.method === "GET" && url.pathname === "/health") {
+          return json({ ok: true, root: ROOT, protocol: 1 });
+        }
+        if (request.method === "GET" && url.pathname === "/manifest") {
+          const scope = url.searchParams.get("scope") || "all";
+          return json(await buildManifest(scope));
+        }
+        if (request.method === "GET" && url.pathname === "/file") {
+          const path = safeRequestPath(url);
+          let entry;
+          try {
+            entry = await manifestEntry(path);
+          } catch (error) {
+            if (error?.code === "ENOENT") return json({ error: "file not found" }, 404);
+            throw error;
+          }
+          return new Response(Bun.file(absolutePath(path)), {
+            headers: {
+              "content-type": "application/octet-stream",
+              "content-length": String(entry.size),
+              "x-editor-sha256": entry.sha256,
+              "x-editor-mode": String(entry.mode),
+            },
+          });
+        }
+        if (request.method === "PUT" && url.pathname === "/file") {
+          const path = safeRequestPath(url);
+          if (!isAssetPath(path)) return json({ error: "code is read-only" }, 403);
+          const entry = {
+            sha256: request.headers.get("x-editor-sha256") || "",
+            size: Number(request.headers.get("content-length") || 0),
+            mode: Number(request.headers.get("x-editor-mode") || 0o644),
+          };
+          if (!/^[0-9a-f]{64}$/.test(entry.sha256)) fail("missing SHA-256 header");
+          const id = validateSyncId(request.headers.get("x-editor-sync-id") || "mac-push");
+          await atomicWrite(path, await request.arrayBuffer(), entry, id);
+          return json({ ok: true, path });
+        }
+        if (request.method === "POST" && url.pathname === "/delete") {
+          const body = await request.json();
+          const id = validateSyncId(body.syncId || "mac-push");
+          for (const value of body.paths || []) {
+            const path = normalizeRelative(value);
+            if (!isAssetPath(path) || !isManagedFile(path)) fail(`cannot delete ${path}`);
+            await removeManagedFile(path, id);
+          }
+          return json({ ok: true, deleted: (body.paths || []).length });
+        }
+        if (request.method === "GET" && url.pathname === "/client") {
+          return new Response(Bun.file(import.meta.path), {
+            headers: { "content-type": "application/javascript", "cache-control": "no-store" },
+          });
+        }
+        if (request.method === "GET" && url.pathname === "/install") {
+          return new Response(installerScript(url.origin), {
+            headers: { "content-type": "text/x-shellscript", "cache-control": "no-store" },
+          });
+        }
+        return json({ error: "not found" }, 404);
+      } catch (error) {
+        console.error(`editor-sync request: ${error.message || error}`);
+        return json({ error: error.message || String(error) }, 400);
+      }
+    },
+  });
+
+  console.log(`Editor sync server ready: ${server.url}`);
+  const addresses = Object.values(networkInterfaces())
+    .flat()
+    .filter((row) => row && row.family === "IPv4" && !row.internal)
+    .map((row) => row.address);
+  const urls = [`http://busiah.local:${TUNING.port}`, ...addresses.map((ip) => `http://${ip}:${TUNING.port}`)];
+  console.log("Mac bootstrap (run once):");
+  for (const url of [...new Set(urls)]) {
+    console.log(`  curl -fsS ${url}/install | bash`);
+  }
+  console.log("Leave this terminal open. Ctrl-C stops the server.");
+}
+
+async function serverUrl(argument) {
+  const explicit = argument || process.env.EDITOR_SYNC_SERVER;
+  if (explicit) return explicit.replace(/\/$/, "");
+  try {
+    return (await readFile(resolve(ROOT, LOCAL_SERVER_FILE), "utf8")).trim().replace(/\/$/, "");
+  } catch {
+    return TUNING.defaultServer;
+  }
+}
+
+async function fetchJson(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) fail(`${response.status} ${response.statusText}: ${await response.text()}`);
+  return response.json();
+}
+
+async function remoteManifest(origin, scope) {
+  return fetchJson(`${origin}/manifest?scope=${encodeURIComponent(scope)}`);
+}
+
+function printPlan(label, plan) {
+  console.log(`${label}: ${plan.changed.length} changed (${formatBytes(plan.bytes)}), ${plan.removed.length} removed`);
+}
+
+function progress(path, index, total) {
+  if (total <= TUNING.progressPathLimit || index === 0 || index + 1 === total || (index + 1) % 25 === 0) {
+    console.log(`  [${index + 1}/${total}] ${path}`);
+  }
+}
+
+async function downloadFile(origin, path, entry, id, index, total) {
+  progress(path, index, total);
+  const url = new URL(`${origin}/file`);
+  url.searchParams.set("path", path);
+  const response = await fetch(url);
+  if (!response.ok) fail(`download failed for ${path}: ${await response.text()}`);
+  if (response.headers.get("x-editor-sha256") !== entry.sha256) {
+    fail(`server changed ${path} during pull; rerun pull`);
+  }
+  await atomicWrite(path, await response.arrayBuffer(), entry, id);
+}
+
+async function uploadFile(origin, path, entry, id, index, total) {
+  progress(path, index, total);
+  const url = new URL(`${origin}/file`);
+  url.searchParams.set("path", path);
+  const response = await fetch(url, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/octet-stream",
+      "content-length": String(entry.size),
+      "x-editor-sha256": entry.sha256,
+      "x-editor-mode": String(entry.mode),
+      "x-editor-sync-id": id,
+    },
+    body: Bun.file(absolutePath(path)),
+  });
+  if (!response.ok) fail(`upload failed for ${path}: ${await response.text()}`);
+}
+
+function assertMatching(source, destination, label) {
+  const remaining = planChanges(source, destination);
+  if (remaining.changed.length || remaining.removed.length) {
+    const sample = [...remaining.changed, ...remaining.removed].slice(0, 8).join(", ");
+    fail(`${label} verification failed (${sample}); rerun the command`);
+  }
+}
+
+async function pull(origin) {
+  console.log(`Comparing desktop ${origin} with ${ROOT} ...`);
+  const [remote, local] = await Promise.all([remoteManifest(origin, "all"), buildManifest("all")]);
+  const plan = planChanges(remote, local);
+  printPlan("Pull", plan);
+  const id = syncId("mac-pull");
+  await mapLimit(plan.changed, TUNING.transferConcurrency, (path, index) =>
+    downloadFile(origin, path, remote.files[path], id, index, plan.changed.length),
+  );
+  for (const path of plan.removed) await removeManagedFile(path, id);
+
+  const [freshRemote, freshLocal] = await Promise.all([remoteManifest(origin, "all"), buildManifest("all")]);
+  assertMatching(freshRemote, freshLocal, "pull");
+  console.log(`Verified: ${Object.keys(freshLocal.files).length} files match the desktop by SHA-256.`);
+  if (plan.changed.length || plan.removed.length) console.log(`Backup: ${resolve(ROOT, BACKUP_ROOT, id)}`);
+}
+
+async function push(origin) {
+  console.log(`Comparing Mac editor assets with desktop ${origin} ...`);
+  const [local, remote] = await Promise.all([buildManifest("assets"), remoteManifest(origin, "assets")]);
+  const plan = planChanges(local, remote);
+  printPlan("Push", plan);
+  const id = syncId("mac-push");
+  await mapLimit(plan.changed, TUNING.transferConcurrency, (path, index) =>
+    uploadFile(origin, path, local.files[path], id, index, plan.changed.length),
+  );
+  if (plan.removed.length) {
+    await fetchJson(`${origin}/delete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ syncId: id, paths: plan.removed }),
+    });
+  }
+
+  const [freshLocal, freshRemote] = await Promise.all([buildManifest("assets"), remoteManifest(origin, "assets")]);
+  assertMatching(freshLocal, freshRemote, "push");
+  console.log(`Verified: ${Object.keys(freshLocal.files).length} editor asset files match by SHA-256.`);
+  if (plan.changed.length || plan.removed.length) console.log(`Desktop backup id: ${id}`);
+}
+
+async function status(origin) {
+  console.log(`Comparing ${ROOT} with ${origin} ...`);
+  const [remoteAll, localAll, remoteAssets, localAssets] = await Promise.all([
+    remoteManifest(origin, "all"),
+    buildManifest("all"),
+    remoteManifest(origin, "assets"),
+    buildManifest("assets"),
+  ]);
+  printPlan("Desktop -> Mac pull", planChanges(remoteAll, localAll));
+  printPlan("Mac -> desktop asset push", planChanges(localAssets, remoteAssets));
+}
+
+function usage() {
+  console.log(`Usage:
+  tools/editor-sync serve
+  tools/editor-sync pull [server-url]
+  tools/editor-sync push [server-url]
+  tools/editor-sync status [server-url]
+
+Desktop code is authoritative. Run pull before Mac work; run push after making
+models or maps. Push makes the desktop asset set match the Mac exactly. Only
+changed files cross the network.`);
+}
+
+async function main() {
+  const command = process.argv[2];
+  if (command === "serve") return serve();
+  if (command === "pull") return pull(await serverUrl(process.argv[3]));
+  if (command === "push") return push(await serverUrl(process.argv[3]));
+  if (command === "status") return status(await serverUrl(process.argv[3]));
+  if (command === "help" || command === "--help" || command === "-h") return usage();
+  usage();
+  process.exitCode = 2;
+}
+
+main().catch((error) => {
+  console.error(`editor-sync: ${error.message || error}`);
+  process.exitCode = 1;
+});
