@@ -11,7 +11,7 @@ export { stampBrushDab, brushDabRgb, jitterSeed } from './stamp';
 export * from './theme';
 export * from './icons';
 export * from './controls';
-export { ColorField, type ColorFieldProps } from './ColorField';
+export { ColorField, HexColorInput, type ColorFieldProps, type HexColorInputProps } from './ColorField';
 export { BrushKit, type BrushKitProps } from './BrushKit';
 
 export {

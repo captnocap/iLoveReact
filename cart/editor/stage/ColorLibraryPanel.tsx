@@ -7,7 +7,7 @@
 // because all these are doing anyways is just showing variation of the color".
 //
 // So: no lens tabs, no modes. ONE vertical surface —
-//   CURRENT   the armed color + save
+//   CURRENT   the armed color + editable hex + save
 //   SAVED     the tray (the colors you like)
 //   MAP       a real 2D OKLCH picker: hue across, LIGHTNESS down (black is at
 //             the bottom — the old Field only stepped hue), chroma strip below
@@ -22,7 +22,9 @@
 // in a REF so a no-move click can never wedge the surface (req_1455).
 import { useRef, useState } from 'react';
 import { Box, Col, Effect, Pressable, Row, Text } from '../../../runtime/primitives';
+import { HexColorInput } from '../../../runtime/paint/ColorField';
 import {
+  hexToOklch,
   oklchToHex,
   oklchToRgb01,
   type OklchColor,
@@ -152,13 +154,19 @@ export default function ColorLibraryPanel(props: {
 
   return (
     <Col style={{ gap: 8 }}>
-      {/* CURRENT — the armed color, its name, save-to-library. */}
+      {/* CURRENT — the armed color, direct hex entry, and save-to-library. */}
       <Row style={{ alignItems: 'center', gap: 8 }}>
         <Box style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: currentCss, borderWidth: 1, borderColor: LINE }} />
         <Col style={{ flexGrow: 1, minWidth: 0, gap: 2 }}>
           <Text numberOfLines={1} noWrap style={{ color: TEXT, fontSize: 12, fontWeight: '700' }}>{oklchName(current)}</Text>
-          <Text numberOfLines={1} noWrap style={{ color: DIM, fontSize: 9, fontFamily: 'ui-monospace' }}>{oklchReadout(current)} · {currentCss}</Text>
+          <Text numberOfLines={1} noWrap style={{ color: DIM, fontSize: 9, fontFamily: 'ui-monospace' }}>{oklchReadout(current)}</Text>
         </Col>
+        <HexColorInput
+          value={currentCss}
+          onChange={(hex) => props.onSetCurrent(hexToOklch(hex))}
+          showSwatch={false}
+          width={104}
+        />
         <Pressable tooltip="Save this color to your library" onPress={props.onAddToTray}
           style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 7, borderWidth: 1, borderColor: LINE }}>
           <Text style={{ color: TEXT, fontSize: 10, fontWeight: '700' }}>save</Text>

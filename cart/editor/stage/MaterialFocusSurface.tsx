@@ -10,6 +10,7 @@
 import { useMemo, useState } from 'react';
 import { Effect } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
+import { HexColorInput } from '../../../runtime/paint/ColorField';
 import {
   colorStudioOverrideKey,
   colorStudioSpec,
@@ -24,7 +25,7 @@ import {
 } from '../data/colorStudio';
 import { SPINE_LIBRARY, oklchName } from '../data/colorSpine';
 import { FILL_GRADES } from '../textures/shaders';
-import { oklchToHex, oklchToRgb01 } from '../../../runtime/paint/colors';
+import { hexToRgb01, oklchToHex, oklchToRgb01 } from '../../../runtime/paint/colors';
 import { C, accentFor } from '../workspace.cls';
 import type { Asset, EditorState, Rgb } from '../data/types';
 import type { OklchColor } from '../../../runtime/paint/colors';
@@ -234,6 +235,12 @@ export default function MaterialFocusSurface(props: {
                 <C.HW_ColorActiveText>
                   <C.HW_HeadTitle>{activeSlot.slot.name}</C.HW_HeadTitle>
                   <C.HW_KeyText>{slotOwned ? 'you own it' : 'shader default'}</C.HW_KeyText>
+                  <HexColorInput
+                    value={rgbToCss(activeSlot.rgb)}
+                    onCommit={(hex) => props.onFill(hexToRgb01(hex) as Rgb, `hex ${hex}`)}
+                    showSwatch={false}
+                    width={112}
+                  />
                   <C.HW_ColorCode>was baked: {rgbToVec3(activeSlot.baked)}</C.HW_ColorCode>
                 </C.HW_ColorActiveText>
               </C.HW_ColorActiveSlot>

@@ -61,6 +61,99 @@ function hsvFromValue(hsv: HsvColor, p: any, rect: Rect): HsvColor {
   return { ...hsv, v: clamp01((Number(p?.x) - rect.x) / Math.max(1, rect.width)) };
 }
 
+export interface HexColorInputProps {
+  value: string;
+  onChange?: (hex: string) => void;
+  onCommit?: (hex: string) => void;
+  showSwatch?: boolean;
+  width?: number | string;
+  theme?: PaintTheme;
+  style?: Record<string, unknown>;
+}
+
+/** The paint kit's one editable hex control. Full six-digit values apply as
+ *  soon as they are valid; Enter also accepts three-digit shorthand. */
+export function HexColorInput(props: HexColorInputProps) {
+  const T = props.theme ?? DARK_THEME;
+  const value = normalizeHexColor(props.value);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value.toUpperCase());
+  useEffect(() => { if (!editing) setDraft(value.toUpperCase()); }, [value, editing]);
+  const editingRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const lastLiveHexRef = useRef<string | null>(null);
+
+  const beginEditing = () => {
+    if (editingRef.current) return;
+    editingRef.current = true;
+    dirtyRef.current = false;
+    lastLiveHexRef.current = null;
+    setEditing(true);
+  };
+
+  const updateDraft = (nextDraft: string) => {
+    beginEditing();
+    dirtyRef.current = true;
+    setDraft(nextDraft);
+    if (isFullHexColor(nextDraft)) {
+      const next = normalizeHexColor(nextDraft);
+      if (props.onChange && next !== value && next !== lastLiveHexRef.current) {
+        lastLiveHexRef.current = next;
+        props.onChange(next);
+      }
+    }
+  };
+
+  const finishEditing = () => {
+    // The host may emit submit, submitEditing, and then blur for one Enter.
+    // Close the editing session once so commits/history never triple-fire.
+    if (!editingRef.current) return;
+    editingRef.current = false;
+    const changed = dirtyRef.current;
+    dirtyRef.current = false;
+    setEditing(false);
+
+    if (isHexColor(draft)) {
+      const next = normalizeHexColor(draft);
+      if (props.onChange && next !== value && next !== lastLiveHexRef.current) props.onChange(next);
+      setDraft(next.toUpperCase());
+      if (changed) props.onCommit?.(next);
+      return;
+    }
+    setDraft(value.toUpperCase());
+  };
+
+  return (
+    <Row style={{ width: props.width ?? '100%', gap: 6, alignItems: 'center', ...(props.style ?? {}) }}>
+      {props.showSwatch === false ? null : (
+        <Box style={{ width: 18, height: 14, borderRadius: 3, backgroundColor: value, borderWidth: 1, borderColor: T.frame }} />
+      )}
+      <TextInput
+        value={draft}
+        onMouseDown={beginEditing}
+        onChangeText={updateDraft}
+        onSubmit={finishEditing}
+        onSubmitEditing={finishEditing}
+        onBlur={finishEditing}
+        placeholder="#RRGGBB"
+        style={{
+          flexGrow: 1,
+          minWidth: 0,
+          height: 22,
+          fontSize: 10,
+          fontWeight: '800',
+          color: isHexColor(draft) ? T.ink : T.bad,
+          backgroundColor: T.control,
+          borderWidth: 1,
+          borderColor: isHexColor(draft) ? T.frame : T.bad,
+          borderRadius: 4,
+          paddingHorizontal: 6,
+        }}
+      />
+    </Row>
+  );
+}
+
 export interface ColorFieldProps {
   value: string;
   onChange: (hex: string) => void;
@@ -96,20 +189,8 @@ export function ColorField(props: ColorFieldProps) {
   // long-standing "click a color, can't pick another until you leave & return"
   // bug. Per-element handlers can't get stuck (req_1455).
   const dragRef = useRef<DragTarget | null>(null);
-  const [editingHex, setEditingHex] = useState(false);
-  const [hexDraft, setHexDraft] = useState(value.toUpperCase());
-  useEffect(() => { if (!editingHex) setHexDraft(value.toUpperCase()); }, [value, editingHex]);
 
   const commit = (next: HsvColor) => props.onChange(hsvToHex(next));
-  const commitHex = (draft: string, done = false) => {
-    setEditingHex(true);
-    setHexDraft(draft);
-    if (isFullHexColor(draft) || (done && isHexColor(draft))) {
-      const next = normalizeHexColor(draft);
-      props.onChange(next);
-      if (done) { setHexDraft(next.toUpperCase()); setEditingHex(false); props.onCommit?.(next); }
-    } else if (done) { setHexDraft(value.toUpperCase()); setEditingHex(false); }
-  };
   const commitWheel = (p: any) => { if (wheelRect) commit(hsvFromWheel(hsvRef.current, p, wheelRect)); };
   const commitValue = (p: any) => { if (valueRect) commit(hsvFromValue(hsvRef.current, p, valueRect)); };
   const startDrag = (t: DragTarget, p: any) => { dragRef.current = t; if (t === 'wheel') commitWheel(p); else commitValue(p); };
@@ -162,18 +243,7 @@ export function ColorField(props: ColorFieldProps) {
       </Box>
 
       {props.showHex === false ? null : (
-        <Row style={{ width: size, gap: 6, alignItems: 'center' }}>
-          <Box style={{ width: 18, height: 14, borderRadius: 3, backgroundColor: value, borderWidth: 1, borderColor: T.frame }} />
-          <TextInput
-            value={hexDraft}
-            onMouseDown={() => setEditingHex(true)}
-            onChangeText={(v: string) => commitHex(v)}
-            onSubmit={() => commitHex(hexDraft, true)}
-            onSubmitEditing={() => commitHex(hexDraft, true)}
-            placeholder="#RRGGBB"
-            style={{ flexGrow: 1, height: 22, fontSize: 10, fontWeight: '800', color: isHexColor(hexDraft) ? T.ink : T.bad, backgroundColor: T.control, borderWidth: 1, borderColor: isHexColor(hexDraft) ? T.frame : T.bad, borderRadius: 4, paddingHorizontal: 6 }}
-          />
-        </Row>
+        <HexColorInput value={value} onChange={props.onChange} onCommit={props.onCommit} width={size} theme={T} />
       )}
     </Col>
   );

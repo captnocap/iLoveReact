@@ -16,7 +16,10 @@ import {
   normalizeBrush, blendModeIndex, brushFromPreset, BRUSH_PRESETS,
   BRUSH_SHAPE_ID, pushRecent, defaultPalette, inkKey, DEFAULT_BRUSH,
 } from './model';
-import { hexToHsv, hsvToHex, hexToRgb01, normalizeHexColor, rgb01ToHex } from './colors';
+import {
+  hexToHsv, hexToOklch, hsvToHex, isFullHexColor, isHexColor,
+  hexToRgb01, normalizeHexColor, oklchToHex, rgb01ToHex,
+} from './colors';
 import { layoutText, hasGlyph, GLYPH_W, GLYPH_H } from './glyphs';
 
 // ── micro harness (self-contained; the repo has no test framework) ───────────
@@ -157,6 +160,18 @@ test('rgb01 helpers round-trip and normalize shorthand hex', () => {
   assert(rgb01ToHex(r, g, b) === '#3da9ff', 'rgb01 round-trip');
   assert(normalizeHexColor('#abc') === '#aabbcc', 'shorthand expands');
   assert(normalizeHexColor('garbage') === '#ffffff', 'garbage → fallback');
+});
+
+test('hex entry accepts shorthand or full RGB and rejects incomplete drafts', () => {
+  assert(isHexColor('#abc') && isHexColor('3da9ff'), 'shorthand and bare full hex are valid');
+  assert(isFullHexColor('#3da9ff') && !isFullHexColor('#abc'), 'only six digits are full hex');
+  assert(!isHexColor('#3da9f') && !isHexColor('#12xz56'), 'incomplete and non-hex drafts are invalid');
+});
+
+test('hex → OKLCH → hex preserves typed sRGB colors', () => {
+  for (const hex of ['#e0463f', '#34d399', '#3da9ff', '#111827', '#ffffff', '#000000']) {
+    assert(oklchToHex(hexToOklch(hex)) === hex, `${hex} survives the Color Studio conversion`);
+  }
 });
 
 // ── text tool bitmap font (req_1600) ─────────────────────────────────────────
