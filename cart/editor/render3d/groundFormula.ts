@@ -51,9 +51,16 @@ const DEFAULT_BINDINGS: TileMaterialOverrides = {
   mud: { fn: 'mud', variant: 0 },
   sand: { fn: 'sand', variant: 0 },
   grass: { fn: 'grass', variant: 0 },
-  junction: { fn: 'road', variant: 0 },
+  // Road grammar kinds must be bound explicitly. Falling through to concrete
+  // made the whole carriageway read as sidewalk while only the median looked
+  // like asphalt (req_2936). Lane flow stays semantic; the surface is asphalt.
+  laneNorth: { fn: 'asphalt', variant: 2 },
+  laneSouth: { fn: 'asphalt', variant: 2 },
+  laneEast: { fn: 'asphalt', variant: 2 },
+  laneWest: { fn: 'asphalt', variant: 2 },
+  junction: { fn: 'asphalt', variant: 2 },
   crosswalk: { fn: 'curb_crosswalk', variant: 0 },
-  median: { fn: 'road', variant: 1 },
+  median: { fn: 'asphalt', variant: 0 },
   parking: { fn: 'asphalt', variant: 1 },
   parkingCross: { fn: 'asphalt', variant: 1 },
   vehicleSpawn: { fn: 'asphalt', variant: 0 },
@@ -149,6 +156,17 @@ export function editorGroundFormula(): string {
     return { mat, variant: b.variant, joint: SLAB_JOINT_FNS.has(b.fn) };
   });
   const n = bindings.length;
+  const roadKinds = {
+    laneNorth: TILE_KINDS.indexOf('laneNorth'),
+    laneSouth: TILE_KINDS.indexOf('laneSouth'),
+    laneEast: TILE_KINDS.indexOf('laneEast'),
+    laneWest: TILE_KINDS.indexOf('laneWest'),
+    median: TILE_KINDS.indexOf('median'),
+    crosswalk: TILE_KINDS.indexOf('crosswalk'),
+  };
+  if (Object.values(roadKinds).some((index) => index < 0)) {
+    throw new Error('[groundFormula] road-kind legend is incomplete — directional UV dispatch cannot be built');
+  }
   const arr = (vals: number[], fixed: number) => vals.map((v) => v.toFixed(fixed)).join(', ');
 
   return `
@@ -217,7 +235,22 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
       take = D[bb + 2];
       joint = D[bb + 3];
     }
-    rgb = fill_pick(mat, board, fc, fc * 64.0, take, seed);
+    // Catalog road fills author their longitudinal axis along UV.y. East/west
+    // lanes therefore swap axes; a median has no direction tag, so infer its
+    // axis from the immediately adjacent directional lane cells. This keeps
+    // asphalt markings parallel to the semantic road rather than crossing it.
+    var surfaceUv = fc;
+    var roadAlongX = kind == ${roadKinds.laneEast} || kind == ${roadKinds.laneWest};
+    if (kind == ${roadKinds.median} || kind == ${roadKinds.crosswalk}) {
+      var northKind = -1;
+      var southKind = -1;
+      if (cy > 0) { northKind = (i32(D[cellBase + (cy - 1) * cols + cx]) % 1024) - 1; }
+      if (cy < rows - 1) { southKind = (i32(D[cellBase + (cy + 1) * cols + cx]) % 1024) - 1; }
+      roadAlongX = northKind == ${roadKinds.laneEast} || northKind == ${roadKinds.laneWest}
+        || southKind == ${roadKinds.laneEast} || southKind == ${roadKinds.laneWest};
+    }
+    if (roadAlongX) { surfaceUv = vec2f(fc.y, fc.x); }
+    rgb = fill_pick(mat, board, surfaceUv, surfaceUv * 64.0, take, seed);
     // Slab joint at tile edges — concrete/sidewalk slabs carry it; seamless
     // surfaces (asphalt, earth, water) skip it so they read as one carriageway.
     if (joint > 0.5) {
