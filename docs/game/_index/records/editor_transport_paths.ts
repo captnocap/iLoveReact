@@ -6,7 +6,7 @@ export const editor_transport_paths: DocIndex = {
   cart: 'cart/editor/stage/MapPaintDock.tsx',
   purpose: ['world_gen', 'pathing', 'vehicle', 'ui', 'rendering', 'persistence', 'host_bridge'],
   summary:
-    'req_2924/2933/2934/2936: one native semantic road/light-rail/railway pen with immediate 3D preview, adjustable 3D curve/grade, signed 3 m storey levels, path-attached TC Stops, RMAP v4 persistence, and corrected directional asphalt materials. Roads compile the tile grammar; rail and controls remain semantic recipes.',
+    'req_2924/2933/2934/2936/2938: one native semantic road/light-rail/railway pen with immediate 3D preview, signed 3 m storey levels, path-attached TC Stops, RMAP v4 persistence, 3 m lane-aware Road material markings, and Studio traffic/transit prop roles. Roads compile gameplay tiles plus derived paint; rail and controls remain semantic recipes.',
   interfaces: [
     {
       name: 'transport.zig semantic path table + live draft',
@@ -51,13 +51,23 @@ export const editor_transport_paths: DocIndex = {
       status: 'live',
     },
     {
-      name: 'directional road ground materials',
+      name: 'three-metre road lane markings',
       purpose: ['rendering', 'world_gen'],
       kind: 'module',
       sourceFile: 'cart/editor/render3d/groundFormula.ts',
       description:
-        'req_2936: all directional lane and junction kinds bind explicitly to asphalt instead of concrete fallback. East/west lanes rotate catalog UV; median/crosswalk infer axis from adjacent semantic lane kinds so markings follow the path.',
+        'req_2936/2938: road cells bind the Road catalog instead of concrete. roads.zig derives a marking byte from the ruled 3 m cross-section: 7 m minimum two-way carriageway, yellow median, dashed internal splits, solid outer edges, crosswalk band, and longitudinal axis. engine.zig packs it above binding+1 in the existing material-reference plane; the ground formula rotates metre/UV axes and composites the semantic markings.',
       dependsOn: ['transport.zig semantic path table + live draft'],
+      status: 'live',
+    },
+    {
+      name: 'semantic Studio prop export roles',
+      purpose: ['vehicle', 'world_gen', 'persistence', 'ui'],
+      kind: 'data_model',
+      sourceFile: 'cart/editor/data/propExports.ts',
+      description:
+        'req_2938: File → Export → Prop declares scenery|stopSign|trafficLight|streetSign|busStop|trainStop in manifest.placeable.role. Existing role-less props read as scenery. Geometry remains one free-placeable authored prop; later derived intersections and transport controls select catalog models by role instead of filenames.',
+      consumers: ['cart/editor/data/commands.ts', 'cart/editor/shell/AppFrame.tsx', 'cart/editor/data/initialState.ts'],
       status: 'live',
     },
   ],
@@ -76,7 +86,7 @@ export const editor_transport_paths: DocIndex = {
       name: 'rail path is authored, train gameplay consumer is not yet attached',
       purpose: ['vehicle', 'pathing'],
       description:
-        'The live/persisted 3D rail network and TC Stops exist, but switches, stations, signals, bridge/tunnel structure, and train motion are later consumers. Do not create a second route graph from rendered geometry; consume Path + Control and samplePath.',
+        'The live/persisted 3D rail network, TC Stops, lane marking recipe, and traffic/transit prop roles exist, but automatic junction prop placement, center-turn/exit stencils, runtime traffic gates, switches, stations, bridge/tunnel structure, and train motion are later consumers. Do not create a second route graph from rendered geometry; consume Path + Control and samplePath.',
       evidence: ['framework/game/map/transport.zig', 'docs/game/editor_transport_paths.md'],
       severity: 'medium',
     },
