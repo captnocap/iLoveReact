@@ -1,0 +1,31 @@
+{
+  "id": "req_2937",
+  "at": "2026-07-11T00:17:43.393Z",
+  "origin": "codex:019f4ce0",
+  "text": "oh, yeah lets do that and also check on the part where when i add an outliner to a scene it doesnt automatically put it state into focus, i thought earlier it was when duplicate happened but no dupe works great its when a base outliner is added it never is put into focus right after being added",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T00:17:50.828Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T00:26:44.907Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented both requested editor corrections. Solidify now collapses render triangles by authored face group, derives one area-weighted plane per quad/ngon, and solves the inward offset-plane intersection at each welded vertex, giving a cube an exact uniform shell independent of its triangulation diagonals. Focused Zig tests cover the triangulated cube and planar panel. Adding a primitive Outliner row now synchronously collapses selection to the new row and pushes its host range through the same complete focus path as Duplicate; the headless audit confirms the appended Cube 2 is selected, primary, and owns all six selected authored faces. ReleaseFast editor build passes.",
+  "shas": [
+    "7f56d5d69",
+    "149df4759"
+  ],
+  "resolvedAt": "2026-07-11T00:26:44.907Z"
+}
