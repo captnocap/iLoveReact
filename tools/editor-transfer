@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# Package the portable cart/editor working set into one archive, or restore it.
+#
+#   tools/editor-transfer pack [archive.tar.gz|smb]
+#   tools/editor-transfer unpack [archive.tar.gz|smb] [repo-directory]
+#
+# `smb` names the MacBook home share at smb://mbp.local/josiahprice.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ARCHIVE_NAME="reactjit-editor-transfer.tar.gz"
+DEFAULT_ARCHIVE="$(dirname "$ROOT")/$ARCHIVE_NAME"
+SMB_URL="${EDITOR_TRANSFER_SMB_URL:-smb://mbp.local/josiahprice}"
+SMB_MOUNT_ROOT="${EDITOR_TRANSFER_SMB_ROOT:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/gvfs/smb-share:server=mbp.local,share=josiahprice}"
+
+STAGE_DIR=""
+TEMP_ARCHIVE=""
+
+cleanup() {
+  if [[ -n "$STAGE_DIR" && -d "$STAGE_DIR" ]]; then
+    rm -rf -- "$STAGE_DIR"
+  fi
+  if [[ -n "$TEMP_ARCHIVE" && -f "$TEMP_ARCHIVE" ]]; then
+    rm -f -- "$TEMP_ARCHIVE"
+  fi
+}
+trap cleanup EXIT
+
+die() {
+  printf 'editor-transfer: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'EOF'
+Usage:
+  tools/editor-transfer pack [archive.tar.gz|smb]
+  tools/editor-transfer unpack [archive.tar.gz|smb] [repo-directory]
+
+Examples:
+  tools/editor-transfer pack smb
+  tools/editor-transfer unpack
+  tools/editor-transfer pack /media/$USER/USB/reactjit-editor-transfer.tar.gz
+  tools/editor-transfer unpack /Volumes/USB/reactjit-editor-transfer.tar.gz
+EOF
+}
+
+need_command() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+mount_smb_share() {
+  if [[ -d "$SMB_MOUNT_ROOT" ]]; then
+    return
+  fi
+
+  need_command gio
+  printf 'Mounting %s ...\n' "$SMB_URL" >&2
+  gio mount "$SMB_URL" >&2
+  [[ -d "$SMB_MOUNT_ROOT" ]] || die "SMB share mounted, but $SMB_MOUNT_ROOT was not found"
+}
+
+archive_path() {
+  local requested="${1:-}"
+
+  if [[ -z "$requested" ]]; then
+    printf '%s\n' "$DEFAULT_ARCHIVE"
+    return
+  fi
+
+  if [[ "$requested" == "smb" ]]; then
+    mount_smb_share
+    printf '%s/%s\n' "$SMB_MOUNT_ROOT" "$ARCHIVE_NAME"
+    return
+  fi
+
+  if [[ "$requested" == /* ]]; then
+    printf '%s\n' "$requested"
+  else
+    printf '%s/%s\n' "$PWD" "$requested"
+  fi
+}
+
+# These rules keep portable source and editor-owned data while leaving each
+# machine's Git database, caches, dependencies, and platform binaries alone.
+TRANSFER_RULES=(
+  "--filter=+ /zig-out/"
+  "--filter=+ /zig-out/game/"
+  "--filter=+ /zig-out/game/editor/***"
+  "--filter=+ /zig-out/game/contentstore/***"
+  "--filter=- /zig-out/***"
+  "--exclude=/.git/"
+  "--exclude=/.zig-cache/"
+  "--exclude=/.cache/"
+  "--exclude=/.rjit-sync-backup/"
+  "--exclude=/deps/"
+  "--exclude=/archive/"
+  "--exclude=/love2d/"
+  "--exclude=/tsz/"
+  "--exclude=/os/"
+  "--exclude=/images/"
+  "--exclude=/shots/"
+  "--exclude=/pics/"
+  "--exclude=/recovered-models/"
+  "--exclude=/tmp/"
+  "--exclude=/_MODEL_RECOVERY_BACKUP_20260629/"
+  "--exclude=/cart/hmsc-int/"
+  "--exclude=/bundle*.js"
+  "--exclude=/bundle*.json"
+  "--exclude=/tools/esbuild"
+  "--exclude=/tools/v8cli"
+  "--exclude=/tools/zig/"
+  "--exclude=.DS_Store"
+)
+
+pack_archive() {
+  local archive parent size
+  archive="$(archive_path "${1:-}")"
+  parent="$(dirname "$archive")"
+
+  need_command rsync
+  need_command tar
+  mkdir -p -- "$parent"
+  STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/reactjit-editor-transfer.XXXXXX")"
+  mkdir -p -- "$STAGE_DIR/reactjit"
+  TEMP_ARCHIVE="$(mktemp "$parent/.reactjit-editor-transfer.XXXXXX")"
+
+  printf 'Collecting editor source, models, assets, maps, and game data ...\n'
+  rsync -rlpt "${TRANSFER_RULES[@]}" "$ROOT/" "$STAGE_DIR/reactjit/"
+
+  printf 'Compressing one portable archive ...\n'
+  tar -czf "$TEMP_ARCHIVE" -C "$STAGE_DIR" reactjit
+  tar -tzf "$TEMP_ARCHIVE" >/dev/null
+  mv -f -- "$TEMP_ARCHIVE" "$archive"
+  TEMP_ARCHIVE=""
+
+  size="$(du -h "$archive" | awk '{print $1}')"
+  printf 'Ready: %s (%s)\n' "$archive" "$size"
+}
+
+validate_archive_entries() {
+  local archive="$1" entry
+
+  while IFS= read -r entry; do
+    case "$entry" in
+      reactjit|reactjit/*) ;;
+      *) die "archive contains an unexpected path: $entry" ;;
+    esac
+    case "/$entry/" in
+      */../*) die "archive contains an unsafe path: $entry" ;;
+    esac
+  done < <(tar -tzf "$archive")
+}
+
+unpack_archive() {
+  local archive destination backup stamp
+  archive="$(archive_path "${1:-}")"
+  destination="${2:-$ROOT}"
+
+  if [[ "$destination" != /* ]]; then
+    destination="$PWD/$destination"
+  fi
+
+  need_command rsync
+  need_command tar
+  [[ -f "$archive" ]] || die "archive not found: $archive"
+  validate_archive_entries "$archive"
+
+  STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/reactjit-editor-transfer.XXXXXX")"
+  printf 'Unpacking %s ...\n' "$archive"
+  tar -xzf "$archive" -C "$STAGE_DIR"
+  [[ -d "$STAGE_DIR/reactjit/cart/editor" ]] || die "archive is missing cart/editor"
+
+  mkdir -p -- "$destination"
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  backup="$destination/.rjit-sync-backup/$stamp"
+  mkdir -p -- "$backup"
+
+  rsync -rlpt --delete --backup --backup-dir="$backup" \
+    "${TRANSFER_RULES[@]}" "$STAGE_DIR/reactjit/" "$destination/"
+
+  printf 'Restored: %s\n' "$destination"
+  printf 'Previous files, if replaced or removed: %s\n' "$backup"
+}
+
+case "${1:-}" in
+  pack)
+    pack_archive "${2:-}"
+    ;;
+  unpack)
+    unpack_archive "${2:-}" "${3:-}"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
