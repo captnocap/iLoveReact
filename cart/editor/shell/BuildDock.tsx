@@ -8,6 +8,7 @@ import { formatBytes, formatCount, formatMeters, selectedPieceReadout } from '..
 import { useWorldHoverReadout } from '../data/worldHoverReadout';
 import { PIECE_MODULE_METERS } from '../world/pieces';
 import type { BuildJournalSnapshot, EditorState } from '../data/types';
+import { mapHistory } from '../../../runtime/game/map';
 
 const BUS_METRIC_TAIL = 256;
 
@@ -48,7 +49,9 @@ export default function BuildDock({
   // While the paint session is live the STROKE journal is the badge's truth (req_2672)
   // — same 2Hz poll, different door: strokes land host-side per gesture with no render.
   const painting = isModelDoc && state.modelTool.paint;
+  const mapPainting = !isModelDoc && state.mapPaint.active;
   const [meshDepths, setMeshDepths] = useState({ undo: 0, redo: 0 });
+  const [mapDepths, setMapDepths] = useState({ undo: 0, redo: 0 });
   useEffect(() => {
     if (!isModelDoc) return;
     const read = () => {
@@ -65,8 +68,19 @@ export default function BuildDock({
     const t = setInterval(read, 500);
     return () => clearInterval(t);
   }, [isModelDoc, painting]);
-  const undoCount = isModelDoc ? meshDepths.undo : state.worldUndo.length;
-  const redoCount = isModelDoc ? meshDepths.redo : state.worldRedo.length;
+  useEffect(() => {
+    if (!mapPainting) return;
+    const read = () => {
+      const history = mapHistory();
+      const next = { undo: history.undo, redo: history.redo };
+      setMapDepths((prev) => (prev.undo === next.undo && prev.redo === next.redo ? prev : next));
+    };
+    read();
+    const t = setInterval(read, 500);
+    return () => clearInterval(t);
+  }, [mapPainting]);
+  const undoCount = isModelDoc ? meshDepths.undo : mapPainting ? mapDepths.undo : state.worldUndo.length;
+  const redoCount = isModelDoc ? meshDepths.redo : mapPainting ? mapDepths.redo : state.worldRedo.length;
   // Cursor hover wins while the mouse is over the world; selection is the fallback.
   const hover = useWorldHoverReadout();
   const piece = hover ?? selectedPieceReadout(state);
@@ -106,12 +120,12 @@ export default function BuildDock({
         <C.HW_DockLabel>BUS</C.HW_DockLabel>
         <C.HW_DockValue>{busCount}</C.HW_DockValue>
       </C.HW_DockBuild>
-      <C.HW_DockBuild onPress={onUndo} tooltip={painting ? 'Undo (paint strokes)' : isModelDoc ? 'Undo (host mesh journal)' : 'Undo (world edits)'}>
+      <C.HW_DockBuild onPress={onUndo} tooltip={mapPainting ? 'Undo (Map Paint native journal)' : painting ? 'Undo (paint strokes)' : isModelDoc ? 'Undo (host mesh journal)' : 'Undo (world edits)'}>
         <Icon name="Undo2" size={12} color={accentFor(undoCount > 0 ? 'textSecondary' : 'textFaint')} />
         <C.HW_DockLabel>UNDO</C.HW_DockLabel>
         <C.HW_DockValue>{undoCount}</C.HW_DockValue>
       </C.HW_DockBuild>
-      <C.HW_DockBuild onPress={onRedo} tooltip={painting ? 'Redo (paint strokes)' : isModelDoc ? 'Redo (host mesh journal)' : 'Redo (world edits)'}>
+      <C.HW_DockBuild onPress={onRedo} tooltip={mapPainting ? 'Redo (Map Paint native journal)' : painting ? 'Redo (paint strokes)' : isModelDoc ? 'Redo (host mesh journal)' : 'Redo (world edits)'}>
         <Icon name="Redo2" size={12} color={accentFor(redoCount > 0 ? 'textSecondary' : 'textFaint')} />
         <C.HW_DockLabel>REDO</C.HW_DockLabel>
         <C.HW_DockValue>{redoCount}</C.HW_DockValue>

@@ -1,7 +1,9 @@
-import type { MapPathInvalidReason, MapPathKind, MapPathProfile } from '../../../runtime/game/map';
+import type { MapPathAuthoringTool, MapPathInvalidReason, MapPathKind, MapPathProfile } from '../../../runtime/game/map';
 
 export type TransportPathChrome = {
+  pathTool: MapPathAuthoringTool;
   pathKind: MapPathKind;
+  pathLevel: number;
   pathCurveRadiusM: number;
   railTracks: number;
   roadLanesF: number;
@@ -40,14 +42,23 @@ export const PATH_CURVE_TUNING = {
   stepM: 1,
   railTracksMin: 1,
   railTracksMax: 2,
+  levelMin: -32,
+  levelMax: 128,
+  metersPerLevel: 3,
 } as const;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
 }
 
-export function pathKindPatch(kind: MapPathKind): Pick<TransportPathChrome, 'pathKind' | 'pathCurveRadiusM'> {
-  return { pathKind: kind, pathCurveRadiusM: PATH_KIND_META[kind].defaultCurveRadiusM };
+export function pathKindPatch(kind: MapPathKind): Pick<TransportPathChrome, 'pathTool' | 'pathKind' | 'pathCurveRadiusM'> {
+  return { pathTool: 'draw', pathKind: kind, pathCurveRadiusM: PATH_KIND_META[kind].defaultCurveRadiusM };
+}
+
+export function pathLevelLabel(level: number): string {
+  const value = Math.round(level);
+  if (value === 0) return 'Ground';
+  return value > 0 ? `Floor ${value}` : `Basement ${Math.abs(value)}`;
 }
 
 export function pathProfileOf(state: TransportPathChrome): MapPathProfile {
@@ -61,11 +72,12 @@ export function pathProfileOf(state: TransportPathChrome): MapPathProfile {
   };
 }
 
-export function pathInvalidLabel(reason: MapPathInvalidReason, minCurveM: number | null): string {
+export function pathInvalidLabel(reason: MapPathInvalidReason, minCurveM: number | null, maxGrade = 0): string {
   if (reason === 'tooFewPoints') return 'place one more anchor';
   if (reason === 'segmentTooShort') return 'segment is shorter than 0.5 m';
   if (reason === 'curveTooTight') {
     return minCurveM === null ? 'curve is too tight for this rail type' : `curve reaches only ${minCurveM.toFixed(1)} m`;
   }
+  if (reason === 'gradeTooSteep') return `grade is ${(maxGrade * 100).toFixed(1)}% — lengthen the slope run`;
   return '';
 }

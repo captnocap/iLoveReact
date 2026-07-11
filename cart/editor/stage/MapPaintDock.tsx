@@ -7,13 +7,13 @@ import { Fragment, useEffect, useState } from 'react';
 import { Box, Row, Slider, TextInput } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { mapPathCancel, mapPathCommit, mapPathDelete, mapPathStats, mapPathUndoPoint, type MapPathStats } from '../../../runtime/game/map';
+import { mapPathCancel, mapPathCommit, mapPathControlDelete, mapPathDelete, mapPathStats, mapPathUndoPoint, type MapPathStats } from '../../../runtime/game/map';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
 import { addZonePatch, PAINTABLE_TILE_KINDS, saveMapFile, type MapPaintChannel, type MapPaintState } from './mapPaint';
 import { CHANNELS, CHANNEL_META, cycle, GIZMOS, GIZMO_META, PROFILES, SHAPES, TERRAIN_TOOLS, TERRAIN_TOOL_META } from './mapPaintUi';
-import { PATH_CURVE_TUNING, PATH_KIND_META, PATH_KIND_ORDER, pathInvalidLabel, pathKindPatch } from './transportPathUi';
+import { PATH_CURVE_TUNING, PATH_KIND_META, PATH_KIND_ORDER, pathInvalidLabel, pathKindPatch, pathLevelLabel } from './transportPathUi';
 
 const ICON_PANEL = '#101923';
 const ICON_PANEL_ON = '#12283a';
@@ -395,7 +395,10 @@ function ZoneTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPai
 function pathStatsKey(stats: MapPathStats): string {
   return [stats.paths, stats.roads, stats.rails, stats.draftPoints, stats.planTruncated ? 1 : 0,
     stats.draftKind ?? '-', stats.valid ? 1 : 0, stats.invalidReason,
-    stats.minCurveM ?? '-', stats.lastPathId, stats.curveRadiusM].join('|');
+    stats.minCurveM ?? '-', stats.lastPathId, stats.curveRadiusM, stats.maxGrade,
+    stats.controls, stats.lastControlId, stats.controlPreviewPathId ?? '-',
+    stats.controlPreviewDistanceM ?? '-', stats.controlPreviewValid ? 1 : 0,
+    stats.authoringTool, stats.level].join('|');
 }
 
 /** Native clicks do not traverse React. Poll this tiny diagnostics record at UI
@@ -416,9 +419,10 @@ function usePathStats(): MapPathStats {
 function PathTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPaintState>) => void }) {
   const s = props.state;
   const stats = usePathStats();
+  const stopping = s.pathTool === 'stop';
   const isRoad = s.pathKind === 'road';
   const invalid = stats.draftPoints > 0 && !stats.valid
-    ? pathInvalidLabel(stats.invalidReason, stats.minCurveM)
+    ? pathInvalidLabel(stats.invalidReason, stats.minCurveM, stats.maxGrade)
     : '';
   return (
     <Fragment>
@@ -428,11 +432,38 @@ function PathTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPai
           icon={PATH_KIND_META[kind].icon}
           label={PATH_KIND_META[kind].label}
           tooltip={PATH_KIND_META[kind].tooltip}
-          on={s.pathKind === kind}
+          on={!stopping && s.pathKind === kind}
           onPress={() => props.onPatch(pathKindPatch(kind))}
         />
       ))}
-      {isRoad ? (
+      <OptionTile
+        icon="CircleStop"
+        label="TC Stop"
+        tooltip="TC Stop — hover a committed rail alignment to preview, then click to attach a train stop control"
+        on={stopping}
+        onPress={() => props.onPatch({ pathTool: 'stop' })}
+      />
+      {stopping ? (
+        <Fragment>
+          <FactPanel label="STOPS" value={String(stats.controls)} />
+          <FactPanel
+            label="TARGET"
+            value={stats.controlPreviewPathId == null
+              ? 'move onto rail'
+              : stats.controlPreviewValid
+                ? `#${stats.controlPreviewPathId} · ${stats.controlPreviewDistanceM?.toFixed(1) ?? '0.0'}m`
+                : 'already occupied'}
+          />
+          {stats.lastControlId > 0 ? (
+            <OptionTile
+              icon="Trash2"
+              label="Last Stop"
+              tooltip={`Delete the last committed TC Stop (#${stats.lastControlId})`}
+              onPress={() => { mapPathControlDelete(stats.lastControlId); props.onPatch({}); }}
+            />
+          ) : null}
+        </Fragment>
+      ) : isRoad ? (
         <Fragment>
           <StepperPanel
             label="LANES F"
@@ -455,53 +486,66 @@ function PathTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPai
           />
         </Fragment>
       ) : (
-        <StepperPanel
-          label="TRACKS"
-          value={String(s.railTracks)}
-          onDown={() => props.onPatch({ railTracks: Math.max(PATH_CURVE_TUNING.railTracksMin, s.railTracks - 1) })}
-          onUp={() => props.onPatch({ railTracks: Math.min(PATH_CURVE_TUNING.railTracksMax, s.railTracks + 1) })}
-        />
+        <Fragment>
+          <StepperPanel
+            label="TRACKS"
+            value={String(s.railTracks)}
+            onDown={() => props.onPatch({ railTracks: Math.max(PATH_CURVE_TUNING.railTracksMin, s.railTracks - 1) })}
+            onUp={() => props.onPatch({ railTracks: Math.min(PATH_CURVE_TUNING.railTracksMax, s.railTracks + 1) })}
+          />
+          <StepperPanel
+            label="LEVEL"
+            value={pathLevelLabel(s.pathLevel)}
+            onDown={() => props.onPatch({ pathLevel: Math.max(PATH_CURVE_TUNING.levelMin, s.pathLevel - 1) })}
+            onUp={() => props.onPatch({ pathLevel: Math.min(PATH_CURVE_TUNING.levelMax, s.pathLevel + 1) })}
+          />
+        </Fragment>
       )}
-      <ScalarPanel
-        label="CURVE"
-        value={s.pathCurveRadiusM}
-        min={PATH_CURVE_TUNING.minM}
-        max={PATH_CURVE_TUNING.maxM}
-        step={PATH_CURVE_TUNING.stepM}
-        unit="m"
-        onValue={(pathCurveRadiusM) => props.onPatch({ pathCurveRadiusM })}
-      />
-      <FactPanel label="DRAFT" value={`${stats.draftPoints} pts`} />
-      <FactPanel label="PATHS" value={stats.planTruncated ? 'truncated' : `${stats.roads}r · ${stats.rails}t`} />
-      {invalid ? <FactPanel label="ADJUST" value={invalid} /> : null}
-      <OptionTile
-        icon="Check"
-        label="Finish"
-        tooltip={stats.valid
-          ? 'Finish path — roads compile their lane grid; rail persists and renders from the curve'
-          : invalid || 'Place two anchors before finishing'}
-        on={stats.valid}
-        onPress={() => { if (stats.valid) mapPathCommit(); props.onPatch({}); }}
-      />
-      <OptionTile
-        icon="Undo"
-        label="Point"
-        tooltip="Undo the last accepted path point; the live hover piece remains editable"
-        onPress={() => { mapPathUndoPoint(); props.onPatch({}); }}
-      />
-      <OptionTile
-        icon="X"
-        label="Cancel"
-        tooltip="Cancel this path draft without changing committed roads or rail"
-        onPress={() => { mapPathCancel(); props.onPatch({}); }}
-      />
-      {stats.lastPathId > 0 ? (
-        <OptionTile
-          icon="Trash2"
-          label="Last"
-          tooltip={`Delete the last committed path (#${stats.lastPathId})`}
-          onPress={() => { mapPathDelete(stats.lastPathId); props.onPatch({}); }}
-        />
+      {!stopping ? (
+        <Fragment>
+          <ScalarPanel
+            label="CURVE"
+            value={s.pathCurveRadiusM}
+            min={PATH_CURVE_TUNING.minM}
+            max={PATH_CURVE_TUNING.maxM}
+            step={PATH_CURVE_TUNING.stepM}
+            unit="m"
+            onValue={(pathCurveRadiusM) => props.onPatch({ pathCurveRadiusM })}
+          />
+          <FactPanel label="DRAFT" value={`${stats.draftPoints} pts`} />
+          <FactPanel label="GRADE" value={`${(stats.maxGrade * 100).toFixed(1)}%`} />
+          <FactPanel label="PATHS" value={stats.planTruncated ? 'truncated' : `${stats.roads}r · ${stats.rails}t`} />
+          {invalid ? <FactPanel label="ADJUST" value={invalid} /> : null}
+          <OptionTile
+            icon="Check"
+            label="Finish"
+            tooltip={stats.valid
+              ? 'Finish path — roads compile their lane grid; rail persists and renders from the 3D curve'
+              : invalid || 'Place two anchors before finishing'}
+            on={stats.valid}
+            onPress={() => { if (stats.valid) mapPathCommit(); props.onPatch({}); }}
+          />
+          <OptionTile
+            icon="Undo"
+            label="Point"
+            tooltip="Undo the last accepted path point; the live hover piece remains editable"
+            onPress={() => { mapPathUndoPoint(); props.onPatch({}); }}
+          />
+          <OptionTile
+            icon="X"
+            label="Cancel"
+            tooltip="Cancel this path draft without changing committed roads or rail"
+            onPress={() => { mapPathCancel(); props.onPatch({}); }}
+          />
+          {stats.lastPathId > 0 ? (
+            <OptionTile
+              icon="Trash2"
+              label="Last"
+              tooltip={`Delete the last committed path (#${stats.lastPathId})`}
+              onPress={() => { mapPathDelete(stats.lastPathId); props.onPatch({}); }}
+            />
+          ) : null}
+        </Fragment>
       ) : null}
     </Fragment>
   );

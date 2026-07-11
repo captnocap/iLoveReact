@@ -16,7 +16,7 @@ import { catalogRowFor } from '../world/buildCatalog';
 import { pieceKindOf, placementSlotKey, type MaterialRef, type PlacedPiece, type PlacementGesture } from '../world/pieces';
 
 type EditPayload = { verb: string; target: string; meta: string; editMs: number };
-export type MapAuthoringAction = 'stroke' | 'road.commit' | 'road.delete' | 'chunk.grow' | 'zone.drop' | 'tile.bindings';
+export type MapAuthoringAction = 'stroke' | 'road.commit' | 'road.delete' | 'chunk.grow' | 'zone.drop' | 'tile.bindings' | 'path.control.add' | 'path.control.delete';
 export type MapPaintPayload = {
   action: MapAuthoringAction;
   label: string;

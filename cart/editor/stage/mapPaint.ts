@@ -9,6 +9,7 @@ import {
   mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapReset, mapSaveFile, mapSetAutosaveFile,
   mapSetGroundLook, mapSetTileBindings, mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds,
   mapPathSetProfile, mapSetBrushGizmo,
+  mapPathSetLevel, mapPathSetTool,
   type MapBrushGizmo, type MapBrushProfile, type MapBrushShape, type MapTerrainTool,
 } from '../../../runtime/game/map';
 import { exists } from '../../../runtime/hooks/fs';
@@ -89,6 +90,8 @@ export function defaultMapPaint(): MapPaintState {
     zones: [],
     zoneIdx: 0,
     pathKind: 'road',
+    pathTool: 'draw',
+    pathLevel: 0,
     pathCurveRadiusM: 8,
     railTracks: 1,
     roadLanesF: 1,
@@ -191,6 +194,8 @@ function pushMapTool(s: MapPaintState): void {
   const flora = FLORA_KIND_DEFINITIONS[s.floraKindIdx];
   const gizmo = s.gizmo ?? 'profile';
   mapPathSetProfile(pathProfileOf(s));
+  mapPathSetTool(s.pathTool);
+  mapPathSetLevel(s.pathLevel);
   mapSetTool({
     channel: s.channel,
     mode: s.mode,

@@ -1,4 +1,4 @@
-import { PATH_CURVE_TUNING, pathInvalidLabel, pathKindPatch, pathProfileOf } from './transportPathUi';
+import { PATH_CURVE_TUNING, pathInvalidLabel, pathKindPatch, pathLevelLabel, pathProfileOf } from './transportPathUi';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -16,6 +16,7 @@ test('path kinds select useful distinct curve defaults', () => {
 
 test('the chrome boundary clamps every value before crossing to Zig', () => {
   const profile = pathProfileOf({
+    pathTool: 'draw', pathLevel: 0,
     pathKind: 'railway', pathCurveRadiusM: 999, railTracks: 7,
     roadLanesF: -4, roadLanesB: 9, roadSidewalks: true,
   });
@@ -24,9 +25,16 @@ test('the chrome boundary clamps every value before crossing to Zig', () => {
   assert(profile.lanesF === 0 && profile.lanesB === 3, 'road fields were not normalized');
 });
 
+test('signed track levels use the building storey vocabulary', () => {
+  assert(pathLevelLabel(0) === 'Ground', 'ground label drifted');
+  assert(pathLevelLabel(2) === 'Floor 2', 'raised-storey label drifted');
+  assert(pathLevelLabel(-3) === 'Basement 3', 'subway-storey label drifted');
+});
+
 test('rail validation errors are phrased as an actionable edit', () => {
   assert(pathInvalidLabel('curveTooTight', 4.25).includes('4.3 m'), 'minimum curve was not surfaced');
   assert(pathInvalidLabel('tooFewPoints', null).includes('anchor'), 'missing-point guidance disappeared');
+  assert(pathInvalidLabel('gradeTooSteep', null, 0.117).includes('11.7%'), 'grade guidance disappeared');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

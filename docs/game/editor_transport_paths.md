@@ -2,115 +2,129 @@
 
 Active surface: `cart/editor/` and its `/play` route. Last verified: 2026-07-10.
 
-## User contract — req_2924
+## User contract — req_2924, req_2933, req_2934
 
 Road and rail authoring is one live path pen, not the old blind sequence of
-clicking two or more points and waiting for a destructive stamp before seeing
-the result. The authored object is a semantic path recipe; the 1 m cell grid is
-only the road compiler/pathing substrate.
-
-The interaction is:
+clicking two or more points before seeing a result. The authored object is a
+semantic path recipe; the 1 m cell grid is only the road compiler/pathing
+substrate.
 
 1. Pick Road, Light Rail, or Railway in Map Paint → Paths.
 2. Click once to place an anchor.
 3. Moving the pointer immediately shows the complete next piece in the 3D
    world. Road ghosts are curb-to-curb; rail ghosts show their bed and rails.
-4. Click to accept a point, then continue moving/clicking to shape the route.
-   The Curve control changes the quadratic corner reach live over the whole
-   editable wire. Undo Point removes the last accepted point.
-5. Finish persists the semantic recipe. Cancel drops only the draft. Rail bends
-   below the selected type's minimum reach render red and Finish stays gated.
+4. Click to accept points. Curve changes the quadratic corner reach live; Undo
+   Point removes the last accepted point.
+5. Finish persists the recipe. Rail bends below their type's minimum radius,
+   or grades above its limit, render red and keep Finish gated.
 
-This is deliberately RollerCoaster-Tycoon-like piece drawing: the unfinished
-piece follows the pointer and is visible before acceptance. A click records an
-anchor; it does not make the user wait to discover what the segment became.
+This is RollerCoaster-Tycoon-like piece drawing: the unfinished physical piece
+follows the pointer before acceptance.
+
+Rail anchors also carry a signed 3 m storey offset using the building-level
+vocabulary: Basement N, Ground, Floor N. Change LEVEL before accepting the next
+point; the horizontal distance to it is the run over which the track gains or
+loses that storey height. Terrain is not raised or lowered. This authors
+elevated light rail, subway descents, and underground alignments as one 3D path.
+
+TC Stop is the path-attached control tool. Hovering a committed light-rail or
+railway path projects to its curved centerline and previews a transverse stop
+piece. A click stores `Control { id, path_id, distance_m, kind=stop }`. The
+marker renderer and later train motion resolve the exact point/tangent through
+`samplePath`; neither infers a network from sleepers or meshes.
 
 ## One authoring model, separate consumers
 
 `framework/game/map/transport.zig` owns `Path { id, points, profile,
-curve_radius_m }`. `profile` is tagged as road, light rail, or railway:
+curve_radius_m }` and path-attached `Control` rows. Each point has snapped X/Z
+and a signed elevation offset. Profiles are tagged road, light rail, or railway.
 
 - Road profile: lanes with/against draw direction, sidewalks, speed limit.
 - Rail profile: one or two parallel tracks; light rail and railway remain
   distinct semantic kinds.
 
 The draft has accepted points plus one transient hover point. `curvePoints` is
-the shared quadratic-fillet sampler used by both preview and compilation, so
-the ghost cannot advertise a different curve from the committed object.
+the shared 3D quadratic-fillet sampler used by preview and consumers, so the
+ghost cannot advertise a different curve or grade from the committed object.
+Light rail accepts up to a 9% grade; railway accepts 4%. These values and the
+3 m storey height live in `TUNING`, not UI magic numbers.
 
-Consumers stay separate:
+Consumers remain separate:
 
-- `roads.zig` filters only road paths and compiles them through the ruled
+- `roads.zig` filters only road paths and compiles the ruled
   lane/median/sidewalk/junction/crosswalk grammar. Rail never enters the tile
   compiler.
-- `world_loader.zig` renders committed rail directly from its semantic recipe:
+- `world_loader.zig` renders rail and TC Stops from the semantic recipe:
   embedded slab + steel for light rail; ballast + sleepers + steel for railway.
-  The live road ghost is a full-width ribbon, while committed roads remain the
-  native painted grid.
+- The future train controller consumes the same sampled 3D path and controls.
 
-This is the V24 reconciliation law applied to transport infrastructure: one
-authoring representation bakes into each system, never a separate mesh truth
-and path truth.
+This is the V24 reconciliation law: one authoring representation bakes into
+each system, never separate mesh and path truths.
 
 ## Host boundary and frame discipline
 
-`runtime/game/map.ts` exposes the small UI-rate surface:
+`runtime/game/map.ts` exposes the UI-rate surface:
 
-- `mapPathSetProfile`
+- `mapPathSetProfile`, `mapPathSetTool`, `mapPathSetLevel`
 - `mapPathCommit` / `mapPathCancel` / `mapPathUndoPoint` / `mapPathDelete`
+- `mapPathControlDelete`
 - `mapPathStats`
 
-The world loader already owns pointer-to-painted-terrain ray hits. While Paths
-is armed it feeds the snapped 25 cm hover point to the transport draft on the
-native frame path. React only mirrors controls and polls the eleven-float stats
-record at 10 Hz so point counts and Finish validity follow native clicks.
+The world loader already owns pointer-to-terrain ray hits. While Paths is armed
+it feeds the snapped hover to transport natively. React mirrors controls and
+polls the compact stats record at 10 Hz for point count, grade, stop targeting,
+and validity.
 
-Preview rows rebuild only when the snapped hover/draft revision changes or when
-terrain height changes. Committed rail rows rebuild only on a committed-path
-revision or terrain change. Railway sleepers are omitted from the moving ghost
-and generated for the committed path, preventing tie spacing from becoming
-pointer-frame work. There is no per-frame JS curve or geometry generation.
+Preview rows rebuild only when snapped hover/draft or terrain revisions change.
+Committed rail/stop rows rebuild only on committed transport or terrain
+revisions. Moving railway ghosts omit sleepers; committed paths generate them.
+There is no per-frame JS curve or geometry generation.
 
 ## Persistence
 
-RMAP v3 extends the trailing recipe section from road-only strokes to tagged
-transport paths and stores curve reach. The base grid is still saved beneath
-road undercoat, then roads recompile after load. v1/v2 files remain readable as
-roads with their historical 5 m fillet; material bindings and chunk payloads do
-not change.
+RMAP v4 extends v3 path recipes with point elevation and a trailing semantic
+control table. Path identities survive reload because controls reference them.
+The base grid still saves beneath road undercoat and roads recompile after load.
+v1/v2 files load as roads with their historical 5 m fillet; v3 rail paths
+migrate at Ground with no fabricated controls. The named map document remains
+the single `painting.rmap` owner for terrain, cells, roads, rail, and TC Stops.
 
-Light rail/railway recipes are visible again after a save/reopen without
-creating tile kinds or a sibling JSON store. The named map document remains the
-single `painting.rmap` owner for terrain, painted cells, roads, and rail.
+## Road surface correction — req_2936
+
+The road compiler was correct, but the active ground formula omitted
+`laneNorth/laneSouth/laneEast/laneWest` from its material table. Lane cells fell
+through to concrete while only the median used a road fill. Lane and junction
+kinds now bind explicitly to asphalt; the median uses its marking variant.
+East/west lane UVs rotate, and the neutral median infers its axis from adjacent
+directional lanes, so markings follow the road instead of crossing it.
 
 ## Deliberate next seams
 
-- The first slice edits a draft through point placement, Undo Point, curve
-  reach, type, width/track controls, Finish, Cancel, and Delete Last. Selecting
-  and dragging an already committed control point is a later editing verb.
-- Track grade currently drapes to the rendered terrain surface. Elevated deck,
-  bridge, tunnel, banking, and explicit grade handles need semantic elevation
-  data rather than visual-only offsets.
-- This establishes the authored rail network and visual grammar. Train motion,
-  switches/stations, signals, and the compiled gameplay route consumer attach
-  to the same path records; none should infer a second network from geometry.
+- Selecting and dragging a committed anchor or TC Stop is a later editing verb;
+  the current surface authors, undoes, deletes, and recreates them.
+- Bridge piers/decks, tunnel portals/linings, banking, stations, switches, and
+  signals remain later physical/gameplay consumers.
+- Train motion is not attached yet. It must consume these path/control records
+  and must not derive another network from rendered geometry.
 
 ## Verification
 
-- `zig build test-game-map -Doptimize=ReleaseFast`: transport curve/table,
-  RMAP v3 road+rail round trip, immediate hover preview, rail exclusion from
-  road tile stamping, and existing road grammar tests.
-- `cart/editor/stage/transportPathUi.test.ts`: kind defaults, boundary clamps,
-  and actionable rail-validation language.
-- `SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor`: ReleaseFast bridge + loader +
-  active-cart bundle integration.
+- `zig build test-game-map -Doptimize=ReleaseFast`: RMAP v4 round trips and v3
+  migration, 3D grade validation, stop projection/path sampling, live preview,
+  rail exclusion from road stamping, Map Paint history, and road grammar.
+- `cart/editor/stage/transportPathUi.test.ts`: defaults, clamps, signed storey
+  labels, and actionable curve/grade errors.
+- `cart/editor/render3d/groundFormula.test.ts`: directional lanes bind asphalt
+  and east/west grammar rotates catalog UVs.
+- `SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor`: ReleaseFast bridge, loader, and
+  active-cart integration.
 
-## CHANGESET — req_2924
+## CHANGESET — req_2924, req_2933, req_2934, req_2936
 
-What: replace blind road point drafting with a shared live road/light-rail/
-railway path pen, adjustable curves, native full-shape ghosts, rail validation,
-rail rendering, and RMAP v3 persistence. Why: the previous 2D-to-3D port hid
-the result until multiple clicks plus Commit and made curves impossible to
-author confidently. Affects: native map engine, road planner, RMAP store, world
-loader, V8 map bindings, runtime map door, and Map Paint Paths chrome. Breaking
-changes: none for existing maps; v1/v2 RMAP loads remain supported.
+What: a shared live road/light-rail/railway pen, adjustable 3D curves, signed
+storey grades, path-attached TC Stops, native ghosts, corrected road materials,
+rail validation/rendering, and RMAP v4 persistence. Why: the previous port hid
+results until multiple clicks and could not confidently author curves, grades,
+or stop controls. Affects: native map engine, road planner, RMAP store, world
+loader, V8/runtime map doors, ground formula, and Map Paint chrome. Breaking
+changes: none; v1/v2/v3 RMAP files remain supported.

@@ -95,10 +95,10 @@ import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFol
 import { WORLD_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
 import { scheduleGlobalsSave } from '../data/globalsStore';
 import { DEFAULT_PHYSICS_GLOBALS, type PhysicsGlobals } from '../data/globals';
-import { mapEventDrain, mapHostLive, type MapAuthoringEvent } from '../../../runtime/game/map';
+import { mapEventDrain, mapGetTileBindings, mapHostLive, mapRedo, mapUndo, type MapAuthoringEvent, type MapHistoryKind } from '../../../runtime/game/map';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
-import { GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
+import { floatsToBindings, GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
 
 // FLOORCTL req_2485: floorIndex is the world viewport's REAL active storey
 // (0 = Ground) — the action bar's ▼/▲ is the one control. 128 storeys
@@ -107,6 +107,17 @@ import { GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
 // filter, and the host validator (build.zig validatePlacement) has no storey
 // cap — floor 128 places at terrainY + 384m and validates clean.
 const MAX_FLOOR = 128;
+
+const MAP_HISTORY_LABEL: Record<MapHistoryKind, string> = {
+  paintStroke: 'paint stroke',
+  pathCommit: 'transport path',
+  pathDelete: 'transport path deletion',
+  controlAdd: 'TC Stop',
+  controlDelete: 'TC Stop deletion',
+  tileBindings: 'tile material binding',
+  zoneDrop: 'zone removal',
+  chunkGrow: 'chunk growth',
+};
 
 function materialBindingLabel(fn: string, variant: number): string {
   const material = GROUND_MATERIALS.find((item) => item.fn === fn);
@@ -142,6 +153,8 @@ function mapEventPayload(event: MapAuthoringEvent, mapPaint: EditorState['mapPai
     if (action === 'chunk.grow') return `grow chunk (${event.auxA}, ${event.auxB})`;
     if (action === 'zone.drop') return `drop zone ${mapPaint.zones[event.auxA]?.name ?? `#${event.auxA}`}`;
     if (action === 'tile.bindings') return `edit tile material bindings (${event.auxA})`;
+    if (action === 'path.control.add') return `place TC Stop #${event.id}`;
+    if (action === 'path.control.delete') return `delete TC Stop #${event.id}`;
     return action;
   })();
   const durationMs = Math.max(0, event.durationMs);
@@ -586,6 +599,23 @@ export default function AppFrame() {
     }));
   };
 
+  const runMapHistory = (redo: boolean) => {
+    const result = redo ? mapRedo() : mapUndo();
+    const verb = redo ? 'redo' : 'undo';
+    if (!result.ok) {
+      setState((prev) => ({ ...prev, status: `nothing to ${verb} in Map Paint — its native gesture journal is empty` }));
+      return;
+    }
+    // RMAP snapshots own their binding table too. Mirror it back into chrome
+    // after a restore so a later tool patch cannot re-push stale material rows.
+    const tileBindings = floatsToBindings(mapGetTileBindings());
+    setState((prev) => ({
+      ...prev,
+      mapPaint: { ...prev.mapPaint, tileBindings },
+      status: `${verb} ${MAP_HISTORY_LABEL[result.kind]} — ${result.undo} undo · ${result.redo} redo`,
+    }));
+  };
+
   const runCommand = (commandId: string, source: string) => {
     const command = commandById(commandId);
     // Modal discipline (req_2626 HH): while a blocking session/dialog is unresolved every
@@ -736,6 +766,10 @@ export default function AppFrame() {
         meshUndoRedo(false);
         return;
       }
+      if (doc?.kind === 'world' && state.mapPaint.active) {
+        runMapHistory(false);
+        return;
+      }
       undoLocal();
       return;
     }
@@ -744,6 +778,10 @@ export default function AppFrame() {
       if (doc?.kind === 'model') {
         if (state.modelTool.paint) { paintUndoRedo(true); return; }
         meshUndoRedo(true);
+        return;
+      }
+      if (doc?.kind === 'world' && state.mapPaint.active) {
+        runMapHistory(true);
         return;
       }
       redoLocal();

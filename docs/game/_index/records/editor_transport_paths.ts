@@ -6,7 +6,7 @@ export const editor_transport_paths: DocIndex = {
   cart: 'cart/editor/stage/MapPaintDock.tsx',
   purpose: ['world_gen', 'pathing', 'vehicle', 'ui', 'rendering', 'persistence', 'host_bridge'],
   summary:
-    'req_2924: the active editor now has one native semantic transport-path pen for roads, light rail, and railway. First click anchors and hover immediately previews the complete next 3D piece; accepted points + adjustable curve reach remain editable until Finish. Roads compile the ruled tile grammar, rail renders/persists from the same path recipe without becoming a second tile or mesh truth.',
+    'req_2924/2933/2934/2936: one native semantic road/light-rail/railway pen with immediate 3D preview, adjustable 3D curve/grade, signed 3 m storey levels, path-attached TC Stops, RMAP v4 persistence, and corrected directional asphalt materials. Roads compile the tile grammar; rail and controls remain semantic recipes.',
   interfaces: [
     {
       name: 'transport.zig semantic path table + live draft',
@@ -14,7 +14,7 @@ export const editor_transport_paths: DocIndex = {
       kind: 'data_model',
       sourceFile: 'framework/game/map/transport.zig',
       description:
-        'Path {id, points, tagged profile road|light_rail|railway, curve_radius_m}; one host-owned committed table plus accepted draft points and one transient hover point. curvePoints is the shared quadratic-fillet sampler. Rail validation gates turns below the light-rail/railway minimum; all limits live in TUNING. Separate committed/draft revisions keep rendering event-driven.',
+        'Path points carry snapped X/Z plus signed terrain-relative elevation; profiles remain road|light_rail|railway. curvePoints/samplePath are the shared 3D sampler. Control {id,path_id,distance_m,stop} attaches gameplay to that path. Rail radius and grade validation, 3 m storeys, control snap, and limits live in TUNING. Separate revisions keep rendering event-driven.',
       consumers: ['framework/game/map/roads.zig', 'framework/game/map/store.zig', 'world_loader.zig'],
       status: 'live',
     },
@@ -24,7 +24,7 @@ export const editor_transport_paths: DocIndex = {
       kind: 'module',
       sourceFile: 'world_loader.zig',
       description:
-        'The loader turns its existing painted-terrain hover hit into the draft virtual endpoint. Road previews are full curb-to-curb ribbons; light rail is slab+steel; railway is ballast+steel while moving and gains sleepers once committed. Invalid rail ghosts are red. Dynamic cube-instance rows rebuild only on snapped draft/terrain revisions; no React/frame-loop geometry.',
+        'The loader turns its terrain hover into a 3D draft endpoint or projected TC Stop. Road previews are curb-to-curb; light rail is slab+steel; railway gains sleepers once committed; stop controls render as transverse bars/posts. Invalid curve/grade/duplicate-stop ghosts are red. Instance rows rebuild only on semantic/terrain revisions.',
       dependsOn: ['transport.zig semantic path table + live draft'],
       consumers: ['cart/editor/world/WorldViewport.tsx'],
       status: 'live',
@@ -35,18 +35,28 @@ export const editor_transport_paths: DocIndex = {
       kind: 'host_fn',
       sourceFile: 'runtime/game/map.ts',
       description:
-        'UI-rate typed boundary: set tagged profile/curve, Finish, Cancel, Undo Point, Delete, and read the eleven-float stats/validation record. MapPaintDock polls stats at 10 Hz because native viewport clicks intentionally bypass React. Older hosts honestly fall back to road-only rather than pretending to save rail.',
+        'UI-rate typed boundary: select draw|stop, set tagged profile/curve/signed level, Finish/Cancel/Undo Point/Delete path or control, and read compact grade/target stats. MapPaintDock polls at 10 Hz because native viewport clicks intentionally bypass React. Older hosts remain honestly road-only.',
       dependsOn: ['transport.zig semantic path table + live draft'],
       consumers: ['cart/editor/stage/mapPaint.ts', 'cart/editor/stage/MapPaintDock.tsx'],
       status: 'live',
     },
     {
-      name: 'RMAP v3 transport recipes',
+      name: 'RMAP v4 transport recipes and controls',
       purpose: ['persistence', 'format'],
       kind: 'data_model',
       sourceFile: 'framework/game/map/store.zig',
       description:
-        'The RMAP trailing recipe table is tagged road/light-rail/railway and carries curve reach. Chunk/material layout is unchanged. v1/v2 road strokes load with their historical 5 m fillet; road undercoat still serializes the base grid and restamps after load.',
+        'The RMAP path table carries tagged profile, curve reach, stable id, and point elevation; a trailing table stores path-attached controls. Chunk/material layout is unchanged. v1/v2 roads retain their 5 m fillet and v3 rail migrates at Ground with no controls.',
+      dependsOn: ['transport.zig semantic path table + live draft'],
+      status: 'live',
+    },
+    {
+      name: 'directional road ground materials',
+      purpose: ['rendering', 'world_gen'],
+      kind: 'module',
+      sourceFile: 'cart/editor/render3d/groundFormula.ts',
+      description:
+        'req_2936: all directional lane and junction kinds bind explicitly to asphalt instead of concrete fallback. East/west lanes rotate catalog UV; median/crosswalk infer axis from adjacent semantic lane kinds so markings follow the path.',
       dependsOn: ['transport.zig semantic path table + live draft'],
       status: 'live',
     },
@@ -66,7 +76,7 @@ export const editor_transport_paths: DocIndex = {
       name: 'rail path is authored, train gameplay consumer is not yet attached',
       purpose: ['vehicle', 'pathing'],
       description:
-        'The live/persisted rail network and visual grammar exist, but switches, stations, signals, and train motion are later consumers. Do not create a second route graph from rendered geometry; extend the tagged Path contract and compile from it.',
+        'The live/persisted 3D rail network and TC Stops exist, but switches, stations, signals, bridge/tunnel structure, and train motion are later consumers. Do not create a second route graph from rendered geometry; consume Path + Control and samplePath.',
       evidence: ['framework/game/map/transport.zig', 'docs/game/editor_transport_paths.md'],
       severity: 'medium',
     },
