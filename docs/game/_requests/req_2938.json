@@ -1,0 +1,32 @@
+{
+  "id": "req_2938",
+  "at": "2026-07-11T00:24:45.761Z",
+  "origin": "codex:019f4de6",
+  "text": "So the road one is one still needs work on the shader and i can help here so if you see this shader called Road [Image #1] it has 3 variants and its called Take 1 Take 2 and Take 3; take 1 is the yellow divider and take 3 is a plain asphalt patch, the thing is there is no proper 'take 2' that would be white dividers on the edges of a lane when its wider than 1 if you know what i mean, but this should help, since a lane is effectively 3 tiles wide, and a vehicle actually fits in 2.75 of the tiles when centered, that gives you the perfect amount of room on both sides to make the shader hit perfect for both white dashed lines for lane splits and white solid lines on the right most edge lane and also to be able to section off onto and from exits; so if i had a 1 by 1 lane so one in each direction, i would at minimum need a 6.5 round it up call it 7 tiles wide to get in the yellow line with then a perfect lane on each side. now, as you can also tell you can really start to push this system and start to account for center turn lanes and intersection logic. We can use the studio export system for props necessary at intersections and 4 way stops or similar, signs, lights, whatever, we just need to pass it in as a export type, and that same thing goes for bus systems we will have with bus stops, train stops, etc.",
+  "status": "review",
+  "sessionId": "019f4de6-2533-7ed0-8e75-190a8d7d1e46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T00:24:55.291Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T00:40:47.482Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Road rendering now consumes the authored three-metre lane profile instead of repeating one-metre shader tiles: the native planner derives yellow median, dashed internal split, solid outer-edge, crosswalk, and axis flags, packs them into the existing ground material-reference plane, and the Road shader composites metre-continuous markings over Plain Asphalt. A one-lane-each-way road remains the ruled 7 m carriageway and the dock displays that width live. Studio Export → Prop now persists scenery, stop-sign, traffic-light, street-sign, bus-stop, or train-stop roles in each model manifest so later derived intersections/transit controls select catalog assets without filename guesses. Native tests, 18 focused editor assertions, oracle indexing, and the full ReleaseFast editor build pass; live visual appearance and the 60-second frame-time gate remain for user review. Center-turn/exit stencils and automatic junction prop placement are documented next consumers.",
+  "shas": [
+    "05affa685",
+    "c49ccb8ec",
+    "dc1326325"
+  ],
+  "resolvedAt": "2026-07-11T00:40:47.482Z"
+}
