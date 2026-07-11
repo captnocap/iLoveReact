@@ -1,0 +1,30 @@
+{
+  "id": "req_2954",
+  "at": "2026-07-11T07:31:42.970Z",
+  "origin": "codex:019f4ce0",
+  "text": "here is a clearer photo with wireframe off, u can see i have 7 total edges [Image #1]",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T07:32:15.060Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T07:47:38.311Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The wireframe-off clarification exposed the exact failure: seven lines are the boundary of two adjacent cylinder quads, produced when a previous document's [0,2) edit scope survived into the new cylinder whose real part range is [0,14). True model loads now reset that stale scope; the native HUD and diagnostic log distinguish the cylinder's 36 editable authored edges from its 66 triangulation edges; internal fan diagonals are rejected by the programmatic edge-selection door; and copied history includes/validates live scope. Exact native regression, ReleaseFast build, headless bridge/log output, and the 60+ second frame-time gate pass.",
+  "shas": [
+    "a31a47ea4"
+  ],
+  "resolvedAt": "2026-07-11T07:47:38.311Z"
+}

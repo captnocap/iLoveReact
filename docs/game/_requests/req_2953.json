@@ -1,0 +1,30 @@
+{
+  "id": "req_2953",
+  "at": "2026-07-11T07:29:20.363Z",
+  "origin": "codex:019f4ce0",
+  "text": "lol alright well, so that repro never landed, so ive kinda just left this thread open hoping something strange would happen again, and i could catch it, and well something strange happened again but the catch for it is bleak. i literally did new mesh -> cylinder -> changes some of the settings upfront like different face count or whatever i dont really remember it but {\n  \"version\": 1,\n  \"capacity\": 32,\n  \"byteBudget\": 201326592,\n  \"journalBytes\": 0,\n  \"pending\": {\n    \"gizmo\": false,\n    \"loopCut\": false\n  },\n  \"undo\": [],\n  \"current\": {\n    \"vertices\": 132,\n    \"triangles\": 44,\n    \"groupRows\": 44,\n    \"groupsMatchTriangles\": true,\n    \"authoredGroups\": 14,\n    \"parts\": [\n      {\n        \"lo\": 0,\n        \"hi\": 14,\n        \"faces\": 44\n      }\n    ],\n    \"rangesValid\": true,\n    \"unownedFaces\": 0,\n    \"multiplyOwnedFaces\": 0,\n    \"ownershipValid\": true,\n    \"hiddenParts\": 0,\n    \"bytes\": 4742,\n    \"note\": \"{\\\"modelId\\\":\\\"primitive:cylinder:3\\\",\\\"parts\\\":[{\\\"id\\\":\\\"part:cylinder:2031\\\",\\\"name\\\":\\\"Cylinder 1\\\",\\\"kind\\\":\\\"cylinder\\\",\\\"visible\\\":true,\\\"color\\\":\\\"#c9b48f\\\",\\\"lo\\\":0,\\\"hi\\\":14}]}\"\n  },\n  \"redo\": []\n} \n\n\nand the problem heere is this is the whole outliner LMAO [Image #1] holy shit thats a bug if i ever seen one",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T07:29:47.450Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T07:47:38.311Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root cause was live edit scope surviving a model-document replacement: an old [0,2) range filtered the healthy cylinder part [0,14) down to exactly two adjacent quads and seven unique editable edges. Fresh file/cooked model loads now clear only the prior document scope, while in-document topology edits and quality remeshing retain their scope. Authored face-group arrival now invalidates the native boundary cache; the HUD reports authored/editable edges (36 for this 12-sided cylinder) instead of all 66 render-triangle edges; and Edit History now records live scope plus welded, triangle-edge, and editable-edge counts and flags stale ranges. The exact 24-vertex/14-face/44-triangle cylinder and seven-edge stale-scope failure are covered natively. Mesh-edit and journal tests, ReleaseFast editor build, live headless bridge/log probe, and a silent 60+ second post-init spike trace pass.",
+  "shas": [
+    "a31a47ea4"
+  ],
+  "resolvedAt": "2026-07-11T07:47:38.311Z"
+}
