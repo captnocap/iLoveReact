@@ -199,6 +199,191 @@ pub fn cornerVertPub(f: u32, k: u32) u32 {
     if (idx >= corners.len) return 0;
     return corners[idx];
 }
+
+/// Solidify works from the authored surface, not its render triangulation. These
+/// values are deliberately centralized because both the host operation and its
+/// unit regressions consume the same boundary contract.
+pub const SolidifyTuning = struct {
+    pub const default_thickness_m: f32 = 0.125;
+    /// Damped least-squares keeps one-plane and two-plane boundary vertices stable
+    /// while converging to the exact three-plane intersection at closed corners.
+    pub const plane_solver_regularization: f64 = 1.0e-9;
+    pub const normal_epsilon_squared: f64 = 1.0e-18;
+};
+
+/// One selected render triangle plus the authored face it came from. `group` is
+/// NO_FACE_GROUP for ungrouped imports, where each render triangle is intentionally
+/// treated as its own authored plane.
+pub const SolidifyTriangle = struct {
+    face: u32,
+    group: u32,
+    corners: [3]u32,
+    positions: [3][3]f32,
+};
+
+/// Deep result surface for solidify: callers only ask for the already-solved inward
+/// displacement of a welded vertex. Plane grouping, miter solving, and ownership stay
+/// private, so the resident-mesh operation cannot accidentally reintroduce triangle
+/// weighting.
+pub const SolidifyOffsets = struct {
+    allocator: std.mem.Allocator,
+    by_vertex: std.AutoHashMapUnmanaged(u32, [3]f32) = .{},
+
+    pub fn deinit(self: *SolidifyOffsets) void {
+        self.by_vertex.deinit(self.allocator);
+        self.* = undefined;
+    }
+
+    pub fn get(self: *const SolidifyOffsets, vertex: u32) [3]f32 {
+        return self.by_vertex.get(vertex) orelse .{ 0, 0, 0 };
+    }
+};
+
+const SolidifyPlane = struct {
+    index: u32,
+    normal_sum: [3]f64 = .{ 0, 0, 0 },
+};
+
+const SolidifyPlaneSystem = struct {
+    // A^T A (symmetric) and A^T 1 for n_i · displacement = -thickness.
+    matrix: [3][3]f64 = .{
+        .{ 0, 0, 0 },
+        .{ 0, 0, 0 },
+        .{ 0, 0, 0 },
+    },
+    normal_sum: [3]f64 = .{ 0, 0, 0 },
+
+    fn addPlane(self: *SolidifyPlaneSystem, normal: [3]f32) void {
+        const n = [3]f64{ normal[0], normal[1], normal[2] };
+        inline for (0..3) |row| {
+            self.normal_sum[row] += n[row];
+            inline for (0..3) |column| self.matrix[row][column] += n[row] * n[column];
+        }
+    }
+
+    fn solve(self: SolidifyPlaneSystem, thickness: f32) [3]f32 {
+        // (A^T A + lambda I)d = -thickness A^T 1. Cholesky is stable for the
+        // positive-definite damped system and naturally returns the minimum-length
+        // inset at one-/two-plane boundary vertices.
+        const regularization = SolidifyTuning.plane_solver_regularization;
+        var a = self.matrix;
+        inline for (0..3) |axis| a[axis][axis] += regularization;
+        const b = [3]f64{
+            -@as(f64, thickness) * self.normal_sum[0],
+            -@as(f64, thickness) * self.normal_sum[1],
+            -@as(f64, thickness) * self.normal_sum[2],
+        };
+
+        const l00 = @sqrt(@max(a[0][0], regularization));
+        const l10 = a[1][0] / l00;
+        const l20 = a[2][0] / l00;
+        const l11 = @sqrt(@max(a[1][1] - l10 * l10, regularization));
+        const l21 = (a[2][1] - l20 * l10) / l11;
+        const l22 = @sqrt(@max(a[2][2] - l20 * l20 - l21 * l21, regularization));
+
+        const y0 = b[0] / l00;
+        const y1 = (b[1] - l10 * y0) / l11;
+        const y2 = (b[2] - l20 * y0 - l21 * y1) / l22;
+        const x2 = y2 / l22;
+        const x1 = (y1 - l21 * x2) / l11;
+        const x0 = (y0 - l10 * x1 - l20 * x2) / l00;
+        return .{ @floatCast(x0), @floatCast(x1), @floatCast(x2) };
+    }
+};
+
+fn solidifyPlaneKey(triangle: SolidifyTriangle) u64 {
+    if (triangle.group != model_source.NO_FACE_GROUP) return triangle.group;
+    // Authored ids occupy the low u32 domain. The upper namespace makes an
+    // ungrouped render triangle distinct without colliding with a real group id.
+    return (@as(u64, 1) << 32) | triangle.face;
+}
+
+/// Compute an even-thickness inward displacement for every welded vertex touched by
+/// `triangles`. Render triangles sharing an authored face-group first collapse into ONE
+/// area-weighted plane; each vertex then intersects its incident planes after all move
+/// inward by `thickness`. A triangulated cube therefore becomes a smaller parallel cube,
+/// independent of which diagonal split each quad happened to use.
+pub fn solidifyOffsets(
+    allocator: std.mem.Allocator,
+    triangles: []const SolidifyTriangle,
+    thickness: f32,
+) !SolidifyOffsets {
+    var result = SolidifyOffsets{ .allocator = allocator };
+    errdefer result.deinit();
+    if (triangles.len == 0 or thickness <= 0) return result;
+
+    var planes = std.AutoHashMapUnmanaged(u64, SolidifyPlane){};
+    defer planes.deinit(allocator);
+    // Packed (welded vertex, sequential plane index), unique even when a vertex is
+    // present in both render triangles of the same authored quad.
+    var vertex_plane_uses = std.AutoHashMapUnmanaged(u64, void){};
+    defer vertex_plane_uses.deinit(allocator);
+
+    for (triangles) |triangle| {
+        const ab = [3]f64{
+            @as(f64, triangle.positions[1][0]) - triangle.positions[0][0],
+            @as(f64, triangle.positions[1][1]) - triangle.positions[0][1],
+            @as(f64, triangle.positions[1][2]) - triangle.positions[0][2],
+        };
+        const ac = [3]f64{
+            @as(f64, triangle.positions[2][0]) - triangle.positions[0][0],
+            @as(f64, triangle.positions[2][1]) - triangle.positions[0][1],
+            @as(f64, triangle.positions[2][2]) - triangle.positions[0][2],
+        };
+        const cross = [3]f64{
+            ab[1] * ac[2] - ab[2] * ac[1],
+            ab[2] * ac[0] - ab[0] * ac[2],
+            ab[0] * ac[1] - ab[1] * ac[0],
+        };
+        const area_squared = cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2];
+        if (area_squared <= SolidifyTuning.normal_epsilon_squared) continue;
+
+        const key = solidifyPlaneKey(triangle);
+        const plane = try planes.getOrPut(allocator, key);
+        if (!plane.found_existing) plane.value_ptr.* = .{ .index = @intCast(planes.count() - 1) };
+        inline for (0..3) |axis| plane.value_ptr.normal_sum[axis] += cross[axis];
+        for (triangle.corners) |vertex| {
+            const use_key = (@as(u64, vertex) << 32) | plane.value_ptr.index;
+            try vertex_plane_uses.put(allocator, use_key, {});
+        }
+    }
+
+    const plane_normals = try allocator.alloc([3]f32, planes.count());
+    defer allocator.free(plane_normals);
+    @memset(plane_normals, .{ 0, 0, 0 });
+    var plane_it = planes.valueIterator();
+    while (plane_it.next()) |plane| {
+        const sum = plane.normal_sum;
+        const length = @sqrt(sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]);
+        if (length <= @sqrt(SolidifyTuning.normal_epsilon_squared)) continue;
+        plane_normals[plane.index] = .{
+            @floatCast(sum[0] / length),
+            @floatCast(sum[1] / length),
+            @floatCast(sum[2] / length),
+        };
+    }
+
+    var systems = std.AutoHashMapUnmanaged(u32, SolidifyPlaneSystem){};
+    defer systems.deinit(allocator);
+    var use_it = vertex_plane_uses.keyIterator();
+    while (use_it.next()) |use_key| {
+        const vertex: u32 = @intCast(use_key.* >> 32);
+        const plane_index: u32 = @truncate(use_key.*);
+        if (plane_index >= plane_normals.len) continue;
+        const normal = plane_normals[plane_index];
+        if (normal[0] == 0 and normal[1] == 0 and normal[2] == 0) continue;
+        const system = try systems.getOrPut(allocator, vertex);
+        if (!system.found_existing) system.value_ptr.* = .{};
+        system.value_ptr.addPlane(normal);
+    }
+
+    var system_it = systems.iterator();
+    while (system_it.next()) |entry| {
+        try result.by_vertex.put(allocator, entry.key_ptr.*, entry.value_ptr.solve(thickness));
+    }
+    return result;
+}
+
 pub fn selectedEdgeCountPub() u32 {
     return countTrue(g_sel_edge);
 }

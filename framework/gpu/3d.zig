@@ -3476,11 +3476,12 @@ pub fn modelGlassFirstVertex() u32 {
     return @intCast(first * 3);
 }
 
-/// Solidify the selected faces (face mode) IN PLACE: an inner skin offset along the
-/// per-vertex normals plus wall quads around the selection's boundary edges — the old
-/// studio's solidifyFaces on the resident soup. New triangles inherit their source
-/// face's authored group (inner skin picks/paints with its outer face) and colour, so
-/// part ranges are untouched. Thickness in meters; <= 0 uses the studio default 2/16.
+/// Solidify the selected faces (face mode) IN PLACE: an inner skin offset by the
+/// selected AUTHORED face planes plus wall quads around the selection's boundary edges.
+/// Render triangles sharing a quad/ngon group collapse to one plane before the inset is
+/// solved, so triangulation diagonals cannot skew the shell. New triangles inherit their
+/// source face's authored group (inner skin picks/paints with its outer face) and colour,
+/// so part ranges are untouched. Thickness in meters; <= 0 uses the studio default 2/16.
 pub fn meshSolidifySelection(thickness_raw: f32) bool {
     if (!model_paint.hasTarget()) return false;
     if (mesh_edit.mode() != .face) return false;
@@ -3492,13 +3493,15 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     defer jalloc.free(mask);
     const selected = mesh_edit.buildDeleteMask(mask);
     if (selected == 0) return false;
-    const t: f32 = if (thickness_raw > 1e-5) thickness_raw else 0.125;
+    const t: f32 = if (thickness_raw > 1e-5) thickness_raw else mesh_edit.SolidifyTuning.default_thickness_m;
 
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
 
-    // Per-WELDED-vertex offset normal, accumulated from the selected faces touching it.
-    var vert_normals = std.AutoHashMapUnmanaged(u32, [3]f32){};
-    defer vert_normals.deinit(jalloc);
+    // Selected render triangles are reduced to authored planes by mesh_edit's deep
+    // solidify boundary. Keeping that reduction outside this host orchestration is the
+    // guard against ever weighting a quad's diagonal endpoints twice again.
+    var solidify_triangles = std.ArrayListUnmanaged(mesh_edit.SolidifyTriangle){};
+    defer solidify_triangles.deinit(jalloc);
     // Selection-boundary edges: welded-vert pair → incident selected-face count, plus
     // the (face, corner) that owns the edge in winding order (for the wall's winding).
     const EdgeUse = struct { count: u32, face: u32, corner: u32 };
@@ -3513,17 +3516,21 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         const p0: [3]f32 = .{ cur_verts[base + 0], cur_verts[base + 1], cur_verts[base + 2] };
         const p1: [3]f32 = .{ cur_verts[base + 8], cur_verts[base + 9], cur_verts[base + 10] };
         const p2: [3]f32 = .{ cur_verts[base + 16], cur_verts[base + 17], cur_verts[base + 18] };
-        const n = normalOf(p0, p1, p2);
+        const corners = [3]u32{
+            mesh_edit.cornerVertPub(f, 0),
+            mesh_edit.cornerVertPub(f, 1),
+            mesh_edit.cornerVertPub(f, 2),
+        };
+        solidify_triangles.append(jalloc, .{
+            .face = f,
+            .group = model_source.faceGroupOf(f),
+            .corners = corners,
+            .positions = .{ p0, p1, p2 },
+        }) catch return false;
         var k: u32 = 0;
         while (k < 3) : (k += 1) {
-            const cv = mesh_edit.cornerVertPub(f, k);
-            const gop = vert_normals.getOrPut(jalloc, cv) catch return false;
-            if (!gop.found_existing) gop.value_ptr.* = .{ 0, 0, 0 };
-            gop.value_ptr.*[0] += n[0];
-            gop.value_ptr.*[1] += n[1];
-            gop.value_ptr.*[2] += n[2];
-            const a = mesh_edit.cornerVertPub(f, k);
-            const b = mesh_edit.cornerVertPub(f, (k + 1) % 3);
+            const a = corners[k];
+            const b = corners[(k + 1) % 3];
             if (a == b) continue;
             const key = (@as(u64, @min(a, b)) << 32) | @as(u64, @max(a, b));
             const egop = euse.getOrPut(jalloc, key) catch return false;
@@ -3535,13 +3542,8 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         }
     }
 
-    const offsetOf = struct {
-        fn call(map: *std.AutoHashMapUnmanaged(u32, [3]f32), cv: u32, shell: f32) [3]f32 {
-            const acc = map.get(cv) orelse return .{ 0, 0, 0 };
-            const n = vnorm(acc);
-            return .{ -n[0] * shell, -n[1] * shell, -n[2] * shell };
-        }
-    }.call;
+    var offsets = mesh_edit.solidifyOffsets(jalloc, solidify_triangles.items, t) catch return false;
+    defer offsets.deinit();
 
     var out = std.ArrayListUnmanaged(f32){};
     defer out.deinit(jalloc);
@@ -3561,7 +3563,7 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         var k: usize = 0;
         while (k < 3) : (k += 1) {
             p[k] = .{ cur_verts[base + k * 8], cur_verts[base + k * 8 + 1], cur_verts[base + k * 8 + 2] };
-            const off = offsetOf(&vert_normals, mesh_edit.cornerVertPub(f, @intCast(k)), t);
+            const off = offsets.get(mesh_edit.cornerVertPub(f, @intCast(k)));
             p[k] = .{ p[k][0] + off[0], p[k][1] + off[1], p[k][2] + off[2] };
         }
         if (!appendTri(&out, p[0], p[2], p[1])) return false;
@@ -3577,8 +3579,8 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         const fa = use.face;
         const a = mesh_edit.vertPosPub(mesh_edit.cornerVertPub(fa, use.corner));
         const b = mesh_edit.vertPosPub(mesh_edit.cornerVertPub(fa, (use.corner + 1) % 3));
-        const oa = offsetOf(&vert_normals, mesh_edit.cornerVertPub(fa, use.corner), t);
-        const ob = offsetOf(&vert_normals, mesh_edit.cornerVertPub(fa, (use.corner + 1) % 3), t);
+        const oa = offsets.get(mesh_edit.cornerVertPub(fa, use.corner));
+        const ob = offsets.get(mesh_edit.cornerVertPub(fa, (use.corner + 1) % 3));
         const ai: [3]f32 = .{ a[0] + oa[0], a[1] + oa[1], a[2] + oa[2] };
         const bi: [3]f32 = .{ b[0] + ob[0], b[1] + ob[1], b[2] + ob[2] };
         // Edge a→b runs in the face's winding, so (a, ai, bi, b) faces outward.

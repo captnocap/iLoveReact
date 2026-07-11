@@ -208,6 +208,74 @@ test "repeated masked cuts inherit sibling RGBA by source face (req_2906)" {
     try testing.expectEqual(@as(u32, 2), sibling_faces);
 }
 
+test "solidify offsets a triangulated cube by authored planes, not diagonal incidence" {
+    const corners = [8][3]f32{
+        .{ -0.5, -0.5, -0.5 }, .{ 0.5, -0.5, -0.5 }, .{ 0.5, -0.5, 0.5 }, .{ -0.5, -0.5, 0.5 },
+        .{ -0.5, 0.5, -0.5 },  .{ 0.5, 0.5, -0.5 },  .{ 0.5, 0.5, 0.5 },  .{ -0.5, 0.5, 0.5 },
+    };
+    const quads = [6][4]u32{
+        .{ 4, 7, 6, 5 }, .{ 0, 1, 2, 3 }, .{ 0, 4, 5, 1 },
+        .{ 3, 2, 6, 7 }, .{ 0, 3, 7, 4 }, .{ 1, 5, 6, 2 },
+    };
+    var triangles: [12]mesh_edit.SolidifyTriangle = undefined;
+    var face: u32 = 0;
+    for (quads, 0..) |quad, group| {
+        const split = [2][3]u32{
+            .{ quad[0], quad[1], quad[2] },
+            .{ quad[0], quad[2], quad[3] },
+        };
+        for (split) |triangle| {
+            triangles[face] = .{
+                .face = face,
+                .group = @intCast(group),
+                .corners = triangle,
+                .positions = .{ corners[triangle[0]], corners[triangle[1]], corners[triangle[2]] },
+            };
+            face += 1;
+        }
+    }
+
+    const thickness: f32 = 0.125;
+    var offsets = try mesh_edit.solidifyOffsets(testing.allocator, triangles[0..], thickness);
+    defer offsets.deinit();
+
+    for (corners, 0..) |position, vertex| {
+        const expected = [3]f32{
+            if (position[0] < 0) thickness else -thickness,
+            if (position[1] < 0) thickness else -thickness,
+            if (position[2] < 0) thickness else -thickness,
+        };
+        const actual = offsets.get(@intCast(vertex));
+        inline for (0..3) |axis| try testing.expectApproxEqAbs(expected[axis], actual[axis], 0.00001);
+    }
+}
+
+test "solidify keeps a triangulated planar panel parallel at exact thickness" {
+    const triangles = [2]mesh_edit.SolidifyTriangle{
+        .{
+            .face = 0,
+            .group = 42,
+            .corners = .{ 0, 1, 2 },
+            .positions = .{ .{ 0, 0, 0 }, .{ 1, 0, 0 }, .{ 1, 1, 0 } },
+        },
+        .{
+            .face = 1,
+            .group = 42,
+            .corners = .{ 0, 2, 3 },
+            .positions = .{ .{ 0, 0, 0 }, .{ 1, 1, 0 }, .{ 0, 1, 0 } },
+        },
+    };
+    var offsets = try mesh_edit.solidifyOffsets(testing.allocator, triangles[0..], 0.2);
+    defer offsets.deinit();
+    var vertex: u32 = 0;
+    while (vertex < 4) : (vertex += 1) {
+        const actual = offsets.get(vertex);
+        try testing.expectApproxEqAbs(@as(f32, 0), actual[0], 0.00001);
+        try testing.expectApproxEqAbs(@as(f32, 0), actual[1], 0.00001);
+        try testing.expectApproxEqAbs(@as(f32, -0.2), actual[2], 0.00001);
+    }
+}
+
 // Keep the mesh module's co-located lower-level tests in this unit target too.
 test {
     std.testing.refAllDecls(mesh_edit);
