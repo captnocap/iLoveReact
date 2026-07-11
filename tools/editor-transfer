@@ -96,6 +96,7 @@ TRANSFER_RULES=(
   "--exclude=/.zig-cache/"
   "--exclude=/.cache/"
   "--exclude=/.rjit-sync-backup/"
+  "--exclude=node_modules/"
   "--exclude=/$MANIFEST_NAME"
   "--exclude=/deps/"
   "--exclude=/archive/"

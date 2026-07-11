@@ -57,6 +57,7 @@ const EXCLUDED_TOP_LEVEL = new Set([
   "recovered-models",
   "tmp",
   "_MODEL_RECOVERY_BACKUP_20260629",
+  "node_modules",
 ]);
 
 const hashCache = new Map();
@@ -90,8 +91,10 @@ function isAssetPath(path) {
 
 function isManagedFile(path) {
   const clean = normalizeRelative(path);
-  const first = clean.split("/", 1)[0];
+  const parts = clean.split("/");
+  const first = parts[0];
   if (EXCLUDED_TOP_LEVEL.has(first)) return false;
+  if (parts.includes("node_modules")) return false;
   if (basename(clean) === ".DS_Store") return false;
   if (basename(clean).includes(".editor-sync-")) return false;
   if (clean === LOCAL_SERVER_FILE) return false;
@@ -107,8 +110,10 @@ function isManagedFile(path) {
 
 function shouldTraverseDirectory(path) {
   const clean = normalizeRelative(path);
-  const first = clean.split("/", 1)[0];
+  const parts = clean.split("/");
+  const first = parts[0];
   if (EXCLUDED_TOP_LEVEL.has(first)) return false;
+  if (parts.includes("node_modules")) return false;
   if (clean === "cart/hmsc-int" || clean.startsWith("cart/hmsc-int/")) return false;
   if (clean === "tools/zig" || clean.startsWith("tools/zig/")) return false;
   if (clean === "zig-out" || clean === "zig-out/game") return true;
