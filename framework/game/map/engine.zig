@@ -237,6 +237,7 @@ pub fn reset() void {
     chunks.clearAll();
     transport.clearAll();
     g_road_under.clearRetainingCapacity();
+    g_road_markings.clearRetainingCapacity();
     road_plan_truncated = false;
     g_tool = .{};
     g_brush_gizmo = .profile;
@@ -1119,6 +1120,10 @@ pub fn setZonePalette(zone_rgb: []const f32) void {
 
 pub const MAX_TILE_BINDINGS: usize = 256;
 pub const BINDING_FLOATS: usize = 4;
+/// Per-cell material references reserve the low 9 bits for binding+1 and pack
+/// the road compiler's derived u8 paint flags above them. Both values remain
+/// exact in f32 while avoiding a third 14,400-float chunk plane.
+pub const GROUND_MATERIAL_REF_STRIDE: i32 = 512;
 var g_tile_bindings: [MAX_TILE_BINDINGS][BINDING_FLOATS]f32 = undefined;
 var g_tile_binding_count: usize = 0;
 
@@ -1158,6 +1163,8 @@ fn floraCompositeAt(chunk: *const chunks.Chunk, idx: usize) i16 {
 }
 
 /// Encode a chunk's cell channels as the ground formula's D stream (layout v3).
+/// The material-reference plane packs `(binding + 1) + roadMarking * 512`;
+/// road markings are derived from strokes and never persisted as authored cells.
 /// dst.len must be ≥ groundDataFloats(). Returns the floats written.
 pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
     dst[0] = @floatFromInt(chunks.TILE_COLS);
@@ -1199,11 +1206,16 @@ pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
         dst[n] = @floatFromInt(t + f * 1024 + z * 262144);
         n += 1;
     }
-    for (chunk.materials) |m| {
+    for (chunk.materials, 0..) |m, i| {
         // A stale index past the live table means the binding is gone — fall
         // to the kind default rather than show a random neighbor's look.
         const bind: i32 = if (m >= 0 and m < g_tile_binding_count) m else -1;
-        dst[n] = @floatFromInt(bind + 1);
+        const lx: i32 = @intCast(i % chunks.TILE_COLS);
+        const lz: i32 = @intCast(i / chunks.TILE_COLS);
+        const gx = chunk.cx * CHUNK_TILES + lx;
+        const gz = chunk.cz * CHUNK_TILES + lz;
+        const marking: i32 = @intCast(g_road_markings.get(roadCellKey(gx, gz)) orelse 0);
+        dst[n] = @floatFromInt(bind + 1 + marking * GROUND_MATERIAL_REF_STRIDE);
         n += 1;
     }
     return n;
@@ -1222,6 +1234,8 @@ const MAX_PLAN_CELLS: usize = 65536;
 var g_plan_cells: [MAX_PLAN_CELLS]roads.PlanCell = undefined;
 /// cell → the (tile, material) pair beneath the road stamp.
 var g_road_under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty;
+/// cell → render-only lane paint flags, re-derived on every global restamp.
+var g_road_markings: std.AutoHashMapUnmanaged(u64, u8) = .empty;
 var g_road_strokes_buf: [roads.MAX_STROKES]roads.RoadStroke = undefined;
 /// LOUD truncation flag from the last restamp (surface it in chrome, never drop silently).
 pub var road_plan_truncated: bool = false;
@@ -1255,6 +1269,7 @@ pub fn roadsRestamp() void {
         }
     }
     g_road_under.clearRetainingCapacity();
+    g_road_markings.clearRetainingCapacity();
 
     // 2. replan every stroke
     const count = roads.collectStrokes(g_road_strokes_buf[0..]);
@@ -1268,6 +1283,9 @@ pub fn roadsRestamp() void {
         g_road_under.put(seen_alloc, roadCellKey(pc.gx, pc.gz), .{ cell.tile.*, cell.material.* }) catch continue;
         cell.tile.* = roads.kindIndex(pc.kind);
         cell.material.* = chunks.EMPTY_CELL;
+        if (pc.markings != 0) {
+            g_road_markings.put(seen_alloc, roadCellKey(pc.gx, pc.gz), pc.markings) catch {};
+        }
     }
 }
 

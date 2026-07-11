@@ -13,7 +13,7 @@ import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
 import { addZonePatch, PAINTABLE_TILE_KINDS, saveMapFile, type MapPaintChannel, type MapPaintState } from './mapPaint';
 import { CHANNELS, CHANNEL_META, cycle, GIZMOS, GIZMO_META, PROFILES, SHAPES, TERRAIN_TOOLS, TERRAIN_TOOL_META } from './mapPaintUi';
-import { PATH_CURVE_TUNING, PATH_KIND_META, PATH_KIND_ORDER, pathInvalidLabel, pathKindPatch, pathLevelLabel } from './transportPathUi';
+import { PATH_CURVE_TUNING, PATH_KIND_META, PATH_KIND_ORDER, pathInvalidLabel, pathKindPatch, pathLevelLabel, roadCarriagewayWidthM } from './transportPathUi';
 
 const ICON_PANEL = '#101923';
 const ICON_PANEL_ON = '#12283a';
@@ -477,6 +477,7 @@ function PathTray(props: { state: MapPaintState; onPatch: (patch: Partial<MapPai
             onDown={() => props.onPatch({ roadLanesB: Math.max(0, s.roadLanesB - 1) })}
             onUp={() => props.onPatch({ roadLanesB: Math.min(3, s.roadLanesB + 1) })}
           />
+          <FactPanel label="WIDTH" value={`${roadCarriagewayWidthM(s.roadLanesF, s.roadLanesB)}m`} />
           <OptionTile
             icon="Footprints"
             label="Walks"

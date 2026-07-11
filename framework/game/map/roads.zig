@@ -115,6 +115,24 @@ pub const RoadCellKind = enum(u8) {
 
 pub const ROAD_CELL_KIND_COUNT: usize = @typeInfo(RoadCellKind).@"enum".fields.len;
 
+/// Render-only lane-paint recipe carried beside the gameplay tile kind. The
+/// tile kind continues to own flow/pathing; these flags are DERIVED from the
+/// road stroke's 3 m cross-section and never become another authored grid.
+///
+/// Low/high name the transverse edge in world-coordinate order after the
+/// renderer rotates UVs so x crosses the road and y runs along it. One byte is
+/// enough for the current grammar and leaves bit 7 available for a later
+/// turn/exit stencil without changing the ground-stream contract.
+pub const RoadMarking = struct {
+    pub const axis_x: u8 = 1 << 0;
+    pub const yellow_center: u8 = 1 << 1;
+    pub const white_dash_low: u8 = 1 << 2;
+    pub const white_dash_high: u8 = 1 << 3;
+    pub const white_solid_low: u8 = 1 << 4;
+    pub const white_solid_high: u8 = 1 << 5;
+    pub const crosswalk: u8 = 1 << 6;
+};
+
 var g_kind_indices: [ROAD_CELL_KIND_COUNT]i16 = @splat(-1);
 
 /// Map each RoadCellKind → the content tile-legend index the consumer stamps.
@@ -278,12 +296,66 @@ const StrokeRaster = struct {
     center: []CenterCell,
     /// cell → kind; closest-to-centerline column wins so corners stay clean
     carriage: std.AutoHashMapUnmanaged(u64, RoadCellKind),
+    /// cell → derived paint flags for the same winning cross-section column
+    markings: std.AutoHashMapUnmanaged(u64, u8),
     walk: std.AutoHashMapUnmanaged(u64, void),
     /// cell → |offset| that produced it (the corner tiebreak)
     rank: std.AutoHashMapUnmanaged(u64, i32),
     /// cell → travel-axis bits (AXIS_X / AXIS_Z) along this stroke
     axes: std.AutoHashMapUnmanaged(u64, u8),
 };
+
+fn axisMarking(dir: Dir) u8 {
+    return if (dir.dx != 0) RoadMarking.axis_x else 0;
+}
+
+const EdgePaint = enum { dash, solid };
+
+/// Flag the physical edge reached by stepping `offset_sign` along rightOf(dir).
+/// The shader's transverse x is world Z for east/west roads and world X for
+/// north/south roads, so this conversion keeps curves and reversed strokes from
+/// silently swapping their left/right paint.
+fn edgeMarking(dir: Dir, offset_sign: i32, paint: EdgePaint) u8 {
+    const rt = rightOf(dir);
+    const transverse_delta = if (dir.dx != 0) rt.dz * offset_sign else rt.dx * offset_sign;
+    const high = transverse_delta > 0;
+    return switch (paint) {
+        .dash => if (high) RoadMarking.white_dash_high else RoadMarking.white_dash_low,
+        .solid => if (high) RoadMarking.white_solid_high else RoadMarking.white_solid_low,
+    };
+}
+
+/// Paint for one cross-section column. A lane is exactly LANE_TILES (3 m):
+/// internal 3 m boundaries are dashed, the two carriageway shoulders are
+/// solid, and the one-cell opposing-flow separator carries the yellow center.
+fn columnMarking(profile: RoadProfile, col: Col, dir: Dir) u8 {
+    const p = clampProfile(profile);
+    var flags = axisMarking(dir);
+    if (col.kind == .median) return flags | RoadMarking.yellow_center;
+
+    if (p.lanesF > 0 and p.lanesB > 0) {
+        const magnitude = @abs(col.off);
+        const group_width = if (col.off > 0) LANE_TILES * p.lanesF else LANE_TILES * p.lanesB;
+        if (magnitude == group_width) {
+            flags |= edgeMarking(dir, signOf(@as(f32, @floatFromInt(col.off))), .solid);
+        } else if (@mod(magnitude, LANE_TILES) == 0) {
+            flags |= edgeMarking(dir, signOf(@as(f32, @floatFromInt(col.off))), .dash);
+        }
+        return flags;
+    }
+
+    // One-way roads are centred on the stroke. Group the continuous ribbon
+    // from its low offset so every lane remains 3 m even when the width is even.
+    const width = LANE_TILES * @max(p.lanesF, p.lanesB);
+    const left = -@divFloor(width - 1, 2);
+    const right = left + width - 1;
+    if (col.off == left) flags |= edgeMarking(dir, -1, .solid);
+    if (col.off == right) flags |= edgeMarking(dir, 1, .solid);
+    if (col.off < right and @mod(col.off - left + 1, LANE_TILES) == 0) {
+        flags |= edgeMarking(dir, 1, .dash);
+    }
+    return flags;
+}
 
 var g_fillet_scratch: [MAX_FILLETED_POINTS]RoadPoint = undefined;
 
@@ -297,6 +369,7 @@ fn rasterizeStroke(arena: std.mem.Allocator, stroke: RoadStroke) !StrokeRaster {
         .stroke = stroke,
         .center = center,
         .carriage = .empty,
+        .markings = .empty,
         .walk = .empty,
         .rank = .empty,
         .axes = .empty,
@@ -323,6 +396,7 @@ fn rasterizeStroke(arena: std.mem.Allocator, stroke: RoadStroke) !StrokeRaster {
                 .backward => laneKindFor(.{ .dx = -c.dir.dx, .dz = -c.dir.dz }),
             };
             try r.carriage.put(arena, key, kind);
+            try r.markings.put(arena, key, columnMarking(profile, col, c.dir));
             _ = r.walk.remove(key); // carriageway beats this stroke's own sidewalk
         }
         for (xs.walk[0..xs.walk_count]) |off| {
@@ -343,7 +417,14 @@ fn rasterizeStroke(arena: std.mem.Allocator, stroke: RoadStroke) !StrokeRaster {
 
 // ── the plan (roadData.ts:335-406) ────────────────────────────────────────────
 
-pub const PlanCell = struct { gx: i32, gz: i32, kind: RoadCellKind };
+pub const PlanCell = struct {
+    gx: i32,
+    gz: i32,
+    kind: RoadCellKind,
+    markings: u8,
+};
+
+const PlanValue = struct { kind: RoadCellKind, markings: u8 };
 
 pub const PlanResult = struct {
     count: usize,
@@ -400,20 +481,23 @@ fn planRoadsArena(arena: std.mem.Allocator, strokes: []const RoadStroke, out: []
 
     // 1) sidewalks first, then carriageways — any stroke's lanes beat any
     //    stroke's sidewalk where a corner grazes a neighbour road (ts:340).
-    var plan: std.AutoHashMapUnmanaged(u64, RoadCellKind) = .empty;
+    var plan: std.AutoHashMapUnmanaged(u64, PlanValue) = .empty;
     for (rasters.items) |*r| {
         var wit = r.walk.keyIterator();
-        while (wit.next()) |key| try plan.put(arena, key.*, .sidewalk);
+        while (wit.next()) |key| try plan.put(arena, key.*, .{ .kind = .sidewalk, .markings = 0 });
     }
     for (rasters.items) |*r| {
         var cit = r.carriage.iterator();
-        while (cit.next()) |entry| try plan.put(arena, entry.key_ptr.*, entry.value_ptr.*);
+        while (cit.next()) |entry| try plan.put(arena, entry.key_ptr.*, .{
+            .kind = entry.value_ptr.*,
+            .markings = r.markings.get(entry.key_ptr.*) orelse 0,
+        });
     }
 
     // 2) junction boxes (ts:349)
     var junction = try junctionCells(arena, rasters.items);
     var jit = junction.keyIterator();
-    while (jit.next()) |key| try plan.put(arena, key.*, .junction);
+    while (jit.next()) |key| try plan.put(arena, key.*, .{ .kind = .junction, .markings = 0 });
 
     // 3) crosswalk bands: the CROSSWALK_DEPTH centerline cells just outside
     //    every enter/exit of the box stamp their carriageway cross-section as
@@ -458,7 +542,10 @@ fn planRoadsArena(arena: std.mem.Allocator, strokes: []const RoadStroke, out: []
                 for (xs.carriage[0..xs.carriage_count]) |col| {
                     const key = cellKeyOf(c.gx + rt.dx * col.off, c.gz + rt.dz * col.off);
                     if (!junction.contains(key) and plan.contains(key)) {
-                        try plan.put(arena, key, .crosswalk);
+                        try plan.put(arena, key, .{
+                            .kind = .crosswalk,
+                            .markings = axisMarking(c.dir) | RoadMarking.crosswalk,
+                        });
                     }
                 }
             }
@@ -475,7 +562,12 @@ fn planRoadsArena(arena: std.mem.Allocator, strokes: []const RoadStroke, out: []
             break;
         }
         const cell = cellOfKey(entry.key_ptr.*);
-        out[count] = .{ .gx = cell[0], .gz = cell[1], .kind = entry.value_ptr.* };
+        out[count] = .{
+            .gx = cell[0],
+            .gz = cell[1],
+            .kind = entry.value_ptr.kind,
+            .markings = entry.value_ptr.markings,
+        };
         count += 1;
     }
     return .{ .count = count, .truncated = truncated };
@@ -711,6 +803,13 @@ fn planKindAt(cells: []const PlanCell, count: usize, gx: i32, gz: i32) ?RoadCell
     return null;
 }
 
+fn planCellAt(cells: []const PlanCell, count: usize, gx: i32, gz: i32) ?PlanCell {
+    for (cells[0..count]) |c| {
+        if (c.gx == gx and c.gz == gz) return c;
+    }
+    return null;
+}
+
 fn countKind(cells: []const PlanCell, count: usize, kind: RoadCellKind) usize {
     var n: usize = 0;
     for (cells[0..count]) |c| {
@@ -738,12 +837,45 @@ test "an eastbound two-way stroke puts forward lanes south of the median (right-
     try std.testing.expect(planKindAt(&test_plan, res.count, 15, 16) == null);
 }
 
+test "one lane each way compiles the ruled seven metre marked carriageway" {
+    const pts = [_]RoadPoint{ .{ .gx = 10, .gz = 10 }, .{ .gx = 20, .gz = 10 } };
+    const res = planRoads(&.{testStroke(1, &pts, 1, 1, false)}, test_plan[0..]);
+    try std.testing.expect(!res.truncated);
+
+    const median = planCellAt(&test_plan, res.count, 15, 10).?;
+    try std.testing.expect((median.markings & RoadMarking.axis_x) != 0);
+    try std.testing.expect((median.markings & RoadMarking.yellow_center) != 0);
+
+    // No white line duplicates the yellow separator. Each 3 m lane ends in
+    // one solid shoulder line, leaving a centred 2.75 m vehicle 0.125 m/side.
+    try std.testing.expectEqual(@as(u8, RoadMarking.axis_x), planCellAt(&test_plan, res.count, 15, 11).?.markings);
+    try std.testing.expect((planCellAt(&test_plan, res.count, 15, 13).?.markings & RoadMarking.white_solid_high) != 0);
+    try std.testing.expect((planCellAt(&test_plan, res.count, 15, 7).?.markings & RoadMarking.white_solid_low) != 0);
+}
+
+test "multi-lane groups derive dashed splits every three metres and solid outer edges" {
+    const pts = [_]RoadPoint{ .{ .gx = 10, .gz = 10 }, .{ .gx = 20, .gz = 10 } };
+    var res = planRoads(&.{testStroke(1, &pts, 2, 1, false)}, test_plan[0..]);
+    try std.testing.expect((planCellAt(&test_plan, res.count, 15, 13).?.markings & RoadMarking.white_dash_high) != 0);
+    try std.testing.expect((planCellAt(&test_plan, res.count, 15, 16).?.markings & RoadMarking.white_solid_high) != 0);
+
+    // A centred two-lane one-way ribbon has two solid shoulders and one dashed
+    // split; it does not need a median kind to recover its 3 m lane phase.
+    res = planRoads(&.{testStroke(2, &pts, 2, 0, false)}, test_plan[0..]);
+    try std.testing.expect((planCellAt(&test_plan, res.count, 15, 8).?.markings & RoadMarking.white_solid_low) != 0);
+    try std.testing.expect((planCellAt(&test_plan, res.count, 15, 10).?.markings & RoadMarking.white_dash_high) != 0);
+    try std.testing.expect((planCellAt(&test_plan, res.count, 15, 13).?.markings & RoadMarking.white_solid_high) != 0);
+}
+
 test "a northbound stroke flows laneNorth with its forward group on the east side" {
     const pts = [_]RoadPoint{ .{ .gx = 10, .gz = 20 }, .{ .gx = 10, .gz = 10 } };
     const res = planRoads(&.{testStroke(1, &pts, 1, 1, false)}, test_plan[0..]);
     try std.testing.expectEqual(RoadCellKind.median, planKindAt(&test_plan, res.count, 10, 15).?);
     for ([_]i32{ 11, 12, 13 }) |x| try std.testing.expectEqual(RoadCellKind.laneNorth, planKindAt(&test_plan, res.count, x, 15).?);
     for ([_]i32{ 9, 8, 7 }) |x| try std.testing.expectEqual(RoadCellKind.laneSouth, planKindAt(&test_plan, res.count, x, 15).?);
+    try std.testing.expect((planCellAt(&test_plan, res.count, 13, 15).?.markings & RoadMarking.white_solid_high) != 0);
+    try std.testing.expect((planCellAt(&test_plan, res.count, 7, 15).?.markings & RoadMarking.white_solid_low) != 0);
+    try std.testing.expect((planCellAt(&test_plan, res.count, 10, 15).?.markings & RoadMarking.axis_x) == 0);
 }
 
 test "a one-way road has no median and centres the carriageway on the stroke" {

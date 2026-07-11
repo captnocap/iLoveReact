@@ -3,6 +3,7 @@
 const std = @import("std");
 const engine = @import("../../game/map/engine.zig");
 const chunks = @import("../../game/map/chunks.zig");
+const roads = @import("../../game/map/roads.zig");
 
 test "reset unbinds the outgoing document and clears map-scoped bindings" {
     engine.reset();
@@ -97,4 +98,45 @@ test "Map Paint undo and redo restore the native RMAP concern per gesture" {
     try std.testing.expect(redone.ok);
     try std.testing.expectApproxEqAbs(@as(f32, 6), engine.heightAt(0, 0), 0.001);
     try std.testing.expectEqual(@as(usize, 1), redone.stats.undo);
+}
+
+test "road marking recipes ride the existing packed ground material plane" {
+    engine.reset();
+    defer engine.reset();
+    var kinds: [roads.ROAD_CELL_KIND_COUNT]i16 = undefined;
+    for (&kinds, 0..) |*kind, i| kind.* = @intCast(i);
+    roads.setKindIndices(kinds);
+    defer roads.setKindIndices(@splat(chunks.EMPTY_CELL));
+
+    const chunk = chunks.growChunk(0, 0).?;
+    engine.setTool(.{ .channel = .road });
+    engine.setPathProfile(.{ .road = .{ .lanesF = 2, .lanesB = 1, .sidewalks = false } }, 8);
+    engine.strokeBegin(-20, 0);
+    _ = engine.strokeEnd();
+    engine.strokeBegin(20, 0);
+    _ = engine.strokeEnd();
+    try std.testing.expect(engine.pathCommit() != null);
+
+    const data = try std.testing.allocator.alloc(f32, engine.groundDataFloats());
+    defer std.testing.allocator.free(data);
+    const written = engine.encodeGroundData(chunk, data);
+    try std.testing.expectEqual(data.len, written);
+    const tile_pal: usize = @intFromFloat(data[2]);
+    const flora_pal: usize = @intFromFloat(data[3]);
+    const zone_pal: usize = @intFromFloat(data[4]);
+    const bindings: usize = @intFromFloat(data[5]);
+    const material_base = 6 + (tile_pal + flora_pal + zone_pal) * 3 + bindings * engine.BINDING_FLOATS + chunks.TILE_CELLS;
+    const markingAt = struct {
+        fn read(stream: []const f32, base: usize, gx: usize, gz: usize) u8 {
+            const ref_value: i32 = @intFromFloat(stream[base + gz * chunks.TILE_COLS + gx]);
+            return @intCast(@divFloor(ref_value, engine.GROUND_MATERIAL_REF_STRIDE));
+        }
+    }.read;
+
+    const median = markingAt(data, material_base, 60, 60);
+    const split = markingAt(data, material_base, 60, 63);
+    const shoulder = markingAt(data, material_base, 60, 66);
+    try std.testing.expect((median & roads.RoadMarking.yellow_center) != 0);
+    try std.testing.expect((split & roads.RoadMarking.white_dash_high) != 0);
+    try std.testing.expect((shoulder & roads.RoadMarking.white_solid_high) != 0);
 }

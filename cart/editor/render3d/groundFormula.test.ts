@@ -1,4 +1,5 @@
-import { EDITOR_GROUND_FORMULA, tileBindingFor } from './groundFormula';
+import { EDITOR_GROUND_FORMULA, GROUND_STREAM_TUNING, tileBindingFor } from './groundFormula';
+import { MATERIALS } from './shaders/_generated/registry';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -8,18 +9,37 @@ function test(name: string, fn: () => void) {
 }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
-test('every directional road lane resolves to asphalt instead of the concrete fallback', () => {
+test('every road grammar cell resolves to the semantic Road material instead of concrete', () => {
   for (const kind of ['laneNorth', 'laneSouth', 'laneEast', 'laneWest'] as const) {
-    assert(tileBindingFor(kind).fn === 'asphalt', `${kind} is not asphalt`);
+    assert(tileBindingFor(kind).fn === 'road', `${kind} is not Road`);
+    assert(tileBindingFor(kind).variant === 2, `${kind} does not start from Plain Asphalt`);
   }
-  assert(tileBindingFor('junction').fn === 'asphalt', 'junction is not asphalt');
-  assert(tileBindingFor('median').fn === 'asphalt', 'median is not asphalt');
+  assert(tileBindingFor('junction').fn === 'road', 'junction is not Road');
+  assert(tileBindingFor('crosswalk').fn === 'road', 'crosswalk is not Road');
+  assert(tileBindingFor('median').fn === 'road', 'median is not Road');
 });
 
 test('ground shader rotates catalog UVs for east-west road grammar', () => {
-  assert(EDITOR_GROUND_FORMULA.includes('var roadAlongX = kind =='), 'directional road dispatch missing');
+  assert(EDITOR_GROUND_FORMULA.includes('var roadAlongX = (roadMark & 1) != 0 || kind =='), 'directional road dispatch missing');
   assert(EDITOR_GROUND_FORMULA.includes('surfaceUv = vec2f(fc.y, fc.x)'), 'east-west UV swap missing');
   assert(EDITOR_GROUND_FORMULA.includes('immediately adjacent directional lane cells'), 'median axis inference missing');
+});
+
+test('ground material references unpack native lane markings without another cell plane', () => {
+  assert(GROUND_STREAM_TUNING.materialRefStride === 512, 'material/marking stride drifted from the native contract');
+  assert(EDITOR_GROUND_FORMULA.includes('materialRef % 512'), 'material reference low bits are not decoded');
+  assert(EDITOR_GROUND_FORMULA.includes('materialRef / 512'), 'native road marking byte is not decoded');
+  assert(EDITOR_GROUND_FORMULA.includes('road_apply_markings(rgb, surfaceUv, surfaceMeters'), 'derived road paint is not composited');
+  assert(EDITOR_GROUND_FORMULA.includes('surfaceMeters = vec2f(p.y, p.x)'), 'east-west marking metres are not rotated');
+});
+
+test('Road catalog variants name the yellow, white, and plain authored takes', () => {
+  const road = MATERIALS.find((material) => material.fn === 'road');
+  assert(!!road, 'Road material disappeared from the generated registry');
+  assert(
+    road!.variantLabels.join('|') === 'Yellow Divider|White Lane + Edge|Plain Asphalt',
+    `Road take labels drifted: ${road!.variantLabels.join('|')}`,
+  );
 });
 
 log(`\n${passed} passed, ${failed} failed`);

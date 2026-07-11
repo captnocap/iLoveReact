@@ -1,4 +1,4 @@
-import { PATH_CURVE_TUNING, pathInvalidLabel, pathKindPatch, pathLevelLabel, pathProfileOf } from './transportPathUi';
+import { PATH_CURVE_TUNING, pathInvalidLabel, pathKindPatch, pathLevelLabel, pathProfileOf, roadCarriagewayWidthM } from './transportPathUi';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -29,6 +29,12 @@ test('signed track levels use the building storey vocabulary', () => {
   assert(pathLevelLabel(0) === 'Ground', 'ground label drifted');
   assert(pathLevelLabel(2) === 'Floor 2', 'raised-storey label drifted');
   assert(pathLevelLabel(-3) === 'Basement 3', 'subway-storey label drifted');
+});
+
+test('road width exposes the ruled three-metre lanes and one-metre two-way divider', () => {
+  assert(roadCarriagewayWidthM(1, 1) === 7, 'one lane each way is not the minimum 7 m carriageway');
+  assert(roadCarriagewayWidthM(2, 1) === 10, 'multi-lane width lost its 3 m module');
+  assert(roadCarriagewayWidthM(2, 0) === 6, 'one-way width incorrectly gained a median');
 });
 
 test('rail validation errors are phrased as an actionable edit', () => {

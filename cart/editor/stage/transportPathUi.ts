@@ -45,6 +45,8 @@ export const PATH_CURVE_TUNING = {
   levelMin: -32,
   levelMax: 128,
   metersPerLevel: 3,
+  roadLaneWidthM: 3,
+  roadMedianWidthM: 1,
 } as const;
 
 function clamp(value: number, min: number, max: number): number {
@@ -70,6 +72,16 @@ export function pathProfileOf(state: TransportPathChrome): MapPathProfile {
     lanesB: Math.round(clamp(state.roadLanesB, 0, 3)),
     sidewalks: !!state.roadSidewalks,
   };
+}
+
+/** Curb-to-curb driving width. Two-way roads reserve the ruled one-metre
+ * yellow separator; one-way roads remain laneCount×3 m. */
+export function roadCarriagewayWidthM(lanesF: number, lanesB: number): number {
+  let forward = Math.round(clamp(lanesF, 0, 3));
+  const backward = Math.round(clamp(lanesB, 0, 3));
+  if (forward === 0 && backward === 0) forward = 1;
+  const median = forward > 0 && backward > 0 ? PATH_CURVE_TUNING.roadMedianWidthM : 0;
+  return (forward + backward) * PATH_CURVE_TUNING.roadLaneWidthM + median;
 }
 
 export function pathInvalidLabel(reason: MapPathInvalidReason, minCurveM: number | null, maxGrade = 0): string {

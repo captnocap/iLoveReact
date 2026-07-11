@@ -20,7 +20,9 @@
 // [2]tilePal [3]floraPal [4]zonePal [5]bindCount, then tilePal×3 + floraPal×3
 // + zonePal×3 palette rgb floats, then bindCount×4 binding rows ([materialId,
 // boardIndex, variant, joint]), then rows×cols PACKED cells, then rows×cols
-// per-cell material indices (binding+1; 0 = kind default). Packed cell
+// packed material references: (binding+1) + roadMarking·512. The low nine
+// bits preserve the material table (0 = kind default); the upper byte is the
+// road compiler's derived yellow/dashed/solid/crosswalk paint recipe. Packed cell
 // (24 bits, exact in f32): (tile+1) + (flora+1)·1024 + (zone+1)·262144;
 // 0 = empty slot. Flora and zones tint OVER the ground material — the
 // authoring overlay view; the real populations materialize at Compile.
@@ -32,6 +34,10 @@ import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 
 export type TileMaterialBinding = { fn: string; variant: number };
+
+export const GROUND_STREAM_TUNING = {
+  materialRefStride: 512,
+} as const;
 
 const MATERIAL_BY_FN = new Map(MATERIALS.map((m) => [m.fn, m]));
 
@@ -54,13 +60,13 @@ const DEFAULT_BINDINGS: TileMaterialOverrides = {
   // Road grammar kinds must be bound explicitly. Falling through to concrete
   // made the whole carriageway read as sidewalk while only the median looked
   // like asphalt (req_2936). Lane flow stays semantic; the surface is asphalt.
-  laneNorth: { fn: 'asphalt', variant: 2 },
-  laneSouth: { fn: 'asphalt', variant: 2 },
-  laneEast: { fn: 'asphalt', variant: 2 },
-  laneWest: { fn: 'asphalt', variant: 2 },
-  junction: { fn: 'asphalt', variant: 2 },
-  crosswalk: { fn: 'curb_crosswalk', variant: 0 },
-  median: { fn: 'asphalt', variant: 0 },
+  laneNorth: { fn: 'road', variant: 2 },
+  laneSouth: { fn: 'road', variant: 2 },
+  laneEast: { fn: 'road', variant: 2 },
+  laneWest: { fn: 'road', variant: 2 },
+  junction: { fn: 'road', variant: 2 },
+  crosswalk: { fn: 'road', variant: 2 },
+  median: { fn: 'road', variant: 2 },
   parking: { fn: 'asphalt', variant: 1 },
   parkingCross: { fn: 'asphalt', variant: 1 },
   vehicleSpawn: { fn: 'asphalt', variant: 0 },
@@ -227,7 +233,9 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
     var board = hf_tile_board(kind);
     var take = hf_tile_var(kind);
     var joint = hf_tile_joint(kind);
-    let bind = i32(D[matBase + cy * cols + cx]) - 1;
+    let materialRef = i32(D[matBase + cy * cols + cx]);
+    let bind = (materialRef % ${GROUND_STREAM_TUNING.materialRefStride}) - 1;
+    let roadMark = materialRef / ${GROUND_STREAM_TUNING.materialRefStride};
     if (bind >= 0 && bind < bindCount) {
       let bb = bindBase + bind * 4;
       mat = i32(D[bb]);
@@ -240,8 +248,9 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
     // axis from the immediately adjacent directional lane cells. This keeps
     // asphalt markings parallel to the semantic road rather than crossing it.
     var surfaceUv = fc;
-    var roadAlongX = kind == ${roadKinds.laneEast} || kind == ${roadKinds.laneWest};
-    if (kind == ${roadKinds.median} || kind == ${roadKinds.crosswalk}) {
+    var surfaceMeters = p;
+    var roadAlongX = (roadMark & 1) != 0 || kind == ${roadKinds.laneEast} || kind == ${roadKinds.laneWest};
+    if (roadMark == 0 && (kind == ${roadKinds.median} || kind == ${roadKinds.crosswalk})) {
       var northKind = -1;
       var southKind = -1;
       if (cy > 0) { northKind = (i32(D[cellBase + (cy - 1) * cols + cx]) % 1024) - 1; }
@@ -249,8 +258,14 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
       roadAlongX = northKind == ${roadKinds.laneEast} || northKind == ${roadKinds.laneWest}
         || southKind == ${roadKinds.laneEast} || southKind == ${roadKinds.laneWest};
     }
-    if (roadAlongX) { surfaceUv = vec2f(fc.y, fc.x); }
+    if (roadAlongX) {
+      surfaceUv = vec2f(fc.y, fc.x);
+      surfaceMeters = vec2f(p.y, p.x);
+    }
     rgb = fill_pick(mat, board, surfaceUv, surfaceUv * 64.0, take, seed);
+    if (roadMark > 0) {
+      rgb = road_apply_markings(rgb, surfaceUv, surfaceMeters, f32(roadMark));
+    }
     // Slab joint at tile edges — concrete/sidewalk slabs carry it; seamless
     // surfaces (asphalt, earth, water) skip it so they read as one carriageway.
     if (joint > 0.5) {

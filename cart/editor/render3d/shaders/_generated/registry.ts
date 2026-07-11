@@ -21,8 +21,8 @@ export type RegistryMaterial = {
 };
 
 export const MATERIALS: RegistryMaterial[] = [
-  { fn: "road", slug: "road", name: "Road", board: "environment", boardIndex: 0, materialId: 0, variantLabels: ["Take 1", "Take 2", "Take 3"], kind: "surface", tags: ["environment", "road"], author: "legacy",
-    slots: [{ name: "color low", rgb: [0.03, 0.033, 0.034] }, { name: "color high", rgb: [0.125, 0.128, 0.122] }, { name: "smoothstep", rgb: [0.012, 0.014, 0.015] }, { name: "color", rgb: [0.13, 0.13, 0.12] }, { name: "color 2", rgb: [0.045, 0.043, 0.04] }, { name: "color 3", rgb: [0.055, 0.054, 0.052] }, { name: "stripe", rgb: [0.96, 0.74, 0.26] }, { name: "sat", rgb: [0.78, 0.8, 0.75] }, { name: "tar patch", rgb: [0.018, 0.02, 0.021] }] },
+  { fn: "road", slug: "road", name: "Road", board: "environment", boardIndex: 0, materialId: 0, variantLabels: ["Yellow Divider", "White Lane + Edge", "Plain Asphalt"], kind: "surface", tags: ["environment", "road"], author: "legacy",
+    slots: [{ name: "white", rgb: [0.93, 0.94, 0.9] }, { name: "center", rgb: [0.96, 0.74, 0.26] }, { name: "zebra", rgb: [0.91, 0.91, 0.86] }, { name: "color low", rgb: [0.03, 0.033, 0.034] }, { name: "color high", rgb: [0.125, 0.128, 0.122] }, { name: "smoothstep", rgb: [0.012, 0.014, 0.015] }, { name: "color", rgb: [0.13, 0.13, 0.12] }, { name: "color 2", rgb: [0.045, 0.043, 0.04] }, { name: "color 3", rgb: [0.055, 0.054, 0.052] }] },
   { fn: "concrete", slug: "concrete", name: "Concrete", board: "environment", boardIndex: 0, materialId: 1, variantLabels: ["Take 1", "Take 2", "Take 3"], kind: "surface", tags: ["environment", "concrete"], author: "legacy",
     slots: [{ name: "color low", rgb: [0.4, 0.405, 0.39] }, { name: "color high", rgb: [0.72, 0.72, 0.68] }] },
   { fn: "brick", slug: "brick", name: "Brick", board: "environment", boardIndex: 0, materialId: 2, variantLabels: ["Take 1", "Take 2", "Take 3"], kind: "surface", tags: ["environment", "brick"], author: "legacy",
@@ -846,7 +846,7 @@ export type FillBoard = { board: number; letter: string; title: string; seedCoef
 
 export const FILL_BOARDS: FillBoard[] = [
   { board: 0, letter: "A", title: "Environment", seedCoef: [17, 5, 3], materials: [
-    { slug: "road", name: "Road", variants: ["Take 1", "Take 2", "Take 3"] },
+    { slug: "road", name: "Road", variants: ["Yellow Divider", "White Lane + Edge", "Plain Asphalt"] },
     { slug: "concrete", name: "Concrete", variants: ["Take 1", "Take 2", "Take 3"] },
     { slug: "brick", name: "Brick", variants: ["Take 1", "Take 2", "Take 3"] },
     { slug: "sand", name: "Sand", variants: ["Take 1", "Take 2", "Take 3"] },
