@@ -112,7 +112,8 @@ var g_edge_boundary: ?[]bool = null;
 // edit just those, not the whole composed model. Inactive = the whole mesh. g_scope_vert/edge
 // are derived masks (a vert is in scope if it belongs to an in-scope face; an edge if both
 // ends are), rebuilt lazily when the scope or facecount changes. (req_2415)
-const MAX_SCOPE_RANGES: usize = 64; // outliner parts are dozens at most — truncation is LOUD below
+pub const max_scope_ranges: usize = 64; // outliner parts are dozens at most — truncation is LOUD below
+const MAX_SCOPE_RANGES = max_scope_ranges;
 var g_scope_active: bool = false;
 var g_scope_ranges: [MAX_SCOPE_RANGES][2]u32 = undefined;
 var g_scope_count: usize = 0;
@@ -572,6 +573,18 @@ pub fn reset() void {
     g_built_for = 0;
 }
 
+/// A fresh resident model is a new scope domain. Topology-only resets deliberately
+/// preserve the focused outliner range across edits, but carrying that range into the
+/// next document can expose just a prefix of its authored faces (for example [0,2)
+/// turns a 12-sided cylinder into the seven-edge outline of two quads). Keep the
+/// selection tool/mirror mode, but return edit scope to honest whole-model until the
+/// new document's outliner focuses one of its own ranges.
+pub fn resetForModelLoad() void {
+    reset();
+    g_scope_active = false;
+    g_scope_count = 0;
+}
+
 /// Authored face groups are topology, not presentation metadata: they decide whether
 /// a shared triangle edge is a real face boundary or an internal triangulation seam.
 /// Group-only mutations keep the triangle count unchanged, so the normal face-count
@@ -596,7 +609,7 @@ pub const test_support = if (builtin.is_test) struct {
     }
 
     pub fn clear() void {
-        reset();
+        resetForModelLoad();
         model_paint.clear();
         model_source.clear();
     }
@@ -633,6 +646,18 @@ pub fn setEditScopeRanges(pairs: []const u32) void {
         g_scope_count += 1;
     }
     g_scope_active = g_scope_count > 0;
+}
+
+/// Read-only flattened [lo,hi) scope ranges for diagnostics. Empty means the whole
+/// model. Returns the number of u32 values copied (always an even number).
+pub fn scopeRangesPub(out: []u32) usize {
+    if (!g_scope_active) return 0;
+    const pair_count = @min(g_scope_count, out.len / 2);
+    for (g_scope_ranges[0..pair_count], 0..) |range, index| {
+        out[index * 2] = range[0];
+        out[index * 2 + 1] = range[1];
+    }
+    return pair_count * 2;
 }
 
 fn faceInScope(f: u32) bool {
@@ -908,9 +933,12 @@ pub fn buildDeleteMask(out: []bool) u32 {
 /// need a deterministic edge set for topology operations.
 pub fn selectEdgeByIndex(idx: u32, additive: bool) bool {
     if (!ensureTopology()) return false;
-    g_mode = .edge;
     const sel = g_sel_edge orelse return false;
-    if (idx >= sel.len) return false;
+    // Raw welded triangle edges include quad/n-gon fan diagonals. They are not
+    // authored edges and every interactive picker already rejects them; keep the
+    // deterministic/headless door on that same strict boundary.
+    if (idx >= sel.len or !edgeIsBoundaryPub(idx) or !edgeInScopePub(idx)) return false;
+    g_mode = .edge;
     if (!additive) @memset(sel, false);
     sel[idx] = true;
     applyFaceHighlight(); // leaving face mode removes any face tint

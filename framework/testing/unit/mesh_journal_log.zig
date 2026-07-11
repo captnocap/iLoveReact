@@ -72,6 +72,8 @@ test "json keeps chronological labels state ownership and escaped notes" {
         .journal_bytes = 300,
         .pending_gizmo = false,
         .pending_loop_cut = true,
+        .scope_ranges = &.{ 0, 2 },
+        .topology = .{ .welded_vertices = 24, .triangle_edges = 66, .editable_edges = 36 },
         .undo = &undo,
         .current = after,
         .redo = &redo,
@@ -82,4 +84,6 @@ test "json keeps chronological labels state ownership and escaped notes" {
     try testing.expect(std.mem.indexOf(u8, json, "\"ownershipValid\":true") != null);
     try testing.expect(std.mem.indexOf(u8, json, "before \\\"row\\\"\\nline") != null);
     try testing.expect(std.mem.indexOf(u8, json, "\"loopCut\":true") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"scope\":{\"ranges\":[[0,2]]}") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"triangleEdges\":66,\"editableEdges\":36") != null);
 }

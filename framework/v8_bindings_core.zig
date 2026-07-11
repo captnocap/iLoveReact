@@ -261,6 +261,9 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     // rewrites UVs — positions are untouched, but copy now to be unambiguous).
     model_source.retain(path, mesh.verts, mesh.vert_count);
 
+    // New document boundary: discard any focused part range carried by the previous
+    // model before the incoming topology is installed (req_2953).
+    scene3d.meshEditBeginModel();
     // Adopt this mesh as the paint target FIRST — it rewrites the verts' UVs to the
     // per-face paint atlas in place, so the stash (next) ships the paint-ready UVs.
     scene3d.setPaintTarget(path, mesh.verts, mesh.vert_count);
@@ -389,6 +392,7 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     // Keep the original cooked factor for quality/paint projection, then adopt a
     // paint-ready working copy into the resident host stash.
     model_source.retain(key, mesh.verts, mesh.vert_count);
+    scene3d.meshEditBeginModel();
     scene3d.setPaintTarget(key, mesh.verts, mesh.vert_count);
     scene3d.meshJournalClear(); // a fresh model is a new document — no inherited history
     if (!scene3d.stashHostMesh(key, mesh.verts, mesh.vert_count)) {
@@ -503,7 +507,7 @@ fn hostMeshSetFaceGroups(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         return;
     }
     const groups: []const u32 = @alignCast(std.mem.bytesAsSlice(u32, bytes));
-    model_source.setFaceGroups(groups);
+    scene3d.meshEditSetFaceGroups(groups);
     if (scene3d.refreshPaintLayout()) state.markDirty();
     setReturnNumber(info, 1);
 }

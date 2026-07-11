@@ -47,6 +47,8 @@ type MeshHistoryLog = {
   byteBudget: number;
   journalBytes: number;
   pending: { gizmo: boolean; loopCut: boolean };
+  scope: { ranges: [number, number][] };
+  topology: { weldedVertices: number; triangleEdges: number; editableEdges: number } | null;
   undo: MeshHistoryEntry[];
   current: MeshHistoryState;
   redo: MeshHistoryEntry[];
@@ -212,6 +214,12 @@ export default function ModelContextMenu({ modelTool, hasActivePart, selectedPar
   };
 
   const historyOpen = openGroup === 'edit-history';
+  const scopeRanges = history?.scope?.ranges ?? [];
+  const staleScope = Boolean(history && scopeRanges.some(([lo, hi]) =>
+    !history.current.parts.some((part) => part.lo === lo && part.hi === hi)));
+  const scopeLabel = scopeRanges.length
+    ? scopeRanges.map(([lo, hi]) => `[${lo},${hi})`).join(' + ')
+    : 'whole model';
 
   return (
     <C.HW_StageContextMenu style={{ width: historyOpen ? 430 : 188 }}>
@@ -263,6 +271,14 @@ export default function ModelContextMenu({ modelTool, hasActivePart, selectedPar
               <Text fontSize={9} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace', fontWeight: 700 }}>Copy</Text>
             </Pressable>
           </Row>
+          {history ? (
+            <Text fontSize={9} color={accentFor(staleScope ? 'error' : 'textSecondary')} style={{ fontFamily: 'monospace', fontWeight: staleScope ? 800 : 500 }}>
+              {history.topology
+                ? `${history.topology.weldedVertices} welded verts  ·  ${history.topology.editableEdges} editable edges  ·  ${history.topology.triangleEdges} triangle edges`
+                : 'topology unavailable'}
+              {`  ·  scope ${scopeLabel}${staleScope ? '  ·  STALE SCOPE' : ''}`}
+            </Text>
+          ) : null}
           {historyError ? <Text fontSize={9} color={accentFor('error')} style={{ fontFamily: 'monospace' }}>{historyError}</Text> : null}
           {history ? (
             <ScrollView style={{ height: 258 }} showScrollbar contentContainerStyle={{ flexDirection: 'column', gap: 6, paddingRight: 3, paddingBottom: 4 }}>

@@ -125,6 +125,94 @@ test "merging authored faces dissolves their shared selectable edge (req_2871)" 
     try testing.expectEqual(@as(u32, 6), mesh_edit.boundaryEdgeCount());
 }
 
+test "twelve sided cylinder keeps all authored rim and side edges (req_2953/req_2954)" {
+    // Exact topology emitted by editMeshToGeometry(cylinder(..., 12)):
+    // 12 side quads (two triangles/group), then two 12-gon cap fans
+    // (ten triangles/group). The render soup has 66 welded triangle edges, but
+    // the editor topology has only the cylinder's 36 authored edges.
+    const segments: usize = 12;
+    const triangle_count: usize = segments * 2 + (segments - 2) * 2;
+    var soup = [_]f32{0} ** (triangle_count * 3 * 8);
+    var groups: [triangle_count]u32 = undefined;
+    var bottom: [segments][3]f32 = undefined;
+    var top: [segments][3]f32 = undefined;
+
+    for (0..segments) |i| {
+        const angle = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(segments)) * 2.0 * std.math.pi;
+        const x = @cos(angle) * 0.5;
+        const z = @sin(angle) * 0.5;
+        bottom[i] = .{ x, 0.0, z };
+        top[i] = .{ x, 1.0, z };
+    }
+
+    const Emit = struct {
+        fn triangle(out: []f32, rows: []u32, triangle_index: *usize, group: u32, a: [3]f32, b: [3]f32, c: [3]f32) void {
+            const points = [_][3]f32{ a, b, c };
+            for (points, 0..) |point, corner| {
+                const base = (triangle_index.* * 3 + corner) * 8;
+                out[base + 0] = point[0];
+                out[base + 1] = point[1];
+                out[base + 2] = point[2];
+            }
+            rows[triangle_index.*] = group;
+            triangle_index.* += 1;
+        }
+    };
+
+    var triangle_index: usize = 0;
+    for (0..segments) |i| {
+        const next = (i + 1) % segments;
+        Emit.triangle(soup[0..], groups[0..], &triangle_index, @intCast(i), bottom[i], top[i], top[next]);
+        Emit.triangle(soup[0..], groups[0..], &triangle_index, @intCast(i), bottom[i], top[next], bottom[next]);
+    }
+    // Top face.loop is reversed; bottom is the forward ring, matching cylinder().
+    for (0..segments - 2) |i| {
+        Emit.triangle(soup[0..], groups[0..], &triangle_index, segments, top[segments - 1], top[segments - 2 - i], top[segments - 3 - i]);
+    }
+    for (0..segments - 2) |i| {
+        Emit.triangle(soup[0..], groups[0..], &triangle_index, segments + 1, bottom[0], bottom[i + 1], bottom[i + 2]);
+    }
+    try testing.expectEqual(triangle_count, triangle_index);
+
+    mesh_edit.test_support.loadGroupedSoup(2953, soup[0..], @intCast(triangle_count * 3), groups[0..]);
+    defer mesh_edit.test_support.clear();
+    try testing.expect(mesh_edit.ensureTopologyPub());
+    try testing.expectEqual(@as(u32, 24), mesh_edit.vertCount());
+    try testing.expectEqual(@as(u32, 66), mesh_edit.edgeCount());
+    try testing.expectEqual(@as(u32, 36), mesh_edit.boundaryEdgeCount());
+
+    // The user's seven-line screenshot is precisely a stale [0,2) part scope:
+    // two adjacent quads contribute two top + two bottom + three vertical edges.
+    mesh_edit.setEditScope(0, 2);
+    var scoped_edges: u32 = 0;
+    for (0..mesh_edit.edgeCount()) |edge| {
+        const index: u32 = @intCast(edge);
+        if (mesh_edit.edgeIsBoundaryPub(index) and mesh_edit.edgeInScopePub(index)) scoped_edges += 1;
+    }
+    try testing.expectEqual(@as(u32, 7), scoped_edges);
+
+    // Loading a different document must not inherit that old part's range.
+    mesh_edit.resetForModelLoad();
+    try testing.expect(mesh_edit.ensureTopologyPub());
+    var fresh_edges: u32 = 0;
+    for (0..mesh_edit.edgeCount()) |edge| {
+        const index: u32 = @intCast(edge);
+        if (mesh_edit.edgeIsBoundaryPub(index) and mesh_edit.edgeInScopePub(index)) fresh_edges += 1;
+    }
+    try testing.expectEqual(@as(u32, 36), fresh_edges);
+
+    var internal_edge: ?u32 = null;
+    for (0..mesh_edit.edgeCount()) |edge| {
+        const index: u32 = @intCast(edge);
+        if (!mesh_edit.edgeIsBoundaryPub(index)) {
+            internal_edge = index;
+            break;
+        }
+    }
+    try testing.expect(internal_edge != null);
+    try testing.expect(!mesh_edit.selectEdgeByIndex(internal_edge.?, false));
+}
+
 test "masked plane cut cannot cross an outliner part boundary (req_2899)" {
     // Two coincident quads represent separate outliner parts. Both cross x=1, but only
     // the first part is inside the edit scope. The scoped cut must split that quad while

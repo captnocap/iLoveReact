@@ -24,12 +24,21 @@ pub const EntryView = struct {
     state: StateView,
 };
 
+pub const TopologyView = struct {
+    welded_vertices: u32,
+    triangle_edges: u32,
+    editable_edges: u32,
+};
+
 pub const LogView = struct {
     capacity: usize,
     byte_budget: usize,
     journal_bytes: usize,
     pending_gizmo: bool,
     pending_loop_cut: bool,
+    // Live tool state, not undo state. Empty scope ranges means whole-model.
+    scope_ranges: []const u32 = &.{},
+    topology: ?TopologyView = null,
     undo: []const EntryView,
     current: StateView,
     redo: []const EntryView,
@@ -245,7 +254,7 @@ pub fn encode(allocator: std.mem.Allocator, log: LogView) ![]u8 {
     errdefer out.deinit(allocator);
     const writer = out.writer(allocator);
     try writer.print(
-        "{{\"version\":1,\"capacity\":{d},\"byteBudget\":{d},\"journalBytes\":{d},\"pending\":{{\"gizmo\":{s},\"loopCut\":{s}}},\"undo\":",
+        "{{\"version\":1,\"capacity\":{d},\"byteBudget\":{d},\"journalBytes\":{d},\"pending\":{{\"gizmo\":{s},\"loopCut\":{s}}},\"scope\":{{\"ranges\":[",
         .{
             log.capacity,
             log.byte_budget,
@@ -254,6 +263,19 @@ pub fn encode(allocator: std.mem.Allocator, log: LogView) ![]u8 {
             if (log.pending_loop_cut) "true" else "false",
         },
     );
+    var scope_index: usize = 0;
+    while (scope_index + 1 < log.scope_ranges.len) : (scope_index += 2) {
+        if (scope_index != 0) try writer.writeByte(',');
+        try writer.print("[{d},{d}]", .{ log.scope_ranges[scope_index], log.scope_ranges[scope_index + 1] });
+    }
+    try writer.writeAll("]},\"topology\":");
+    if (log.topology) |topology| {
+        try writer.print(
+            "{{\"weldedVertices\":{d},\"triangleEdges\":{d},\"editableEdges\":{d}}}",
+            .{ topology.welded_vertices, topology.triangle_edges, topology.editable_edges },
+        );
+    } else try writer.writeAll("null");
+    try writer.writeAll(",\"undo\":");
     try writeEntries(writer, allocator, log.undo);
     try writer.writeAll(",\"current\":");
     try writeState(writer, allocator, log.current);

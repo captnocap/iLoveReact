@@ -625,7 +625,7 @@ pub fn setPaintTarget(key: []const u8, verts: []f32, count: u32) void {
     // Reset BEFORE the target swaps: reset restores any selection tint, and the saved
     // base patches belong to the OUTGOING atlas — restoring them into the new one
     // would write stale bytes (or silently no-op) wherever the layouts differ.
-    mesh_edit.reset(); // topology changed (load or quality re-mesh) → rebuild lazily
+    mesh_edit.reset(); // topology changed (load, quality re-mesh, or edit replace) → rebuild lazily
     model_paint.setTarget(hashKey(key), verts, count);
     const need = @as(usize, count) * 8;
     if (verts.len >= need) {
@@ -643,6 +643,13 @@ pub fn meshEditActiveKey() ?[]const u8 {
 }
 pub fn meshEditActiveCount() u32 {
     return g_edit_count;
+}
+
+/// Start a genuinely new model document. Unlike an in-document topology replace or
+/// quality remesh, this drops the previous document's focused outliner range so it
+/// cannot filter the incoming mesh (req_2953).
+pub fn meshEditBeginModel() void {
+    mesh_edit.resetForModelLoad();
 }
 
 fn appendFloats(list: *std.ArrayListUnmanaged(f32), values: []const f32) bool {
@@ -2755,12 +2762,26 @@ pub fn meshJournalLogJson(allocator: std.mem.Allocator) ?[]u8 {
     for (g_journal_redo.items) |*entry| journal_bytes += journalEntryBytes(entry);
     if (g_gizmo_snap) |*entry| journal_bytes += journalEntryBytes(entry);
 
+    // The journal's ownership table can be perfectly healthy while a stale live edit
+    // scope hides most of the part (req_2953). Include both the scope and the two edge
+    // vocabularies so the copied log distinguishes render triangulation from authored
+    // topology without relying on a screenshot.
+    var scope_storage: [mesh_edit.max_scope_ranges * 2]u32 = undefined;
+    const scope_len = mesh_edit.scopeRangesPub(scope_storage[0..]);
+    const topology: ?mesh_journal_log.TopologyView = if (mesh_edit.ensureTopologyPub()) .{
+        .welded_vertices = mesh_edit.vertCount(),
+        .triangle_edges = mesh_edit.edgeCount(),
+        .editable_edges = mesh_edit.boundaryEdgeCount(),
+    } else null;
+
     return mesh_journal_log.encode(allocator, .{
         .capacity = JOURNAL_CAP,
         .byte_budget = JOURNAL_BYTE_BUDGET,
         .journal_bytes = journal_bytes,
         .pending_gizmo = g_gizmo_snap != null,
         .pending_loop_cut = g_lc != null,
+        .scope_ranges = scope_storage[0..scope_len],
+        .topology = topology,
         .undo = undo,
         .current = .{
             .vertex_count = g_edit_count,
@@ -5324,6 +5345,13 @@ pub fn meshEditSetScope(lo: u32, hi: u32) void {
 pub fn meshEditSetScopeRanges(pairs: []const u32) void {
     mesh_edit.setEditScopeRanges(pairs);
 }
+/// Adopt authored-face ids as topology, invalidating any boundary classification
+/// built before the groups arrived. The binding must not write model_source directly:
+/// same-triangle-count group changes are invisible to mesh_edit's normal cache key.
+pub fn meshEditSetFaceGroups(groups: []const u32) void {
+    model_source.setFaceGroups(groups);
+    mesh_edit.faceGroupsChanged();
+}
 /// Adopt the outliner's part ranges (flattened [lo,hi) group-id pairs) and rebuild the
 /// welded topology, so coincident verts in DIFFERENT parts stay separate logical verts.
 pub fn meshEditSetPartRanges(pairs: []const u32) void {
@@ -5370,10 +5398,12 @@ pub fn meshEditSelectEdge(idx: u32, additive: bool) bool {
 pub fn meshEditReset() void {
     mesh_edit.reset();
 }
-/// Topology + selection counts for the HUD: {mode, verts, edges, selected-in-mode}.
+/// Authored topology + selection counts for the HUD: {mode, verts, editable edges,
+/// selected-in-mode}. `edgeCount` is the render soup's triangle-edge count; exposing it
+/// made a 12-sided cylinder claim 66 edges even though only 36 can be drawn/selected.
 pub fn meshEditCounts() [4]u32 {
-    if (mesh_edit.mode() == .vertex or mesh_edit.mode() == .edge) _ = mesh_edit.ensureTopologyPub();
-    return .{ @intFromEnum(mesh_edit.mode()), mesh_edit.vertCount(), mesh_edit.edgeCount(), mesh_edit.selCount() };
+    if (mesh_edit.mode() != .none) _ = mesh_edit.ensureTopologyPub();
+    return .{ @intFromEnum(mesh_edit.mode()), mesh_edit.vertCount(), mesh_edit.boundaryEdgeCount(), mesh_edit.selCount() };
 }
 
 /// Paint the face under viewport pixel (mx,my) the given colour, using the last-drawn
