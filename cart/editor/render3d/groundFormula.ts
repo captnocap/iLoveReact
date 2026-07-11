@@ -9,20 +9,21 @@
 //
 // req_2494: the ground no longer dispatches to four hand-written fills (which
 // made sand and mud literally identical and water render as concrete). The
-// FULL material catalog (render3d/shaders — the same 113 materials the paint
+// FULL material catalog (render3d/shaders — the same materials the paint
 // ink and Color Studio use) composes into the formula, and each TILE KIND
 // carries a REBINDABLE (material, variant) binding: the defaults below give
 // every kind a distinct real material, and the paint bar's texture picker can
 // point any kind at any surface material. Rebinding regenerates this formula
 // and re-pushes the ground look — pure cart-side, no engine change.
 //
-// D[] layout v3 (the engine's encodeGroundData contract): [0]cols [1]rows
+// D[] layout v4 (the engine's encodeGroundData contract): [0]cols [1]rows
 // [2]tilePal [3]floraPal [4]zonePal [5]bindCount, then tilePal×3 + floraPal×3
 // + zonePal×3 palette rgb floats, then bindCount×4 binding rows ([materialId,
 // boardIndex, variant, joint]), then rows×cols PACKED cells, then rows×cols
-// packed material references: (binding+1) + roadMarking·512. The low nine
-// bits preserve the material table (0 = kind default); the upper byte is the
-// road compiler's derived yellow/dashed/solid/crosswalk paint recipe. Packed cell
+// packed material references: (binding+1) + roadMarking·512 +
+// undercoatToken·131072. The exact 24-bit packing preserves the material table,
+// raster fallback markings, and the tile/material visually beneath a road.
+// Finally: ribbonCount then ribbonCount×11 analytic curve floats. Packed cell
 // (24 bits, exact in f32): (tile+1) + (flora+1)·1024 + (zone+1)·262144;
 // 0 = empty slot. Flora and zones tint OVER the ground material — the
 // authoring overlay view; the real populations materialize at Compile.
@@ -37,6 +38,8 @@ export type TileMaterialBinding = { fn: string; variant: number };
 
 export const GROUND_STREAM_TUNING = {
   materialRefStride: 512,
+  undercoatRefStride: 131072,
+  ribbonSegmentFloats: 11,
 } as const;
 
 const MATERIAL_BY_FN = new Map(MATERIALS.map((m) => [m.fn, m]));
@@ -148,7 +151,7 @@ function composedFillFuncs(): string {
 /** Build the STATIC ground formula. The kind→material tables baked here are
  *  the curated DEFAULTS only — they never change at runtime, so this WGSL
  *  compiles exactly once per app run. Hand-picked looks arrive as DATA: the
- *  binding table + per-cell material indices in the D stream (layout v3),
+ *  binding table + per-cell material indices in the D stream (layout v4),
  *  pushed via mapSetTileBindings — a pick used to regenerate this source and
  *  stall 10-15s in the driver compile (req_2693). */
 export function editorGroundFormula(): string {
@@ -169,9 +172,15 @@ export function editorGroundFormula(): string {
     laneWest: TILE_KINDS.indexOf('laneWest'),
     median: TILE_KINDS.indexOf('median'),
     crosswalk: TILE_KINDS.indexOf('crosswalk'),
+    junction: TILE_KINDS.indexOf('junction'),
   };
   if (Object.values(roadKinds).some((index) => index < 0)) {
     throw new Error('[groundFormula] road-kind legend is incomplete — directional UV dispatch cannot be built');
+  }
+  const roadSurface = MATERIAL_BY_FN.get('road');
+  const sidewalkSurface = MATERIAL_BY_FN.get('sidewalk');
+  if (!roadSurface || !sidewalkSurface) {
+    throw new Error('[groundFormula] analytic road ribbon requires Road and Sidewalk catalog materials');
   }
   const arr = (vals: number[], fixed: number) => vals.map((v) => v.toFixed(fixed)).join(', ');
 
@@ -205,13 +214,24 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
   let bindBase = zoneBase + zonePal * 3;
   let cellBase = bindBase + bindCount * 4;
   let matBase = cellBase + rows * cols;
+  let ribbonBase = matBase + rows * cols;
+  let ribbonCount = i32(D[ribbonBase]);
 
   let cx = clamp(i32(floor(uv0.x * f32(cols))), 0, cols - 1);
   let cy = clamp(i32(floor(uv0.y * f32(rows))), 0, rows - 1);
   let packed = i32(D[cellBase + cy * cols + cx]);
-  let kind = (packed % 1024) - 1;
+  let semanticKind = (packed % 1024) - 1;
   let flora = ((packed / 1024) % 256) - 1;
   let zone = (packed / 262144) - 1;
+  let materialRef = i32(D[matBase + cy * cols + cx]);
+  let undercoatToken = materialRef / ${GROUND_STREAM_TUNING.undercoatRefStride};
+  let lowerMaterialRef = materialRef % ${GROUND_STREAM_TUNING.undercoatRefStride};
+  let bind = (lowerMaterialRef % ${GROUND_STREAM_TUNING.materialRefStride}) - 1;
+  let roadMark = lowerMaterialRef / ${GROUND_STREAM_TUNING.materialRefStride};
+  // Analytic roads render over the exact tile/material they replaced. Token 1
+  // means empty undercoat; N+2 means tile kind N. The semantic kind remains
+  // available for junction/crosswalk policy and all gameplay stays native.
+  let kind = select(semanticKind, undercoatToken - 2, undercoatToken > 0);
 
   // 1 tile = 1 m, so p IS world XZ in metres; fract gives the in-tile uv and
   // the per-cell seed varies the grain like the placed-piece path does.
@@ -233,9 +253,6 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
     var board = hf_tile_board(kind);
     var take = hf_tile_var(kind);
     var joint = hf_tile_joint(kind);
-    let materialRef = i32(D[matBase + cy * cols + cx]);
-    let bind = (materialRef % ${GROUND_STREAM_TUNING.materialRefStride}) - 1;
-    let roadMark = materialRef / ${GROUND_STREAM_TUNING.materialRefStride};
     if (bind >= 0 && bind < bindCount) {
       let bb = bindBase + bind * 4;
       mat = i32(D[bb]);
@@ -249,8 +266,8 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
     // asphalt markings parallel to the semantic road rather than crossing it.
     var surfaceUv = fc;
     var surfaceMeters = p;
-    var roadAlongX = (roadMark & 1) != 0 || kind == ${roadKinds.laneEast} || kind == ${roadKinds.laneWest};
-    if (roadMark == 0 && (kind == ${roadKinds.median} || kind == ${roadKinds.crosswalk})) {
+    var roadAlongX = undercoatToken == 0 && ((roadMark & 1) != 0 || semanticKind == ${roadKinds.laneEast} || semanticKind == ${roadKinds.laneWest});
+    if (undercoatToken == 0 && roadMark == 0 && (semanticKind == ${roadKinds.median} || semanticKind == ${roadKinds.crosswalk})) {
       var northKind = -1;
       var southKind = -1;
       if (cy > 0) { northKind = (i32(D[cellBase + (cy - 1) * cols + cx]) % 1024) - 1; }
@@ -263,7 +280,7 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
       surfaceMeters = vec2f(p.y, p.x);
     }
     rgb = fill_pick(mat, board, surfaceUv, surfaceUv * 64.0, take, seed);
-    if (roadMark > 0) {
+    if (roadMark > 0 && ribbonCount == 0) {
       rgb = road_apply_markings(rgb, surfaceUv, surfaceMeters, f32(roadMark));
     }
     // Slab joint at tile edges — concrete/sidewalk slabs carry it; seamless
@@ -272,6 +289,101 @@ fn hf_ground_rgb(uv0: vec2f) -> vec3f {
       let je = min(min(fc.x, 1.0 - fc.x), min(fc.y, 1.0 - fc.y));
       let jaa = max(fwidth(je), 0.0008);
       rgb = mix(rgb, rgb * 0.5, (1.0 - smoothstep(0.012, 0.012 + jaa, je)) * 0.8);
+    }
+  }
+
+  // The tile stamp above is GAMEPLAY. The visible road is the same filleted
+  // centerline recipe as rail: evaluate the union of analytic carriageway and
+  // sidewalk strips over the exact visual undercoat. Any carriageway wins over
+  // another road's sidewalk at an overlap; junction/crosswalk policy still
+  // comes from the semantic raster kind.
+  if (ribbonCount > 0) {
+    var bestFullD = 1e9;
+    var bestFullExt = 0.0;
+    var bestFullSigned = 0.0;
+    var bestFullAlong = 0.0;
+    var bestRoadD = 1e9;
+    var bestRoadExt = 0.0;
+    var bestRoadRight = 0.0;
+    var bestRoadLeft = 0.0;
+    var bestRoadSigned = 0.0;
+    var bestRoadAlong = 0.0;
+    var bestRoadTwoWay = 0.0;
+    var bestRoadPhase = 0.0;
+    for (var segment = 0; segment < ribbonCount; segment = segment + 1) {
+      let row = ribbonBase + 1 + segment * ${GROUND_STREAM_TUNING.ribbonSegmentFloats};
+      let a = vec2f(D[row], D[row + 1]);
+      let b = vec2f(D[row + 2], D[row + 3]);
+      let ab = b - a;
+      let len2 = dot(ab, ab);
+      if (len2 <= 0.000001) { continue; }
+      let segmentM = sqrt(len2);
+      let t = clamp(dot(p - a, ab) / len2, 0.0, 1.0);
+      let q = a + ab * t;
+      let delta = p - q;
+      let distanceM = length(delta);
+      let right = vec2f(0.0 - ab.y, ab.x) / segmentM;
+      let signedM = dot(delta, right);
+      let roadExt = select(D[row + 5], D[row + 4], signedM >= 0.0);
+      let fullExt = select(D[row + 7], D[row + 6], signedM >= 0.0);
+      let alongM = D[row + 10] + t * segmentM;
+      if (distanceM <= fullExt + 0.25 && distanceM < bestFullD) {
+        bestFullD = distanceM;
+        bestFullExt = fullExt;
+        bestFullSigned = signedM;
+        bestFullAlong = alongM;
+      }
+      if (distanceM <= roadExt + 0.25 && distanceM < bestRoadD) {
+        bestRoadD = distanceM;
+        bestRoadExt = roadExt;
+        bestRoadRight = D[row + 4];
+        bestRoadLeft = D[row + 5];
+        bestRoadSigned = signedM;
+        bestRoadAlong = alongM;
+        bestRoadTwoWay = D[row + 8];
+        bestRoadPhase = D[row + 9];
+      }
+    }
+
+    var fullMask = 0.0;
+    if (bestFullD < 1e8) {
+      let aa = max(fwidth(bestFullD), 0.008);
+      fullMask = 1.0 - smoothstep(bestFullExt - aa, bestFullExt + aa, bestFullD);
+    }
+    var roadMask = 0.0;
+    if (bestRoadD < 1e8) {
+      let aa = max(fwidth(bestRoadD), 0.008);
+      roadMask = 1.0 - smoothstep(bestRoadExt - aa, bestRoadExt + aa, bestRoadD);
+    }
+
+    if (fullMask > 0.0) {
+      let sidewalkMeters = vec2f(bestFullSigned, bestFullAlong);
+      let sidewalkUv = fract(sidewalkMeters);
+      let sidewalkRgb = fill_pick(
+        ${sidewalkSurface.materialId}, ${sidewalkSurface.boardIndex.toFixed(1)},
+        sidewalkUv, sidewalkMeters * 64.0, 0.0, seed
+      );
+      rgb = mix(rgb, sidewalkRgb, max(fullMask - roadMask, 0.0));
+    }
+    if (roadMask > 0.0) {
+      let roadMeters = vec2f(bestRoadSigned, bestRoadAlong);
+      let roadUv = fract(roadMeters);
+      var roadRgb = fill_pick(
+        ${roadSurface.materialId}, ${roadSurface.boardIndex.toFixed(1)},
+        roadUv, roadMeters * 64.0, 2.0, seed
+      );
+      roadRgb = road_apply_ribbon_markings(
+        roadRgb,
+        bestRoadSigned,
+        bestRoadAlong,
+        bestRoadRight,
+        bestRoadLeft,
+        bestRoadTwoWay,
+        bestRoadPhase,
+        select(0.0, 1.0, semanticKind == ${roadKinds.junction}),
+        select(0.0, 1.0, semanticKind == ${roadKinds.crosswalk})
+      );
+      rgb = mix(rgb, roadRgb, roadMask);
     }
   }
   // flora authoring tint (composite lane) — grain-speckled so a painted

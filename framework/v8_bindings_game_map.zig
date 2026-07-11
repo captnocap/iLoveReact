@@ -442,7 +442,7 @@ fn hostRoadStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     road_stats_out[0] = @floatFromInt(engine.roads.strokeCount());
     road_stats_out[1] = @floatFromInt(engine.roads.draftPointCount());
-    road_stats_out[2] = if (engine.road_plan_truncated) 1 else 0;
+    road_stats_out[2] = if (engine.road_plan_truncated or engine.road_ribbon_truncated) 1 else 0;
     setReturnF32Buffer(info, road_stats_out[0..]);
 }
 
@@ -459,7 +459,7 @@ fn hostPathStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     path_stats_out[1] = @floatFromInt(engine.transport.countKind(.road));
     path_stats_out[2] = @floatFromInt(engine.transport.railCount());
     path_stats_out[3] = @floatFromInt(engine.transport.draftPointCount());
-    path_stats_out[4] = if (engine.road_plan_truncated) 1 else 0;
+    path_stats_out[4] = if (engine.road_plan_truncated or engine.road_ribbon_truncated) 1 else 0;
     path_stats_out[5] = if (engine.transport.draftKind()) |kind| @floatFromInt(@intFromEnum(kind)) else -1;
     path_stats_out[6] = if (validation.valid) 1 else 0;
     path_stats_out[7] = @floatFromInt(@intFromEnum(validation.reason));

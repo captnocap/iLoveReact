@@ -239,6 +239,7 @@ pub fn reset() void {
     g_road_under.clearRetainingCapacity();
     g_road_markings.clearRetainingCapacity();
     road_plan_truncated = false;
+    road_ribbon_truncated = false;
     g_tool = .{};
     g_brush_gizmo = .profile;
     g_stroke_active = false;
@@ -1046,14 +1047,14 @@ pub fn downsampleFloorWaterDepths(
 // engine encodes each chunk's D stream from its cell grids. Formula + palettes
 // are CONTENT — pushed at UI rate, kept across map reset.
 //
-// D layout v3 (one PACKED cell array keeps three channels inside the ground
-// pipeline's per-chunk float budget; v3 adds the tile-binding table + a second
-// per-cell MATERIAL array so a pick is a data push, never a shader rebuild):
+// D layout v4 (one PACKED cell array keeps three channels inside the ground
+// pipeline's per-chunk float budget; the tile-binding/material planes keep a
+// pick as a data push, and the bounded tail carries analytic road segments):
 //   [0]cols [1]rows [2]tilePaletteCount [3]floraPaletteCount [4]zonePaletteCount
 //   [5]bindingCount
 //   tilePal×3 rgb, floraPal×3 rgb, zonePal×3 rgb, bindingCount×4 rows,
-//   then rows×cols packed cells, then rows×cols material cells (binding+1;
-//   0 = the kind's default look).
+//   then rows×cols packed cells, rows×cols material/marking/undercoat refs,
+//   then ribbonCount and ribbonCount×11 road-segment floats.
 // Packed cell (exact in f32 — 24 bits): (tile+1) + (flora+1)·1024 + (zone+1)·262144
 //   tile+1 in [0,1024) · flora+1 in [0,256) · zone+1 in [0,64); 0 = empty slot.
 // Flora is the COMPOSITE authoring tint of the three lanes (tree over bush over
@@ -1121,9 +1122,18 @@ pub fn setZonePalette(zone_rgb: []const f32) void {
 pub const MAX_TILE_BINDINGS: usize = 256;
 pub const BINDING_FLOATS: usize = 4;
 /// Per-cell material references reserve the low 9 bits for binding+1 and pack
-/// the road compiler's derived u8 paint flags above them. Both values remain
-/// exact in f32 while avoiding a third 14,400-float chunk plane.
+/// the road compiler's derived u8 paint flags above them. The next seven bits
+/// carry a visual-undercoat token for analytic roads. The maximum packed value
+/// is 2^24-1, so every reference remains exact in f32 without another cell plane.
 pub const GROUND_MATERIAL_REF_STRIDE: i32 = 512;
+pub const GROUND_UNDERCOAT_REF_STRIDE: i32 = GROUND_MATERIAL_REF_STRIDE * 256;
+pub const GROUND_UNDERCOAT_TILE_LIMIT: i16 = 125;
+pub const GROUND_RIBBON_HEADER_FLOATS: usize = 1;
+const GROUND_PACKED_REF_MAX: i32 = MAX_TILE_BINDINGS + 255 * GROUND_MATERIAL_REF_STRIDE +
+    (@as(i32, GROUND_UNDERCOAT_TILE_LIMIT) + 2) * GROUND_UNDERCOAT_REF_STRIDE;
+comptime {
+    if (GROUND_PACKED_REF_MAX > 16_777_215) @compileError("ground material references must remain exact in f32");
+}
 var g_tile_bindings: [MAX_TILE_BINDINGS][BINDING_FLOATS]f32 = undefined;
 var g_tile_binding_count: usize = 0;
 
@@ -1152,7 +1162,8 @@ pub fn groundFormula() ?[]const u8 {
 /// Floats one chunk's D stream needs at the current palettes + binding table.
 pub fn groundDataFloats() usize {
     return 6 + (g_palette_count + g_flora_palette_count + g_zone_palette_count) * 3 +
-        g_tile_binding_count * BINDING_FLOATS + chunks.TILE_CELLS * 2;
+        g_tile_binding_count * BINDING_FLOATS + chunks.TILE_CELLS * 2 +
+        GROUND_RIBBON_HEADER_FLOATS + roads.MAX_RIBBON_SEGMENTS_PER_CHUNK * roads.RIBBON_SEGMENT_FLOATS;
 }
 
 /// Composite flora lane tint for one cell: tree over bush over grass.
@@ -1162,11 +1173,34 @@ fn floraCompositeAt(chunk: *const chunks.Chunk, idx: usize) i16 {
     return chunk.flora[0][idx]; // grass (or empty)
 }
 
-/// Encode a chunk's cell channels as the ground formula's D stream (layout v3).
-/// The material-reference plane packs `(binding + 1) + roadMarking * 512`;
-/// road markings are derived from strokes and never persisted as authored cells.
+/// Encode a chunk's cell channels as the ground formula's D stream (layout v4).
+/// The material-reference plane packs `(binding + 1) + roadMarking * 512 +
+/// undercoatToken * 131072`. Undercoat token 0 means ordinary painted cell, 1
+/// means a road over empty ground, and N+2 means a road over tile kind N. The
+/// trailing section is `[ribbonCount, ribbonCount * 11 floats]`.
 /// dst.len must be ≥ groundDataFloats(). Returns the floats written.
 pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
+    var ribbon_rows: [roads.MAX_RIBBON_SEGMENTS_PER_CHUNK]roads.RibbonSegment = undefined;
+    const stroke_count = roads.collectStrokes(g_road_strokes_buf[0..]);
+    const ribbon = roads.ribbonSegmentsForChunk(
+        g_road_strokes_buf[0..stroke_count],
+        chunk.cx,
+        chunk.cz,
+        CHUNK_TILES,
+        ribbon_rows[0..],
+    );
+    if (ribbon.truncated) road_ribbon_truncated = true;
+    // A partial ribbon would reveal undercoat where omitted segments should be.
+    // Fall back to the complete raster road for this pathological chunk.
+    var ribbon_count = if (ribbon.truncated) 0 else ribbon.count;
+    if (ribbon_count > 0 and g_palette_count > @as(usize, @intCast(GROUND_UNDERCOAT_TILE_LIMIT + 1))) {
+        // A future tile legend that outgrows the seven-bit token must expand the
+        // stream contract first. Until then the complete raster is the safe look.
+        road_ribbon_truncated = true;
+        ribbon_count = 0;
+    }
+    const analytic_road = ribbon_count > 0;
+
     dst[0] = @floatFromInt(chunks.TILE_COLS);
     dst[1] = @floatFromInt(chunks.TILE_COLS);
     dst[2] = @floatFromInt(g_palette_count);
@@ -1207,16 +1241,48 @@ pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
         n += 1;
     }
     for (chunk.materials, 0..) |m, i| {
-        // A stale index past the live table means the binding is gone — fall
-        // to the kind default rather than show a random neighbor's look.
-        const bind: i32 = if (m >= 0 and m < g_tile_binding_count) m else -1;
         const lx: i32 = @intCast(i % chunks.TILE_COLS);
         const lz: i32 = @intCast(i / chunks.TILE_COLS);
         const gx = chunk.cx * CHUNK_TILES + lx;
         const gz = chunk.cz * CHUNK_TILES + lz;
-        const marking: i32 = @intCast(g_road_markings.get(roadCellKey(gx, gz)) orelse 0);
-        dst[n] = @floatFromInt(bind + 1 + marking * GROUND_MATERIAL_REF_STRIDE);
+        const key = roadCellKey(gx, gz);
+        const under = if (analytic_road) g_road_under.get(key) else null;
+        const source_material = if (under) |pair| pair[1] else m;
+        // A stale index past the live table means the binding is gone — fall
+        // to the kind default rather than show a random neighbor's look.
+        const bind: i32 = if (source_material >= 0 and source_material < g_tile_binding_count) source_material else -1;
+        const marking: i32 = @intCast(g_road_markings.get(key) orelse 0);
+        var undercoat_token: i32 = 0;
+        if (under) |pair| {
+            if (pair[0] <= GROUND_UNDERCOAT_TILE_LIMIT) {
+                undercoat_token = @as(i32, pair[0]) + 2;
+            } else {
+                // The packed contract has seven exact bits for the visual kind.
+                // Stay loud rather than aliasing a future oversized palette.
+                road_ribbon_truncated = true;
+            }
+        }
+        dst[n] = @floatFromInt(bind + 1 + marking * GROUND_MATERIAL_REF_STRIDE + undercoat_token * GROUND_UNDERCOAT_REF_STRIDE);
         n += 1;
+    }
+    dst[n] = @floatFromInt(ribbon_count);
+    n += 1;
+    for (ribbon_rows[0..ribbon_count]) |segment| {
+        const row = [_]f32{
+            segment.ax,
+            segment.az,
+            segment.bx,
+            segment.bz,
+            segment.right_road_m,
+            segment.left_road_m,
+            segment.right_full_m,
+            segment.left_full_m,
+            segment.two_way,
+            segment.divider_phase_m,
+            segment.arc_start_m,
+        };
+        @memcpy(dst[n .. n + roads.RIBBON_SEGMENT_FLOATS], row[0..]);
+        n += roads.RIBBON_SEGMENT_FLOATS;
     }
     return n;
 }
@@ -1239,6 +1305,7 @@ var g_road_markings: std.AutoHashMapUnmanaged(u64, u8) = .empty;
 var g_road_strokes_buf: [roads.MAX_STROKES]roads.RoadStroke = undefined;
 /// LOUD truncation flag from the last restamp (surface it in chrome, never drop silently).
 pub var road_plan_truncated: bool = false;
+pub var road_ribbon_truncated: bool = false;
 
 fn roadCellKey(gx: i32, gz: i32) u64 {
     return (@as(u64, @as(u32, @bitCast(gx))) << 32) | @as(u64, @as(u32, @bitCast(gz)));
@@ -1275,6 +1342,7 @@ pub fn roadsRestamp() void {
     const count = roads.collectStrokes(g_road_strokes_buf[0..]);
     const plan = roads.planRoads(g_road_strokes_buf[0..count], g_plan_cells[0..]);
     road_plan_truncated = plan.truncated;
+    road_ribbon_truncated = false;
 
     // 3. stamp, capturing the undercoat. Road cells wear the kind default
     // (hand-painted materials never bleed into the grammar's lanes).

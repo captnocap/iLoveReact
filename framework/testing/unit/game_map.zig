@@ -100,7 +100,7 @@ test "Map Paint undo and redo restore the native RMAP concern per gesture" {
     try std.testing.expectEqual(@as(usize, 1), redone.stats.undo);
 }
 
-test "road marking recipes ride the existing packed ground material plane" {
+test "analytic road rows and visual undercoat ride the compact ground stream" {
     engine.reset();
     defer engine.reset();
     var kinds: [roads.ROAD_CELL_KIND_COUNT]i16 = undefined;
@@ -109,6 +109,10 @@ test "road marking recipes ride the existing packed ground material plane" {
     defer roads.setKindIndices(@splat(chunks.EMPTY_CELL));
 
     const chunk = chunks.growChunk(0, 0).?;
+    engine.setTileBindings(&.{ 11, 12, 13, 0 });
+    const authored_undercoat = chunks.cellIndex(60, 66).?;
+    chunk.tiles[authored_undercoat] = 4;
+    chunk.materials[authored_undercoat] = 0;
     engine.setTool(.{ .channel = .road });
     engine.setPathProfile(.{ .road = .{ .lanesF = 2, .lanesB = 1, .sidewalks = false } }, 8);
     engine.strokeBegin(-20, 0);
@@ -120,16 +124,31 @@ test "road marking recipes ride the existing packed ground material plane" {
     const data = try std.testing.allocator.alloc(f32, engine.groundDataFloats());
     defer std.testing.allocator.free(data);
     const written = engine.encodeGroundData(chunk, data);
-    try std.testing.expectEqual(data.len, written);
+    try std.testing.expect(written <= data.len);
     const tile_pal: usize = @intFromFloat(data[2]);
     const flora_pal: usize = @intFromFloat(data[3]);
     const zone_pal: usize = @intFromFloat(data[4]);
     const bindings: usize = @intFromFloat(data[5]);
     const material_base = 6 + (tile_pal + flora_pal + zone_pal) * 3 + bindings * engine.BINDING_FLOATS + chunks.TILE_CELLS;
+    const ribbon_base = material_base + chunks.TILE_CELLS;
     const markingAt = struct {
         fn read(stream: []const f32, base: usize, gx: usize, gz: usize) u8 {
             const ref_value: i32 = @intFromFloat(stream[base + gz * chunks.TILE_COLS + gx]);
-            return @intCast(@divFloor(ref_value, engine.GROUND_MATERIAL_REF_STRIDE));
+            const lower = @mod(ref_value, engine.GROUND_UNDERCOAT_REF_STRIDE);
+            return @intCast(@divFloor(lower, engine.GROUND_MATERIAL_REF_STRIDE));
+        }
+    }.read;
+    const undercoatAt = struct {
+        fn read(stream: []const f32, base: usize, gx: usize, gz: usize) i32 {
+            const ref_value: i32 = @intFromFloat(stream[base + gz * chunks.TILE_COLS + gx]);
+            return @divFloor(ref_value, engine.GROUND_UNDERCOAT_REF_STRIDE);
+        }
+    }.read;
+    const bindingAt = struct {
+        fn read(stream: []const f32, base: usize, gx: usize, gz: usize) i32 {
+            const ref_value: i32 = @intFromFloat(stream[base + gz * chunks.TILE_COLS + gx]);
+            const lower = @mod(ref_value, engine.GROUND_UNDERCOAT_REF_STRIDE);
+            return @mod(lower, engine.GROUND_MATERIAL_REF_STRIDE) - 1;
         }
     }.read;
 
@@ -139,4 +158,13 @@ test "road marking recipes ride the existing packed ground material plane" {
     try std.testing.expect((median & roads.RoadMarking.yellow_center) != 0);
     try std.testing.expect((split & roads.RoadMarking.white_dash_high) != 0);
     try std.testing.expect((shoulder & roads.RoadMarking.white_solid_high) != 0);
+    try std.testing.expectEqual(@as(i32, 1), undercoatAt(data, material_base, 60, 60)); // road over empty ground
+    try std.testing.expectEqual(@as(i32, 6), undercoatAt(data, material_base, 60, 66)); // tile kind 4 + token bias
+    try std.testing.expectEqual(@as(i32, 0), bindingAt(data, material_base, 60, 66)); // exact prior material binding
+
+    const ribbon_count: usize = @intFromFloat(data[ribbon_base]);
+    try std.testing.expectEqual(@as(usize, 1), ribbon_count);
+    try std.testing.expectEqual(ribbon_base + engine.GROUND_RIBBON_HEADER_FLOATS + ribbon_count * roads.RIBBON_SEGMENT_FLOATS, written);
+    try std.testing.expectApproxEqAbs(@as(f32, 40), data[ribbon_base + 1], 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 80), data[ribbon_base + 3], 0.001);
 }

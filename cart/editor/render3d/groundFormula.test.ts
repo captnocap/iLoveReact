@@ -20,17 +20,29 @@ test('every road grammar cell resolves to the semantic Road material instead of 
 });
 
 test('ground shader rotates catalog UVs for east-west road grammar', () => {
-  assert(EDITOR_GROUND_FORMULA.includes('var roadAlongX = (roadMark & 1) != 0 || kind =='), 'directional road dispatch missing');
+  assert(EDITOR_GROUND_FORMULA.includes('var roadAlongX = undercoatToken == 0 && ((roadMark & 1) != 0 || semanticKind =='), 'directional road dispatch missing');
+  assert(EDITOR_GROUND_FORMULA.includes('if (undercoatToken == 0 && roadMark == 0'), 'visual undercoat is incorrectly inheriting road rotation');
   assert(EDITOR_GROUND_FORMULA.includes('surfaceUv = vec2f(fc.y, fc.x)'), 'east-west UV swap missing');
   assert(EDITOR_GROUND_FORMULA.includes('immediately adjacent directional lane cells'), 'median axis inference missing');
 });
 
-test('ground material references unpack native lane markings without another cell plane', () => {
+test('ground material references unpack fallback markings and analytic visual undercoat', () => {
   assert(GROUND_STREAM_TUNING.materialRefStride === 512, 'material/marking stride drifted from the native contract');
-  assert(EDITOR_GROUND_FORMULA.includes('materialRef % 512'), 'material reference low bits are not decoded');
-  assert(EDITOR_GROUND_FORMULA.includes('materialRef / 512'), 'native road marking byte is not decoded');
+  assert(GROUND_STREAM_TUNING.undercoatRefStride === 131072, 'undercoat stride drifted from the native contract');
+  assert(EDITOR_GROUND_FORMULA.includes('materialRef % 131072'), 'packed material/marking low bits are not decoded');
+  assert(EDITOR_GROUND_FORMULA.includes('materialRef / 131072'), 'visual undercoat token is not decoded');
+  assert(EDITOR_GROUND_FORMULA.includes('undercoatToken - 2'), 'road cells do not reveal their exact prior tile');
   assert(EDITOR_GROUND_FORMULA.includes('road_apply_markings(rgb, surfaceUv, surfaceMeters'), 'derived road paint is not composited');
   assert(EDITOR_GROUND_FORMULA.includes('surfaceMeters = vec2f(p.y, p.x)'), 'east-west marking metres are not rotated');
+});
+
+test('committed roads render as continuous curve ribbons over the gameplay raster', () => {
+  assert(GROUND_STREAM_TUNING.ribbonSegmentFloats === 11, 'ribbon row shape drifted from Zig');
+  assert(EDITOR_GROUND_FORMULA.includes('let ribbonCount = i32(D[ribbonBase])'), 'ribbon header is not read');
+  assert(EDITOR_GROUND_FORMULA.includes('bestRoadAlong = alongM'), 'arc-continuous marking phase is not carried');
+  assert(EDITOR_GROUND_FORMULA.includes('max(fullMask - roadMask, 0.0)'), 'sidewalk/road union priority is missing');
+  assert(EDITOR_GROUND_FORMULA.includes('road_apply_ribbon_markings('), 'analytic Road catalog markings are not applied');
+  assert(EDITOR_GROUND_FORMULA.includes('semanticKind =='), 'junction/crosswalk raster policy was discarded');
 });
 
 test('Road catalog variants name the yellow, white, and plain authored takes', () => {

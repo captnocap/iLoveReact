@@ -304,6 +304,21 @@ fn mat_pal(i: i32, baked: vec3f) -> vec3f {
 // @kind surface
 // @tags environment, road
 // @author legacy
+fn road_white() -> vec3f {
+  let white = mat_pal(0, vec3f(0.93, 0.94, 0.90));
+  return white;
+}
+
+fn road_center() -> vec3f {
+  let center = mat_pal(1, vec3f(0.96, 0.74, 0.26));
+  return center;
+}
+
+fn road_zebra() -> vec3f {
+  let zebra = mat_pal(2, vec3f(0.91, 0.91, 0.86));
+  return zebra;
+}
+
 fn road_apply_markings(base: vec3f, uv: vec2f, meters: vec2f, marking: f32) -> vec3f {
   let flags = i32(floor(marking + 0.5));
   var col = base;
@@ -320,11 +335,11 @@ fn road_apply_markings(base: vec3f, uv: vec2f, meters: vec2f, marking: f32) -> v
   if ((flags & 8) != 0) { white = max(white, high_edge * dash); }
   if ((flags & 16) != 0) { white = max(white, low_edge); }
   if ((flags & 32) != 0) { white = max(white, high_edge); }
-  col = mix(col, mat_pal(0, vec3f(0.93, 0.94, 0.90)), white * 0.92);
+  col = mix(col, road_white(), white * 0.92);
 
   if ((flags & 2) != 0) {
     let center = line_near(uv.x - 0.50, 0.030) * dash;
-    col = mix(col, mat_pal(1, vec3f(0.96, 0.74, 0.26)), center * 0.94);
+    col = mix(col, road_center(), center * 0.94);
   }
 
   // The road planner emits a two-metre-deep band. Alternating half-metre
@@ -332,8 +347,50 @@ fn road_apply_markings(base: vec3f, uv: vec2f, meters: vec2f, marking: f32) -> v
   if ((flags & 64) != 0) {
     let zebra_phase = fract(meters.y * 2.0);
     let zebra = step(0.14, zebra_phase) * step(zebra_phase, 0.72);
-    col = mix(col, mat_pal(2, vec3f(0.91, 0.91, 0.86)), zebra * 0.84);
+    col = mix(col, road_zebra(), zebra * 0.84);
   }
+  return sat3(col);
+}
+
+fn road_apply_ribbon_markings(
+  base: vec3f,
+  signed_m: f32,
+  along_m: f32,
+  right_ext_m: f32,
+  left_ext_m: f32,
+  two_way: f32,
+  divider_phase_m: f32,
+  junction: f32,
+  crosswalk: f32,
+) -> vec3f {
+  var col = base;
+  if (crosswalk > 0.5) {
+    let zebra_phase = fract(along_m * 2.0);
+    let zebra = step(0.14, zebra_phase) * step(zebra_phase, 0.72);
+    return mix(col, road_zebra(), zebra * 0.84);
+  }
+  if (junction > 0.5) { return col; }
+
+  let dash_phase = fract(along_m / 3.0);
+  let dash = step(0.32, dash_phase) * step(dash_phase, 0.82);
+  let ad = abs(signed_m);
+  let ext_here = select(left_ext_m, right_ext_m, signed_m >= 0.0);
+
+  if (two_way > 0.5) {
+    let center = line_near(signed_m, 0.030) * dash;
+    col = mix(col, road_center(), center * 0.94);
+  }
+
+  let rel = ad - divider_phase_m;
+  let lane_index = floor(rel / 3.0 + 0.5);
+  let boundary_m = divider_phase_m + lane_index * 3.0;
+  if (lane_index >= 0.0 && boundary_m < ext_here - 0.25 && (boundary_m > 0.3 || divider_phase_m < 0.1)) {
+    let split = line_near(ad - boundary_m, 0.050) * dash;
+    col = mix(col, road_white(), split * 0.92);
+  }
+
+  let outer = line_near(ad - (ext_here - 0.10), 0.055);
+  col = mix(col, road_white(), outer * 0.92);
   return sat3(col);
 }
 

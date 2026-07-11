@@ -18,10 +18,10 @@
 // The grammar is CONTENT-FREE: it emits RoadCellKind (semantic names); the
 // consumer maps them to tile-legend indices via setKindIndices.
 //
-// COORDINATES: every public fn works in the TS's own GLOBAL CELL frame
-// (RoadPoint gx/gz — integer cells for authored points, fractional after
-// fillets; roadData.ts:49 "chunk cx covers gx ∈ [cx·120, cx·120+119]"). The
-// caller translates to/from the map engine's frame.
+// COORDINATES: every public fn works in the transport GLOBAL METRE frame.
+// Authored RoadPoint gx/gz values snap to 25 cm; the gameplay compiler rounds
+// only while rasterizing into global cells. The caller translates to/from the
+// map engine's centered world frame.
 //
 // TODO(later slices): intersections.ts (junction controls + generated props,
 // stable ids + pose overrides) and roadGrade.ts (road earthworks) ride the
@@ -55,8 +55,8 @@ pub const SPEED_LIMIT_MAX_KPH: f32 = 130;
 
 pub const RoadProfile = transport.RoadProfile;
 
-/// Global cell coords. Authored points are integer cells; fillet output is
-/// fractional (the arc samples).
+/// Global metre coords in the 1 m grid frame. Authored points snap to the
+/// transport substrate; fillet output is fractional along the curve.
 pub const RoadPoint = transport.Point;
 
 pub const RoadStroke = struct {
@@ -96,6 +96,124 @@ pub fn carriagewayTiles(p: RoadProfile) i32 {
 /// Full stamped width in tiles, curb to curb including sidewalks (ts:120).
 pub fn roadWidthTiles(p: RoadProfile) i32 {
     return carriagewayTiles(p) + (if (p.sidewalks) 2 * SIDEWALK_TILES else 0);
+}
+
+// ── analytic render ribbon ───────────────────────────────────────────────────
+// The gameplay stamp stays a one-metre raster. The visible road is the authored
+// filleted curve: these compact rows let the chunk ground shader evaluate a
+// continuous distance field for asphalt, markings, and sidewalks.
+
+pub const RIBBON_SEGMENT_FLOATS: usize = 11;
+pub const MAX_RIBBON_SEGMENTS_PER_CHUNK: usize = 160;
+pub const RIBBON_FILTER_MARGIN_M: f32 = 1.5;
+
+pub const RibbonExtents = struct {
+    right_road_m: f32,
+    left_road_m: f32,
+    right_full_m: f32,
+    left_full_m: f32,
+    two_way: bool,
+    /// First absolute white-divider distance from the centerline. Repeats at
+    /// LANE_TILES; an outer-edge check suppresses the final carriageway edge.
+    divider_phase_m: f32,
+};
+
+pub fn ribbonExtents(profile: RoadProfile) RibbonExtents {
+    const p = clampProfile(profile);
+    var right_road_m: f32 = undefined;
+    var left_road_m: f32 = undefined;
+    var phase_m: f32 = undefined;
+    const two_way = p.lanesF > 0 and p.lanesB > 0;
+    if (two_way) {
+        right_road_m = 0.5 + @as(f32, @floatFromInt(LANE_TILES * p.lanesF));
+        left_road_m = 0.5 + @as(f32, @floatFromInt(LANE_TILES * p.lanesB));
+        phase_m = 0.5 + @as(f32, @floatFromInt(LANE_TILES));
+    } else {
+        const lanes = @max(p.lanesF, p.lanesB);
+        right_road_m = @as(f32, @floatFromInt(LANE_TILES * lanes)) * 0.5;
+        left_road_m = right_road_m;
+        phase_m = if (@mod(lanes, 2) == 1) @as(f32, @floatFromInt(LANE_TILES)) * 0.5 else 0;
+    }
+    const walk_m: f32 = if (p.sidewalks) @floatFromInt(SIDEWALK_TILES) else 0;
+    return .{
+        .right_road_m = right_road_m,
+        .left_road_m = left_road_m,
+        .right_full_m = right_road_m + walk_m,
+        .left_full_m = left_road_m + walk_m,
+        .two_way = two_way,
+        .divider_phase_m = phase_m,
+    };
+}
+
+pub const RibbonSegment = struct {
+    ax: f32,
+    az: f32,
+    bx: f32,
+    bz: f32,
+    right_road_m: f32,
+    left_road_m: f32,
+    right_full_m: f32,
+    left_full_m: f32,
+    two_way: f32,
+    divider_phase_m: f32,
+    arc_start_m: f32,
+};
+
+pub const RibbonResult = struct { count: usize, truncated: bool };
+
+/// Compile committed road recipes to chunk-local analytic rows. Arc distance is
+/// accumulated before chunk filtering, so dash cadence remains continuous when
+/// a path crosses a chunk boundary or a filleted corner.
+pub fn ribbonSegmentsForChunk(
+    strokes: []const RoadStroke,
+    chunk_cx: i32,
+    chunk_cz: i32,
+    chunk_tiles: i32,
+    out: []RibbonSegment,
+) RibbonResult {
+    const origin_x = @as(f32, @floatFromInt(chunk_cx * chunk_tiles));
+    const origin_z = @as(f32, @floatFromInt(chunk_cz * chunk_tiles));
+    const span: f32 = @floatFromInt(chunk_tiles);
+    var count: usize = 0;
+    for (strokes) |stroke| {
+        if (stroke.points.len < 2) continue;
+        const ext = ribbonExtents(stroke.profile);
+        const reach = @max(ext.right_full_m, ext.left_full_m) + RIBBON_FILTER_MARGIN_M;
+        var curve: [MAX_FILLETED_POINTS]RoadPoint = undefined;
+        const curve_count = filletPoints(stroke.points, stroke.curve_radius_m, curve[0..]);
+        var arc_start_m: f32 = 0;
+        var i: usize = 0;
+        while (i + 1 < curve_count) : (i += 1) {
+            const ax = curve[i].gx - origin_x;
+            const az = curve[i].gz - origin_z;
+            const bx = curve[i + 1].gx - origin_x;
+            const bz = curve[i + 1].gz - origin_z;
+            const dx = bx - ax;
+            const dz = bz - az;
+            const segment_m = @sqrt(dx * dx + dz * dz);
+            const touches = @max(ax, bx) >= -reach and @min(ax, bx) <= span + reach and
+                @max(az, bz) >= -reach and @min(az, bz) <= span + reach;
+            if (touches and segment_m > 0.0001) {
+                if (count >= out.len) return .{ .count = count, .truncated = true };
+                out[count] = .{
+                    .ax = ax,
+                    .az = az,
+                    .bx = bx,
+                    .bz = bz,
+                    .right_road_m = ext.right_road_m,
+                    .left_road_m = ext.left_road_m,
+                    .right_full_m = ext.right_full_m,
+                    .left_full_m = ext.left_full_m,
+                    .two_way = if (ext.two_way) 1 else 0,
+                    .divider_phase_m = ext.divider_phase_m,
+                    .arc_start_m = arc_start_m,
+                };
+                count += 1;
+            }
+            arc_start_m += segment_m;
+        }
+    }
+    return .{ .count = count, .truncated = false };
 }
 
 // ── the output vocabulary ─────────────────────────────────────────────────────
@@ -824,6 +942,70 @@ test "a lane is 3 tiles; 1+1 with sidewalks is 11 wide curb to curb" {
     try std.testing.expectEqual(@as(i32, 7), carriagewayTiles(.{ .lanesF = 1, .lanesB = 1, .sidewalks = false }));
     try std.testing.expectEqual(@as(i32, 11), roadWidthTiles(.{ .lanesF = 1, .lanesB = 1, .sidewalks = true }));
     try std.testing.expectEqual(@as(i32, 6), roadWidthTiles(.{ .lanesF = 2, .lanesB = 0, .sidewalks = false }));
+}
+
+test "analytic ribbon extents match the semantic road cross-section" {
+    const two_way = ribbonExtents(.{ .lanesF = 1, .lanesB = 1, .sidewalks = true });
+    try std.testing.expect(two_way.two_way);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.5), two_way.right_road_m, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.5), two_way.left_road_m, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 5.5), two_way.right_full_m, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 3.5), two_way.divider_phase_m, 0.001);
+
+    const one_way = ribbonExtents(.{ .lanesF = 2, .lanesB = 0, .sidewalks = false });
+    try std.testing.expect(!one_way.two_way);
+    try std.testing.expectApproxEqAbs(@as(f32, 3), one_way.right_road_m, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), one_way.divider_phase_m, 0.001);
+}
+
+test "analytic ribbon follows a slight filleted bend with continuous arc phase" {
+    const pts = [_]RoadPoint{
+        .{ .gx = 10, .gz = 10 },
+        .{ .gx = 20, .gz = 10 },
+        .{ .gx = 30, .gz = 13 },
+    };
+    const stroke = RoadStroke{
+        .id = 1,
+        .points = &pts,
+        .profile = .{ .lanesF = 1, .lanesB = 1, .sidewalks = true },
+        .curve_radius_m = 8,
+    };
+    var segments: [64]RibbonSegment = undefined;
+    const result = ribbonSegmentsForChunk(&.{stroke}, 0, 0, 120, segments[0..]);
+    try std.testing.expect(!result.truncated);
+    try std.testing.expect(result.count > 3);
+    var saw_fractional = false;
+    var previous_arc: f32 = -1;
+    for (segments[0..result.count]) |segment| {
+        try std.testing.expect(segment.arc_start_m >= previous_arc);
+        previous_arc = segment.arc_start_m;
+        if (segment.ax != @floor(segment.ax) or segment.az != @floor(segment.az) or
+            segment.bx != @floor(segment.bx) or segment.bz != @floor(segment.bz))
+        {
+            saw_fractional = true;
+        }
+    }
+    try std.testing.expect(saw_fractional);
+
+    var tiny: [1]RibbonSegment = undefined;
+    const clipped = ribbonSegmentsForChunk(&.{stroke}, 0, 0, 120, tiny[0..]);
+    try std.testing.expect(clipped.truncated);
+
+    const long_pts = [_]RoadPoint{
+        .{ .gx = 0, .gz = 20 },
+        .{ .gx = 100, .gz = 20 },
+        .{ .gx = 145, .gz = 50 },
+    };
+    const long_stroke = RoadStroke{
+        .id = 2,
+        .points = &long_pts,
+        .profile = stroke.profile,
+        .curve_radius_m = 12,
+    };
+    const next_chunk = ribbonSegmentsForChunk(&.{long_stroke}, 1, 0, 120, segments[0..]);
+    try std.testing.expect(!next_chunk.truncated);
+    try std.testing.expect(next_chunk.count > 0);
+    try std.testing.expect(segments[0].arc_start_m > 0);
 }
 
 test "an eastbound two-way stroke puts forward lanes south of the median (right-hand traffic)" {
