@@ -2,7 +2,6 @@ import { Effect, StaticSurface } from '@reactjit/primitives';
 import type { ReactNode } from 'react';
 import { C } from '../workspace.cls';
 import type { Asset } from '../data/types';
-import { textureBlobDataUrl } from '../data/hmscAssetCatalog';
 import { DecalSurface } from '../textures/decalRender';
 
 const PREVIEW_FILL = { width: '100%', height: '100%' };
@@ -26,9 +25,6 @@ export default function AssetPreview({ asset, live }: {
     content = <Effect shader={preview.shader} data={preview.data} style={PREVIEW_FILL} />;
   } else if (preview.kind === 'image') {
     content = <C.HW_MaterialTileImage source={preview.source} />;
-  } else if (preview.kind === 'texture-blob') {
-    const source = textureBlobDataUrl(preview.ref);
-    content = source ? <C.HW_MaterialTileImage source={source} /> : null;
   } else if (preview.kind === 'decal') {
     content = (
       <C.HW_DecalPreviewFrame>

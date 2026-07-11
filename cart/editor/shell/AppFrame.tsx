@@ -58,8 +58,8 @@ import { dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacem
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
-import { primitivePartMesh, primitiveMeshData, composeModelParts, storedModelParts, storedModelMeshData, storedModelFaceGroupData, cookedMeshBlobData, cookedMeshRefForAsset, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/hmscAssetCatalog';
-import { partsMetaFromRows, meshDocRangeCenters } from '../data/meshDoc';
+import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
+import { partsMetaFromRows, meshDocRangeCenters, meshDocRangeGeometry } from '../data/meshDoc';
 import { assignPartsToGroup, nextDuplicateGroupName, nextDuplicatePartName, nextModelGroupName, ungroupParts } from '../data/modelOutliner';
 import { materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
@@ -841,9 +841,7 @@ export default function AppFrame() {
       // RECORD (USER RULING req_2718): the export writes `placeable` (+ the
       // compiled RIG skeleton for props) into the model's own package on disk,
       // and every boot re-derives the palette from that scan — localstore only
-      // caches. The mesh key is the bare stored-model id (storedModelMeshData
-      // key), stripped of the 'studio:' package prefix so residency + refs
-      // agree. The status ALWAYS reports — a silent no-op is what made this
+      // caches. The status ALWAYS reports — a silent no-op is what made this
       // feel dead before.
       const propTarget = propExportTargetForCommand(command.id);
       const exportTarget = propTarget
@@ -2954,10 +2952,9 @@ export default function AppFrame() {
     setState((prev) => ({ ...prev, status: ok ? okMsg : failMsg }));
   };
 
-  // Cross-model reuse: append a saved library model into the OPEN model as new part(s).
-  // Studio models import per authored part (seeds ride along); cooked assets append
-  // their triangle blob; file-backed models host-parse via __mesh_append_file. Pick the
-  // same model again to reuse it any number of times.
+  // Cross-model reuse: append a saved package document into the OPEN model,
+  // preserving its authored part ranges. File-backed packages host-parse their
+  // copied .glb/.obj. Pick the same model again to reuse it any number of times.
   const importModelAsParts = (pkg: ModelPackage) => {
     setImportPartOpen(false);
     const mid = activePartsModelId(state);
@@ -2970,48 +2967,38 @@ export default function AppFrame() {
     let tint = existing.length;
     const nextColor = () => PART_TINTS[tint++ % PART_TINTS.length]!;
     const added: ModelPart[] = [];
-    const bareId = pkg.id.startsWith('studio:') ? pkg.id.slice('studio:'.length) : pkg.id;
-    const sparts = pkg.sourceKind === 'studio-model' ? storedModelParts(bareId) : null;
-    if (sparts && sparts.length > 0) {
-      for (const sp of sparts) {
-        if (!sp.mesh) continue;
-        const geo = composeModelParts([{ ...sp, visible: true }]);
-        if (geo.positions.length === 0) continue;
-        const color = sp.color ?? nextColor();
+    const doc = packageMeshDoc(pkg);
+    const meta = packageMeshDocParts(pkg) ?? [];
+    if (doc && doc.vertices.length >= 24) {
+      for (let index = 0; index < doc.ranges.length; index += 1) {
+        const geo = meshDocRangeGeometry(doc, index);
+        if (geo.vertices.length === 0) continue;
+        const row = meta[index];
+        const color = row?.color ?? nextColor();
         const r = api.appendPart(geo.positions, geo.faceGroups, color);
         if (!r) continue;
-        added.push({ id: `part:imp:${state.seq}:${added.length}`, name: `${pkg.name} · ${sp.name}`, mesh: cloneMesh(sp.mesh), visible: true, color, lift: sp.lift, lo: r.lo, hi: r.hi });
+        added.push({
+          id: `part:imp:${state.seq}:${added.length}`,
+          name: doc.ranges.length === 1 ? pkg.name : `${pkg.name} · ${row?.name ?? `part ${index + 1}`}`,
+          kind: row?.kind as PrimitiveKind | undefined,
+          visible: true,
+          color,
+          lo: r.lo,
+          hi: r.hi,
+        });
       }
     } else if (pkg.primitive) {
       const built = primitiveMeshData(pkg.primitive);
       const color = nextColor();
       const r = built.positions.length > 0 ? api.appendPart(built.positions, built.faceGroups, color) : null;
       if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, kind: pkg.primitive, mesh: primitivePartMesh(pkg.primitive), visible: true, color, lo: r.lo, hi: r.hi });
-    } else {
-      const cookedId = pkg.id.startsWith('cooked:') ? pkg.id.slice('cooked:'.length) : pkg.id;
-      const meshRef = pkg.viewerMeshRef ?? (pkg.sourceKind === 'cooked-asset' ? cookedMeshRefForAsset(cookedId) : null);
-      const blob = meshRef ? cookedMeshBlobData(meshRef) : (pkg.sourceKind === 'studio-model' ? storedModelMeshData(bareId) : null);
-      if (blob && blob.length >= 24) {
-        const tris = Math.floor(blob.length / 24);
-        const stored = pkg.sourceKind === 'studio-model' ? storedModelFaceGroupData(bareId) : null;
-        let groups: Uint32Array;
-        if (stored && stored.length === tris) {
-          groups = stored;
-        } else {
-          groups = new Uint32Array(tris);
-          for (let i = 0; i < tris; i++) groups[i] = i;
-        }
-        const color = nextColor();
-        const r = api.appendPart(blob, groups, color);
-        if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, visible: true, color, lo: r.lo, hi: r.hi });
-      } else if (pkg.viewerPath && isViewerFile(pkg.viewerPath)) {
-        const color = nextColor();
-        const r = api.appendModelFile(pkg.viewerPath, color);
-        if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, visible: true, color, lo: r.lo, hi: r.hi });
-      }
+    } else if (pkg.viewerPath && isViewerFile(pkg.viewerPath)) {
+      const color = nextColor();
+      const r = api.appendModelFile(pkg.viewerPath, color);
+      if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, visible: true, color, lo: r.lo, hi: r.hi });
     }
     if (added.length === 0) {
-      setState((prev) => ({ ...prev, status: `could not import ${pkg.name} — no usable geometry (studio parts, cooked mesh blob, or a .glb/.obj file)` }));
+      setState((prev) => ({ ...prev, status: `could not import ${pkg.name} — its package has no usable mesh document or .glb/.obj` }));
       return;
     }
     setState((prev) => ({
@@ -3425,9 +3412,6 @@ export default function AppFrame() {
         const filePath = pkg?.viewerPath;
         if (filePath && isViewerFile(filePath)) {
           parts = [filePartSeed(filePath, pkg!.name)];
-        } else {
-          const bareId = mid.startsWith('studio:') ? mid.slice('studio:'.length) : mid;
-          parts = storedModelParts(bareId) ?? undefined;
         }
       }
       if (!parts) return;

@@ -16,7 +16,7 @@ import { useState } from 'react';
 import { Box, Col, Row, Text, Pressable, Slider } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { PRIMITIVE_MESHES } from '../data/commands';
-import { PRIMITIVE_FIELDS, U_PER_TILE, defaultPrimitiveParamsU, primitiveParamsFromU, type PrimitiveField, type PrimitiveParams } from '../data/hmscAssetCatalog';
+import { PRIMITIVE_FIELDS, U_PER_TILE, defaultPrimitiveParamsU, primitiveParamsFromU, type PrimitiveField, type PrimitiveParams } from '../data/assetCatalog';
 import { REGIONS } from './regions';
 import type { PrimitiveKind } from '../data/types';
 

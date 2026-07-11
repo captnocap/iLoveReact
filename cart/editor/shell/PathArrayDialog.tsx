@@ -11,7 +11,7 @@ import {
   type PathArrayParams,
   type PathArrayPoint,
 } from '../data/pathArray';
-import { U_PER_TILE } from '../data/hmscAssetCatalog';
+import { U_PER_TILE } from '../data/assetCatalog';
 
 const PANEL = '#17181b';
 const BORDER = '#2a2c31';

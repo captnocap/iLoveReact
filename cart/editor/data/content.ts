@@ -1,6 +1,6 @@
 // editor/data/content.ts - content tree, navigation enums, and folder helpers.
 import { MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
-import { HMSC_EDITOR_CATALOG, fileModelPackage, modelCategoryNodes } from './hmscAssetCatalog';
+import { EDITOR_ASSET_CATALOG, fileModelPackage, modelCategoryNodes } from './assetCatalog';
 import { isMaterialized, listPackageFiles, type PackageFile } from './modelPackageStore';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 import { allocateBuildStarterModelId, allocatePlayerModelId, allocatePrimitiveModelId, BUILD_STARTER_MODEL_ID_PREFIX, PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
@@ -27,7 +27,7 @@ export const RIGHT_PANES = [
   ['mission', 'Flag'],
   ['routes', 'Route'],
 ];
-export const CONTENT_TREE: ContentNode[] = HMSC_EDITOR_CATALOG.contentTree;
+export const CONTENT_TREE: ContentNode[] = EDITOR_ASSET_CATALOG.contentTree;
 export const SNAP_MODES = ['surface + edge', 'grid', 'free', 'vertex'];
 export const FLOORS = ['Floor 2', 'Floor 1', 'Basement'];
 export const PRESETS = ['default', 'slow', 'fast', 'custom'];

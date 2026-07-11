@@ -1,18 +1,18 @@
-// editor/data/catalog.ts - catalog helpers backed by hmsc-int stored data.
-import { HMSC_EDITOR_CATALOG } from './hmscAssetCatalog';
+// Editor catalog helpers backed by local model packages and shader recipes.
+import { EDITOR_ASSET_CATALOG } from './assetCatalog';
 import type { Asset, AssetOverride, LibraryTab, ModelPackage } from './types';
 import type { MaterialRef } from '../world/pieces';
 
 export const ASSET_PAGE_SIZE = 12;
 export const MATERIAL_PAGE_SIZE = 16;
 
-export const ASSETS: Asset[] = HMSC_EDITOR_CATALOG.assets;
-export const MODEL_PACKAGES: ModelPackage[] = HMSC_EDITOR_CATALOG.modelPackages;
+export const ASSETS: Asset[] = EDITOR_ASSET_CATALOG.assets;
+export const MODEL_PACKAGES: ModelPackage[] = EDITOR_ASSET_CATALOG.modelPackages;
 export const MODEL_PACKAGE_COUNT = MODEL_PACKAGES.length;
 export const MATERIAL_ASSET_COUNT = ASSETS.filter((asset) => asset.tab === 'Skins').length;
-export const DEFAULT_ASSET_ID = HMSC_EDITOR_CATALOG.defaultAssetId;
-export const DEFAULT_CONTENT_FOLDER = HMSC_EDITOR_CATALOG.defaultContentFolder;
-export const CATALOG_DIAGNOSTICS = HMSC_EDITOR_CATALOG.diagnostics;
+export const DEFAULT_ASSET_ID = EDITOR_ASSET_CATALOG.defaultAssetId;
+export const DEFAULT_CONTENT_FOLDER = EDITOR_ASSET_CATALOG.defaultContentFolder;
+export const CATALOG_DIAGNOSTICS = EDITOR_ASSET_CATALOG.diagnostics;
 
 export function clampChannel(value: number): number {
   return Math.max(0, Math.min(255, value));

@@ -281,7 +281,7 @@ export type Asset = {
   recipe?: string;
   seed?: number;
   variants?: string[];
-  sourceKind?: 'shader-recipe' | 'shader-preset' | 'stored-material' | 'texture-file' | 'cooked-asset';
+  sourceKind?: 'shader-recipe' | 'shader-preset';
   sourceId?: string;
   sourcePath?: string;
   semanticKind?: string;
@@ -292,7 +292,6 @@ export type Asset = {
 export type AssetPreview =
   | { kind: 'shader'; shader: string; data: number[] }
   | { kind: 'image'; source: string }
-  | { kind: 'texture-blob'; ref: string }
   | { kind: 'decal'; doc: DecalDoc }
   | { kind: 'color'; color: string };
 
@@ -327,9 +326,8 @@ export type ModelPaintVariant = {
   color: string;
 };
 
-// Per-model UI mutations (right-click actions). Models are snapshot-derived and
-// read-only, so rename/favorite/delete live here as overrides applied on read;
-// real model-store writes arrive with package materialization (Slice 2).
+// Per-model UI mutations (right-click actions). Package manifests are disk truth;
+// these overrides are the live projection used during the current render cycle.
 export type ModelOverride = { name?: string; favorite?: boolean; hidden?: boolean };
 
 // What a model is EXPORTED AS — declared in its own on-disk manifest (USER

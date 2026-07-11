@@ -14,7 +14,7 @@
 // bounds center so a future baked animation can pose the parts; colors come
 // from the rank-paired parts.json rows (the outliner tints).
 import { MODEL_PACKAGES } from '../data/catalog';
-import { packageMeshDoc, packageMeshDocParts } from '../data/hmscAssetCatalog';
+import { packageMeshDoc, packageMeshDocParts } from '../data/assetCatalog';
 import { meshDocRangeCenters, type PackageMeshDoc, type MeshDocPartMeta } from '../data/meshDoc';
 import { buildBodyClips, encodeAnimationPayload, type AnimNode } from './playerAnimation';
 import type { ModelPackage } from '../data/types';

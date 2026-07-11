@@ -4,7 +4,7 @@
 // parts, a content-addressed mesh blob, or a primitive — exactly as the viewer
 // does. No "special" representation. This module just adds a small cache + the
 // package lookup so the resident builder can resolve by (modelId, pkgId).
-import { modelPackageMeshData } from '../data/hmscAssetCatalog';
+import { modelPackageMeshData } from '../data/assetCatalog';
 import { modelPackageById } from '../data/content';
 
 const CACHE = new Map<string, Float32Array>();

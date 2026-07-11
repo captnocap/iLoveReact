@@ -17,7 +17,7 @@ import { base64ToBytes } from '../../../runtime/workspace';
 import { modelPackageById } from '../data/content';
 import { resolvePackageDir } from '../data/modelPackageStore';
 import { bindPaintSkinToCurrentMesh, listPaintSkins, PAINT_MESH_VERTEX_BYTES, PAINT_MESH_VERTEX_FLOATS } from '../data/paintVariants';
-import { packageMeshDoc, packageMeshDocParts } from '../data/hmscAssetCatalog';
+import { packageMeshDoc, packageMeshDocParts } from '../data/assetCatalog';
 import { compileDoorMesh, DOOR_EXPORT_TUNING } from '../model/doorModel';
 import { compileOutlinerCollisionBoxes } from '../model/meshCollision';
 import type { ModelPackage } from '../data/types';

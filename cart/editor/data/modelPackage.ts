@@ -15,15 +15,13 @@
 //     <category>/                 props | build | characters | vehicles (from kind)
 //       <model>/                  filesystem-safe slug of the model id
 //         manifest.json           the model's durable record (this file's schema)
-//         mesh/                    mesh data (mesh.blob / editmesh.json)   [blobs: later slice]
-//         atlases/                one texture atlas per decomposition       [blobs: later slice]
-//         paints/                 stored paint variations                   [blobs: later slice]
-//         shaders/                copies of referenced shader code          [blobs: later slice]
+//         mesh/                    source and editable mesh documents
+//         atlases/                one texture atlas per decomposition
+//         paints/                 stored paint variations
+//         shaders/                copies of referenced shader code
 //
-// The manifest carries the durable, portable metadata; blob materialization
-// (mesh/atlas/paint/shader bytes into the subdirs) is the next slice. path and
-// source are DERIVED from the package location on load — they intentionally
-// point at the package home, not the old hmsc-int snapshot.
+// The manifest and its sibling artifacts are the durable, portable model.
+// path and source derive from that package home on load.
 import type { ContentFolderId, ModelAtlas, ModelPackage, ModelPaintVariant, ModelPlaceable } from './types';
 import type { Skeleton } from '../../../runtime/skeleton';
 

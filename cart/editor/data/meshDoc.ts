@@ -196,3 +196,31 @@ export function meshDocRangeCenters(doc: PackageMeshDoc): ([number, number, numb
     (b.min[2]! + b.max[2]!) / 2,
   ]));
 }
+
+/** Extract one package part as standalone appendable geometry. Face-group ids
+ * are normalized to a compact zero-based span so the receiving model can assign
+ * its own durable range without inheriting ids from the source package. */
+export function meshDocRangeGeometry(
+  doc: PackageMeshDoc,
+  rangeIndex: number,
+): { vertices: Float32Array; faceGroups: Uint32Array } {
+  const range = doc.ranges[rangeIndex];
+  if (!range) return { vertices: new Float32Array(0), faceGroups: new Uint32Array(0) };
+  const vertices: number[] = [];
+  const faceGroups: number[] = [];
+  const normalized = new Map<number, number>();
+  const triCount = Math.floor(doc.vertices.length / 24);
+  for (let tri = 0; tri < triCount; tri += 1) {
+    const sourceGroup = doc.faceGroups?.[tri] ?? tri;
+    if (sourceGroup < range.lo || sourceGroup >= range.hi) continue;
+    let targetGroup = normalized.get(sourceGroup);
+    if (targetGroup === undefined) {
+      targetGroup = normalized.size;
+      normalized.set(sourceGroup, targetGroup);
+    }
+    const start = tri * 24;
+    for (let i = 0; i < 24; i += 1) vertices.push(doc.vertices[start + i]!);
+    faceGroups.push(targetGroup);
+  }
+  return { vertices: new Float32Array(vertices), faceGroups: new Uint32Array(faceGroups) };
+}

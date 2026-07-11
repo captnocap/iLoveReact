@@ -5,7 +5,7 @@
 //     --outfile=/tmp/editor-meshdoc.test.js --format=iife --platform=neutral --target=es2022 \
 //     --alias:@reactjit/runtime=$ROOT/runtime --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-meshdoc.test.js
-import { parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
+import { meshDocRangeGeometry, parseMeshDocBytes, partsMetaFromRows } from './meshDoc';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -57,6 +57,19 @@ test('parts metadata preserves organizational groups while ranking by host range
   ]);
   assert(rows[0]?.name === 'deck' && rows[1]?.name === 'divider', 'host-range ranking changed');
   assert(rows.every((row) => row.groupId === 'bridge' && row.groupName === 'Bridge deck'), 'group metadata was stripped from parts.json rows');
+});
+
+test('package part extraction keeps only its range and normalizes face groups', () => {
+  const vertices = new Float32Array(4 * 24);
+  for (let i = 0; i < vertices.length; i += 1) vertices[i] = i;
+  const part = meshDocRangeGeometry({
+    vertices,
+    faceGroups: new Uint32Array([2, 7, 8, 12]),
+    ranges: [{ lo: 2, hi: 3 }, { lo: 7, hi: 10 }, { lo: 12, hi: 13 }],
+  }, 1);
+  assert(part.vertices.length === 48, `expected two triangles, got ${part.vertices.length / 24}`);
+  assert(part.vertices[0] === 24 && part.vertices[24] === 48, 'wrong source triangles copied');
+  assert(part.faceGroups[0] === 0 && part.faceGroups[1] === 1, 'source group ids were not normalized');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

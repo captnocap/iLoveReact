@@ -1,10 +1,5 @@
-// CLONED from cart/modelview.tsx — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor owns this copy so the cart is self-contained. NOTE: modelview is an
-// interactable system; the durable path is host-native model tools (req_2178:
-// "studio capabilities remade as host functions"), at which point this React copy
-// and the standalone cart/modelview.tsx both collapse into that. Until then, do NOT
-// re-import cart/modelview; diverge here.
-// modelview — pick (or drop) a .glb/.obj, view it. Crisp, butter-smooth, native.
+// Editor-owned host-resident mesh editing, paint atlas, and package surface.
+// Pick or drop a .glb/.obj, edit it, and persist it into the active package.
 //
 // The whole point of this cart is what it DOESN'T do: it never ships geometry across
 // the JS bridge and never re-renders to move the camera. The chosen file is parsed
@@ -51,7 +46,7 @@ import { writeModelArtifacts } from '../data/modelPackageStore';
 import { syntheticKeyEdge } from '../data/keymap';
 // Headless harness only (RJIT_MESHOPS addpart) — builds a primitive's grouped soup so the
 // gesture script can exercise the REAL appendPart path without the outliner UI (req_2644).
-import { primitiveMeshData, U_PER_TILE } from '../data/hmscAssetCatalog';
+import { primitiveMeshData, U_PER_TILE } from '../data/assetCatalog';
 import type { PathArrayParams } from '../data/pathArray';
 // The fixed-region layout contract (req_2627): popup control grids share the editor's
 // ONE column grid instead of inventing local cell widths.

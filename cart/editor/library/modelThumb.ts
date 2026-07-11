@@ -1,12 +1,11 @@
-// editor/library/modelThumb.ts — the model-preview pipeline, ported from the old
-// app (hmsc-int/railThumbGrid): frame an orbit camera on a model's own bounds so
+// editor/library/modelThumb.ts — frame an orbit camera on a model's own bounds so
 // every model reads like a product shot — a phone booth and a bus both fill the
 // tile instead of one being a speck. The thumbnail itself is a static <Scene3D>
 // (ModelThumbnail.tsx); this module is the pure mesh + framing math it consumes.
-import { cookedMeshBlobData, cookedMeshRefForAsset, packageMeshDoc, storedModelMeshData } from '../data/hmscAssetCatalog';
+import { packageMeshDoc } from '../data/assetCatalog';
 import type { ModelPackage } from '../data/types';
 
-// Cooked/studio meshes are interleaved [px,py,pz, nx,ny,nz, u,v] — 8 floats/vertex.
+// Package meshes are interleaved [px,py,pz, nx,ny,nz, u,v] — 8 floats/vertex.
 const STRIDE = 8;
 
 // Product-shot framing (the railThumbGrid constants): a snug 3/4 orbit at a
@@ -33,17 +32,6 @@ export function resolveModelMesh(model: ModelPackage): ThumbMesh | null {
     const v = doc.vertices;
     const stamp = `${v.length}:${Math.round((v[0] ?? 0) * 1e3)}:${Math.round((v[v.length - STRIDE] ?? 0) * 1e3)}`;
     return { key: `pkgdoc:${model.id}:${stamp}`, vertices: v, count: Math.floor(v.length / STRIDE) };
-  }
-  const cookedRef = model.viewerMeshRef
-    ?? (model.sourceKind === 'cooked-asset' ? cookedMeshRefForAsset(cookedAssetId(model)) : null);
-  if (cookedRef) {
-    const vertices = cookedMeshBlobData(cookedRef);
-    if (vertices && vertices.length >= STRIDE) return { key: cookedRef, vertices, count: Math.floor(vertices.length / STRIDE) };
-  }
-  if (model.sourceKind === 'studio-model') {
-    const storedId = model.id.startsWith('studio:') ? model.id.slice('studio:'.length) : model.id;
-    const vertices = storedModelMeshData(storedId);
-    if (vertices && vertices.length >= STRIDE) return { key: `studio:${storedId}`, vertices, count: Math.floor(vertices.length / STRIDE) };
   }
   return null;
 }
@@ -133,8 +121,4 @@ function thumbCamera(b: Bounds): ThumbView['cam'] {
     target: [b.cx, b.cy, b.cz],
     fov: THUMB_FOV,
   };
-}
-
-function cookedAssetId(model: ModelPackage): string {
-  return model.id.startsWith('cooked:') ? model.id.slice('cooked:'.length) : model.id;
 }

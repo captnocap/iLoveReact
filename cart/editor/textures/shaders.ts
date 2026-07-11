@@ -1,12 +1,8 @@
-// CLONED from cart/hmsc-int/game/textures/shaders.ts — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor cart owns this copy; do NOT re-import from cart/hmsc-int. Diverge freely.
-// game/textures/shaders.ts — the CANONICAL texture-shader catalog: every tunable
+// Editor-owned canonical texture-shader catalog: every tunable
 // WGSL recipe a texture can be authored from, each one NAMED, range-bounded,
 // draggable parameters — never a bare data[] of magic numbers. (Lineage: lived as
-// cart/hmsc/render3d/textureShaders.ts, and before that editor-side as
-// hmsc-int/shaderCatalog.ts with one entry; TEXPORT-0606 moved the texture
-// pipeline behind the game/textures door — the captured ground floor bakes
-// stored materials from these specs, the editor only adds sliders on top.)
+// a prototype texture catalog; the active editor owns both the recipes and the
+// authoring controls now.)
 //
 // A ShaderSpec here is a RECIPE: ShaderLab can still tune it and Materialize a
 // custom frozen look. The registry also derives ShaderTexturePresets from these
@@ -406,7 +402,7 @@ const FILL_SPECS: ShaderSpec[] = FILL_BOARDS.flatMap((b) => b.materials.map((m, 
 
 // ── The catalog ──────────────────────────────────────────────────────────────
 
-export const HMSC_SHADERS: ShaderSpec[] = [ROAD, CUTOUT_STENCIL, MISSION_CODE, ...FILL_SPECS];
+export const EDITOR_SHADERS: ShaderSpec[] = [ROAD, CUTOUT_STENCIL, MISSION_CODE, ...FILL_SPECS];
 
 function slugPart(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'preset';
@@ -445,8 +441,8 @@ function shaderPresetsFor(spec: ShaderSpec): ShaderTexturePreset[] {
   return [];
 }
 
-export const HMSC_SHADER_PRESETS: ShaderTexturePreset[] = HMSC_SHADERS.flatMap(shaderPresetsFor);
-export const HMSC_BROWSE_SHADER_PRESETS: ShaderTexturePreset[] = HMSC_SHADER_PRESETS.filter((preset) => {
+export const EDITOR_SHADER_PRESETS: ShaderTexturePreset[] = EDITOR_SHADERS.flatMap(shaderPresetsFor);
+export const EDITOR_BROWSE_SHADER_PRESETS: ShaderTexturePreset[] = EDITOR_SHADER_PRESETS.filter((preset) => {
   const spec = shaderSpec(preset.shaderId);
   if (!spec) return false;
   return spec.id === 'road' || preset.id.endsWith('--std');
@@ -465,18 +461,18 @@ export function registerImportedSpecs(specs: ShaderSpec[]): void {
 }
 
 export function shaderSpec(id: string): ShaderSpec | undefined {
-  return HMSC_SHADERS.find((s) => s.id === id) ?? IMPORTED_SPECS.find((s) => s.id === id);
+  return EDITOR_SHADERS.find((s) => s.id === id) ?? IMPORTED_SPECS.find((s) => s.id === id);
 }
 
 export function shaderTexturePreset(id: string): ShaderTexturePreset | undefined {
-  return HMSC_SHADER_PRESETS.find((p) => p.id === id);
+  return EDITOR_SHADER_PRESETS.find((p) => p.id === id);
 }
 
 // Group order for catalog rails: the purpose categories in their declared order
 // (TEXTURE_CATEGORIES), with any stragglers appended in first-seen order.
 export function shaderGroups(): { group: string; specs: ShaderSpec[] }[] {
   const out: { group: string; specs: ShaderSpec[] }[] = [];
-  for (const spec of [...HMSC_SHADERS, ...IMPORTED_SPECS]) {
+  for (const spec of [...EDITOR_SHADERS, ...IMPORTED_SPECS]) {
     const g = out.find((x) => x.group === spec.group);
     if (g) g.specs.push(spec); else out.push({ group: spec.group, specs: [spec] });
   }

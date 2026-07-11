@@ -82,7 +82,7 @@ export default function LibraryPanel(props: {
         <Icon name="FolderOpen" size={13} color={accentFor('primary')} />
         <C.HW_Kicker>CONTENT BROWSER</C.HW_Kicker>
         <C.HW_Spacer />
-        <C.HW_StatusText>M {props.models.length} · MAT {MATERIAL_ASSET_COUNT} · C {CATALOG_DIAGNOSTICS.cookedAssets}</C.HW_StatusText>
+        <C.HW_StatusText>M {props.models.length} · MAT {MATERIAL_ASSET_COUNT} · PKG {CATALOG_DIAGNOSTICS.modelPackages}</C.HW_StatusText>
       </C.HW_PanelHead>
       <C.HW_Search placeholder="search models, paints, materials..." value={props.state.search} onChange={props.onSearch} />
       {renamingModel ? (

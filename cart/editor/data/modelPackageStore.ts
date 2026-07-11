@@ -33,7 +33,6 @@ import { invalidateMeshDoc, writeMeshDoc, type MeshDocPartMeta } from './meshDoc
 const host = globalThis as any;
 
 export type MaterializeResult = { ok: boolean; id: string; dir: string; error?: string };
-export type MaterializeSummary = { total: number; wrote: number; failed: MaterializeResult[] };
 
 // ── Package directory resolution (id → real on-disk home) ───────────────────
 
@@ -151,10 +150,9 @@ export function materializeModelPackage(pkg: ModelPackage): MaterializeResult {
   return { ok: true, id: pkg.id, dir };
 }
 
-// Everything a snapshot-era model needs copied beside its manifest to become a
-// self-contained package (req_2732). The catalog resolves these — it owns the
-// snapshot data; this store only knows how to lay them down in the right subdirs.
-export type PackageBlobs = {
+// Binary/source artifacts copied beside a manifest to make a package complete.
+// The caller supplies bytes; this store owns their strict on-disk layout.
+export type PackageArtifacts = {
   /** mesh/base.blob — interleaved verts (8 f32/vert, raw little-endian), the same format __model_mesh_write emits. */
   meshBlob?: Float32Array;
   /** mesh/<name> — a copied .glb/.obj source file (base64 bytes). */
@@ -165,13 +163,11 @@ export type PackageBlobs = {
   atlasPngBase64?: string;
 };
 
-// Materialize a snapshot-derived model into a FULL package: dirs, blob bytes,
-// manifest LAST. The manifest is the commit point — an interrupted run leaves
-// no manifest, so the next catalog load retries instead of trusting a
-// half-written package (isMaterialized keys off the manifest alone).
+// Materialize a FULL package: dirs, artifact bytes, manifest LAST. The manifest
+// is the commit point, so an interrupted write never advertises a partial model.
 // MUTATES pkg when a mesh file is copied in: viewerPath is repointed at the
 // package's own copy, so the manifest AND the live roster entry agree.
-export function materializeSnapshotPackage(pkg: ModelPackage, blobs: PackageBlobs): MaterializeResult {
+export function materializePackageArtifacts(pkg: ModelPackage, blobs: PackageArtifacts): MaterializeResult {
   const dir = claimPackageDir(pkg);
   if (!ensurePackageDirs(dir)) return { ok: false, id: pkg.id, dir, error: 'mkdir package dirs failed' };
   if (blobs.meshBlob && blobs.meshBlob.length > 0) {
@@ -208,19 +204,6 @@ export function readManifest(kind: ModelPackageKind, id: string): ModelManifest 
   } catch {
     return null;
   }
-}
-
-// Materialize a whole catalog. Used to seed the package home from the current
-// (still snapshot-derived) model list so the on-disk directories become real.
-export function materializeCatalog(pkgs: ModelPackage[]): MaterializeSummary {
-  const failed: MaterializeResult[] = [];
-  let wrote = 0;
-  for (const pkg of pkgs) {
-    const result = materializeModelPackage(pkg);
-    if (result.ok) wrote += 1;
-    else failed.push(result);
-  }
-  return { total: pkgs.length, wrote, failed };
 }
 
 // True when THIS model already has a package directory (manifest on disk). The
@@ -353,16 +336,6 @@ export function copyModelPackage(src: ModelPackage, newId: string, newName: stri
   if (!writeFile(`${destDir}/manifest.json`, serializeManifest(manifest))) return null;
   indexPackageDir(src.kind, newId, destDir);
   return manifestToPackage(manifest, destDir);
-}
-
-// True once at least one materialized package exists on disk. Lets callers
-// prefer real packages and fall back to the snapshot catalog while empty.
-export function hasMaterializedPackages(): boolean {
-  if (!exists(MODELS_HOME)) return false;
-  return listDir(MODELS_HOME).some((category) => {
-    const categoryPath = `${MODELS_HOME}/${category}`;
-    return exists(categoryPath) && listDir(categoryPath).length > 0;
-  });
 }
 
 // Read every materialized package back into ModelPackage[]. Skips any directory

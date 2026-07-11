@@ -2,7 +2,7 @@ import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage, ModelPart, ModelToolApi, ModelToolSnapshot, PrimitiveKind } from '../data/types';
 import ModelView, { type PartRange } from './ModelView';
-import { cookedMeshBlobData, cookedMeshRefForAsset, storedModelMeshData, storedModelFaceGroupData, primitiveMeshData, composeModelParts, packageMeshDoc } from '../data/hmscAssetCatalog';
+import { primitiveMeshData, composeModelParts, packageMeshDoc } from '../data/assetCatalog';
 
 // The outliner's part handlers, threaded from AppFrame (which owns state). Split from the
 // live parts/active so Workspace + Stage can carry the stable handlers and Stage supplies
@@ -230,8 +230,7 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
   );
 }
 
-// A cooked file path, resident cooked mesh, resident studio part, a typed
-// "missing" placeholder, or null (no live viewer → the stored-data doc card).
+// Package document, imported file, fresh primitive, or a typed missing package.
 function resolveViewer(model: ModelPackage): ViewerSource {
   // The package's saved model document beats every seed-shaped source (req_2753):
   // a saved-then-reopened model must show its EDITS, not re-arm its primitive seed.
@@ -246,40 +245,7 @@ function resolveViewer(model: ModelPackage): ViewerSource {
     return { kind: 'mesh', key: `primitive:${model.primitive}:${model.id}`, vertices: built.positions, faceGroups: built.faceGroups };
   }
   if (model.viewerPath) return { kind: 'path', path: model.viewerPath };
-
-  const meshRef = viewerMeshRefFor(model);
-  if (meshRef) {
-    const vertices = cookedMeshBlobData(meshRef);
-    return vertices
-      ? { kind: 'mesh', key: meshRef, vertices }
-      : { kind: 'missing', title: 'MODEL TRIANGLE DATA MISSING', label: meshRef };
-  }
-
-  const storedModelId = viewerStoredModelId(model);
-  if (storedModelId) {
-    const vertices = storedModelMeshData(storedModelId);
-    return vertices
-      ? { kind: 'mesh', key: `studio:${storedModelId}`, vertices, faceGroups: storedModelFaceGroupData(storedModelId) ?? undefined }
-      : { kind: 'missing', title: 'MODEL PART GEOMETRY MISSING', label: storedModelId };
-  }
-
-  return null;
-}
-
-function viewerMeshRefFor(model: ModelPackage): string | null {
-  if (model.viewerMeshRef) return model.viewerMeshRef;
-  const assetId = cookedAssetId(model);
-  return assetId ? cookedMeshRefForAsset(assetId) : null;
-}
-
-function cookedAssetId(model: ModelPackage): string | null {
-  if (model.sourceKind !== 'cooked-asset') return null;
-  return model.id.startsWith('cooked:') ? model.id.slice('cooked:'.length) : model.id;
-}
-
-function viewerStoredModelId(model: ModelPackage): string | null {
-  if (model.sourceKind !== 'studio-model') return null;
-  return model.id.startsWith('studio:') ? model.id.slice('studio:'.length) : model.id;
+  return { kind: 'missing', title: 'MODEL PACKAGE GEOMETRY MISSING', label: `${model.path}/mesh` };
 }
 
 function DocStat({ label, value }: { label: string; value: string }) {
