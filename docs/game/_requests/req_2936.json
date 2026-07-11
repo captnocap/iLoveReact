@@ -1,0 +1,37 @@
+{
+  "id": "req_2936",
+  "at": "2026-07-10T23:46:51.662Z",
+  "origin": "codex:019f4de6",
+  "text": "also take a moment and look at how you set the road shaders on this it is giving me all sidewalk and then sideways road in the most center tile [Image #1]",
+  "status": "review",
+  "sessionId": "019f4de6-2533-7ed0-8e75-190a8d7d1e46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T23:47:00.979Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T23:48:34.888Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root cause confirmed from the active ground formula: laneNorth/laneSouth/laneEast/laneWest had no default material entries, so every carriageway cell fell through to concrete; only median was road-bound. The median/road fill also consumed unrotated per-tile UVs. Fix binds all lane/junction cells to asphalt, binds the median to its marking variant, and rotates/infer axes from the semantic lane kinds so markings run with the road."
+    },
+    {
+      "at": "2026-07-11T00:04:43.849Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the pictured road surface failure at its material boundary: directional lane kinds and junctions now bind explicitly to asphalt instead of falling through to concrete, the median uses its marking variant, east-west lane UVs rotate, and neutral median/crosswalk cells infer axis from adjacent directional lanes so markings follow the road. Focused ground-formula tests and the full ReleaseFast editor build pass; user visual confirmation on existing and newly committed roads remains.",
+  "shas": [
+    "e0866eff1",
+    "e5b4baf21"
+  ],
+  "resolvedAt": "2026-07-11T00:04:43.849Z"
+}

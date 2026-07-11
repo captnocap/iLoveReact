@@ -1,0 +1,37 @@
+{
+  "id": "req_2933",
+  "at": "2026-07-10T23:37:49.169Z",
+  "origin": "codex:019f4de6",
+  "text": "Hell yeah that is sick! [Image #1] thats a great start. the next slice would be to be able to put in a TC/stop piece where it would come to a stop on its path",
+  "status": "review",
+  "sessionId": "019f4de6-2533-7ed0-8e75-190a8d7d1e46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T23:37:56.818Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T23:39:48.090Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Survey complete: implement TC Stop as a semantic control attached to a committed light-rail/railway Path by pathId plus distance along the shared curved centerline. The native tool will project hover/click to the nearest rail, preview the transverse stop piece before placement, persist controls in the RMAP, cascade them when their path is deleted, and expose one sampling contract for the later train-motion consumer. No rendered-geometry graph or loose prop representation."
+    },
+    {
+      "at": "2026-07-11T00:04:43.822Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added a first-class TC Stop authoring tool to Map Paint Paths. Hover projects onto the nearest committed light-rail or railway centerline and previews a transverse stop bar with posts; clicking persists a semantic Control keyed by stable path id and distance. Stop markers and the future train controller share samplePath point/tangent data, controls cascade with deleted paths, survive RMAP v4 reload, participate in native undo/redo, and can be deleted from the tray. Zig, TypeScript, oracle, and ReleaseFast build checks pass; live appearance and 60-second spikewatch remain for user review.",
+  "shas": [
+    "2014f87ad",
+    "e5b4baf21"
+  ],
+  "resolvedAt": "2026-07-11T00:04:43.822Z"
+}

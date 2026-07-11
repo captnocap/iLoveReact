@@ -1,0 +1,37 @@
+{
+  "id": "req_2934",
+  "at": "2026-07-10T23:41:32.003Z",
+  "origin": "codex:019f4de6",
+  "text": "oh also, one other thing you can set in this, is to give me some slope control for raised and lowered (tunel into the ground) so i could do subway approach in some areas and also above the street in others for a light rail. since i wouldnt want to do either a raised or lowered terrain (atleast not raised, that would break the whole point of it); and you can use the ground/floor 1 /.... system for height control, and treat the points between one click to another as the distance it takes for the slope gain; and the floor height makes it then easy to come and build appropriate structures to get up to it",
+  "status": "review",
+  "sessionId": "019f4de6-2533-7ed0-8e75-190a8d7d1e46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T23:41:38.658Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T23:44:13.416Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Folded into the active transport-path slice: every accepted path point will carry a signed 3 m storey elevation (Basement, Ground, Floor 1+). Changing level before the next click makes that segment's horizontal run the grade transition, while terrain remains unchanged; curve/render/sampling/persistence all consume the same 3D recipe."
+    },
+    {
+      "at": "2026-07-11T00:04:43.832Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added signed storey elevation to rail anchors using Basement, Ground, and Floor N at the existing 3 metre module. Changing LEVEL before the next click makes that point-to-point run gain or lose the storey height without sculpting terrain; the native ghost renders the grade live, limits are validated at 9 percent light rail and 4 percent railway, and 3D curve samples persist in RMAP v4. Focused grade, migration, and path-sampling tests plus ReleaseFast editor build pass; live slope/tunnel appearance and spikewatch remain for user review.",
+  "shas": [
+    "2014f87ad",
+    "e5b4baf21"
+  ],
+  "resolvedAt": "2026-07-11T00:04:43.832Z"
+}

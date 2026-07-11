@@ -1,0 +1,37 @@
+{
+  "id": "req_2935",
+  "at": "2026-07-10T23:43:04.241Z",
+  "origin": "codex:019f4de6",
+  "text": "oh and one more thing, this tool + pretty much all the other painting tools in the map editor all need to be instrumented with the proper undo/redo histories. i find i paint some terrain, dont like it, ctrl z and a building disappears lol",
+  "status": "review",
+  "sessionId": "019f4de6-2533-7ed0-8e75-190a8d7d1e46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T23:43:09.322Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T23:44:13.424Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Root contract: Map Paint owns a bounded native gesture history over its RMAP concern. Terrain, water, tile, flora, zone, binding, chunk, road, rail, and TC-stop mutations checkpoint at their real native boundary; Ctrl+Z/Ctrl+Shift+Z and the dock route to that journal whenever Map Paint is armed, so building history cannot be consumed by a paint undo."
+    },
+    {
+      "at": "2026-07-11T00:04:43.840Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Map Paint now owns a bounded native RMAP gesture journal covering terrain, water, tiles, flora, zones, structural map edits, roads, rails, and TC Stops. Ctrl+Z, Ctrl+Shift+Z, and dock buttons route to it whenever Map Paint is armed, so paint undo no longer consumes building history; restores recompile roads, dirty native mirrors, autosave, and mirror tile bindings back to chrome. Zig undo/redo restoration tests and the ReleaseFast editor build pass; user interaction and 60-second frame-time review remain.",
+  "shas": [
+    "2014f87ad",
+    "e5b4baf21"
+  ],
+  "resolvedAt": "2026-07-11T00:04:43.840Z"
+}
