@@ -1,3 +1,5 @@
+// SECTION F — Stage Tabs (see shell/regions.ts SECTIONS): the open-document
+// tab strip along the bottom edge of the stage.
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import type { WorkspaceDocument } from '../data/types';

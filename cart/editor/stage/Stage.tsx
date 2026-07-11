@@ -1,3 +1,7 @@
+// SECTION E — Stage (see shell/regions.ts SECTIONS): the flexing center
+// viewport — world / model / playtest / animation / material-focus surfaces +
+// their in-viewport docks (BuildBar, MapPaintDock). Section F (StageTabs)
+// renders below the viewport inside this same panel.
 import { C } from '../workspace.cls';
 import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';

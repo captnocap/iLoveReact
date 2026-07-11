@@ -1,3 +1,5 @@
+// SECTION H — Status Bar (see shell/regions.ts SECTIONS): the bottom build
+// dock — undo/redo, build journal, eventbus, perf, memory, status line, coords.
 import { useEffect, useState } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { useTelemetry } from '../../../runtime/hooks/useTelemetry';

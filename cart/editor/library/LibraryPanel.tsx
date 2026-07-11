@@ -1,3 +1,5 @@
+// SECTION C — Content Browser (see shell/regions.ts SECTIONS): the left panel —
+// content tree, search, asset grids, model gallery.
 import { useState } from 'react';
 import { Image } from '../../../runtime/primitives';
 import { C, accentFor } from '../workspace.cls';

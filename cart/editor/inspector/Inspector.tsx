@@ -1,3 +1,5 @@
+// SECTION G — Focus Panel (see shell/regions.ts SECTIONS): the right panel
+// (inspector / layers / grid / mission / routes) + its pane-switch rail.
 import { useEffect, useState } from 'react';
 import { Box, Col, Pressable, Row, ScrollView, Text } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';

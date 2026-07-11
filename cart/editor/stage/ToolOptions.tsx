@@ -1,3 +1,6 @@
+// SECTION D — Action Bar (see shell/regions.ts SECTIONS): THE toolbar — the
+// tool row pinned above the stage (mesh tools, snap, floor, view modes, paint
+// segment, map-paint bar).
 import { Fragment } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';

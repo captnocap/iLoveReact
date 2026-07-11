@@ -1,3 +1,5 @@
+// SECTION B — Left Rail (see shell/regions.ts SECTIONS): the vertical domain
+// icon stack on the window's left edge (Eye, Grid, Box, Actor, Data, Pipeline).
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { DOMAINS } from '../data/content';

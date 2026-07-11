@@ -9,15 +9,38 @@
 //
 // Region map (the user's vocabulary), top to bottom / left to right:
 //
-//   ┌────────────────────── window chrome (37) ──────────────────────┐
-//   │ rail │ content browser │        viewport (flexes)  │ focus     │
-//   │ (48) │      (350)      │  [action bar 36 on top]   │ panel     │
-//   │      │                 │                           │ (326)     │
-//   └────────────────────── status bar (31) ─────────────────────────┘
+//   ┌──────────────────── A window chrome (37) ──────────────────────┐
+//   │  B   │        C        │  D  [action bar 36]       │           │
+//   │ rail │ content browser │  E     viewport (flexes)  │  G focus  │
+//   │ (48) │      (350)      │                           │  panel    │
+//   │      │                 │  F  [stage tabs]          │  (326)    │
+//   └──────────────────── H status bar (31) ─────────────────────────┘
 //
 // Content rules that hang off this contract: no whole-panel scrolling (nested
 // scrolls inside bounded sub-areas instead), paged assets over long scroll,
 // and content must justify its use of the fixed space.
+//
+// ── SECTIONS (req_2970) — the prompting vocabulary ──────────────────────────
+// Every persistent block of the editor UI carries a section LETTER so an ask
+// can say "add that to section C" instead of describing geometry. A section is
+// a block in the UI flow (its pixel shape is irrelevant); there are exactly
+// eight, lettered in reading order — top strip, then left → right through the
+// body, then bottom. Floating layers (dialogs, popovers, context menus,
+// in-viewport docks) are NOT sections — they belong to the section that spawns
+// them. Each owning component is stamped `SECTION <X>` at its top; grep for
+// that to land in the right file.
+export const SECTIONS = {
+  A: { region: 'chrome', name: 'Window Chrome', file: 'shell/Chrome.tsx', contains: 'Shitty Games brand · File/Edit/View/Build menu bar · Compile · Editor/Play toggle · window controls' },
+  B: { region: 'leftRail', name: 'Left Rail', file: 'shell/LeftRail.tsx', contains: 'the vertical domain icon stack (Eye, Grid, Box, Actor, Data, Pipeline)' },
+  C: { region: 'contentBrowser', name: 'Content Browser', file: 'library/LibraryPanel.tsx', contains: 'content tree · search · asset grids · model gallery' },
+  D: { region: 'actionBar', name: 'Action Bar', file: 'stage/ToolOptions.tsx', contains: 'THE toolbar: tool row above the stage — mesh tools, snap, floor ▼/▲, view modes, paint segment (shell/PaintToolbar.tsx), map-paint bar (stage/MapPaintBar.tsx)' },
+  E: { region: 'viewport', name: 'Stage', file: 'stage/Stage.tsx', contains: 'the flexing center surface (world / model / playtest / animation / material focus) + its in-viewport docks (BuildBar, MapPaintDock)' },
+  F: { region: 'viewport', name: 'Stage Tabs', file: 'stage/StageTabs.tsx', contains: 'the open-document tab strip at the bottom edge of the stage' },
+  G: { region: 'focusPanel', name: 'Focus Panel', file: 'inspector/Inspector.tsx', contains: 'the right panel (inspector / layers / grid / mission / routes) + its 40px pane-switch rail' },
+  H: { region: 'statusBar', name: 'Status Bar', file: 'shell/BuildDock.tsx', contains: 'build dock: undo/redo · build journal · eventbus · perf · memory · status line · coords' },
+} as const;
+
+export type SectionLetter = keyof typeof SECTIONS;
 
 /** All region borders are the theme's thin border (theme:borderThin = 1px). */
 const BORDER = 1;

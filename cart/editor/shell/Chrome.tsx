@@ -1,3 +1,5 @@
+// SECTION A — Window Chrome (see shell/regions.ts SECTIONS): brand + menu bar +
+// Compile + Editor/Play toggle + window controls. The top strip of the editor.
 import { Icon } from '../../../runtime/icons/Icon';
 import { callHost } from '../../../runtime/ffi';
 import { C, accentFor } from '../workspace.cls';
