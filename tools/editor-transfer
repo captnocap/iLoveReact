@@ -9,12 +9,15 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCHIVE_NAME="reactjit-editor-transfer.tar.gz"
+MANIFEST_NAME=".reactjit-transfer.sha256"
 DEFAULT_ARCHIVE="$(dirname "$ROOT")/$ARCHIVE_NAME"
 SMB_URL="${EDITOR_TRANSFER_SMB_URL:-smb://mbp.local/josiahprice}"
 SMB_MOUNT_ROOT="${EDITOR_TRANSFER_SMB_ROOT:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/gvfs/smb-share:server=mbp.local,share=josiahprice}"
 
 STAGE_DIR=""
 TEMP_ARCHIVE=""
+SHA256_TOOL=()
+MANIFEST_FILE_COUNT=0
 
 cleanup() {
   if [[ -n "$STAGE_DIR" && -d "$STAGE_DIR" ]]; then
@@ -93,6 +96,7 @@ TRANSFER_RULES=(
   "--exclude=/.zig-cache/"
   "--exclude=/.cache/"
   "--exclude=/.rjit-sync-backup/"
+  "--exclude=/$MANIFEST_NAME"
   "--exclude=/deps/"
   "--exclude=/archive/"
   "--exclude=/love2d/"
@@ -113,6 +117,98 @@ TRANSFER_RULES=(
   "--exclude=.DS_Store"
 )
 
+select_sha256_tool() {
+  if (( ${#SHA256_TOOL[@]} > 0 )); then
+    return
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    SHA256_TOOL=(sha256sum)
+  elif command -v shasum >/dev/null 2>&1; then
+    SHA256_TOOL=(shasum -a 256)
+  else
+    die "SHA-256 verification requires sha256sum or shasum"
+  fi
+}
+
+validate_hashable_paths() {
+  local root="$1" path
+
+  while IFS= read -r -d '' path; do
+    case "$path" in
+      *$'\n'*|*$'\r'*|*\\*)
+        die "cannot safely record a checksum for path: $path"
+        ;;
+    esac
+  done < <(find "$root" -type f -print0)
+}
+
+validate_sha256_manifest() {
+  local manifest="$1" line hash marker path
+  local count=0
+
+  [[ -f "$manifest" ]] || die "archive is missing its SHA-256 manifest"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    hash="${line:0:64}"
+    marker="${line:64:2}"
+    path="${line:66}"
+
+    [[ ${#hash} -eq 64 && "$hash" != *[!0123456789abcdefABCDEF]* ]] \
+      || die "archive contains a malformed SHA-256 digest"
+    [[ "$marker" == "  " || "$marker" == " *" ]] \
+      || die "archive contains a malformed SHA-256 record"
+    case "$path" in
+      ./*) ;;
+      *) die "SHA-256 manifest contains an unsafe path: $path" ;;
+    esac
+    case "/${path#./}/" in
+      */../*) die "SHA-256 manifest contains an unsafe path: $path" ;;
+    esac
+    [[ "$path" != "./$MANIFEST_NAME" ]] \
+      || die "SHA-256 manifest cannot checksum itself"
+    count=$((count + 1))
+  done < "$manifest"
+
+  (( count > 0 )) || die "archive contains an empty SHA-256 manifest"
+  MANIFEST_FILE_COUNT="$count"
+}
+
+write_sha256_manifest() {
+  local root="$1" manifest="$1/$MANIFEST_NAME"
+
+  select_sha256_tool
+  validate_hashable_paths "$root"
+  (
+    cd "$root"
+    find . -type f ! -path "./$MANIFEST_NAME" \
+      -exec "${SHA256_TOOL[@]}" {} +
+  ) > "$manifest"
+  validate_sha256_manifest "$manifest"
+}
+
+verify_restored_layout() {
+  local source="$1" destination="$2" differences
+
+  differences="$(rsync -rlptn --delete --itemize-changes \
+    "${TRANSFER_RULES[@]}" "$source/" "$destination/")"
+  if [[ -n "$differences" ]]; then
+    printf 'Files still differ after restore:\n%s\n' "$differences" | sed -n '1,24p' >&2
+    return 1
+  fi
+}
+
+verify_sha256_manifest() {
+  local root="$1" manifest="$2"
+
+  select_sha256_tool
+  validate_sha256_manifest "$manifest"
+  printf 'Verifying %s transferred files with SHA-256 ...\n' "$MANIFEST_FILE_COUNT"
+  (
+    cd "$root"
+    "${SHA256_TOOL[@]}" --quiet --strict -c "$manifest"
+  )
+}
+
 pack_archive() {
   local archive parent size
   archive="$(archive_path "${1:-}")"
@@ -128,6 +224,9 @@ pack_archive() {
   printf 'Collecting editor source, models, assets, maps, and game data ...\n'
   rsync -rlpt "${TRANSFER_RULES[@]}" "$ROOT/" "$STAGE_DIR/reactjit/"
 
+  printf 'Recording SHA-256 hashes for every transferred file ...\n'
+  write_sha256_manifest "$STAGE_DIR/reactjit"
+
   printf 'Compressing one portable archive ...\n'
   tar -czf "$TEMP_ARCHIVE" -C "$STAGE_DIR" reactjit
   tar -tzf "$TEMP_ARCHIVE" >/dev/null
@@ -135,7 +234,7 @@ pack_archive() {
   TEMP_ARCHIVE=""
 
   size="$(du -h "$archive" | awk '{print $1}')"
-  printf 'Ready: %s (%s)\n' "$archive" "$size"
+  printf 'Ready: %s (%s, %s files hashed)\n' "$archive" "$size" "$MANIFEST_FILE_COUNT"
 }
 
 validate_archive_entries() {
@@ -153,7 +252,7 @@ validate_archive_entries() {
 }
 
 unpack_archive() {
-  local archive destination backup stamp
+  local archive destination backup manifest stamp
   archive="$(archive_path "${1:-}")"
   destination="${2:-$ROOT}"
 
@@ -170,6 +269,8 @@ unpack_archive() {
   printf 'Unpacking %s ...\n' "$archive"
   tar -xzf "$archive" -C "$STAGE_DIR"
   [[ -d "$STAGE_DIR/reactjit/cart/editor" ]] || die "archive is missing cart/editor"
+  manifest="$STAGE_DIR/reactjit/$MANIFEST_NAME"
+  validate_sha256_manifest "$manifest"
 
   mkdir -p -- "$destination"
   stamp="$(date +%Y%m%d-%H%M%S)"
@@ -179,8 +280,14 @@ unpack_archive() {
   rsync -rlpt --delete --backup --backup-dir="$backup" \
     "${TRANSFER_RULES[@]}" "$STAGE_DIR/reactjit/" "$destination/"
 
+  printf 'Rollback copy for replaced files: %s\n' "$backup"
+  verify_restored_layout "$STAGE_DIR/reactjit" "$destination" \
+    || die "post-unpack layout verification failed"
+  verify_sha256_manifest "$destination" "$manifest" \
+    || die "post-unpack SHA-256 verification failed"
+
   printf 'Restored: %s\n' "$destination"
-  printf 'Previous files, if replaced or removed: %s\n' "$backup"
+  printf 'Integrity verified: all %s transferred files match.\n' "$MANIFEST_FILE_COUNT"
 }
 
 case "${1:-}" in
