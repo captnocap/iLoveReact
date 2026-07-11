@@ -104,6 +104,13 @@ const TransportRenderTuning = struct {
     slab_color: [3]f32,
     sleeper_color: [3]f32,
     steel_color: [3]f32,
+    stop_bar_depth_m: f32,
+    stop_bar_height_m: f32,
+    stop_side_margin_m: f32,
+    stop_post_width_m: f32,
+    stop_post_height_m: f32,
+    stop_head_size_m: f32,
+    stop_color: [3]f32,
 };
 
 const TRANSPORT_RENDER = TransportRenderTuning{
@@ -129,6 +136,13 @@ const TRANSPORT_RENDER = TransportRenderTuning{
     .slab_color = .{ 0.32, 0.36, 0.41 },
     .sleeper_color = .{ 0.34, 0.22, 0.14 },
     .steel_color = .{ 0.68, 0.72, 0.76 },
+    .stop_bar_depth_m = 0.34,
+    .stop_bar_height_m = 0.12,
+    .stop_side_margin_m = 0.42,
+    .stop_post_width_m = 0.16,
+    .stop_post_height_m = 1.8,
+    .stop_head_size_m = 0.42,
+    .stop_color = .{ 1.0, 0.62, 0.08 },
 };
 // Live-foliage preview STARTING sizes (req_2497: painting flora grows LITERAL
 // blades/bushes/flowers/palms live). These are NOT walls (req_2843: "the
@@ -8170,9 +8184,9 @@ fn paintWaterSurface(raw_depths: []const f32, beds: []const f32, depths: []f32, 
 
 // ── semantic road / rail path preview (req_2924) ─────────────────────────────
 
-fn transportWorldPoint(point: map_transport.Point) [2]f32 {
+fn transportWorldPoint(point: map_transport.Point) [3]f32 {
     const author_origin = map_chunks.CHUNK_METERS / 2;
-    return .{ point.gx - author_origin, point.gz - author_origin };
+    return .{ point.gx - author_origin, point.elevation_m, point.gz - author_origin };
 }
 
 fn transportGroundY(runtime: *Runtime, x: f32, z: f32) f32 {
@@ -8188,8 +8202,10 @@ fn appendTransportBox(
     rows: *std.ArrayListUnmanaged(f32),
     ax: f32,
     az: f32,
+    a_elevation_m: f32,
     bx: f32,
     bz: f32,
+    b_elevation_m: f32,
     width_m: f32,
     height_m: f32,
     lift_m: f32,
@@ -8199,8 +8215,8 @@ fn appendTransportBox(
     const dz = bz - az;
     const horizontal = @sqrt(dx * dx + dz * dz);
     if (horizontal < 0.0001) return;
-    const ay = transportGroundY(runtime, ax, az) + lift_m + height_m * 0.5;
-    const by = transportGroundY(runtime, bx, bz) + lift_m + height_m * 0.5;
+    const ay = transportGroundY(runtime, ax, az) + a_elevation_m + lift_m + height_m * 0.5;
+    const by = transportGroundY(runtime, bx, bz) + b_elevation_m + lift_m + height_m * 0.5;
     const dy = by - ay;
     const length = @sqrt(horizontal * horizontal + dy * dy) + TRANSPORT_RENDER.segment_overlap_m;
     const degrees = 180.0 / std.math.pi;
@@ -8237,8 +8253,10 @@ fn appendRoadPreview(runtime: *Runtime, path: map_transport.Path, rows: *std.Arr
             runtime,
             rows,
             a[0],
+            a[2],
             a[1],
             b[0],
+            b[2],
             b[1],
             width_m,
             TRANSPORT_RENDER.preview_thickness_m,
@@ -8276,7 +8294,7 @@ fn appendRailPath(runtime: *Runtime, path: map_transport.Path, rows: *std.ArrayL
         const a = transportWorldPoint(curve[i]);
         const b = transportWorldPoint(curve[i + 1]);
         const dx = b[0] - a[0];
-        const dz = b[1] - a[1];
+        const dz = b[2] - a[2];
         const segment_length = @sqrt(dx * dx + dz * dz);
         if (segment_length < 0.0001) continue;
         const right_x = -dz / segment_length;
@@ -8286,8 +8304,10 @@ fn appendRailPath(runtime: *Runtime, path: map_transport.Path, rows: *std.ArrayL
             runtime,
             rows,
             a[0],
+            a[2],
             a[1],
             b[0],
+            b[2],
             b[1],
             bed_width,
             bed_height,
@@ -8305,9 +8325,11 @@ fn appendRailPath(runtime: *Runtime, path: map_transport.Path, rows: *std.ArrayL
                     runtime,
                     rows,
                     a[0] + right_x * offset,
-                    a[1] + right_z * offset,
+                    a[2] + right_z * offset,
+                    a[1],
                     b[0] + right_x * offset,
-                    b[1] + right_z * offset,
+                    b[2] + right_z * offset,
+                    b[1],
                     TRANSPORT_RENDER.rail_width_m,
                     TRANSPORT_RENDER.rail_height_m,
                     TRANSPORT_RENDER.surface_lift_m + bed_height,
@@ -8322,15 +8344,18 @@ fn appendRailPath(runtime: *Runtime, path: map_transport.Path, rows: *std.ArrayL
             while (sleeper_to_next <= segment_length) : (sleeper_to_next += TRANSPORT_RENDER.sleeper_spacing_m) {
                 const t = sleeper_to_next / segment_length;
                 const cx = a[0] + dx * t;
-                const cz = a[1] + dz * t;
+                const cz = a[2] + dz * t;
+                const elevation_m = a[1] + (b[1] - a[1]) * t;
                 const half_sleeper = bed_width * 0.5 - bed_margin * 0.25;
                 try appendTransportBox(
                     runtime,
                     rows,
                     cx - right_x * half_sleeper,
                     cz - right_z * half_sleeper,
+                    elevation_m,
                     cx + right_x * half_sleeper,
                     cz + right_z * half_sleeper,
+                    elevation_m,
                     TRANSPORT_RENDER.sleeper_width_m,
                     TRANSPORT_RENDER.sleeper_height_m,
                     TRANSPORT_RENDER.surface_lift_m + bed_height,
@@ -8340,6 +8365,111 @@ fn appendRailPath(runtime: *Runtime, path: map_transport.Path, rows: *std.ArrayL
             sleeper_to_next -= segment_length;
         }
     }
+}
+
+fn railBedMetrics(path: map_transport.Path) ?[2]f32 {
+    const kind = map_transport.kindOf(path.profile);
+    const profile = switch (path.profile) {
+        .light_rail => |rail| rail,
+        .railway => |rail| rail,
+        else => return null,
+    };
+    const tracks: usize = @intCast(std.math.clamp(profile.tracks, 1, map_transport.TUNING.max_tracks));
+    const track_span = TRANSPORT_RENDER.double_track_spacing_m * @as(f32, @floatFromInt(tracks - 1)) + TRANSPORT_RENDER.rail_gauge_m;
+    const is_light_rail = kind == .light_rail;
+    const margin = if (is_light_rail) TRANSPORT_RENDER.light_rail_slab_margin_m else TRANSPORT_RENDER.railway_bed_margin_m;
+    const height = if (is_light_rail) TRANSPORT_RENDER.light_rail_slab_height_m else TRANSPORT_RENDER.railway_bed_height_m;
+    return .{ track_span + margin * 2, height };
+}
+
+fn appendTransportUpright(
+    runtime: *Runtime,
+    rows: *std.ArrayListUnmanaged(f32),
+    x: f32,
+    z: f32,
+    elevation_m: f32,
+    width_m: f32,
+    height_m: f32,
+    lift_m: f32,
+    color: [3]f32,
+) !void {
+    const y = transportGroundY(runtime, x, z) + elevation_m + lift_m + height_m * 0.5;
+    try rows.appendSlice(runtime.allocator, &[INSTANCE_STRIDE]f32{
+        x, y, z,
+        0, 0, 0,
+        width_m, height_m, width_m,
+        color[0], color[1], color[2],
+    });
+}
+
+fn appendControlSample(
+    runtime: *Runtime,
+    path: map_transport.Path,
+    sample: map_transport.PathSample,
+    rows: *std.ArrayListUnmanaged(f32),
+    preview: bool,
+    valid: bool,
+) !void {
+    const metrics = railBedMetrics(path) orelse return;
+    const point = transportWorldPoint(sample.point);
+    const tangent_len = std.math.hypot(sample.tangent.gx, sample.tangent.gz);
+    if (tangent_len < 0.0001) return;
+    const right_x = -sample.tangent.gz / tangent_len;
+    const right_z = sample.tangent.gx / tangent_len;
+    const half_span = metrics[0] * 0.5 + TRANSPORT_RENDER.stop_side_margin_m;
+    const color = if (preview)
+        (if (valid) TRANSPORT_RENDER.preview_color else TRANSPORT_RENDER.invalid_color)
+    else
+        TRANSPORT_RENDER.stop_color;
+    const track_lift = TRANSPORT_RENDER.surface_lift_m + metrics[1] + TRANSPORT_RENDER.rail_height_m;
+
+    try appendTransportBox(
+        runtime,
+        rows,
+        point[0] - right_x * half_span,
+        point[2] - right_z * half_span,
+        point[1],
+        point[0] + right_x * half_span,
+        point[2] + right_z * half_span,
+        point[1],
+        TRANSPORT_RENDER.stop_bar_depth_m,
+        TRANSPORT_RENDER.stop_bar_height_m,
+        track_lift,
+        color,
+    );
+
+    for ([_]f32{ -1, 1 }) |side| {
+        const x = point[0] + right_x * half_span * side;
+        const z = point[2] + right_z * half_span * side;
+        try appendTransportUpright(
+            runtime,
+            rows,
+            x,
+            z,
+            point[1],
+            TRANSPORT_RENDER.stop_post_width_m,
+            TRANSPORT_RENDER.stop_post_height_m,
+            track_lift,
+            color,
+        );
+        try appendTransportUpright(
+            runtime,
+            rows,
+            x,
+            z,
+            point[1],
+            TRANSPORT_RENDER.stop_head_size_m,
+            TRANSPORT_RENDER.stop_head_size_m,
+            track_lift + TRANSPORT_RENDER.stop_post_height_m,
+            color,
+        );
+    }
+}
+
+fn appendCommittedControl(runtime: *Runtime, control: map_transport.Control, rows: *std.ArrayListUnmanaged(f32)) !void {
+    const path = map_transport.pathForId(control.path_id) orelse return;
+    const sample = map_transport.samplePath(path, control.distance_m) orelse return;
+    try appendControlSample(runtime, path, sample, rows, false, true);
 }
 
 fn updateTransportNode(runtime: *Runtime, maybe_kid: ?usize, rows: *std.ArrayListUnmanaged(f32)) void {
@@ -8364,6 +8494,14 @@ fn rebuildCommittedTransport(runtime: *Runtime, force: bool) void {
             break;
         };
     }
+    var controls: [map_transport.MAX_CONTROLS]map_transport.Control = undefined;
+    const control_count = map_transport.collectControls(controls[0..]);
+    for (controls[0..control_count]) |control| {
+        appendCommittedControl(runtime, control, &runtime.transport_committed_rows) catch {
+            runtime.transport_committed_rows.clearRetainingCapacity();
+            break;
+        };
+    }
     updateTransportNode(runtime, runtime.transport_committed_kid, &runtime.transport_committed_rows);
     runtime.transport_committed_revision = revision;
 }
@@ -8373,12 +8511,20 @@ fn rebuildTransportPreview(runtime: *Runtime, active: bool, force: bool) void {
     if (!force and runtime.transport_draft_revision == revision and runtime.transport_preview_active == active) return;
     runtime.transport_preview_rows.clearRetainingCapacity();
     if (active) {
-        if (map_transport.draftPreview()) |path| {
-            const validation = map_transport.validate(path);
-            const color = if (validation.valid) TRANSPORT_RENDER.preview_color else TRANSPORT_RENDER.invalid_color;
-            switch (map_transport.kindOf(path.profile)) {
-                .road => appendRoadPreview(runtime, path, &runtime.transport_preview_rows, color) catch runtime.transport_preview_rows.clearRetainingCapacity(),
-                .light_rail, .railway => appendRailPath(runtime, path, &runtime.transport_preview_rows, true, validation.valid) catch runtime.transport_preview_rows.clearRetainingCapacity(),
+        if (map_paint.pathAuthoringTool() == .stop) {
+            if (map_transport.controlPreview()) |preview| {
+                if (map_transport.pathForId(preview.path_id)) |path| {
+                    appendControlSample(runtime, path, preview.sample, &runtime.transport_preview_rows, true, preview.valid) catch runtime.transport_preview_rows.clearRetainingCapacity();
+                }
+            }
+        } else {
+            if (map_transport.draftPreview()) |path| {
+                const validation = map_transport.validate(path);
+                const color = if (validation.valid) TRANSPORT_RENDER.preview_color else TRANSPORT_RENDER.invalid_color;
+                switch (map_transport.kindOf(path.profile)) {
+                    .road => appendRoadPreview(runtime, path, &runtime.transport_preview_rows, color) catch runtime.transport_preview_rows.clearRetainingCapacity(),
+                    .light_rail, .railway => appendRailPath(runtime, path, &runtime.transport_preview_rows, true, validation.valid) catch runtime.transport_preview_rows.clearRetainingCapacity(),
+                }
             }
         }
     }
@@ -8765,7 +8911,11 @@ fn applyPaintLayer(runtime: *Runtime) void {
     // the brush gizmo: preview-only chrome over the footprint at the hover point
     if (runtime.paint_beam_kid) |beam_kid| {
         const node = &runtime.kid_list.items[beam_kid];
-        if (armed and runtime.paint_hover != null and !(path_active and map_transport.draftPointCount() > 0)) {
+        const path_has_ghost = path_active and (if (map_paint.pathAuthoringTool() == .stop)
+            map_transport.controlPreview() != null
+        else
+            map_transport.draftPointCount() > 0);
+        if (armed and runtime.paint_hover != null and !path_has_ghost) {
             const hover = runtime.paint_hover.?;
             const tool = map_paint.tool();
             dressPaintGizmo(runtime, node, hover, tool);

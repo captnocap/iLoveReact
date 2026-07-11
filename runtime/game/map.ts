@@ -71,7 +71,7 @@ export interface MapStrokeStats {
   waterDry: boolean;
 }
 
-export type MapAuthoringEventKind = 'stroke' | 'road.commit' | 'road.delete' | 'chunk.grow' | 'zone.drop' | 'tile.bindings';
+export type MapAuthoringEventKind = 'stroke' | 'road.commit' | 'road.delete' | 'chunk.grow' | 'zone.drop' | 'tile.bindings' | 'path.control.add' | 'path.control.delete';
 export type MapAuthoringEvent = {
   kind: MapAuthoringEventKind;
   tool: Required<MapTool>;
@@ -85,7 +85,7 @@ export type MapAuthoringEvent = {
   droppedBefore: number;
 };
 
-const AUTHORING_EVENT_KINDS: readonly MapAuthoringEventKind[] = ['stroke', 'road.commit', 'road.delete', 'chunk.grow', 'zone.drop', 'tile.bindings'];
+const AUTHORING_EVENT_KINDS: readonly MapAuthoringEventKind[] = ['stroke', 'road.commit', 'road.delete', 'chunk.grow', 'zone.drop', 'tile.bindings', 'path.control.add', 'path.control.delete'];
 const MAP_EVENT_FLOATS = 32;
 
 function enumValue<T>(items: readonly T[], raw: number | undefined, fallback: T): T {
@@ -239,11 +239,12 @@ export type MapPathProfile = MapRoadProfile & {
   tracks: number;
   curveRadiusM: number;
 };
-export type MapPathInvalidReason = 'none' | 'tooFewPoints' | 'segmentTooShort' | 'curveTooTight';
+export type MapPathInvalidReason = 'none' | 'tooFewPoints' | 'segmentTooShort' | 'curveTooTight' | 'gradeTooSteep';
+export type MapPathAuthoringTool = 'draw' | 'stop';
 
 const PATH_KIND_INDEX: Record<MapPathKind, number> = { road: 0, lightRail: 1, railway: 2 };
 const PATH_KINDS: readonly MapPathKind[] = ['road', 'lightRail', 'railway'];
-const PATH_INVALID_REASONS: readonly MapPathInvalidReason[] = ['none', 'tooFewPoints', 'segmentTooShort', 'curveTooTight'];
+const PATH_INVALID_REASONS: readonly MapPathInvalidReason[] = ['none', 'tooFewPoints', 'segmentTooShort', 'curveTooTight', 'gradeTooSteep'];
 
 /** Arm the shared semantic path pen. Roads and rails share gesture/curve data;
  * their compiler/render policies remain distinct behind this boundary. */
@@ -259,6 +260,15 @@ export function mapPathSetProfile(profile: MapPathProfile): void {
   // Honest hot-reload fallback: an older host can still author roads, but it
   // cannot pretend to persist/render rail paths it does not understand.
   if (profile.kind === 'road') mapRoadSetProfile(profile);
+}
+
+export function mapPathSetTool(tool: MapPathAuthoringTool): void {
+  callHost('__map_path_set_tool', undefined, tool === 'stop' ? 1 : 0);
+}
+
+/** Signed 3 m storey carried by the next accepted rail anchor. */
+export function mapPathSetLevel(level: number): void {
+  callHost('__map_path_set_level', undefined, Math.round(Number.isFinite(level) ? level : 0));
 }
 
 /** The draft profile road clicks author with. */
@@ -300,6 +310,10 @@ export function mapPathUndoPoint(): boolean {
 
 export function mapPathDelete(id: number): boolean {
   return callHost<number>(hasHost('__map_path_delete') ? '__map_path_delete' : '__map_road_delete', 0, id) === 1;
+}
+
+export function mapPathControlDelete(id: number): boolean {
+  return callHost<number>('__map_path_control_delete', 0, id) === 1;
 }
 
 /** Save the whole painting to a file — the blob never crosses the bridge (the
@@ -351,6 +365,14 @@ export type MapPathStats = {
   minCurveM: number | null;
   lastPathId: number;
   curveRadiusM: number;
+  maxGrade: number;
+  controls: number;
+  lastControlId: number;
+  controlPreviewPathId: number | null;
+  controlPreviewDistanceM: number | null;
+  controlPreviewValid: boolean;
+  authoringTool: MapPathAuthoringTool;
+  level: number;
 };
 
 export function mapPathStats(): MapPathStats {
@@ -362,7 +384,10 @@ export function mapPathStats(): MapPathStats {
       draftPoints: road.draftPoints, planTruncated: road.planTruncated,
       draftKind: road.draftPoints > 0 ? 'road' : null,
       valid: road.draftPoints >= 2, invalidReason: road.draftPoints >= 2 ? 'none' : 'tooFewPoints',
-      minCurveM: null, lastPathId: 0, curveRadiusM: 0,
+      minCurveM: null, lastPathId: 0, curveRadiusM: 0, maxGrade: 0,
+      controls: 0, lastControlId: 0, controlPreviewPathId: null,
+      controlPreviewDistanceM: null, controlPreviewValid: false,
+      authoringTool: 'draw', level: 0,
     };
   }
   const out = new Float32Array(ab);
@@ -381,7 +406,59 @@ export function mapPathStats(): MapPathStats {
     minCurveM: minCurve >= 0 ? minCurve : null,
     lastPathId: Math.trunc(out[9] ?? 0),
     curveRadiusM: out[10] ?? 0,
+    maxGrade: out[11] ?? 0,
+    controls: Math.trunc(out[12] ?? 0),
+    lastControlId: Math.trunc(out[13] ?? 0),
+    controlPreviewPathId: (out[14] ?? -1) >= 0 ? Math.trunc(out[14]!) : null,
+    controlPreviewDistanceM: (out[15] ?? -1) >= 0 ? out[15]! : null,
+    controlPreviewValid: (out[16] ?? 0) >= 0.5,
+    authoringTool: (out[17] ?? 0) >= 0.5 ? 'stop' : 'draw',
+    level: Math.trunc(out[18] ?? 0),
   };
+}
+
+export type MapHistoryKind = 'paintStroke' | 'pathCommit' | 'pathDelete' | 'controlAdd' | 'controlDelete' | 'tileBindings' | 'zoneDrop' | 'chunkGrow';
+export type MapHistoryStats = { undo: number; redo: number; bytes: number; dropped: number };
+export type MapHistoryResult = MapHistoryStats & { ok: boolean; kind: MapHistoryKind };
+
+const MAP_HISTORY_KINDS: readonly MapHistoryKind[] = [
+  'paintStroke', 'pathCommit', 'pathDelete', 'controlAdd',
+  'controlDelete', 'tileBindings', 'zoneDrop', 'chunkGrow',
+];
+
+export function mapHistory(): MapHistoryStats {
+  const ab = callHost<ArrayBuffer | null>('__map_history', null);
+  if (!ab) return { undo: 0, redo: 0, bytes: 0, dropped: 0 };
+  const out = new Float32Array(ab);
+  return {
+    undo: Math.trunc(out[0] ?? 0),
+    redo: Math.trunc(out[1] ?? 0),
+    bytes: Math.trunc(out[2] ?? 0),
+    dropped: Math.trunc(out[3] ?? 0),
+  };
+}
+
+function mapHistoryMutation(name: '__map_undo' | '__map_redo'): MapHistoryResult {
+  const ab = callHost<ArrayBuffer | null>(name, null);
+  if (!ab) return { ok: false, kind: 'paintStroke', undo: 0, redo: 0, bytes: 0, dropped: 0 };
+  const out = new Float32Array(ab);
+  const current = mapHistory();
+  return {
+    ok: (out[0] ?? 0) >= 0.5,
+    kind: MAP_HISTORY_KINDS[Math.max(0, Math.min(MAP_HISTORY_KINDS.length - 1, Math.trunc(out[1] ?? 0)))]!,
+    undo: Math.trunc(out[2] ?? current.undo),
+    redo: Math.trunc(out[3] ?? current.redo),
+    bytes: current.bytes,
+    dropped: Math.trunc(out[4] ?? current.dropped),
+  };
+}
+
+export function mapUndo(): MapHistoryResult {
+  return mapHistoryMutation('__map_undo');
+}
+
+export function mapRedo(): MapHistoryResult {
+  return mapHistoryMutation('__map_redo');
 }
 
 /** Begin a stroke at a world-meter point (chrome-driven path). */

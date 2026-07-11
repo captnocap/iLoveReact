@@ -24,7 +24,9 @@ pub const MAGIC: u32 = 0x50414d52; // "RMAP"
 /// v3 (req_2924): the trailing road-only recipes become tagged transport paths
 /// (road/light-rail/railway) and carry editable curve reach. v1/v2 still load
 /// as roads with their original 5 m fillet.
-pub const VERSION: u32 = 3;
+/// v4 (req_2933/req_2934): path anchors gain signed storey elevation and the
+/// tail gains semantic path controls (TC Stops keyed by path id + distance).
+pub const VERSION: u32 = 4;
 
 /// Floats per tile-binding row (engine.zig BINDING_FLOATS — kept in sync by
 /// the loadMap/saveMap call sites passing engine-owned buffers).
@@ -189,15 +191,13 @@ pub fn saveSizeUpperBound() usize {
     const per_cell_channel = 8 + chunks.TILE_CELLS * 4;
     const per_sample_channel = 8 + chunks.SAMPLE_CELLS * 4;
     const per_chunk = 8 + per_cell_channel * 6 + per_sample_channel * 2;
-    const path_bytes = 16 + transport.MAX_PATHS * (32 + transport.MAX_POINTS_PER_PATH * 8);
+    const path_bytes = 16 + transport.MAX_PATHS * (32 + transport.MAX_POINTS_PER_PATH * 12);
+    const control_bytes = 8 + transport.MAX_CONTROLS * 16;
     const binding_bytes = 8 + 256 * BINDING_FLOATS * 4;
-    return 16 + binding_bytes + chunks.chunkCount() * per_chunk + path_bytes;
+    return 16 + binding_bytes + chunks.chunkCount() * per_chunk + path_bytes + control_bytes;
 }
 
-/// Serialize the whole painting into dst. Returns bytes written, or 0 when dst
-/// is too small (LOUD — callers size by saveSizeUpperBound()).
-pub fn save(dst: []u8, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bindings: []const [BINDING_FLOATS]f32) usize {
-    var sink = Sink{ .buf = dst };
+fn writePainting(sink: *Sink, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bindings: []const [BINDING_FLOATS]f32) void {
     sink.put(u32, MAGIC);
     sink.put(u32, VERSION);
     sink.put(u32, @intCast(bindings.len));
@@ -211,13 +211,13 @@ pub fn save(dst: []u8, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bind
         sink.put(i32, chunk.cx);
         sink.put(i32, chunk.cz);
         baseCells(chunk, chunk.tiles[0..], under, 0, g_tile_scratch[0..]);
-        rleWriteCells(&sink, g_tile_scratch[0..]);
+        rleWriteCells(sink, g_tile_scratch[0..]);
         baseCells(chunk, chunk.materials[0..], under, 1, g_tile_scratch[0..]);
-        rleWriteCells(&sink, g_tile_scratch[0..]);
-        rleWriteCells(&sink, chunk.zones[0..]);
-        for (chunk.flora) |lane| rleWriteCells(&sink, lane[0..]);
-        rleWriteQuantized(&sink, chunk.height[0..], g_cell_scratch[0..]);
-        rleWriteQuantized(&sink, chunk.water[0..], g_cell_scratch[0..]);
+        rleWriteCells(sink, g_tile_scratch[0..]);
+        rleWriteCells(sink, chunk.zones[0..]);
+        for (chunk.flora) |lane| rleWriteCells(sink, lane[0..]);
+        rleWriteQuantized(sink, chunk.height[0..], g_cell_scratch[0..]);
+        rleWriteQuantized(sink, chunk.water[0..], g_cell_scratch[0..]);
     }
 
     var path_buf: [transport.MAX_PATHS]transport.Path = undefined;
@@ -245,8 +245,25 @@ pub fn save(dst: []u8, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bind
         for (path.points) |pt| {
             sink.put(f32, pt.gx);
             sink.put(f32, pt.gz);
+            sink.put(f32, pt.elevation_m);
         }
     }
+    var control_buf: [transport.MAX_CONTROLS]transport.Control = undefined;
+    const control_count = transport.collectControls(control_buf[0..]);
+    sink.put(u32, @intCast(control_count));
+    for (control_buf[0..control_count]) |control| {
+        sink.put(u32, control.id);
+        sink.put(u32, control.path_id);
+        sink.put(u8, @intFromEnum(control.kind));
+        sink.put(f32, control.distance_m);
+    }
+}
+
+/// Serialize the whole painting into dst. Returns bytes written, or 0 when dst
+/// is too small (LOUD — callers size with saveSizeUpperBound()).
+pub fn save(dst: []u8, under: *const std.AutoHashMapUnmanaged(u64, [2]i16), bindings: []const [BINDING_FLOATS]f32) usize {
+    var sink = Sink{ .buf = dst };
+    writePainting(&sink, under, bindings);
     return if (sink.overflow) 0 else sink.n;
 }
 
@@ -297,7 +314,6 @@ pub fn load(bytes: []const u8, bindings_buf: [][BINDING_FLOATS]f32, bindings_cou
     var si: u32 = 0;
     while (si < stroke_count) : (si += 1) {
         const id = src.get(u32);
-        _ = id; // ids re-mint sequentially; recipes carry no cross-references yet
         var profile: transport.Profile = undefined;
         var curve_radius_m = transport.TUNING.legacy_road_curve_radius_m;
         if (version >= 3) {
@@ -334,10 +350,30 @@ pub fn load(bytes: []const u8, bindings_buf: [][BINDING_FLOATS]f32, bindings_cou
         while (pi < point_count) : (pi += 1) {
             const gx = src.get(f32);
             const gz = src.get(f32);
-            transport.addDraftPoint(.{ .gx = gx, .gz = gz });
+            const elevation_m = if (version >= 4) src.get(f32) else 0;
+            transport.addDraftPoint(.{ .gx = gx, .gz = gz, .elevation_m = elevation_m });
         }
         if (src.bad) return false;
-        if (transport.commitDraft() == null) return false;
+        if ((if (version >= 4) transport.restoreDraft(id) else transport.commitDraft()) == null) return false;
+    }
+    if (version >= 4) {
+        const control_count = src.get(u32);
+        if (control_count > transport.MAX_CONTROLS) return false;
+        var control_index: u32 = 0;
+        while (control_index < control_count) : (control_index += 1) {
+            const id = src.get(u32);
+            const path_id = src.get(u32);
+            const raw_kind = src.get(u8);
+            if (raw_kind > @intFromEnum(transport.ControlKind.stop)) return false;
+            const distance_m = src.get(f32);
+            if (src.bad) return false;
+            if (transport.restoreControl(.{
+                .id = id,
+                .path_id = path_id,
+                .kind = @enumFromInt(raw_kind),
+                .distance_m = distance_m,
+            }) == null) return false;
+        }
     }
     return !src.bad;
 }
@@ -365,7 +401,9 @@ test "save/load round-trips every channel and road plus rail recipes" {
     transport.beginDraft(.{ .light_rail = .{ .tracks = 2 } }, 18);
     transport.addDraftPoint(.{ .gx = 10.5, .gz = 40.5 });
     transport.addDraftPoint(.{ .gx = 40.5, .gz = 40.5 });
-    _ = transport.commitDraft().?;
+    const rail_id = transport.commitDraft().?;
+    transport.setControlHover(.{ .gx = 24, .gz = 41 });
+    _ = transport.commitControlPreview().?;
 
     var empty_under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty;
     const bindings = [_][BINDING_FLOATS]f32{ .{ 41, 2, 1, 0 }, .{ 7, 0, 2, 1 } };
@@ -391,6 +429,7 @@ test "save/load round-trips every channel and road plus rail recipes" {
     try std.testing.expect(back.dirty.any());
     try std.testing.expectEqual(@as(usize, 1), roads.strokeCount());
     try std.testing.expectEqual(@as(usize, 1), transport.railCount());
+    try std.testing.expectEqual(@as(usize, 1), transport.controlCount());
 
     var stroke_buf: [roads.MAX_STROKES]roads.RoadStroke = undefined;
     _ = roads.collectStrokes(stroke_buf[0..]);
@@ -402,6 +441,36 @@ test "save/load round-trips every channel and road plus rail recipes" {
     try std.testing.expectEqual(@as(usize, 2), path_count);
     try std.testing.expectEqual(transport.Kind.light_rail, transport.kindOf(paths[1].profile));
     try std.testing.expectApproxEqAbs(@as(f32, 18), paths[1].curve_radius_m, 0.001);
+    try std.testing.expectEqual(rail_id, paths[1].id);
+    var controls: [transport.MAX_CONTROLS]transport.Control = undefined;
+    try std.testing.expectEqual(@as(usize, 1), transport.collectControls(controls[0..]));
+    try std.testing.expectEqual(rail_id, controls[0].path_id);
+}
+
+test "v4 round-trips signed storey elevations and stable path identity" {
+    chunks.clearAll();
+    transport.clearAll();
+    defer chunks.clearAll();
+    defer transport.clearAll();
+    _ = chunks.growChunk(0, 0).?;
+    transport.beginDraft(.{ .light_rail = .{} }, 18);
+    transport.addDraftPoint(.{ .gx = 0, .gz = 0, .elevation_m = -3 });
+    transport.addDraftPoint(.{ .gx = 60, .gz = 0, .elevation_m = 0 });
+    const path_id = transport.restoreDraft(37).?;
+
+    var under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty;
+    const empty_bindings = [_][BINDING_FLOATS]f32{};
+    const bytes = try std.testing.allocator.alloc(u8, saveSizeUpperBound());
+    defer std.testing.allocator.free(bytes);
+    const n = save(bytes, &under, empty_bindings[0..]);
+    try std.testing.expect(n > 0);
+    var bindings: [8][BINDING_FLOATS]f32 = undefined;
+    var binding_count: usize = 0;
+    try std.testing.expect(load(bytes[0..n], bindings[0..], &binding_count));
+
+    const restored = transport.pathForId(path_id).?;
+    try std.testing.expectApproxEqAbs(@as(f32, -3), restored.points[0].elevation_m, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), restored.points[1].elevation_m, 0.001);
 }
 
 test "save resolves road-stamped cells back to the undercoat base" {
@@ -462,6 +531,37 @@ test "v2 road recipes migrate with the historical five-metre curve" {
     try std.testing.expectEqual(@as(usize, 1), transport.collectPaths(paths[0..]));
     try std.testing.expectEqual(transport.Kind.road, transport.kindOf(paths[0].profile));
     try std.testing.expectApproxEqAbs(transport.TUNING.legacy_road_curve_radius_m, paths[0].curve_radius_m, 0.001);
+}
+
+test "v3 rail recipes migrate at Ground with no fabricated controls" {
+    var bytes: [160]u8 = @splat(0);
+    var sink = Sink{ .buf = bytes[0..] };
+    sink.put(u32, MAGIC);
+    sink.put(u32, 3);
+    sink.put(u32, 0); // bindings
+    sink.put(u32, 0); // chunks
+    sink.put(u32, 1); // paths
+    sink.put(u32, 9);
+    sink.put(u8, @intFromEnum(transport.Kind.light_rail));
+    sink.put(f32, 18);
+    sink.put(i32, 1); // tracks
+    sink.put(i32, 0);
+    sink.put(u8, 0);
+    sink.put(f32, 0);
+    sink.put(u32, 2);
+    sink.put(f32, 0);
+    sink.put(f32, 0);
+    sink.put(f32, 30);
+    sink.put(f32, 0);
+
+    var bindings: [8][BINDING_FLOATS]f32 = undefined;
+    var binding_count: usize = 0;
+    try std.testing.expect(load(bytes[0..sink.n], bindings[0..], &binding_count));
+    var paths: [transport.MAX_PATHS]transport.Path = undefined;
+    try std.testing.expectEqual(@as(usize, 1), transport.collectPaths(paths[0..]));
+    try std.testing.expectApproxEqAbs(@as(f32, 0), paths[0].points[0].elevation_m, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 0), paths[0].points[1].elevation_m, 0.001);
+    try std.testing.expectEqual(@as(usize, 0), transport.controlCount());
 }
 
 test "inspectHeader reads v1 and current chunk counts without loading the world" {

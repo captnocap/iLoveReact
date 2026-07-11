@@ -136,10 +136,15 @@ fn hostGrowChunk(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnF64(info, 0);
         return;
     };
+    const record = argBool(info, 2, true);
+    const before = chunks.chunkCount();
+    if (record) engine.beginMapHistory(.chunk_grow);
     const grew = chunks.growChunk(at[0], at[1]) != null;
+    const changed = chunks.chunkCount() > before;
+    if (record) engine.commitMapHistory(changed);
     if (grew) {
         _ = engine.autosaveNow();
-        if (argBool(info, 2, true)) engine.recordChunkGrow(at[0], at[1]);
+        if (record and changed) engine.recordChunkGrow(at[0], at[1]);
     }
     setReturnF64(info, if (grew) 1 else 0);
 }
@@ -271,8 +276,13 @@ fn hostSetZonePalette(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 fn hostSetTileBindings(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const rows = argF32Slice(info, 0);
+    const record = argBool(info, 1, false);
+    if (record) engine.beginMapHistory(.tile_bindings);
     engine.setTileBindings(rows);
-    if (argBool(info, 1, false)) engine.recordTileBindings(rows.len / engine.BINDING_FLOATS);
+    if (record) {
+        engine.commitMapHistory(true);
+        engine.recordTileBindings(rows.len / engine.BINDING_FLOATS);
+    }
 }
 
 // __map_get_tile_bindings() -> Float32 ArrayBuffer [count, then count×4 rows] —
@@ -296,9 +306,12 @@ fn hostDropZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const idx = argToF64(info, 0) orelse return;
     if (idx < 0 or !std.math.isFinite(idx)) return;
     const zone_idx: i16 = @intFromFloat(@min(idx, @as(f64, @floatFromInt(std.math.maxInt(i16)))));
+    const record = argBool(info, 1, true);
+    if (record) engine.beginMapHistory(.zone_drop);
     chunks.dropZoneIndex(zone_idx);
+    if (record) engine.commitMapHistory(true);
     _ = engine.autosaveNow();
-    if (argBool(info, 1, true)) engine.recordZoneDrop(@intCast(zone_idx));
+    if (record) engine.recordZoneDrop(@intCast(zone_idx));
 }
 
 // __map_set_flora_specs(f32 triples) — per flora kind [spec, count, chance]
@@ -343,6 +356,22 @@ fn hostPathSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     };
     const curve_radius: f32 = @floatCast(argToF64(info, 5) orelse engine.transport.defaultCurveRadius(kind));
     engine.setPathProfile(profile, curve_radius);
+}
+
+// __map_path_set_tool(0 draw | 1 TC stop)
+fn hostPathSetTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const raw = argToF64(info, 0) orelse 0;
+    const index: u8 = @intFromFloat(std.math.clamp(raw, 0, 1));
+    engine.setPathAuthoringTool(@enumFromInt(index));
+}
+
+// __map_path_set_level(signed storey) — one storey is transport.TUNING's 3 m.
+fn hostPathSetLevel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const raw = argToF64(info, 0) orelse 0;
+    if (!std.math.isFinite(raw)) return;
+    engine.setPathLevel(@intFromFloat(raw));
 }
 
 // __map_road_set_kinds(f32[8]) — RoadCellKind → content tile index, in enum
@@ -396,6 +425,16 @@ fn hostPathDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     hostRoadDelete(info_c);
 }
 
+fn hostPathControlDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const id = argToF64(info, 0) orelse 0;
+    if (id <= 0 or !std.math.isFinite(id)) {
+        setReturnF64(info, 0);
+        return;
+    }
+    setReturnF64(info, if (engine.pathControlDelete(@intFromFloat(id))) 1 else 0);
+}
+
 // __map_road_stats() -> [strokeCount, draftPoints, planTruncated]
 var road_stats_out: [3]f32 = undefined;
 
@@ -409,8 +448,9 @@ fn hostRoadStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 // __map_path_stats() -> [paths, roads, rails, draftPoints, planTruncated,
 // draftKind(-1 none), valid, invalidReason, minCurve(-1 straight), lastId,
-// draftCurveRadius]. Read-only UI-rate diagnostics.
-var path_stats_out: [11]f32 = undefined;
+// draftCurveRadius, maxGrade, controls, lastControlId, previewPathId,
+// previewDistance, previewValid, authoringTool, level]. UI-rate diagnostics.
+var path_stats_out: [19]f32 = undefined;
 
 fn hostPathStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -426,7 +466,55 @@ fn hostPathStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     path_stats_out[8] = if (std.math.isFinite(validation.min_curve_m)) validation.min_curve_m else -1;
     path_stats_out[9] = @floatFromInt(engine.transport.lastPathId());
     path_stats_out[10] = engine.transport.draftCurveRadius();
+    path_stats_out[11] = validation.max_grade;
+    path_stats_out[12] = @floatFromInt(engine.transport.controlCount());
+    path_stats_out[13] = @floatFromInt(engine.transport.lastControlId());
+    if (engine.transport.controlPreview()) |preview| {
+        path_stats_out[14] = @floatFromInt(preview.path_id);
+        path_stats_out[15] = preview.distance_m;
+        path_stats_out[16] = if (preview.valid) 1 else 0;
+    } else {
+        path_stats_out[14] = -1;
+        path_stats_out[15] = -1;
+        path_stats_out[16] = 0;
+    }
+    path_stats_out[17] = @floatFromInt(@intFromEnum(engine.pathAuthoringTool()));
+    path_stats_out[18] = @floatFromInt(engine.pathLevel());
     setReturnF32Buffer(info, path_stats_out[0..]);
+}
+
+// Dedicated Map Paint history. Ctrl+Z routing stays cart-side, but the journal
+// and every restore live beside the native RMAP mutations they own.
+var map_history_out: [4]f32 = undefined;
+var map_history_result_out: [5]f32 = undefined;
+
+fn hostMapHistory(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const stats = engine.mapHistoryStats();
+    map_history_out[0] = @floatFromInt(stats.undo);
+    map_history_out[1] = @floatFromInt(stats.redo);
+    map_history_out[2] = @floatFromInt(stats.bytes);
+    map_history_out[3] = @floatFromInt(stats.dropped);
+    setReturnF32Buffer(info, map_history_out[0..]);
+}
+
+fn setMapHistoryResult(info: v8.FunctionCallbackInfo, result: engine.MapHistoryResult) void {
+    map_history_result_out[0] = if (result.ok) 1 else 0;
+    map_history_result_out[1] = @floatFromInt(@intFromEnum(result.kind));
+    map_history_result_out[2] = @floatFromInt(result.stats.undo);
+    map_history_result_out[3] = @floatFromInt(result.stats.redo);
+    map_history_result_out[4] = @floatFromInt(result.stats.dropped);
+    setReturnF32Buffer(info, map_history_result_out[0..]);
+}
+
+fn hostMapUndo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setMapHistoryResult(info, engine.mapHistoryUndo());
+}
+
+fn hostMapRedo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setMapHistoryResult(info, engine.mapHistoryRedo());
 }
 
 fn argWorldPoint(info: v8.FunctionCallbackInfo) ?[2]f32 {
@@ -687,6 +775,8 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_set_flora_specs", hostSetFloraSpecs);
     v8_runtime.registerHostFn("__map_road_set_profile", hostRoadSetProfile);
     v8_runtime.registerHostFn("__map_path_set_profile", hostPathSetProfile);
+    v8_runtime.registerHostFn("__map_path_set_tool", hostPathSetTool);
+    v8_runtime.registerHostFn("__map_path_set_level", hostPathSetLevel);
     v8_runtime.registerHostFn("__map_road_set_kinds", hostRoadSetKinds);
     v8_runtime.registerHostFn("__map_road_commit", hostRoadCommit);
     v8_runtime.registerHostFn("__map_road_cancel", hostRoadCancel);
@@ -696,7 +786,11 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_path_cancel", hostPathCancel);
     v8_runtime.registerHostFn("__map_path_undo", hostPathUndo);
     v8_runtime.registerHostFn("__map_path_delete", hostPathDelete);
+    v8_runtime.registerHostFn("__map_path_control_delete", hostPathControlDelete);
     v8_runtime.registerHostFn("__map_path_stats", hostPathStats);
+    v8_runtime.registerHostFn("__map_history", hostMapHistory);
+    v8_runtime.registerHostFn("__map_undo", hostMapUndo);
+    v8_runtime.registerHostFn("__map_redo", hostMapRedo);
     v8_runtime.registerHostFn("__map_save_file", hostSaveFile);
     v8_runtime.registerHostFn("__map_inspect_file", hostInspectFile);
     v8_runtime.registerHostFn("__map_set_autosave_file", hostSetAutosaveFile);

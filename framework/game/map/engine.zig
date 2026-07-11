@@ -107,6 +107,8 @@ pub const AuthoringEventKind = enum(u8) {
     chunk_grow = 3,
     zone_drop = 4,
     tile_bindings = 5,
+    path_control_add = 6,
+    path_control_delete = 7,
 };
 
 pub const AuthoringEvent = struct {
@@ -231,6 +233,7 @@ pub fn reset() void {
     // that happened to be open before it. The caller must explicitly bind the
     // new document after seeding/loading it.
     g_autosave_len = 0;
+    clearMapHistory();
     chunks.clearAll();
     transport.clearAll();
     g_road_under.clearRetainingCapacity();
@@ -244,6 +247,8 @@ pub fn reset() void {
     g_seen.clearRetainingCapacity();
     g_authoring_event_count = 0;
     g_authoring_event_dropped = 0;
+    g_path_tool = .draw;
+    g_path_level = 0;
     // Painted-material bindings are authored per map and ride the RMAP. A new
     // map must not inherit the outgoing map's material table.
     g_tile_binding_count = 0;
@@ -252,11 +257,33 @@ pub fn reset() void {
 /// The profile and turn reach authored by the shared road/rail path tool.
 var g_path_profile: transport.Profile = .{ .road = .{} };
 var g_path_curve_radius_m: f32 = transport.TUNING.default_road_curve_radius_m;
+pub const PathAuthoringTool = enum(u8) { draw = 0, stop = 1 };
+var g_path_tool: PathAuthoringTool = .draw;
+var g_path_level: i32 = 0;
 
 pub fn setPathProfile(profile: transport.Profile, curve_radius_m: f32) void {
     g_path_profile = transport.clampProfile(profile);
     g_path_curve_radius_m = transport.clampCurveRadius(curve_radius_m);
     transport.updateDraftProfile(g_path_profile, g_path_curve_radius_m);
+}
+
+pub fn setPathAuthoringTool(tool_value: PathAuthoringTool) void {
+    if (g_path_tool == tool_value) return;
+    g_path_tool = tool_value;
+    transport.clearDraftHover();
+    transport.clearControlHover();
+}
+
+pub fn pathAuthoringTool() PathAuthoringTool {
+    return g_path_tool;
+}
+
+pub fn setPathLevel(level: i32) void {
+    g_path_level = transport.clampLevel(level);
+}
+
+pub fn pathLevel() i32 {
+    return g_path_level;
 }
 
 /// Compatibility door for callers that only know roads.
@@ -279,6 +306,8 @@ pub fn strokeBegin(x: f32, z: f32) void {
     g_stroke_started_ms = nowMs();
     g_seen.clearRetainingCapacity();
 
+    if (g_tool.channel != .road) beginMapHistory(.paint_stroke);
+
     if (g_tool.channel == .terrain and g_tool.mode == .paint and g_tool.terrain_tool == .ramp) {
         // anchor snapped to the cell center (PaintCanvas beginRamp:1541)
         const anchor = cellCenter(x, z);
@@ -291,6 +320,19 @@ pub fn strokeBegin(x: f32, z: f32) void {
         return;
     }
     if (g_tool.channel == .road) {
+        if (g_path_tool == .stop) {
+            beginMapHistory(.control_add);
+            transport.setControlHover(pathPointFromWorld(x, z));
+            if (transport.commitControlPreview()) |id| {
+                g_stats.stamps += 1;
+                commitMapHistory(true);
+                _ = autosaveNow();
+                pushAuthoringEvent(.{ .kind = .path_control_add, .tool = g_tool, .id = id });
+            } else {
+                commitMapHistory(false);
+            }
+            return;
+        }
         // One click accepts one semantic path anchor. The loader independently
         // feeds the current hover into setPathHover, so after the FIRST anchor
         // a full-width next piece is already visible before another click.
@@ -358,6 +400,7 @@ pub fn strokeEnd() StrokeStats {
     // Transport anchors are still a draft and are not serialized until Finish;
     // writing the unchanged RMAP after every click only stalls the live pen.
     if (g_stats.stamps > 0 and g_tool.channel != .road) _ = autosaveNow();
+    if (g_stroke_tool.channel != .road) commitMapHistory(g_stats.stamps > 0);
     pushStrokeAuthoringEvent();
     return g_stats;
 }
@@ -385,15 +428,25 @@ fn cellCenter(x: f32, z: f32) [2]f32 {
 /// use the grid only as a 25 cm snap substrate; their object model stays f32.
 fn pathPointFromWorld(x: f32, z: f32) transport.Point {
     const half = chunks.CHUNK_METERS / 2;
-    return transport.snapPoint(x + half, z + half);
+    const kind = transport.kindOf(g_path_profile);
+    const level = if (kind == .road) 0 else g_path_level;
+    return transport.snapPointAtLevel(x + half, z + half, level);
 }
 
 pub fn setPathHover(x: f32, z: f32) void {
-    transport.setDraftHover(pathPointFromWorld(x, z));
+    const point = pathPointFromWorld(x, z);
+    if (g_path_tool == .stop) {
+        transport.clearDraftHover();
+        transport.setControlHover(point);
+    } else {
+        transport.clearControlHover();
+        transport.setDraftHover(point);
+    }
 }
 
 pub fn clearPathHover() void {
     transport.clearDraftHover();
+    transport.clearControlHover();
 }
 
 // ── sample dispatch ───────────────────────────────────────────────────────────
@@ -1222,8 +1275,13 @@ pub fn roadsRestamp() void {
 /// rail remains a semantic path rendered directly from its recipe.
 pub fn pathCommit() ?u32 {
     const kind = transport.draftKind() orelse return null;
-    const id = transport.commitDraft() orelse return null;
+    beginMapHistory(.path_commit);
+    const id = transport.commitDraft() orelse {
+        commitMapHistory(false);
+        return null;
+    };
     if (kind == .road) roadsRestamp();
+    commitMapHistory(true);
     _ = autosaveNow();
     pushAuthoringEvent(.{ .kind = .road_commit, .tool = g_tool, .id = id });
     return id;
@@ -1247,11 +1305,28 @@ pub fn pathUndoPoint() bool {
 
 pub fn pathDelete(id: u32) bool {
     const kind = transport.kindForId(id) orelse return false;
+    beginMapHistory(.path_delete);
     const ok = transport.deletePath(id);
     if (ok) {
         if (kind == .road) roadsRestamp();
+        commitMapHistory(true);
         _ = autosaveNow();
         pushAuthoringEvent(.{ .kind = .road_delete, .tool = g_tool, .id = id });
+    } else {
+        commitMapHistory(false);
+    }
+    return ok;
+}
+
+pub fn pathControlDelete(id: u32) bool {
+    beginMapHistory(.control_delete);
+    const ok = transport.deleteControl(id);
+    if (ok) {
+        commitMapHistory(true);
+        _ = autosaveNow();
+        pushAuthoringEvent(.{ .kind = .path_control_delete, .tool = g_tool, .id = id });
+    } else {
+        commitMapHistory(false);
     }
     return ok;
 }
@@ -1309,6 +1384,213 @@ pub fn floraSpec(kind: i16) ?FloraSpec {
 
 pub const store = @import("store.zig");
 
+// ── concern-owned Map Paint undo/redo (req_2935) ─────────────────────────────
+// One history unit is one native mutation boundary: a completed stroke, path
+// commit/delete, TC Stop placement/delete, or structural map edit. Snapshots
+// use the already-compact RMAP source format, so every channel restores as one
+// coherent concern and Ctrl+Z can never consume the building workspace stack.
+
+pub const MapHistoryKind = enum(u8) {
+    paint_stroke = 0,
+    path_commit = 1,
+    path_delete = 2,
+    control_add = 3,
+    control_delete = 4,
+    tile_bindings = 5,
+    zone_drop = 6,
+    chunk_grow = 7,
+};
+
+const MapHistoryTuning = struct {
+    max_entries_per_stack: usize,
+    max_bytes_per_stack: usize,
+};
+
+const MAP_HISTORY_TUNING = MapHistoryTuning{
+    .max_entries_per_stack = 64,
+    .max_bytes_per_stack = 64 * 1024 * 1024,
+};
+
+const MapSnapshot = struct {
+    storage: ?[]u8 = null,
+    used: usize = 0,
+    kind: MapHistoryKind = .paint_stroke,
+};
+
+pub const MapHistoryStats = struct {
+    undo: usize,
+    redo: usize,
+    bytes: usize,
+    dropped: u32,
+};
+
+pub const MapHistoryResult = struct {
+    ok: bool,
+    kind: MapHistoryKind,
+    stats: MapHistoryStats,
+};
+
+var g_map_undo: [MAP_HISTORY_TUNING.max_entries_per_stack]MapSnapshot = @splat(.{});
+var g_map_redo: [MAP_HISTORY_TUNING.max_entries_per_stack]MapSnapshot = @splat(.{});
+var g_map_undo_count: usize = 0;
+var g_map_redo_count: usize = 0;
+var g_map_history_pending: ?MapSnapshot = null;
+var g_map_history_dropped: u32 = 0;
+var g_map_history_restoring = false;
+
+fn freeMapSnapshot(snapshot: *MapSnapshot) void {
+    if (snapshot.storage) |storage| std.heap.page_allocator.free(storage);
+    snapshot.* = .{};
+}
+
+fn clearMapStack(stack: []MapSnapshot, count: *usize) void {
+    for (stack[0..count.*]) |*snapshot| freeMapSnapshot(snapshot);
+    count.* = 0;
+}
+
+pub fn clearMapHistory() void {
+    clearMapStack(g_map_undo[0..], &g_map_undo_count);
+    clearMapStack(g_map_redo[0..], &g_map_redo_count);
+    if (g_map_history_pending) |*pending| freeMapSnapshot(pending);
+    g_map_history_pending = null;
+    g_map_history_dropped = 0;
+}
+
+fn stackBytes(stack: []const MapSnapshot, count: usize) usize {
+    var bytes: usize = 0;
+    for (stack[0..count]) |snapshot| if (snapshot.storage) |storage| {
+        bytes += storage.len;
+    };
+    return bytes;
+}
+
+fn dropOldestMapSnapshot(stack: []MapSnapshot, count: *usize) void {
+    if (count.* == 0) return;
+    freeMapSnapshot(&stack[0]);
+    if (count.* > 1) std.mem.copyForwards(MapSnapshot, stack[0 .. count.* - 1], stack[1..count.*]);
+    count.* -= 1;
+    stack[count.*] = .{};
+    g_map_history_dropped +%= 1;
+}
+
+fn pushMapSnapshot(stack: []MapSnapshot, count: *usize, snapshot: MapSnapshot) void {
+    const size = if (snapshot.storage) |storage| storage.len else 0;
+    if (size == 0 or size > MAP_HISTORY_TUNING.max_bytes_per_stack) {
+        var rejected = snapshot;
+        freeMapSnapshot(&rejected);
+        g_map_history_dropped +%= 1;
+        return;
+    }
+    while (count.* >= stack.len or (count.* > 0 and stackBytes(stack, count.*) + size > MAP_HISTORY_TUNING.max_bytes_per_stack)) {
+        dropOldestMapSnapshot(stack, count);
+    }
+    stack[count.*] = snapshot;
+    count.* += 1;
+}
+
+fn popMapSnapshot(stack: []MapSnapshot, count: *usize) ?MapSnapshot {
+    if (count.* == 0) return null;
+    count.* -= 1;
+    const snapshot = stack[count.*];
+    stack[count.*] = .{};
+    return snapshot;
+}
+
+fn captureMapSnapshot(kind: MapHistoryKind) ?MapSnapshot {
+    const alloc = std.heap.page_allocator;
+    const capacity = saveSizeUpperBound();
+    var storage = alloc.alloc(u8, capacity) catch return null;
+    const used = saveMap(storage);
+    if (used == 0) {
+        alloc.free(storage);
+        return null;
+    }
+    storage = alloc.realloc(storage, used) catch storage;
+    return .{ .storage = storage, .used = used, .kind = kind };
+}
+
+pub fn beginMapHistory(kind: MapHistoryKind) void {
+    if (g_map_history_restoring) return;
+    if (g_map_history_pending) |*pending| freeMapSnapshot(pending);
+    g_map_history_pending = captureMapSnapshot(kind);
+}
+
+pub fn commitMapHistory(changed: bool) void {
+    if (g_map_history_restoring) return;
+    var pending = g_map_history_pending orelse return;
+    g_map_history_pending = null;
+    if (!changed) {
+        freeMapSnapshot(&pending);
+        return;
+    }
+    clearMapStack(g_map_redo[0..], &g_map_redo_count);
+    pushMapSnapshot(g_map_undo[0..], &g_map_undo_count, pending);
+}
+
+pub fn mapHistoryStats() MapHistoryStats {
+    return .{
+        .undo = g_map_undo_count,
+        .redo = g_map_redo_count,
+        .bytes = stackBytes(g_map_undo[0..], g_map_undo_count) + stackBytes(g_map_redo[0..], g_map_redo_count),
+        .dropped = g_map_history_dropped,
+    };
+}
+
+fn restoreMapSnapshot(snapshot: MapSnapshot) bool {
+    const storage = snapshot.storage orelse return false;
+    g_map_history_restoring = true;
+    defer g_map_history_restoring = false;
+    return loadMapInternal(storage[0..snapshot.used], false);
+}
+
+pub fn mapHistoryUndo() MapHistoryResult {
+    var target = popMapSnapshot(g_map_undo[0..], &g_map_undo_count) orelse return .{
+        .ok = false,
+        .kind = .paint_stroke,
+        .stats = mapHistoryStats(),
+    };
+    const current = captureMapSnapshot(target.kind);
+    const ok = restoreMapSnapshot(target);
+    if (ok) {
+        if (current) |snapshot| pushMapSnapshot(g_map_redo[0..], &g_map_redo_count, snapshot);
+        _ = autosaveNow();
+    } else {
+        if (current) |snapshot| {
+            var discarded = snapshot;
+            freeMapSnapshot(&discarded);
+        }
+        pushMapSnapshot(g_map_undo[0..], &g_map_undo_count, target);
+        return .{ .ok = false, .kind = target.kind, .stats = mapHistoryStats() };
+    }
+    const kind = target.kind;
+    freeMapSnapshot(&target);
+    return .{ .ok = true, .kind = kind, .stats = mapHistoryStats() };
+}
+
+pub fn mapHistoryRedo() MapHistoryResult {
+    var target = popMapSnapshot(g_map_redo[0..], &g_map_redo_count) orelse return .{
+        .ok = false,
+        .kind = .paint_stroke,
+        .stats = mapHistoryStats(),
+    };
+    const current = captureMapSnapshot(target.kind);
+    const ok = restoreMapSnapshot(target);
+    if (ok) {
+        if (current) |snapshot| pushMapSnapshot(g_map_undo[0..], &g_map_undo_count, snapshot);
+        _ = autosaveNow();
+    } else {
+        if (current) |snapshot| {
+            var discarded = snapshot;
+            freeMapSnapshot(&discarded);
+        }
+        pushMapSnapshot(g_map_redo[0..], &g_map_redo_count, target);
+        return .{ .ok = false, .kind = target.kind, .stats = mapHistoryStats() };
+    }
+    const kind = target.kind;
+    freeMapSnapshot(&target);
+    return .{ .ok = true, .kind = kind, .stats = mapHistoryStats() };
+}
+
 pub fn saveSizeUpperBound() usize {
     return store.saveSizeUpperBound();
 }
@@ -1320,13 +1602,18 @@ pub fn saveMap(dst: []u8) usize {
 
 /// Rebuild the painting from a save blob, then re-derive the road stamps
 /// (grid = base + roads, req_0795). False on a malformed blob (world cleared).
-pub fn loadMap(bytes: []const u8) bool {
+fn loadMapInternal(bytes: []const u8, clear_history: bool) bool {
+    if (clear_history) clearMapHistory();
     g_road_under.clearRetainingCapacity();
     var binding_count: usize = 0;
     const ok = store.load(bytes, g_tile_bindings[0..], &binding_count);
     g_tile_binding_count = if (ok) binding_count else 0;
     if (ok) roadsRestamp();
     return ok;
+}
+
+pub fn loadMap(bytes: []const u8) bool {
+    return loadMapInternal(bytes, true);
 }
 
 // ── autosave (SESSIONSAVE req_2765) ──────────────────────────────────────────
