@@ -805,11 +805,40 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // (global door — AppFrame re-stamps its outliner rows' lo/hi and re-scopes the active
   // part). Returns false when the host carries no ranges (unparted mesh) so callers can
   // fall back to establishing them with a push.
+  const partRangeAliasesRef = useRef<Map<string, { lo: number; hi: number }>>(new Map());
+  const partRangeKey = (range: { lo: number; hi: number }) => `${range.lo}:${range.hi}`;
+  const resolveLivePartRange = (lo: number, hi: number): { lo: number; hi: number } => {
+    let candidate = { lo, hi };
+    // Same-count topology edits preserve part rank while renumbering group ids.
+    // Follow the bounded alias chain until it reaches an exact CURRENT range;
+    // the native duplicate boundary rejects it if it cannot be resolved.
+    for (let depth = 0; depth < 32; depth += 1) {
+      if (partRangesRef.current.some((range) => range.lo === candidate.lo && range.hi === candidate.hi)) return candidate;
+      const next = partRangeAliasesRef.current.get(partRangeKey(candidate));
+      if (!next) break;
+      candidate = next;
+    }
+    return candidate;
+  };
   const resyncPartRanges = (): boolean => {
     const ranges = meshPartRangesRead();
     if (!ranges) return false;
     const prev = partRangesRef.current;
     const changed = ranges.length !== prev.length || ranges.some((r, i) => r.lo !== prev[i]?.lo || r.hi !== prev[i]?.hi);
+    if (changed) {
+      if (prev.length === ranges.length) {
+        prev.forEach((oldRange, index) => {
+          const nextRange = ranges[index];
+          if (nextRange && (oldRange.lo !== nextRange.lo || oldRange.hi !== nextRange.hi)) {
+            partRangeAliasesRef.current.set(partRangeKey(oldRange), nextRange);
+          }
+        });
+      } else {
+        // Append/detach/merge changes partition cardinality; old ranks no longer
+        // identify parts safely, so only the strict native boundary may decide.
+        partRangeAliasesRef.current.clear();
+      }
+    }
     partRangesRef.current = ranges;
     if (changed) (globalThis as any).__modelPartRangesChanged?.(ranges);
     return true;
@@ -1226,7 +1255,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // ── Studio-parity part ops. Each adopts the host's new mesh key; the host grew or
     // fused its range truth inside the op, so the mirror resyncs (fallback: seed push).
     duplicatePart: (lo, hi, mirrorAxis) => {
-      const r = meshDuplicateRange(lo, hi, mirrorAxis);
+      const live = resolveLivePartRange(lo, hi);
+      const r = meshDuplicateRange(live.lo, live.hi, mirrorAxis);
       if (!adoptMesh(r) || r?.lo == null || r?.hi == null) return null;
       // No tint here — the host copied the source part's per-face paint onto the twin.
       if (!resyncPartRanges()) {
@@ -1690,7 +1720,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     //   mode:N sel:N add:N range:lo,hi pick:x,y pickadd:x,y box:x0,y0,x1,y1 snap revert
     //   clear scope:lo,hi nudge:axis,amt scaleby:factor gizmo:N undo redo del flip glass spiketrace:0|1
     //   grouppaint:lo,hi,r,g,b
-    //   detail:px wait:frames report atlas:/path.png parts addpart:kind orbit:dx,dy
+    //   detail:px wait:frames report atlas:/path.png parts historylog duprange:lo,hi dupalias:lo,hi addpart:kind orbit:dx,dy
     //   lcbegin lcprev:dir,cuts,off lcend:0|1 lcstate  (loop-cut session; off = 0..1 frac)
     //   paintend paintundo paintredo painthist layers layerop:op,id[,arg] progread
     //   progapply  (stroke journal + paint layers, req_2672)
@@ -1745,6 +1775,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         else if (name === 'undo') { const r = meshUndoDoor(); adoptMesh(r); console.error(`[meshops] undo → ${JSON.stringify(r)} history=${host.__mesh_history?.() ?? 'n/a'}`); }
         else if (name === 'redo') { const r = meshRedoDoor(); adoptMesh(r); console.error(`[meshops] redo → ${JSON.stringify(r)} history=${host.__mesh_history?.() ?? 'n/a'}`); }
         else if (name === 'history') console.error(`[meshops] history → ${host.__mesh_history?.() ?? 'n/a'}`);
+        else if (name === 'historylog') console.error(`[meshops] historylog → ${host.__mesh_history_log?.() ?? 'n/a'}`);
         // key:z / key:ctrl,z — synthesize a REAL SDL key edge through the live bridge
         // (__ifttt_onKeyDown, the exact global engine.zig pumps). This drives the FULL
         // keyboard path headlessly: bridge → __keydown bus → AppFrame's normalized
@@ -1876,6 +1907,19 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           let owned = 0;
           for (const pr of ranges ?? []) owned += Number(host.__mesh_group_face_count?.(pr.lo, pr.hi) ?? 0);
           console.error(`[meshops] parts → ${JSON.stringify(ranges)} ownedFaces=${owned} totalFaces=${total} partition=${ranges && owned === total ? 'OK' : 'BROKEN'}`);
+        }
+        // duprange:lo,hi — raw native duplicate boundary, useful for proving a stale
+        // cart range is rejected instead of silently cloning a partial part.
+        else if (name === 'duprange') {
+          const r = meshDuplicateRange(num(a[0]), num(a[1]), -1);
+          adoptMesh(r);
+          console.error(`[meshops] duprange:${a[0]},${a[1]} → ${JSON.stringify(r)}`);
+        }
+        // dupalias uses the viewer boundary (the same one the outliner calls), so
+        // a pre-renumber pair proves it resolves to the complete current part.
+        else if (name === 'dupalias') {
+          const r = toolApiRef.current?.duplicatePart(num(a[0]), num(a[1]), -1) ?? null;
+          console.error(`[meshops] dupalias:${a[0]},${a[1]} → ${JSON.stringify(r)}`);
         }
         // addpart:<kind> — append a primitive as a NEW PART through the real appendPart
         // path (host append + range truth + tint), the headless twin of outliner Add.

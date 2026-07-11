@@ -887,6 +887,18 @@ fn hostMeshHistory(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     setReturnString(info, json);
 }
 
+/// __mesh_history_log() → complete bounded journal JSON. This is intentionally
+/// read-only: the model context menu uses it to inspect operation chronology,
+/// topology counts, and exact face ownership without perturbing the journal.
+fn hostMeshHistoryLog(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const allocator = std.heap.c_allocator;
+    if (scene3d.meshJournalLogJson(allocator)) |json| {
+        defer allocator.free(json);
+        setReturnString(info, json);
+    } else setReturnString(info, "");
+}
+
 /// __mesh_journal_note(json?) — with an argument: SET the cart's opaque parts-metadata
 /// note (rides every subsequent journal snapshot). Without: GET the current note (the
 /// one an undo/redo just restored) — "" when none. The note lets the outliner resync
@@ -2754,6 +2766,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_undo", hostMeshUndo);
     v8_runtime.registerHostFn("__mesh_redo", hostMeshRedo);
     v8_runtime.registerHostFn("__mesh_history", hostMeshHistory);
+    v8_runtime.registerHostFn("__mesh_history_log", hostMeshHistoryLog);
     v8_runtime.registerHostFn("__mesh_journal_note", hostMeshJournalNote);
     v8_runtime.registerHostFn("__mesh_duplicate_range", hostMeshDuplicateRange);
     v8_runtime.registerHostFn("__mesh_path_array", hostMeshPathArray);

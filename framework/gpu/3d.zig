@@ -21,6 +21,7 @@ const paint_islands_mod = @import("paint_islands.zig");
 const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
 const mesh_edit = @import("mesh_edit.zig");
+const mesh_journal_log = @import("mesh_journal_log.zig");
 const path_array = @import("path_array.zig");
 const stage_scale = @import("stage_scale.zig");
 const capsules = @import("capsules.zig");
@@ -2578,8 +2579,11 @@ var g_gizmo_snap: ?JournalEntry = null; // taken at gizmo-begin; committed only 
 fn journalEntryBytes(e: *const JournalEntry) usize {
     var n: usize = e.verts.len * @sizeOf(f32);
     if (e.groups) |g| n += g.len * @sizeOf(u32);
+    if (e.part_ranges) |p| n += p.len * @sizeOf(u32);
     if (e.colors) |c| n += c.len;
+    n += e.hidden.len * @sizeOf(JournalHidden);
     for (e.hidden) |h| n += h.verts.len * @sizeOf(f32) + h.groups.len * @sizeOf(u32);
+    if (e.note) |note| n += note.len;
     return n;
 }
 
@@ -2701,6 +2705,75 @@ pub fn meshJournalCounts() [2]u32 {
     return .{ @intCast(g_journal_undo.items.len), @intCast(g_journal_redo.items.len) };
 }
 
+fn journalLogEntryView(entry: *const JournalEntry) mesh_journal_log.EntryView {
+    return .{
+        .label = entry.label,
+        .state = .{
+            .vertex_count = entry.count,
+            .groups = entry.groups,
+            .part_ranges = entry.part_ranges,
+            .hidden_parts = entry.hidden.len,
+            .bytes = journalEntryBytes(entry),
+            .note = entry.note,
+        },
+    };
+}
+
+fn journalCurrentStateBytes(groups: ?[]const u32) usize {
+    var bytes = @as(usize, g_edit_count) * 8 * @sizeOf(f32);
+    if (groups) |rows| bytes += rows.len * @sizeOf(u32);
+    if (model_source.partRanges()) |ranges| bytes += ranges.len * @sizeOf(u32);
+    if (model_source.colors()) |colors| bytes += colors.len;
+    bytes += g_hidden_groups.items.len * @sizeOf(HiddenGroup);
+    for (g_hidden_groups.items) |hidden| {
+        bytes += hidden.verts.len * @sizeOf(f32) + hidden.groups.len * @sizeOf(u32);
+    }
+    if (g_journal_note) |note| bytes += note.len;
+    return bytes;
+}
+
+/// Full, bounded in-memory edit history for the model surface's right-click
+/// diagnostics. Every snapshot includes topology counts and exact outliner
+/// group-range ownership; redo is emitted in the order it will be replayed.
+pub fn meshJournalLogJson(allocator: std.mem.Allocator) ?[]u8 {
+    const undo = allocator.alloc(mesh_journal_log.EntryView, g_journal_undo.items.len) catch return null;
+    defer allocator.free(undo);
+    for (g_journal_undo.items, 0..) |*entry, index| undo[index] = journalLogEntryView(entry);
+
+    const redo = allocator.alloc(mesh_journal_log.EntryView, g_journal_redo.items.len) catch return null;
+    defer allocator.free(redo);
+    for (0..g_journal_redo.items.len) |index| {
+        const source_index = g_journal_redo.items.len - 1 - index;
+        redo[index] = journalLogEntryView(&g_journal_redo.items[source_index]);
+    }
+
+    const current_groups: ?[]u32 = if (model_source.faceGroups() != null) captureFaceGroups() else null;
+    defer if (current_groups) |groups| jalloc.free(groups);
+
+    var journal_bytes: usize = 0;
+    for (g_journal_undo.items) |*entry| journal_bytes += journalEntryBytes(entry);
+    for (g_journal_redo.items) |*entry| journal_bytes += journalEntryBytes(entry);
+    if (g_gizmo_snap) |*entry| journal_bytes += journalEntryBytes(entry);
+
+    return mesh_journal_log.encode(allocator, .{
+        .capacity = JOURNAL_CAP,
+        .byte_budget = JOURNAL_BYTE_BUDGET,
+        .journal_bytes = journal_bytes,
+        .pending_gizmo = g_gizmo_snap != null,
+        .pending_loop_cut = g_lc != null,
+        .undo = undo,
+        .current = .{
+            .vertex_count = g_edit_count,
+            .groups = current_groups,
+            .part_ranges = model_source.partRanges(),
+            .hidden_parts = g_hidden_groups.items.len,
+            .bytes = journalCurrentStateBytes(current_groups),
+            .note = g_journal_note,
+        },
+        .redo = redo,
+    }) catch null;
+}
+
 /// The resident mesh-editor SESSION (req_2898 hot-reload resume). A dev hot reload
 /// tears down the JS world but this process — the live edit mesh, its journal, the
 /// paint atlas, and the orbit pose — all survive. This readback gives the remounted
@@ -2816,6 +2889,13 @@ pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult 
     if (!model_paint.hasTarget() or hi <= lo) return fail;
     const cur_verts = g_edit_verts orelse return fail;
     if (model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return fail;
+    const live_ranges = model_source.partRanges() orelse return fail;
+    // Deep boundary: duplicate means one COMPLETE live outliner part. Topology
+    // edits can renumber a part from e.g. [0,6) to [0,16); accepting the stale
+    // subrange copied a plausible-looking 9/24-face fragment and only failed
+    // after the user moved it. The viewer resolves same-rank renumber aliases;
+    // anything still stale or malformed is rejected here without mutation.
+    if (!mesh_journal_log.hasExactPartRange(live_ranges, lo, hi)) return fail;
     const cur_faces = g_edit_count / 3;
 
     var out = std.ArrayListUnmanaged(f32){};
@@ -2893,11 +2973,7 @@ fn pathArrayFail() PathArrayResult {
 }
 
 fn knownPartRange(part_ranges: []const u32, lo: u32, hi: u32) bool {
-    var i: usize = 0;
-    while (i + 1 < part_ranges.len) : (i += 2) {
-        if (part_ranges[i] == lo and part_ranges[i + 1] == hi) return true;
-    }
-    return false;
+    return mesh_journal_log.hasExactPartRange(part_ranges, lo, hi);
 }
 
 fn sourceRangeIndex(source_ranges: []const u32, group: u32) ?usize {

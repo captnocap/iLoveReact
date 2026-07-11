@@ -7,7 +7,7 @@
 import { Fragment, useState } from 'react';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
-import { Slider } from '../../../runtime/primitives';
+import { Box, Pressable, Row, ScrollView, Slider, Text } from '../../../runtime/primitives';
 import {
   meshToolCommands, meshToolActive, meshTopoCommands, modelContextMenuLayout,
   type ModelContextMenuGroup,
@@ -23,6 +23,95 @@ const LIGHT_ROWS: { id: LightId; label: string; field: 'litFlat' | 'litKey' | 'l
 ];
 
 const STATEFUL_TOOL_IDS = new Set(meshToolCommands().map((command) => command.id));
+
+type MeshHistoryPart = { lo: number; hi: number; faces: number };
+type MeshHistoryState = {
+  vertices: number;
+  triangles: number;
+  groupRows: number;
+  groupsMatchTriangles: boolean;
+  authoredGroups: number;
+  parts: MeshHistoryPart[];
+  rangesValid: boolean;
+  unownedFaces: number;
+  multiplyOwnedFaces: number;
+  ownershipValid: boolean;
+  hiddenParts: number;
+  bytes: number;
+  note: string | null;
+};
+type MeshHistoryEntry = { label: string; state: MeshHistoryState };
+type MeshHistoryLog = {
+  version: number;
+  capacity: number;
+  byteBudget: number;
+  journalBytes: number;
+  pending: { gizmo: boolean; loopCut: boolean };
+  undo: MeshHistoryEntry[];
+  current: MeshHistoryState;
+  redo: MeshHistoryEntry[];
+};
+
+function readMeshHistoryLog(): MeshHistoryLog {
+  const door = (globalThis as any).__mesh_history_log;
+  if (typeof door !== 'function') throw new Error('history log door unavailable — rebuild the editor host');
+  const raw = door();
+  if (typeof raw !== 'string' || !raw) throw new Error('history log returned no data');
+  const parsed = JSON.parse(raw) as MeshHistoryLog;
+  if (!parsed?.current || !Array.isArray(parsed.undo) || !Array.isArray(parsed.redo)) {
+    throw new Error('history log returned malformed data');
+  }
+  return parsed;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
+function namesFromNote(note: string | null): string[] {
+  if (!note) return [];
+  try {
+    const parsed = JSON.parse(note);
+    if (!Array.isArray(parsed?.parts)) return [];
+    return parsed.parts.map((part: any, index: number) =>
+      typeof part?.name === 'string' && part.name ? part.name : `part ${index + 1}`);
+  } catch { return []; }
+}
+
+function HistoryState({ title, state, emphasis = false }: {
+  title: string;
+  state: MeshHistoryState;
+  emphasis?: boolean;
+}) {
+  const names = namesFromNote(state.note);
+  const ownershipColor = accentFor(state.ownershipValid ? 'success' : 'error');
+  const partSummary = state.parts.length
+    ? state.parts.map((part, index) => `${names[index] ?? `part ${index + 1}`} [${part.lo},${part.hi}) ${part.faces}f`).join('  ·  ')
+    : 'no outliner ranges';
+  const problems = [
+    !state.groupsMatchTriangles ? `${state.groupRows}/${state.triangles} group rows` : null,
+    !state.rangesValid ? 'invalid/overlapping ranges' : null,
+    state.unownedFaces ? `${state.unownedFaces} unowned` : null,
+    state.multiplyOwnedFaces ? `${state.multiplyOwnedFaces} multiply owned` : null,
+  ].filter(Boolean).join('  ·  ');
+  return (
+    <Box style={{ flexDirection: 'column', gap: 3, padding: 7, borderRadius: 5, backgroundColor: emphasis ? 'theme:segActiveBg' : 'theme:cardBg', borderWidth: 1, borderColor: emphasis ? 'theme:primary' : 'theme:borderSoft' }}>
+      <Row style={{ alignItems: 'center', gap: 7 }}>
+        <Text fontSize={10} color={emphasis ? accentFor('primary') : accentFor('textSecondary')} style={{ fontFamily: 'monospace', fontWeight: 800 }}>{title}</Text>
+        <Box style={{ flexGrow: 1, minWidth: 0 }} />
+        <Text fontSize={9} color={ownershipColor} style={{ fontFamily: 'monospace', fontWeight: 800 }}>{state.ownershipValid ? 'ownership OK' : 'OWNERSHIP FAULT'}</Text>
+      </Row>
+      <Text fontSize={9} color={accentFor('textDim')} style={{ fontFamily: 'monospace' }}>
+        {state.vertices} verts  ·  {state.triangles} tris  ·  {state.authoredGroups} faces  ·  {formatBytes(state.bytes)}
+      </Text>
+      <Text fontSize={9} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace' }}>{partSummary}</Text>
+      {problems ? <Text fontSize={9} color={accentFor('error')} style={{ fontFamily: 'monospace', fontWeight: 800 }}>{problems}</Text> : null}
+      {state.hiddenParts ? <Text fontSize={9} color={accentFor('warning')} style={{ fontFamily: 'monospace' }}>{state.hiddenParts} hidden part{state.hiddenParts === 1 ? '' : 's'} retained in memory</Text> : null}
+    </Box>
+  );
+}
 
 function CommandRow({ command, modelTool, indented = false, onPress }: {
   command: Command;
@@ -72,11 +161,43 @@ export default function ModelContextMenu({ modelTool, hasActivePart, selectedPar
 }) {
   // One family at a time keeps the right-click menu short even after expansion.
   // Child commands preserve the canonical dispatch path; this component only lays them out.
-  const [openGroup, setOpenGroup] = useState<ModelContextMenuGroup['id'] | null>(null);
+  const [openGroup, setOpenGroup] = useState<ModelContextMenuGroup['id'] | 'edit-history' | null>(null);
+  const [history, setHistory] = useState<MeshHistoryLog | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const layout = modelContextMenuLayout(hasActivePart, selectedPartCount);
   const toolGroups = layout.groups.filter((group) => group.id !== 'view');
   const viewGroup = layout.groups.find((group) => group.id === 'view')!;
   const run = (command: Command) => { onCommand(command.id, 'context'); onClose(); };
+  const refreshHistory = () => {
+    try {
+      setHistory(readMeshHistoryLog());
+      setHistoryError(null);
+      setCopyStatus(null);
+    } catch (error) {
+      setHistory(null);
+      setHistoryError(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const toggleHistory = () => {
+    if (openGroup === 'edit-history') {
+      setOpenGroup(null);
+      return;
+    }
+    setOpenGroup('edit-history');
+    refreshHistory();
+  };
+  const copyHistory = () => {
+    if (!history) return;
+    const text = JSON.stringify(history, null, 2);
+    (globalThis as any).__meshHistoryLastCopy = text;
+    try {
+      const copy = (globalThis as any).__clipboard_set;
+      if (typeof copy !== 'function') throw new Error('clipboard door unavailable');
+      copy(text);
+      setCopyStatus('copied');
+    } catch { setCopyStatus('copy failed'); }
+  };
 
   const renderGroup = (group: ModelContextMenuGroup) => {
     const open = openGroup === group.id;
@@ -90,8 +211,10 @@ export default function ModelContextMenu({ modelTool, hasActivePart, selectedPar
     );
   };
 
+  const historyOpen = openGroup === 'edit-history';
+
   return (
-    <C.HW_StageContextMenu>
+    <C.HW_StageContextMenu style={{ width: historyOpen ? 430 : 188 }}>
       {toolGroups.map(renderGroup)}
       {layout.directToolCommands.map((command) => (
         <CommandRow key={command.id} command={command} modelTool={modelTool} onPress={() => run(command)} />
@@ -118,6 +241,47 @@ export default function ModelContextMenu({ modelTool, hasActivePart, selectedPar
       {layout.directPartCommands.map((command) => (
         <CommandRow key={command.id} command={command} modelTool={modelTool} onPress={() => run(command)} />
       ))}
+      <C.HW_ContextRow onPress={toggleHistory}>
+        <Icon name="History" size={12} color={accentFor('primary')} />
+        <C.HW_ContextText>Edit History</C.HW_ContextText>
+        <C.HW_Spacer />
+        <Icon name={historyOpen ? 'ChevronDown' : 'ChevronRight'} size={12} color={accentFor('textDim')} />
+      </C.HW_ContextRow>
+      {historyOpen ? (
+        <Box style={{ flexDirection: 'column', gap: 7, paddingLeft: 8, paddingRight: 8, paddingTop: 6, paddingBottom: 8, borderTopWidth: 1, borderTopColor: 'theme:borderSoft' }}>
+          <Row style={{ alignItems: 'center', gap: 7 }}>
+            <Text fontSize={9} color={accentFor('textDim')} style={{ fontFamily: 'monospace' }}>
+              {history ? `${history.undo.length} undo  ·  ${history.redo.length} redo  ·  ${formatBytes(history.journalBytes)} journal` : 'resident native journal'}
+            </Text>
+            <Box style={{ flexGrow: 1, minWidth: 0 }} />
+            {copyStatus ? <Text fontSize={9} color={accentFor(copyStatus === 'copied' ? 'success' : 'error')} style={{ fontFamily: 'monospace' }}>{copyStatus}</Text> : null}
+            <Pressable onPress={refreshHistory} style={{ width: 24, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 4, backgroundColor: 'theme:controlBg', borderWidth: 1, borderColor: 'theme:controlBorder' }}>
+              <Icon name="RefreshCw" size={11} color={accentFor('textSecondary')} />
+            </Pressable>
+            <Pressable onPress={copyHistory} style={{ height: 22, flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 7, paddingRight: 7, borderRadius: 4, backgroundColor: 'theme:controlBg', borderWidth: 1, borderColor: 'theme:controlBorder', opacity: history ? 1 : 0.4 }}>
+              <Icon name="ClipboardCopy" size={11} color={accentFor('textSecondary')} />
+              <Text fontSize={9} color={accentFor('textSecondary')} style={{ fontFamily: 'monospace', fontWeight: 700 }}>Copy</Text>
+            </Pressable>
+          </Row>
+          {historyError ? <Text fontSize={9} color={accentFor('error')} style={{ fontFamily: 'monospace' }}>{historyError}</Text> : null}
+          {history ? (
+            <ScrollView style={{ height: 258 }} showScrollbar contentContainerStyle={{ flexDirection: 'column', gap: 6, paddingRight: 3, paddingBottom: 4 }}>
+              {history.undo.map((entry, index) => (
+                <HistoryState key={`undo-${index}`} title={`${index + 1}. before ${entry.label}`} state={entry.state} />
+              ))}
+              <HistoryState title="NOW · resident mesh" state={history.current} emphasis />
+              {history.redo.map((entry, index) => (
+                <HistoryState key={`redo-${index}`} title={`redo ${index + 1}. after ${entry.label}`} state={entry.state} />
+              ))}
+            </ScrollView>
+          ) : null}
+          {history?.pending.gizmo || history?.pending.loopCut ? (
+            <Text fontSize={9} color={accentFor('warning')} style={{ fontFamily: 'monospace' }}>
+              pending: {[history.pending.gizmo ? 'gizmo gesture' : null, history.pending.loopCut ? 'loop cut' : null].filter(Boolean).join(' · ')}
+            </Text>
+          ) : null}
+        </Box>
+      ) : null}
       {/* Quality lives here — tucked away, only present when the menu is called.
           Dragging stays inside the menu, so it doesn't dismiss. */}
       <C.HW_StageMenuQuality>

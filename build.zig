@@ -1179,6 +1179,28 @@ pub fn build(b: *std.Build) void {
     const mesh_edit_test_step = b.step("test-mesh-edit", "Run the mesh-edit welding/selection unit tests");
     mesh_edit_test_step.dependOn(&run_mesh_edit_test.step);
 
+    // ── mesh journal log (history ownership diagnostics + JSON) unit tests ─
+    const mesh_journal_log_impl_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/mesh_journal_log.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const mesh_journal_log_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/mesh_journal_log.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    mesh_journal_log_test_mod.addImport("mesh_journal_log", mesh_journal_log_impl_test_mod);
+    const mesh_journal_log_test = b.addTest(.{
+        .name = "mesh-journal-log-test",
+        .root_module = mesh_journal_log_test_mod,
+    });
+    const run_mesh_journal_log_test = b.addRunArtifact(mesh_journal_log_test);
+    const mesh_journal_log_test_step = b.step("test-mesh-journal-log", "Run the mesh journal ownership/log tests");
+    mesh_journal_log_test_step.dependOn(&run_mesh_journal_log_test.step);
+
     // ── path array (constant-radius turn + elevation profile) unit tests ─────
     const path_array_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/path_array.zig"),
