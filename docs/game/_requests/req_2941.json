@@ -1,0 +1,30 @@
+{
+  "id": "req_2941",
+  "at": "2026-07-11T00:39:37.837Z",
+  "origin": "codex:019f4ce0",
+  "text": "oh and for the models data, dont worry about it, it was literal farts and dicks i spent ~1 minute before i hit the failure so no need to go hunting for it we can repro very easy after adding log",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T00:39:52.530Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T00:59:32.376Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Kept the throwaway model data entirely out of the investigation. The failure was reproduced from a fresh sphere in the headless mesh harness after the journal landed, which exposed the stale-range 9/24 partial copy and verified the repaired full 24/24 duplicate without relying on saved user assets.",
+  "shas": [
+    "d60f64bdc"
+  ],
+  "resolvedAt": "2026-07-11T00:59:32.376Z"
+}

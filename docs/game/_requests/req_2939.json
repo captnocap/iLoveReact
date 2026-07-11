@@ -1,0 +1,30 @@
+{
+  "id": "req_2939",
+  "at": "2026-07-11T00:33:40.112Z",
+  "origin": "codex:019f4ce0",
+  "text": "hm. this is a problem i just found, real annoying but i was making a prop and i have a sphere that i have basically sliced and diced, i duplicated it, and t he duplicate is carrying part of the original in its topology ;_; [Image #1]",
+  "status": "review",
+  "sessionId": "019f4ce0-499a-7322-b566-680bbc1fa236",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T00:33:47.963Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T00:59:32.359Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reproduced the sliced-sphere duplicate failure from a fresh primitive using the new journal: a loop cut moved the live part from [0,6) to [0,16), while the stale duplicate request silently copied only 9 of 24 triangles. The viewer now resolves same-part range renumbering before Duplicate, and the native boundary rejects any request that is not one complete live part. Headless proofs show the raw stale request leaves the mesh untouched while the user-facing path creates a matching 24-face twin with 48/48 triangles owned.",
+  "shas": [
+    "d60f64bdc"
+  ],
+  "resolvedAt": "2026-07-11T00:59:32.359Z"
+}
