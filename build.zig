@@ -1363,6 +1363,29 @@ pub fn build(b: *std.Build) void {
     const flora_test_step = b.step("test-world-flora", "Run painted flora recipe and shared wrapped geometry tests");
     flora_test_step.dependOn(&run_flora_test.step);
 
+    // ── Split world-loader procedural geometry parity ──────────────────
+    // The replacement loader is assembled from framework/world_loader/*.zig.
+    // Pin the pure mesh vocabulary at its owning Zig layer so a later move or
+    // cleanup cannot silently change the retained geometry sent to gpu/3d.zig.
+    const world_loader_geometry_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/world_loader/geometry.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const world_loader_geometry_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_loader_geometry.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    world_loader_geometry_test_mod.addImport("world_loader_geometry", world_loader_geometry_mod_for_tests);
+    const world_loader_geometry_test = b.addTest(.{
+        .name = "world-loader-geometry-test",
+        .root_module = world_loader_geometry_test_mod,
+    });
+    const run_world_loader_geometry_test = b.addRunArtifact(world_loader_geometry_test);
+    const world_loader_geometry_test_step = b.step("test-world-loader", "Run split world-loader geometry parity tests");
+    world_loader_geometry_test_step.dependOn(&run_world_loader_geometry_test.step);
+
     // ── Game camera behavior tests (V23, P4) ───────────────────────
     // Exercises framework/game/camera.zig: Orbit/Aim fidelity against
     // runtime/cameras reference vectors, retained host-side smoothing, and
