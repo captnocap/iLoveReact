@@ -2,7 +2,7 @@
 
 Active surface: `cart/editor/` and its `/play` route. Last verified: 2026-07-10.
 
-## User contract — req_2924, req_2933, req_2934, req_2938
+## User contract — req_2924, req_2933, req_2934, req_2938, req_2942
 
 Road and rail authoring is one live path pen, not the old blind sequence of
 clicking two or more points before seeing a result. The authored object is a
@@ -119,6 +119,41 @@ and Plain Asphalt. The white preview shows a dashed lane split on one edge and a
 solid road edge on the other; committed roads receive the exact edge selection
 from their lane profile rather than repeating that preview on every tile.
 
+## Smooth committed road ribbon — req_2942
+
+The one-metre road stamp is no longer the committed road's visible outline. A
+slight bend used to expose every rounded cell as a stair step, break sidewalks
+into rectangular ledges, and restart lane paint at tile boundaries. That made a
+valid semantic road look broken even though its light-rail sibling followed the
+authored curve.
+
+Committed roads now use the shared `curvePoints` fillet as an analytic render
+ribbon:
+
+- `roads.zig` emits chunk-local curve segments with asymmetric left/right
+  carriageway and sidewalk extents, two-way state, lane-divider phase, and
+  cumulative path distance.
+- The raster lane/median/junction/crosswalk cells remain authoritative for
+  vehicle flow, costs, intersection policy, undo, and persistence.
+- `engine.zig` preserves each road cell's exact prior tile/material as a compact
+  visual-undercoat token. The ground shader first restores that undercoat, then
+  evaluates distance to the filleted centerline at fragment resolution.
+- Asphalt wins over sidewalk wherever ribbons overlap. Sidewalk occupies only
+  the smooth band between the full and carriageway extents. Yellow, dashed
+  white, solid white, and zebra paint use continuous path distance, so cadence
+  does not restart at a bend or chunk boundary.
+
+The ground stream's material-reference integer remains exactly representable in
+an `f32`: low nine bits carry binding+1, the next byte carries the derived raster
+marking fallback, and the upper seven bits carry the undercoat token. The stream
+then appends a bounded 11-float row per curve segment. If a pathological chunk
+exceeds that bound, the truncation indicator becomes loud and that chunk keeps
+the complete raster road instead of displaying a partial ribbon.
+
+This is the same authoring law as rail: the smooth path recipe is the visible
+object; tiles are a downstream spatial index. It does not add a second road
+object or infer a curve back from stamped cells.
+
 ## Studio traffic/transit prop exports — req_2938
 
 File → Export → Prop now declares one of these manifest roles: scenery, stop
@@ -141,9 +176,9 @@ role has an exported model.
   signals remain later physical/gameplay consumers.
 - Train motion is not attached yet. It must consume these path/control records
   and must not derive another network from rendered geometry.
-- Center-turn and exit-lane stencils are later road-profile edits. The marking
-  byte reserves a new stencil bit so they can extend this recipe without
-  proliferating tile kinds or changing the packed ground layout.
+- Center-turn and exit-lane stencils are later road-profile edits. The raster
+  marking byte reserves a new stencil bit; the analytic ribbon must consume the
+  corresponding semantic profile rather than proliferating tile kinds.
 - Export roles are live manifest data; automatic junction prop placement and
   runtime signal/stop gating have not yet been moved onto the active surface.
 
@@ -155,21 +190,22 @@ role has an exported model.
 - `cart/editor/stage/transportPathUi.test.ts`: defaults, clamps, signed storey
   labels, and actionable curve/grade errors.
 - `cart/editor/render3d/groundFormula.test.ts`: directional lanes bind the Road
-  catalog, packed marking data decodes, metre/UV axes rotate, and take labels
-  retain their meanings.
+  catalog, packed marking/undercoat data decodes, the analytic ribbon takes
+  priority over its raster, and take labels retain their meanings.
 - `cart/editor/data/commands.test.ts`: every traffic/transit prop role is
   reachable under the nested Export → Prop menu.
 - `SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor`: ReleaseFast bridge, loader, and
   active-cart integration.
 
-## CHANGESET — req_2924, req_2933, req_2934, req_2936, req_2938
+## CHANGESET — req_2924, req_2933, req_2934, req_2936, req_2938, req_2942
 
 What: a shared live road/light-rail/railway pen, adjustable 3D curves, signed
 storey grades, path-attached TC Stops, native ghosts, 3 m lane-aware road paint,
-semantic traffic/transit prop exports, rail validation/rendering, and RMAP v4
-persistence. Why: the previous port hid results until multiple clicks and its
-one-metre material UV could not express the three-metre lane grammar. Affects:
-native map engine, road planner, RMAP store, world loader, V8/runtime map doors,
-Road material/ground formula, Studio export manifests, and Map Paint chrome.
-Breaking changes: none; v1/v2/v3 RMAP files and role-less prop manifests remain
-supported.
+smooth analytic committed-road ribbons, semantic traffic/transit prop exports,
+rail validation/rendering, and RMAP v4 persistence. Why: the previous port hid
+results until multiple clicks, its one-metre material UV could not express the
+three-metre lane grammar, and its raster outline visibly destroyed gentle
+bends. Affects: native map engine, road planner, RMAP store, world loader,
+V8/runtime map doors, Road material/ground formula, Studio export manifests,
+and Map Paint chrome. Breaking changes: none; v1/v2/v3 RMAP files and role-less
+prop manifests remain supported.

@@ -6,7 +6,7 @@ export const editor_transport_paths: DocIndex = {
   cart: 'cart/editor/stage/MapPaintDock.tsx',
   purpose: ['world_gen', 'pathing', 'vehicle', 'ui', 'rendering', 'persistence', 'host_bridge'],
   summary:
-    'req_2924/2933/2934/2936/2938: one native semantic road/light-rail/railway pen with immediate 3D preview, signed 3 m storey levels, path-attached TC Stops, RMAP v4 persistence, 3 m lane-aware Road material markings, and Studio traffic/transit prop roles. Roads compile gameplay tiles plus derived paint; rail and controls remain semantic recipes.',
+    'req_2924/2933/2934/2936/2938/2942: one native semantic road/light-rail/railway pen with immediate 3D preview, signed 3 m storey levels, path-attached TC Stops, RMAP v4 persistence, smooth analytic committed-road ribbons with 3 m lane-aware markings, and Studio traffic/transit prop roles. Roads retain raster gameplay cells beneath the smooth path-derived look; rail and controls remain semantic recipes.',
   interfaces: [
     {
       name: 'transport.zig semantic path table + live draft',
@@ -61,6 +61,17 @@ export const editor_transport_paths: DocIndex = {
       status: 'live',
     },
     {
+      name: 'analytic committed-road ribbon',
+      purpose: ['rendering', 'geometry', 'world_gen'],
+      kind: 'module',
+      sourceFile: 'framework/game/map/roads.zig',
+      description:
+        'req_2942: the visible committed road evaluates the shared filleted path at fragment resolution instead of exposing the one-metre gameplay stamp. Chunk rows carry asymmetric carriageway/sidewalk extents plus continuous arc distance; engine.zig packs the exact pre-road visual undercoat into the existing material-reference integer. groundFormula.ts unions smooth asphalt and sidewalk bands, gives carriageway priority at overlaps, and retains raster junction/crosswalk policy. A bounded overflow falls back to the complete raster and reports truncation rather than drawing a partial road.',
+      dependsOn: ['transport.zig semantic path table + live draft', 'three-metre road lane markings'],
+      consumers: ['cart/editor/render3d/groundFormula.ts', 'framework/game/map/engine.zig'],
+      status: 'live',
+    },
+    {
       name: 'semantic Studio prop export roles',
       purpose: ['vehicle', 'world_gen', 'persistence', 'ui'],
       kind: 'data_model',
@@ -76,7 +87,7 @@ export const editor_transport_paths: DocIndex = {
       name: 'one semantic path, separate compilers',
       purpose: ['world_gen', 'pathing', 'vehicle'],
       description:
-        'Share the authored curve and interaction, not the derived systems: roads filter into lane/crosswalk tiles; rail renders and later feeds train routing from the tagged path. Preview and consumers sample the same curve. Never infer a rail network back from its sleepers/meshes.',
+        'Share the authored curve and interaction, not the derived systems: roads filter into lane/crosswalk tiles while their visible ribbon samples that same curve; rail renders and later feeds train routing from the tagged path. Preview and consumers sample the same curve. Never infer a transport network back from raster cells, sleepers, or meshes.',
       examples: ['editor_transport_paths'],
       status: 'resolved',
     },
