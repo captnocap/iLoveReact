@@ -4,7 +4,7 @@
 //
 // The card describes the model with facts NOTHING else on screen already shows. The
 // OUTLINER (right below) owns the parts and their count — so the card never restates
-// "N parts". A model's kind, its synthetic snapshot path, and empty contract slots are
+// "N parts". A model's kind, its package path, and empty contract slots are
 // noise, not data: we show the name, stage, real triangle count, and the single real
 // source, then gate every section to actual content (req_2406, req_2416).
 import { ScrollView } from '../../../runtime/primitives';

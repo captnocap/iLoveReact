@@ -1,8 +1,7 @@
-// CLONED from cart/hmsc-int/world/tileTextureKeys.ts — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor cart owns this copy; do NOT re-import from cart/hmsc-int.
+// Editor-owned texture ids shared with the Zig tile renderer.
 import type { TileKind } from '../design';
 
-export const HMSC_TILE_TEXTURE_KEYS = {
+export const EDITOR_TILE_TEXTURE_KEYS = {
   water: 'hmsc.tile.water',
   road: 'hmsc.tile.road',
   asphalt: 'hmsc.tile.asphalt',

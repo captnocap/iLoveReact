@@ -2,11 +2,7 @@
 // REAL 3D world (not a second renderer). It pans, zooms, rotates in 90° detents,
 // and resolves a screen click to a world cell on the active FLOOR LEVEL.
 //
-// CLONED from cart/hmsc-int/isoStage.ts — req_2486 (cut the last cross-cart
-// import; hmsc-int is dying). The editor cart owns this copy. The ONE change:
-// the hmsc `./game` barrel import (which welds to the 435-file prop-recipe
-// science project) is replaced by the framework camera kit directly —
-// @reactjit/cameras is where GAME_CAMERA's solve/unproject always came from.
+// The editor owns this controller and uses the framework camera kit directly.
 //
 // Pure controller, no React: it solves and picks headless. The pane holds one
 // in a ref and drives it from input.
@@ -30,10 +26,8 @@ export const ISO_PITCH = 35.264; // true isometric elevation: atan(1/sqrt(2))
 const MIN_PITCH = 12;
 const MAX_PITCH = 80;
 
-// One floor level == one storey == one build-mode wall. This IS the build
-// catalog's WALL_SIZE.heightMeters (HMSC_SCALE.storyHeightMeters = 3) — sourced
-// as a literal here because the editor no longer imports the hmsc scale table;
-// the value is the R4-adjacent storey module and does not drift.
+// One floor level == one storey == one build-mode wall. The value is the
+// editor-owned R4-adjacent storey module and does not drift.
 export const METERS_PER_LEVEL = 3;
 
 export interface IsoPose {

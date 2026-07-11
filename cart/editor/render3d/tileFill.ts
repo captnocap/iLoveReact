@@ -1,12 +1,10 @@
-// CLONED from cart/hmsc-int/render3d/tileFill.ts — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor cart owns this copy; do NOT re-import from cart/hmsc-int.
+// Editor-owned procedural tile materials.
 import type { TileKind } from '../design';
 import { tileKindDefinition } from '../world/tileKinds';
 
 // Procedural tile materials ported from cart/effect_fills (the static env set:
 // concrete, road, sand). fbm()/snoise() are injected by the <Effect> primitive,
-// so this WGSL works in any Effect surface — the game floor capture and the
-// hmsc-int map quad both. Prepend TILE_FILL_WGSL to a shader, then call
+// so this WGSL works in any Effect surface. Prepend TILE_FILL_WGSL to a shader, then call
 // tileMaterial(matId, uv, px, variant, seed) per cell.
 //
 // matId: 0 concrete (sidewalk), 1 road (road/asphalt), 2 sand (sand/mud), 3 grass.

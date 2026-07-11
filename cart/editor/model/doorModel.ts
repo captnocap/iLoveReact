@@ -13,7 +13,7 @@ import type { MeshDocPartMeta, PackageMeshDoc } from '../data/meshDoc';
 
 export const DOOR_LEAF_PART_NAME = 'Door Leaf';
 
-// P2 interaction data captured from the ruled hmsc-int door compiler. The Zig
+// P2 interaction data for the editor-owned door contract. The Zig
 // loader owns swing physics; this boundary only declares its authored contract.
 export const DOOR_EXPORT_TUNING = {
   walk: { reachMeters: 2.2, vehicle: false },

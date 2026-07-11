@@ -1,6 +1,4 @@
-// CLONED from cart/hmsc-int/render3d/shaders/index.ts — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor cart owns this copy; do NOT re-import from cart/hmsc-int. Diverge freely.
-// shaders/index.ts — assembles helpers + materials + generated dispatch + the
+// Editor-owned shader assembly: helpers + materials + generated dispatch + the
 // standard tile-local fs_main. Replaces the old fillShader.ts single file;
 // same D[] contract, same exports (FILL_FUNCS / FILL_SHADER), so downstream
 // consumers (game/textures/shaders.ts, editors/model/MaterialFill.tsx) only
@@ -9,7 +7,7 @@
 // D[] = [materialId, variant, seed, quality, board] — see boards.ts for board
 // slugs/ids and _generated/registry.ts for the material catalog. To add or
 // remove a material, only materials/*.wgsl changes; then run:
-//   tools/v8cli cart/hmsc-int/render3d/shaders/build-shaders.ts
+//   tools/v8cli cart/editor/render3d/shaders/build-shaders.ts
 import { FILL_FUNCS } from './_generated/dispatch';
 
 // the standard tile-local entry: pick the material at in.uv, then vignette/quality.

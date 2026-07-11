@@ -1,5 +1,4 @@
-// CLONED (minimal) from cart/hmsc-int/design.ts — req_2178 (no cross-cart imports).
-// Only the TileKind union the cloned tile/shader files need; NOT the hmsc-int design core.
+// Minimal editor-owned tile-kind vocabulary shared by world and shader modules.
 
 export type TileKind =
   | 'water'
@@ -9,7 +8,7 @@ export type TileKind =
   // Directional lane tiles — the CENTER tile of a 3-tile lane trio
   // ([shoulder, lane, shoulder]); the painted line cars actually drive.
   // The kind name carries the lane's legal flow (compass; -Z = north, the
-  // hmsc facing convention). Direction is ENFORCED by host pathing's flow
+  // editor facing convention). Direction is ENFORCED by host pathing's flow
   // table (runtime/pathing.ts setPathFlows): with-flow rides cheap,
   // against-flow pays the profile's penalty — right-hand traffic falls out
   // of the paint itself. 'junction' is the intersection resolver: flow-
@@ -42,8 +41,7 @@ export type TileKind =
   // 'spawn' is where the player (re)appears; 'save' is a checkpoint that, when
   // stepped on, persists the game and points the respawn at a CHOSEN spawn cell
   // (PlacedCell.spawnKey). A world can hold many of each; a save never sits on its
-  // own spawn (you save here, you reappear THERE). Authored in hmsc-int's MARKERS
-  // palette, lowered to placedCells on compile.
+  // own spawn (you save here, you reappear THERE). Lowered to placedCells on compile.
   | 'spawn'
   | 'save'
   // Living ground: plain lawn/meadow surface only. Grass blades, palms, and

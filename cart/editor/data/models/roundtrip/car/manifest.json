@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "car",
-  "source": "cart/hmsc-int/car.obj",
+  "source": "retired-source:car.obj",
   "sourceTris": 180,
   "radius": 1.396367077678717,
   "bakes": [

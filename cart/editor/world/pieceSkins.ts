@@ -1,6 +1,5 @@
-// world/pieceSkins.ts — REAL textures on placed build-piece faces (req_2575
-// Stage B). Cloned in spirit from cart/hmsc-int/editors/build/pieceMeshes.tsx
-// buildingSkinBoxes: a piece face that wears an assigned material becomes a
+// world/pieceSkins.ts — real textures on placed build-piece faces (req_2575
+// Stage B). A piece face that wears an assigned material becomes a
 // textured cube (a "skin box") outset a hair over the flat live-piece box, and
 // the material's WGSL shader is pushed once so the loader samples it.
 //

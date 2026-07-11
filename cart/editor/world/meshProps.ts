@@ -32,7 +32,7 @@ export function meshKeyHash(key: string): number {
 
 export type ResidentMesh = {
   key: string;
-  /** interleaved vertices, stride 8: pos3 + normal3 + uv2 (the storedModelMeshData shape). */
+  /** interleaved package vertices, stride 8: pos3 + normal3 + uv2. */
   vertices: Float32Array;
   /** flat draw colour 0..1 (untextured meshes render with this). */
   color?: [number, number, number];

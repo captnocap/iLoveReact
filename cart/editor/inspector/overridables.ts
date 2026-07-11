@@ -1,7 +1,6 @@
 // inspector/overridables.ts — the per-instance properties a placed build piece
-// can override (req_2563 Phase 3), folded from the last editor's tile-override
-// list (cart/hmsc-int/tileOverrides.ts OVERRIDABLE). Repurposed for build pieces:
-// the paths mirror the host's BuildGameplayTags vocabulary (framework/game/
+// can override (req_2563 Phase 3). The paths mirror the host's BuildGameplayTags
+// vocabulary (framework/game/
 // build.zig) rather than tile-surface terms.
 //
 // An override is authoring intent stored on the piece (piece.overrides[path]).

@@ -2,9 +2,8 @@
 // (req_2563 Phase 4). The "texture slots" the user asked for: named surfaces on
 // a piece that each hold a MaterialRef (piece.slots[role]).
 //
-// Cloned in spirit from the last editor's face-slot model (hmsc-int
-// buildingEditor.ts FACE_ROLES / BuildingFaceSkins) but pared to the roles the
-// kind actually exposes. Walls/verticals read front+back; plates read a single
+// The role table is pared to the surfaces each kind actually exposes.
+// Walls/verticals read front+back; plates read a single
 // top; posts/signs a single surface. Per-face granularity (every one of a box's
 // six faces) is a later extension — this is the meaningful minimum that lets a
 // placed piece carry per-instance material assignments today.

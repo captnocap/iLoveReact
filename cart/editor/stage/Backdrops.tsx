@@ -1,5 +1,4 @@
-// editor/stage/Backdrops.tsx — reference-image backdrops for tracing (req_2758; the old
-// studio's req_1280 capability, cloned + repurposed for the editor — no cross-dir import).
+// editor/stage/Backdrops.tsx — reference-image backdrops for tracing (req_2758).
 //
 // Drop a blueprint / concept / photo into the model viewport on one of the six cardinal
 // planes, behind the model, then build straight over it — the classic "blueprint on the

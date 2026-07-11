@@ -58,9 +58,7 @@ const EDIT_BY_ID: Record<string, WallEdit> = {
   'wall.plywood.brokenWindow': 'brokenWindow',
 };
 
-// How each material READS — verbatim from the old hmsc build editor's
-// MATERIAL_LOOK (cart/hmsc-int/editors/build/pieceShapes.ts) so a placement
-// looks identical to what shipped. Gameplay truth stays host-side in the tags.
+// How each material reads in the editor. Gameplay truth stays host-side in the tags.
 const MATERIAL_LOOK: Record<BuildMaterial, { hex: string; opacity?: number }> = {
   concrete: { hex: '#9aa3ad' },
   brick: { hex: '#8a4a3a' },

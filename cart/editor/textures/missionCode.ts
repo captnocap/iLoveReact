@@ -1,6 +1,5 @@
-// CLONED from cart/hmsc-int/game/textures/missionCode.ts — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor cart owns this copy; do NOT re-import from cart/hmsc-int. Diverge freely.
-// game/textures/missionCode.ts — UNIQUE, SCANNABLE in-world codes minted from a
+// Editor-owned codec for unique, scannable in-world mission codes.
+// Codes are minted from a
 // mission key (req_1620 / req_1621). The authoring half of the QR-mission idea:
 // create a mission → mint a code bound to it → import the code as a DECAL and
 // paint/place it on a prop. The in-game "scan" (look-at + interact, resolved by

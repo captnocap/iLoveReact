@@ -1,8 +1,8 @@
 // editor/library/ModelActionMenu.tsx — the right-click menu for a model home.
 // Rename / Favorite / Duplicate / Delete. Rendered at the cursor by
 // useContextMenu (LibraryPanel owns the hook + the target model). Each action
-// commits then closes; the actions themselves live in AppFrame as model-state
-// mutations (overrides applied on read — models are snapshot-derived today).
+// commits then closes; AppFrame writes durable identity changes through to the
+// package manifest and mirrors them in live state.
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ModelPackage } from '../data/types';

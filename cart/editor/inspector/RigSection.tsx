@@ -2,9 +2,8 @@
 //
 // Rigging a prop = declaring what its bones MEAN before export: searchable
 // pockets (loot category, open/locked/keyed access), placement surfaces
-// (tabletops items can be set on), seats, cover, kickable dynamics — the same
-// load-bearing capability set the retired hmsc-int prop table carried, now
-// authored as a PropRig draft that Export → Prop compiles into the package
+// (tabletops items can be set on), seats, cover, kickable dynamics — authored
+// as a PropRig draft that Export → Prop compiles into the package
 // manifest's skeleton (runtime/skeleton/rigs.ts owns the mapping, req_2718
 // disk truth).
 //

@@ -1,5 +1,4 @@
-// CLONED from cart/hmsc-int/render3d/roadTileFill.ts — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor cart owns this copy; do NOT re-import from cart/hmsc-int. Diverge freely.
+// Editor-owned one-tile road material shader.
 import { TILE_FILL_WGSL } from './tileFill';
 
 // roadTileFill — the road, decomposed to a ONE-TILE shader.

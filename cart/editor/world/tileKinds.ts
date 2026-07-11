@@ -1,7 +1,6 @@
-// CLONED from cart/hmsc-int/world/tileKinds.ts — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor cart owns this copy; do NOT re-import from cart/hmsc-int.
+// Editor-owned semantic tile catalog.
 import type { TileKind } from '../design';
-import { HMSC_TILE_TEXTURE_KEYS } from './tileTextureKeys';
+import { EDITOR_TILE_TEXTURE_KEYS } from './tileTextureKeys';
 
 export type TilePathingProfile = {
   walkable: boolean;
@@ -226,7 +225,7 @@ function laneKindDefinition(kind: TileKind, label: string): TileKindDefinition {
     visibility: OPEN_VISIBILITY,
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
     surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.18, lateralGrip: 0.92, restitution: 0.84 },
-    render: { color: '#232936', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.road },
+    render: { color: '#232936', heightMeters: 0.08, textureKey: EDITOR_TILE_TEXTURE_KEYS.road },
     altitude: HEIGHTFIELD_ALTITUDE,
   };
 }
@@ -243,7 +242,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: { ...OPEN_VISIBILITY, opacity: 0.05, concealment: 0.1, lightTransmission: 0.88, soundOcclusion: 0.18 },
     traversal: { ...BLOCKED_TRAVERSAL, allowedModes: ['swim'], width: 'open', vehicleGripMultiplier: 0 },
     surface: { material: 'water', walkSpeedMultiplier: 0.42, runSpeedMultiplier: 0.28, vehicleSpeedMultiplier: 0, accelerationMultiplier: 0.35, friction: 0.96, lateralGrip: 0.22, restitution: 0.02 },
-    render: { color: '#4ea0df', heightMeters: 0.02, textureKey: HMSC_TILE_TEXTURE_KEYS.water },
+    render: { color: '#4ea0df', heightMeters: 0.02, textureKey: EDITOR_TILE_TEXTURE_KEYS.water },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   road: {
@@ -257,7 +256,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
     surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.18, lateralGrip: 0.92, restitution: 0.84 },
-    render: { color: '#1f2530', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.road },
+    render: { color: '#1f2530', heightMeters: 0.08, textureKey: EDITOR_TILE_TEXTURE_KEYS.road },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   asphalt: {
@@ -271,7 +270,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 0.95 },
     surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 0.95, accelerationMultiplier: 1.0, friction: 0.2, lateralGrip: 0.9, restitution: 0.82 },
-    render: { color: '#20242d', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.asphalt },
+    render: { color: '#20242d', heightMeters: 0.08, textureKey: EDITOR_TILE_TEXTURE_KEYS.asphalt },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   sidewalk: {
@@ -285,7 +284,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 0.55 },
     surface: { material: 'concrete', walkSpeedMultiplier: 0.98, runSpeedMultiplier: 0.96, vehicleSpeedMultiplier: 0.55, accelerationMultiplier: 0.96, friction: 0.24, lateralGrip: 0.86, restitution: 0.78 },
-    render: { color: '#596170', heightMeters: 0.11, textureKey: HMSC_TILE_TEXTURE_KEYS.sidewalk },
+    render: { color: '#596170', heightMeters: 0.11, textureKey: EDITOR_TILE_TEXTURE_KEYS.sidewalk },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   mud: {
@@ -299,7 +298,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: { ...OPEN_VISIBILITY, concealment: 0.18, lightTransmission: 0.94, soundOcclusion: 0.08 },
     traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.24, slopeLimitDegrees: 24, vehicleGripMultiplier: 0.38 },
     surface: { material: 'soil', walkSpeedMultiplier: 0.68, runSpeedMultiplier: 0.52, vehicleSpeedMultiplier: 0.38, accelerationMultiplier: 0.45, friction: 0.86, lateralGrip: 0.55, restitution: 0.16 },
-    render: { color: '#5b4636', heightMeters: 0.075, textureKey: HMSC_TILE_TEXTURE_KEYS.mud },
+    render: { color: '#5b4636', heightMeters: 0.075, textureKey: EDITOR_TILE_TEXTURE_KEYS.mud },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   sand: {
@@ -313,7 +312,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: { ...OPEN_VISIBILITY, concealment: 0.1, lightTransmission: 0.96, soundOcclusion: 0.05 },
     traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.26, slopeLimitDegrees: 28, vehicleGripMultiplier: 0.48 },
     surface: { material: 'sand', walkSpeedMultiplier: 0.78, runSpeedMultiplier: 0.62, vehicleSpeedMultiplier: 0.48, accelerationMultiplier: 0.58, friction: 0.74, lateralGrip: 0.45, restitution: 0.12 },
-    render: { color: '#c8b66f', heightMeters: 0.075, textureKey: HMSC_TILE_TEXTURE_KEYS.sand },
+    render: { color: '#c8b66f', heightMeters: 0.075, textureKey: EDITOR_TILE_TEXTURE_KEYS.sand },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   wall: {
@@ -327,7 +326,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: BLOCKED_VISIBILITY,
     traversal: BLOCKED_TRAVERSAL,
     surface: { material: 'wall', walkSpeedMultiplier: 0, runSpeedMultiplier: 0, vehicleSpeedMultiplier: 0, accelerationMultiplier: 0, friction: 0.5, lateralGrip: 0, restitution: 0.45 },
-    render: { color: '#cbd5e1', heightMeters: 1.6, textureKey: HMSC_TILE_TEXTURE_KEYS.wall },
+    render: { color: '#cbd5e1', heightMeters: 1.6, textureKey: EDITOR_TILE_TEXTURE_KEYS.wall },
     altitude: CELL_BASE_ALTITUDE,
   },
   door: {
@@ -350,7 +349,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: { ...OPEN_VISIBILITY, opacity: 0.12, concealment: 0.25, lightTransmission: 0.72, soundOcclusion: 0.36 },
     traversal: { ...PEDESTRIAN_TRAVERSAL, width: 'narrow', minClearanceMeters: 2.05, vehicleGripMultiplier: 0 },
     surface: { material: 'door', walkSpeedMultiplier: 0.82, runSpeedMultiplier: 0.74, vehicleSpeedMultiplier: 0, accelerationMultiplier: 0.75, friction: 0.42, lateralGrip: 0.7, restitution: 0.42 },
-    render: { color: '#f59e0b', heightMeters: 1.2, textureKey: HMSC_TILE_TEXTURE_KEYS.door },
+    render: { color: '#f59e0b', heightMeters: 1.2, textureKey: EDITOR_TILE_TEXTURE_KEYS.door },
     altitude: CELL_BASE_ALTITUDE,
   },
   bush: {
@@ -368,7 +367,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: { opacity: 0.5, concealment: 0.82, lightTransmission: 0.6, soundOcclusion: 0.2, blocksLineOfSight: false },
     traversal: { ...PEDESTRIAN_TRAVERSAL, maxStepUpMeters: 0.3 },
     surface: { material: 'soil', walkSpeedMultiplier: 0.9, runSpeedMultiplier: 0.84, vehicleSpeedMultiplier: 0, accelerationMultiplier: 0.85, friction: 0.5, lateralGrip: 0.7, restitution: 0.2 },
-    render: { color: '#2f6b35', heightMeters: 0.05, textureKey: HMSC_TILE_TEXTURE_KEYS.bush },
+    render: { color: '#2f6b35', heightMeters: 0.05, textureKey: EDITOR_TILE_TEXTURE_KEYS.bush },
     altitude: CELL_BASE_ALTITUDE,
   },
   marker: {
@@ -382,7 +381,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: OPEN_TRAVERSAL,
     surface: { material: 'dev', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.2, lateralGrip: 0.9, restitution: 0.8 },
-    render: { color: '#22d3ee', heightMeters: 0.095, textureKey: HMSC_TILE_TEXTURE_KEYS.marker },
+    render: { color: '#22d3ee', heightMeters: 0.095, textureKey: EDITOR_TILE_TEXTURE_KEYS.marker },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   // Where the player (re)appears. Ordinary walkable ground underneath a marker
@@ -399,7 +398,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: OPEN_TRAVERSAL,
     surface: { material: 'dev', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.2, lateralGrip: 0.9, restitution: 0.8 },
-    render: { color: '#22c55e', heightMeters: 0.05, textureKey: HMSC_TILE_TEXTURE_KEYS.spawn },
+    render: { color: '#22c55e', heightMeters: 0.05, textureKey: EDITOR_TILE_TEXTURE_KEYS.spawn },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   // A save checkpoint. Stepping on it persists the game and arms the respawn at
@@ -415,7 +414,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: OPEN_TRAVERSAL,
     surface: { material: 'dev', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.2, lateralGrip: 0.9, restitution: 0.8 },
-    render: { color: '#a855f7', heightMeters: 0.05, textureKey: HMSC_TILE_TEXTURE_KEYS.save },
+    render: { color: '#a855f7', heightMeters: 0.05, textureKey: EDITOR_TILE_TEXTURE_KEYS.save },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   // ── directional lanes + the junction resolver (see design.ts TileKind) ────
@@ -436,7 +435,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
     surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.18, lateralGrip: 0.92, restitution: 0.84 },
-    render: { color: '#272c37', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.road },
+    render: { color: '#272c37', heightMeters: 0.08, textureKey: EDITOR_TILE_TEXTURE_KEYS.road },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   // The zebra crossing (see design.ts) — drivable like road, pleasantly
@@ -452,7 +451,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
     surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.19, lateralGrip: 0.92, restitution: 0.84 },
-    render: { color: '#3a4250', heightMeters: 0.085, textureKey: HMSC_TILE_TEXTURE_KEYS.road },
+    render: { color: '#3a4250', heightMeters: 0.085, textureKey: EDITOR_TILE_TEXTURE_KEYS.road },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   // The double-yellow centerline strip between opposing lane groups (stamped by
@@ -472,7 +471,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
     surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.18, lateralGrip: 0.92, restitution: 0.84 },
-    render: { color: '#46431f', heightMeters: 0.085, textureKey: HMSC_TILE_TEXTURE_KEYS.median },
+    render: { color: '#46431f', heightMeters: 0.085, textureKey: EDITOR_TILE_TEXTURE_KEYS.median },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   // ── living ground: plain lawn surface. Growth is flora, not ground. ────────
@@ -487,7 +486,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: { ...OPEN_VISIBILITY, concealment: 0.12, lightTransmission: 0.97, soundOcclusion: 0.04 },
     traversal: { ...OPEN_TRAVERSAL, maxStepUpMeters: 0.28, slopeLimitDegrees: 30, vehicleGripMultiplier: 0.5 },
     surface: { material: 'soil', walkSpeedMultiplier: 0.95, runSpeedMultiplier: 0.92, vehicleSpeedMultiplier: 0.5, accelerationMultiplier: 0.7, friction: 0.6, lateralGrip: 0.6, restitution: 0.2 },
-    render: { color: '#3f7d33', heightMeters: 0.06, textureKey: HMSC_TILE_TEXTURE_KEYS.grass },
+    render: { color: '#3f7d33', heightMeters: 0.06, textureKey: EDITOR_TILE_TEXTURE_KEYS.grass },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   // ── parking + vehicle spawn (PARKSPAWN-0612, req_0694) — appended LAST ─────
@@ -505,7 +504,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 0.95 },
     surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 0.85, accelerationMultiplier: 0.95, friction: 0.2, lateralGrip: 0.9, restitution: 0.82 },
-    render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.parking },
+    render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: EDITOR_TILE_TEXTURE_KEYS.parking },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   // Where the traffic system may materialize a vehicle. Ordinary drivable
@@ -522,7 +521,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: OPEN_TRAVERSAL,
     surface: { material: 'dev', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.2, lateralGrip: 0.9, restitution: 0.8 },
-    render: { color: '#f97316', heightMeters: 0.05, textureKey: HMSC_TILE_TEXTURE_KEYS.vehicleSpawn },
+    render: { color: '#f97316', heightMeters: 0.05, textureKey: EDITOR_TILE_TEXTURE_KEYS.vehicleSpawn },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
   // Parking rotated 90° (req_0710): identical lot ground to 'parking', its bay
@@ -539,7 +538,7 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     visibility: OPEN_VISIBILITY,
     traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 0.95 },
     surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 0.85, accelerationMultiplier: 0.95, friction: 0.2, lateralGrip: 0.9, restitution: 0.82 },
-    render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.parkingCross },
+    render: { color: '#2a2f3a', heightMeters: 0.08, textureKey: EDITOR_TILE_TEXTURE_KEYS.parkingCross },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
 };

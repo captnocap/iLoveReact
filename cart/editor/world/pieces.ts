@@ -1,8 +1,5 @@
-// world/pieces.ts — the editor's OWN placed-piece model (req_2486: the last
-// hmsc-int cross-import dies). This is deliberately the MINIMAL vocabulary the
-// editor's world surface actually exercises today — grid-snapped plates placed
-// live — not a clone of the hmsc build brain (which is welded to the 435-file
-// prop-recipe science project and dies with its cart).
+// world/pieces.ts — the editor-owned placed-piece model (req_2486). This is the
+// minimal vocabulary the world surface exercises: grid-snapped semantic pieces.
 //
 // The heavy placement math already lives HOST-SIDE (framework/game/build.zig,
 // req_2349 — placementFor/validatePlacement/raycastPieces); the editor calls it
@@ -52,8 +49,8 @@ export type PlacedPiece = {
   // Per-instance material slots keyed by slot role (see pieceSlots.ts) — the
   // focus panel writes these; the live overlay reflects the primary slot's tint.
   slots?: Record<string, MaterialRef>;
-  // Per-instance property overrides (friction/walkable/opacity/… as num|bool),
-  // the folded-in hmsc-int override editor. Absent key ⇒ the kind default.
+  // Per-instance property overrides (friction/walkable/opacity/… as num|bool).
+  // Absent key ⇒ the kind default.
   overrides?: Record<string, number | boolean>;
 };
 

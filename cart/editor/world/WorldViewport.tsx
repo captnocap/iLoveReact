@@ -1,5 +1,5 @@
-// WorldViewport — the editor's OWN iso world viewport (req_2486: the LoaderIsoView
-// cross-import dies here). A THIN pane over host doors, nothing else:
+// WorldViewport — the editor-owned iso world viewport. A thin pane over host
+// doors, nothing else:
 //
 //   render   — the native WorldLoader primitive (world_loader.zig) draws the baked
 //              world + the live map-paint layer; JS never touches a mesh.
@@ -19,9 +19,8 @@
 //              nearest hit wins. The viewport is MODAL — the armed tool owns the
 //              click (req_2550).
 //
-// Deliberately NOT here (they die with hmsc-int or arrive by door): the TS build
-// brain (host-ported, req_2349), prefab stamping, skins, cooked-asset residency
-// beyond the local snapped Move drag — each returns as a door-driven slice.
+// Deliberately not here: host-owned build logic, prefab stamping, and residency
+// beyond the local snapped Move drag. Each arrives through a strict host door.
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Graph, Pressable } from '@reactjit/primitives';
 import { IsoStage, METERS_PER_LEVEL, type Rect } from './isoStage';

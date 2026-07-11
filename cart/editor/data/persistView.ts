@@ -5,8 +5,7 @@
 // you were looking at). useHotState persists atoms in Zig-owned memory
 // (framework/state/hotstate.zig) that outlives the teardown, so we mirror the
 // editor VIEW into one atom and rehydrate it on boot. Map-authored slices are
-// redacted: named document files are their only truth. Same idea the
-// previous editor app (hmsc-int) leans on for its studio/game state.
+// redacted: named document files are their only truth.
 //
 // Survives hot reload; resets on a cold process restart (hotstate is
 // in-process) — which is the wanted behaviour for VIEW state: a fresh launch

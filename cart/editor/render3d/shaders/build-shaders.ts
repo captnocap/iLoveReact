@@ -3,9 +3,8 @@
 // _generated/dispatch.ts. This is the ONLY place that ever needs to run when a
 // material is added or deleted — no other file is touched.
 //
-// CLONED from cart/hmsc-int/render3d/shaders/build-shaders.ts (no cross-cart
-// imports; clone-and-repurpose). The editor cart owns this copy AND its
-// materials/ sources; diverge freely. Editor addition: PALETTE SLOTS — every
+// The editor owns this generator and its materials/ sources. PALETTE SLOTS:
+// every
 // color-looking vec3f literal in a material fn is extracted as a named slot
 // (registry metadata) and rewritten to mat_pal(slot, baked) in the emitted
 // dispatch, so D[5]=count, D[6+i*3..]=RGB overrides recolor the material with

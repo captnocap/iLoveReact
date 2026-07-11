@@ -1,6 +1,4 @@
-// CLONED from cart/hmsc-int/game/textures/decalRender.tsx — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor cart owns this copy; do NOT re-import from cart/hmsc-int. Diverge freely.
-// game/textures/decalRender.tsx — the decal doc's React half (DECALEDIT-0606,
+// Editor-owned decal document renderer (DECALEDIT-0606,
 // the painted.ts / paintedRender.tsx split: decal.ts stores, this renders).
 //
 // <DecalSurface doc width height /> draws the doc scaled to the target pixel

@@ -3,17 +3,14 @@
 // File → New Mesh → Player / NPC Model seeds a full humanoid as a MULTI-PART
 // mesh document: one editable part per body region, each NAMED AFTER ITS BONE
 // in the body formation (runtime/skeleton rigs.ts bodyRigBones — the skeleton
-// object model, V2's head_lab figure carried forward). The default silhouettes
-// are cloned from the figure stack's part presets (cart/hmsc-int/game/figure/
-// shapes.ts — radial profile lathes, profile shapes RADIUS ONLY, never length)
+// object model). The default silhouettes use captured radial-profile lathes
+// (profile shapes control RADIUS ONLY, never length)
 // evaluated at the neutral stand pose, so the default body IS the old player
 // model — now as ordinary editable mesh parts. Adjust any part in the editor,
 // save/export whole; the package manifest carries the skeleton (formation +
 // per-bone mesh assignments) forward as the rig truth (req_2718 pattern).
 //
-// Cloned-not-imported per the cross-dir rule: the profile tables and the
-// stand-pose joint positions below are captured from the hmsc figure stack
-// (shapes.ts PART_PRESETS + skeleton.ts buildSkeleton at neutral/stand),
+// The profile tables and stand-pose joint positions below are editor-owned data
 // re-based onto the bodyRigBones vocabulary. Ground is y=0; the figure stands
 // ~2.05 m tall facing -Z (the figure-stack convention).
 

@@ -8,13 +8,11 @@
 //
 // FLOAT ORDER IS A WIRE CONTRACT: packPhysicsGlobals emits the lump order the
 // host reads (world_loader.zig setPhysicsConfig / constructor.PhysicsConfig,
-// itself the hmsc encodePhysicsConfigLump layout). Reorder NOTHING without
+// itself the gamefile PHYSICS_CONFIG layout). Reorder NOTHING without
 // changing both sides.
 //
-// Defaults are the tuned hmsc values (cart/hmsc-int/state/defaults.ts
-// DEFAULT_GAME_CONFIG + player walk/run) and the scale contract (R4: collider
-// height 1.65 m, radius 0.34 m, step 0.5 m) — the feel the last era locked in,
-// as this era's starting point.
+// Defaults are the editor's tuned game values and scale contract (R4: collider
+// height 1.65 m, radius 0.34 m, step 0.5 m).
 import type { OverridableProp } from '../inspector/overridables';
 
 export type PhysicsGlobals = {

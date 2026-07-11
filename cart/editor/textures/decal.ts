@@ -1,6 +1,4 @@
-// CLONED from cart/hmsc-int/game/textures/decal.ts — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor cart owns this copy; do NOT re-import from cart/hmsc-int. Diverge freely.
-// game/textures/decal.ts — the DECAL document model (DECALEDIT-0606).
+// Editor-owned DECAL document model (DECALEDIT-0606).
 //
 // The locked art→material vocabulary's third source, as DATA: a decal is a
 // look authored in React (Box/Text/Image) and baked to a texture — what

@@ -1,6 +1,4 @@
-// CLONED from cart/hmsc-int/editors/model/editMesh.ts — req_2178 (no cross-cart imports; clone-and-repurpose).
-// The editor cart owns this copy; do NOT re-import from cart/hmsc-int. Diverge freely.
-// editors/model/editMesh.ts — the Studio's editable topological mesh (req_0942
+// Editor-owned editable topological mesh (req_0942
 // → req_0950). THE KEYSTONE of the whole modeling consolidation: one mesh type
 // with shared verts + n-gon (quad-friendly) faces + derived edge adjacency, that
 // LOWERS to the same `GeometryData` triangle soup everything in the framework

@@ -1,5 +1,5 @@
 # car — SDF round-trip @ 48^3 (scripts/sdf-roundtrip.js, req_2604)
-# source cart/hmsc-int/car.obj  src_tris 180
+# source retired-source:car.obj  src_tris 180
 v -0.2507 -0.4741 -1.1150
 v -0.2172 -0.4741 -1.1150
 v -0.1280 -0.4699 -1.1114

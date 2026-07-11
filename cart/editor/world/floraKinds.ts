@@ -1,7 +1,5 @@
-// CLONED from cart/hmsc-int/floraData.ts kind tables — req_2178 (no cross-cart
-// imports; clone-and-repurpose). The editor cart owns this copy.
-//
-// Flora is what GROWS on a cell — grass blades, palms, bushes — a channel
+// Editor-owned flora kind table. Flora is what GROWS on a cell — grass blades,
+// palms, bushes — a channel
 // SEPARATE from the ground tiles so a population layers over any surface
 // (beach grass = sand GROUND + grass FLORA). Three lanes (grass/tree/bush) can
 // occupy the same 1m cell; a kind paints only its lane. Index order IS the

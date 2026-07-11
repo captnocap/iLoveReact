@@ -61,9 +61,8 @@ export type ExplorerIndex = {
   truncated: boolean;
 };
 
-// The product surfaces worth indexing: editor-authored packages only. Deliberately
-// not a repo/source-code scan and not a legacy hmsc-int scan: model and texture
-// imports materialize into cart/editor/data/*, so the explorer reads the editor's
+// The product surfaces worth indexing: editor-authored packages only. Model and
+// texture imports materialize into cart/editor/data/*, so the explorer reads the editor's
 // own portable on-disk project assets.
 const SCAN_DIRS = [
   'cart/editor/data/models',

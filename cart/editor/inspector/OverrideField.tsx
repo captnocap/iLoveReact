@@ -1,6 +1,5 @@
-// inspector/OverrideField.tsx — one per-instance override control (req_2563
-// Phase 3), cloned in spirit from the last editor's field renderer (hmsc-int
-// shell/fields.tsx num/bool + reset rider) but drawn in the editor's own cls.
+// inspector/OverrideField.tsx — one editor-owned per-instance override control
+// (req_2563 Phase 3), drawn in the shared cls vocabulary.
 //
 // A num field is a [−] value [+] stepper; a bool field is an On/Off toggle. When
 // the piece carries no override for this path the field shows its BASE dimmed

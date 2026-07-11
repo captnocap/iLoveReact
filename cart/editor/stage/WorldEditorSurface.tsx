@@ -16,9 +16,8 @@ import type { MapZoneDef } from './mapPaint';
 export const EDITOR_GAME_FILE = 'zig-out/game/editor/world.gamefile';
 export const EDITOR_STORE_DIR = 'zig-out/game/contentstore';
 
-// The world document's surface: the editor's OWN thin viewport over host doors
-// (world/WorldViewport — req_2486 cut the LoaderIsoView cross-import; hmsc-int
-// is dying). React owns only the placed-piece list + the armed palette entry;
+// The world document's surface: the editor's thin viewport over host doors.
+// React owns only the placed-piece list + the armed palette entry;
 // rendering, camera application, picking, validation, map painting, and
 // colliders are host-side.
 //

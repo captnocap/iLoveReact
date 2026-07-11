@@ -1,5 +1,5 @@
-// stage/WorldContextMenu.tsx — the world surface's right-click quick menu (req_2733,
-// picker rebuilt req_2737 on the hmsc-int FacePainter pattern).
+// stage/WorldContextMenu.tsx — the world surface's right-click quick menu
+// (req_2733/req_2737).
 //
 // "Keep an edit within 200px of mouse movement": right-clicking a placed build
 // piece in the viewport opens this at the cursor — in ANY tool mode — with the
@@ -10,7 +10,7 @@
 //            the kind default, shown as an empty "default" slot). Click a face
 //            to TARGET it; with a target set, picking a skin paints only that
 //            face. With NO target, picking a skin paints EVERY face — the
-//            FacePainter law (hmsc-int req_0758).
+//            shared face-painting law.
 //   RECENT — the live recently-used materials row (EditorState.recentMaterialIds).
 //   grid   — search ("search skins…") over the RANKED catalog, paged like the
 //            ink popover (every tile is a live <Effect> thumb via AssetPreview,

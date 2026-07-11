@@ -2,9 +2,8 @@
 //
 // The live overlay used to draw ONE flat unit box per piece, so a window wall
 // showed no window, a doorway showed no opening, and you couldn't tell which way
-// a wall faced. This ports the last editor's piece DECOMPOSITION (cart/hmsc-int/
-// editors/build/pieceShapes.ts pieceVisualShapes — cloned per the no-cross-dir
-// rule) into cart/editor: a piece becomes a SET of shapes — front/back face
+// a wall faced. The editor-owned decomposition makes a piece a SET of shapes:
+// front/back face
 // slabs, window jamb/sill/header + glass pane, door leaf, ramps, gable roofs,
 // elevator frames — the same meaning the colliders carry, as boxes.
 //
@@ -17,8 +16,7 @@ import type { PlacedPiece } from './pieces';
 
 const DEG = Math.PI / 180;
 
-// Tuning verbatim from the source BUILD_UI (cart/hmsc-int/editors/build/
-// pieceShapes.ts) so a placement reads identically.
+// Editor-owned visual tuning for readable placements.
 const UI = {
   faceSlabThicknessMeters: 0.02,
   faceSlabLiftMeters: 0.012,
