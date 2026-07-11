@@ -1985,6 +1985,10 @@ export default function AppFrame() {
     if (composeModelParts(parts).positions.length === 0) {
       const seedRange = composeModelParts([{ ...part, visible: true }]).ranges[0];
       const placed: ModelPart = { ...part, lo: seedRange?.lo ?? 0, hi: seedRange?.hi ?? 0 };
+      // There is no resident host mesh to scope until ModelView remounts, but the
+      // outliner selection still changes transactionally with its new base row.
+      selectedPartIdsRef.current = [placed.id];
+      setSelectedPartIds([placed.id]);
       setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name} to the empty model` }));
       return;
     }
@@ -2000,7 +2004,16 @@ export default function AppFrame() {
       return;
     }
     const placed: ModelPart = { ...part, lo: range.lo, hi: range.hi };
+    const nextParts = [...parts, placed];
+    // Adding a row hands the edit transaction to that new geometry, exactly like
+    // Duplicate already does. modelActivePartId alone only highlights the React row;
+    // the native gizmo/topology scope must receive the appended range synchronously.
+    selectedPartIdsRef.current = [placed.id];
+    setSelectedPartIds([placed.id]);
+    pushPartSetToHost(state, nextParts, [placed.id], placed.id);
     setState((prev) => ({ ...prev, seq: prev.seq + 1, modelParts: { ...prev.modelParts, [activeModel]: [...(prev.modelParts[activeModel] ?? []), placed] }, modelActivePartId: placed.id, newMeshPrompt: null, status: `added ${placed.name}` }));
+    const bridge = (globalThis as any).__modelFocusBridge;
+    if (bridge?.paintLive) bridge.refreshUv?.();
   };
 
   // 'new' verb — ALWAYS a fresh model document seeded with this one part (mount composes it), even
@@ -3190,12 +3203,12 @@ export default function AppFrame() {
   // Drives the REAL outliner handlers by row index — the shell-side twin of
   // RJIT_MESHOPS (which drives host doors). ';'-separated ops:
   //   sel:i · shiftsel:i (the shift-click accumulate path, shift asserted on the live
-  //   modifier record for the call) · eye:i · dup:i · del:i · merge · undo · redo · wait:frames ·
+  //   modifier record for the call) · add:kind · eye:i · dup:i · del:i · merge · undo · redo · wait:frames ·
   //   report (rows + selected set + primary) · audit (adds face counts + host selection).
   // Handlers are per-render closures — the ref keeps the once-installed timer calling
   // the CURRENT ones (the same mount-frozen-closure trap as the meshops harness).
-  const partOpsRef = useRef({ selectPart, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo });
-  partOpsRef.current = { selectPart, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo };
+  const partOpsRef = useRef({ selectPart, addPrimitivePart, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo });
+  partOpsRef.current = { selectPart, addPrimitivePart, toggleVisiblePart, duplicatePartById, deletePart, mergeSelectedParts, meshUndoRedo };
   useEffect(() => {
     const opsText = (globalThis as any).__env_get?.('RJIT_PARTOPS') as string | null | undefined;
     if (!opsText) return;
@@ -3214,6 +3227,8 @@ export default function AppFrame() {
         const m = currentModifiers() as { shift: boolean };
         m.shift = true; // assert the live modifier record for this one call — the REAL shift branch runs
         try { h.selectPart(id); } finally { m.shift = false; }
+      } else if (name === 'add' && PRIMITIVE_MESHES.some((primitive) => primitive.kind === arg)) {
+        h.addPrimitivePart(arg as PrimitiveKind, { size: 1, height: 1, resolution: 1 });
       } else if (name === 'eye' && id) h.toggleVisiblePart(id);
       else if (name === 'dup' && id) h.duplicatePartById(id, -1);
       else if (name === 'del' && id) h.deletePart(id);
