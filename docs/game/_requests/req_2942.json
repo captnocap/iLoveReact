@@ -1,0 +1,30 @@
+{
+  "id": "req_2942",
+  "at": "2026-07-11T01:03:11.186Z",
+  "origin": "codex:019f4de6",
+  "text": "roads looking better already! [Image #1] one thing i thing we need to absolutely close in on is this geometry, the slight bend in the road just absolutely puts this thing in the dumpster and makes for authoring really shitty, the thing is that this is arguably a bit of a pain in the fucking ass if you think about how the system is set up, using tile space i think maybe the approach is found inside the same shape the lightrail track takes in how it can bend around, idk, something has to change though, the break in here is just a huge no for me [Image #2][Image #3]",
+  "status": "review",
+  "sessionId": "019f4de6-2533-7ed0-8e75-190a8d7d1e46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T01:03:24.841Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T01:25:36.758Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Committed roads now render from the shared filleted transport path as smooth analytic asphalt and sidewalk ribbons while the one-metre stamp remains authoritative for vehicle flow, junctions, undo, and persistence. Exact tile/material undercoat restoration removes stair-step protrusions, lane paint keeps continuous path distance across bends and chunk boundaries, and bounded overflow falls back loudly to the complete raster. Native and formula suites plus the ReleaseFast editor build pass; visual bend quality and the required 60-second spikewatch remain for user verification.",
+  "shas": [
+    "24784c16d"
+  ],
+  "resolvedAt": "2026-07-11T01:25:36.758Z"
+}
