@@ -2258,7 +2258,33 @@ pub fn meshDeleteSelection() bool {
     defer std.heap.c_allocator.free(mask);
     const del = mesh_edit.buildDeleteMask(mask);
     if (del == 0) return false;
+    return deleteMaskedFaces(verts, tri_count, mask, "delete selection");
+}
 
+/// Delete every face whose authored group id is in [lo, hi) — the outliner removing a
+/// PART. Structural, not a selection gesture: it must not route through the interactive
+/// selection doors, which the paint session makes inert (req_2662) — that routing made
+/// an outliner delete mid-paint silently no-op while the row still left the list (req_2981).
+pub fn meshDeleteGroupRange(lo: u32, hi: u32) bool {
+    if (!model_paint.hasTarget()) return false;
+    const verts = g_edit_verts orelse return false;
+    const tri_count = g_edit_count / 3;
+    if (tri_count == 0 or hi <= lo) return false;
+
+    const mask = std.heap.c_allocator.alloc(bool, tri_count) catch return false;
+    defer std.heap.c_allocator.free(mask);
+    var del: u32 = 0;
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        const g = model_source.faceGroupOf(f);
+        mask[f] = g != model_source.NO_FACE_GROUP and g >= lo and g < hi;
+        if (mask[f]) del += 1;
+    }
+    if (del == 0) return false;
+    return deleteMaskedFaces(verts, tri_count, mask, "delete part");
+}
+
+fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, label: []const u8) bool {
     // Drop the selection FIRST (same rule as detach/glass): the orange tint is
     // real atlas pixels with per-face saved patches, and both are keyed by the
     // CURRENT face indices. Restoring after the survivors compact would paint
@@ -2288,7 +2314,7 @@ pub fn meshDeleteSelection() bool {
     };
     defer std.heap.c_allocator.free(owned);
 
-    var snap = journalSnapshotCurrent("delete selection");
+    var snap = journalSnapshotCurrent(label);
     const ok = replaceActiveEditMesh(owned, kept);
     if (ok) {
         if (kept > 0 and has_groups) {

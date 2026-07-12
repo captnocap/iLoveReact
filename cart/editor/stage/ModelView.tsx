@@ -464,10 +464,11 @@ const meshPartRangesRead = (): { lo: number; hi: number }[] | null => {
     return null;
   }
 };
-const meshDeleteGroupRange = (lo: number, hi: number) => {
-  host.__mesh_edit_select_group_range?.(lo, hi, 0);
-  return readTopoResult(host.__mesh_delete_selection?.());
-};
+// Structural part delete — its own host door, NOT select-then-delete: the selection
+// doors are inert while the paint session owns the surface (req_2662), which made an
+// outliner delete mid-paint silently no-op while the row still left the list (req_2981).
+const meshDeleteGroupRange = (lo: number, hi: number) =>
+  readTopoResult(host.__mesh_delete_group_range?.(lo, hi));
 const readGuard = (): GuardInfo | null => {
   try {
     const j = host.__mesh_edit_guard?.();
@@ -1243,8 +1244,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       const ok = adoptMesh(r) && Boolean(r?.ok);
       // Deleting a PART is a structural change the cart authors: the pair leaves the
       // range list (the host kept the id-span — its faces are gone, the row follows).
-      partRangesRef.current = partRangesRef.current.filter((pr) => pr.lo !== lo || pr.hi !== hi);
-      meshSetPartRanges(partRangesRef.current);
+      // Only on a host-confirmed delete — a failed op keeps the mirror true to the mesh.
+      if (ok) {
+        partRangesRef.current = partRangesRef.current.filter((pr) => pr.lo !== lo || pr.hi !== hi);
+        meshSetPartRanges(partRangesRef.current);
+      }
       return r ? { ok, count: Math.floor((r.count ?? 0) / 3) } : null;
     },
     // ── Studio-parity part ops. Each adopts the host's new mesh key; the host grew or

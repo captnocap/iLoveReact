@@ -753,6 +753,19 @@ fn hostMeshDeleteSelection(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     setMeshTopoReturn(info, ok);
 }
 
+/// __mesh_delete_group_range(lo, hi) → JSON {"ok","key","count"}. Delete every face in the
+/// authored group range [lo, hi) — the outliner removing a whole part. Structural, so it
+/// bypasses the interactive selection doors and works while the paint session owns the
+/// surface (req_2981; the selection doors are inert mid-paint per req_2662).
+fn hostMeshDeleteGroupRange(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    const hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
+    const ok = scene3d.meshDeleteGroupRange(lo, hi);
+    if (ok) state.markDirty();
+    setMeshTopoReturn(info, ok);
+}
+
 /// __mesh_append_group(f32Verts, count, u32Groups) → JSON {"ok","key","count","lo","hi"}.
 /// Append a new part's triangles to the LIVE edit mesh (preserving prior edits) with a fresh
 /// authored-group range. Only the new part's geometry crosses the bridge.
@@ -2764,6 +2777,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_lc_end", hostMeshLcEnd);
     v8_runtime.registerHostFn("__mesh_lc_state", hostMeshLcState);
     v8_runtime.registerHostFn("__mesh_delete_selection", hostMeshDeleteSelection);
+    v8_runtime.registerHostFn("__mesh_delete_group_range", hostMeshDeleteGroupRange);
     v8_runtime.registerHostFn("__mesh_group_face_count", hostMeshGroupFaceCount);
     v8_runtime.registerHostFn("__mesh_append_group", hostMeshAppendGroup);
     v8_runtime.registerHostFn("__mesh_set_group_hidden", hostMeshSetGroupHidden);

@@ -2534,6 +2534,9 @@ export default function AppFrame() {
     // delete — the host empties honestly now (req_2806: the refuse-to-empty guard is
     // gone; it made this path skip the op and leave a ghost mesh behind, req_2805).
     const lines: string[] = [];
+    // A row only leaves the outliner when its geometry actually left the host — a failed
+    // host op keeps the row, or the list and the stage diverge (the ghost cube, req_2981).
+    const removed: string[] = [];
     for (const tid of targets) {
       const part = allParts.find((p) => p.id === tid);
       if (!part) continue;
@@ -2541,19 +2544,20 @@ export default function AppFrame() {
       // Each visible part is its own host op and its own journal entry — the status
       // reads one line per part (honest N entries, no faked atomicity; req_2659e).
       const r = range && part.visible ? modelToolApiRef.current?.deletePartRange(range.lo, range.hi) : null;
+      if (!part.visible || !range || r?.ok) removed.push(tid);
       lines.push(part.visible && range
         ? r?.ok
           ? `deleted ${part.name} [${range.lo},${range.hi}) — ${r.count} tris remain`
           : `could not delete ${part.name} [${range.lo},${range.hi}) — host op failed`
         : `removed ${part.name} from the outliner`);
-      hiddenPartIdsRef.current.delete(tid);
+      if (removed.includes(tid)) hiddenPartIdsRef.current.delete(tid);
     }
     const status = lines.join(' · ');
     setState((prev) => {
-      const parts = (prev.modelParts[mid] ?? []).filter((p) => !targets.includes(p.id));
-      return { ...prev, status, modelParts: { ...prev.modelParts, [mid]: parts }, modelActivePartId: targets.includes(prev.modelActivePartId ?? '') ? (parts[0]?.id ?? null) : prev.modelActivePartId };
+      const parts = (prev.modelParts[mid] ?? []).filter((p) => !removed.includes(p.id));
+      return { ...prev, status, modelParts: { ...prev.modelParts, [mid]: parts }, modelActivePartId: removed.includes(prev.modelActivePartId ?? '') ? (parts[0]?.id ?? null) : prev.modelActivePartId };
     });
-    setSelectedPartIds((prev) => prev.filter((sid) => !targets.includes(sid)));
+    setSelectedPartIds((prev) => prev.filter((sid) => !removed.includes(sid)));
   };
   // The host mesh is authoritative, so a delete just changes it — parts are metadata. After a
   // delete, drop any part whose group range now has ZERO surviving faces (metadata only; no
