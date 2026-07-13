@@ -19,8 +19,9 @@ Plan of record: `~/.claude/plans/hey-i-want-you-giggly-minsky.md`.
   editing, brushes, gizmos, input loop, model authoring) is a Zig host function
   with a native input loop, zero JS per event. `cart/modelview.tsx` is the
   reference.
-- **Everything authoring goes through the eventbus** (below). Commands EMIT
-  events; nothing mutates editor state directly.
+- **Everything authoring enters through CommandAuthority** (below). The owning
+  domain validates and applies once; only the authority's outcome sink appends
+  the immutable eventbus report. The bus is not an alternate mutation door.
 - **Styling = classifier `.cls.ts` only**, `theme:NAME` tokens, no inline styles
   without a damn good reason. Baseline: `cart/hmsc-workspace-mock/workspace.cls.ts`
   + `theme.ts` + `runtime/classifier.tsx`. JSX reads like a document.
@@ -29,9 +30,10 @@ Plan of record: `~/.claude/plans/hey-i-want-you-giggly-minsky.md`.
 
 ## Two distinct buses — do not conflate
 
-- **Authoring eventbus** = `runtime/editorbus/` (TS door) + `framework/events/`
-  (Zig authority, workstream A). The **source of truth** for edits. Ordered,
-  append-only, replayable, multiplayer-shaped.
+- **Authoring outcome log** = `runtime/editorbus/` (TS door) +
+  `framework/events/` (Zig ordering/persistence spine). Ordered, append-only,
+  multiplayer-shaped. Correlated CommandAuthority outcomes are replay-grade;
+  uncorrelated legacy receipts are observational while their slices migrate.
 - **Diagnostics bus** = `runtime/eventBus.ts` + `framework/diag/event_bus.zig`
   (logging/observability, sampled, fire-and-forget). The in-app console may
   subscribe to authoring events, but diagnostics channels are their own registry.
@@ -48,6 +50,15 @@ interface EditorEvent<P> {
   type: string;       // a registered event type, e.g. 'piece.place'
   targets: TargetRef[]; // { kind, id }[] — drives dirty-tracking + the hot index
   payload: P;
+  // Present on migrated command outcomes:
+  invocationId?: string;
+  commandId?: string;
+  actionId?: string;
+  source?: string;
+  phase?: 'applied' | 'rejected' | 'undone' | 'redone';
+  causedBy?: string;
+  effect?: 'action' | 'project-action' | 'report-only' | 'control';
+  undoScope?: { kind: 'none' | 'document' | 'project' | 'workspace' | 'native'; key?: string };
 }
 ```
 
@@ -67,7 +78,34 @@ const placePiece = defineEventType<{ piece: string }>({
 event declare its dirty region directly; object refs are resolved to chunks by the
 hot index (E). **Carrying refs is what keeps one edit O(1) on an empty vs rich map.**
 
-## Seam 2 — host-door convention (`runtime/ffi.ts`)
+## Seam 2 — application command authority (`runtime/commands/`)
+
+`CommandRegistry` stores declarations and returns frozen, handler-free
+projections. Menus, keybindings, Section D, context menus, palettes, native
+input, automation, and remote peers may inspect those projections, but cannot
+execute their private handlers.
+
+`CommandAuthority.invoke({ invocationId, commandId, args, source, ... })` is the
+one execution entrance. It validates arguments, enablement, capabilities, and
+mode predicates; runs exactly one private handler; then publishes exactly one
+`applied` or `rejected` outcome through its authority-owned sink. `source` is
+withheld from the handler, so it cannot select another implementation.
+
+Action outcomes carry a stable `actionId`. Undo/redo are control commands whose
+`undone`/`redone` reports retain that action id. Domain handlers must prepare all
+fallible work before one atomic commit; the authority cannot roll back arbitrary
+side effects captured by a TypeScript closure.
+
+First active-cart proofs (`req_2985`):
+
+- `world.floor.step`: Map menu, `]`, Section D arrows, and headless invocation
+  share one handler.
+- `world.pieces.place`: viewport submits semantic candidates; authority assigns
+  ids, computes exact replacement forward/inverse patches, commits once, and
+  emits a correlated `piece.place` outcome. World undo/redo report against the
+  same action id.
+
+## Seam 3 — host-door convention (`runtime/ffi.ts`)
 
 - Naming: `__editor_*` for new editor doors (e.g. `__editor_bus_emit`); existing
   `__mesh_edit_*` / `__model_*` (modelview) are the interactable-system reference.
@@ -89,7 +127,7 @@ hot index (E). **Carrying refs is what keeps one edit O(1) on an empty vs rich m
 - `__diag_emit(channelId, severity, msg, fieldsJson)` — cheap no-op when disabled; captures host events too.
 - `__diag_set_enabled(channelId, on)` — mirror enabled state to host emitters.
 
-## Seam 3 — diagnostics channel contract (`runtime/diag/channel.ts`)
+## Seam 4 — diagnostics channel contract (`runtime/diag/channel.ts`)
 
 Register a channel ONCE; the settings UI renders toggles from the registry and the
 console reads the feed. `costTier` (`cheap | sampled | heavy`) makes hot channels
@@ -103,13 +141,13 @@ const placeCh = defineChannel({
 if (placeCh.on) placeCh.log('info', 'placed', { ms, chunk });
 ```
 
-## Seam 4 — directory homes
+## Seam 5 — directory homes
 
 | System | Home |
 | --- | --- |
-| Authoring eventbus (A) | `framework/events/` (Zig) + `runtime/editorbus/` (TS door) |
+| Authoring outcome log (A) | `framework/events/` (Zig) + `runtime/editorbus/` (TS door) |
 | Diagnostics + console (B) | `framework/diag/` (Zig) + `runtime/diag/` (TS) + cart console overlay |
-| Command/keybinding registry (C) | `runtime/commands/` (TS) |
+| Command registry + authority (C) | `runtime/commands/` (TS); cart composition in `cart/editor/data/applicationCommands.ts` |
 | Content-hash + chunk cache (D) | `framework/world/` (Zig, beside `gamefile_writer.zig`) |
 | Hot authoring-state index (E) | `framework/` (Zig, host-owned) |
 | Build-journal + bug-thread (F) | `runtime/` (TS) over `tools/request` + `docs/game/_requests/` |
@@ -139,5 +177,5 @@ if (placeCh.on) placeCh.log('info', 'placed', { ms, chunk });
 - UI: `tools/rjit dev <cart>` + headless `tools/rjit shot <cart>`. **Never desktop
   capture** (SELFSHOT rule).
 - The supervising thread integrates each workstream against these seams before it
-  is accepted; nothing merges that bypasses the bus, uses inline styles, or
+  is accepted; nothing merges that bypasses CommandAuthority, uses inline styles, or
   implements an interactable system in React.
