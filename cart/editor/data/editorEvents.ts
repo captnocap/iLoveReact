@@ -10,12 +10,21 @@
 // AppFrame has been promising itself — the editor getting on the bus that was already
 // built and parked at the station (req_2424).
 import { defineEventType, dispatch } from '../../../runtime/editorbus';
+import type { TargetRef } from '../../../runtime/editorbus';
+import type { CommandOutcome } from '../../../runtime/commands';
 import type { HistoryEvent } from './types';
 import { assetById } from './catalog';
 import { catalogRowFor } from '../world/buildCatalog';
 import { pieceKindOf, placementSlotKey, type MaterialRef, type PlacedPiece, type PlacementGesture } from '../world/pieces';
 
 type EditPayload = { verb: string; target: string; meta: string; editMs: number };
+export type CommandOutcomePayload = {
+  status: CommandOutcome['status'];
+  label: string;
+  result?: unknown;
+  code?: string;
+  reason?: string;
+};
 export type MapAuthoringAction = 'stroke' | 'road.commit' | 'road.delete' | 'chunk.grow' | 'zone.drop' | 'tile.bindings' | 'path.control.add' | 'path.control.delete';
 export type MapPaintPayload = {
   action: MapAuthoringAction;
@@ -96,6 +105,20 @@ export const editorEdit = defineEventType<EditPayload>({
   describe: (p) => `${p.verb} ${p.target}`.trim() || 'edit',
 });
 
+/** The durable report for commands whose domain does not already own a richer
+ * event type. The authority fields live on the common envelope; this payload is
+ * presentation/result data only. */
+export const commandOutcome = defineEventType<CommandOutcomePayload>({
+  type: 'command.outcome',
+  undoable: false,
+  describe: (payload) => payload.label,
+  validate: (payload) => {
+    if (!payload.label || (payload.status !== 'applied' && payload.status !== 'rejected')) {
+      throw new Error('command.outcome: malformed status/label');
+    }
+  },
+});
+
 export const piecePlace = defineEventType<PiecePlacementPayload>({
   type: 'piece.place',
   undoable: true,
@@ -147,6 +170,32 @@ export function dispatchEdit(h: HistoryEvent): number {
     { verb: h.verb, target: h.target, meta: h.meta, editMs: h.editMs ?? 0 },
     [{ kind: 'edit', id: h.id }],
   ));
+}
+
+export function dispatchCommandOutcome(
+  outcome: CommandOutcome,
+  options: { label?: string; targets?: TargetRef[] } = {},
+): number {
+  const payload: CommandOutcomePayload = outcome.status === 'applied'
+    ? { status: outcome.status, label: options.label ?? `${outcome.commandId} applied`, result: outcome.result }
+    : {
+        status: outcome.status,
+        label: options.label ?? `${outcome.commandId} rejected`,
+        code: outcome.code,
+        reason: outcome.reason,
+      };
+  return dispatch(commandOutcome(payload, options.targets ?? [], {
+    invocationId: outcome.invocationId,
+    commandId: outcome.commandId,
+    ...(outcome.status === 'applied' && outcome.actionId ? { actionId: outcome.actionId } : {}),
+    source: outcome.source,
+    phase: outcome.phase,
+    ...(outcome.causedBy ? { causedBy: outcome.causedBy } : {}),
+    ...(outcome.status === 'applied' ? {
+      effect: outcome.effect,
+      undoScope: outcome.undoScope === 'none' ? { kind: 'none' } : outcome.undoScope,
+    } : {}),
+  }));
 }
 
 function materialName(ref: MaterialRef): string {

@@ -11,7 +11,7 @@
 //   tools/v8cli /tmp/editor-events.test.js
 
 import { describeEvent } from '../../../runtime/editorbus';
-import { draftPiecePlacementEvent, finalizePiecePlacementEvent, mapPaint, piecePlace, type MapPaintPayload } from './editorEvents';
+import { commandOutcome, draftPiecePlacementEvent, finalizePiecePlacementEvent, mapPaint, piecePlace, type MapPaintPayload } from './editorEvents';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -80,6 +80,25 @@ test('map.paint payload describes native tile strokes with coordinates and timin
   assert(payload.start?.x === 4 && payload.end?.z === 16, 'stroke coordinates carried');
   assert(payload.stamps === 9 && payload.touchedChunks === 1, 'stroke stats carried');
   assert(payload.inputToMaterializedMs === 6, `stroke timing carried, got ${payload.inputToMaterializedMs}`);
+});
+
+test('command outcomes persist identity and source in the common envelope', () => {
+  const event = commandOutcome({
+    status: 'applied',
+    label: 'active floor → Floor 4',
+    result: { previousFloorIndex: 3, floorIndex: 4 },
+  }, [{ kind: 'view-floor', id: '4' }], {
+    invocationId: 'editor:1:4',
+    commandId: 'world.floor.step',
+    source: 'toolbar',
+    phase: 'applied',
+    effect: 'report-only',
+    undoScope: { kind: 'none' },
+  });
+  assert(event.commandId === 'world.floor.step' && event.invocationId === 'editor:1:4', 'command identity left the envelope');
+  assert(event.source === 'toolbar' && event.phase === 'applied', 'source/phase left the envelope');
+  assert(event.undoScope?.kind === 'none' && event.targets[0]?.id === '4', 'scope/target drifted');
+  assert(describeEvent(event) === 'active floor → Floor 4', 'outcome description drifted');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

@@ -4,7 +4,7 @@
 import { Fragment } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
-import { COMMANDS, activeMenuFor, commandById, meshToolCommands, meshToolActive, meshTopoCommands } from '../data/commands';
+import { commandById, meshToolCommands, meshToolActive, meshTopoCommands, worldActionBarCommands } from '../data/commands';
 import { SNAP_MODES } from '../data/content';
 import type { EditorState, ViewMode } from '../data/types';
 import MapPaintBar from './MapPaintBar';
@@ -96,11 +96,14 @@ export default function ToolOptions(props: {
   // Map Paint is a tool toggle segment, not a replacement toolbar. Keep the
   // world action bar visible while the viewport dock owns paint options.
   const mapPaint = props.state.mapPaint;
-  const activeMenu = activeMenuFor(props.state);
+  // Section D follows the armed tool family, never whichever menu or hotkey ran
+  // most recently. A report-only floor step therefore cannot replace the Build
+  // controls with a dormant Map strip. Permanently unavailable roadmap rows are
+  // not user-facing controls and never project into the action bar.
   // Submenu-nested commands (File → New Mesh → the seven primitives, etc.) stay in their
   // menus — mirroring them here dumped a row of context-free primitive icons onto the map
   // bar whenever File was the active menu (req_2646: "why are all these buttons here").
-  const actionCommands = COMMANDS.filter((command) => command.menu === activeMenu && command.scope !== 'model' && !command.submenu);
+  const actionCommands = worldActionBarCommands(props.state);
   return (
     <C.HW_ToolOptions>
       <MapPaintBar state={mapPaint} onPatch={props.onMapPaint} />

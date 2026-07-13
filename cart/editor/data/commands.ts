@@ -151,7 +151,7 @@ export const COMMANDS: Command[] = [
   { id: 'add-trigger', menu: 'Map', name: 'Add Trigger Volume', icon: 'BoxSelect', key: 'T', context: true, native: true, undoable: true, tool: true, scope: 'world', available: false },
   { id: 'set-spawn', menu: 'Map', name: 'Set Spawn Point', icon: 'MapPin', key: 'S', context: true, native: true, undoable: true, tool: true, scope: 'world', available: false },
   // FLOORCTL req_2485: steps the REAL active storey (0 = Ground) up, wrapping past the cap.
-  { id: 'cycle-floor', menu: 'Map', name: 'Cycle Active Floor', icon: 'Layers', key: ']', context: false, native: true, undoable: false, scope: 'world' },
+  { id: 'world.floor.step', menu: 'Map', name: 'Step Active Floor', icon: 'Layers', key: ']', context: false, native: true, undoable: false, scope: 'world' },
 
   // ── Build (world) ─────────────────────────────────────────────────────────────────────────
   // Select is the neutral default (req_2550): a viewport click picks the piece under it and places
@@ -400,7 +400,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
   ],
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('delete-selection'), MESH_SUBMENU],
   View: [cmd('toggle-view-mode'), cmd('toggle-minimap'), cmd('focus-selection'), cmd('model-ref-images')],
-  Map: [cmd('add-chunk'), cmd('add-trigger'), cmd('set-spawn'), cmd('cycle-floor')],
+  Map: [cmd('add-chunk'), cmd('add-trigger'), cmd('set-spawn'), cmd('world.floor.step')],
   Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-material'), cmd('paint-faces'), cmd('open-color-studio'), cmd('sample-material')],
   Story: [cmd('mission-point'), cmd('author-sequence')],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],
@@ -580,4 +580,14 @@ export function menuDropdownLeft(menu: Menu | null): number {
 
 export function activeMenuFor(state: EditorState): Menu {
   return state.openMenu ?? state.actionMenu;
+}
+
+/** Section D follows the armed world-tool family, not command/menu history.
+ * Report-only commands therefore cannot swap the toolbar, and permanently
+ * unavailable roadmap rows never become user-facing controls. */
+export function worldActionBarCommands(state: Pick<EditorState, 'activeCommandId'>): Command[] {
+  const activeTool = commandById(state.activeCommandId);
+  const menu: Menu = activeTool.tool && activeTool.scope === 'world' ? activeTool.menu : 'Build';
+  return COMMANDS.filter((command) =>
+    command.menu === menu && command.scope !== 'model' && !command.submenu && command.available !== false);
 }

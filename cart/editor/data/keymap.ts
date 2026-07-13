@@ -45,7 +45,7 @@ const WORLD_KEYS: Record<string, string> = {
   // them. 'd' used to be Duplicate, which fired on every strafe and spammed copies of the phantom
   // selection (req_2558); 's' was the (inert) Set Spawn. Both move to menu-only so WASD is clean.
   tab: 'toggle-view-mode',
-  ']': 'cycle-floor',
+  ']': 'world.floor.step',
   delete: 'delete-selection',
   // R rotates the selected placed piece 90° (req_2733) — free on the world surface; the model
   // surface's R (rotate gizmo) lives in MODEL_KEYS and never collides.

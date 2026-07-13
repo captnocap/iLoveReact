@@ -54,8 +54,10 @@ import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialSt
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
 import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
-import { dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacement, draftPiecePlacementEvent, finalizePiecePlacementEvent, type MapPaintPayload, type PiecePlacementDraftPayload } from '../data/editorEvents';
+import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacement, draftPiecePlacementEvent, finalizePiecePlacementEvent, type MapPaintPayload, type PiecePlacementDraftPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
+import { commandSource, createEditorApplicationCommands, WORLD_FLOOR_STEP_COMMAND_ID, type WorldFloorStepResult } from '../data/applicationCommands';
+import { activeSurface } from '../data/surfaces';
 import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
@@ -107,8 +109,6 @@ import { floatsToBindings, GROUND_MATERIALS, tileBindingFor } from '../render3d/
 // isoStage.setLevel clamps at ground only, the storey cutaway is an integer
 // filter, and the host validator (build.zig validatePlacement) has no storey
 // cap — floor 128 places at terrainY + 384m and validates clean.
-const MAX_FLOOR = 128;
-
 const MAP_HISTORY_LABEL: Record<MapHistoryKind, string> = {
   paintStroke: 'paint stroke',
   pathCommit: 'transport path',
@@ -204,6 +204,11 @@ export default function AppFrame() {
   const { path } = useRoute();
   const playing = path === '/play';
   const [state, setState] = useState<EditorState>(loadPersistedState);
+  // Migrated application commands read and atomically replace this live
+  // snapshot before publishing their outcome. React is a projection of that
+  // commit; menu/toolbar/hotkey callers never receive setState.
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
   const pendingPieceEvents = useRef<PiecePlacementDraftPayload[]>([]);
   // The open paint-toolbar popover (ink / brush). Local, not persisted — the popovers render
@@ -258,6 +263,50 @@ export default function AppFrame() {
   // Live handle for the once-installed hotkey subscription (fresh closures per render).
   const blockingNowRef = useRef(blockingNow);
   blockingNowRef.current = blockingNow;
+
+  const applicationCommandsRef = useRef<ReturnType<typeof createEditorApplicationCommands> | null>(null);
+  if (applicationCommandsRef.current === null) {
+    applicationCommandsRef.current = createEditorApplicationCommands({
+      activeSurface: () => activeSurface(stateRef.current),
+      blockedReason: () => blockingNowRef.current(stateRef.current)?.label ?? null,
+      floorIndex: () => stateRef.current.floorIndex,
+      commitFloor: (result) => {
+        const previous = stateRef.current;
+        const next: EditorState = {
+          ...previous,
+          openMenu: null,
+          floorIndex: result.floorIndex,
+          status: result.floorIndex === 0 ? 'floor: Ground' : `floor: Floor ${result.floorIndex}`,
+        };
+        stateRef.current = next;
+        setState(next);
+      },
+    }, (outcome) => {
+      if (outcome.status === 'applied' && outcome.commandId === WORLD_FLOOR_STEP_COMMAND_ID) {
+        const result = outcome.result as WorldFloorStepResult;
+        dispatchCommandOutcome(outcome, {
+          label: result.floorIndex === 0 ? 'active floor → Ground' : `active floor → Floor ${result.floorIndex}`,
+          targets: [{ kind: 'view-floor', id: String(result.floorIndex) }],
+        });
+        return;
+      }
+      dispatchCommandOutcome(outcome);
+    });
+  }
+  const invokeApplicationCommand = (
+    commandId: string,
+    args: unknown,
+    source: string,
+  ) => {
+    const outcome = applicationCommandsRef.current!.invoke({ commandId, args, source: commandSource(source) });
+    if (outcome.status === 'rejected') {
+      const previous = stateRef.current;
+      const next = { ...previous, openMenu: null, status: outcome.reason };
+      stateRef.current = next;
+      setState(next);
+    }
+    return outcome;
+  };
   const refuseBlocked = (block: BlockingOverlay) =>
     setState((prev) => ({ ...prev, status: `resolve ${block.label} first — finish or cancel it before doing anything else` }));
   /** Wrap a handler so it is inert (with the honest status) while a blocker is open. */
@@ -618,6 +667,12 @@ export default function AppFrame() {
   };
 
   const runCommand = (commandId: string, source: string) => {
+    // First migrated command: every projection crosses the framework authority
+    // before any cart-local dispatcher logic can select a second behavior.
+    if (commandId === WORLD_FLOOR_STEP_COMMAND_ID) {
+      invokeApplicationCommand(commandId, { delta: 1 }, source);
+      return;
+    }
     const command = commandById(commandId);
     // Modal discipline (req_2626 HH): while a blocking session/dialog is unresolved every
     // command is inert except the one that CLOSES the blocker. The refusal is loud (status
@@ -1095,10 +1150,6 @@ export default function AppFrame() {
 
       if (command.id === 'toggle-view-mode') {
         next = { ...next, viewMode: prev.viewMode === '3D' ? '2D' : '3D' };
-      } else if (command.id === 'cycle-floor') {
-        // FLOORCTL req_2485: floorIndex is the REAL active storey (0 = Ground);
-        // the command steps up and wraps back to the ground past the cap.
-        next = { ...next, floorIndex: prev.floorIndex >= MAX_FLOOR ? 0 : prev.floorIndex + 1 };
       } else if (command.id === 'toggle-minimap') {
         next = { ...next, rightPane: prev.rightPane === 'grid' ? 'inspector' : 'grid' };
       } else if (command.id === 'focus-selection') {
@@ -3172,8 +3223,6 @@ export default function AppFrame() {
   // ModelView keeps only viewport-native Esc/Delete. Refs keep the once-installed subscription
   // reading live state + the current runCommand. (The engine routes keys to focused text inputs
   // first, so typing in a field never triggers a command.)
-  const stateRef = useRef(state);
-  stateRef.current = state;
   const runCommandRef = useRef(runCommand);
   runCommandRef.current = runCommand;
 
@@ -3766,10 +3815,7 @@ export default function AppFrame() {
               return { ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}${prev !== prev0 ? ' — map paint off (one mode at a time)' : ''}` };
             }))}
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
-            onFloor={guarded((delta: number) => setState((prev) => {
-              const floorIndex = Math.max(0, Math.min(MAX_FLOOR, prev.floorIndex + delta));
-              return { ...prev, floorIndex, status: floorIndex === 0 ? 'floor: Ground' : `floor: Floor ${floorIndex}` };
-            }))}
+            onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
             onViewMode={guarded((viewMode: EditorState['viewMode']) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` })))}
             onMapPaint={patchMapPaint}

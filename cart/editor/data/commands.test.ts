@@ -11,7 +11,7 @@
 
 import {
   commandById, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
-  type MenuNode,
+  worldActionBarCommands, type MenuNode,
 } from './commands';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
@@ -109,6 +109,17 @@ test('Export Prop exposes gameplay roles for intersections and transit stops', (
   for (const id of ['export-prop-stop-sign', 'export-prop-traffic-light', 'export-prop-bus-stop', 'export-prop-train-stop']) {
     assert(commandIds.includes(id), `${id} is missing`);
   }
+});
+
+test('Section D follows the armed tool and excludes unavailable roadmap rows', () => {
+  const build = worldActionBarCommands({ activeCommandId: 'select-tool' });
+  assert(build.every((command) => command.menu === 'Build'), 'default world bar mirrors unrelated menu history');
+  assert(build.some((command) => command.id === 'place-piece'), 'real Build tools disappeared');
+
+  const afterFloor = worldActionBarCommands({ activeCommandId: 'world.floor.step' });
+  assert(afterFloor.map((command) => command.id).join('|') === build.map((command) => command.id).join('|'), 'floor report swapped Section D family');
+  assert(!afterFloor.some((command) => command.available === false), 'unavailable roadmap command projected into Section D');
+  assert(!afterFloor.some((command) => command.id === 'add-trigger' || command.id === 'set-spawn'), 'Trigger/Spawn leaked into Section D');
 });
 
 log(`\n${passed} passed, ${failed} failed`);
