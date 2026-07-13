@@ -25,6 +25,7 @@ const model_source = @import("gpu/model_source.zig");
 const material_tex = @import("gpu/material_tex.zig");
 const paint_program = @import("gpu/paint_program.zig");
 const capture = @import("gpu/capture.zig");
+const root = @import("root");
 
 // Retained FULL-RES source mesh + its path, so the live quality slider can re-decimate
 // from the original at any level (model_set_quality) without re-reading the file.
@@ -114,6 +115,34 @@ fn argBytes(info: v8.FunctionCallbackInfo, idx: u32) ?[]const u8 {
     const base = bs.getData() orelse return null;
     const base_bytes: [*]const u8 = @ptrCast(base);
     return base_bytes[byte_off .. byte_off + byte_len];
+}
+
+fn hostDevReloadSetPolicy(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const raw = argToI32(info, 0) orelse -1;
+    const ok = if (comptime @hasDecl(root, "devReloadSetPolicy"))
+        raw >= 0 and root.devReloadSetPolicy(@intCast(raw))
+    else
+        false;
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+fn hostDevReloadWaiting(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const waiting = if (comptime @hasDecl(root, "devReloadWaiting")) root.devReloadWaiting() else false;
+    setReturnNumber(info, if (waiting) 1 else 0);
+}
+
+fn hostDevReloadApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = if (comptime @hasDecl(root, "devReloadApply")) root.devReloadApply() else false;
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+fn hostDevReloadRevision(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const revision = if (comptime @hasDecl(root, "devReloadRevision")) root.devReloadRevision() else 0;
+    setReturnNumber(info, @floatFromInt(revision));
 }
 
 // __hostFlush now lives in framework/v8_bindings_reconciler.zig (single
@@ -2741,6 +2770,10 @@ fn hostFswatchDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 pub fn registerCore(vm: anytype) void {
     _ = vm;
     ensureContentStore();
+    v8_runtime.registerHostFn("__dev_reload_set_policy", hostDevReloadSetPolicy);
+    v8_runtime.registerHostFn("__dev_reload_waiting", hostDevReloadWaiting);
+    v8_runtime.registerHostFn("__dev_reload_apply", hostDevReloadApply);
+    v8_runtime.registerHostFn("__dev_reload_revision", hostDevReloadRevision);
     // __hostFlush is registered by framework/v8_bindings_reconciler.zig
     // (the shell calls reconciler.register() directly).
     v8_runtime.registerHostFn("__getInputTextForNode", hostGetInputTextForNode);

@@ -1654,6 +1654,41 @@ pub fn build(b: *std.Build) void {
     const key_pack_test_step = b.step("test-key-pack", "Run the key packing behavior tests");
     key_pack_test_step.dependOn(&run_key_pack_test.step);
 
+    // Platform-native application configuration paths. The resolver is pure;
+    // the V8 fs binding only creates the directory returned here.
+    const app_config_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/fs/app_config.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const app_config_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/app_config.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    app_config_test_mod.addImport("app_config", app_config_mod_for_tests);
+    const app_config_test = b.addTest(.{ .name = "app-config-test", .root_module = app_config_test_mod });
+    const run_app_config_test = b.addRunArtifact(app_config_test);
+    b.step("test-app-config", "Run application config path tests")
+        .dependOn(&run_app_config_test.step);
+
+    const dev_reload_policy_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/dev_reload_policy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const dev_reload_policy_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/dev_reload_policy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    dev_reload_policy_test_mod.addImport("dev_reload_policy", dev_reload_policy_mod_for_tests);
+    const dev_reload_policy_test = b.addTest(.{ .name = "dev-reload-policy-test", .root_module = dev_reload_policy_test_mod });
+    b.step("test-dev-reload-policy", "Run development reload policy tests")
+        .dependOn(&b.addRunArtifact(dev_reload_policy_test).step);
+
     // ── Localstore behavior tests (PAINTLOSS req_0695, P4) ──────
     // Exercises framework/storage/localstore.zig: large-value persistence
     // across a deinit/init "restart" (the old 8KB MAX_VALUE silently ate the

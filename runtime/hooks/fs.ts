@@ -42,6 +42,13 @@ export function writeFile(path: string, content: string): boolean {
   return callHost<boolean>('__fs_write', false, path, content);
 }
 
+/** Native per-user application configuration directory. The host creates it
+ * before returning. Settings belong here rather than in project data or the
+ * SQLite-backed localstore. */
+export function configDir(appName: string): string | null {
+  return callHost<string | null>('__fs_config_dir', null, appName);
+}
+
 /** Atomically write base64-decoded bytes via temp file + fsync + rename. */
 export function writeFileBase64Atomic(path: string, contentBase64: string): boolean {
   return callHost<boolean>('__fs_write_base64_atomic', false, path, contentBase64);

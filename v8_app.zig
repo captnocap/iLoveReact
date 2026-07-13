@@ -286,7 +286,27 @@ const DEV_BUNDLE_PATH = if (@hasDecl(build_options, "dev_bundle_path")) build_op
 var g_dev_bundle_buf: []u8 = &.{};
 var g_last_bundle_mtime: i128 = 0;
 var g_mtime_poll_counter: u32 = 0;
-var g_reload_pending: bool = false;
+const dev_reload_policy = @import("framework/dev_reload_policy.zig");
+var g_dev_reload = dev_reload_policy.Controller{};
+var g_pending_push_tab: ?usize = null;
+var g_dev_reload_revision: u64 = 0;
+
+pub fn devReloadSetPolicy(raw: u8) bool {
+    if (!DEV_MODE) return false;
+    return g_dev_reload.setPolicy(raw);
+}
+
+pub fn devReloadWaiting() bool {
+    return DEV_MODE and g_dev_reload.waitingForApproval();
+}
+
+pub fn devReloadApply() bool {
+    return DEV_MODE and g_dev_reload.applyHeld();
+}
+
+pub fn devReloadRevision() u64 {
+    return if (DEV_MODE) g_dev_reload_revision else 0;
+}
 
 const dev_ipc = @import("framework/diag/dev_ipc.zig");
 
@@ -3446,7 +3466,8 @@ fn maybeScheduleReload() void {
     const mt = bundleMtimeOrZero();
     if (mt != 0 and mt != g_last_bundle_mtime) {
         g_last_bundle_mtime = mt;
-        g_reload_pending = true;
+        g_dev_reload_revision +%= 1;
+        g_dev_reload.onBundleChanged();
     }
 }
 
@@ -3528,6 +3549,22 @@ fn performReload() void {
     replaceActiveTabBundle(new_bundle);
     evalActiveTab();
     std.log.info("[dev] reloaded '{s}' ({d} bytes)", .{ tabName(g_active_tab), new_bundle.len });
+}
+
+fn applyScheduledReload() void {
+    // Give the currently mounted application one synchronous checkpoint edge.
+    // The callback is optional and must only copy in-process state; the policy
+    // gate has already decided that this context is about to be replaced.
+    _ = v8_runtime.evalScriptChecked("if(typeof globalThis.__beforeDevReload==='function')globalThis.__beforeDevReload();");
+    if (g_pending_push_tab) |idx| {
+        g_pending_push_tab = null;
+        if (idx >= g_tabs.items.len) return;
+        g_active_tab = idx;
+        evalActiveTab();
+        std.log.info("[dev] applied pushed update for '{s}'", .{tabName(idx)});
+        return;
+    }
+    performReload();
 }
 
 /// Swap the active tab's stored bundle bytes for `new_bundle`. Frees the old
@@ -3620,7 +3657,12 @@ fn processIncomingPushes() void {
                     std.log.warn("[dev] upsertTab failed: {}", .{e});
                     continue;
                 };
-                switchToTab(idx);
+                // IPC and disk-watch updates share ONE policy gate. The pushed
+                // bytes are retained as the latest candidate, but Ask/Off keep
+                // the currently evaluated context alive until approval.
+                g_pending_push_tab = idx;
+                g_dev_reload_revision +%= 1;
+                g_dev_reload.onBundleChanged();
             },
             .notice => |notice| {
                 emitDevNotice(notice.json);
@@ -3803,9 +3845,8 @@ fn appTick(now: u32) void {
         processIncomingPushes();
     }
     maybeScheduleReload();
-    if (g_reload_pending) {
-        g_reload_pending = false;
-        performReload();
+    if (g_dev_reload.takeReload()) {
+        applyScheduledReload();
         return;
     }
 

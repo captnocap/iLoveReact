@@ -4,6 +4,7 @@ const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const mapfile = @import("world/mapfile.zig");
+const app_config = @import("fs/app_config.zig");
 
 
 fn currentContext(info: v8.FunctionCallbackInfo) v8.Context {
@@ -444,6 +445,29 @@ fn fsWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setBool(info, true);
 }
 
+/// __fs_config_dir(app_name) -> string|null. Resolves and creates the native
+/// per-user configuration directory. Settings files live here; project data
+/// and localstore deliberately do not.
+fn fsConfigDir(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const app_name = argStringAlloc(alloc, info, 0) orelse {
+        setNull(info);
+        return;
+    };
+    defer alloc.free(app_name);
+    const path = app_config.resolve(alloc, app_name) catch {
+        setNull(info);
+        return;
+    };
+    defer alloc.free(path);
+    std.fs.cwd().makePath(path) catch {
+        setNull(info);
+        return;
+    };
+    setString(info, path);
+}
+
 /// Raw bytes from a Uint8Array / ArrayBufferView arg, borrowed in place (zero
 /// copy). Pointer owned by V8 — valid only for the duration of the call.
 fn argView(info: v8.FunctionCallbackInfo, idx: u32) ?[]const u8 {
@@ -859,6 +883,7 @@ pub fn registerFs(vm: anytype) void {
     v8_runtime.registerHostFn("__fs_read_base64", fsReadBase64);
     v8_runtime.registerHostFn("__fs_read_rjmp_entities", fsReadRjmpEntities);
     v8_runtime.registerHostFn("__fs_write", fsWrite);
+    v8_runtime.registerHostFn("__fs_config_dir", fsConfigDir);
     v8_runtime.registerHostFn("__fs_write_bytes", fsWriteBytes);
     v8_runtime.registerHostFn("__fs_write_bytes_atomic", fsWriteBytesAtomic);
     v8_runtime.registerHostFn("__fs_write_base64_atomic", fsWriteBase64Atomic);
