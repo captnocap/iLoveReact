@@ -1,21 +1,16 @@
-// cart/editor/data/editorEvents.ts — the editor boarding the real eventbus.
+// cart/editor/data/editorEvents.ts — immutable command outcomes + legacy receipts.
 //
-// Every recorded authoring edit is dispatched as ONE `editor.edit` event through the
-// runtime/editorbus door. That door is host-backed by framework/events/editor_bus.zig
-// (durable SQLite log, authoritative monotonic seq, multiplayer-shaped origin) once the
-// v8 bindings are built into the binary, and degrades to an in-process log otherwise.
-//
-// state.history stays the editor's LOCAL undo model (fast, capped, session-only). The
-// bus is the separate durable source of truth. This is the first step of the migration
-// AppFrame has been promising itself — the editor getting on the bus that was already
-// built and parked at the station (req_2424).
+// Migrated commands arrive here only through CommandAuthority's outcome sink;
+// their durable envelopes carry command/action/source/phase correlation. Older
+// editor paths still dispatch observational receipts until their slice migrates.
 import { defineEventType, dispatch } from '../../../runtime/editorbus';
-import type { TargetRef } from '../../../runtime/editorbus';
-import type { CommandOutcome } from '../../../runtime/commands';
+import type { EventCommandMetadata, TargetRef } from '../../../runtime/editorbus';
+import type { CommandAppliedOutcome, CommandOutcome } from '../../../runtime/commands';
 import type { HistoryEvent } from './types';
+import type { WorldPiecesPlaceResult } from './applicationCommands';
 import { assetById } from './catalog';
 import { catalogRowFor } from '../world/buildCatalog';
-import { pieceKindOf, placementSlotKey, type MaterialRef, type PlacedPiece, type PlacementGesture } from '../world/pieces';
+import { pieceKindOf, placementSlotKey, type MaterialRef } from '../world/pieces';
 
 type EditPayload = { verb: string; target: string; meta: string; editMs: number };
 export type CommandOutcomePayload = {
@@ -70,9 +65,10 @@ export type PiecePlacementPosition = {
   yawDegrees: number;
 };
 export type PiecePlacementSlot = { role: string; material: string; ref: MaterialRef };
-export type PiecePlacementDraftPayload = {
+export type PiecePlacementPayload = {
   action: 'place' | 'replace';
-  mode: PlacementGesture['mode'];
+  documentId: string;
+  mode: 'click' | 'drag-run';
   pieceId: string;
   label: string;
   kind: string;
@@ -83,18 +79,16 @@ export type PiecePlacementDraftPayload = {
   pointerX: number;
   pointerY: number;
   inputAtMs: number;
-  committedAtMs: number;
+  applyStartedAtMs: number;
+  appliedAtMs: number;
   applyMs: number;
-  inputToCommitMs: number;
+  inputToAppliedMs: number;
   positions: PiecePlacementPosition[];
   slots: PiecePlacementSlot[];
   overrides: Record<string, number | boolean>;
-};
-export type PiecePlacementPayload = PiecePlacementDraftPayload & {
-  materializedAtMs: number;
-  inputToMaterializedMs: number;
-  commitToMaterializedMs: number;
-  renderDeltaMs: number;
+  /** Exact forward/inverse transaction: replacement victims retain full data
+   * and original indices, so replay and undo do not guess from counts. */
+  transaction: WorldPiecesPlaceResult['plan']['transaction'];
 };
 
 // One event type for now — a plain authoring edit. Richer per-system types (piece.place,
@@ -127,7 +121,8 @@ export const piecePlace = defineEventType<PiecePlacementPayload>({
     return p.count === 1 ? `${prefix} ${p.label}` : `${prefix} ${p.count}x ${p.label}`;
   },
   validate: (p) => {
-    if (!p.pieceId || !p.positions.length || p.positions.length !== p.count) {
+    if (!p.documentId || !p.pieceId || !p.positions.length || p.positions.length !== p.count ||
+        p.transaction.placed.length !== p.count) {
       throw new Error('piece.place: payload count/positions mismatch');
     }
   },
@@ -184,7 +179,11 @@ export function dispatchCommandOutcome(
         code: outcome.code,
         reason: outcome.reason,
       };
-  return dispatch(commandOutcome(payload, options.targets ?? [], {
+  return dispatch(commandOutcome(payload, options.targets ?? [], commandMetadata(outcome)));
+}
+
+function commandMetadata(outcome: CommandOutcome): EventCommandMetadata {
+  return {
     invocationId: outcome.invocationId,
     commandId: outcome.commandId,
     ...(outcome.status === 'applied' && outcome.actionId ? { actionId: outcome.actionId } : {}),
@@ -195,7 +194,7 @@ export function dispatchCommandOutcome(
       effect: outcome.effect,
       undoScope: outcome.undoScope === 'none' ? { kind: 'none' } : outcome.undoScope,
     } : {}),
-  }));
+  };
 }
 
 function materialName(ref: MaterialRef): string {
@@ -203,34 +202,30 @@ function materialName(ref: MaterialRef): string {
   return `${ref.fn} v${ref.variant}`;
 }
 
-export function draftPiecePlacementEvent(args: {
-  placed: PlacedPiece[];
-  replaced: number;
-  gesture: PlacementGesture;
-  applyMs: number;
-  committedAtMs: number;
-}): PiecePlacementDraftPayload {
-  const first = args.placed[0]!;
+export function piecePlacementPayload(result: WorldPiecesPlaceResult): PiecePlacementPayload {
+  const transaction = result.plan.transaction;
+  const first = transaction.placed[0]!;
   const row = catalogRowFor(first.pieceId);
   const slots = Object.entries(first.slots ?? {}).map(([role, ref]) => ({ role, material: materialName(ref), ref }));
-  const action: PiecePlacementDraftPayload['action'] = args.replaced && args.placed.length === 1 ? 'replace' : 'place';
   return {
-    action,
-    mode: args.gesture.mode,
+    action: transaction.action,
+    documentId: transaction.documentId,
+    mode: transaction.gestureMode,
     pieceId: first.pieceId,
     label: row?.label ?? first.pieceId,
     kind: pieceKindOf(first.pieceId) ?? row?.kind ?? 'unknown',
     material: row?.material ?? 'custom',
     theme: row?.theme ?? 'custom',
-    count: args.placed.length,
-    replaced: args.replaced,
-    pointerX: args.gesture.pointerX,
-    pointerY: args.gesture.pointerY,
-    inputAtMs: args.gesture.inputAtMs,
-    committedAtMs: args.committedAtMs,
-    applyMs: args.applyMs,
-    inputToCommitMs: Math.max(0, args.committedAtMs - args.gesture.inputAtMs),
-    positions: args.placed.map((piece) => ({
+    count: transaction.placed.length,
+    replaced: transaction.removed.length,
+    pointerX: result.pointerX,
+    pointerY: result.pointerY,
+    inputAtMs: result.inputAtMs,
+    applyStartedAtMs: result.applyStartedAtMs,
+    appliedAtMs: result.appliedAtMs,
+    applyMs: result.applyMs,
+    inputToAppliedMs: result.inputToAppliedMs,
+    positions: transaction.placed.map((piece) => ({
       id: piece.id,
       slotKey: placementSlotKey(piece),
       x: piece.x,
@@ -241,28 +236,21 @@ export function draftPiecePlacementEvent(args: {
     })),
     slots,
     overrides: { ...(first.overrides ?? {}) },
+    transaction,
   };
 }
 
-export function finalizePiecePlacementEvent(draft: PiecePlacementDraftPayload, materializedAtMs: number): PiecePlacementPayload {
-  const inputToMaterializedMs = Math.max(0, materializedAtMs - draft.inputAtMs);
-  const commitToMaterializedMs = Math.max(0, materializedAtMs - draft.committedAtMs);
-  return {
-    ...draft,
-    materializedAtMs,
-    inputToMaterializedMs,
-    commitToMaterializedMs,
-    renderDeltaMs: Math.max(0, inputToMaterializedMs - draft.applyMs),
-  };
-}
-
-export function dispatchPiecePlacement(payload: PiecePlacementPayload): number {
+export function dispatchPiecePlacementOutcome(outcome: CommandAppliedOutcome<WorldPiecesPlaceResult>): number {
+  const payload = piecePlacementPayload(outcome.result);
   return dispatch(piecePlace(
     payload,
     [
+      { kind: 'map', id: payload.documentId },
       { kind: 'piece-kind', id: payload.pieceId },
       ...payload.positions.map((p) => ({ kind: 'piece', id: p.id })),
+      ...payload.transaction.removed.map((row) => ({ kind: 'piece', id: row.piece.id })),
     ],
+    commandMetadata(outcome),
   ));
 }
 

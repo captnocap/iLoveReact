@@ -6,6 +6,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { C } from '../workspace.cls';
 import { Box } from '../../../runtime/primitives';
+import type { CommandAppliedOutcome } from '../../../runtime/commands';
 import Chrome from './Chrome';
 import DropdownMenu from './DropdownMenu';
 import LeftRail from './LeftRail';
@@ -34,7 +35,7 @@ import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture, MaterialRef } from '../world/pieces';
-import { PIECE_ROTATION_STEP_DEGREES, placementSlotKey } from '../world/pieces';
+import { PIECE_ROTATION_STEP_DEGREES, pieceKindOf, placementSlotKey } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
@@ -54,9 +55,9 @@ import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialSt
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
 import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
-import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacement, draftPiecePlacementEvent, finalizePiecePlacementEvent, type MapPaintPayload, type PiecePlacementDraftPayload } from '../data/editorEvents';
+import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
-import { commandSource, createEditorApplicationCommands, WORLD_FLOOR_STEP_COMMAND_ID, type WorldFloorStepResult } from '../data/applicationCommands';
+import { commandSource, createEditorApplicationCommands, WORLD_FLOOR_STEP_COMMAND_ID, WORLD_PIECES_PLACE_COMMAND_ID, WORLD_REDO_COMMAND_ID, WORLD_UNDO_COMMAND_ID, type WorldFloorStepResult, type WorldHistoryControlResult, type WorldPiecesPlaceResult } from '../data/applicationCommands';
 import { activeSurface } from '../data/surfaces';
 import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
@@ -99,6 +100,7 @@ import { WORLD_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocum
 import { scheduleGlobalsSave } from '../data/globalsStore';
 import { DEFAULT_PHYSICS_GLOBALS, type PhysicsGlobals } from '../data/globals';
 import { mapEventDrain, mapGetTileBindings, mapHostLive, mapRedo, mapUndo, type MapAuthoringEvent, type MapHistoryKind } from '../../../runtime/game/map';
+import { buildCatalogIndex, validateBuildPlacement } from '../../../runtime/game/build';
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { floatsToBindings, GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
@@ -210,7 +212,6 @@ export default function AppFrame() {
   const stateRef = useRef(state);
   stateRef.current = state;
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
-  const pendingPieceEvents = useRef<PiecePlacementDraftPayload[]>([]);
   // The open paint-toolbar popover (ink / brush). Local, not persisted — the popovers render
   // LATE (below) so they sit over the body; the bar (early) only toggles this.
   const [paintPopover, setPaintPopover] = useState<PaintPopover>(null);
@@ -281,12 +282,143 @@ export default function AppFrame() {
         stateRef.current = next;
         setState(next);
       },
+      placement: {
+        read: () => ({
+          documentId: stateRef.current.activeMapStem,
+          pieces: stateRef.current.worldPieces,
+          selectedPieceId: stateRef.current.selectedPieceId,
+          nextPieceId: stateRef.current.seq,
+        }),
+        policy: {
+          makePieceId: (sequence) => `bp_${sequence}`,
+          validateCandidate: (candidate) => {
+            if (!pieceKindOf(candidate.pieceId)) throw new Error(`unknown semantic piece '${candidate.pieceId}'`);
+            const catalogIndex = buildCatalogIndex(candidate.pieceId);
+            if (catalogIndex < 0) return;
+            const validation = validateBuildPlacement(
+              catalogIndex,
+              candidate.x,
+              candidate.y,
+              candidate.z,
+              candidate.yawDegrees,
+            );
+            if (!validation.valid) throw new Error(`host rejected placement '${candidate.pieceId}'`);
+          },
+        },
+        now: Date.now,
+        commit: (plan, actionId, gesture, applyStartedAtMs) => {
+          const previous = stateRef.current;
+          const transaction = plan.transaction;
+          const first = transaction.placed[0]!;
+          const replaced = transaction.removed.length;
+          const count = transaction.placed.length;
+          const what = count === 1 ? first.pieceId : `${count}× ${first.pieceId}`;
+          const verb = replaced && count === 1 ? 'replaced' : 'placed';
+          const appliedAtMs = Date.now();
+          const applyMs = Math.max(0, appliedAtMs - applyStartedAtMs);
+          const meta = [
+            `mode=${gesture.mode}`,
+            `kind=${pieceKindOf(first.pieceId) ?? 'unknown'}`,
+            `floor=${first.floor ?? 0}`,
+            `pos=(${first.x.toFixed(2)},${first.y.toFixed(2)},${first.z.toFixed(2)})`,
+            `yaw=${Math.round(first.yawDegrees)}`,
+            `count=${count}`,
+            replaced ? `replaced=${replaced}` : '',
+            `apply=${applyMs.toFixed(1)}ms`,
+          ].filter(Boolean).join(' ');
+          const nextBase: EditorState = {
+            ...previous,
+            seq: plan.next.nextPieceId,
+            history: [
+              {
+                id: `h-${actionId}`,
+                actionId,
+                commandId: WORLD_PIECES_PLACE_COMMAND_ID,
+                verb: transaction.action,
+                target: what,
+                meta,
+                undoable: true,
+                eventType: 'piece.place',
+                atMs: appliedAtMs,
+                editMs: Math.max(0, appliedAtMs - gesture.inputAtMs),
+                emptyMs: applyMs,
+                richMs: Math.max(0, appliedAtMs - gesture.inputAtMs),
+              },
+              ...previous.history,
+            ].slice(0, 8),
+            redo: [],
+            worldPieces: [...plan.next.pieces],
+            selectedPieceId: plan.next.selectedPieceId,
+            status: `${verb} ${what}${replaced && count > 1 ? ` (replaced ${replaced})` : ''}`,
+          };
+          const next = recordWorldEdit(
+            previous,
+            nextBase,
+            `${transaction.action} ${what}`,
+            { actionId, commandId: WORLD_PIECES_PLACE_COMMAND_ID },
+          );
+          stateRef.current = next;
+          setState(next);
+          return appliedAtMs;
+        },
+      },
+      history: {
+        peekUndo: () => stateRef.current.worldUndo[0] ?? null,
+        peekRedo: () => stateRef.current.worldRedo[0] ?? null,
+        commitUndo: () => {
+          const previous = stateRef.current;
+          const [entry, ...rest] = previous.worldUndo;
+          // isEnabled established this immediately before the synchronous
+          // handler. Keep the adapter total in case a future caller violates it.
+          if (!entry) return { direction: 'undo', label: 'nothing', changedKeys: [] };
+          const changedKeys = Object.keys(entry.before);
+          const next: EditorState = {
+            ...previous,
+            ...entry.before,
+            worldUndo: rest,
+            worldRedo: [entry, ...previous.worldRedo].slice(0, WORLD_UNDO_CAP),
+            status: `undid ${entry.label} — restored ${changedKeys.join(', ')}`,
+          };
+          stateRef.current = next;
+          setState(next);
+          return { direction: 'undo', label: entry.label, actionId: entry.actionId, commandId: entry.commandId, changedKeys };
+        },
+        commitRedo: () => {
+          const previous = stateRef.current;
+          const [entry, ...rest] = previous.worldRedo;
+          if (!entry) return { direction: 'redo', label: 'nothing', changedKeys: [] };
+          const changedKeys = Object.keys(entry.after);
+          const next: EditorState = {
+            ...previous,
+            ...entry.after,
+            worldRedo: rest,
+            worldUndo: [entry, ...previous.worldUndo].slice(0, WORLD_UNDO_CAP),
+            status: `redid ${entry.label} — reapplied ${changedKeys.join(', ')}`,
+          };
+          stateRef.current = next;
+          setState(next);
+          return { direction: 'redo', label: entry.label, actionId: entry.actionId, commandId: entry.commandId, changedKeys };
+        },
+      },
     }, (outcome) => {
       if (outcome.status === 'applied' && outcome.commandId === WORLD_FLOOR_STEP_COMMAND_ID) {
         const result = outcome.result as WorldFloorStepResult;
         dispatchCommandOutcome(outcome, {
           label: result.floorIndex === 0 ? 'active floor → Ground' : `active floor → Floor ${result.floorIndex}`,
           targets: [{ kind: 'view-floor', id: String(result.floorIndex) }],
+        });
+        return;
+      }
+      if (outcome.status === 'applied' && outcome.commandId === WORLD_PIECES_PLACE_COMMAND_ID) {
+        dispatchPiecePlacementOutcome(outcome as CommandAppliedOutcome<WorldPiecesPlaceResult>);
+        return;
+      }
+      if (outcome.status === 'applied' &&
+          (outcome.commandId === WORLD_UNDO_COMMAND_ID || outcome.commandId === WORLD_REDO_COMMAND_ID)) {
+        const result = outcome.result as WorldHistoryControlResult;
+        dispatchCommandOutcome(outcome, {
+          label: `${result.direction === 'undo' ? 'undo' : 'redo'} ${result.label}`,
+          targets: [{ kind: 'map', id: stateRef.current.activeMapStem }],
         });
         return;
       }
@@ -297,8 +429,14 @@ export default function AppFrame() {
     commandId: string,
     args: unknown,
     source: string,
+    correlation: { actionId?: string; causedBy?: string } = {},
   ) => {
-    const outcome = applicationCommandsRef.current!.invoke({ commandId, args, source: commandSource(source) });
+    const outcome = applicationCommandsRef.current!.invoke({
+      commandId,
+      args,
+      source: commandSource(source),
+      ...correlation,
+    });
     if (outcome.status === 'rejected') {
       const previous = stateRef.current;
       const next = { ...previous, openMenu: null, status: outcome.reason };
@@ -395,13 +533,6 @@ export default function AppFrame() {
     lastHistoryId.current = latestId;
     if (!latest.eventType) dispatchEdit(latest);
   }, [state.history]);
-
-  useEffect(() => {
-    if (!pendingPieceEvents.current.length) return;
-    const materializedAtMs = Date.now();
-    const events = pendingPieceEvents.current.splice(0);
-    for (const event of events) dispatchPiecePlacement(finalizePiecePlacementEvent(event, materializedAtMs));
-  }, [state.worldPieces]);
 
   // Mirror the authored placeables into the module registry (req_2578) so the
   // pure placement/render helpers resolve them without prop threading. The
@@ -671,6 +802,18 @@ export default function AppFrame() {
     // before any cart-local dispatcher logic can select a second behavior.
     if (commandId === WORLD_FLOOR_STEP_COMMAND_ID) {
       invokeApplicationCommand(commandId, { delta: 1 }, source);
+      return;
+    }
+    if ((commandId === 'undo-local' || commandId === 'redo-local') &&
+        activeSurface(stateRef.current) === 'world' && !stateRef.current.mapPaint.active) {
+      const undo = commandId === 'undo-local';
+      const entry = undo ? stateRef.current.worldUndo[0] : stateRef.current.worldRedo[0];
+      invokeApplicationCommand(
+        undo ? WORLD_UNDO_COMMAND_ID : WORLD_REDO_COMMAND_ID,
+        {},
+        source,
+        entry?.actionId ? { actionId: entry.actionId, causedBy: entry.actionId } : {},
+      );
       return;
     }
     const command = commandById(commandId);
@@ -1234,7 +1377,12 @@ export default function AppFrame() {
   // the host mesh journal instead (meshUndoRedo below).
   const WORLD_UNDO_CAP = 32;
   const WORLD_UNDO_KEYS = ['worldPieces', 'objects', 'authoredBuildPieces', 'selectedPieceId', 'selectedObjectId', 'armedPieceId'] as const;
-  const recordWorldEdit = (prev: EditorState, next: EditorState, label: string): EditorState => {
+  const recordWorldEdit = (
+    prev: EditorState,
+    next: EditorState,
+    label: string,
+    identity: { actionId: string; commandId: string } | null = null,
+  ): EditorState => {
     const before: WorldUndoSlices = {};
     const after: WorldUndoSlices = {};
     let changed = false;
@@ -1246,7 +1394,11 @@ export default function AppFrame() {
       }
     }
     if (!changed) return next;
-    return { ...next, worldUndo: [{ label, before, after }, ...prev.worldUndo].slice(0, WORLD_UNDO_CAP), worldRedo: [] };
+    return {
+      ...next,
+      worldUndo: [{ label, before, after, ...(identity ?? {}) }, ...prev.worldUndo].slice(0, WORLD_UNDO_CAP),
+      worldRedo: [],
+    };
   };
 
   const undoLocal = () => {
@@ -1308,68 +1460,15 @@ export default function AppFrame() {
   // path as the world surface's selection source.
   const placePieces = (pieces: PlacedPiece[], gesture: PlacementGesture) => {
     if (!pieces.length) return;
-    setState((prev) => {
-      const applyStartMs = Date.now();
-      // One gesture = ONE journal entry (req_2747): a click arrives as a one-piece
-      // batch, a drag-run as the whole wall run / floor rect — never N entries.
-      let seq = prev.seq;
-      // Copy stamp (req_2733): a copied piece's slots/overrides ride every placement
-      // until the palette re-arms, so Copy drops true clones — not bare kind defaults.
-      const placed = pieces.map((piece) => ({ ...piece, id: `bp_${seq++}`, ...(prev.armedStamp ?? {}) }));
-      // Replace anything already occupying these footprints (req_2583): dropping a
-      // window wall onto a wall REPLACES it — no two pieces fighting for the same
-      // space. Different footprints (a wall vs the floor under it) don't collide.
-      const keys = new Set(placed.map(placementSlotKey));
-      const kept = prev.worldPieces.filter((p) => !keys.has(placementSlotKey(p)));
-      const replaced = prev.worldPieces.length - kept.length;
-      const what = placed.length === 1 ? pieces[0]!.pieceId : `${placed.length}× ${pieces[0]!.pieceId}`;
-      const verb = replaced && placed.length === 1 ? 'replaced' : 'placed';
-      const committedAtMs = Date.now();
-      const event = draftPiecePlacementEvent({
-        placed,
-        replaced,
-        gesture,
-        applyMs: Math.max(0, committedAtMs - applyStartMs),
-        committedAtMs,
-      });
-      pendingPieceEvents.current.push(event);
-      const first = event.positions[0]!;
-      const coord = `pos=(${first.x.toFixed(2)},${first.y.toFixed(2)},${first.z.toFixed(2)})`;
-      const meta = [
-        `mode=${event.mode}`,
-        `kind=${event.kind}`,
-        `material=${event.material}`,
-        `floor=${first.floor}`,
-        coord,
-        `yaw=${Math.round(first.yawDegrees)}`,
-        `count=${event.count}`,
-        event.replaced ? `replaced=${event.replaced}` : '',
-        `apply=${event.applyMs.toFixed(1)}ms`,
-      ].filter(Boolean).join(' ');
-      return recordWorldEdit(prev, {
-        ...prev,
-        seq,
-        history: [
-          {
-            id: `h-${prev.seq}`,
-            verb: event.action,
-            target: event.count === 1 ? event.label : `${event.count}x ${event.label}`,
-            meta,
-            undoable: true,
-            eventType: 'piece.place',
-            atMs: committedAtMs,
-            editMs: event.inputToCommitMs,
-            emptyMs: event.applyMs,
-            richMs: event.inputToCommitMs,
-          },
-          ...prev.history,
-        ].slice(0, 8),
-        redo: [],
-        worldPieces: [...kept, ...placed],
-        selectedPieceId: placed[placed.length - 1]!.id,
-        status: `${verb} ${what}${replaced && placed.length > 1 ? ` (replaced ${replaced})` : ''}`,
-      }, `${verb === 'replaced' ? 'replace' : 'place'} ${what}`);
-    });
+    // The viewport resolves camera/pointer geometry only. Identity allocation,
+    // copy stamping, footprint replacement, undo data, mutation, and reporting
+    // all happen behind the one semantic command entrance.
+    invokeApplicationCommand(WORLD_PIECES_PLACE_COMMAND_ID, {
+      documentId: stateRef.current.activeMapStem,
+      candidates: pieces,
+      gesture,
+      stamp: stateRef.current.armedStamp,
+    }, 'viewport');
   };
 
   /** Commit one viewport drag after its local snapped preview has settled. This

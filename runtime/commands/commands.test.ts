@@ -135,10 +135,12 @@ test('authored actions carry stable ids and controls can correlate to them', () 
   }, () => 'placed');
   registry.register({
     id: 'history.undo', label: 'Undo', icon: 'Undo2', effect: 'control',
-    undoScope: 'none', projections: { menu: ['Edit'] },
+    undoScope: 'none', outcomePhase: 'undone', projections: { menu: ['Edit'] },
+    keybindings: [{ chord: 'Ctrl+Z' }, { chord: 'Ctrl+U' }],
     validateArgs: (_args) => ({ ok: true, value: {} }),
   }, () => 'undone');
   const authority = new CommandAuthority(registry);
+  assert(registry.resolveChord('Ctrl+Z')?.id === 'history.undo' && registry.resolveChord('Ctrl+U')?.id === 'history.undo', 'one command lost its alternate binding');
 
   const defaultId = authority.invoke({
     invocationId: 'invoke:place:1', commandId: 'world.piece.place', args: { amount: 1 }, source: 'toolbar',
@@ -155,6 +157,7 @@ test('authored actions carry stable ids and controls can correlate to them', () 
   assert(defaultId.status === 'applied' && defaultId.actionId === 'invoke:place:1', 'action defaults to invocation id');
   assert(suppliedId.status === 'applied' && suppliedId.actionId === 'action:piece:9', 'explicit action id survives');
   assert(undo.status === 'applied' && undo.actionId === 'action:piece:9', 'control correlates to the authored action');
+  assert(undo.status === 'applied' && undo.phase === 'undone', 'undo publishes its semantic phase');
 });
 
 test('invalid, disabled, and unauthorized invocations never reach mutation', () => {

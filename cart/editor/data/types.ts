@@ -404,6 +404,8 @@ export type WorldObject = {
 
 export type HistoryEvent = {
   id: string;
+  actionId?: string;
+  commandId?: string;
   verb: string;
   target: string;
   meta: string;
@@ -425,7 +427,15 @@ export type HistoryEvent = {
 // (they never flow through EditorState); the empty-stack status says so.
 export type WorldUndoSlices = Partial<Pick<EditorState,
   'worldPieces' | 'objects' | 'authoredBuildPieces' | 'selectedPieceId' | 'selectedObjectId' | 'armedPieceId'>>;
-export type WorldUndoEntry = { label: string; before: WorldUndoSlices; after: WorldUndoSlices };
+export type WorldUndoEntry = {
+  label: string;
+  before: WorldUndoSlices;
+  after: WorldUndoSlices;
+  /** Present for commands migrated behind CommandAuthority. Undo/redo reports
+   * retain this identity instead of inventing a second unrelated action. */
+  actionId?: string;
+  commandId?: string;
+};
 
 // The editor's whole authoring state — one plain object threaded through every
 // panel, reduced by AppFrame. (Was `MockState` while the shell was a design

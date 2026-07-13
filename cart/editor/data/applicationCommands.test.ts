@@ -12,7 +12,9 @@ import {
   createEditorApplicationCommands,
   type EditorCommandAdapter,
   type WorldFloorStepResult,
+  type WorldPiecesPlaceResult,
 } from './applicationCommands';
+import type { PiecePlacementWorld } from '../world/piecePlacementCommand';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -22,21 +24,60 @@ function test(name: string, fn: () => void) {
 }
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 
-function harness(startFloor = 0, surface = 'world', blocked: string | null = null) {
+function harness(
+  startFloor = 0,
+  surface = 'world',
+  blocked: string | null = null,
+  historyEntry: { label: string; actionId?: string; commandId?: string } | null = null,
+) {
   let floor = startFloor;
   let commits = 0;
+  let placementWorld: PiecePlacementWorld = { documentId: 'main', pieces: [], selectedPieceId: null, nextPieceId: 1 };
+  let undo = historyEntry ? [historyEntry] : [];
+  let redo: typeof undo = [];
+  let now = 1000;
   const outcomes: CommandOutcome[] = [];
   const adapter: EditorCommandAdapter = {
     activeSurface: () => surface,
     blockedReason: () => blocked,
     floorIndex: () => floor,
     commitFloor: (result) => { floor = result.floorIndex; commits += 1; },
+    placement: {
+      read: () => placementWorld,
+      policy: {
+        makePieceId: (sequence) => `bp_${sequence}`,
+        validateCandidate: (candidate) => {
+          if (candidate.pieceId !== 'floor.concrete.common') throw new Error(`unknown piece '${candidate.pieceId}'`);
+        },
+      },
+      now: () => now++,
+      commit: (plan) => { placementWorld = plan.next; commits += 1; return now++; },
+    },
+    history: {
+      peekUndo: () => undo[0] ?? null,
+      peekRedo: () => redo[0] ?? null,
+      commitUndo: () => {
+        const entry = undo.shift()!;
+        redo.unshift(entry);
+        commits += 1;
+        return { ...entry, direction: 'undo' as const, changedKeys: ['worldPieces'] };
+      },
+      commitRedo: () => {
+        const entry = redo.shift()!;
+        undo.unshift(entry);
+        commits += 1;
+        return { ...entry, direction: 'redo' as const, changedKeys: ['worldPieces'] };
+      },
+    },
   };
   return {
     commands: createEditorApplicationCommands(adapter, (outcome) => outcomes.push(outcome)),
     floor: () => floor,
     commits: () => commits,
     outcomes,
+    pieces: () => placementWorld.pieces,
+    undoDepth: () => undo.length,
+    redoDepth: () => redo.length,
   };
 }
 
@@ -90,6 +131,49 @@ test('invalid, blocked, and wrong-surface calls reject without mutation', () => 
   const wrong = model.commands.invoke({ commandId: WORLD_FLOOR_STEP_COMMAND_ID, args: { delta: 1 }, source: 'hotkey' });
   assert(wrong.status === 'rejected' && wrong.code === 'disabled', 'wrong surface did not reject');
   assert(model.floor() === 3 && model.commits() === 0, 'wrong surface mutated floor');
+});
+
+test('a headless viewport or remote peer commits the same authored placement once', () => {
+  for (const source of ['viewport', 'remote'] as CommandSource[]) {
+    const h = harness();
+    const outcome = h.commands.invoke<WorldPiecesPlaceResult>({
+      invocationId: `place:${source}`,
+      commandId: 'world.pieces.place',
+      args: {
+        documentId: 'main',
+        candidates: [{ id: '', pieceId: 'floor.concrete.common', x: 1.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 }],
+        gesture: { mode: 'click', inputAtMs: 900, pointerX: 40, pointerY: 24 },
+        stamp: { slots: { top: { assetId: 'mat-copy' } }, overrides: { friction: 0.4 } },
+      },
+      source,
+    });
+    assert(outcome.status === 'applied' && outcome.actionId === `place:${source}`, `${source} action id drifted`);
+    assert(outcome.status === 'applied' && outcome.result.plan.transaction.placed[0]?.id === 'bp_1', `${source} transaction drifted`);
+    assert(outcome.status === 'applied' && outcome.result.plan.transaction.placed[0]?.slots?.top &&
+      'assetId' in outcome.result.plan.transaction.placed[0]!.slots!.top &&
+      outcome.result.plan.transaction.placed[0]!.slots!.top.assetId === 'mat-copy', `${source} copy stamp disappeared`);
+    assert(h.pieces().length === 1 && h.commits() === 1, `${source} did not commit exactly once`);
+    assert(h.outcomes.length === 1 && h.outcomes[0] === outcome, `${source} did not publish exactly once`);
+  }
+});
+
+test('undo and redo outcomes retain the authored action identity', () => {
+  const entry = { label: 'place Concrete Floor', actionId: 'place:7', commandId: 'world.pieces.place' };
+  const h = harness(0, 'world', null, entry);
+  const undone = h.commands.invoke({
+    invocationId: 'undo:1', commandId: 'world.history.undo', args: {}, source: 'hotkey',
+    actionId: entry.actionId, causedBy: entry.actionId,
+  });
+  assert(undone.status === 'applied' && undone.phase === 'undone' && undone.actionId === entry.actionId, 'undo correlation drifted');
+  assert(h.undoDepth() === 0 && h.redoDepth() === 1, 'undo did not move one history entry');
+
+  const redone = h.commands.invoke({
+    invocationId: 'redo:1', commandId: 'world.history.redo', args: {}, source: 'dock',
+    actionId: entry.actionId, causedBy: entry.actionId,
+  });
+  assert(redone.status === 'applied' && redone.phase === 'redone' && redone.actionId === entry.actionId, 'redo correlation drifted');
+  assert(h.undoDepth() === 1 && h.redoDepth() === 0, 'redo did not restore one history entry');
+  assert(h.commits() === 2 && h.outcomes.length === 2, 'controls did not commit/publish exactly once each');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

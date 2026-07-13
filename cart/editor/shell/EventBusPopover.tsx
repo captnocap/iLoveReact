@@ -33,7 +33,7 @@ function f(n: number | undefined, digits = 2): string {
 
 function isPiecePlacement(payload: unknown): payload is PiecePlacementPayload {
   const p = payload as Partial<PiecePlacementPayload> | null;
-  return !!p && typeof p.pieceId === 'string' && Array.isArray(p.positions) && typeof p.inputToMaterializedMs === 'number';
+  return !!p && typeof p.pieceId === 'string' && Array.isArray(p.positions) && typeof p.inputToAppliedMs === 'number';
 }
 
 function isMapPaint(payload: unknown): payload is MapPaintPayload {
@@ -54,8 +54,7 @@ function placementDetail(p: PiecePlacementPayload): string {
     p.replaced ? `replaced=${p.replaced}` : '',
     `input=${clock(p.inputAtMs)}`,
     `apply=${formatMs(p.applyMs)}`,
-    `ready=+${formatMs(p.inputToMaterializedMs)}`,
-    `delta=+${formatMs(p.renderDeltaMs)}`,
+    `applied=+${formatMs(p.inputToAppliedMs)}`,
   ].filter(Boolean).join('  ');
 }
 
@@ -93,13 +92,23 @@ function mapPaintDetail(p: MapPaintPayload): string {
   ].filter(Boolean).join('  ');
 }
 
+function commandTrace(e: EditorEvent): string {
+  if (!e.commandId) return '';
+  return [
+    `cmd=${e.commandId}`,
+    e.source ? `source=${e.source}` : '',
+    e.phase ? `phase=${e.phase}` : '',
+    e.actionId ? `action=${e.actionId}` : '',
+  ].filter(Boolean).join('  ');
+}
+
 function busRow(e: EditorEvent): Row {
   if (e.type === 'piece.place' && isPiecePlacement(e.payload)) {
     const p = e.payload;
     return {
       key: `#${e.seq}`,
       title: p.count === 1 ? `${p.action} ${p.label}` : `${p.action} ${p.count}x ${p.label}`,
-      detail: placementDetail(p),
+      detail: [placementDetail(p), commandTrace(e)].filter(Boolean).join('  '),
       time: clock(e.ts),
       type: e.type,
       origin: e.origin,
@@ -110,18 +119,18 @@ function busRow(e: EditorEvent): Row {
     return {
       key: `#${e.seq}`,
       title: p.label,
-      detail: mapPaintDetail(p),
+      detail: [mapPaintDetail(p), commandTrace(e)].filter(Boolean).join('  '),
       time: clock(e.ts),
       type: e.type,
       origin: e.origin,
     };
   }
-  const payload = (e.payload ?? {}) as { meta?: string; editMs?: number };
+  const payload = (e.payload ?? {}) as { meta?: string; editMs?: number; reason?: string };
   const timing = typeof payload.editMs === 'number' ? `apply=${formatMs(payload.editMs)}` : '';
   return {
     key: `#${e.seq}`,
     title: describeEvent(e),
-    detail: [payload.meta ?? '', timing].filter(Boolean).join('  '),
+    detail: [payload.meta ?? '', payload.reason ?? '', timing, commandTrace(e)].filter(Boolean).join('  '),
     time: clock(e.ts),
     type: e.type,
     origin: e.origin,

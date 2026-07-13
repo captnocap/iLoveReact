@@ -11,7 +11,8 @@
 //   tools/v8cli /tmp/editor-events.test.js
 
 import { describeEvent } from '../../../runtime/editorbus';
-import { commandOutcome, draftPiecePlacementEvent, finalizePiecePlacementEvent, mapPaint, piecePlace, type MapPaintPayload } from './editorEvents';
+import { commandOutcome, mapPaint, piecePlace, piecePlacementPayload, type MapPaintPayload } from './editorEvents';
+import { planPiecePlacement } from '../world/piecePlacementCommand';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -22,32 +23,37 @@ function test(name: string, fn: () => void) {
 function assert(c: boolean, m: string) { if (!c) throw new Error(m); }
 
 test('piece.place payload describes the placed floor, not the selected material', () => {
-  const draft = draftPiecePlacementEvent({
-    placed: [{
-      id: 'bp_7',
-      pieceId: 'floor.concrete.common',
-      x: 1.5,
-      y: 0,
-      z: 4.5,
-      yawDegrees: 0,
-      floor: 0,
-    }],
-    replaced: 0,
-    gesture: { mode: 'click', inputAtMs: 1000, pointerX: 42, pointerY: 24 },
-    applyMs: 2,
-    committedAtMs: 1005,
+  const plan = planPiecePlacement({ documentId: 'main', pieces: [], selectedPieceId: null, nextPieceId: 7 }, {
+    documentId: 'main',
+    candidates: [{ id: '', pieceId: 'floor.concrete.common', x: 1.5, y: 0, z: 4.5, yawDegrees: 0, floor: 0 }],
+    gestureMode: 'click',
+  }, {
+    makePieceId: (sequence) => `bp_${sequence}`,
+    validateCandidate: () => {},
   });
-  const payload = finalizePiecePlacementEvent(draft, 1012);
-  const event = piecePlace(payload, [{ kind: 'piece', id: 'bp_7' }]);
+  const payload = piecePlacementPayload({
+    plan,
+    inputAtMs: 1000,
+    pointerX: 42,
+    pointerY: 24,
+    applyStartedAtMs: 1004,
+    appliedAtMs: 1005,
+    applyMs: 1,
+    inputToAppliedMs: 5,
+  });
+  const event = piecePlace(payload, [{ kind: 'piece', id: 'bp_7' }], {
+    invocationId: 'place:7', commandId: 'world.pieces.place', actionId: 'place:7',
+    source: 'viewport', phase: 'applied', effect: 'action', undoScope: { kind: 'document', key: 'world' },
+  });
 
   assert(payload.pieceId === 'floor.concrete.common', 'semantic piece id carried');
   assert(payload.label === 'Concrete Floor', `catalog label carried, got ${payload.label}`);
   assert(payload.kind === 'floor', `piece kind carried, got ${payload.kind}`);
   assert(payload.material === 'concrete', `default piece material carried, got ${payload.material}`);
   assert(payload.positions[0]?.slotKey === 'grid:1.5,0,4.5', `slot key carried, got ${payload.positions[0]?.slotKey}`);
-  assert(payload.inputToCommitMs === 5, `input→commit timing carried, got ${payload.inputToCommitMs}`);
-  assert(payload.inputToMaterializedMs === 12, `input→materialized timing carried, got ${payload.inputToMaterializedMs}`);
-  assert(payload.renderDeltaMs === 10, `render delta carried, got ${payload.renderDeltaMs}`);
+  assert(payload.inputToAppliedMs === 5, `input→apply timing carried, got ${payload.inputToAppliedMs}`);
+  assert(payload.transaction.placed[0]?.id === 'bp_7' && payload.transaction.forward.append.length === 1, 'exact transaction carried');
+  assert(event.actionId === 'place:7' && event.commandId === 'world.pieces.place', 'authority correlation carried');
   assert(describeEvent(event) === 'place Concrete Floor', `description uses piece label, got ${describeEvent(event)}`);
 });
 

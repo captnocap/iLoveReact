@@ -20,6 +20,7 @@ export type CommandSource =
   | 'menu'
   | 'hotkey'
   | 'toolbar'
+  | 'dock'
   | 'context-menu'
   | 'palette'
   | 'viewport'
@@ -100,6 +101,9 @@ export interface CommandRegistration<Args> {
   projections: CommandProjectionDeclaration;
   keybindings?: readonly CommandKeybinding[];
   requiredCapabilities?: readonly string[];
+  /** Controls such as undo/redo publish their semantic outcome phase while
+   * still using the same applied-command return shape. */
+  outcomePhase?: 'applied' | 'undone' | 'redone';
   validateArgs(args: unknown): ArgsValidation<Args>;
   isEnabled?(ctx: CommandGuardContext<Args>): Enablement;
 }
@@ -114,6 +118,7 @@ interface RegisteredCommand {
   validateArgs(args: unknown): ArgsValidation<unknown>;
   isEnabled?(ctx: CommandGuardContext<unknown>): Enablement;
   handler(ctx: CommandGuardContext<unknown>): unknown;
+  outcomePhase: 'applied' | 'undone' | 'redone';
 }
 
 interface IndexedBinding {
@@ -212,7 +217,10 @@ export class CommandRegistry {
 
     for (let i = 0; i < bindings.length; i++) {
       const binding = bindings[i]!;
-      const candidates = [...(state.bindings.get(binding.chord) ?? []), ...bindings.slice(0, i)];
+      const candidates = [
+        ...(state.bindings.get(binding.chord) ?? []),
+        ...bindings.slice(0, i).filter((other) => other.chord === binding.chord),
+      ];
       const conflict = candidates.find((other) => predicatesOverlap(binding.when, other.when));
       if (conflict) {
         throw new Error(
@@ -250,6 +258,7 @@ export class CommandRegistry {
       validateArgs: registration.validateArgs as (args: unknown) => ArgsValidation<unknown>,
       isEnabled: registration.isEnabled as ((ctx: CommandGuardContext<unknown>) => Enablement) | undefined,
       handler: handler as CommandHandler<unknown, unknown>,
+      outcomePhase: registration.outcomePhase ?? 'applied',
     });
     for (const binding of bindings) {
       const list = state.bindings.get(binding.chord) ?? [];
@@ -342,7 +351,7 @@ interface CommandOutcomeBase {
 
 export interface CommandAppliedOutcome<Result = unknown> extends CommandOutcomeBase {
   readonly status: 'applied';
-  readonly phase: 'applied';
+  readonly phase: 'applied' | 'undone' | 'redone';
   readonly effect: CommandEffect;
   readonly undoScope: UndoScope;
   readonly actionId?: string;
@@ -468,7 +477,7 @@ export class CommandAuthority {
         origin: invocation.origin,
         causedBy: invocation.causedBy,
         status: 'applied' as const,
-        phase: 'applied' as const,
+        phase: record.outcomePhase,
         effect: record.projection.effect,
         undoScope: record.projection.undoScope,
         ...(actionId == null ? {} : { actionId }),

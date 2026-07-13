@@ -20,10 +20,10 @@ export function eventTimingSamples(events: EditorEvent[]): EditTimingSample[] {
   const samples: EditTimingSample[] = [];
   for (const event of events) {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
-    const editMs = finiteMs(payload.inputToMaterializedMs) ?? finiteMs(payload.inputToCommitMs) ?? finiteMs(payload.editMs) ?? finiteMs(payload.applyMs);
+    const editMs = finiteMs(payload.inputToAppliedMs) ?? finiteMs(payload.inputToMaterializedMs) ?? finiteMs(payload.inputToCommitMs) ?? finiteMs(payload.editMs) ?? finiteMs(payload.applyMs);
     if (editMs === null) continue;
     const emptyMs = finiteMs(payload.applyMs) ?? finiteMs(payload.emptyMs) ?? editMs;
-    const richMs = finiteMs(payload.inputToMaterializedMs) ?? finiteMs(payload.richMs) ?? editMs;
+    const richMs = finiteMs(payload.inputToAppliedMs) ?? finiteMs(payload.inputToMaterializedMs) ?? finiteMs(payload.richMs) ?? editMs;
     samples.push({ editMs, emptyMs, richMs });
   }
   return samples;
