@@ -80,6 +80,7 @@ export function initialState(): EditorState {
     activeTab: 'Skins',
     activeCommandId: 'select-tool',
     activeAssetId: DEFAULT_ASSET_ID,
+    stickerArm: { textureId: null, rot: 0, scale: 1 },
     assetPage: 0,
     materialFocused: false,
     colorStudioMaterial: 'b-rot-siding',

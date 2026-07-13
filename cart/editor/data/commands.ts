@@ -173,6 +173,10 @@ export const COMMANDS: Command[] = [
   // exterior and interior of one wall paint independently). A drag sweeps across faces. Not
   // selection-gated — the touch provides the target, like Focus/Move.
   { id: 'paint-faces', menu: 'Build', name: 'Paint Faces', icon: 'Paintbrush', key: 'N', context: true, native: true, undoable: true, tool: true, scope: 'world' },
+  // Place Sticker (req_3025): an armable stamp MODE — the click's face hit takes the armed
+  // sticker at its true meter size (4x6 label default). Not selection-gated; the touch is
+  // the target, like Paint Faces. The armed sticker/rot/scale live in state.stickerArm.
+  { id: 'place-sticker', menu: 'Build', name: 'Place Sticker', icon: 'Sticker', key: 'K', context: true, native: true, undoable: true, tool: true, scope: 'world' },
   { id: 'open-color-studio', menu: 'Build', name: 'Open Color Studio', icon: 'Palette', key: 'C', context: true, native: true, undoable: false, tool: true, scope: 'world', needsSelection: true },
   { id: 'sample-material', menu: 'Build', name: 'Sample Material', icon: 'Pipette', key: 'I', context: true, native: true, undoable: false, tool: true, scope: 'world', needsSelection: true },
 
@@ -403,7 +407,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('delete-selection'), MESH_SUBMENU],
   View: [cmd('toggle-view-mode'), cmd('toggle-minimap'), cmd('focus-selection'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('add-trigger'), cmd('set-spawn'), cmd('world.floor.step')],
-  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-material'), cmd('paint-faces'), cmd('open-color-studio'), cmd('sample-material')],
+  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-material'), cmd('paint-faces'), cmd('place-sticker'), cmd('open-color-studio'), cmd('sample-material')],
   Story: [cmd('mission-point'), cmd('author-sequence')],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],

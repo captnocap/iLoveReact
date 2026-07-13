@@ -102,3 +102,15 @@ export function allStickers(): readonly StickerManifest[] {
 export function stickerById(id: string): StickerManifest | undefined {
   return STICKERS.find((s) => s.id === id);
 }
+
+/** The sticker for an imported texture, materialized on first use — arming any
+ *  imported texture as a stamp IS creating its sticker (one-liner law: no
+ *  separate "make sticker" ceremony). New stickers mint at the 4x6 label. */
+export function ensureStickerForTexture(textureId: string, name: string): StickerManifest | null {
+  const existing = STICKERS.find((s) => s.textureId === textureId);
+  if (existing) return existing;
+  const saved = saveSticker(name, textureId, DEFAULT_STICKER_METERS.width, DEFAULT_STICKER_METERS.height);
+  if (!saved) return null;
+  STICKERS = [...STICKERS, saved];
+  return saved;
+}

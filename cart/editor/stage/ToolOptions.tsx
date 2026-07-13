@@ -8,6 +8,11 @@ import { commandById, meshToolCommands, meshToolActive, meshTopoCommands, worldA
 import { SNAP_MODES } from '../data/content';
 import type { EditorState, ViewMode } from '../data/types';
 import MapPaintBar from './MapPaintBar';
+import { Effect } from '../../../runtime/primitives';
+import { importedSpecs } from '../textures/shaders';
+
+// Place Sticker (req_3025): the stamp scale presets the rail cycles through.
+const STICKER_SCALES = [0.5, 1, 2, 4];
 
 // A model document owns the host-native mesh editor — the toolbar becomes the
 // home for its tools (icon-only), with select / gizmo / toggle groups divided.
@@ -21,6 +26,8 @@ export default function ToolOptions(props: {
   onCommand: (id: string, source: string) => void;
   onTool: (id: string) => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
+  /** Place Sticker (req_3025): patch the armed stamp (texture / rot / scale). */
+  onStickerArm: (patch: Partial<EditorState['stickerArm']>) => void;
   onSnap: () => void;
   onFloor: (delta: number) => void;
   /** toggle hiding the ACTIVE floor's walls (storey cutaway extra, req_2567) */
@@ -116,6 +123,32 @@ export default function ToolOptions(props: {
           </Btn>
         );
       })}
+      {props.state.activeCommandId === 'place-sticker' ? (
+        <Fragment>
+          <C.HW_OptionDivider />
+          {importedSpecs().map((spec) => {
+            const armed = props.state.stickerArm.textureId === spec.id;
+            const Swatch = armed ? C.HW_IconButtonOn : C.HW_IconButton;
+            return (
+              <Swatch key={spec.id} tooltip={`Stamp ${spec.label}`} onPress={() => props.onStickerArm({ textureId: spec.id })}>
+                <Effect shader={spec.shader} data={spec.buildData()} style={{ width: 16, height: 16 }} />
+              </Swatch>
+            );
+          })}
+          <C.HW_IconButton
+            tooltip={`Rotate stamp — ${props.state.stickerArm.rot * 90}°`}
+            onPress={() => props.onStickerArm({ rot: (props.state.stickerArm.rot + 1) % 4 })}
+          >
+            <Icon name="RotateCw" size={14} color={accentFor(props.state.stickerArm.rot === 0 ? 'textDim' : 'primary')} />
+          </C.HW_IconButton>
+          <C.HW_PillOn
+            tooltip="Stamp size — multiplies the sticker's real meter footprint"
+            onPress={() => props.onStickerArm({ scale: STICKER_SCALES[(STICKER_SCALES.indexOf(props.state.stickerArm.scale) + 1) % STICKER_SCALES.length] })}
+          >
+            <C.HW_PillTextOn>{`x${props.state.stickerArm.scale}`}</C.HW_PillTextOn>
+          </C.HW_PillOn>
+        </Fragment>
+      ) : null}
       <C.HW_OptionDivider />
       <C.HW_PillOn onPress={props.onSnap}>
         <C.HW_OptionLabel>SNAP</C.HW_OptionLabel>

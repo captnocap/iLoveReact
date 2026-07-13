@@ -460,6 +460,11 @@ export function registerImportedSpecs(specs: ShaderSpec[]): void {
   IMPORTED_SPECS = specs;
 }
 
+/** The imported set alone — the sticker rail (req_3025) lists what's stampable. */
+export function importedSpecs(): readonly ShaderSpec[] {
+  return IMPORTED_SPECS;
+}
+
 export function shaderSpec(id: string): ShaderSpec | undefined {
   return EDITOR_SHADERS.find((s) => s.id === id) ?? IMPORTED_SPECS.find((s) => s.id === id);
 }

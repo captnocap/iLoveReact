@@ -30,6 +30,7 @@ import { isAuthoredPiece, authoredResidentKeyOf, type AuthoredBuildPiece } from 
 import { pushLiveWorld, pushResidentMeshes } from './livePush';
 import { pickBuildPieceHostHit } from '../../../runtime/game/build';
 import { faceRoleForHit } from './pieceSlots';
+import { stickerLocalFrom } from './pieceSkins';
 import { ensureMapSeeded } from '../stage/mapPaint';
 import type { MapZoneDef } from '../stage/mapPaint';
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
@@ -120,6 +121,9 @@ export default function WorldViewport(props: {
    *  owner binds the active material into piece.slots[role]. Fired once per face per
    *  stroke (a drag sweeps across faces; each (piece, role) pair paints once). */
   onPaintFace: (id: string, role: string) => void;
+  /** Place Sticker (req_3025): the click's face hit as the piece-local anchor +
+   *  normal a StickerPlacement stores — the owner adds the armed sticker there. */
+  onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
   /** everything ONE gesture placed: a click is a one-piece batch, a drag-run
    *  (req_2747) is the whole wall run / floor rect — one journal entry either way. */
   onPlace: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
@@ -177,6 +181,8 @@ export default function WorldViewport(props: {
   onPieceContextRef.current = props.onPieceContext;
   const onPaintFaceRef = useRef(props.onPaintFace);
   onPaintFaceRef.current = props.onPaintFace;
+  const onStampStickerRef = useRef(props.onStampSticker);
+  onStampStickerRef.current = props.onStampSticker;
 
   // The one placed-piece pick, from PANE-local coords: host raycast for catalog pieces,
   // JS slab-test for authored (model:) placements, nearest hit wins. Shared by the
@@ -215,6 +221,22 @@ export default function WorldViewport(props: {
     stroke.add(key);
     onPaintFaceRef.current(hit.id, hit.role);
   }, [pickFaceAt]);
+
+  // Place Sticker (req_3025): the click's face hit, converted to the piece-local
+  // anchor + normal the placement stores. Same pick as Paint Faces; the hit
+  // POINT (not just the role) is what makes the stamp land where the ray touched.
+  const stampStickerAt = useCallback((lx: number, ly: number): void => {
+    const ray = stage.worldRay(lx, ly, rectRef.current);
+    if (!ray) return;
+    const hostHit = pickBuildPieceHostHit(ray, piecesRef.current, 1000);
+    if (!hostHit) return;
+    const authoredHit = pickAuthoredPlacement(ray, piecesRef.current, 1000);
+    if (authoredHit && authoredHit.t < hostHit.t) return; // a mesh piece occludes the face
+    const role = faceRoleForHit(hostHit.piece.pieceId, hostHit.piece.yawDegrees, hostHit.normal);
+    if (!role) return;
+    const local = stickerLocalFrom(hostHit.piece, hostHit.point, hostHit.normal);
+    onStampStickerRef.current(hostHit.piece.id, role, local);
+  }, [stage]);
 
   // Push the JS-solved iso pose to the native loader. Cheap (8 floats) — the only
   // per-interaction bridge traffic; the host re-applies it every embedded frame.
@@ -561,6 +583,8 @@ export default function WorldViewport(props: {
     // Paint Faces (req_2879): the down IS the first touch — paint the face under it
     // now; the stroke set keeps the drag sweeping new faces without re-painting.
     const paint = !e?.shiftKey && toolRef.current === 'paintFace' ? new Set<string>() : null;
+    // Place Sticker (req_3025): a click stamps once — no drag semantics.
+    if (!e?.shiftKey && toolRef.current === 'sticker') stampStickerAt(p.x, p.y);
     setMovePreview(null);
     dragRef.current = {
       x: p.x,
@@ -576,7 +600,7 @@ export default function WorldViewport(props: {
       paint,
     };
     if (paint) paintFaceAt(p.x, p.y, paint);
-  }, [local, groundUnder, pickPieceAt, paintFaceAt]);
+  }, [local, groundUnder, pickPieceAt, paintFaceAt, stampStickerAt]);
 
   const onMove = useCallback((e: any) => {
     const p = local(e);

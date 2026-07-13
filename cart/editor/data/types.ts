@@ -456,6 +456,9 @@ export type EditorState = {
   activeTab: LibraryTab;
   activeCommandId: string;
   activeAssetId: string;
+  // Place Sticker (req_3025): the armed stamp — an imported texture's spec id,
+  // quarter turns clockwise, and a uniform multiplier of the sticker's meter size.
+  stickerArm: { textureId: string | null; rot: number; scale: number };
   assetPage: number;
   materialFocused: boolean;
   colorStudioMaterial: string; // ShaderSpec id (textures/shaders.ts catalog)

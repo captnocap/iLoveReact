@@ -94,6 +94,7 @@ import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '.
 import { image as imageOps, quantize as quantizeImage } from '../../../runtime/image';
 import { encodeRows, parseQuantizeProbe } from '../textures/pixelTexture';
 import { loadTexturePackages, textureSpec, savePixelTexture, saveExactImage } from '../data/texturePackage';
+import { loadStickers, registerStickers, ensureStickerForTexture } from '../data/stickerStore';
 import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageDialog';
 import { readFileBase64, remove } from '../../../runtime/hooks/fs';
 import { oklchName } from '../data/colorSpine';
@@ -292,6 +293,7 @@ export default function AppFrame() {
       .map((pkg) => textureSpec(pkg, (b64) => imageOps(b64).raw()))
       .filter((s): s is NonNullable<typeof s> => s !== null);
     registerImportedSpecs(specs);
+    registerStickers(loadStickers()); // stamps resolve through the same reload (req_3025)
     return specs.length;
   };
   useEffect(() => {
@@ -1504,6 +1506,15 @@ export default function AppFrame() {
         // req_2879: the brush is the browser's active material; the viewport's
         // touch reports (piece, face role) up into assignPieceSlot.
         next = { ...next, status: `Paint Faces armed — touch a piece face to apply ${asset.name}; each face slot paints separately (drag to sweep)` };
+      } else if (command.id === 'place-sticker') {
+        // req_3025: the stamp is the armed imported texture (sticker rail in the
+        // action bar); the viewport's face hit reports up into stampSticker.
+        next = {
+          ...next,
+          status: prev.stickerArm.textureId
+            ? 'Place Sticker armed — click a piece face to stamp'
+            : 'Place Sticker armed — pick a sticker in the action bar (import an image first if the rail is empty)',
+        };
       } else if (command.id === 'open-color-studio') {
         const doc = materialDocument(asset);
         next = {
@@ -1794,6 +1805,42 @@ export default function AppFrame() {
     });
   };
   const assignPieceSlot = (id: string, role: string) => assignPieceSlotAsset(id, role, stateRef.current.activeAssetId);
+
+  // Place Sticker (req_3025): add the armed sticker to the clicked face at the
+  // ray's exact hit point. The sticker asset materializes on first stamp of a
+  // texture (ensureStickerForTexture — 4x6 label default); the placement is a
+  // piece-local row, so it rides the piece through move/rotate/delete/undo.
+  const stampSticker = (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => {
+    const arm = stateRef.current.stickerArm;
+    if (!arm.textureId) {
+      setState((prev) => ({ ...prev, status: 'no sticker armed — pick one in the action bar (import an image first if the rail is empty)' }));
+      return;
+    }
+    const spec = shaderSpec(arm.textureId);
+    const sticker = spec ? ensureStickerForTexture(arm.textureId, spec.label) : null;
+    if (!sticker) {
+      setState((prev) => ({ ...prev, status: `sticker FAILED — could not write a sticker manifest for ${arm.textureId}` }));
+      return;
+    }
+    setState((prev) => recordWorldEdit(prev, {
+      ...prev,
+      seq: prev.seq + 1,
+      worldPieces: prev.worldPieces.map((p) => p.id === id
+        ? {
+            ...p,
+            stickers: [...(p.stickers ?? []), {
+              id: `stk-${prev.seq}`,
+              stickerId: sticker.id,
+              role,
+              ...local,
+              scale: prev.stickerArm.scale,
+              rot: prev.stickerArm.rot,
+            }],
+          }
+        : p),
+      status: `${sticker.name} stamped on ${role}`,
+    }, 'stamp sticker'));
+  };
 
   // role null = clear EVERY slot back to the kind default (the quick menu's
   // untargeted "default" chip); a string clears just that face (req_2737).
@@ -4237,6 +4284,8 @@ export default function AppFrame() {
             onSelectPiece={selectPiece}
             onPieceContext={openPieceQuickMenu}
             onPaintFace={assignPieceSlot}
+            onStampSticker={stampSticker}
+            onStickerArm={(patch) => setState((prev) => ({ ...prev, stickerArm: { ...prev.stickerArm, ...patch } }))}
             onArmPiece={armPiece}
             onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
             onSelectColorStudioMaterial={selectColorStudioMaterial}

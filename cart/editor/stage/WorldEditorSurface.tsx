@@ -47,6 +47,7 @@ export default function WorldEditorSurface(props: {
   onPieceContext: (id: string, x: number, y: number) => void;
   /** Paint Faces (req_2879): a touched face's slot role — the owner binds the active material. */
   onPaintFace: (id: string, role: string) => void;
+  onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
 }) {
   // The viewport is modal (req_2550): the armed command decides the click. The palette piece is
   // armed ONLY in Place mode, so Select/Move/Focus never drop a piece. The armed piece id is the
@@ -83,6 +84,7 @@ export default function WorldEditorSurface(props: {
         onSelect={props.onSelect}
         onPieceContext={props.onPieceContext}
         onPaintFace={props.onPaintFace}
+        onStampSticker={props.onStampSticker}
         onPlace={props.onPlace}
         onMove={props.onMove}
         floor={props.floor}
