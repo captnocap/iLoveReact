@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "flora:oak",
+  "name": "flora_oak",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "flora",
+  "sourceKind": "cooked-asset",
+  "color": "#3f6c2b",
+  "rig": "-",
+  "data": "-",
+  "triangles": 134,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": []
+}

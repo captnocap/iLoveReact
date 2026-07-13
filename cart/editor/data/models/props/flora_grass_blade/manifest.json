@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "flora:grass-blade",
+  "name": "flora_grass_blade",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "flora",
+  "sourceKind": "cooked-asset",
+  "color": "#4f8a34",
+  "rig": "-",
+  "data": "-",
+  "triangles": 12,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": []
+}

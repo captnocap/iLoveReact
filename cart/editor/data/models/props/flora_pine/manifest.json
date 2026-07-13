@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "flora:pine",
+  "name": "flora_pine",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "flora",
+  "sourceKind": "cooked-asset",
+  "color": "#245d35",
+  "rig": "-",
+  "data": "-",
+  "triangles": 114,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": []
+}

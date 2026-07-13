@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "flora:flower-head",
+  "name": "flora_flower_head",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "flora",
+  "sourceKind": "cooked-asset",
+  "color": "#d77ab6",
+  "rig": "-",
+  "data": "-",
+  "triangles": 12,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": []
+}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "flora:palm-trunk",
+  "name": "flora_palm_trunk",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "flora",
+  "sourceKind": "cooked-asset",
+  "color": "#7a5a3a",
+  "rig": "-",
+  "data": "-",
+  "triangles": 560,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": []
+}

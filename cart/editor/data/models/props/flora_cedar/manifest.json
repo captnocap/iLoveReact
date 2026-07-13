@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "flora:cedar",
+  "name": "flora_cedar",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "flora",
+  "sourceKind": "cooked-asset",
+  "color": "#1f5b4a",
+  "rig": "-",
+  "data": "-",
+  "triangles": 124,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": []
+}

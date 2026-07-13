@@ -823,6 +823,33 @@ pub fn build(b: *std.Build) void {
     const hmsc_parity_step = b.step("hmsc-parity-compiler", "Build the hmsc Zig game-file parity compiler");
     hmsc_parity_step.dependOn(&b.addInstallArtifact(hmsc_parity_exe, .{}).step);
 
+    // ── flora dump (req_2993) ───────────────────────────────────
+    // Pure Zig exporter: every flora mesh (instanced cards + wrapped species)
+    // materialized as editor model packages for content-browser inspection.
+    const flora_geometry_mod = b.createModule(.{
+        .root_source_file = b.path("framework/world/flora_geometry.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const loader_geometry_mod = b.createModule(.{
+        .root_source_file = b.path("framework/world_loader/geometry.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const flora_dump_mod = b.createModule(.{
+        .root_source_file = b.path("framework/tools/flora_dump.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    flora_dump_mod.addImport("flora_geometry", flora_geometry_mod);
+    flora_dump_mod.addImport("loader_geometry", loader_geometry_mod);
+    const flora_dump_exe = b.addExecutable(.{
+        .name = "flora_dump",
+        .root_module = flora_dump_mod,
+    });
+    const flora_dump_step = b.step("flora-dump", "Export every flora mesh as an editor model package");
+    flora_dump_step.dependOn(&b.addInstallArtifact(flora_dump_exe, .{}).step);
+
     // ── tui-app: DELETED (C3) ────────────────────────────────────
     // The dedicated tui-app build target + v8_tui_app.zig entry point
     // were retired once v8_app.zig grew a runHeadless() branch behind

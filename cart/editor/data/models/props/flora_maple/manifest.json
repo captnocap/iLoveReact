@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "flora:maple",
+  "name": "flora_maple",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "flora",
+  "sourceKind": "cooked-asset",
+  "color": "#4f7f32",
+  "rig": "-",
+  "data": "-",
+  "triangles": 120,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": []
+}
