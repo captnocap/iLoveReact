@@ -1,14 +1,14 @@
-// editorbus/bus.ts — the runtime DOOR onto the authoring eventbus.
+// editorbus/bus.ts — the ordered outcome-log door.
 //
 // This file is the CONTRACT for the host side: workstream A implements the
 // `__editor_bus_*` doors in Zig (framework/events/). Until it lands, this door
 // degrades to an in-process local log so the TS workstreams (commands, defaults,
 // build-journal) can build, emit, and unit-test against the real surface now.
 //
-// The seam: callers NEVER mutate editor state directly. They `dispatch()` an
-// event; the authority assigns its `seq`; subscribers (the hot index, the dock,
-// the console) fold the ordered stream. That is what makes the editor
-// multiplayer-shaped and the placement-latency doctrine achievable.
+// dispatch() appends an already-applied outcome and assigns its authoritative
+// `seq`; it does not validate a command or apply application state. Migrated
+// systems enter through CommandAuthority and only its outcome sink dispatches.
+// Legacy callers still dispatch receipts directly until their slice migrates.
 
 import { callHost, callHostJson, hasHost, subscribe as ffiSubscribe, emit as ffiEmit } from '../ffi';
 import { type EditorEvent, type Seq, SEQ_PENDING } from './event';

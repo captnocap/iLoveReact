@@ -1,18 +1,19 @@
-// editorbus/event.ts — the authoring-event CONTRACT.
+// editorbus/event.ts — the immutable authoring-outcome CONTRACT.
 //
 // This is the central seam of the whole editor foundation. Every meaningful
 // authoring action (place, move, delete, paint, material.slot.fill, compile, …)
-// is one of these events, and EVERY foundation system is built against this
-// shape: workstream A (the Zig spine) orders and persists them, C (commands)
-// emits them, D/E (chunk cache + hot index) consume their `targets` to dirty
-// and fold, G (defaults) emits material.* edits through them.
+// produces one of these outcomes, and foundation systems build against this
+// shape: CommandAuthority applies through the owning domain, the Zig spine
+// orders and persists the outcome, and read models consume `targets` to fold.
+// Legacy producers still emit receipts directly while they migrate one slice
+// at a time.
 //
 // It is DISTINCT from runtime/eventBus.ts — that is the diagnostics/observability
-// bus (logging, sampled, fire-and-forget). THIS bus is the source of truth for
-// edits, and is built multiplayer-shaped: every event carries an authoritative
-// monotonic `seq` and a peer `origin`, so a remote peer's events interleave by
-// `seq` and the same log replays identically on every machine. V20 is dead; this
-// log + autosave snapshots + backup is its replacement.
+// bus (logging, sampled, fire-and-forget). This log is multiplayer-shaped: every
+// outcome carries an authoritative monotonic `seq` and a peer `origin`. The log
+// is not itself mutation authority. Correlated CommandAuthority outcomes are
+// replay-grade; uncorrelated legacy receipts remain observational until their
+// command slice migrates.
 //
 // The type list is NOT hardcoded here. Each workstream registers its own event
 // types once via defineEventType() — the registry is the seam that lets parallel
@@ -41,9 +42,27 @@ export interface TargetRef {
   id: string;
 }
 
+/** Command-correlation fields carried by migrated authority outcomes. They are
+ * optional while legacy receipt producers move behind CommandAuthority one at
+ * a time; when present they live in the durable envelope, not only inside an
+ * opaque domain payload. */
+export interface EventCommandMetadata {
+  invocationId?: string;
+  commandId?: string;
+  actionId?: string;
+  source?: string;
+  phase?: 'applied' | 'rejected' | 'undone' | 'redone';
+  causedBy?: string;
+  effect?: 'action' | 'project-action' | 'report-only' | 'control';
+  undoScope?: Readonly<{
+    kind: 'none' | 'document' | 'project' | 'workspace' | 'native';
+    key?: string;
+  }>;
+}
+
 /** The one envelope every authoring event shares. `payload` is the per-type
  *  body, described and (optionally) validated by its registered EventTypeDef. */
-export interface EditorEvent<P = unknown> {
+export interface EditorEvent<P = unknown> extends EventCommandMetadata {
   /** Authoritative order. SEQ_PENDING on an unconfirmed local/optimistic event. */
   seq: Seq;
   /** Producing peer. */
@@ -79,7 +98,7 @@ const REGISTRY = new Map<string, EventTypeDef<any>>();
 export interface EventFactory<P> {
   type: string;
   /** Build a local event: stamps origin + ts, seq = SEQ_PENDING. */
-  (payload: P, targets?: TargetRef[]): EditorEvent<P>;
+  (payload: P, targets?: TargetRef[], command?: EventCommandMetadata): EditorEvent<P>;
   def: EventTypeDef<P>;
 }
 
@@ -97,9 +116,9 @@ export function defineEventType<P>(def: EventTypeDef<P>): EventFactory<P> {
     throw new Error(`editorbus: event type '${def.type}' already registered`);
   }
   REGISTRY.set(def.type, def);
-  const make = ((payload: P, targets: TargetRef[] = []): EditorEvent<P> => {
+  const make = ((payload: P, targets: TargetRef[] = [], command: EventCommandMetadata = {}): EditorEvent<P> => {
     def.validate?.(payload, targets);
-    return { seq: SEQ_PENDING, origin: g_origin, ts: Date.now(), type: def.type, targets, payload };
+    return { seq: SEQ_PENDING, origin: g_origin, ts: Date.now(), type: def.type, targets, payload, ...command };
   }) as EventFactory<P>;
   make.type = def.type;
   make.def = def;

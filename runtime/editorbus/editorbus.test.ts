@@ -43,6 +43,21 @@ test('a registered factory stamps a well-formed, not-yet-ordered event', () => {
   assert(e.payload.piece === 'Wall Kit', 'payload carried');
 });
 
+test('migrated command correlation lives in the durable envelope', () => {
+  const e = placeEvent({ piece: 'Wall Kit' }, [{ kind: 'piece', id: 'wall-2' }], {
+    invocationId: 'invoke:2',
+    commandId: 'world.pieces.place',
+    actionId: 'action:2',
+    source: 'viewport',
+    phase: 'applied',
+    effect: 'action',
+    undoScope: { kind: 'document', key: 'world' },
+  });
+  assert(e.invocationId === 'invoke:2' && e.commandId === 'world.pieces.place', 'command identity carried');
+  assert(e.actionId === 'action:2' && e.phase === 'applied', 'action correlation carried');
+  assert(e.source === 'viewport' && e.undoScope?.key === 'world', 'source and undo scope carried');
+});
+
 test('re-registering a type is rejected (the anti-collision seam)', () => {
   let threw = false;
   try { defineEventType({ type: 'test.piece.place', undoable: false, describe: () => '' }); }
