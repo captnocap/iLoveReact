@@ -93,6 +93,39 @@ export function packExactTexture(rgba: Uint8Array, width: number, height: number
   return data;
 }
 
+/** Rotate packed shader data[] by quarter turns clockwise (sticker stamps,
+ *  req_3025) — the grid is re-laid at pack level so PIXEL_TEXTURE_SHADER needs
+ *  no rotation uniform and rotated stamps stay on the one shader contract.
+ *  Handles both palette mode (1 float/cell) and raw mode (3 floats/cell). */
+export function rotatePackedTexture(data: number[], quarterTurns: number): number[] {
+  const turns = ((quarterTurns % 4) + 4) % 4;
+  if (turns === 0) return data;
+  const w = Math.round(data[0]!);
+  const h = Math.round(data[1]!);
+  const k = Math.round(data[2]!);
+  const stride = k > 0 ? 1 : 3;
+  const head = 3 + (k > 0 ? k * 3 : 0);
+  const cells = data.slice(head);
+  if (cells.length < w * h * stride) return data; // malformed pack — leave untouched
+  const dw = turns % 2 === 0 ? w : h;
+  const dh = turns % 2 === 0 ? h : w;
+  const out = data.slice(0, head);
+  out[0] = dw;
+  out[1] = dh;
+  for (let y = 0; y < dh; y++) {
+    for (let x = 0; x < dw; x++) {
+      // Source cell that lands at dst (x, y) after `turns` clockwise turns.
+      let sx: number, sy: number;
+      if (turns === 1) { sx = y; sy = h - 1 - x; }
+      else if (turns === 2) { sx = w - 1 - x; sy = h - 1 - y; }
+      else { sx = w - 1 - y; sy = x; }
+      const s = (sy * w + sx) * stride;
+      for (let c = 0; c < stride; c++) out.push(cells[s + c]!);
+    }
+  }
+  return out;
+}
+
 // ── The on-disk RLE rows format (the pixel_icon lineage) ─────────────────────
 // rows: one array per row; entries are a bare index (one cell), null (one
 // transparent cell), or [count, index|null] runs. Flat art collapses to a

@@ -11,9 +11,12 @@
 //   3. WorldViewport pushes the materials via __compiled_world_set_live_material
 //      and the boxes via __compiled_world_set_live_skin_boxes.
 import { pieceVisualShapes } from './pieceShapes';
-import type { MaterialRef, PlacedPiece } from './pieces';
+import type { MaterialRef, PlacedPiece, StickerPlacement } from './pieces';
 import { slotRefForBox } from './pieceSlots';
 import { assetById } from '../data/catalog';
+import { stickerById } from '../data/stickerStore';
+import { shaderSpec } from '../textures/shaders';
+import { rotatePackedTexture } from '../textures/pixelTexture';
 
 export type LiveMaterial = { hash: number; wgsl: string; data: number[]; opacity: number };
 export type SkinPush = { boxes: Uint8Array; materials: LiveMaterial[] };
@@ -40,24 +43,117 @@ function shaderMaterialFor(ref: MaterialRef): LiveMaterial | null {
   return { hash, wgsl: preview.shader, data: preview.data, opacity: 1 };
 }
 
+// Sticker quad geometry (req_3025): a stamp is a THIN skin box sized to the
+// sticker's meter footprint, floated a hair off its face so the wall (and any
+// face-slot skin box on it) never z-fights it.
+const STICKER_THICKNESS = 0.004;
+const STICKER_OUTSET = 0.008;
+const DEG = Math.PI / 180;
+
+/** The sticker asset's texture as a live material, rotation baked into the
+ *  packed data so every stamp rides the one pixel-texture shader contract. */
+function stickerMaterialFor(placement: StickerPlacement): LiveMaterial | null {
+  const sticker = stickerById(placement.stickerId);
+  if (!sticker) return null;
+  const spec = shaderSpec(sticker.textureId);
+  if (!spec) return null; // texture package gone — the stamp draws nothing, loudly absent
+  const rot = ((placement.rot % 4) + 4) % 4;
+  const data = rotatePackedTexture(spec.buildData(), rot);
+  const hash = fnv1a(`stk:${sticker.id}:${rot}`);
+  return { hash, wgsl: spec.shader, data, opacity: 1 };
+}
+
+/** A placement's skin-box row: anchor + outward normal live in the PIECE frame,
+ *  so the box center is the yaw-rotated anchor nudged along the world normal;
+ *  the box's own yaw is the piece yaw (the quad lies in the face plane). */
+function stickerBoxFor(
+  piece: PlacedPiece,
+  p: StickerPlacement,
+  wMeters: number,
+  hMeters: number,
+): { cx: number; cy: number; cz: number; sx: number; sy: number; sz: number; yaw: number } {
+  const w = wMeters * p.scale;
+  const h = hMeters * p.scale;
+  const swapped = p.rot % 2 === 1; // quarter turns swap the footprint
+  const fw = swapped ? h : w;
+  const fh = swapped ? w : h;
+  const lift = STICKER_OUTSET + STICKER_THICKNESS / 2;
+  const ax = p.lx + p.nx * lift;
+  const ay = p.ly + p.ny * lift;
+  const az = p.lz + p.nz * lift;
+  // local→world in the pieceShapes/localOffset frame (the convention the
+  // loader's skin boxes already pair with yaw); stickerLocalFrom is its inverse.
+  const cos = Math.cos(piece.yawDegrees * DEG);
+  const sin = Math.sin(piece.yawDegrees * DEG);
+  const cx = piece.x + ax * cos + az * sin;
+  const cz = piece.z - ax * sin + az * cos;
+  const cy = piece.y + ay;
+  // Dominant local normal axis picks which box axis is the thin one.
+  const anx = Math.abs(p.nx), any = Math.abs(p.ny), anz = Math.abs(p.nz);
+  if (any >= anx && any >= anz) {
+    return { cx, cy, cz, sx: fw, sy: STICKER_THICKNESS, sz: fh, yaw: piece.yawDegrees };
+  }
+  if (anx >= anz) {
+    return { cx, cy, cz, sx: STICKER_THICKNESS, sy: fh, sz: fw, yaw: piece.yawDegrees };
+  }
+  return { cx, cy, cz, sx: fw, sy: fh, sz: STICKER_THICKNESS, yaw: piece.yawDegrees };
+}
+
+/** World raycast hit → the piece-local anchor + outward normal a
+ *  StickerPlacement stores. The exact inverse of stickerBoxFor's local→world,
+ *  so a stamp renders precisely where the ray touched. */
+export function stickerLocalFrom(
+  piece: { x: number; y: number; z: number; yawDegrees: number },
+  point: { x: number; y: number; z: number },
+  normal: { x: number; y: number; z: number },
+): { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number } {
+  const cos = Math.cos(piece.yawDegrees * DEG);
+  const sin = Math.sin(piece.yawDegrees * DEG);
+  const dx = point.x - piece.x;
+  const dz = point.z - piece.z;
+  const lx = dx * cos - dz * sin;
+  const lz = dx * sin + dz * cos;
+  const rnx = normal.x * cos - normal.z * sin;
+  const rnz = normal.x * sin + normal.z * cos;
+  // Snap the local normal to its dominant axis — piece faces are axis-aligned
+  // in their own frame, and the box math keys on that axis.
+  const ax = Math.abs(rnx), ay = Math.abs(normal.y), az = Math.abs(rnz);
+  let nx = 0, ny = 0, nz = 0;
+  if (ay >= ax && ay >= az) ny = normal.y >= 0 ? 1 : -1;
+  else if (ax >= az) nx = rnx >= 0 ? 1 : -1;
+  else nz = rnz >= 0 ? 1 : -1;
+  return { lx, ly: point.y - piece.y, lz, nx, ny, nz };
+}
+
 /** Build the live skin boxes + their materials for the placed pieces. Only faces
  *  with an assigned shader material produce a box; unskinned faces stay on their
- *  flat live-piece colour. */
+ *  flat live-piece colour. Sticker stamps ride the same push as thin quads over
+ *  their faces. */
 export function pieceSkinBoxes(pieces: readonly PlacedPiece[]): SkinPush {
   const out: { cx: number; cy: number; cz: number; sx: number; sy: number; sz: number; yaw: number; matHash: number }[] = [];
   const materials = new Map<number, LiveMaterial>();
   for (const piece of pieces) {
-    if (!piece.slots) continue; // cheap skip — no assigned material → no skin box
-    for (const shape of pieceVisualShapes(piece, '#ffffff')) {
-      if (shape.kind !== 'box') continue; // skinned ramps deferred (roofs stay flat)
-      const b = shape.box;
-      if (b.door) continue; // the door leaf keeps its dark panel, never a material
-      const ref = slotRefForBox(piece, b.slot);
-      if (!ref) continue;
-      const mat = shaderMaterialFor(ref);
+    if (piece.slots) {
+      for (const shape of pieceVisualShapes(piece, '#ffffff')) {
+        if (shape.kind !== 'box') continue; // skinned ramps deferred (roofs stay flat)
+        const b = shape.box;
+        if (b.door) continue; // the door leaf keeps its dark panel, never a material
+        const ref = slotRefForBox(piece, b.slot);
+        if (!ref) continue;
+        const mat = shaderMaterialFor(ref);
+        if (!mat) continue;
+        if (!materials.has(mat.hash)) materials.set(mat.hash, mat);
+        out.push({ cx: b.cx, cy: b.cy, cz: b.cz, sx: b.sx, sy: b.sy, sz: b.sz, yaw: b.yawDegrees, matHash: mat.hash });
+      }
+    }
+    for (const placement of piece.stickers ?? []) {
+      const sticker = stickerById(placement.stickerId);
+      if (!sticker) continue;
+      const mat = stickerMaterialFor(placement);
       if (!mat) continue;
       if (!materials.has(mat.hash)) materials.set(mat.hash, mat);
-      out.push({ cx: b.cx, cy: b.cy, cz: b.cz, sx: b.sx, sy: b.sy, sz: b.sz, yaw: b.yawDegrees, matHash: mat.hash });
+      const box = stickerBoxFor(piece, placement, sticker.widthMeters, sticker.heightMeters);
+      out.push({ ...box, matHash: mat.hash });
     }
   }
   const buf = new ArrayBuffer(out.length * SKIN_BOX_STRIDE_BYTES);

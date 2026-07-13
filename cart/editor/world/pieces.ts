@@ -33,6 +33,29 @@ export function pieceKindOf(pieceId: string): PlaceableKind | undefined {
 // reads whichever is present; absent slot ⇒ the piece's kind default.
 export type MaterialRef = { assetId: string } | { fn: string; variant: number };
 
+// A sticker stamped on a piece face (req_3025). Piece-LOCAL anchor so the stamp
+// rides every move/rotate/delete of its piece; the sticker's meter footprint
+// lives on the sticker asset (stickerStore) — a placement is only this row.
+export type StickerPlacement = {
+  id: string;
+  stickerId: string;
+  /** the face role the stamp sits on (pieceSlots vocabulary). */
+  role: string;
+  /** piece-local anchor, meters from the piece origin (pre-yaw frame). */
+  lx: number;
+  ly: number;
+  lz: number;
+  /** piece-local outward face normal (unit axis) — orients the quad; the role
+   *  alone can't ('sides' spans four surfaces). */
+  nx: number;
+  ny: number;
+  nz: number;
+  /** uniform multiplier of the sticker's intrinsic meter size. */
+  scale: number;
+  /** quarter turns clockwise on the face (0-3). */
+  rot: number;
+};
+
 export type PlacedPiece = {
   id: string;
   pieceId: string;
@@ -52,6 +75,8 @@ export type PlacedPiece = {
   // Per-instance property overrides (friction/walkable/opacity/… as num|bool).
   // Absent key ⇒ the kind default.
   overrides?: Record<string, number | boolean>;
+  // Stickers stamped on this piece's faces (req_3025) — see StickerPlacement.
+  stickers?: StickerPlacement[];
 };
 
 /** The build-bar selection carried by Place mode. `yawDegrees` is the user's

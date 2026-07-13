@@ -72,6 +72,17 @@ function validPiece(value: unknown): value is PlacedPiece {
       if (typeof override !== 'boolean' && !finite(override)) return false;
     }
   }
+  if (piece.stickers !== undefined) {
+    if (!Array.isArray(piece.stickers)) return false;
+    for (const s of piece.stickers) {
+      if (!isRecord(s)) return false;
+      if (typeof s.id !== 'string' || typeof s.stickerId !== 'string' || typeof s.role !== 'string') return false;
+      if (!finite(s.lx) || !finite(s.ly) || !finite(s.lz)) return false;
+      if (!finite(s.nx) || !finite(s.ny) || !finite(s.nz)) return false;
+      if (!finite(s.scale) || (s.scale as number) <= 0) return false;
+      if (!finite(s.rot) || !Number.isInteger(s.rot)) return false;
+    }
+  }
   return true;
 }
 
