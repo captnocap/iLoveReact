@@ -13,7 +13,7 @@
 
 const std = @import("std");
 const testing = std.testing;
-const bus = @import("editor_bus");
+const bus = @import("../../events/editor_bus.zig");
 
 fn envelope(kind: []const u8) []const u8 {
     // A client envelope as bus.ts/event.ts builds it: seq = SEQ_PENDING (-1),
@@ -108,4 +108,43 @@ test "append rejects a non-object payload" {
     try testing.expectEqual(@as(i64, -1), bus.append("not json"));
     // A rejected append must not advance the authoritative order.
     try testing.expectEqual(@as(i64, 0), bus.head());
+}
+
+test "append accepts the legacy common envelope while command outcomes migrate" {
+    bus.initInMemoryForTest();
+    defer bus.deinit();
+
+    // Existing cart receipts do not yet carry command invocation, action, source,
+    // or outcome-phase metadata. Keep that envelope valid while commands migrate
+    // one at a time; the native bus owns only common-envelope integrity here.
+    const env = envelope("editor.edit");
+    defer testing.allocator.free(env);
+    try testing.expectEqual(@as(i64, 1), bus.append(env));
+
+    const confirmed = try bus.since(testing.allocator, 0);
+    defer testing.allocator.free(confirmed);
+    try testing.expect(std.mem.indexOf(u8, confirmed, "\"type\":\"editor.edit\"") != null);
+    try testing.expect(std.mem.indexOf(u8, confirmed, "invocationId") == null);
+    try testing.expect(std.mem.indexOf(u8, confirmed, "actionId") == null);
+}
+
+test "append rejects malformed common envelope fields without consuming seq" {
+    bus.initInMemoryForTest();
+    defer bus.deinit();
+
+    const malformed = [_][]const u8{
+        "{}",
+        "{\"origin\":\"\",\"ts\":1,\"type\":\"editor.edit\",\"targets\":[],\"payload\":{}}",
+        "{\"origin\":\"local\",\"ts\":1,\"type\":\"\",\"targets\":[],\"payload\":{}}",
+        "{\"origin\":\"local\",\"ts\":1.5,\"type\":\"editor.edit\",\"targets\":[],\"payload\":{}}",
+        "{\"origin\":\"local\",\"ts\":1,\"type\":\"editor.edit\",\"targets\":{},\"payload\":{}}",
+        "{\"origin\":\"local\",\"ts\":1,\"type\":\"editor.edit\",\"targets\":[],\"payload\":[]}",
+    };
+
+    for (malformed) |json| try testing.expectEqual(@as(i64, -1), bus.append(json));
+    try testing.expectEqual(@as(i64, 0), bus.head());
+
+    const valid = envelope("editor.edit");
+    defer testing.allocator.free(valid);
+    try testing.expectEqual(@as(i64, 1), bus.append(valid));
 }

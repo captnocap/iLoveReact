@@ -180,20 +180,6 @@ pub fn build(b: *std.Build) void {
     // dlopens libluajit-5.1 directly, so it doesn't need this import.
     if (has_audio) root_mod.addImport("zluajit", zluajit_dep.module("zluajit"));
 
-    // sqlite — the authoring eventbus spine (framework/events/editor_bus.zig)
-    // imports "sqlite" as a NAMED module so it can be built in isolation for its
-    // unit test (see editor_bus_mod_t below). The host build reaches editor_bus.zig
-    // via relative import (v8_ingredients → v8_bindings_editor_bus → editor_bus),
-    // so it compiles into root_mod — which means the "sqlite" name must be
-    // registered here too, or the graph fails with "no module named 'sqlite'
-    // available within module 'root'". sqlite.zig dlopens libsqlite3 (no link dep).
-    const editor_sqlite_root_mod = b.createModule(.{
-        .root_source_file = b.path("framework/storage/sqlite.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    root_mod.addImport("sqlite", editor_sqlite_root_mod);
-
     // ── pg.zig (Postgres client) ────────────────────────────────
     // Used by framework/pg.zig (and via that, framework/embed.zig). Always
     // imported so the comptime-stub paths in v8_app.zig still resolve when
@@ -1550,27 +1536,15 @@ pub fn build(b: *std.Build) void {
     b.step("test-diag-registry", "Run the diagnostics registry unit tests")
         .dependOn(&b.addRunArtifact(diag_registry_test).step);
 
-    // authoring eventbus spine (workstream A)
-    const editor_sqlite_mod_t = b.createModule(.{
-        .root_source_file = b.path("framework/storage/sqlite.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    const editor_bus_mod_t = b.createModule(.{
-        .root_source_file = b.path("framework/events/editor_bus.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    editor_bus_mod_t.addImport("sqlite", editor_sqlite_mod_t);
+    // Authoring eventbus behavior tests. Root this test at framework/ so the
+    // bus and SQLite stay in one module when their production relative import
+    // is compiled; a named SQLite test module would duplicate that source.
     const editor_bus_test_mod = b.createModule(.{
-        .root_source_file = b.path("framework/testing/unit/editor_bus.zig"),
+        .root_source_file = b.path("framework/testing_editor_bus.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,
     });
-    editor_bus_test_mod.addImport("editor_bus", editor_bus_mod_t);
     const editor_bus_test = b.addTest(.{ .name = "editor-bus-test", .root_module = editor_bus_test_mod });
     b.step("test-editor-bus", "Run the authoring eventbus unit tests")
         .dependOn(&b.addRunArtifact(editor_bus_test).step);

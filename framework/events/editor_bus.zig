@@ -32,14 +32,9 @@
 //! Single-writer discipline: the main (V8) thread owns this. No locks.
 
 const std = @import("std");
-// sqlite — relative import, uniform with the sibling framework/diag/event_bus.zig.
-// It USED to be a named `@import("sqlite")` module so the isolated unit test could
-// inject it, but once editor_bus is pulled into the host root module (v8_ingredients →
-// v8_bindings_editor_bus → here), that put framework/storage/sqlite.zig into TWO modules
-// at once — the named "sqlite" module AND root (where diag/event_bus + others relative-
-// import it) — which Zig rejects as "file exists in multiple modules". The relative path
-// resolves in both the host build and the unit test (it's resolved from THIS file's
-// location either way), so it's the collision-free form. No named "sqlite" module needed.
+// Keep SQLite in the framework root module, uniform with the sibling diagnostics
+// bus. The unit-test root also lives at framework/ so this relative import remains
+// inside one legal module boundary without registering the file a second time.
 const sqlite = @import("../storage/sqlite.zig");
 
 const alloc = std.heap.c_allocator;
@@ -197,13 +192,15 @@ pub fn deinit() void {
 /// Append one authoring event. Parses the JSON envelope, stamps the
 /// authoritative seq, persists + rings the confirmed envelope, and fans it out
 /// on CHANNEL. Returns the assigned seq, or -1 if the bus is uninitialized or the
-/// payload is not a JSON object.
+/// payload is not a well-formed common event envelope. Domain payload schemas
+/// stay above this storage boundary; this validates only the fields shared by
+/// every legacy receipt and future command outcome.
 pub fn append(envelope_json: []const u8) i64 {
     if (!g_inited) return -1;
 
     var parsed = std.json.parseFromSlice(std.json.Value, alloc, envelope_json, .{}) catch return -1;
     defer parsed.deinit();
-    if (parsed.value != .object) return -1;
+    if (!validEnvelope(parsed.value)) return -1;
 
     const seq = g_next_seq;
     // Overwrite the client's SEQ_PENDING (-1) with the authoritative order.
@@ -369,4 +366,25 @@ fn intField(v: std.json.Value, key: []const u8) ?i64 {
         .float => |f| @intFromFloat(f),
         else => null,
     };
+}
+
+fn validEnvelope(v: std.json.Value) bool {
+    if (v != .object) return false;
+
+    const origin = strField(v, "origin") orelse return false;
+    if (origin.len == 0) return false;
+
+    const event_type = strField(v, "type") orelse return false;
+    if (event_type.len == 0) return false;
+
+    const ts = v.object.get("ts") orelse return false;
+    if (ts != .integer) return false;
+
+    const targets = v.object.get("targets") orelse return false;
+    if (targets != .array) return false;
+
+    const payload = v.object.get("payload") orelse return false;
+    if (payload != .object) return false;
+
+    return true;
 }
