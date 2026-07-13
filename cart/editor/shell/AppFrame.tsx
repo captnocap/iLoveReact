@@ -60,7 +60,7 @@ import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPain
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
-import { commandSource, createEditorApplicationCommands, WORLD_FLOOR_STEP_COMMAND_ID, WORLD_PIECES_PLACE_COMMAND_ID, WORLD_REDO_COMMAND_ID, WORLD_UNDO_COMMAND_ID, type WorldFloorStepResult, type WorldHistoryControlResult, type WorldPiecesPlaceResult } from '../data/applicationCommands';
+import { commandSource, createEditorApplicationCommands, WORLD_FLOOR_STEP_COMMAND_ID, WORLD_PIECES_PLACE_COMMAND_ID, WORLD_REDO_COMMAND_ID, WORLD_SELECT_TOOL_COMMAND_ID, WORLD_UNDO_COMMAND_ID, type WorldFloorStepResult, type WorldHistoryControlResult, type WorldPiecesPlaceResult, type WorldSelectToolResult } from '../data/applicationCommands';
 import { activeSurface } from '../data/surfaces';
 import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
@@ -346,6 +346,28 @@ export default function AppFrame() {
         stateRef.current = next;
         setState(next);
       },
+      worldTool: () => ({
+        activeCommandId: stateRef.current.activeCommandId,
+        mapPaintActive: stateRef.current.mapPaint.active,
+      }),
+      commitSelectTool: (result) => {
+        const previous = stateRef.current;
+        let mapPaint = previous.mapPaint;
+        if (result.mapPaintDropped) {
+          mapPaint = { ...previous.mapPaint, active: false, texturePickerOpen: false };
+          applyMapPaintEffects(previous.mapPaint, mapPaint);
+        }
+        const next: EditorState = {
+          ...previous,
+          mapPaint,
+          openMenu: null,
+          actionMenu: 'Build',
+          activeCommandId: WORLD_SELECT_TOOL_COMMAND_ID,
+          status: result.mapPaintDropped ? 'Select armed — map paint off' : 'Select armed',
+        };
+        stateRef.current = next;
+        setState(next);
+      },
       placement: {
         read: () => ({
           documentId: stateRef.current.activeMapStem,
@@ -470,6 +492,18 @@ export default function AppFrame() {
         dispatchCommandOutcome(outcome, {
           label: result.floorIndex === 0 ? 'active floor → Ground' : `active floor → Floor ${result.floorIndex}`,
           targets: [{ kind: 'view-floor', id: String(result.floorIndex) }],
+        });
+        return;
+      }
+      if (outcome.status === 'applied' && outcome.commandId === WORLD_SELECT_TOOL_COMMAND_ID) {
+        const result = outcome.result as WorldSelectToolResult;
+        // Pressing Esc while already neutral is genuinely inert. The command
+        // result remains deterministic for automation, but there is no state
+        // transition to append to the session outcome stream.
+        if (!result.changed) return;
+        dispatchCommandOutcome(outcome, {
+          label: `active tool → Select${result.mapPaintDropped ? ' · map paint off' : ''}`,
+          targets: [{ kind: 'world-tool', id: WORLD_SELECT_TOOL_COMMAND_ID }],
         });
         return;
       }
@@ -990,6 +1024,10 @@ export default function AppFrame() {
     // before any cart-local dispatcher logic can select a second behavior.
     if (commandId === WORLD_FLOOR_STEP_COMMAND_ID) {
       invokeApplicationCommand(commandId, { delta: 1 }, source);
+      return;
+    }
+    if (commandId === WORLD_SELECT_TOOL_COMMAND_ID) {
+      invokeApplicationCommand(commandId, {}, source);
       return;
     }
     if ((commandId === 'undo-local' || commandId === 'redo-local') &&
@@ -4143,10 +4181,16 @@ export default function AppFrame() {
             // "switch up to paint mid loop-cut" the user ruled WRONG.
             // Arming from the bar also EXITS Map Paint (req_2666 WW) — same
             // withMapPaintOff door as the hotkey/menu path; one mode at a time.
-            onTool={guarded((id: string) => setState((prev0) => {
-              const prev = withMapPaintOff(prev0);
-              return { ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}${prev !== prev0 ? ' — map paint off (one mode at a time)' : ''}` };
-            }))}
+            onTool={guarded((id: string) => {
+              if (id === WORLD_SELECT_TOOL_COMMAND_ID) {
+                invokeApplicationCommand(id, {}, 'action bar');
+                return;
+              }
+              setState((prev0) => {
+                const prev = withMapPaintOff(prev0);
+                return { ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}${prev !== prev0 ? ' — map paint off (one mode at a time)' : ''}` };
+              });
+            })}
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}

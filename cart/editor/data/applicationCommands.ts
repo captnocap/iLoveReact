@@ -25,6 +25,7 @@ import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 
 export const WORLD_FLOOR_STEP_COMMAND_ID = 'world.floor.step';
 export const WORLD_MAX_FLOOR = 128;
+export const WORLD_SELECT_TOOL_COMMAND_ID = 'select-tool';
 export const WORLD_UNDO_COMMAND_ID = 'world.history.undo';
 export const WORLD_REDO_COMMAND_ID = 'world.history.redo';
 export { WORLD_PIECES_PLACE_COMMAND_ID } from '../world/piecePlacementCommand';
@@ -35,6 +36,13 @@ export type WorldFloorStepResult = {
   floorIndex: number;
   delta: -1 | 1;
   maxFloor: number;
+};
+
+export type WorldSelectToolResult = {
+  previousToolId: string;
+  toolId: typeof WORLD_SELECT_TOOL_COMMAND_ID;
+  mapPaintDropped: boolean;
+  changed: boolean;
 };
 
 export type WorldPiecesPlaceArgs = {
@@ -90,6 +98,8 @@ export interface EditorCommandAdapter {
   blockedReason(): string | null;
   floorIndex(): number;
   commitFloor(result: WorldFloorStepResult): void;
+  worldTool(): { activeCommandId: string; mapPaintActive: boolean };
+  commitSelectTool(result: WorldSelectToolResult): void;
   placement: EditorPlacementAdapter;
   history: EditorHistoryAdapter;
 }
@@ -191,6 +201,34 @@ export function createEditorApplicationCommands(
       maxFloor: WORLD_MAX_FLOOR,
     };
     adapter.commitFloor(result);
+    return result;
+  });
+
+  registry.register<{}, WorldSelectToolResult>({
+    id: WORLD_SELECT_TOOL_COMMAND_ID,
+    label: 'Select',
+    icon: 'MousePointer2',
+    effect: 'report-only',
+    undoScope: 'none',
+    projections: { menu: ['Build'], toolbar: ['D.world'], palette: true },
+    keybindings: [{ chord: 'Esc', when: { surface: 'world' } }],
+    validateArgs: noArgs,
+    isEnabled: () => {
+      const blocked = adapter.blockedReason();
+      if (blocked) return { enabled: false, reason: `resolve ${blocked} first` };
+      return adapter.activeSurface() === 'world'
+        ? true
+        : { enabled: false, reason: 'only in the world editor' };
+    },
+  }, () => {
+    const current = adapter.worldTool();
+    const result: WorldSelectToolResult = {
+      previousToolId: current.activeCommandId,
+      toolId: WORLD_SELECT_TOOL_COMMAND_ID,
+      mapPaintDropped: current.mapPaintActive,
+      changed: current.activeCommandId !== WORLD_SELECT_TOOL_COMMAND_ID || current.mapPaintActive,
+    };
+    if (result.changed) adapter.commitSelectTool(result);
     return result;
   });
 

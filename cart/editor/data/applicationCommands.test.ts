@@ -9,6 +9,7 @@ import { type CommandOutcome, type CommandSource } from '../../../runtime/comman
 import {
   WORLD_FLOOR_STEP_COMMAND_ID,
   WORLD_MAX_FLOOR,
+  WORLD_SELECT_TOOL_COMMAND_ID,
   createEditorApplicationCommands,
   type EditorCommandAdapter,
   type WorldFloorStepResult,
@@ -29,6 +30,8 @@ function harness(
   surface = 'world',
   blocked: string | null = null,
   historyEntry: { label: string; actionId?: string; commandId?: string } | null = null,
+  startTool = 'place-piece',
+  startMapPaint = false,
 ) {
   let floor = startFloor;
   let commits = 0;
@@ -36,12 +39,16 @@ function harness(
   let undo = historyEntry ? [historyEntry] : [];
   let redo: typeof undo = [];
   let now = 1000;
+  let activeTool = startTool;
+  let mapPaintActive = startMapPaint;
   const outcomes: CommandOutcome[] = [];
   const adapter: EditorCommandAdapter = {
     activeSurface: () => surface,
     blockedReason: () => blocked,
     floorIndex: () => floor,
     commitFloor: (result) => { floor = result.floorIndex; commits += 1; },
+    worldTool: () => ({ activeCommandId: activeTool, mapPaintActive }),
+    commitSelectTool: () => { activeTool = WORLD_SELECT_TOOL_COMMAND_ID; mapPaintActive = false; commits += 1; },
     placement: {
       read: () => placementWorld,
       policy: {
@@ -78,6 +85,8 @@ function harness(
     pieces: () => placementWorld.pieces,
     undoDepth: () => undo.length,
     redoDepth: () => redo.length,
+    activeTool: () => activeTool,
+    mapPaintActive: () => mapPaintActive,
   };
 }
 
@@ -114,6 +123,26 @@ test('headless chord resolution returns the same inert command projection', () =
   assert(h.commands.commandsByMenu('Map')[0] === byId, 'menu projection identity drifted');
   assert(h.commands.resolveChord(']', { surface: 'world' }) === byId, 'world key projection drifted');
   assert(h.commands.resolveChord(']', { surface: 'model' }) === undefined, 'wrong mode resolved floor command');
+  assert(h.commands.resolveChord('Esc', { surface: 'world' })?.id === WORLD_SELECT_TOOL_COMMAND_ID, 'Escape did not resolve the Select command');
+});
+
+test('Escape selects the neutral tool without inventing a material edit', () => {
+  for (const source of ['hotkey', 'toolbar', 'remote'] as CommandSource[]) {
+    const h = harness(0, 'world', null, null, 'paint-faces', true);
+    const outcome = h.commands.invoke({ commandId: WORLD_SELECT_TOOL_COMMAND_ID, args: {}, source });
+    assert(outcome.status === 'applied' && outcome.effect === 'report-only', `${source} was not report-only`);
+    assert(outcome.status === 'applied' && outcome.result.previousToolId === 'paint-faces', `${source} lost the actual prior tool`);
+    assert(h.activeTool() === WORLD_SELECT_TOOL_COMMAND_ID && !h.mapPaintActive(), `${source} did not reach the neutral tool`);
+    assert(h.commits() === 1 && !('actionId' in outcome), `${source} invented an authored edit`);
+    assert(JSON.stringify(outcome).toLowerCase().includes('material') === false, `${source} fabricated a material target`);
+  }
+});
+
+test('repeated Escape is an idempotent Select request', () => {
+  const h = harness(0, 'world', null, null, WORLD_SELECT_TOOL_COMMAND_ID, false);
+  const outcome = h.commands.invoke({ commandId: WORLD_SELECT_TOOL_COMMAND_ID, args: {}, source: 'hotkey' });
+  assert(outcome.status === 'applied' && outcome.result.changed === false, 'neutral Select did not report a no-op');
+  assert(h.commits() === 0, 'repeated Escape committed state');
 });
 
 test('invalid, blocked, and wrong-surface calls reject without mutation', () => {
