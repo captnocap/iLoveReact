@@ -137,7 +137,6 @@ export function pushLiveWorld(nodeId: number, pieces: readonly PlacedPiece[]): v
     }
     g.__compiled_world_set_live_mesh_props(nodeId, encodeMeshRefs(refs));
   }
-  console.warn(`[place] live push: ${pieces.length} pieces (decomposed) + ${skin.materials.length} materials -> loader node ${nodeId}`);
 }
 
 /** Keep the authored meshes RESIDENT so their placements can draw (req_2577).

@@ -377,13 +377,32 @@ export function isWallPiece(pieceId: string): boolean {
  *  hidden so the storey you're editing is never buried under its own building,
  *  and `wallsDown` additionally hides the ACTIVE floor's walls (interior /
  *  prop-placement view). Floors below always show — they're the context. */
-export function visibleStoreyPieces(pieces: readonly PlacedPiece[], floor: number, wallsDown: boolean): PlacedPiece[] {
-  return pieces.filter((piece) => {
+export function visibleStoreyPieces(pieces: readonly PlacedPiece[], floor: number, wallsDown: boolean): readonly PlacedPiece[] {
+  const visible = pieces.filter((piece) => {
     const storey = pieceFloorOf(piece);
     if (storey > floor) return false;
     if (wallsDown && storey === floor && isWallPiece(piece.pieceId)) return false;
     return true;
   });
+  // Structural sharing is functional here, not a micro-optimization: the
+  // viewport's live-world effect keys off this array. A floor selection whose
+  // cutaway reveals/hides nothing must not republish every piece and rebuild
+  // every native collider.
+  return visible.length === pieces.length ? pieces : visible;
+}
+
+/** Retain the last viewport projection when a different floor calculation
+ * produces the exact same piece sequence. This keeps view-only state from
+ * crossing the authoritative live-world/collider door. */
+export function retainPieceSequence(
+  previous: readonly PlacedPiece[],
+  next: readonly PlacedPiece[],
+): readonly PlacedPiece[] {
+  if (previous.length !== next.length) return next;
+  for (let index = 0; index < next.length; index += 1) {
+    if (previous[index] !== next[index]) return next;
+  }
+  return previous;
 }
 
 function hexToRgb(hex: string): [number, number, number] {

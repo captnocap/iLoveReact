@@ -259,12 +259,13 @@ export default function WorldViewport(props: {
     return () => clearInterval(t);
   }, [props.mapStem, props.mapZones]);
 
-  // The active floor lifts the camera target + the pick plane (Sims storeys).
+  // The active floor moves only the semantic placement/pick plane. Camera pose
+  // is independent: choosing a storey must never move the user's view or cross
+  // the camera host door.
   useEffect(() => {
     stage.setLevel(props.floor);
-    pushCamera();
     setSnap(null);
-  }, [props.floor, stage, pushCamera]);
+  }, [props.floor, stage]);
 
   // WASD camera panning (req_2558) — it worked before the world surface moved to this viewport
   // and never got re-wired. Held keys slide the iso centre along the view's own forward/right

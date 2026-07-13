@@ -872,5 +872,10 @@ pub fn applyLiveColliders(runtime: anytype, comptime live_scene: type) void {
     if (clipped > 0) {
         log.print("[live] collider cap CLIPPED {d} live rows — distant pieces are walk-through\n", .{clipped});
     }
-    log.print("[live] colliders folded: {d} base + {d} live rects, {d} base + {d} live oriented, {d} live door(s)\n", .{ runtime.base_rect_count, live_rect_count, runtime.base_oriented_count, live_oriented_count, runtime.live_cooked_doors.len });
+    // Successful rebuilds are routine projection traffic, not warnings. Keep
+    // the detail behind the same opt-in diagnostic used by the live overlay;
+    // allocation failures and clipping remain unconditionally loud above.
+    if (std.posix.getenv("RJIT_LIVELOG") != null) {
+        log.print("[live] colliders folded: {d} base + {d} live rects, {d} base + {d} live oriented, {d} live door(s)\n", .{ runtime.base_rect_count, live_rect_count, runtime.base_oriented_count, live_oriented_count, runtime.live_cooked_doors.len });
+    }
 }

@@ -33,6 +33,9 @@ export const METERS_PER_LEVEL = 3;
 export interface IsoPose {
   centerX: number; // world tile the view orbits over (pan), in tiles
   centerZ: number;
+  // Camera target height is independent of the active editing storey. Changing
+  // floors moves the placement/pick plane, not the user's view.
+  viewY: number;
   yaw: number;     // compass rotation in DEGREES — continuous (mouse-drag) + 90° buttons
   pitch: number;   // elevation above the horizon in DEGREES — tilt between near-level and near-plan
   zoom: number;    // 1 = BASE_DIST; larger = closer
@@ -66,7 +69,10 @@ export class IsoStage {
   private sampleHeight: HeightSampler;
 
   constructor(initial?: Partial<IsoPose>, heightAt: HeightSampler = () => 0) {
-    this.pose = { centerX: 0, centerZ: 0, yaw: ISO_YAW_START, pitch: ISO_PITCH, zoom: 1, level: 0, ...initial };
+    // Old hot-state twigs predate viewY and encoded the camera target in level.
+    // Preserve that view once on migration; later setLevel calls never alter it.
+    const migratedViewY = initial?.viewY ?? (initial?.level ?? 0) * METERS_PER_LEVEL;
+    this.pose = { centerX: 0, centerZ: 0, yaw: ISO_YAW_START, pitch: ISO_PITCH, zoom: 1, level: 0, ...initial, viewY: migratedViewY };
     this.sampleHeight = heightAt;
   }
 
@@ -89,7 +95,7 @@ export class IsoStage {
   // per-frame JS camera props.
   solve(): Solved {
     const dist = BASE_DIST / clamp(this.pose.zoom, MIN_ZOOM, MAX_ZOOM);
-    const target: Vec3 = [this.pose.centerX, this.levelElevation(), this.pose.centerZ];
+    const target: Vec3 = [this.pose.centerX, this.pose.viewY, this.pose.centerZ];
     return solveCamera(Isometric, {
       target,
       yaw: this.yawDegrees(),

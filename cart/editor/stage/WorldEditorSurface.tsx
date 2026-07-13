@@ -1,8 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { C } from '../workspace.cls';
 import WorldViewport from '../world/WorldViewport';
 import { worldToolFor } from '../world/worldTool';
-import { visibleStoreyPieces, type ArmedPiece, type PlacedPiece, type PlacementGesture } from '../world/pieces';
+import { retainPieceSequence, visibleStoreyPieces, type ArmedPiece, type PlacedPiece, type PlacementGesture } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
 import type { MapZoneDef } from './mapPaint';
 
@@ -62,10 +62,13 @@ export default function WorldEditorSurface(props: {
   // active floor's walls for interior/prop work. The FULL list stays here: it is
   // the authored world; placements append to it and floor changes re-derive the
   // view. Picking naturally can't hit hidden pieces (the viewport never gets them).
-  const visiblePieces = useMemo(
-    () => visibleStoreyPieces(props.pieces, props.floor, props.wallsDown),
-    [props.pieces, props.floor, props.wallsDown],
-  );
+  const previousVisiblePieces = useRef<readonly PlacedPiece[]>([]);
+  const visiblePieces = useMemo(() => {
+    const next = visibleStoreyPieces(props.pieces, props.floor, props.wallsDown);
+    const stable = retainPieceSequence(previousVisiblePieces.current, next);
+    previousVisiblePieces.current = stable;
+    return stable;
+  }, [props.pieces, props.floor, props.wallsDown]);
 
   return (
     <C.HW_WorldEditorSurface>
