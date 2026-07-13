@@ -326,10 +326,9 @@ pub const INGREDIENTS = [_]Ingredient{
     // five host fns and a circular ring; nothing the cart has to import.
     .{ .name = "eventbus", .required = true, .grep_prefix = "", .reg_fn = "registerEventBus", .mod = v8_bindings_eventbus },
     // Authoring eventbus (framework/events/editor_bus.zig) — always-on like the other
-    // buses. registerEditorBus() also calls editor_bus.init() (opens the durable SQLite
-    // log best-effort) and installs the __ffiEmit broadcaster, so no boot line elsewhere.
-    // This is the durable, seq-ordered, multiplayer-shaped source of truth the editor's
-    // runtime/editorbus door fronts; the door degrades to an in-process log when absent.
+    // buses. registerEditorBus() also calls editor_bus.init() and installs the __ffiEmit
+    // broadcaster, so no boot line is needed elsewhere. The ordered stream belongs to the
+    // current host process: V8 hot reload retains it and a cold app start begins empty.
     .{ .name = "editor_bus", .required = true, .grep_prefix = "", .reg_fn = "registerEditorBus", .mod = v8_bindings_editor_bus },
     // editor diagnostics registry — always-on observability (same rationale as the
     // eventbus above): registers __diag_emit/set_enabled/set_sample/recent/channels_state

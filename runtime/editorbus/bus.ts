@@ -1,4 +1,4 @@
-// editorbus/bus.ts — the ordered outcome-log door.
+// editorbus/bus.ts — the ordered process-session outcome-stream door.
 //
 // This file is the CONTRACT for the host side: workstream A implements the
 // `__editor_bus_*` doors in Zig (framework/events/). Until it lands, this door
@@ -9,6 +9,8 @@
 // `seq`; it does not validate a command or apply application state. Migrated
 // systems enter through CommandAuthority and only its outcome sink dispatches.
 // Legacy callers still dispatch receipts directly until their slice migrates.
+// The stream is not document state or cross-process storage: a cold host starts
+// empty, while a V8 hot reload retains it because the native host stays alive.
 
 import { callHost, callHostJson, hasHost, subscribe as ffiSubscribe, emit as ffiEmit } from '../ffi';
 import { type EditorEvent, type Seq, SEQ_PENDING } from './event';

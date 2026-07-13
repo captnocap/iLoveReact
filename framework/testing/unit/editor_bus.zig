@@ -9,7 +9,7 @@
 //!   3. since(afterSeq) round-trips: returns exactly the confirmed envelopes with
 //!      seq > afterSeq, oldest-first, each carrying its stamped seq.
 //!
-//! Ring-only (in-memory) so the test never touches the user's real db.
+//! The bus is process-session-only, so this test never touches disk.
 
 const std = @import("std");
 const testing = std.testing;
@@ -58,6 +58,28 @@ test "seq is monotonic and head tracks it" {
         try testing.expectEqual(expected_seq, bus.head());
         expected_seq += 1;
     }
+}
+
+test "a cold lifecycle starts a new empty session" {
+    bus.initInMemoryForTest();
+    const env = envelope("session.one");
+    defer testing.allocator.free(env);
+    try testing.expectEqual(@as(i64, 1), bus.append(env));
+    try testing.expectEqual(@as(i64, 1), bus.head());
+
+    // V8 context replacement registers the host door again, but the native
+    // process remains alive. Idempotent init must keep this session intact.
+    bus.init();
+    try testing.expectEqual(@as(i64, 1), bus.head());
+
+    bus.deinit();
+    bus.init();
+    defer bus.deinit();
+
+    try testing.expectEqual(@as(i64, 0), bus.head());
+    const events = try bus.since(testing.allocator, 0);
+    defer testing.allocator.free(events);
+    try testing.expectEqualStrings("[]", events);
 }
 
 test "since round-trips confirmed events after a given seq" {

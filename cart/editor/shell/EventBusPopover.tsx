@@ -10,12 +10,10 @@ import type { MapPaintPayload, PiecePlacementPayload } from '../data/editorEvent
 // read back off the bus even if this popover renders before AppFrame's first dispatch.
 import '../data/editorEvents';
 
-// Eventbus Review — a window onto the authoring event stream. Prefers the real bus (the
-// editorbus door, host-backed once built in), but the bus starts EMPTY: it only fills from
-// edits dispatched after boarding, and the in-process fallback log resets on a hot reload. So
-// when the bus has nothing, we show the session's local edit log instead — the review always
-// reflects your edits rather than a blank void, and upgrades to the real durable stream the
-// moment events flow (req_2424, req_2458).
+// Eventbus Review — a window onto this process's authoring outcome stream. The Zig host
+// retains it across a V8 hot reload; a cold app start begins empty. The JS fallback exists
+// only for tests/hosts without the native door. When neither stream has events yet, show the
+// current editor history rows so the panel remains useful (req_2424, req_2458).
 const TAIL = 60; // most-recent events to show
 
 type Row = { key: string; title: string; detail: string; time: string; type: string; origin: string };
