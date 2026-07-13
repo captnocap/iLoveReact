@@ -14,6 +14,9 @@ export default function Workspace(props: {
   onModelToolState: (state: ModelToolSnapshot) => void;
   modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
   outlinerHandlers: OutlinerHandlers;
+  modelOnDisk: boolean;
+  onRequireFirstModelSave: () => boolean;
+  onModelDocumentMutated: () => void;
   onTool: (id: string) => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onSnap: () => void;

@@ -30,6 +30,9 @@ export default function Stage(props: {
   onModelToolState: (state: ModelToolSnapshot) => void;
   modelContextTrigger: { onRightClick: (e: { x: number; y: number }) => void };
   outlinerHandlers: OutlinerHandlers;
+  modelOnDisk: boolean;
+  onRequireFirstModelSave: () => boolean;
+  onModelDocumentMutated: () => void;
   onStage: () => void;
   onContext: () => void;
   onObject: (id: string) => void;
@@ -111,6 +114,9 @@ export default function Stage(props: {
             onToolApi={props.onModelToolApi}
             onToolState={props.onModelToolState}
             outliner={outliner}
+            modelOnDisk={props.modelOnDisk}
+            onRequireFirstSave={props.onRequireFirstModelSave}
+            onDocumentMutated={props.onModelDocumentMutated}
           />
         ) : (
           <MaterialFocusSurface

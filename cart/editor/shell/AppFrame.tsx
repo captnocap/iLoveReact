@@ -20,6 +20,9 @@ import ExportCharacterDialog from './ExportCharacterDialog';
 import PaintToolbar, { PaintPopovers, type PaintPopover } from './PaintToolbar';
 import PerformancePopover from './PerformancePopover';
 import MemoryPopover from './MemoryPopover';
+import PreferencesDialog from './PreferencesDialog';
+import HotUpdateDialog from './HotUpdateDialog';
+import UnsavedChangesDialog from './UnsavedChangesDialog';
 import LibraryPanel from '../library/LibraryPanel';
 import Workspace from '../stage/Workspace';
 import Inspector from '../inspector/Inspector';
@@ -40,7 +43,7 @@ import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
 import { loadPersistedState, persistState } from '../data/persistView';
-import { emptyWorldSave, flushWorldSave, readWorldSave, saveWorldNow, scheduleWorldSave, type WorldSave } from '../data/worldStore';
+import { cancelWorldSave, emptyWorldSave, flushWorldSave, readWorldSave, saveWorldNow, scheduleWorldSave, type WorldSave } from '../data/worldStore';
 import {
   createMapDocument,
   deleteMapDocument,
@@ -53,7 +56,7 @@ import {
 import { mapAuthoringSlicesFor } from '../data/mapDocumentState';
 import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
-import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint } from '../stage/mapPaint';
+import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint, setMapDocumentAutosave } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
@@ -75,6 +78,7 @@ import { subscribe } from '@reactjit/runtime/ffi';
 // Live modifier state (no re-render) — the outliner's shift-click multi-select
 // (req_2659) reads shift at press time instead of threading it through every row.
 import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
+import { removeHotState } from '@reactjit/runtime/hooks/useHotState';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor, resolveMaterialRef } from '../data/catalog';
 import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
@@ -91,13 +95,16 @@ import { image as imageOps, quantize as quantizeImage } from '../../../runtime/i
 import { encodeRows, parseQuantizeProbe } from '../textures/pixelTexture';
 import { loadTexturePackages, textureSpec, savePixelTexture, saveExactImage } from '../data/texturePackage';
 import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageDialog';
-import { readFileBase64 } from '../../../runtime/hooks/fs';
+import { readFileBase64, remove } from '../../../runtime/hooks/fs';
 import { oklchName } from '../data/colorSpine';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import { useBuildJournal } from '../data/journal';
 import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
 import { WORLD_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
-import { scheduleGlobalsSave } from '../data/globalsStore';
+import { cancelGlobalsSave, saveGlobalsNow, scheduleGlobalsSave } from '../data/globalsStore';
+import { editorPersistenceSettings, editorSettings } from '../data/editorSettings';
+import { discardModelWorkingCopyState } from '../data/persistenceLifecycle';
+import { applyDevReload, devReloadRevision, devReloadWaiting, installDevReloadCheckpoint, setDevReloadPolicy } from '../../../runtime/devReload';
 import { DEFAULT_PHYSICS_GLOBALS, type PhysicsGlobals } from '../data/globals';
 import { mapEventDrain, mapGetTileBindings, mapHostLive, mapRedo, mapUndo, type MapAuthoringEvent, type MapHistoryKind } from '../../../runtime/game/map';
 import { buildCatalogIndex, validateBuildPlacement } from '../../../runtime/game/build';
@@ -211,6 +218,7 @@ export default function AppFrame() {
   // commit; menu/toolbar/hotkey callers never receive setState.
   const stateRef = useRef(state);
   stateRef.current = state;
+  useEffect(() => installDevReloadCheckpoint(() => persistState(stateRef.current)), []);
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
   // The open paint-toolbar popover (ink / brush). Local, not persisted — the popovers render
   // LATE (below) so they sit over the body; the bar (early) only toggles this.
@@ -223,6 +231,59 @@ export default function AppFrame() {
   // Apply revalidates these ids/ranges against the live outliner before touching mesh.
   const [pathArrayPrompt, setPathArrayPrompt] = useState<{ sourceIds: string[]; label: string; sourceSpanU: { xU: number; zU: number } } | null>(null);
   const [scaleByOpen, setScaleByOpen] = useState(false);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [hotUpdatePromptOpen, setHotUpdatePromptOpen] = useState(false);
+  const [unsavedDocumentName, setUnsavedDocumentName] = useState<string | null>(null);
+  const unsavedDecisionRef = useRef<{ save: () => void; discard: () => void; cancel?: () => void } | null>(null);
+  const requestUnsavedDecision = (documentName: string, save: () => void, discard: () => void, cancel?: () => void) => {
+    unsavedDecisionRef.current = { save, discard, cancel };
+    setUnsavedDocumentName(documentName);
+  };
+  const [settingsRevision, setSettingsRevision] = useState(0);
+  useEffect(() => editorSettings.subscribe(() => setSettingsRevision((revision) => revision + 1)), []);
+  const persistenceSettings = useMemo(editorPersistenceSettings, [settingsRevision]);
+  const [manualWorldDirty, setManualWorldDirty] = useState(false);
+  const [modelMutationRevision, setModelMutationRevision] = useState(0);
+  const worldDurableRefs = useRef<{
+    pieces: EditorState['worldPieces'];
+    objects: EditorState['objects'];
+    zones: EditorState['mapPaint']['zones'];
+    globals: EditorState['worldGlobals'];
+  } | null>(null);
+  const skipNextWorldDirtyRef = useRef(false);
+  useEffect(() => {
+    const previous = worldDurableRefs.current;
+    const next = { pieces: state.worldPieces, objects: state.objects, zones: state.mapPaint.zones, globals: state.worldGlobals };
+    worldDurableRefs.current = next;
+    if (persistenceSettings.autosave) {
+      if (manualWorldDirty) setManualWorldDirty(false);
+      return;
+    }
+    if (previous && (previous.pieces !== next.pieces || previous.objects !== next.objects || previous.zones !== next.zones || previous.globals !== next.globals)) {
+      if (skipNextWorldDirtyRef.current) skipNextWorldDirtyRef.current = false;
+      else setManualWorldDirty(true);
+    }
+  }, [state.worldPieces, state.objects, state.mapPaint.zones, state.worldGlobals, persistenceSettings.autosave]);
+  const hotUpdateRevisionRef = useRef(0);
+  useEffect(() => {
+    setDevReloadPolicy(persistenceSettings.hotUpdate);
+    if (persistenceSettings.hotUpdate !== 'ask') {
+      hotUpdateRevisionRef.current = 0;
+      setHotUpdatePromptOpen(false);
+      return;
+    }
+    const poll = () => {
+      const waiting = devReloadWaiting();
+      const revision = devReloadRevision();
+      if (waiting && revision !== hotUpdateRevisionRef.current) {
+        hotUpdateRevisionRef.current = revision;
+        setHotUpdatePromptOpen(true);
+      }
+    };
+    poll();
+    const timer = setInterval(poll, 250);
+    return () => clearInterval(timer);
+  }, [persistenceSettings.hotUpdate]);
 
   // Imported textures register as dynamic ShaderSpecs at boot (and after every
   // import), so they are first-class materials everywhere a catalog material is.
@@ -259,6 +320,9 @@ export default function AppFrame() {
     if (importPartOpen) return { id: 'import-part', label: 'Add From Library' };
     if (pathArrayPrompt) return { id: 'path-array', label: 'Path Array' };
     if (scaleByOpen) return { id: 'scale-by', label: 'Scale By' };
+    if (preferencesOpen) return { id: 'preferences', label: 'Preferences', closerCommandId: 'open-preferences' };
+    if (hotUpdatePromptOpen) return { id: 'hot-update', label: 'Code Update' };
+    if (unsavedDocumentName) return { id: 'unsaved-changes', label: 'Unsaved Changes' };
     return null;
   };
   // Live handle for the once-installed hotkey subscription (fresh closures per render).
@@ -473,23 +537,43 @@ export default function AppFrame() {
 
   // Mirror the active view into hot-state so a dev hot reload rehydrates exactly
   // what you were looking at instead of snapping back to defaults.
-  useEffect(() => { persistState(state); }, [state]);
+  useEffect(() => {
+    // Hot-state is a reload checkpoint, not a per-input event sink. Collapse a
+    // drag/typing burst to one snapshot so choosing a colour cannot serialize
+    // the whole editor workspace once per pointer sample.
+    const checkpoint = setTimeout(() => persistState(state), 60);
+    return () => clearTimeout(checkpoint);
+  }, [state]);
 
   // Micro-save the world's authored edits to disk (SESSIONSAVE req_2765): every
   // worldPieces / semantic-object / zone-def change — placements, verbs,
   // undo/redo, all of it —
   // schedules a debounced write of the world save, so placed pieces survive a
-  // cold restart with no Save button to forget. The painted map micro-saves
+  // cold restart without requiring Save. Explicit Save uses the same writers.
   // itself host-side (ensureMapSeeded registers its autosave file).
   useEffect(() => {
-    scheduleWorldSave(state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, state.seq);
-  }, [state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones]);
+    scheduleWorldSave(state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, state.seq, {
+      enabled: persistenceSettings.autosave,
+      delayMs: persistenceSettings.autosaveDelayMs,
+    });
+  }, [state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
 
   // GLOBALS req_2770: tuned world globals micro-save on the same contract —
   // "find a value, lock it in" is a debounced write, never a Save button.
   useEffect(() => {
-    scheduleGlobalsSave(state.worldGlobals);
-  }, [state.worldGlobals]);
+    scheduleGlobalsSave(state.worldGlobals, {
+      enabled: persistenceSettings.autosave,
+      delayMs: persistenceSettings.autosaveDelayMs,
+    });
+  }, [state.worldGlobals, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
+
+  useEffect(() => {
+    if (!persistenceSettings.autosave) {
+      cancelWorldSave();
+      cancelGlobalsSave();
+    }
+    setMapDocumentAutosave(persistenceSettings.autosave);
+  }, [persistenceSettings.autosave]);
 
   // One field of the world globals changes: state (→ the playtest surface pushes
   // the live physics door), the bus event, and the micro-save all ride the same
@@ -603,6 +687,91 @@ export default function AppFrame() {
     }
   }, [liveUndoDepths.undo, liveUndoDepths.source, activeModelId, state.activeWorkspaceDocumentId, state.modelDirty]);
 
+  /** The single model commit path used by File → Save, first-atlas gating,
+   * close/switch boundaries, and background autosave after first save. */
+  const saveActiveModelNow = (reason = 'Save'): boolean => {
+    const current = stateRef.current;
+    const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
+    const pkg = doc?.kind === 'model'
+      ? effectiveModelPackage(doc.sourceId, current.modelOverrides, current.modelDupes)
+      : null;
+    if (!pkg) return false;
+
+    const rigDraft = current.modelRigs[pkg.id];
+    const rigModelId = authoredModelIdForPackage(pkg.id);
+    const rigBounds = rigDraft ? authoredMeshBounds(rigModelId, pkg.id) : null;
+    const pkgToSave: ModelPackage = rigDraft && rigBounds
+      ? { ...pkg, skeleton: propRigToSkeleton(rigModelId, rigModelId, rigDraft, rigBounds) }
+      : pkg;
+    const alreadyOnDisk = isMaterialized(pkg.kind, pkg.id);
+    const result = materializeModelPackage(pkgToSave);
+    const artifactsOk = result.ok && writeModelArtifacts(pkg, partsMetaFromRows(current.modelParts[pkg.id] ?? []));
+    const ok = result.ok && artifactsOk;
+    if (result.ok && !artifactsOk && !alreadyOnDisk) remove(result.dir);
+    if (ok) {
+      registerSavedPackage(pkgToSave);
+      const depths = undoDepths(current);
+      savedMeshDepthRef.current[pkg.id] = depths.source === 'mesh' ? depths.undo : 0;
+    }
+    setState((prev) => ({
+      ...prev,
+      openMenu: null,
+      actionMenu: 'File',
+      modelDirty: ok ? { ...prev.modelDirty, [pkg.id]: false } : prev.modelDirty,
+      modelDupes: ok && !alreadyOnDisk && !prev.modelDupes.some((item) => item.id === pkg.id)
+        ? [...prev.modelDupes, pkgToSave]
+        : prev.modelDupes,
+      status: ok
+        ? `${reason}: "${pkg.name}" → ${result.dir}`
+        : `${reason} failed: ${result.error ?? (artifactsOk ? 'unknown error' : 'model artifacts were not written')}`,
+    }));
+    return ok;
+  };
+
+  const markActiveModelDirty = () => {
+    setModelMutationRevision((revision) => revision + 1);
+    const current = stateRef.current;
+    const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
+    const id = doc?.kind === 'model' ? doc.sourceId : null;
+    if (!id || current.modelDirty[id]) return;
+    setState((prev) => ({ ...prev, modelDirty: { ...prev.modelDirty, [id]: true } }));
+  };
+
+  const saveWorldNowAll = (reason = 'Saved'): boolean => {
+    const current = stateRef.current;
+    const worldOk = flushWorldSave(current.activeMapStem, current.worldPieces, current.objects, current.mapPaint.zones, current.seq);
+    const mapOk = flushMapDocumentPainting(current.activeMapStem);
+    const globalsOk = saveGlobalsNow(current.worldGlobals);
+    const ok = worldOk && mapOk && globalsOk;
+    if (ok) setManualWorldDirty(false);
+    setState((prev) => ({
+      ...prev,
+      openMenu: null,
+      actionMenu: 'File',
+      status: ok
+        ? `${reason} map "${current.activeMapName}" and world globals`
+        : `${reason} incomplete — world ${worldOk ? 'ok' : 'failed'}, painting ${mapOk ? 'ok' : 'failed'}, globals ${globalsOk ? 'ok' : 'failed'}`,
+    }));
+    return ok;
+  };
+
+  useEffect(() => {
+    if (!persistenceSettings.autosave || !activeModelId || !activeModelOnDisk || !state.modelDirty[activeModelId]) return;
+    const timer = setTimeout(
+      () => saveActiveModelNow('Autosaved'),
+      persistenceSettings.autosaveDelayMs,
+    );
+    return () => clearTimeout(timer);
+  }, [
+    persistenceSettings.autosave,
+    persistenceSettings.autosaveDelayMs,
+    activeModelId,
+    activeModelOnDisk,
+    state.modelDirty,
+    liveUndoDepths.undo,
+    modelMutationRevision,
+  ]);
+
   const activeCommand = commandById(state.activeCommandId);
   const activeObject = selectedObject(state);
   const catalogAssets = useMemo(() => applyAssetOverrides(ASSETS, state.assetOverrides), [state.assetOverrides]);
@@ -668,6 +837,8 @@ export default function AppFrame() {
     verb: 'opened' | 'created',
     name = mapDocumentName(stem),
     outgoingTriangles: number | null = null,
+    bypassUnsavedPrompt = false,
+    discardOutgoing = false,
   ) => {
     if (outgoingTriangles !== null) recordMapDocumentRenderStats(state.activeMapStem, outgoingTriangles);
     if (stem === state.activeMapStem) {
@@ -679,13 +850,23 @@ export default function AppFrame() {
       return;
     }
 
+    if (!bypassUnsavedPrompt && !persistenceSettings.autosave && manualWorldDirty) {
+      requestUnsavedDecision(
+        state.activeMapName,
+        () => { if (saveWorldNowAll()) switchMapDocument(stem, target, verb, name, outgoingTriangles, true, false); },
+        () => switchMapDocument(stem, target, verb, name, outgoingTriangles, true, true),
+        verb === 'created' ? () => { deleteMapDocument(stem, state.activeMapStem); } : undefined,
+      );
+      return;
+    }
+
     const outgoingStem = state.activeMapStem;
     const outgoingZones = state.mapPaint.zones;
-    if (!flushWorldSave(outgoingStem, state.worldPieces, state.objects, outgoingZones, state.seq)) {
+    if (!discardOutgoing && !flushWorldSave(outgoingStem, state.worldPieces, state.objects, outgoingZones, state.seq)) {
       setState((prev) => ({ ...prev, status: `map switch stopped — could not save ${outgoingStem}/world.json` }));
       return;
     }
-    if (!flushMapDocumentPainting(outgoingStem)) {
+    if (!discardOutgoing && !flushMapDocumentPainting(outgoingStem)) {
       setState((prev) => ({ ...prev, status: `map switch stopped — could not save ${outgoingStem}/painting.rmap` }));
       return;
     }
@@ -712,6 +893,7 @@ export default function AppFrame() {
       return;
     }
 
+    skipNextWorldDirtyRef.current = true;
     setState((prev) => ({
       ...prev,
       ...mapAuthoringSlicesFor(prev, stem, target, activation.bindings, name),
@@ -719,6 +901,7 @@ export default function AppFrame() {
       actionMenu: 'File',
       status: `${verb} map ${name} — ${activation.seeded ? 'clean seed chunk' : `${target.pieces.length} placed piece${target.pieces.length === 1 ? '' : 's'}`}; all map authoring switched together`,
     }));
+    setManualWorldDirty(false);
   };
 
   const openMapDocument = (stem: string, currentTriangles: number | null = null) => {
@@ -798,6 +981,11 @@ export default function AppFrame() {
   };
 
   const runCommand = (commandId: string, source: string) => {
+    if (commandId === 'open-preferences') {
+      setPreferencesOpen((open) => !open);
+      setState((prev) => ({ ...prev, openMenu: null, status: preferencesOpen ? 'preferences closed' : 'preferences opened' }));
+      return;
+    }
     // First migrated command: every projection crosses the framework authority
     // before any cart-local dispatcher logic can select a second behavior.
     if (commandId === WORLD_FLOOR_STEP_COMMAND_ID) {
@@ -987,50 +1175,13 @@ export default function AppFrame() {
       return;
     }
     if (command.id === 'save-snapshot') {
-      // Save Model to Library: materialize the ACTIVE model's on-disk package (its own
-      // directory + manifest under cart/editor/data/models/…). Imports already do this on
-      // drop; this is the explicit "commit my model to the library" for anything not yet on
-      // disk. Paint variants save separately into paints/ (ModelPaintVariants). req_2523.
-      // Resolved through the EFFECTIVE package (req_2620 S): a session rename is part of
-      // the model's identity, so the manifest this writes carries the renamed name — the
-      // old modelPackageById path re-synthesized "Model N" and threw the rename away.
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
       const pkg = doc?.kind === 'model' ? effectiveModelPackage(doc.sourceId, state.modelOverrides, state.modelDupes) : null;
       if (!pkg) {
-        setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: 'Open a model first — Save writes the ACTIVE model to the library.' }));
+        saveWorldNowAll();
         return;
       }
-      // A live RIG draft saves WITH the model (req_2712): compile it onto the
-      // package so the manifest skeleton matches what the Rig section shows —
-      // that's what lets setModelRig honestly mark the model dirty. Bounds come
-      // off the real mesh; a mesh-less model keeps its stored skeleton.
-      const rigDraft = state.modelRigs[pkg.id];
-      const rigModelId = authoredModelIdForPackage(pkg.id);
-      const rigBounds = rigDraft ? authoredMeshBounds(rigModelId, pkg.id) : null;
-      const pkgToSave: ModelPackage = rigDraft && rigBounds
-        ? { ...pkg, skeleton: propRigToSkeleton(rigModelId, rigModelId, rigDraft, rigBounds) }
-        : pkg;
-      const res = materializeModelPackage(pkgToSave);
-      const firstSave = res.ok && !MODEL_PACKAGES.some((m) => m.id === pkg.id);
-      if (res.ok) {
-        // mesh/base.blob + mesh/doc.blob + mesh/parts.json + atlases/base.png — the
-        // meshdoc (req_2753) is what makes this package REOPEN as the edited document.
-        writeModelArtifacts(pkg, partsMetaFromRows(state.modelParts[pkg.id] ?? []));
-        registerSavedPackage(pkgToSave); // a first save joins the live library roster now, not next boot
-        savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
-      }
-      setState((prev) => ({
-        ...prev,
-        openMenu: null,
-        actionMenu: 'File',
-        // Saved = clean. The dirty chip (focus panel) reads this flag.
-        modelDirty: res.ok ? { ...prev.modelDirty, [pkg.id]: false } : prev.modelDirty,
-        // First save also lands in modelDupes: the visible-model memo keys off it,
-        // so the gallery/tree pick the new package up THIS render (the roster push
-        // above is invisible to React). visibleModelPackages dedupes by id.
-        modelDupes: firstSave && !prev.modelDupes.some((m) => m.id === pkg.id) ? [...prev.modelDupes, pkgToSave] : prev.modelDupes,
-        status: res.ok ? `Saved "${pkg.name}" to the library → ${res.dir}` : `Save failed: ${res.error ?? 'unknown error'}`,
-      }));
+      saveActiveModelNow('Saved');
       return;
     }
     if (command.id.startsWith('export-build-piece-') || command.id.startsWith('export-prop')) {
@@ -1085,7 +1236,7 @@ export default function AppFrame() {
         const savedParts = packageMeshDocParts(pkg);
         const compiled = captured && savedDoc && savedParts
           ? compileDoorMesh(captured, savedDoc, savedParts)
-          : { ok: false as const, error: 'Door Wall export could not read the saved mesh/Outliner document; Save Model to Library, then retry.' };
+          : { ok: false as const, error: 'Door Wall export could not read the saved mesh/Outliner document; save the model, then retry.' };
         if (!compiled.ok) {
           setState((prev) => ({ ...prev, openMenu: null, actionMenu: 'File', status: compiled.error }));
           return;
@@ -1148,7 +1299,7 @@ export default function AppFrame() {
           : firstMaterialize ? [...prev.modelDupes, pkgExported] : prev.modelDupes,
         status: vcount > 0
           ? `Exported "${pkg.name}" as a ${kindLabel} (${vcount} verts) — ${disk}. Armed; enter Build (B) to place it.`
-          : `Exported "${pkg.name}" as a ${kindLabel}, but its geometry isn't reachable (0 verts). Open it in the model editor and Save Model to Library, then re-export. (${modelId})`,
+          : `Exported "${pkg.name}" as a ${kindLabel}, but its geometry isn't reachable (0 verts). Open it in the model editor, save, then re-export. (${modelId})`,
       }));
       return;
     }
@@ -3276,8 +3427,10 @@ export default function AppFrame() {
           status: `${verb} ${r.label}`,
         };
       });
+      markActiveModelDirty();
     } else {
       setState((prev) => ({ ...prev, status: `${verb} ${r.label}` }));
+      markActiveModelDirty();
     }
   };
 
@@ -3294,6 +3447,7 @@ export default function AppFrame() {
         const o = JSON.parse(j);
         if (o?.ok === 1) {
           setState((prev) => ({ ...prev, status: `${verb} ${o.label || 'stroke'} — ${o.undo | 0} strokes left to undo` }));
+          markActiveModelDirty();
           return;
         }
       }
@@ -3332,6 +3486,7 @@ export default function AppFrame() {
     const drain = () => {
       const events = mapEventDrain();
       if (!events.length) return;
+      if (!editorPersistenceSettings().autosave) setManualWorldDirty(true);
       const materializedAtMs = Date.now();
       const mapPaint = stateRef.current.mapPaint;
       for (const event of events) dispatchMapPaint(mapEventPayload(event, mapPaint, materializedAtMs));
@@ -3619,15 +3774,12 @@ export default function AppFrame() {
     }));
   };
 
-  // ── Autosave, bounded (req_2620 T) ────────────────────────────────────────────
-  // Leaving a model doc (switch/close) auto-materializes it IF it is dirty AND
-  // already has a package dir (previously saved at least once). A brand-new
-  // never-saved doc is NOT silently autosaved — the user decides the first save;
-  // its NOT-ON-DISK chip stays loud. Must run BEFORE the doc switch lands: the
-  // artifact writers read the live viewer (host mesh/atlas doors), which unmounts
-  // with the doc. No quit-signal door exists in the host, so quit-autosave is out
-  // of scope — doc-switch autosave is the bounded coverage.
+  // Leaving a model doc writes it only when autosave is enabled, it is dirty,
+  // and a valid manifest already exists. A new unsaved model never acquires a
+  // disk identity from background policy. The custom close control uses this
+  // same synchronous artifact boundary before the viewer unmounts.
   const autosaveActiveModelDoc = (s: EditorState): { id: string; name: string } | null => {
+    if (!persistenceSettings.autosave) return null;
     const doc = s.workspaceDocuments.find((d) => d.id === s.activeWorkspaceDocumentId);
     if (doc?.kind !== 'model' || !doc.sourceId) return null;
     const pkg = effectiveModelPackage(doc.sourceId, s.modelOverrides, s.modelDupes);
@@ -3635,12 +3787,42 @@ export default function AppFrame() {
     if (!materializeModelPackage(pkg).ok) return null;
     // The meshdoc rides the autosave (req_2753): the doc switch unmounts the viewer and
     // the NEXT mount seeds from the package, so this write is what edits survive by.
-    writeModelArtifacts(pkg, partsMetaFromRows(s.modelParts[pkg.id] ?? []));
+    if (!writeModelArtifacts(pkg, partsMetaFromRows(s.modelParts[pkg.id] ?? []))) return null;
     savedMeshDepthRef.current[pkg.id] = liveUndoDepths.source === 'mesh' ? liveUndoDepths.undo : 0;
     return { id: pkg.id, name: pkg.name };
   };
 
-  const selectWorkspaceDocument = (activeWorkspaceDocumentId: string) => {
+  /** Discard is a real rollback, not a dirty-chip reset. Drop the host-resume
+   * claim and the React working copy so reopening hydrates the saved package.
+   * A never-materialized model has no durable identity, so its pending override
+   * and session catalog row leave with the working copy too. */
+  const discardModelWorkingCopy = (modelId: string) => {
+    removeHotState('editor:meshdoc:v1');
+    const current = stateRef.current;
+    const pkg = effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes);
+    const materialized = Boolean(pkg && isMaterialized(pkg.kind, pkg.id));
+    const next = discardModelWorkingCopyState(current, modelId, materialized);
+    stateRef.current = next;
+    persistState(next);
+    setState(next);
+  };
+
+  const selectWorkspaceDocument = (activeWorkspaceDocumentId: string, bypassUnsavedPrompt = false) => {
+    if (!bypassUnsavedPrompt && !persistenceSettings.autosave && state.activeWorkspaceDocumentId !== activeWorkspaceDocumentId) {
+      const currentDoc = state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId);
+      const currentModelId = currentDoc?.kind === 'model' ? currentDoc.sourceId : null;
+      if (currentModelId && state.modelDirty[currentModelId]) {
+        requestUnsavedDecision(
+          currentDoc?.title ?? 'Model',
+          () => { if (saveActiveModelNow()) selectWorkspaceDocument(activeWorkspaceDocumentId, true); },
+          () => {
+            discardModelWorkingCopy(currentModelId);
+            selectWorkspaceDocument(activeWorkspaceDocumentId, true);
+          },
+        );
+        return;
+      }
+    }
     const autosaved = state.activeWorkspaceDocumentId === activeWorkspaceDocumentId ? null : autosaveActiveModelDoc(state);
     setState((prev) => {
       const doc = prev.workspaceDocuments.find((item) => item.id === activeWorkspaceDocumentId);
@@ -3685,8 +3867,23 @@ export default function AppFrame() {
     });
   };
 
-  const closeWorkspaceDocument = (documentId: string) => {
+  const closeWorkspaceDocument = (documentId: string, bypassUnsavedPrompt = false) => {
     if (documentId === WORLD_DOCUMENT_ID) return;
+    if (!bypassUnsavedPrompt && !persistenceSettings.autosave && state.activeWorkspaceDocumentId === documentId) {
+      const currentDoc = state.workspaceDocuments.find((doc) => doc.id === documentId);
+      const currentModelId = currentDoc?.kind === 'model' ? currentDoc.sourceId : null;
+      if (currentModelId && state.modelDirty[currentModelId]) {
+        requestUnsavedDecision(
+          currentDoc?.title ?? 'Model',
+          () => { if (saveActiveModelNow()) closeWorkspaceDocument(documentId, true); },
+          () => {
+            discardModelWorkingCopy(currentModelId);
+            closeWorkspaceDocument(documentId, true);
+          },
+        );
+        return;
+      }
+    }
     // Closing the ACTIVE model doc is a doc-switch too — same bounded autosave
     // (dirty + already-on-disk only), before the viewer unmounts (req_2620 T).
     const autosaved = state.activeWorkspaceDocumentId === documentId ? autosaveActiveModelDoc(state) : null;
@@ -3784,7 +3981,7 @@ export default function AppFrame() {
         seq: prev.seq + 1,
         status: copied
           ? `duplicated ${model.name} → ${dupe.path}`
-          : `duplicated ${model.name} (in session only — open it and Save Model to Library to keep it)`,
+          : `duplicated ${model.name} (in session only — open it and save to keep it)`,
       };
     });
 
@@ -3837,6 +4034,39 @@ export default function AppFrame() {
     ? applyAssetOverrides(ASSETS, state.assetOverrides).filter((asset) => asset.tab === 'Skins').sort(rankAssets)
     : [];
 
+  const closeHostWindow = () => (globalThis as any).__window_close?.();
+  const saveDirtyWorkspaceForClose = (): boolean => {
+    const current = stateRef.current;
+    const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
+    const modelId = doc?.kind === 'model' ? doc.sourceId : null;
+    const pkg = modelId ? effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes) : null;
+    if (pkg && current.modelDirty[pkg.id] && !saveActiveModelNow('Saved before exit')) return false;
+    if (manualWorldDirty && !saveWorldNowAll('Saved before exit')) return false;
+    return true;
+  };
+  const closeEditor = () => {
+    const current = stateRef.current;
+    const doc = current.workspaceDocuments.find((item) => item.id === current.activeWorkspaceDocumentId);
+    const modelId = doc?.kind === 'model' ? doc.sourceId : null;
+    const pkg = modelId ? effectiveModelPackage(modelId, current.modelOverrides, current.modelDupes) : null;
+    const modelDirty = Boolean(pkg && current.modelDirty[pkg.id]);
+    if (!persistenceSettings.autosave && (modelDirty || manualWorldDirty)) {
+      requestUnsavedDecision(
+        modelDirty && manualWorldDirty ? 'Current model and world' : (modelDirty ? (doc?.title ?? 'Model') : current.activeMapName),
+        () => { if (saveDirtyWorkspaceForClose()) closeHostWindow(); },
+        closeHostWindow,
+      );
+      return;
+    }
+    if (persistenceSettings.autosave) {
+      // A never-saved model deliberately has no autosave target and is discarded
+      // on process exit. Once a manifest exists, the latest edit is flushed.
+      if (pkg && modelDirty && isMaterialized(pkg.kind, pkg.id) && !saveActiveModelNow('Autosaved before exit')) return;
+      if (!saveWorldNowAll('Autosaved before exit')) return;
+    }
+    closeHostWindow();
+  };
+
   return (
     <C.HW_App>
       <RenderProbe id="Chrome">
@@ -3845,6 +4075,7 @@ export default function AppFrame() {
           activeCommand={activeCommand}
           onMenu={guarded((menu: Menu) => setState((prev) => ({ ...prev, actionMenu: menu, openMenu: prev.openMenu === menu ? null : menu })))}
           onCommand={runCommand}
+          onClose={closeEditor}
         />
       </RenderProbe>
       {playing ? (
@@ -3904,6 +4135,9 @@ export default function AppFrame() {
             onModelToolState={(modelTool: ModelToolSnapshot) => setState((prev) => ({ ...prev, modelTool }))}
             modelContextTrigger={modelMenu.triggerProps}
             outlinerHandlers={outlinerHandlers}
+            modelOnDisk={activeModelOnDisk}
+            onRequireFirstModelSave={() => saveActiveModelNow('Saved before creating paint atlas')}
+            onModelDocumentMutated={markActiveModelDirty}
             // Mode row / action-bar controls are guarded (req_2626 HH): arming tools or
             // flipping view state while a blocking session is unresolved is the exact
             // "switch up to paint mid loop-cut" the user ruled WRONG.
@@ -3991,6 +4225,7 @@ export default function AppFrame() {
             // Save verb runs the SAME 'save-snapshot' command as File → Save.
             onRenameModel={renameModel}
             onSaveModel={() => runCommand('save-snapshot', 'focus-panel')}
+            onModelDocumentMutated={markActiveModelDirty}
             modelOnDisk={activeModelOnDisk}
             onSetModelRig={setModelRig}
             onSetPieceOverride={setPieceOverride}
@@ -4053,6 +4288,44 @@ export default function AppFrame() {
       {state.buildDialogOpen ? (
         <RenderProbe id="Build Journal Dialog">
           <BuildJournalDialog journal={journal} actions={journalActions} onClose={() => setState((prev) => ({ ...prev, buildDialogOpen: false, eventbusPopoverOpen: false, perfPopoverOpen: false, memoryPopoverOpen: false, status: 'build journal closed' }))} />
+        </RenderProbe>
+      ) : null}
+      {preferencesOpen ? (
+        <RenderProbe id="Preferences Dialog">
+          <PreferencesDialog onClose={() => { setPreferencesOpen(false); setState((prev) => ({ ...prev, status: 'preferences closed' })); }} />
+        </RenderProbe>
+      ) : null}
+      {hotUpdatePromptOpen ? (
+        <RenderProbe id="Code Update Dialog">
+          <HotUpdateDialog
+            onLater={() => setHotUpdatePromptOpen(false)}
+            onApply={() => { setHotUpdatePromptOpen(false); applyDevReload(); }}
+          />
+        </RenderProbe>
+      ) : null}
+      {unsavedDocumentName ? (
+        <RenderProbe id="Unsaved Changes Dialog">
+          <UnsavedChangesDialog
+            documentName={unsavedDocumentName}
+            onCancel={() => {
+              const decision = unsavedDecisionRef.current;
+              unsavedDecisionRef.current = null;
+              setUnsavedDocumentName(null);
+              decision?.cancel?.();
+            }}
+            onSave={() => {
+              const decision = unsavedDecisionRef.current;
+              unsavedDecisionRef.current = null;
+              setUnsavedDocumentName(null);
+              decision?.save();
+            }}
+            onDiscard={() => {
+              const decision = unsavedDecisionRef.current;
+              unsavedDecisionRef.current = null;
+              setUnsavedDocumentName(null);
+              decision?.discard();
+            }}
+          />
         </RenderProbe>
       ) : null}
       {state.newMeshPrompt ? (

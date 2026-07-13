@@ -26,6 +26,13 @@ function test(name: string, fn: () => void) {
 function assert(condition: boolean, message: string) { if (!condition) throw new Error(message); }
 const ids = (commands: { id: string }[]) => commands.map((command) => command.id);
 
+test('Save and Preferences are application commands on every document surface', () => {
+  const save = commandById('save-snapshot');
+  const preferences = commandById('open-preferences');
+  assert(save.menu === 'File' && save.scope === 'global' && save.key === 'Ctrl+S', 'Save is not the global document command');
+  assert(preferences.menu === 'Edit' && preferences.scope === 'global' && preferences.key === 'Ctrl+,', 'Preferences is not globally discoverable');
+});
+
 test('ordinary face selection still offers authored-face merge', () => {
   const commands = ids(meshTopoCommands({ selMode: 3, sel: 2 }, 1));
   assert(commands.includes('mesh-merge-faces'), 'Merge Faces remains available for a real face selection');

@@ -44,7 +44,7 @@ type ViewerSource =
   | { kind: 'missing'; title: string; label: string }
   | null;
 
-export default function ModelDocumentSurface({ model, triggerProps, onToolApi, onToolState, outliner }: {
+export default function ModelDocumentSurface({ model, triggerProps, onToolApi, onToolState, outliner, modelOnDisk, onRequireFirstSave, onDocumentMutated }: {
   model: ModelPackage | null;
   // Right-click trigger from the app-root context menu (useContextMenu lives in
   // AppFrame so the menu lands at the cursor — see ModelContextMenu). Spread onto
@@ -55,6 +55,9 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
   // Present only for multi-part (primitive-authored) models — drives the outliner and the
   // composed host mesh. Absent for imported single meshes (their outliner is a follow-up).
   outliner: OutlinerApi | null;
+  modelOnDisk: boolean;
+  onRequireFirstSave: () => boolean;
+  onDocumentMutated: () => void;
 }) {
   // The model surface stays bland — its tools live in the editor toolbar and in
   // the app-root context menu (opened by right-click here), both mirroring the one
@@ -89,7 +92,7 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
           key={`${model.id}:parts`}
           initialTitle={model.name}
           initialFileParts={{ path: fileBase.sourcePath, basePartId: fileBase.id, baseColor: fileBase.color, baseHidden: !fileBase.visible, appends }}
-          allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }}
+          allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
           onPartRanges={(ranges) => outliner.onStampRanges(model.id, ranges)}
         />
       </C.HW_ModelDocument>
@@ -133,7 +136,7 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
         key={model.id}
         initialTitle={model.name}
         initialMesh={seed}
-        allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }}
+        allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated}
       />
     ) : (
       <C.HW_ModelDocEmpty>
@@ -152,8 +155,8 @@ export default function ModelDocumentSurface({ model, triggerProps, onToolApi, o
 
   if (viewer && (viewer.kind === 'path' || viewer.kind === 'mesh')) {
     const modelView = viewer.kind === 'path'
-      ? <ModelView key={model.id} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} />
-      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8), faceGroups: viewer.faceGroups }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} />;
+      ? <ModelView key={model.id} initialPath={viewer.path} initialTitle={model.name} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} />
+      : <ModelView key={model.id} initialTitle={model.name} initialMesh={{ key: viewer.key, name: model.name, vertices: viewer.vertices, count: Math.floor(viewer.vertices.length / 8), faceGroups: viewer.faceGroups }} allowFilePicker={false} trackAttribution={false} hostChrome onToolApi={onToolApi} onToolState={onToolState} paintTarget={{ kind: model.kind, id: model.id, name: model.name }} paintTargetOnDisk={modelOnDisk} onRequireFirstSave={onRequireFirstSave} onDocumentMutated={onDocumentMutated} />;
     return (
       <C.HW_ModelDocument {...triggerProps}>
         {modelView}

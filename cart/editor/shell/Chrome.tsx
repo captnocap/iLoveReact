@@ -7,7 +7,7 @@ import { activeMenuFor, commandById, commandEnabled, MENUS } from '../data/comma
 import RouteToggle from '../RouteToggle';
 import type { Command, Menu, EditorState } from '../data/types';
 
-function WindowControls() {
+function WindowControls({ onClose }: { onClose: () => void }) {
   return (
     <C.HW_WindowControls>
       <C.HW_WindowButton tooltip="Minimize" onPress={() => callHost<void>('__window_minimize', undefined)}>
@@ -16,7 +16,7 @@ function WindowControls() {
       <C.HW_WindowButton tooltip="Maximize" onPress={() => callHost<void>('__window_maximize', undefined)}>
         <Icon name="Square" size={11} color={accentFor('textSecondary')} />
       </C.HW_WindowButton>
-      <C.HW_WindowClose tooltip="Close" onPress={() => callHost<void>('__window_close', undefined)}>
+      <C.HW_WindowClose tooltip="Close" onPress={onClose}>
         <Icon name="X" size={13} color={accentFor('textSecondary')} />
       </C.HW_WindowClose>
     </C.HW_WindowControls>
@@ -28,6 +28,7 @@ export default function Chrome(props: {
   activeCommand: Command;
   onMenu: (menu: Menu) => void;
   onCommand: (id: string, source: string) => void;
+  onClose: () => void;
 }) {
   const activeMenu = activeMenuFor(props.state);
   // The Compile pill mirrors the File → Compile command's state — grayed + inert while the RLE
@@ -63,7 +64,7 @@ export default function Chrome(props: {
         <C.HW_PillTextOn>Compile</C.HW_PillTextOn>
       </C.HW_Compile>
       <RouteToggle />
-      <WindowControls />
+      <WindowControls onClose={props.onClose} />
     </C.HW_Chrome>
   );
 }

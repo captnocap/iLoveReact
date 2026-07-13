@@ -116,8 +116,9 @@ export const COMMANDS: Command[] = [
   // Import a .glb/.obj from anywhere on disk via the OS picker — the same native mesh importer
   // (__mesh_load_file) the explorer's in-project model rows open through.
   { id: 'import-model-file', menu: 'File', name: 'Import Model (.glb / .obj)...', icon: 'FolderInput', key: 'Ctrl+I', context: false, native: true, undoable: false, scope: 'global' },
-  // Save writes the ACTIVE model to the library → only meaningful on a model surface.
-  { id: 'save-snapshot', menu: 'File', name: 'Save Model to Library', icon: 'Save', key: 'Ctrl+S', context: false, native: true, undoable: false, scope: 'model' },
+  // Every document has one explicit Save entrance. The active surface decides
+  // which durable document is committed; autosave never replaces this command.
+  { id: 'save-snapshot', menu: 'File', name: 'Save', icon: 'Save', key: 'Ctrl+S', context: false, native: true, undoable: false, scope: 'global' },
   ...EXPORT_BUILD_COMMANDS,
   ...EXPORT_PROP_COMMANDS,
   EXPORT_CHARACTER_COMMAND,
@@ -128,6 +129,7 @@ export const COMMANDS: Command[] = [
   // Undo/redo route per surface in runCommand (model → host mesh journal; world → local history).
   { id: 'undo-local', menu: 'Edit', name: 'Undo', icon: 'Undo2', key: 'Ctrl+Z', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'redo-local', menu: 'Edit', name: 'Redo', icon: 'Redo2', key: 'Ctrl+Shift+Z', context: false, native: true, undoable: false, scope: 'global' },
+  { id: 'open-preferences', menu: 'Edit', name: 'Preferences...', icon: 'Settings', key: 'Ctrl+,', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'duplicate-selection', menu: 'Edit', name: 'Duplicate Selection', icon: 'Copy', key: 'D', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
   // Delete acts on whatever's selected on the active surface (world object or mesh element).
   { id: 'delete-selection', menu: 'Edit', name: 'Delete Selection', icon: 'Trash2', key: 'Del', context: true, native: true, undoable: true, tool: true, scope: 'global', needsSelection: true },

@@ -203,7 +203,6 @@ function snapshot(
 // One pending snapshot is enough because exactly one map is active. Crucially,
 // the queued write retains ITS stem; a later switch can never retarget an old
 // pieces array into the incoming map's file.
-const SAVE_SETTLE_MS = 400;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let queued: WorldSave | null = null;
 
@@ -220,10 +219,23 @@ export function scheduleWorldSave(
   objects: readonly WorldObject[],
   zones: readonly MapZoneDef[],
   seq: number,
+  options: { enabled?: boolean; delayMs?: number } = {},
 ): void {
+  if (options.enabled === false) {
+    cancelWorldSave();
+    return;
+  }
   queued = snapshot(stem, pieces, objects, zones, seq);
   if (saveTimer !== null) clearTimeout(saveTimer);
-  saveTimer = setTimeout(writeQueued, SAVE_SETTLE_MS);
+  saveTimer = setTimeout(writeQueued, Math.max(0, options.delayMs ?? 400));
+}
+
+/** Drop only a not-yet-written background snapshot. Explicit Save/flush owns
+ * its own fresh snapshot and never calls this as a substitute for writing. */
+export function cancelWorldSave(): void {
+  if (saveTimer !== null) clearTimeout(saveTimer);
+  saveTimer = null;
+  queued = null;
 }
 
 /** Synchronous switch boundary: cancel the debounce and durably write the
@@ -235,8 +247,6 @@ export function flushWorldSave(
   zones: readonly MapZoneDef[],
   seq: number,
 ): boolean {
-  if (saveTimer !== null) clearTimeout(saveTimer);
-  saveTimer = null;
-  queued = null;
+  cancelWorldSave();
   return writeWorldSave(snapshot(stem, pieces, objects, zones, seq));
 }

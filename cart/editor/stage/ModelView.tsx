@@ -42,7 +42,7 @@ import {
 // its WGSL recipe (+ tuned params) into pixels the brush samples (paint-with-a-shader).
 import { shaderSpec, defaultShaderData } from '../textures/shaders';
 import { listPaintVariants, type PaintTarget, type PaintVariant } from '../data/paintVariants';
-import { writeModelArtifacts } from '../data/modelPackageStore';
+import { readModelBasePaint, writeModelArtifacts } from '../data/modelPackageStore';
 import { syntheticKeyEdge } from '../data/keymap';
 // Headless harness only (RJIT_MESHOPS addpart) — builds a primitive's grouped soup so the
 // gesture script can exercise the REAL appendPart path without the outliner UI (req_2644).
@@ -194,6 +194,11 @@ export type ModelViewProps = {
   // The model's package identity, so the viewer can find its saved paintings on disk and
   // restore the latest instead of re-prompting for a new atlas every open (req_2526).
   paintTarget?: PaintTarget;
+  /** A paint atlas is durable model content. A never-saved model must acquire
+   * its manifest first; the shell supplies the one canonical Save entrance. */
+  paintTargetOnDisk?: boolean;
+  onRequireFirstSave?: () => boolean;
+  onDocumentMutated?: () => void;
 };
 
 /** sha256 of the file bytes (host door) — keys attribution to the content. */
@@ -578,7 +583,7 @@ const AP_SIZE_W = 68;
 const AP_DENS_W = 88;
 const AP_REC_W = 76;
 
-export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, paintTarget }: ModelViewProps = {}) {
+export default function ModelView({ initialPath, initialTitle, initialMesh, initialFileParts, allowFilePicker = true, trackAttribution = true, hostChrome = false, onToolApi, onToolState, onPartRanges, paintTarget, paintTargetOnDisk = true, onRequireFirstSave, onDocumentMutated }: ModelViewProps = {}) {
   // How you were holding the tool before the last hot reload (req_2898) — read ONCE
   // per mount and used to seed the states below. Null on a cold process start.
   const toolTwig = useRef<ToolTwig | null>(getHotState<ToolTwig | null>(TOOL_TWIG_KEY, null)).current;
@@ -1045,6 +1050,15 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     }
     if (!model) return;
     if (!atlasReadyRef.current) {
+      const basePaint = paintTarget ? readModelBasePaint(paintTarget) : null;
+      if (basePaint) {
+        changeDetail(basePaint.detail > 1 ? basePaint.detail : 1);
+        if (host.__model_paint_program_apply?.(basePaint.program) === 1) {
+          atlasReadyRef.current = true;
+          enterPaint();
+          return;
+        }
+      }
       // Already-painted model? Its atlas is a solved question — restore the latest
       // painting (which rebuilds the atlas) rather than re-prompting (req_2526).
       const saved = paintTarget ? listPaintVariants(paintTarget) : [];
@@ -1061,6 +1075,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   };
   // Fill only (density 1) vs an atlas-budget fit — the prompt's two shapes of pick.
   const createAtlasAndPaint = (fillOnly: boolean, fitTexels: number) => {
+    if (paintTarget && !paintTargetOnDisk && !(onRequireFirstSave?.() ?? false)) return;
     if (fillOnly) changeDetail(1);
     else changeFit(fitTexels);
     // Lay the chosen base TYPE onto the fresh atlas (req_2546): 0 template, 1 solid, 2 blank.
@@ -2059,8 +2074,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           // pointer-down→up is one stroke, fills included), then refresh the live UV
           // panel (req_2625 GG) — once per stroke, never per dab (a read+encode per dab
           // would drag the brush).
-          onMouseUp={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) { host.__mesh_paint_stroke_end?.(); refreshUvIfLive(); } }}
-          onMouseLeave={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) { host.__mesh_paint_stroke_end?.(); refreshUvIfLive(); } }}
+          onMouseUp={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) { host.__mesh_paint_stroke_end?.(); onDocumentMutated?.(); refreshUvIfLive(); } }}
+          onMouseLeave={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) { host.__mesh_paint_stroke_end?.(); onDocumentMutated?.(); refreshUvIfLive(); } }}
           onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
         />

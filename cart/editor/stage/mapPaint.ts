@@ -132,6 +132,16 @@ export function editorMapFile(stem = activeMapDocumentStem()): string {
   return mapDocumentPaths(stem).painting;
 }
 
+let mapAutosaveEnabled = true;
+
+/** Background persistence policy for the native map engine. An empty path is
+ * the engine's explicit "do not autosave" state; manual Save remains available. */
+export function setMapDocumentAutosave(enabled: boolean): boolean {
+  mapAutosaveEnabled = enabled;
+  if (!mapHostLive()) return true;
+  return mapSetAutosaveFile(enabled && liveMapStem ? editorMapFile(liveMapStem) : '');
+}
+
 export type MapPaintingActivation =
   | { ok: true; bindings: TileMaterialBinding[]; seeded: boolean }
   | { ok: false; error: string };
@@ -168,7 +178,7 @@ export function activateMapDocumentPainting(stem: string, zones: readonly MapZon
   }
 
   configureMapContent(zones);
-  if (!mapSetAutosaveFile(paths.painting)) {
+  if (!mapSetAutosaveFile(mapAutosaveEnabled ? paths.painting : '')) {
     return { ok: false, error: 'map autosave door is unavailable; rebuild the editor host' };
   }
   if (seeded && !mapSaveFile(paths.painting)) return { ok: false, error: `could not create ${paths.painting}` };
@@ -184,8 +194,8 @@ export function flushMapDocumentPainting(stem: string): boolean {
   // A hot reload re-establishes identity through ensureMapSeeded before edits.
   if (!mapHostLive() || liveMapStem !== expected || mapChunkCount() === 0) return false;
   const path = editorMapFile(stem);
-  if (!mapSetAutosaveFile(path)) return false;
-  return mapSaveFile(path);
+  if (!mapSaveFile(path)) return false;
+  return mapSetAutosaveFile(mapAutosaveEnabled ? path : '');
 }
 
 /** Push the chrome state into the host map painter as the ONE armed tool. The
@@ -235,7 +245,7 @@ export function ensureMapSeeded(
       return false;
     }
   } else {
-    if (!mapSetAutosaveFile(editorMapFile(stem))) return false;
+    if (!mapSetAutosaveFile(mapAutosaveEnabled ? editorMapFile(stem) : '')) return false;
     configureMapContent(zones);
   }
   console.warn(`[map-seed] ground seeded — ${mapChunkCount()} chunk(s) live`);

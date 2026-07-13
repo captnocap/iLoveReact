@@ -29,6 +29,7 @@ import {
 } from './modelPackage';
 import type { ModelPackage } from './types';
 import { invalidateMeshDoc, writeMeshDoc, type MeshDocPartMeta } from './meshDoc';
+import { textBytes } from '../../../runtime/workspace/lumps';
 
 const host = globalThis as any;
 
@@ -210,7 +211,26 @@ export function readManifest(kind: ModelPackageKind, id: string): ModelManifest 
 // durable-identity gate (req_2620 S/T/U): rename/favorite/delete write through
 // to the manifest only when it exists; autosave only covers materialized models.
 export function isMaterialized(kind: ModelPackageKind, id: string): boolean {
-  return resolvePackageDir(kind, id) !== null;
+  const manifest = readManifest(kind, id);
+  return manifest !== null && manifest.id === id && manifest.kind === kind;
+}
+
+export type ModelBasePaint = { version: 1; detail: number; program: string };
+
+export function parseModelBasePaintText(text: string): ModelBasePaint | null {
+  try {
+    const value = JSON.parse(text) as Partial<ModelBasePaint>;
+    if (value.version !== 1 || typeof value.program !== 'string' || !value.program) return null;
+    return { version: 1, detail: typeof value.detail === 'number' && Number.isFinite(value.detail) ? value.detail : 1, program: value.program };
+  } catch { return null; }
+}
+
+export function readModelBasePaint(pkg: Pick<ModelPackage, 'kind' | 'id'>): ModelBasePaint | null {
+  const dir = resolvePackageDir(pkg.kind, pkg.id);
+  if (!dir) return null;
+  const text = readFile(`${dir}/atlases/base.paint.json`);
+  if (!text) return null;
+  return parseModelBasePaintText(text);
 }
 
 // Patch the durable-identity fields of an EXISTING on-disk manifest in place
@@ -399,6 +419,7 @@ export function writeModelArtifacts(pkg: Pick<ModelPackage, 'kind' | 'id' | 'nam
   mkdir(atlasDir);
   host.__model_mesh_write?.(`${meshDir}/base.blob`);
   const docWritten = writeMeshDoc(dir, parts);
+  let paintProgramWritten = true;
   try {
     const atlas = JSON.parse(host.__model_atlas_read?.() || '{}');
     if (atlas.data && atlas.w > 0 && atlas.h > 0) {
@@ -409,8 +430,17 @@ export function writeModelArtifacts(pkg: Pick<ModelPackage, 'kind' | 'id' | 'nam
       // render the painted model exactly as the editor shows it.
       host.__model_painted_mesh_write?.(`${meshDir}/painted.blob`);
     }
+    const program = host.__model_paint_program_read?.();
+    if (typeof program === 'string' && program.length > 0) {
+      const basePaint: ModelBasePaint = {
+        version: 1,
+        detail: typeof atlas.detail === 'number' && Number.isFinite(atlas.detail) ? atlas.detail : 1,
+        program,
+      };
+      paintProgramWritten = writeFileBytesAtomic(`${atlasDir}/base.paint.json`, textBytes(JSON.stringify(basePaint)));
+    }
   } catch { /* no atlas resident yet — leave atlases/ empty, which is honest */ }
-  return docWritten;
+  return docWritten && paintProgramWritten;
 }
 
 // Re-exported so callers get the category mapping without reaching past the store.

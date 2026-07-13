@@ -20,7 +20,12 @@ import { createMapDocument, mapDocumentName, setActiveMapDocumentStem } from './
 import { loadGlobalsSave } from './globalsStore';
 import type { EditorState } from './types';
 
-const VIEW_HOT_KEY = 'editor:view:v1';
+const VIEW_HOT_KEY = 'editor:view:v2';
+const MODEL_WORK_HOT_KEY = 'editor:model-work:v1';
+
+type ModelWorkHot = Pick<EditorState, 'modelParts' | 'modelRigs'>;
+let lastModelParts: EditorState['modelParts'] | null = null;
+let lastModelRigs: EditorState['modelRigs'] | null = null;
 
 // Transient surfaces that should NOT spring back open after a reload — even if
 // a menu/dialog/popover was open when the reload fired, the rehydrated view
@@ -88,6 +93,7 @@ export function loadPersistedState(): EditorState {
   const globals = loadGlobalsSave();
   if (globals) base.worldGlobals = globals;
   const saved = getHotState<Partial<EditorState> | null>(VIEW_HOT_KEY, null);
+  const modelWork = getHotState<Partial<ModelWorkHot> | null>(MODEL_WORK_HOT_KEY, null);
   if (!saved) {
     if (bootStatus) base.status = bootStatus;
     else if (world?.pieces.length) base.status = `restored world — ${world.pieces.length} placed piece${world.pieces.length === 1 ? '' : 's'} from the world save`;
@@ -101,6 +107,7 @@ export function loadPersistedState(): EditorState {
   const merged: EditorState = {
     ...base,
     ...saved,
+    ...(modelWork ?? {}),
     ...RESET_ON_RELOAD,
     activeMapStem: base.activeMapStem,
     activeMapName: base.activeMapName,
@@ -133,10 +140,31 @@ export function loadPersistedState(): EditorState {
 
 /** Mirror the current state into the hot atom so the next reload can rehydrate. */
 export function persistState(state: EditorState): void {
+  // Model part seeds can contain large typed vertex arrays. They are a separate
+  // twig written only when that authored structure actually changes; colour
+  // drags, camera/tool state, and selection no longer stringify it repeatedly.
+  if (state.modelParts !== lastModelParts || state.modelRigs !== lastModelRigs) {
+    lastModelParts = state.modelParts;
+    lastModelRigs = state.modelRigs;
+    setHotState<ModelWorkHot>(MODEL_WORK_HOT_KEY, {
+      modelParts: state.modelParts,
+      modelRigs: state.modelRigs,
+    });
+  }
+
+  const {
+    modelParts: _modelParts,
+    modelRigs: _modelRigs,
+    history: _history,
+    redo: _redo,
+    worldUndo: _worldUndo,
+    worldRedo: _worldRedo,
+    ...view
+  } = state;
   // Store the chrome/view shape but redact every per-map authored slice. This
   // makes stale hot memory incapable of resurrecting pieces after New/Open.
   setHotState(VIEW_HOT_KEY, {
-    ...state,
+    ...view,
     worldPieces: [],
     objects: [],
     selectedObjectId: 'obj-tile',

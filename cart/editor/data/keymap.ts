@@ -11,8 +11,8 @@ import { commandById, commandEnabled } from './commands';
 import type { Modifiers } from '../../../runtime/hooks/useModifiers';
 import type { EditorState, ModelToolSnapshot } from './types';
 
-// Global chords fire on any surface (their commands self-gate via commandEnabled — e.g. Ctrl+S
-// Save is model-scoped, so it no-ops on the world). Keyed by a normalized chord string.
+// Global chords fire on any surface. Each command still self-gates through
+// commandEnabled. Keyed by a normalized chord string.
 const GLOBAL_CHORDS: Record<string, string> = {
   'ctrl+n': 'new-map',
   'ctrl+o': 'open-map',
@@ -24,6 +24,7 @@ const GLOBAL_CHORDS: Record<string, string> = {
   'ctrl+shift+z': 'redo-local',
   'ctrl+y': 'redo-local',
   'ctrl+h': 'toggle-eventbus',
+  'ctrl+,': 'open-preferences',
 };
 
 // Bare world single-keys — only consulted when the world surface is in view (the model surface

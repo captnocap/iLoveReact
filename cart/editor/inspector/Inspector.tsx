@@ -171,7 +171,7 @@ function readPaintLayers(): PaintLayersSnap | null {
   } catch { return null; }
 }
 
-function PaintLayersSection({ bridge }: { bridge: ModelFocusBridge | null }) {
+function PaintLayersSection({ bridge, onDocumentMutated }: { bridge: ModelFocusBridge | null; onDocumentMutated: () => void }) {
   const [snap, setSnap] = useState<PaintLayersSnap | null>(() => readPaintLayers());
   const [hint, setHint] = useState<string | null>(null);
   // Host-driven state (strokes/undo land without a React render) — poll at 1Hz like the
@@ -194,6 +194,7 @@ function PaintLayersSection({ bridge }: { bridge: ModelFocusBridge | null }) {
         const o = JSON.parse(j);
         if (o?.ok === 1 && Array.isArray(o.layers)) {
           setSnap({ active: (o.active ?? 0) | 0, layers: o.layers as PaintLayerRow[] });
+          if (op !== 'active' && op !== 'visible') onDocumentMutated();
           return true;
         }
       }
@@ -320,6 +321,7 @@ export default function Inspector(props: {
   // 'save-snapshot' command as File → Save; onDisk feeds the save-state chip.
   onRenameModel: (id: string, name: string) => void;
   onSaveModel: () => void;
+  onModelDocumentMutated: () => void;
   modelOnDisk: boolean;
   // The RIG editor (req_2712/2713): pockets/placements/seats/cover/dynamics on
   // the open model; export compiles the draft into the manifest skeleton.
@@ -519,7 +521,7 @@ export default function Inspector(props: {
             <UvSection bridge={focusBridge} partName={uvPartName} extraCount={uvExtraCount} />
             {/* PAINT LAYERS (req_2672) — the stroke program's layer table, live whenever
                 the doc has paint (host truth; hidden honest-empty before any painting). */}
-            <PaintLayersSection bridge={focusBridge} />
+              <PaintLayersSection bridge={focusBridge} onDocumentMutated={props.onModelDocumentMutated} />
             {/* Brush controls moved OUT of this corner dock to the top PaintToolbar (req_2466):
                 paint controls belong at the top as icons, not a bottom-right text-pill panel.
                 The Inspector now stays focused on selection/material inspection. */}
