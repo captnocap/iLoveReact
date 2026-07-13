@@ -33,6 +33,15 @@ const PRETTY: Record<string, string> = {
   arrowup: 'Up', arrowdown: 'Down', arrowleft: 'Left', arrowright: 'Right',
 };
 
+/** Printable non-alphanumeric keys used by desktop-app keymaps. `+` itself is
+ * intentionally absent because `+` is the chord separator. This covers the
+ * characters a native key event may report after Shift (notably `?`). */
+const PRINTABLE_BASE_KEYS = new Set([
+  '!', '"', '#', '$', '%', '&', "'", '(', ')', '*', ',', '-', '.', '/',
+  ':', ';', '<', '=', '>', '?', '@', '[', '\\', ']', '^', '_', '`',
+  '{', '|', '}', '~',
+]);
+
 /** Parse + canonicalize a chord string. Throws on a malformed chord (no base
  *  key, or two base keys) — a bad default key is an author error, caught at
  *  registration just like a duplicate command id. */
@@ -55,8 +64,8 @@ export function normalizeChord(chord: string): string {
     base = key;
   }
   if (base === null) throw new Error(`keychord: ${JSON.stringify(chord)} has no base key`);
-  if (!/^[a-z0-9]+$/.test(base)) {
-    throw new Error(`keychord: ${JSON.stringify(chord)} has a non-alphanumeric base key (${JSON.stringify(base)})`);
+  if (!/^[a-z0-9]+$/.test(base) && !PRINTABLE_BASE_KEYS.has(base)) {
+    throw new Error(`keychord: ${JSON.stringify(chord)} has an unsupported base key (${JSON.stringify(base)})`);
   }
 
   return [...MOD_ORDER.filter((m) => mods.has(m)), base].join('+');

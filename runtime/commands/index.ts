@@ -1,9 +1,8 @@
-// commands — the editor command + keybinding registry.
+// commands — the native-application command authority.
 //
-// The text menu is the source of truth: every editor action is one CommandDef
-// (command.ts), registered once and reachable both from its menu
-// (commandsByMenu) and from its hotkey (resolveHotkey). Commands EMIT authoring
-// events on the editorbus; they never mutate state. keychord.ts is the chord
-// parser/normalizer the hotkey index resolves through.
+// CommandRegistry exposes frozen declarations to menus, keybindings, toolbars,
+// context menus, palettes, and remote peers. CommandAuthority owns the only
+// handler entrance and publishes one applied/rejected outcome per invocation.
+// keychord.ts supplies the shared chord normalizer and mode-aware registry keys.
 export * from './keychord';
 export * from './command';
