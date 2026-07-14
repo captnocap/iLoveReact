@@ -9,6 +9,7 @@
 import { mkdir, readFile, writeFile, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
 import { textBytes } from '../../../runtime/workspace/lumps';
 import type { PlacedPiece } from '../world/pieces';
+import { validFacade, type Facade } from '../world/facades';
 import type { MapZoneDef } from '../stage/mapPaint';
 import type { WorldObject } from './types';
 import {
@@ -30,6 +31,8 @@ export type WorldSave = {
   objects: WorldObject[];
   /** Zone definitions; painted zone cells live in painting.rmap. */
   zones: MapZoneDef[];
+  /** Graffiti facades (req_3057) — plane-anchored paint programs, never pixels. */
+  facades: Facade[];
 };
 
 export type WorldLoadResult =
@@ -127,6 +130,7 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
     pieces?: unknown;
     objects?: unknown;
     zones?: unknown;
+    facades?: unknown;
   };
   const legacy = raw.version === 1 && options.allowLegacyV1 === true;
   if (raw.version !== 2 && !legacy) throw new Error(`unrecognized world save version ${raw.version}`);
@@ -140,11 +144,12 @@ export function parseWorldSaveText(text: string, expectedStem: string, options: 
     pieces: validatedArray(raw.pieces, 'pieces', validPiece),
     objects: validatedArray(raw.objects, 'objects', validObject, true),
     zones: validatedArray(raw.zones, 'zones', validZone, true),
+    facades: validatedArray(raw.facades ?? [], 'facades', validFacade, true),
   };
 }
 
 export function emptyWorldSave(stem: string, seq = 1): WorldSave {
-  return { version: 2, document: sanitizeMapDocumentName(stem), seq: Math.max(1, Math.trunc(seq)), pieces: [], objects: [], zones: [] };
+  return { version: 2, document: sanitizeMapDocumentName(stem), seq: Math.max(1, Math.trunc(seq)), pieces: [], objects: [], zones: [], facades: [] };
 }
 
 /** Read one named document without changing any active state. Open uses the
@@ -200,6 +205,7 @@ function snapshot(
   objects: readonly WorldObject[],
   zones: readonly MapZoneDef[],
   seq: number,
+  facades: readonly Facade[],
 ): WorldSave {
   return {
     version: 2,
@@ -208,6 +214,7 @@ function snapshot(
     pieces: pieces as PlacedPiece[],
     objects: objects as WorldObject[],
     zones: zones as MapZoneDef[],
+    facades: facades as Facade[],
   };
 }
 
@@ -231,12 +238,13 @@ export function scheduleWorldSave(
   zones: readonly MapZoneDef[],
   seq: number,
   options: { enabled?: boolean; delayMs?: number } = {},
+  facades: readonly Facade[] = [],
 ): void {
   if (options.enabled === false) {
     cancelWorldSave();
     return;
   }
-  queued = snapshot(stem, pieces, objects, zones, seq);
+  queued = snapshot(stem, pieces, objects, zones, seq, facades);
   if (saveTimer !== null) clearTimeout(saveTimer);
   saveTimer = setTimeout(writeQueued, Math.max(0, options.delayMs ?? 400));
 }
@@ -257,7 +265,8 @@ export function flushWorldSave(
   objects: readonly WorldObject[],
   zones: readonly MapZoneDef[],
   seq: number,
+  facades: readonly Facade[] = [],
 ): boolean {
   cancelWorldSave();
-  return writeWorldSave(snapshot(stem, pieces, objects, zones, seq));
+  return writeWorldSave(snapshot(stem, pieces, objects, zones, seq, facades));
 }

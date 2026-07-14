@@ -19,6 +19,7 @@ import { resolvePackageDir } from '../data/modelPackageStore';
 import { bindPaintSkinToCurrentMesh, listPaintSkins, PAINT_MESH_VERTEX_BYTES, PAINT_MESH_VERTEX_FLOATS } from '../data/paintVariants';
 import { packageMeshDoc, packageMeshDocParts } from '../data/assetCatalog';
 import { compileDoorMesh, DOOR_EXPORT_TUNING } from '../model/doorModel';
+import { liveFacadeRefs, liveFacadeResidentMeshes } from './facadeBake';
 import { compileOutlinerCollisionBoxes } from '../model/meshCollision';
 import type { ModelPackage } from '../data/types';
 
@@ -135,6 +136,9 @@ export function pushLiveWorld(nodeId: number, pieces: readonly PlacedPiece[]): v
       if (!isAuthoredPiece(piece.pieceId)) continue;
       refs.push({ key: authoredResidentKeyOf(piece.pieceId), x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees });
     }
+    // Graffiti facades (req_3057): baked paint quads ride the same ref stream —
+    // world-space meshes, so the ref is identity.
+    refs.push(...liveFacadeRefs());
     g.__compiled_world_set_live_mesh_props(nodeId, encodeMeshRefs(refs));
   }
 }
@@ -185,6 +189,7 @@ export function pushResidentMeshes(nodeId: number, authoredPieces: readonly Auth
       }
     }
   }
+  meshes.push(...liveFacadeResidentMeshes()); // graffiti facade quads (req_3057)
   g.__compiled_world_set_resident_meshes(nodeId, encodeResidentMeshes(meshes));
   console.warn(`[authored] resident catalog: ${meshes.length} mesh(es) — ${painted} painted, ${skins} paint skin(s) -> loader node ${nodeId}`);
   return true;
