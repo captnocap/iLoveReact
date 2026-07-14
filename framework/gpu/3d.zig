@@ -1448,7 +1448,17 @@ pub fn meshTopoLoopCut() bool {
     while (scope_face < tri_count) : (scope_face += 1) cut_scope[scope_face] = mesh_edit.faceInScopePub(scope_face);
 
     const groups_arg: ?[]const u32 = if (groups_buf) |g| g else null;
-    const cut = mesh_edit.planeCutSoupMasked(pos, tri_count, nrm, d, groups_arg, cut_scope) orelse return false;
+    // Topological ring cut FIRST (req_3037): split the quad ring at edge midpoints —
+    // level relative to the shape however it leans or flares. The axis-snapped plane
+    // below sliced VERTICALLY whenever the selected edge leaned past 45° (any flare),
+    // the recurring lopsided cut. Plane stays as the fallback for ungrouped soups,
+    // diagonal picks, and meshes whose groups don't chain into a walkable ring.
+    const cut = blk: {
+        if (groups_arg) |gs| {
+            if (mesh_edit.ringCutSoup(pos, tri_count, a, b, gs, cut_scope)) |rc| break :blk rc;
+        }
+        break :blk mesh_edit.planeCutSoupMasked(pos, tri_count, nrm, d, groups_arg, cut_scope) orelse return false;
+    };
     defer std.heap.c_allocator.free(cut.positions);
     defer std.heap.c_allocator.free(cut.src_face);
     defer if (cut.groups) |g| std.heap.c_allocator.free(g);

@@ -2340,6 +2340,212 @@ pub fn planeCutSoupMasked(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, g
     return CutResult{ .positions = positions, .groups = groups, .src_face = src_face, .tri_count = tris };
 }
 
+/// Topological loop cut (req_3037): walk the QUAD RING from the selected edge and split
+/// every crossed authored quad at the parametric MIDPOINT of its entry and exit edges —
+/// Blender's semantics. A geometric plane is only level when the shape cooperates: the
+/// plane path snaps its normal to the selected edge's dominant WORLD axis, so an edge
+/// leaning past 45° (any flared/tapered section) silently turns the "horizontal" cut
+/// into an angled slice — the recurring lopsided loop cut. The midpoint walk is level
+/// RELATIVE TO THE SHAPE through flares, tapers, and prior transforms by construction.
+/// The walk runs both directions from the selected edge, crosses only clean 4-corner
+/// authored faces, and stops at mesh boundaries, non-quads, unchainable groups,
+/// out-of-scope faces (req_2899), or ring closure — where Blender's stops too. Faces
+/// off the ring copy through byte-for-byte. Null when no ring exists (ungrouped mesh,
+/// diagonal selection) — the caller falls back to the plane cut.
+pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f32, groups_in: []const u32, cut_mask_in: ?[]const bool) ?CutResult {
+    if (tri_count == 0 or groups_in.len < tri_count) return null;
+    if (cut_mask_in) |m| {
+        if (m.len < tri_count) return null;
+    }
+
+    var order = std.ArrayListUnmanaged(u32){};
+    defer order.deinit(alloc);
+    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)){};
+    defer {
+        var bit = buckets.valueIterator();
+        while (bit.next()) |b| b.deinit(alloc);
+        buckets.deinit(alloc);
+    }
+    {
+        var f: u32 = 0;
+        while (f < tri_count) : (f += 1) {
+            const og = groups_in[f];
+            if (og == model_source.NO_FACE_GROUP) continue;
+            const gop = buckets.getOrPut(alloc, og) catch return null;
+            if (!gop.found_existing) {
+                gop.value_ptr.* = .{};
+                order.append(alloc, og) catch return null;
+            }
+            gop.value_ptr.append(alloc, f) catch return null;
+        }
+    }
+    if (order.items.len == 0) return null;
+
+    // Chain every group's boundary loop once and index each boundary edge by the (≤2)
+    // groups that carry it — the ring walk's adjacency. Groups that won't chain are
+    // simply not walkable; a ring reaching one ends there.
+    var loops = std.AutoHashMapUnmanaged(u32, CutLoop){};
+    defer {
+        var lit = loops.valueIterator();
+        while (lit.next()) |l| l.deinit(alloc);
+        loops.deinit(alloc);
+    }
+    const EdgeGroups = struct { g: [2]u32, n: u32 };
+    var edge_groups = std.AutoHashMapUnmanaged(u128, EdgeGroups){};
+    defer edge_groups.deinit(alloc);
+    for (order.items) |og| {
+        var loop = CutLoop{};
+        if (!chainGroupLoop(pos, buckets.getPtr(og).?.items, &loop)) {
+            loop.deinit(alloc);
+            continue;
+        }
+        const m = loop.items.len;
+        var i: usize = 0;
+        while (i < m) : (i += 1) {
+            const ka = cutPosKey(loop.items[i]);
+            const kb = cutPosKey(loop.items[(i + 1) % m]);
+            if (ka == kb) continue;
+            const ukey: u128 = (@as(u128, @min(ka, kb)) << 64) | @max(ka, kb);
+            const gop = edge_groups.getOrPut(alloc, ukey) catch {
+                loop.deinit(alloc);
+                return null;
+            };
+            if (!gop.found_existing) gop.value_ptr.* = .{ .g = .{ 0, 0 }, .n = 0 };
+            if (gop.value_ptr.n < 2) gop.value_ptr.g[gop.value_ptr.n] = og;
+            gop.value_ptr.n += 1;
+        }
+        loops.put(alloc, og, loop) catch {
+            loop.deinit(alloc);
+            return null;
+        };
+    }
+
+    const ka0 = cutPosKey(sel_a);
+    const kb0 = cutPosKey(sel_b);
+    if (ka0 == kb0) return null;
+    const sel_ukey: u128 = (@as(u128, @min(ka0, kb0)) << 64) | @max(ka0, kb0);
+    const sel_eg = edge_groups.get(sel_ukey) orelse return null;
+    if (sel_eg.n == 0 or sel_eg.n > 2) return null;
+
+    // The walk. Each crossed quad is captured rotated so its entry edge is (q0,q1);
+    // the exit edge is then (q2,q3) and the next quad is its other owner.
+    const Crossed = struct { og: u32, q: [4][3]f32 };
+    var crossed = std.ArrayListUnmanaged(Crossed){};
+    defer crossed.deinit(alloc);
+    var visited = std.AutoHashMapUnmanaged(u32, void){};
+    defer visited.deinit(alloc);
+    var dir_i: u32 = 0;
+    var ring_closed = false;
+    while (dir_i < sel_eg.n and !ring_closed) : (dir_i += 1) {
+        var cur_ukey = sel_ukey;
+        var cur_og = sel_eg.g[dir_i];
+        walk: while (true) {
+            if (visited.contains(cur_og)) {
+                ring_closed = true;
+                break :walk;
+            }
+            const lp = loops.getPtr(cur_og) orelse break :walk;
+            if (lp.items.len != 4) break :walk; // rings run through quads only
+            if (cut_mask_in) |mask| {
+                for (buckets.getPtr(cur_og).?.items) |tf| {
+                    if (!mask[tf]) break :walk; // another part's face — the ring ends at the scope
+                }
+            }
+            var entry: usize = 4;
+            var i: usize = 0;
+            while (i < 4) : (i += 1) {
+                const ka = cutPosKey(lp.items[i]);
+                const kb = cutPosKey(lp.items[(i + 1) % 4]);
+                if (ka == kb) continue;
+                const ukey: u128 = (@as(u128, @min(ka, kb)) << 64) | @max(ka, kb);
+                if (ukey == cur_ukey) {
+                    entry = i;
+                    break;
+                }
+            }
+            if (entry == 4) break :walk;
+            var q: [4][3]f32 = undefined;
+            i = 0;
+            while (i < 4) : (i += 1) q[i] = lp.items[(entry + i) % 4];
+            visited.put(alloc, cur_og, {}) catch return null;
+            crossed.append(alloc, .{ .og = cur_og, .q = q }) catch return null;
+            const k2 = cutPosKey(q[2]);
+            const k3 = cutPosKey(q[3]);
+            if (k2 == k3) break :walk;
+            const exit_ukey: u128 = (@as(u128, @min(k2, k3)) << 64) | @max(k2, k3);
+            const eg = edge_groups.get(exit_ukey) orelse break :walk;
+            if (eg.n != 2) break :walk; // mesh boundary / non-manifold → the ring ends
+            cur_og = if (eg.g[0] == cur_og) eg.g[1] else eg.g[0];
+            cur_ukey = exit_ukey;
+        }
+    }
+    if (crossed.items.len == 0) return null;
+
+    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    defer remap.deinit(alloc);
+    var next_id: u32 = 0;
+    {
+        var mx: u32 = 0;
+        for (groups_in[0..tri_count]) |v| {
+            if (v != model_source.NO_FACE_GROUP and v > mx) mx = v;
+        }
+        next_id = mx + 1;
+    }
+
+    var out_pos = std.ArrayListUnmanaged(f32){};
+    defer out_pos.deinit(alloc);
+    var out_grp = std.ArrayListUnmanaged(u32){};
+    defer out_grp.deinit(alloc);
+    var out_src = std.ArrayListUnmanaged(u32){};
+    defer out_src.deinit(alloc);
+    const consumed = alloc.alloc(bool, tri_count) catch return null;
+    defer alloc.free(consumed);
+    @memset(consumed, false);
+
+    for (crossed.items) |c| {
+        const q = c.q;
+        // Midpoints are (a+b)*0.5 of bit-identical corner copies, so the two quads
+        // sharing an edge mint the SAME point — the ring welds seamlessly.
+        const m1: [3]f32 = .{ (q[0][0] + q[1][0]) * 0.5, (q[0][1] + q[1][1]) * 0.5, (q[0][2] + q[1][2]) * 0.5 };
+        const m2: [3]f32 = .{ (q[2][0] + q[3][0]) * 0.5, (q[2][1] + q[3][1]) * 0.5, (q[2][2] + q[3][2]) * 0.5 };
+        const tris_of = buckets.getPtr(c.og).?.items;
+        const src = tris_of[0]; // one part per group — any member carries the parentage
+        const half_keep = [4][3]f32{ m2, q[3], q[0], m1 }; // keeps the authored id
+        const half_mint = [4][3]f32{ m1, q[1], q[2], m2 }; // the fresh twin
+        const gid_mint = remapGroup(&remap, c.og, &next_id);
+        if (!emitLoopFan(&out_pos, &out_src, &out_grp, true, half_keep[0..], src, c.og)) return null;
+        if (!emitLoopFan(&out_pos, &out_src, &out_grp, true, half_mint[0..], src, gid_mint)) return null;
+        for (tris_of) |tf| consumed[tf] = true;
+    }
+    {
+        var f: u32 = 0;
+        while (f < tri_count) : (f += 1) {
+            if (consumed[f]) continue;
+            const base = @as(usize, f) * 9;
+            if (base + 8 >= pos.len) break;
+            const p0: [3]f32 = .{ pos[base + 0], pos[base + 1], pos[base + 2] };
+            const p1: [3]f32 = .{ pos[base + 3], pos[base + 4], pos[base + 5] };
+            const p2: [3]f32 = .{ pos[base + 6], pos[base + 7], pos[base + 8] };
+            if (!emitTriPos(&out_pos, p0, p1, p2)) return null;
+            out_src.append(alloc, f) catch return null;
+            out_grp.append(alloc, groups_in[f]) catch return null;
+        }
+    }
+
+    const tris_out: u32 = @intCast(out_pos.items.len / 9);
+    const positions = out_pos.toOwnedSlice(alloc) catch return null;
+    const src_face = out_src.toOwnedSlice(alloc) catch {
+        alloc.free(positions);
+        return null;
+    };
+    const groups = out_grp.toOwnedSlice(alloc) catch {
+        alloc.free(positions);
+        alloc.free(src_face);
+        return null;
+    };
+    return CutResult{ .positions = positions, .groups = groups, .src_face = src_face, .tri_count = tris_out };
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────────
 const testing = std.testing;
 
@@ -3012,4 +3218,85 @@ test "concave guard: ungrouped triangle soup can never fire — tris are always 
     var out = std.ArrayListUnmanaged(u32){};
     defer out.deinit(alloc);
     try testing.expectEqual(@as(u32, 0), newlyConcaveGroups(before[0..], after[0..], 1, groups[0..], &out));
+}
+
+// A closed 4-sided FLARED tube (frustum shell, no caps): bottom square ±4, top square
+// ±1, height 2. Every side edge leans ~63° off vertical — past the 45° where the plane
+// path's dominant-axis snap flips to a vertical slice (the req_3037 lopsided cut).
+// Quad i spans bottom edge i → top edge i; two tris per quad share the b_i→t_{i+1}
+// diagonal (bit-identical corner copies, like the bake emits).
+fn ringTestTube(pos_out: *[72 * 4]f32, groups_out: *[8]u32) void {
+    const bot = [4][3]f32{ .{ -4, 0, -4 }, .{ 4, 0, -4 }, .{ 4, 0, 4 }, .{ -4, 0, 4 } };
+    const top = [4][3]f32{ .{ -1, 2, -1 }, .{ 1, 2, -1 }, .{ 1, 2, 1 }, .{ -1, 2, 1 } };
+    var w: usize = 0;
+    var q: usize = 0;
+    while (q < 4) : (q += 1) {
+        const b0 = bot[q];
+        const b1 = bot[(q + 1) % 4];
+        const t0 = top[q];
+        const t1 = top[(q + 1) % 4];
+        // tri A: b0 b1 t1 · tri B: b0 t1 t0 — shared diagonal b0→t1
+        for ([_][3]f32{ b0, b1, t1, b0, t1, t0 }) |v| {
+            pos_out[w + 0] = v[0];
+            pos_out[w + 1] = v[1];
+            pos_out[w + 2] = v[2];
+            w += 3;
+        }
+        groups_out[q * 2] = @intCast(q);
+        groups_out[q * 2 + 1] = @intCast(q);
+    }
+}
+
+test "ring cut: flared tube splits every quad at edge midpoints — level relative to the shape" {
+    var pos: [72 * 4]f32 = undefined;
+    var groups: [8]u32 = undefined;
+    ringTestTube(&pos, &groups);
+    // Select a leaning side edge (bottom corner 0 → top corner 0): the plane path
+    // would snap this to a horizontal-normal axis and slice vertically.
+    const cut = ringCutSoup(pos[0..], 8, .{ -4, 0, -4 }, .{ -1, 2, -1 }, groups[0..], null) orelse return error.TestExpectedRing;
+    defer alloc.free(cut.positions);
+    defer alloc.free(cut.src_face);
+    defer if (cut.groups) |g| alloc.free(g);
+    // 4 quads (2 tris each) → 2 quad halves each (4 tris): 8 → 16.
+    try testing.expectEqual(@as(u32, 16), cut.tri_count);
+    // Every vertex that is NOT an original corner must be an edge midpoint: on this
+    // tube all side edges span y 0→2, so every minted ring vertex sits at EXACTLY
+    // y = 1 — level relative to the shape, which is the entire point.
+    var v: usize = 0;
+    while (v < cut.tri_count * 3) : (v += 1) {
+        const y = cut.positions[v * 3 + 1];
+        if (y == 0 or y == 2) continue; // original corners pass through untouched
+        try testing.expectEqual(@as(f32, 1), y);
+    }
+    // The ring closed: both halves of each quad carry a group, 4 kept + 4 minted.
+    var distinct = std.AutoHashMapUnmanaged(u32, void){};
+    defer distinct.deinit(alloc);
+    for (cut.groups.?) |g| distinct.put(alloc, g, {}) catch unreachable;
+    try testing.expectEqual(@as(usize, 8), distinct.count());
+}
+
+test "ring cut: open strip ends at the mesh boundary instead of wrapping" {
+    var pos: [72 * 4]f32 = undefined;
+    var groups: [8]u32 = undefined;
+    ringTestTube(&pos, &groups);
+    // Drop quad 3 (tris 6,7) from the group table — a 3-quad open strip. The walk
+    // from quad 0's leaning edge must cross exactly the three remaining quads.
+    groups[6] = model_source.NO_FACE_GROUP;
+    groups[7] = model_source.NO_FACE_GROUP;
+    const cut = ringCutSoup(pos[0..], 8, .{ -4, 0, -4 }, .{ -1, 2, -1 }, groups[0..], null) orelse return error.TestExpectedRing;
+    defer alloc.free(cut.positions);
+    defer alloc.free(cut.src_face);
+    defer if (cut.groups) |g| alloc.free(g);
+    // 3 quads split (6 → 12 tris) + 2 ungrouped passthrough tris.
+    try testing.expectEqual(@as(u32, 14), cut.tri_count);
+}
+
+test "ring cut: ungrouped soup and diagonal selections fall back (null)" {
+    var pos: [72 * 4]f32 = undefined;
+    var groups: [8]u32 = undefined;
+    ringTestTube(&pos, &groups);
+    const ungrouped = [_]u32{model_source.NO_FACE_GROUP} ** 8;
+    try testing.expectEqual(@as(?CutResult, null), ringCutSoup(pos[0..], 8, .{ -4, 0, -4 }, .{ -1, 2, -1 }, ungrouped[0..], null));
+    // A quad's fan DIAGONAL (b0→t1 of quad 0) is interior, not a boundary edge.
+    try testing.expectEqual(@as(?CutResult, null), ringCutSoup(pos[0..], 8, .{ -4, 0, -4 }, .{ 1, 2, -1 }, groups[0..], null));
 }
