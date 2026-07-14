@@ -2345,6 +2345,23 @@ fn maxGroupId(groups: []const u32) i64 {
     return mx;
 }
 
+/// First group id safe for a FRESH part range. maxGroupId alone is wrong here:
+/// part ranges are id SPANS that keep their [lo,hi) through deletions, so after a
+/// delete the max LIVING id can sit far below an existing part's hi — minting at
+/// max+1 then lands the new range inside that part's span and the faces become
+/// multiply-owned (sphere owned the appended cylinder, req_3029). Ops that append
+/// a range pair without renormalizing must allocate above every declared hi too.
+fn nextFreeGroupId(groups: []const u32) u32 {
+    var next: i64 = maxGroupId(groups) + 1;
+    if (model_source.partRanges()) |pr| {
+        var i: usize = 1;
+        while (i < pr.len) : (i += 2) {
+            if (@as(i64, pr[i]) > next) next = pr[i];
+        }
+    }
+    return @intCast(next);
+}
+
 pub const AppendResult = struct { ok: bool, lo: u32, hi: u32, count: u32 };
 
 /// Append a fresh part's triangles to the LIVE edit mesh (which already carries the user's
@@ -2375,7 +2392,7 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
 
     const cur_groups = captureFaceGroups() orelse return fail;
     defer std.heap.c_allocator.free(cur_groups);
-    const offset: u32 = @intCast(maxGroupId(cur_groups) + 1);
+    const offset: u32 = nextFreeGroupId(cur_groups);
 
     const cur_faces = cur_count / 3;
     const new_faces = new_count / 3;
@@ -3163,7 +3180,7 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
     colors.appendSlice(jalloc, cur_colors) catch return fail;
     all_ranges.appendSlice(jalloc, part_ranges) catch return fail;
 
-    var next_group: u32 = @intCast(maxGroupId(cur_groups) + 1);
+    var next_group: u32 = nextFreeGroupId(cur_groups);
     const generated_bays: u32 = if (point_path) |points| @intCast(points.len - 1) else params.bays - 1;
     var bay: u32 = 0;
     while (bay < generated_bays) : (bay += 1) {
@@ -3259,7 +3276,7 @@ pub fn meshDetachSelection() AppendResult {
     // paint layout re-islands under the new grouping.
     mesh_edit.clearSelection();
 
-    const offset: u32 = @intCast(maxGroupId(groups) + 1);
+    const offset: u32 = nextFreeGroupId(groups);
     var remap = std.AutoHashMapUnmanaged(u32, u32){};
     defer remap.deinit(jalloc);
     var next: u32 = offset;
@@ -3310,7 +3327,7 @@ pub fn meshMergeGroupRanges(a_lo: u32, a_hi: u32, b_lo: u32, b_hi: u32) AppendRe
 
     var snap = journalSnapshotCurrent("merge parts");
     mesh_edit.clearSelection();
-    const offset: u32 = @intCast(maxGroupId(groups) + 1);
+    const offset: u32 = nextFreeGroupId(groups);
     var remap = std.AutoHashMapUnmanaged(u32, u32){};
     defer remap.deinit(jalloc);
     var next: u32 = offset;
