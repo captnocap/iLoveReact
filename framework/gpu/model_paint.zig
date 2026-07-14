@@ -1117,22 +1117,29 @@ fn sampleMat(u: f32, v: f32) [4]u8 {
 // window (the island) across the whole face. Fills still flood every member triangle
 // (3d.zig walks groupFaces). Ungrouped soups (imported scans) are per-triangle islands.
 
-pub const MAX_GROUP_FACES = 16; // an authored face is a quad or a small planar fan
+// A 48-side cylinder cap fans into 46 triangles and solidify doubles a group's
+// members — the old MAX_GROUP_FACES=16 stack buffer silently truncated the fill
+// to a wedge of the cap (req_3038). No cap: size to the group, always whole.
+pub const MAX_GROUP_FACES = 128;
 
 /// Every face sharing `face`'s authored group — `face` itself first. A mesh with no
-/// grouping (or a lone triangle) returns just {face}.
+/// grouping (or a lone triangle) returns just {face}. Truncation past the buffer is
+/// LOUD: a partial fill looks like paint that "doesn't work", never acceptable silently.
 pub fn groupFaces(face: u32, buf: *[MAX_GROUP_FACES]u32) []u32 {
     buf[0] = face;
     var n: usize = 1;
     const grp = model_source.faceGroupOf(face);
     if (grp == model_source.NO_FACE_GROUP) return buf[0..1];
     var f: u32 = 0;
-    while (f < g_facecount and n < MAX_GROUP_FACES) : (f += 1) {
+    while (f < g_facecount) : (f += 1) {
         if (f == face) continue;
-        if (model_source.faceGroupOf(f) == grp) {
-            buf[n] = f;
-            n += 1;
+        if (model_source.faceGroupOf(f) != grp) continue;
+        if (n >= MAX_GROUP_FACES) {
+            std.debug.print("[mesh] authored group {d} exceeds {d} member triangles — fill/dab TRUNCATED to the first {d} (raise MAX_GROUP_FACES in model_paint.zig)\n", .{ grp, MAX_GROUP_FACES, MAX_GROUP_FACES });
+            break;
         }
+        buf[n] = f;
+        n += 1;
     }
     return buf[0..n];
 }
