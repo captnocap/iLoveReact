@@ -1323,6 +1323,57 @@ fn renormalizePartRanges(face_part: []const u32, part_count: u32) void {
     _ = refreshPaintLayout(); // islands key off the grouping
 }
 
+/// Tripwire for the partition invariant (req_3032). Part spans must be pairwise
+/// disjoint — ownership is span-containment arithmetic, so an overlap means faces
+/// with two owners and every range-scoped op (select, gizmo, delete, paint) acting
+/// on the wrong geometry, discovered N edits too late (req_3029: a part minted
+/// inside another's span). Every path that installs ranges runs this after. An
+/// overlap is LOUD and heals immediately: each contested group id goes to the
+/// LATEST containing part (the one whose op minted it) and the partition
+/// renormalizes to clean contiguous spans. Returns true when a repair ran.
+fn ensureDisjointPartRanges(context: []const u8) bool {
+    const pr = model_source.partRanges() orelse return false;
+    const pc = pr.len / 2;
+    if (pc < 2) return false;
+    var overlap = false;
+    var i: usize = 0;
+    outer: while (i < pc) : (i += 1) {
+        const ilo = pr[i * 2];
+        const ihi = pr[i * 2 + 1];
+        if (ilo >= ihi) continue; // empty span owns nothing — nothing to contest
+        var j: usize = i + 1;
+        while (j < pc) : (j += 1) {
+            const jlo = pr[j * 2];
+            const jhi = pr[j * 2 + 1];
+            if (jlo >= jhi) continue;
+            if (ilo < jhi and jlo < ihi) {
+                overlap = true;
+                break :outer;
+            }
+        }
+    }
+    if (!overlap) return false;
+    std.debug.print("[mesh] part ranges OVERLAP after {s} — face ownership was ambiguous; repairing: contested group ids go to the latest containing part, partition renormalized (req_3032)\n", .{context});
+    const fc = g_edit_count / 3;
+    if (fc == 0 or model_source.faceGroupOf(0) == model_source.NO_FACE_GROUP) return false;
+    const face_part = std.heap.c_allocator.alloc(u32, fc) catch return false;
+    defer std.heap.c_allocator.free(face_part);
+    var f: u32 = 0;
+    while (f < fc) : (f += 1) {
+        const g = model_source.faceGroupOf(f);
+        var owner: u32 = model_source.NO_PART;
+        if (g != model_source.NO_FACE_GROUP) {
+            var p: usize = 0;
+            while (p < pc) : (p += 1) {
+                if (g >= pr[p * 2] and g < pr[p * 2 + 1]) owner = @intCast(p);
+            }
+        }
+        face_part[f] = owner;
+    }
+    renormalizePartRanges(face_part, @intCast(pc));
+    return true;
+}
+
 /// Loop cut: slice the resident mesh by the axis-aligned plane across the ONE selected
 /// edge, through its midpoint. The plane's normal is the edge's DOMINANT world axis, not
 /// the raw edge direction (req_2837): on a tapered shape the side edges lean, and a plane
@@ -2448,6 +2499,7 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
             const pair = [_]u32{ offset, offset + new_group_span };
             model_source.setPartRanges(pair[0..]);
         }
+        _ = ensureDisjointPartRanges("add part");
         _ = refreshPaintLayout();
     }
     return .{ .ok = ok, .lo = offset, .hi = offset + new_group_span, .count = cur_count + new_count };
@@ -2906,6 +2958,9 @@ fn journalInstall(e: *const JournalEntry) bool {
     }
     if (g_journal_note) |n| jalloc.free(n);
     g_journal_note = if (e.note) |n| (jalloc.dupe(u8, n) catch null) else null;
+    // Snapshots taken while the minting bug was live carry overlapped spans (req_3029)
+    // — undoing into one must heal it, not resurrect the corruption.
+    _ = ensureDisjointPartRanges("undo/redo restore");
     if (e.count > 0) _ = refreshPaintLayout(); // an EMPTY snapshot has no islands to lay out
     return true;
 }
@@ -3244,6 +3299,7 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
         alloc.free(result_ranges);
         return fail;
     }
+    _ = ensureDisjointPartRanges("path array");
     _ = refreshPaintLayout();
     journalCommit(&snap);
     ensureGlassTrailing();
@@ -3306,6 +3362,7 @@ pub fn meshDetachSelection() AppendResult {
             if (ranges.items.len == pr.len + 2) model_source.setPartRanges(ranges.items);
         } else |_| {}
     }
+    _ = ensureDisjointPartRanges("detach faces");
     mesh_edit.reset();
     _ = refreshPaintLayout();
     journalCommit(&snap);
@@ -3377,6 +3434,7 @@ pub fn meshMergeGroupRanges(a_lo: u32, a_hi: u32, b_lo: u32, b_hi: u32) AppendRe
             model_source.setPartRanges(ranges.items);
         }
     }
+    _ = ensureDisjointPartRanges("merge parts");
     mesh_edit.reset(); // part membership moved → weld re-keys
     _ = refreshPaintLayout();
     journalCommit(&snap);
@@ -5397,8 +5455,11 @@ pub fn meshEditSetFaceGroups(groups: []const u32) void {
 }
 /// Adopt the outliner's part ranges (flattened [lo,hi) group-id pairs) and rebuild the
 /// welded topology, so coincident verts in DIFFERENT parts stay separate logical verts.
+/// This is also where a PERSISTED doc's ranges arrive on load/resume — a doc saved
+/// while the req_3029 minting bug was live heals here instead of reopening corrupt.
 pub fn meshEditSetPartRanges(pairs: []const u32) void {
     model_source.setPartRanges(pairs);
+    _ = ensureDisjointPartRanges("cart range push");
     mesh_edit.reset();
 }
 /// Count the surviving faces whose authored group is in [lo, hi) — the outliner asks this
