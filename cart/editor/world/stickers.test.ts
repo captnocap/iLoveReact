@@ -157,7 +157,7 @@ test('authored piece at yaw 90 — AABB pick names the hit face; the stamp lands
   assert(f[5]! < 0.01, 'thin along the face normal (local z under yaw 90)');
 });
 
-test('overlapping stamps stack by stamp order — each lifts a step above the last', () => {
+test('overlapping stamps stack by stamp order — each lifts a step above what it covers', () => {
   const base = placedWall(0);
   const local = stickerLocalFrom(base, { x: 4, y: 1, z: 7.1 }, { x: 0, y: 0, z: 1 });
   const piece: PlacedPiece = {
@@ -169,6 +169,38 @@ test('overlapping stamps stack by stamp order — each lifts a step above the la
   const cz0 = f[2]!, cz1 = f[8 + 2]!, cz2 = f[16 + 2]!;
   near(cz1 - cz0, 0.002, 'second stamp sits one step above the first');
   near(cz2 - cz1, 0.002, 'third above the second');
+});
+
+test('a collage of NON-touching stamps stays flush — no lift without overlap (req_3051)', () => {
+  const base = placedWall(0);
+  // Three stamps spread across the wall, each ~0.3m apart — a 4x6 label is
+  // ~0.1m wide, so nothing touches.
+  const spots = [3.2, 3.9, 4.6].map((x) => stickerLocalFrom(base, { x, y: 1, z: 7.1 }, { x: 0, y: 0, z: 1 }));
+  const piece: PlacedPiece = {
+    ...base,
+    stickers: spots.map((local, i) => ({ id: `s${i}`, stickerId: 'stk-test', role: 'front', ...local, scale: 1, rot: 0 })),
+  };
+  const push = pieceSkinBoxes([piece]);
+  const f = new Float32Array(push.boxes.buffer);
+  near(f[2]!, f[8 + 2]!, 'all flush at the base lift');
+  near(f[8 + 2]!, f[16 + 2]!, 'all flush at the base lift');
+});
+
+test('a touching CHAIN climbs only along the chain; a later isolated stamp resets to flush', () => {
+  const base = placedWall(0);
+  // a and b overlap (5cm apart); c overlaps b but not a; d is far away.
+  const at = (x: number) => stickerLocalFrom(base, { x, y: 1, z: 7.1 }, { x: 0, y: 0, z: 1 });
+  const piece: PlacedPiece = {
+    ...base,
+    stickers: [at(4.0), at(4.05), at(4.1), at(5.5)].map((local, i) => (
+      { id: `s${i}`, stickerId: 'stk-test', role: 'front', ...local, scale: 1, rot: 0 })),
+  };
+  const push = pieceSkinBoxes([piece]);
+  const f = new Float32Array(push.boxes.buffer);
+  const cz = (i: number) => f[i * 8 + 2]!;
+  near(cz(1) - cz(0), 0.002, 'b one step over a');
+  near(cz(2) - cz(1), 0.002, 'c one step over b (chained through the overlap)');
+  near(cz(3), cz(0), 'the isolated d sits flush at the base lift');
 });
 
 test('ray starting inside the authored box yields no stampable face', () => {

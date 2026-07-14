@@ -50,10 +50,60 @@ function shaderMaterialFor(ref: MaterialRef): LiveMaterial | null {
 const STICKER_THICKNESS = 0;
 const STICKER_OUTSET = 0.008;
 // Overlapping stickers must never share a plane (req_3050: "reality doesnt
-// thrash around a z-index based on camera pov") — each stamp on a piece lifts
-// a step above the one before it, so stamp order IS stack order, exactly like
-// slapping stickers over each other.
+// thrash around a z-index based on camera pov") — but lifting every stamp
+// unconditionally displaces a whole collage off its wall (req_3051). A stamp
+// lifts ONE step above the highest sticker it actually covers, so isolated
+// stickers stay flush and only true overlap stacks climb: stamp order is
+// stack order exactly where stickers touch, like reality.
 const STICKER_LAYER_STEP = 0.002;
+
+/** A placement's 2D footprint on its face plane (piece-local face coords) —
+ *  the rect the overlap test compares. Quarter turns swap the footprint; the
+ *  dominant normal axis picks which two local axes span the face. */
+function stickerFaceRect(
+  p: StickerPlacement,
+  wMeters: number,
+  hMeters: number,
+): { plane: string; cu: number; cv: number; hw: number; hh: number } {
+  const w = wMeters * p.scale;
+  const h = hMeters * p.scale;
+  const swapped = p.rot % 2 === 1;
+  const fw = swapped ? h : w;
+  const fh = swapped ? w : h;
+  const anx = Math.abs(p.nx), any = Math.abs(p.ny), anz = Math.abs(p.nz);
+  if (any >= anx && any >= anz) {
+    return { plane: `y${p.ny > 0 ? '+' : '-'}`, cu: p.lx, cv: p.lz, hw: fw / 2, hh: fh / 2 };
+  }
+  if (anx >= anz) {
+    return { plane: `x${p.nx > 0 ? '+' : '-'}`, cu: p.lz, cv: p.ly, hw: fw / 2, hh: fh / 2 };
+  }
+  return { plane: `z${p.nz > 0 ? '+' : '-'}`, cu: p.lx, cv: p.ly, hw: fw / 2, hh: fh / 2 };
+}
+
+type RectOnPlane = ReturnType<typeof stickerFaceRect>;
+
+function rectsOverlap(a: RectOnPlane, b: RectOnPlane): boolean {
+  if (a.plane !== b.plane) return false; // different faces never stack
+  return Math.abs(a.cu - b.cu) < a.hw + b.hw && Math.abs(a.cv - b.cv) < a.hh + b.hh;
+}
+
+/** Stack layers for a piece's stamps, in stamp order: 0 when a stamp covers
+ *  nothing, else one above the highest stamp it overlaps. A collage of
+ *  touching-but-chained stickers climbs only along the chain (rigid quads
+ *  can't bend); anything isolated sits flush at the base lift. */
+export function stickerLayers(
+  rects: readonly RectOnPlane[],
+): number[] {
+  const layers: number[] = [];
+  for (let i = 0; i < rects.length; i += 1) {
+    let layer = 0;
+    for (let j = 0; j < i; j += 1) {
+      if (rectsOverlap(rects[i]!, rects[j]!)) layer = Math.max(layer, layers[j]! + 1);
+    }
+    layers.push(layer);
+  }
+  return layers;
+}
 const DEG = Math.PI / 180;
 
 /** The sticker asset's texture as a live material, rotation baked into the
@@ -153,13 +203,16 @@ export function pieceSkinBoxes(pieces: readonly PlacedPiece[]): SkinPush {
         out.push({ cx: b.cx, cy: b.cy, cz: b.cz, sx: b.sx, sy: b.sy, sz: b.sz, yaw: b.yawDegrees, matHash: mat.hash });
       }
     }
-    (piece.stickers ?? []).forEach((placement, layer) => {
-      const sticker = stickerById(placement.stickerId);
-      if (!sticker) return;
+    const stamps = (piece.stickers ?? [])
+      .map((placement) => ({ placement, sticker: stickerById(placement.stickerId) }))
+      .filter((s): s is { placement: StickerPlacement; sticker: NonNullable<ReturnType<typeof stickerById>> } => !!s.sticker);
+    const layers = stickerLayers(stamps.map(({ placement, sticker }) =>
+      stickerFaceRect(placement, sticker.widthMeters, sticker.heightMeters)));
+    stamps.forEach(({ placement, sticker }, i) => {
       const mat = stickerMaterialFor(placement);
       if (!mat) return;
       if (!materials.has(mat.hash)) materials.set(mat.hash, mat);
-      const box = stickerBoxFor(piece, placement, sticker.widthMeters, sticker.heightMeters, layer);
+      const box = stickerBoxFor(piece, placement, sticker.widthMeters, sticker.heightMeters, layers[i]!);
       out.push({ ...box, matHash: mat.hash });
     });
   }
