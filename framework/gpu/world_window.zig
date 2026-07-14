@@ -29,7 +29,7 @@ const gpu = @import("gpu.zig");
 const scene3d = @import("3d.zig");
 const rects = @import("rects.zig");
 const text = @import("text.zig");
-const world_loader = @import("../../world_loader.zig");
+const world_loader = @import("../world_loader.zig");
 const log = @import("../diag/log.zig");
 
 /// world_loader mounts are keyed by node id; reconciler ids are small and

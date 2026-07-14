@@ -6,7 +6,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const world_loader = @import("../world_loader.zig");
+const world_loader = @import("world_loader.zig");
 const world_window = @import("gpu/world_window.zig");
 
 fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {

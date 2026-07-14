@@ -2,8 +2,12 @@
 
 The compiled-world loader is framework code. Its public entrypoint is
 `framework/world_loader.zig`; implementation lives in this directory. The
-top-level `world_loader.zig` is the untouched legacy comparator until the two
-implementations are reviewed side by side.
+top-level legacy comparator (`/world_loader.zig`) was RETIRED on 2026-07-13
+(req_3041): it had started collecting live fixes the split tree silently
+missed (the req_3028/req_3040 flat-sticker incident — edits to this tree
+compiled into nothing because the app still imported the monolith). Every
+consumer (v8_app.zig, v8_bindings_compiled_world.zig, engine.zig, rjit game's
+LOADER_SOURCE) now imports the facade; the monolith lives only in git history.
 
 ## Boundaries
 
@@ -52,7 +56,8 @@ Adding a subsystem should normally mean:
 
 ## Parity gates
 
-The legacy comparator baseline at the time of this split is:
+The legacy comparator baseline at the time of the split (git history:
+commit 84460c9cd's parent holds the file) was:
 
 ```text
 sha256(world_loader.zig) = dd65fb8da3ef8a6b7d10fd9636e431b48c2c841161ccdd2b0c5680c20eca4509

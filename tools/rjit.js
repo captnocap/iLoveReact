@@ -5378,7 +5378,7 @@ cd "$1"
   # another worker editing tests) force a needless full dev rebuild on every
   # start. Prune them: the fingerprint must reflect only the dev binary's inputs.
   find framework -type d -name testing -prune -o -type f -print 2>/dev/null || true
-  printf '%s\\n' build.zig v8_app.zig v8_cli.zig v8_hello.zig world_loader.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
+  printf '%s\\n' build.zig v8_app.zig v8_cli.zig v8_hello.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
 } | LC_ALL=C sort -u | while IFS= read -r f; do
   [ -f "$f" ] || continue
   sha256sum "$f"
@@ -5944,7 +5944,7 @@ done
     }
   ];
   var LOADER_NAME = "world_loader";
-  var LOADER_SOURCE = "world_loader.zig";
+  var LOADER_SOURCE = "framework/world_loader.zig";
   var LOADER_BIN = `zig-out/bin/${LOADER_NAME}`;
   var LOADER_SHOT = `${OUT_DIR}/${LOADER_NAME}-verify.png`;
   var LOADER_BUILD_ARGS = [

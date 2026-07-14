@@ -457,7 +457,7 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn meshSetMarquee(_: f32, _: f32, _: f32, _: f32) void {}
     pub fn meshClearMarquee() void {}
 };
-const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("../world_loader.zig") else struct {
+const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("world_loader.zig") else struct {
     pub fn renderEmbedded(_: std.mem.Allocator, _: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
         return false;
     }

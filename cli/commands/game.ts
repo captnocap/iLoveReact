@@ -57,7 +57,7 @@ const ROUND_TRIPS: RoundTrip[] = [
 // headless, and capture its own frame to a PNG — proving data -> stateless
 // engine -> rendered frame with ZERO V8/JS in the construct+render path.
 const LOADER_NAME = 'world_loader';
-const LOADER_SOURCE = 'world_loader.zig';
+const LOADER_SOURCE = 'framework/world_loader.zig';
 const LOADER_BIN = `zig-out/bin/${LOADER_NAME}`;
 const LOADER_SHOT = `${OUT_DIR}/${LOADER_NAME}-verify.png`;
 const LOADER_BUILD_ARGS = [

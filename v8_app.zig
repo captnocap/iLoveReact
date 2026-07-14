@@ -104,7 +104,7 @@ const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_opt
         return;
     }
 };
-const world_loader = if (!HEADLESS and @hasDecl(build_options, "has_compiled_world") and build_options.has_compiled_world) @import("world_loader.zig") else struct {
+const world_loader = if (!HEADLESS and @hasDecl(build_options, "has_compiled_world") and build_options.has_compiled_world) @import("framework/world_loader.zig") else struct {
     pub fn unmount(_: u32) void {}
 };
 const latches = @import("framework/state/latches.zig");
