@@ -60,7 +60,7 @@ import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPain
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
-import { commandSource, createEditorApplicationCommands, WORLD_FLOOR_STEP_COMMAND_ID, WORLD_PIECES_PLACE_COMMAND_ID, WORLD_REDO_COMMAND_ID, WORLD_SELECT_TOOL_COMMAND_ID, WORLD_UNDO_COMMAND_ID, type WorldFloorStepResult, type WorldHistoryControlResult, type WorldPiecesPlaceResult, type WorldSelectToolResult } from '../data/applicationCommands';
+import { commandSource, createEditorApplicationCommands, isWorldToolCommandId, WORLD_FLOOR_STEP_COMMAND_ID, WORLD_PIECES_PLACE_COMMAND_ID, WORLD_REDO_COMMAND_ID, WORLD_UNDO_COMMAND_ID, type WorldFloorStepResult, type WorldHistoryControlResult, type WorldPiecesPlaceResult, type WorldToolArmResult } from '../data/applicationCommands';
 import { activeSurface } from '../data/surfaces';
 import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
@@ -352,20 +352,44 @@ export default function AppFrame() {
         activeCommandId: stateRef.current.activeCommandId,
         mapPaintActive: stateRef.current.mapPaint.active,
       }),
-      commitSelectTool: (result) => {
-        const previous = stateRef.current;
-        let mapPaint = previous.mapPaint;
-        if (result.mapPaintDropped) {
-          mapPaint = { ...previous.mapPaint, active: false, texturePickerOpen: false };
-          applyMapPaintEffects(previous.mapPaint, mapPaint);
+      commitWorldTool: (result) => {
+        const previous = result.mapPaintDropped ? withMapPaintOff(stateRef.current) : stateRef.current;
+        const tool = commandById(result.toolId);
+        let status: string;
+        switch (result.toolId) {
+          case 'select-tool':
+            status = 'Select armed';
+            break;
+          case 'place-piece':
+            status = `Place Piece armed — click the world to place ${previous.armedPieceId ?? 'a build piece'}`;
+            break;
+          case 'move-selection':
+            status = previous.selectedPieceId
+              ? 'Move armed — drag the selected placed piece to reposition it'
+              : 'Move armed — drag a placed piece to reposition it';
+            break;
+          case 'focus-selection':
+            status = 'Focus armed — click a placed piece to frame it';
+            break;
+          case 'paint-faces': {
+            const material = assetById(previous.activeAssetId, previous.assetOverrides);
+            status = `Paint Faces armed — touch a piece face to apply ${material.name}; each face slot paints separately (drag to sweep)`;
+            break;
+          }
+          case 'place-sticker':
+            status = previous.stickerArm.textureId
+              ? 'Place Sticker armed — click a piece face to stamp'
+              : 'Place Sticker armed — pick a sticker in the action bar (import an image first if the rail is empty)';
+            break;
         }
+        if (result.mapPaintDropped) status += ' — map paint off (one mode at a time)';
         const next: EditorState = {
           ...previous,
-          mapPaint,
           openMenu: null,
-          actionMenu: 'Build',
-          activeCommandId: WORLD_SELECT_TOOL_COMMAND_ID,
-          status: result.mapPaintDropped ? 'Select armed — map paint off' : 'Select armed',
+          actionMenu: tool.menu,
+          activeCommandId: result.toolId,
+          contextOpen: false,
+          status,
         };
         stateRef.current = next;
         setState(next);
@@ -497,15 +521,16 @@ export default function AppFrame() {
         });
         return;
       }
-      if (outcome.status === 'applied' && outcome.commandId === WORLD_SELECT_TOOL_COMMAND_ID) {
-        const result = outcome.result as WorldSelectToolResult;
-        // Pressing Esc while already neutral is genuinely inert. The command
+      if (outcome.status === 'applied' && isWorldToolCommandId(outcome.commandId)) {
+        const result = outcome.result as WorldToolArmResult;
+        // Re-arming the current tool while Map Paint is already off is genuinely inert. The command
         // result remains deterministic for automation, but there is no state
         // transition to append to the session outcome stream.
         if (!result.changed) return;
+        const tool = commandById(result.toolId);
         dispatchCommandOutcome(outcome, {
-          label: `active tool → Select${result.mapPaintDropped ? ' · map paint off' : ''}`,
-          targets: [{ kind: 'world-tool', id: WORLD_SELECT_TOOL_COMMAND_ID }],
+          label: `active tool → ${tool.name}${result.mapPaintDropped ? ' · map paint off' : ''}`,
+          targets: [{ kind: 'world-tool', id: result.toolId }],
         });
         return;
       }
@@ -1022,13 +1047,13 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, openMenu: null, status: preferencesOpen ? 'preferences closed' : 'preferences opened' }));
       return;
     }
-    // First migrated command: every projection crosses the framework authority
+    // Migrated report-only controls: every projection crosses the framework authority
     // before any cart-local dispatcher logic can select a second behavior.
     if (commandId === WORLD_FLOOR_STEP_COMMAND_ID) {
       invokeApplicationCommand(commandId, { delta: 1 }, source);
       return;
     }
-    if (commandId === WORLD_SELECT_TOOL_COMMAND_ID) {
+    if (isWorldToolCommandId(commandId)) {
       invokeApplicationCommand(commandId, {}, source);
       return;
     }
@@ -1475,30 +1500,6 @@ export default function AppFrame() {
 
       if (command.id === 'toggle-minimap') {
         next = { ...next, rightPane: prev.rightPane === 'grid' ? 'inspector' : 'grid' };
-      } else if (command.id === 'focus-selection') {
-        next = { ...next, cursor: { x: object.left, y: 0, z: object.top } };
-      } else if (command.id === 'place-piece') {
-        next = { ...next, status: `Place Piece armed — click the world to place ${prev.armedPieceId ?? 'a build piece'}` };
-      } else if (command.id === 'move-selection') {
-        next = {
-          ...next,
-          status: prev.selectedPieceId
-            ? 'Move armed — drag the selected placed piece to reposition it'
-            : 'Move armed — drag a placed piece to reposition it',
-        };
-      } else if (command.id === 'paint-faces') {
-        // req_2879: the brush is the browser's active material; the viewport's
-        // touch reports (piece, face role) up into assignPieceSlot.
-        next = { ...next, status: `Paint Faces armed — touch a piece face to apply ${asset.name}; each face slot paints separately (drag to sweep)` };
-      } else if (command.id === 'place-sticker') {
-        // req_3025: the stamp is the armed imported texture (sticker rail in the
-        // action bar); the viewport's face hit reports up into stampSticker.
-        next = {
-          ...next,
-          status: prev.stickerArm.textureId
-            ? 'Place Sticker armed — click a piece face to stamp'
-            : 'Place Sticker armed — pick a sticker in the action bar (import an image first if the rail is empty)',
-        };
       } else if (command.id === 'open-color-studio') {
         const doc = materialDocument(asset);
         next = {
@@ -1521,11 +1522,9 @@ export default function AppFrame() {
         };
       }
 
-      const target = command.id === 'place-piece' ? asset.name : object.name;
+      const target = object.name;
       const editMs = Date.now() - t0;
-      const event = command.id === 'place-piece' || command.id === 'move-selection' || command.id === 'paint-faces'
-        ? { history: prev.history, redo: prev.redo, seq: prev.seq }
-        : pushHistory(prev, command, target, `${source} - ${command.native ? 'native-ready' : 'design-only'}`, editMs);
+      const event = pushHistory(prev, command, target, `${source} - ${command.native ? 'native-ready' : 'design-only'}`, editMs);
       // Any world slice this command touched becomes a REAL reversible entry
       // (recordWorldEdit self-no-ops for commands that changed none — req_2620 W).
       return recordWorldEdit(prev, { ...next, ...event }, command.name.toLowerCase());
@@ -4188,21 +4187,6 @@ export default function AppFrame() {
             modelOnDisk={activeModelOnDisk}
             onRequireFirstModelSave={() => saveActiveModelNow('Saved before creating paint atlas')}
             onModelDocumentMutated={markActiveModelDirty}
-            // Mode row / action-bar controls are guarded (req_2626 HH): arming tools or
-            // flipping view state while a blocking session is unresolved is the exact
-            // "switch up to paint mid loop-cut" the user ruled WRONG.
-            // Arming from the bar also EXITS Map Paint (req_2666 WW) — same
-            // withMapPaintOff door as the hotkey/menu path; one mode at a time.
-            onTool={guarded((id: string) => {
-              if (id === WORLD_SELECT_TOOL_COMMAND_ID) {
-                invokeApplicationCommand(id, {}, 'action bar');
-                return;
-              }
-              setState((prev0) => {
-                const prev = withMapPaintOff(prev0);
-                return { ...prev, actionMenu: commandById(id).menu, activeCommandId: id, status: `armed ${commandById(id).name}${prev !== prev0 ? ' — map paint off (one mode at a time)' : ''}` };
-              });
-            })}
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}

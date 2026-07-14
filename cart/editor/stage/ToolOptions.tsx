@@ -24,7 +24,6 @@ const MESH_SYM_LETTER: Record<string, string> = { 'mesh-sym-x': 'X', 'mesh-sym-y
 export default function ToolOptions(props: {
   state: EditorState;
   onCommand: (id: string, source: string) => void;
-  onTool: (id: string) => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   /** Place Sticker (req_3025): patch the armed stamp (texture / rot / scale). */
   onStickerArm: (patch: Partial<EditorState['stickerArm']>) => void;
@@ -117,7 +116,7 @@ export default function ToolOptions(props: {
       {actionCommands.map((command) => {
         const Btn = props.state.activeCommandId === command.id ? C.HW_IconButtonOn : C.HW_IconButton;
         return (
-          <Btn key={command.id} tooltip={`${command.name} (${command.key})`} onPress={() => command.tool ? props.onTool(command.id) : props.onCommand(command.id, 'action bar')}>
+          <Btn key={command.id} tooltip={`${command.name} (${command.key})`} onPress={() => props.onCommand(command.id, 'action bar')}>
             <Icon name={command.icon} size={14} color={accentFor(props.state.activeCommandId === command.id ? 'primary' : 'textDim')} />
           </Btn>
         );

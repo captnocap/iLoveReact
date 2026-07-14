@@ -16,6 +16,8 @@ import {
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
 import { PROP_EXPORT_TARGETS, propExportCommandId } from './propExports';
+import { commandForKeyEvent } from './keymap';
+import type { EditorState } from './types';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -132,10 +134,38 @@ test('Section D follows the armed tool and contains only real Build tools', () =
   const build = worldActionBarCommands({ activeCommandId: 'select-tool' });
   assert(build.every((command) => command.menu === 'Build'), 'default world bar mirrors unrelated menu history');
   assert(build.some((command) => command.id === 'place-piece'), 'real Build tools disappeared');
+  const toolIds = new Set(['select-tool', 'place-piece', 'move-selection', 'paint-faces', 'place-sticker']);
+  assert(build.filter((command) => toolIds.has(command.id)).every((command) => !command.undoable), 'arming a tool still claims to be an authored edit');
 
   const afterFloor = worldActionBarCommands({ activeCommandId: 'world.floor.step' });
   assert(afterFloor.map((command) => command.id).join('|') === build.map((command) => command.id).join('|'), 'floor report swapped Section D family');
   assert(!afterFloor.some((command) => command.id === 'paint-material' || command.id === 'sample-material'), 'legacy material tools leaked into Section D');
+});
+
+test('the live world key bridge reaches every authority-backed tool identity', () => {
+  const state = {
+    workspaceDocuments: [{ id: 'world', kind: 'world', title: 'World' }],
+    activeWorkspaceDocumentId: 'world',
+    materialFocused: false,
+    modelTool: { blocking: null },
+    newMeshPrompt: null,
+    fileExplorerOpen: false,
+    mapDocumentOpen: false,
+    buildDialogOpen: false,
+    addChunkOpen: false,
+    selectedPieceId: null,
+    selectedObjectId: '',
+    worldUndo: [],
+    worldRedo: [],
+  } as unknown as EditorState;
+  const mods = { ctrl: false, shift: false, alt: false, meta: false };
+  const expected = [
+    ['escape', 'select-tool'], ['b', 'place-piece'], ['v', 'move-selection'],
+    ['f', 'focus-selection'], ['n', 'paint-faces'], ['k', 'place-sticker'],
+  ];
+  for (const [key, id] of expected) {
+    assert(commandForKeyEvent(state, key!, mods) === id, `${key} did not reach ${id}`);
+  }
 });
 
 log(`\n${passed} passed, ${failed} failed`);

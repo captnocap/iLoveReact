@@ -10,8 +10,8 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-events.test.js
 
-import { describeEvent } from '../../../runtime/editorbus';
-import { commandOutcome, mapPaint, piecePlace, piecePlacementPayload, type MapPaintPayload } from './editorEvents';
+import { describeEvent, head, since } from '../../../runtime/editorbus';
+import { commandOutcome, dispatchCommandOutcome, mapPaint, piecePlace, piecePlacementPayload, type MapPaintPayload } from './editorEvents';
 import { planPiecePlacement } from '../world/piecePlacementCommand';
 
 let passed = 0, failed = 0;
@@ -105,6 +105,30 @@ test('command outcomes persist identity and source in the common envelope', () =
   assert(event.source === 'toolbar' && event.phase === 'applied', 'source/phase left the envelope');
   assert(event.undoScope?.kind === 'none' && event.targets[0]?.id === '4', 'scope/target drifted');
   assert(describeEvent(event) === 'active floor → Floor 4', 'outcome description drifted');
+});
+
+test('tool authority outcomes append one correlated report to the eventbus', () => {
+  const before = head();
+  dispatchCommandOutcome({
+    invocationId: 'editor:tool:9',
+    commandId: 'paint-faces',
+    source: 'toolbar',
+    status: 'applied',
+    phase: 'applied',
+    effect: 'report-only',
+    undoScope: 'none',
+    result: { previousToolId: 'select-tool', toolId: 'paint-faces', mapPaintDropped: false, changed: true },
+  }, {
+    label: 'active tool → Paint Faces',
+    targets: [{ kind: 'world-tool', id: 'paint-faces' }],
+  });
+  const appended = since(before);
+  assert(appended.length === 1, `tool choice appended ${appended.length} reports`);
+  const event = appended[0]!;
+  assert(event.commandId === 'paint-faces' && event.source === 'toolbar', 'tool command/source correlation drifted');
+  assert(event.effect === 'report-only' && event.undoScope?.kind === 'none', 'tool choice became authored history');
+  assert(event.targets[0]?.kind === 'world-tool' && event.targets[0]?.id === 'paint-faces', 'tool target drifted');
+  assert(describeEvent(event) === 'active tool → Paint Faces', 'tool report description drifted');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

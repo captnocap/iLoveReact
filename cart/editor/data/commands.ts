@@ -153,8 +153,8 @@ export const COMMANDS: Command[] = [
   // Select is the neutral default (req_2550): a viewport click picks the piece under it and places
   // nothing. It's the tool the editor boots into; Esc returns to it. Arming any other tool takes
   // the click away from placement — that's the modality the world was missing.
-  { id: 'select-tool', menu: 'Build', name: 'Select', icon: 'MousePointer2', key: '', context: false, native: true, undoable: false, tool: true, scope: 'world' },
-  { id: 'place-piece', menu: 'Build', name: 'Place Piece', icon: 'Pencil', key: 'B', context: true, native: true, undoable: true, tool: true, scope: 'world' },
+  { id: 'select-tool', menu: 'Build', name: 'Select', icon: 'MousePointer2', key: 'Esc', context: false, native: true, undoable: false, tool: true, scope: 'world' },
+  { id: 'place-piece', menu: 'Build', name: 'Place Piece', icon: 'Pencil', key: 'B', context: true, native: true, undoable: false, tool: true, scope: 'world' },
   // Move is an armable mode: click a piece to grab it. Not selection-gated — the click selects.
   { id: 'move-selection', menu: 'Build', name: 'Move Selection', icon: 'Move', key: 'V', context: true, native: true, undoable: false, tool: true, scope: 'world' },
   // R is mode-sensitive (req_0598): it spins the selected placed piece when one
@@ -165,12 +165,12 @@ export const COMMANDS: Command[] = [
   // browser's active material lands in THAT face's slot (front vs back stay separate, so the
   // exterior and interior of one wall paint independently). A drag sweeps across faces. Not
   // selection-gated — the touch provides the target, like Focus/Move.
-  { id: 'paint-faces', menu: 'Build', name: 'Paint Faces', icon: 'Paintbrush', key: 'N', context: true, native: true, undoable: true, tool: true, scope: 'world' },
+  { id: 'paint-faces', menu: 'Build', name: 'Paint Faces', icon: 'Paintbrush', key: 'N', context: true, native: true, undoable: false, tool: true, scope: 'world' },
   // Place Sticker (req_3025): an armable stamp MODE — the click's face hit takes the armed
   // sticker at its true meter size (4x6 label default). Not selection-gated; the touch is
   // the target, like Paint Faces. The armed sticker/rot/scale live in state.stickerArm.
-  { id: 'place-sticker', menu: 'Build', name: 'Place Sticker', icon: 'Sticker', key: 'K', context: true, native: true, undoable: true, tool: true, scope: 'world' },
-  { id: 'open-color-studio', menu: 'Build', name: 'Open Color Studio', icon: 'Palette', key: 'C', context: true, native: true, undoable: false, tool: true, scope: 'world', needsSelection: true },
+  { id: 'place-sticker', menu: 'Build', name: 'Place Sticker', icon: 'Sticker', key: 'K', context: true, native: true, undoable: false, tool: true, scope: 'world' },
+  { id: 'open-color-studio', menu: 'Build', name: 'Open Color Studio', icon: 'Palette', key: 'C', context: true, native: true, undoable: false, scope: 'world', needsSelection: true },
 
   // ── Globals (GLOBALS req_2770) — the game's world-level tunables ──────────────────────────
   // Each leaf opens the PLAYTEST tab (the editor world with the embodied player) and puts

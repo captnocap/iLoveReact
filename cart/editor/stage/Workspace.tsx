@@ -17,7 +17,6 @@ export default function Workspace(props: {
   modelOnDisk: boolean;
   onRequireFirstModelSave: () => boolean;
   onModelDocumentMutated: () => void;
-  onTool: (id: string) => void;
   onMapPaint: (patch: Partial<EditorState['mapPaint']>) => void;
   onSnap: () => void;
   onFloor: (delta: number) => void;

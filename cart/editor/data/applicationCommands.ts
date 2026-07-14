@@ -26,6 +26,20 @@ import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 export const WORLD_FLOOR_STEP_COMMAND_ID = 'world.floor.step';
 export const WORLD_MAX_FLOOR = 128;
 export const WORLD_SELECT_TOOL_COMMAND_ID = 'select-tool';
+export const WORLD_PLACE_TOOL_COMMAND_ID = 'place-piece';
+export const WORLD_MOVE_TOOL_COMMAND_ID = 'move-selection';
+export const WORLD_FOCUS_TOOL_COMMAND_ID = 'focus-selection';
+export const WORLD_PAINT_FACES_TOOL_COMMAND_ID = 'paint-faces';
+export const WORLD_STICKER_TOOL_COMMAND_ID = 'place-sticker';
+export const WORLD_TOOL_COMMAND_IDS = [
+  WORLD_SELECT_TOOL_COMMAND_ID,
+  WORLD_PLACE_TOOL_COMMAND_ID,
+  WORLD_MOVE_TOOL_COMMAND_ID,
+  WORLD_FOCUS_TOOL_COMMAND_ID,
+  WORLD_PAINT_FACES_TOOL_COMMAND_ID,
+  WORLD_STICKER_TOOL_COMMAND_ID,
+] as const;
+export type WorldToolCommandId = typeof WORLD_TOOL_COMMAND_IDS[number];
 export const WORLD_UNDO_COMMAND_ID = 'world.history.undo';
 export const WORLD_REDO_COMMAND_ID = 'world.history.redo';
 export { WORLD_PIECES_PLACE_COMMAND_ID } from '../world/piecePlacementCommand';
@@ -38,9 +52,9 @@ export type WorldFloorStepResult = {
   maxFloor: number;
 };
 
-export type WorldSelectToolResult = {
+export type WorldToolArmResult = {
   previousToolId: string;
-  toolId: typeof WORLD_SELECT_TOOL_COMMAND_ID;
+  toolId: WorldToolCommandId;
   mapPaintDropped: boolean;
   changed: boolean;
 };
@@ -90,7 +104,7 @@ export interface EditorHistoryAdapter {
   commitRedo(): WorldHistoryControlResult;
 }
 
-/** The smallest privileged surface needed by the first command slice. It is
+/** The smallest privileged surface needed by the migrated world-command slice. It is
  * deliberately not a React setter: the composition root owns how the one
  * committed result becomes the current read-only snapshot. */
 export interface EditorCommandAdapter {
@@ -99,7 +113,7 @@ export interface EditorCommandAdapter {
   floorIndex(): number;
   commitFloor(result: WorldFloorStepResult): void;
   worldTool(): { activeCommandId: string; mapPaintActive: boolean };
-  commitSelectTool(result: WorldSelectToolResult): void;
+  commitWorldTool(result: WorldToolArmResult): void;
   placement: EditorPlacementAdapter;
   history: EditorHistoryAdapter;
 }
@@ -130,9 +144,28 @@ function wrappedFloor(current: number, delta: -1 | 1): number {
 }
 
 function noArgs(args: unknown) {
-  return args == null || (typeof args === 'object' && !Array.isArray(args))
+  return args == null || (typeof args === 'object' && !Array.isArray(args) && Object.keys(args).length === 0)
     ? { ok: true as const, value: {} }
     : { ok: false as const, reason: 'command takes no arguments' };
+}
+
+const WORLD_TOOL_DEFS: readonly {
+  id: WorldToolCommandId;
+  label: string;
+  icon: string;
+  menu: 'Build' | 'View';
+  chord: string;
+}[] = [
+  { id: WORLD_SELECT_TOOL_COMMAND_ID, label: 'Select', icon: 'MousePointer2', menu: 'Build', chord: 'Esc' },
+  { id: WORLD_PLACE_TOOL_COMMAND_ID, label: 'Place Piece', icon: 'Pencil', menu: 'Build', chord: 'B' },
+  { id: WORLD_MOVE_TOOL_COMMAND_ID, label: 'Move Selection', icon: 'Move', menu: 'Build', chord: 'V' },
+  { id: WORLD_FOCUS_TOOL_COMMAND_ID, label: 'Focus Selection', icon: 'ScanSearch', menu: 'View', chord: 'F' },
+  { id: WORLD_PAINT_FACES_TOOL_COMMAND_ID, label: 'Paint Faces', icon: 'Paintbrush', menu: 'Build', chord: 'N' },
+  { id: WORLD_STICKER_TOOL_COMMAND_ID, label: 'Place Sticker', icon: 'Sticker', menu: 'Build', chord: 'K' },
+];
+
+export function isWorldToolCommandId(id: string): id is WorldToolCommandId {
+  return (WORLD_TOOL_COMMAND_IDS as readonly string[]).includes(id);
 }
 
 type PreparedPlacement = { plan: PiecePlacementPlan; gesture: PlacementGesture };
@@ -204,33 +237,35 @@ export function createEditorApplicationCommands(
     return result;
   });
 
-  registry.register<{}, WorldSelectToolResult>({
-    id: WORLD_SELECT_TOOL_COMMAND_ID,
-    label: 'Select',
-    icon: 'MousePointer2',
-    effect: 'report-only',
-    undoScope: 'none',
-    projections: { menu: ['Build'], toolbar: ['D.world'], palette: true },
-    keybindings: [{ chord: 'Esc', when: { surface: 'world' } }],
-    validateArgs: noArgs,
-    isEnabled: () => {
-      const blocked = adapter.blockedReason();
-      if (blocked) return { enabled: false, reason: `resolve ${blocked} first` };
-      return adapter.activeSurface() === 'world'
-        ? true
-        : { enabled: false, reason: 'only in the world editor' };
-    },
-  }, () => {
-    const current = adapter.worldTool();
-    const result: WorldSelectToolResult = {
-      previousToolId: current.activeCommandId,
-      toolId: WORLD_SELECT_TOOL_COMMAND_ID,
-      mapPaintDropped: current.mapPaintActive,
-      changed: current.activeCommandId !== WORLD_SELECT_TOOL_COMMAND_ID || current.mapPaintActive,
-    };
-    if (result.changed) adapter.commitSelectTool(result);
-    return result;
-  });
+  for (const tool of WORLD_TOOL_DEFS) {
+    registry.register<{}, WorldToolArmResult>({
+      id: tool.id,
+      label: tool.label,
+      icon: tool.icon,
+      effect: 'report-only',
+      undoScope: 'none',
+      projections: { menu: [tool.menu], toolbar: ['D.world'], palette: true },
+      keybindings: [{ chord: tool.chord, when: { surface: 'world' } }],
+      validateArgs: noArgs,
+      isEnabled: () => {
+        const blocked = adapter.blockedReason();
+        if (blocked) return { enabled: false, reason: `resolve ${blocked} first` };
+        return adapter.activeSurface() === 'world'
+          ? true
+          : { enabled: false, reason: 'only in the world editor' };
+      },
+    }, () => {
+      const current = adapter.worldTool();
+      const result: WorldToolArmResult = {
+        previousToolId: current.activeCommandId,
+        toolId: tool.id,
+        mapPaintDropped: current.mapPaintActive,
+        changed: current.activeCommandId !== tool.id || current.mapPaintActive,
+      };
+      if (result.changed) adapter.commitWorldTool(result);
+      return result;
+    });
+  }
 
   registry.register<PreparedPlacement, WorldPiecesPlaceResult>({
     id: WORLD_PIECES_PLACE_COMMAND_ID,
