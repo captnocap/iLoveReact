@@ -1,7 +1,7 @@
 # Editor stickers (Place Sticker)
 
 Active surface: `cart/editor/` world document. Last verified: 2026-07-13.
-USER ASK req_3018 / req_3021 / req_3025.
+USER ASK req_3018 / req_3021 / req_3025 / req_3028.
 
 ## In one sentence
 
@@ -41,10 +41,14 @@ like basically a sticker." Two rulings shape the design:
   nx/ny/nz outward face normal (axis-snapped), scale, rot 0-3 quarter turns}.
   Piece-local means stamps ride move/rotate/delete/undo and persist with the
   map's pieces (worldStore validates the rows).
-- `cart/editor/world/pieceSkins.ts` — rendering (JS, zero new host machinery):
-  `stickerBoxFor` emits a thin box (4mm, floated 8mm off the face) sized to
-  the sticker's meters × scale through the EXISTING
-  `__compiled_world_set_live_skin_boxes` door; the material is the texture's
+- `cart/editor/world/pieceSkins.ts` — rendering: `stickerBoxFor` emits a FLAT
+  quad row (thickness exactly 0, floated 8mm off the face) sized to the
+  sticker's meters × scale through the EXISTING
+  `__compiled_world_set_live_skin_boxes` door. A zero dimension makes the
+  loader draw a 12-vert two-sided sticker plane instead of the 36-vert cube
+  (req_3028, "stickers are flat and dont have sides" — 4 tris, not 12;
+  `framework/world_loader/geometry.zig buildStickerQuad`, one quad per thin
+  axis, cube winding/UV convention). The material is the texture's
   own `PIXEL_TEXTURE_SHADER` spec with rotation baked into the packed data by
   `rotatePackedTexture` (`textures/pixelTexture.ts`) — no rotation uniform, one
   shader contract. `stickerLocalFrom` is the exact inverse (world hit →

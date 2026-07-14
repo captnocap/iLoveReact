@@ -18,6 +18,10 @@ const POP = '#17181b', LINE = '#2a2c31', TEXT = '#e8e8ea', DIM = '#9a9ea6', ACCE
 // Above this mean-squared error the quantized form visibly degrades (banding /
 // chewed glyph edges) and the exact copy becomes the recommendation.
 const PIXEL_MSE_CEILING = 900;
+// The probe downsamples to 128 on the longest side (the shader data[] budget),
+// so the pixel form can lose resolution AND cost more bytes than a well-packed
+// original (indexed PNGs of flat art beat JSON RLE) — req_3028: never recommend
+// the form that is worse on BOTH axes.
 
 export type ImportImagePlan = {
   sourcePath: string;
@@ -37,7 +41,8 @@ export default function ImportImageDialog(props: {
   onCancel: () => void;
 }) {
   const { plan } = props;
-  const recommendPixel = plan.probe.mse <= PIXEL_MSE_CEILING;
+  const downsampled = plan.probe.width < plan.sourceWidth || plan.probe.height < plan.sourceHeight;
+  const recommendPixel = plan.probe.mse <= PIXEL_MSE_CEILING && !(downsampled && plan.pixelKb >= plan.sourceKb);
   const previewData = packPixelTexture(plan.probe);
 
   return (
@@ -55,8 +60,8 @@ export default function ImportImageDialog(props: {
             title="Pixel texture"
             recommended={recommendPixel}
             statLines={[
-              `${plan.probe.colors} colors · ${plan.probe.width}x${plan.probe.height}`,
-              `${plan.pixelKb} KB · recolorable`,
+              `${plan.probe.colors} colors · ${plan.probe.width}x${plan.probe.height}${downsampled ? ` — DOWNSAMPLED from ${plan.sourceWidth}x${plan.sourceHeight}` : ''}`,
+              `${plan.pixelKb} KB · recolorable${plan.pixelKb >= plan.sourceKb ? ' — LARGER than the original' : ''}`,
               `fit error ${Math.round(plan.probe.mse)}${plan.probe.mse <= PIXEL_MSE_CEILING ? ' (clean)' : ' (visible loss)'}`,
             ]}
             onPress={() => props.onPick('pixel')}

@@ -25,7 +25,7 @@ export const editor_stickers: DocIndex = {
       kind: 'utility',
       sourceFile: 'cart/editor/world/pieceSkins.ts',
       description:
-        'A stamp is a piece-LOCAL row (anchor + axis-snapped outward normal + scale + quarter-turn rot) on PlacedPiece.stickers[] — it rides move/rotate/delete/undo and persists with the map. stickerBoxFor emits a 4mm-thin box floated 8mm off the face, sized to the sticker\'s meters, through the EXISTING __compiled_world_set_live_skin_boxes door; rotation bakes into the packed pixel data (rotatePackedTexture) so every stamp stays on the one PIXEL_TEXTURE_SHADER contract. stickerLocalFrom is the proven exact inverse (stickers.test.ts, 9 cases).',
+        'A stamp is a piece-LOCAL row (anchor + axis-snapped outward normal + scale + quarter-turn rot) on PlacedPiece.stickers[] — it rides move/rotate/delete/undo and persists with the map. stickerBoxFor emits a FLAT row (thickness exactly 0, floated 8mm off the face) through the EXISTING __compiled_world_set_live_skin_boxes door; a zero dimension makes the loader draw a 12-vert two-sided sticker plane instead of the 36-vert cube (req_3028 — 4 tris not 12; framework/world_loader/geometry.zig buildStickerQuad per thin axis). Rotation bakes into the packed pixel data (rotatePackedTexture) so every stamp stays on the one PIXEL_TEXTURE_SHADER contract. stickerLocalFrom is the proven exact inverse (stickers.test.ts, 9 cases).',
       dependsOn: ['pieceVisualShapes yaw frame (localOffset)', 'textures/pixelTexture.ts rotatePackedTexture'],
       consumers: ['cart/editor/world/livePush.ts pushLiveWorld'],
       status: 'live',

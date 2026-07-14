@@ -73,6 +73,10 @@ pub const Runtime = struct {
     windowed: bool = false,
     grid: ?SpatialGrid = null,
     cube: [36 * 8]f32 = undefined,
+    // Flat sticker quads, one per thin axis (req_3028) — 12 verts vs the cube's 36.
+    sticker_quad_x: [12 * 8]f32 = undefined,
+    sticker_quad_y: [12 * 8]f32 = undefined,
+    sticker_quad_z: [12 * 8]f32 = undefined,
     cube_open_run_min: [30 * 8]f32 = undefined,
     cube_open_run_max: [30 * 8]f32 = undefined,
     cube_open_run_both: [24 * 8]f32 = undefined,

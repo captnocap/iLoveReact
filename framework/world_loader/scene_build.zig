@@ -348,6 +348,9 @@ pub fn build(self: anytype) !void {
         .far = @max(far, bounds.radius * 4.0 + 64.0),
     };
     self.cube = buildCube();
+    self.sticker_quad_x = m_geometry.buildStickerQuad(0);
+    self.sticker_quad_y = m_geometry.buildStickerQuad(1);
+    self.sticker_quad_z = m_geometry.buildStickerQuad(2);
     self.cube_open_run_min = buildCubeOpenRun(true, false);
     self.cube_open_run_max = buildCubeOpenRun(false, true);
     self.cube_open_run_both = buildCubeOpenRun(true, true);

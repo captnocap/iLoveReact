@@ -70,6 +70,58 @@ pub fn buildCube() [36 * 8]f32 {
     return out;
 }
 
+/// A flat two-sided sticker quad (req_3028): the cube's two faces along `axis`,
+/// flattened onto the center plane — 12 verts (4 tris) where the cube pays 36.
+/// Stickers are planes, not solids ("stickers are flat and dont have sides");
+/// the back face exists only so the one geometry serves both facings under the
+/// back-cull pipeline (the reversed side sits inside the wall it's stamped on).
+/// Same corner/UV convention as buildCube (UVFLIP-0610: one convention, one place).
+pub fn buildStickerQuad(comptime axis: u2) [12 * 8]f32 {
+    const Corner = [3]f32;
+    // The quad's own 2D corners, BL,BR,TR,TL in the cube face convention.
+    const uvs = [4][2]f32{ .{ 0, 1 }, .{ 1, 1 }, .{ 1, 0 }, .{ 0, 0 } };
+    // Per axis: the front-face corner loop with the thin coordinate at 0.
+    // Loops mirror buildCube's +axis/-axis faces (positions only differ by the
+    // flattened coordinate), so instance scale on the two live axes just works.
+    const loops: [3][2][4]Corner = .{
+        // axis 0 (x = 0): +X face then -X face
+        .{
+            .{ .{ 0, -0.5, 0.5 }, .{ 0, -0.5, -0.5 }, .{ 0, 0.5, -0.5 }, .{ 0, 0.5, 0.5 } },
+            .{ .{ 0, -0.5, -0.5 }, .{ 0, -0.5, 0.5 }, .{ 0, 0.5, 0.5 }, .{ 0, 0.5, -0.5 } },
+        },
+        // axis 1 (y = 0): +Y face then -Y face
+        .{
+            .{ .{ -0.5, 0, 0.5 }, .{ 0.5, 0, 0.5 }, .{ 0.5, 0, -0.5 }, .{ -0.5, 0, -0.5 } },
+            .{ .{ -0.5, 0, -0.5 }, .{ 0.5, 0, -0.5 }, .{ 0.5, 0, 0.5 }, .{ -0.5, 0, 0.5 } },
+        },
+        // axis 2 (z = 0): +Z face then -Z face
+        .{
+            .{ .{ -0.5, -0.5, 0 }, .{ 0.5, -0.5, 0 }, .{ 0.5, 0.5, 0 }, .{ -0.5, 0.5, 0 } },
+            .{ .{ 0.5, -0.5, 0 }, .{ -0.5, -0.5, 0 }, .{ -0.5, 0.5, 0 }, .{ 0.5, 0.5, 0 } },
+        },
+    };
+    var out: [12 * 8]f32 = undefined;
+    var i: usize = 0;
+    for (0..2) |side| {
+        const quad = loops[axis][side];
+        var n = Corner{ 0, 0, 0 };
+        n[axis] = if (side == 0) 1 else -1;
+        for ([6]usize{ 0, 1, 2, 0, 2, 3 }) |q| {
+            const p = quad[q];
+            out[i + 0] = p[0];
+            out[i + 1] = p[1];
+            out[i + 2] = p[2];
+            out[i + 3] = n[0];
+            out[i + 4] = n[1];
+            out[i + 5] = n[2];
+            out[i + 6] = uvs[q][0];
+            out[i + 7] = uvs[q][1];
+            i += 8;
+        }
+    }
+    return out;
+}
+
 pub fn buildCubeOpenRun(comptime open_min: bool, comptime open_max: bool) [(36 - (if (open_min) 6 else 0) - (if (open_max) 6 else 0)) * 8]f32 {
     const Corner = [3]f32;
     const v0 = Corner{ -0.5, -0.5, -0.5 };

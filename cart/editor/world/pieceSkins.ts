@@ -43,10 +43,11 @@ function shaderMaterialFor(ref: MaterialRef): LiveMaterial | null {
   return { hash, wgsl: preview.shader, data: preview.data, opacity: 1 };
 }
 
-// Sticker quad geometry (req_3025): a stamp is a THIN skin box sized to the
-// sticker's meter footprint, floated a hair off its face so the wall (and any
-// face-slot skin box on it) never z-fights it.
-const STICKER_THICKNESS = 0.004;
+// Sticker quad geometry (req_3025/req_3028): a stamp is a FLAT quad — thickness
+// exactly 0 marks it for the loader, which draws a 12-vert two-sided plane (4
+// tris vs the cube's 12; stickers have no sides and no real back). Floated a
+// hair off its face so the wall (and any face-slot skin box) never z-fights it.
+const STICKER_THICKNESS = 0;
 const STICKER_OUTSET = 0.008;
 const DEG = Math.PI / 180;
 
