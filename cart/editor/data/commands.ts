@@ -172,6 +172,9 @@ export const COMMANDS: Command[] = [
   // sticker at its true meter size (4x6 label default). Not selection-gated; the touch is
   // the target, like Paint Faces. The armed sticker/rot/scale live in state.stickerArm.
   { id: 'place-sticker', menu: 'Build', name: 'Place Sticker', icon: 'Sticker', key: 'K', context: true, native: true, undoable: false, tool: true, scope: 'world' },
+  // Paint Facade (req_3057): from the piece quick menu — gathers the coplanar wall run
+  // around the clicked piece and opens it as ONE meter-true paint canvas (256 px/m).
+  { id: 'paint-facade', menu: 'Build', name: 'Paint Facade', icon: 'SprayCan', key: '', context: true, native: true, undoable: false, scope: 'world', needsSelection: true },
   { id: 'open-color-studio', menu: 'Build', name: 'Open Color Studio', icon: 'Palette', key: 'C', context: true, native: true, undoable: false, scope: 'world', needsSelection: true },
 
   // ── Globals (GLOBALS req_2770) — the game's world-level tunables ──────────────────────────
@@ -392,7 +395,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('delete-selection'), MESH_SUBMENU],
   View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('world.floor.step')],
-  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('paint-faces'), cmd('place-sticker'), cmd('open-color-studio')],
+  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('paint-faces'), cmd('place-sticker'), cmd('paint-facade'), cmd('open-color-studio')],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],
 };

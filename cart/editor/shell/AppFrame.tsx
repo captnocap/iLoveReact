@@ -114,6 +114,9 @@ import { image as imageOps, quantize as quantizeImage } from '../../../runtime/i
 import { encodeRows, parseQuantizeProbe } from '../textures/pixelTexture';
 import { loadTexturePackages, textureSpec, savePixelTexture, saveExactImage } from '../data/texturePackage';
 import { loadStickers, registerStickers, ensureStickerForTexture } from '../data/stickerStore';
+import { gatherFacade, type Facade, type FacadeStroke, type FacadeStamp } from '../world/facades';
+import { setLiveFacades, saveFacadeBake } from '../world/facadeBake';
+import FacadePainterSurface from '../stage/FacadePainterSurface';
 import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageDialog';
 import { readFileBase64, remove } from '../../../runtime/hooks/fs';
 import { oklchName } from '../data/colorSpine';
@@ -729,8 +732,14 @@ export default function AppFrame() {
     scheduleWorldSave(state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, state.seq, {
       enabled: persistenceSettings.autosave,
       delayMs: persistenceSettings.autosaveDelayMs,
-    });
-  }, [state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
+    }, state.worldFacades);
+  }, [state.activeMapStem, state.worldPieces, state.objects, state.mapPaint.zones, state.worldFacades, persistenceSettings.autosave, persistenceSettings.autosaveDelayMs]);
+
+  // Facade quads follow the active map into every world view (req_3057) —
+  // livePush reads this registry when it re-pushes resident meshes/refs.
+  useEffect(() => {
+    setLiveFacades(state.activeMapStem, state.worldFacades);
+  }, [state.activeMapStem, state.worldFacades]);
 
   // GLOBALS req_2770: tuned world globals micro-save on the same contract —
   // "find a value, lock it in" is a debounced write, never a Save button.
@@ -913,7 +922,7 @@ export default function AppFrame() {
 
   const saveWorldNowAll = (reason = 'Saved'): boolean => {
     const current = stateRef.current;
-    const worldOk = flushWorldSave(current.activeMapStem, current.worldPieces, current.objects, current.mapPaint.zones, current.seq);
+    const worldOk = flushWorldSave(current.activeMapStem, current.worldPieces, current.objects, current.mapPaint.zones, current.seq, current.worldFacades);
     const mapOk = flushMapDocumentPainting(current.activeMapStem);
     const globalsOk = saveGlobalsNow(current.worldGlobals);
     const ok = worldOk && mapOk && globalsOk;
@@ -1036,7 +1045,7 @@ export default function AppFrame() {
 
     const outgoingStem = state.activeMapStem;
     const outgoingZones = state.mapPaint.zones;
-    if (!discardOutgoing && !flushWorldSave(outgoingStem, state.worldPieces, state.objects, outgoingZones, state.seq)) {
+    if (!discardOutgoing && !flushWorldSave(outgoingStem, state.worldPieces, state.objects, outgoingZones, state.seq, state.worldFacades)) {
       setState((prev) => ({ ...prev, status: `map switch stopped — could not save ${outgoingStem}/world.json` }));
       return;
     }
@@ -1155,6 +1164,12 @@ export default function AppFrame() {
   };
 
   const runCommand = (commandId: string, source: string) => {
+    if (commandId === 'paint-facade') {
+      const pieceId = stateRef.current.selectedPieceId;
+      if (pieceId) openFacadePainter(pieceId);
+      else setState((prev) => ({ ...prev, status: 'Paint Facade — select or right-click a wall piece first', contextOpen: false }));
+      return;
+    }
     if (commandId === 'open-preferences') {
       setPreferencesOpen((open) => !open);
       setState((prev) => ({ ...prev, openMenu: null, status: preferencesOpen ? 'preferences closed' : 'preferences opened' }));
@@ -1886,6 +1901,60 @@ export default function AppFrame() {
     });
   };
   const assignPieceSlot = (id: string, role: string) => assignPieceSlotAsset(id, role, stateRef.current.activeAssetId);
+
+  // Paint Facade (req_3057): gather the coplanar wall run around the seed and
+  // open it as ONE meter-true canvas document. A facade already covering the
+  // seed re-opens (the re-edit law) instead of minting a duplicate.
+  const openFacadePainter = (pieceId: string) => {
+    setState((prev) => {
+      const seed = prev.worldPieces.find((p) => p.id === pieceId);
+      if (!seed) return prev;
+      const existing = prev.worldFacades.find((f) => f.pieceIds.includes(pieceId));
+      const facade = existing ?? gatherFacade(seed, prev.worldPieces, `facade-${prev.seq}`);
+      if (!facade) {
+        return { ...prev, contextOpen: false, status: 'Paint Facade — that piece has no wall face (wall / arch / fence / railing kinds paint)' };
+      }
+      const doc = {
+        id: `doc-facade-${facade.id}`,
+        kind: 'facade' as const,
+        title: 'Facade',
+        subtitle: `${facade.widthMeters.toFixed(1)}×${facade.heightMeters.toFixed(1)}m`,
+        sourceId: facade.id,
+      };
+      return {
+        ...prev,
+        seq: existing ? prev.seq : prev.seq + 1,
+        worldFacades: existing ? prev.worldFacades : [...prev.worldFacades, facade],
+        workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
+        activeWorkspaceDocumentId: doc.id,
+        contextOpen: false,
+        status: `Facade painter — ${facade.pieceIds.length} piece(s), ${facade.widthMeters.toFixed(1)}×${facade.heightMeters.toFixed(1)}m at 256 px/m`,
+      };
+    });
+  };
+  const recordFacadeStroke = (facadeId: string, stroke: FacadeStroke) => {
+    setState((prev) => ({ ...prev, worldFacades: prev.worldFacades.map((f) => (f.id === facadeId ? { ...f, strokes: [...f.strokes, stroke] } : f)) }));
+  };
+  const recordFacadeStamp = (facadeId: string, stamp: FacadeStamp) => {
+    setState((prev) => ({ ...prev, worldFacades: prev.worldFacades.map((f) => (f.id === facadeId ? { ...f, stamps: [...f.stamps, stamp] } : f)) }));
+  };
+  const clearFacadePaint = (facadeId: string) => {
+    setState((prev) => ({ ...prev, worldFacades: prev.worldFacades.map((f) => (f.id === facadeId ? { ...f, strokes: [], stamps: [] } : f)) }));
+  };
+  // Bake: the painter's stroke readback + stamps → cached PNG → the world
+  // re-pushes (identity-bump retriggers the viewport's mesh/ref effects).
+  const saveFacadePainting = (facadeId: string, strokesRgba: Uint8Array) => {
+    const facade = stateRef.current.worldFacades.find((f) => f.id === facadeId);
+    if (!facade) return;
+    const ok = saveFacadeBake(stateRef.current.activeMapStem, facade, strokesRgba);
+    setState((prev) => ({
+      ...prev,
+      worldPieces: [...prev.worldPieces],
+      status: ok
+        ? `facade baked — ${facade.widthMeters.toFixed(1)}×${facade.heightMeters.toFixed(1)}m live on the wall`
+        : 'facade bake FAILED — see console',
+    }));
+  };
 
   // Place Sticker (req_3025): add the armed sticker to the clicked face at the
   // ray's exact hit point. The sticker asset materializes on first stamp of a
@@ -4322,6 +4391,10 @@ export default function AppFrame() {
             onPaintFace={assignPieceSlot}
             onStampSticker={stampSticker}
             onStickerArm={(patch) => setState((prev) => ({ ...prev, stickerArm: { ...prev.stickerArm, ...patch } }))}
+            onFacadeStroke={recordFacadeStroke}
+            onFacadeStamp={recordFacadeStamp}
+            onFacadeClear={clearFacadePaint}
+            onFacadeSave={saveFacadePainting}
             onArmPiece={armPiece}
             onExitMaterialFocus={() => setState((prev) => ({ ...prev, materialFocused: false, activeWorkspaceDocumentId: WORLD_DOCUMENT_ID, status: `returned to world with ${assetById(prev.activeAssetId, prev.assetOverrides).name}` }))}
             onSelectColorStudioMaterial={selectColorStudioMaterial}

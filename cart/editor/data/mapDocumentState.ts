@@ -10,6 +10,7 @@ export type MapAuthoringSlices = Pick<EditorState,
   | 'activeMapName'
   | 'activeCommandId'
   | 'worldPieces'
+  | 'worldFacades'
   | 'objects'
   | 'selectedObjectId'
   | 'selectedPieceId'
@@ -38,6 +39,7 @@ export function mapAuthoringSlicesFor(
     activeMapName: name,
     activeCommandId: 'select-tool',
     worldPieces: save.pieces.slice(),
+    worldFacades: save.facades.slice(),
     objects: save.objects.slice(),
     selectedObjectId: save.objects.find((object) => !object.hidden)?.id ?? 'obj-tile',
     selectedPieceId: null,

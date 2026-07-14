@@ -37,6 +37,10 @@ export default function Workspace(props: {
   onPieceContext: (id: string, x: number, y: number) => void;
   onPaintFace: (id: string, role: string) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
+  onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
+  onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;
+  onFacadeClear: (facadeId: string) => void;
+  onFacadeSave: (facadeId: string, strokesRgba: Uint8Array) => void;
   onArmPiece: (pieceId: string) => void;
   onExitMaterialFocus: () => void;
   onSelectColorStudioMaterial: (specId: string) => void;

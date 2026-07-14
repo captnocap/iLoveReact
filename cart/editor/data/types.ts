@@ -64,7 +64,7 @@ export type LibraryTab = 'Build' | 'Props' | 'Skins';
 // where global tunables (Globals → Physics) are tested live.
 // 'animation' (req_2786): the CAPTURE tab — webcam feed beside the exported
 // player model with live pose sync; the animation workbench arc's surface.
-export type WorkspaceDocumentKind = 'world' | 'model' | 'material' | 'playtest' | 'animation';
+export type WorkspaceDocumentKind = 'world' | 'model' | 'material' | 'playtest' | 'animation' | 'facade';
 export type WorkspaceDocument = {
   id: string;
   kind: WorkspaceDocumentKind;
@@ -452,6 +452,8 @@ export type EditorState = {
   activeTab: LibraryTab;
   activeCommandId: string;
   activeAssetId: string;
+  // Graffiti facades on the active map (req_3057) — persisted with world.json.
+  worldFacades: import('../world/facades').Facade[];
   // Place Sticker (req_3025): the armed stamp — an imported texture's spec id,
   // quarter turns clockwise, and a uniform multiplier of the sticker's meter size.
   stickerArm: { textureId: string | null; rot: number; scale: number };

@@ -15,6 +15,7 @@ import ModelDocumentSurface, { type OutlinerHandlers } from './ModelDocumentSurf
 import PlaytestSurface from './PlaytestSurface';
 import StageTabs from './StageTabs';
 import WorldEditorSurface from './WorldEditorSurface';
+import FacadePainterSurface from './FacadePainterSurface';
 import BuildBar from './BuildBar';
 import MapPaintDock from './MapPaintDock';
 import { worldToolFor } from '../world/worldTool';
@@ -42,6 +43,10 @@ export default function Stage(props: {
   onPieceContext: (id: string, x: number, y: number) => void;
   onPaintFace: (id: string, role: string) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
+  onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
+  onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;
+  onFacadeClear: (facadeId: string) => void;
+  onFacadeSave: (facadeId: string, strokesRgba: Uint8Array) => void;
   onArmPiece: (pieceId: string) => void;
   onExitMaterialFocus: () => void;
   onSelectColorStudioMaterial: (specId: string) => void;
@@ -89,6 +94,20 @@ export default function Stage(props: {
             pieces={props.state.worldPieces}
             authoredPieces={props.state.authoredBuildPieces}
           />
+        ) : activeDocument.kind === 'facade' ? (
+          (() => {
+            const facade = props.state.worldFacades.find((f) => f.id === activeDocument.sourceId);
+            return facade ? (
+              <FacadePainterSurface
+                facade={facade}
+                stickerArm={props.state.stickerArm}
+                onStroke={props.onFacadeStroke}
+                onStamp={props.onFacadeStamp}
+                onClear={props.onFacadeClear}
+                onSave={props.onFacadeSave}
+              />
+            ) : null;
+          })()
         ) : activeDocument.kind === 'world' ? (
           <WorldEditorSurface
             paintActive={props.state.mapPaint.active}

@@ -41,6 +41,8 @@ const QUICK_VERBS: { id: string; label: string; keyHint: string; closes: boolean
   // is two more clicks without re-picking; the header's yaw readout tracks live.
   { id: WORLD_PIECE_ROTATE_COMMAND_ID, label: 'Rotate 90°', keyHint: 'R', closes: false },
   { id: WORLD_PIECE_DELETE_COMMAND_ID, label: 'Delete', keyHint: 'Del', closes: true },
+  // Paint Facade (req_3057): the coplanar wall run around THIS piece opens as one canvas.
+  { id: 'paint-facade', label: 'Paint Facade', keyHint: '', closes: true },
 ];
 
 const MENU_W = 240;
