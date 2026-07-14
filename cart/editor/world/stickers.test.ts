@@ -14,7 +14,9 @@ import { pieceSkinBoxes, stickerLocalFrom } from './pieceSkins';
 import { rotatePackedTexture } from '../textures/pixelTexture';
 import { registerStickers } from '../data/stickerStore';
 import { registerImportedSpecs } from '../textures/shaders';
-import type { PlacedPiece } from './pieces';
+import { pickAuthoredPlacement, type PlacedPiece } from './pieces';
+import { setAuthoredPieces } from './authoredRegistry';
+import { cacheAuthoredMesh } from './authoredMesh';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -118,6 +120,61 @@ test('top face (floor) — thin in y, footprint in the ground plane', () => {
   assert(box.sy < 0.01, 'thin in y');
   near(box.sx, STICKER_W, 'sx'); near(box.sz, STICKER_H, 'sz');
   assert(box.cy > 0.2, 'lifted off the surface');
+});
+
+// ── authored (hand-exported) pieces are stamp targets too (req_3050) ─────────
+// The host catalog raycast can't see model: pieces; the JS AABB pick now names
+// the entry face, so a stamp on an authored wall round-trips like any catalog hit.
+
+test('authored piece at yaw 90 — AABB pick names the hit face; the stamp lands on it', () => {
+  setAuthoredPieces([{ id: 'model:test-wall', modelId: 'test-wall', pkgId: 'pkg-test', label: 'Test Wall', kind: 'wall' } as any]);
+  // Two corner verts (pos3+normal3+uv2 stride) are enough to define the AABB:
+  // a 3m-wide, 3m-tall, 0.2m-thick wall centered on x/z.
+  cacheAuthoredMesh('test-wall', new Float32Array([
+    -1.5, 0, -0.1, 0, 0, 1, 0, 0,
+    1.5, 3, 0.1, 0, 0, 1, 1, 1,
+  ]));
+  const piece: PlacedPiece = { id: 'a1', pieceId: 'model:test-wall', x: 10, y: 0, z: 5, yawDegrees: 90 };
+  // At yaw 90 the wall's thin axis lies along world x; approach from -x.
+  const ray = { origin: { x: 5, y: 1.5, z: 5 }, dir: { x: 1, y: 0, z: 0 } };
+  const hit = pickAuthoredPlacement(ray, [piece], 1000);
+  assert(!!hit, 'authored pick hits');
+  near(hit!.point.x, 9.9, 'hit point on the -x face plane');
+  assert(!!hit!.normal, 'entry face names a normal');
+  near(hit!.normal!.x, -1, 'outward normal faces the ray');
+  const local = stickerLocalFrom(piece, hit!.point, hit!.normal!);
+  const withSticker: PlacedPiece = {
+    ...piece,
+    stickers: [{ id: 's2', stickerId: 'stk-test', role: 'surface', ...local, scale: 1, rot: 0 }],
+  };
+  const push = pieceSkinBoxes([withSticker]);
+  assert(push.materials.length === 1, 'sticker material resolves on an authored piece');
+  const f = new Float32Array(push.boxes.buffer, 0, 7);
+  near(f[0]!, 9.9 - 0.008, 'box floats 8mm off the hit face');
+  near(f[1]!, 1.5, 'cy at the hit height');
+  near(f[2]!, 5, 'cz at the hit');
+  // The row carries yaw 90: the face normal is LOCAL z, so the thin slot is sz.
+  assert(f[5]! < 0.01, 'thin along the face normal (local z under yaw 90)');
+});
+
+test('overlapping stamps stack by stamp order — each lifts a step above the last', () => {
+  const base = placedWall(0);
+  const local = stickerLocalFrom(base, { x: 4, y: 1, z: 7.1 }, { x: 0, y: 0, z: 1 });
+  const piece: PlacedPiece = {
+    ...base,
+    stickers: [0, 1, 2].map((i) => ({ id: `s${i}`, stickerId: 'stk-test', role: 'front', ...local, scale: 1, rot: 0 })),
+  };
+  const push = pieceSkinBoxes([piece]);
+  const f = new Float32Array(push.boxes.buffer);
+  const cz0 = f[2]!, cz1 = f[8 + 2]!, cz2 = f[16 + 2]!;
+  near(cz1 - cz0, 0.002, 'second stamp sits one step above the first');
+  near(cz2 - cz1, 0.002, 'third above the second');
+});
+
+test('ray starting inside the authored box yields no stampable face', () => {
+  const piece: PlacedPiece = { id: 'a2', pieceId: 'model:test-wall', x: 0, y: 0, z: 0, yawDegrees: 0 };
+  const hit = pickAuthoredPlacement({ origin: { x: 0, y: 1, z: 0 }, dir: { x: 0, y: 0, z: 1 } }, [piece], 1000);
+  assert(!!hit && hit!.normal === null, 'inside start → t hit but null normal');
 });
 
 test('unknown sticker id renders nothing (no box, no material)', () => {

@@ -49,6 +49,11 @@ function shaderMaterialFor(ref: MaterialRef): LiveMaterial | null {
 // hair off its face so the wall (and any face-slot skin box) never z-fights it.
 const STICKER_THICKNESS = 0;
 const STICKER_OUTSET = 0.008;
+// Overlapping stickers must never share a plane (req_3050: "reality doesnt
+// thrash around a z-index based on camera pov") — each stamp on a piece lifts
+// a step above the one before it, so stamp order IS stack order, exactly like
+// slapping stickers over each other.
+const STICKER_LAYER_STEP = 0.002;
 const DEG = Math.PI / 180;
 
 /** The sticker asset's texture as a live material, rotation baked into the
@@ -72,13 +77,14 @@ function stickerBoxFor(
   p: StickerPlacement,
   wMeters: number,
   hMeters: number,
+  layer: number,
 ): { cx: number; cy: number; cz: number; sx: number; sy: number; sz: number; yaw: number } {
   const w = wMeters * p.scale;
   const h = hMeters * p.scale;
   const swapped = p.rot % 2 === 1; // quarter turns swap the footprint
   const fw = swapped ? h : w;
   const fh = swapped ? w : h;
-  const lift = STICKER_OUTSET + STICKER_THICKNESS / 2;
+  const lift = STICKER_OUTSET + layer * STICKER_LAYER_STEP + STICKER_THICKNESS / 2;
   const ax = p.lx + p.nx * lift;
   const ay = p.ly + p.ny * lift;
   const az = p.lz + p.nz * lift;
@@ -147,15 +153,15 @@ export function pieceSkinBoxes(pieces: readonly PlacedPiece[]): SkinPush {
         out.push({ cx: b.cx, cy: b.cy, cz: b.cz, sx: b.sx, sy: b.sy, sz: b.sz, yaw: b.yawDegrees, matHash: mat.hash });
       }
     }
-    for (const placement of piece.stickers ?? []) {
+    (piece.stickers ?? []).forEach((placement, layer) => {
       const sticker = stickerById(placement.stickerId);
-      if (!sticker) continue;
+      if (!sticker) return;
       const mat = stickerMaterialFor(placement);
-      if (!mat) continue;
+      if (!mat) return;
       if (!materials.has(mat.hash)) materials.set(mat.hash, mat);
-      const box = stickerBoxFor(piece, placement, sticker.widthMeters, sticker.heightMeters);
+      const box = stickerBoxFor(piece, placement, sticker.widthMeters, sticker.heightMeters, layer);
       out.push({ ...box, matHash: mat.hash });
-    }
+    });
   }
   const buf = new ArrayBuffer(out.length * SKIN_BOX_STRIDE_BYTES);
   const f = new Float32Array(buf);

@@ -115,8 +115,8 @@ export function pickAuthoredPlacement(
   ray: { origin: { x: number; y: number; z: number }; dir: { x: number; y: number; z: number } },
   pieces: readonly PlacedPiece[],
   maxDistance: number,
-): { piece: PlacedPiece; t: number } | null {
-  let best: { piece: PlacedPiece; t: number } | null = null;
+): { piece: PlacedPiece; t: number; point: { x: number; y: number; z: number }; normal: { x: number; y: number; z: number } | null } | null {
+  let best: { piece: PlacedPiece; t: number; entry: AabbEntry } | null = null;
   for (const piece of pieces) {
     const authored = authoredPieceFor(piece.pieceId);
     if (!authored) continue;
@@ -132,27 +132,61 @@ export function pickAuthoredPlacement(
     const oz = ray.origin.z - piece.z;
     const localOrigin = { x: ox * ca - oz * sa, y: oy, z: ox * sa + oz * ca };
     const localDir = { x: ray.dir.x * ca - ray.dir.z * sa, y: ray.dir.y, z: ray.dir.x * sa + ray.dir.z * ca };
-    const t = rayAabbEntry(localOrigin, localDir, b, maxDistance);
-    if (t !== null && (!best || t < best.t)) best = { piece, t };
+    const entry = rayAabbEntry(localOrigin, localDir, b, maxDistance);
+    if (entry !== null && (!best || entry.t < best.t)) best = { piece, t: entry.t, entry };
   }
-  return best;
+  if (!best) return null;
+  // World hit point straight from t (frame-independent). The entry face names
+  // the outward normal in the pick's local frame; rotate it back by +yaw
+  // (the exact inverse of the un-rotate above). Null when the ray started
+  // inside the box — there is no entry face to name (req_3050 sticker stamps
+  // need the normal; piece picking only needs t).
+  const point = {
+    x: ray.origin.x + ray.dir.x * best.t,
+    y: ray.origin.y + ray.dir.y * best.t,
+    z: ray.origin.z + ray.dir.z * best.t,
+  };
+  let normal: { x: number; y: number; z: number } | null = null;
+  if (best.entry.axis !== null) {
+    const ln = { x: 0, y: 0, z: 0 };
+    if (best.entry.axis === 0) ln.x = best.entry.side;
+    else if (best.entry.axis === 1) ln.y = best.entry.side;
+    else ln.z = best.entry.side;
+    const yaw = (best.piece.yawDegrees * Math.PI) / 180;
+    const cy = Math.cos(yaw);
+    const sy = Math.sin(yaw);
+    normal = { x: ln.x * cy - ln.z * sy, y: ln.y, z: ln.x * sy + ln.z * cy };
+  }
+  return { piece: best.piece, t: best.t, point, normal };
 }
 
-/** Slab-test a ray against an AABB; the entry distance along the ray, or null. */
+type AabbEntry = {
+  t: number;
+  /** the slab that produced the entry (0=x 1=y 2=z), or null when the ray
+   *  origin sits inside the box (no entry face). */
+  axis: 0 | 1 | 2 | null;
+  /** outward normal sign on that axis. */
+  side: -1 | 1;
+};
+
+/** Slab-test a ray against an AABB; the entry distance + entry face, or null. */
 function rayAabbEntry(
   origin: { x: number; y: number; z: number },
   dir: { x: number; y: number; z: number },
   b: MeshBounds,
   maxDistance: number,
-): number | null {
+): AabbEntry | null {
   let tNear = 0;
   let tFar = maxDistance;
+  let axis: 0 | 1 | 2 | null = null;
+  let side: -1 | 1 = 1;
   const slabs: [number, number, number, number][] = [
     [origin.x, dir.x, b.minX, b.maxX],
     [origin.y, dir.y, b.minY, b.maxY],
     [origin.z, dir.z, b.minZ, b.maxZ],
   ];
-  for (const [o, d, lo, hi] of slabs) {
+  for (let i = 0; i < slabs.length; i += 1) {
+    const [o, d, lo, hi] = slabs[i]!;
     if (Math.abs(d) < 1e-9) {
       if (o < lo || o > hi) return null;
       continue;
@@ -160,11 +194,16 @@ function rayAabbEntry(
     let t0 = (lo - o) / d;
     let t1 = (hi - o) / d;
     if (t0 > t1) { const tmp = t0; t0 = t1; t1 = tmp; }
-    if (t0 > tNear) tNear = t0;
+    if (t0 > tNear) {
+      tNear = t0;
+      axis = i as 0 | 1 | 2;
+      // Entering against the direction of travel: the face faced the ray.
+      side = d > 0 ? -1 : 1;
+    }
     if (t1 < tFar) tFar = t1;
     if (tNear > tFar) return null;
   }
-  return tNear;
+  return { t: tNear, axis, side };
 }
 
 /** The grid module placements snap to (the catalog's 3m piece module). */

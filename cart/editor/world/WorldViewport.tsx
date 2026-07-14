@@ -222,16 +222,24 @@ export default function WorldViewport(props: {
     onPaintFaceRef.current(hit.id, hit.role);
   }, [pickFaceAt]);
 
-  // Place Sticker (req_3025): the click's face hit, converted to the piece-local
-  // anchor + normal the placement stores. Same pick as Paint Faces; the hit
-  // POINT (not just the role) is what makes the stamp land where the ray touched.
+  // Place Sticker (req_3025/req_3050): the click's face hit, converted to the
+  // piece-local anchor + normal the placement stores. Both pick paths are stamp
+  // targets — catalog pieces via the host raycast, authored (hand-exported)
+  // pieces via the JS AABB pick's entry face; nearest hit wins. Authored pieces
+  // have no slot roles, so their stamps record 'surface'.
   const stampStickerAt = useCallback((lx: number, ly: number): void => {
     const ray = stage.worldRay(lx, ly, rectRef.current);
     if (!ray) return;
     const hostHit = pickBuildPieceHostHit(ray, piecesRef.current, 1000);
-    if (!hostHit) return;
     const authoredHit = pickAuthoredPlacement(ray, piecesRef.current, 1000);
-    if (authoredHit && authoredHit.t < hostHit.t) return; // a mesh piece occludes the face
+    const authoredInFront = authoredHit && (!hostHit || authoredHit.t < hostHit.t);
+    if (authoredInFront) {
+      if (!authoredHit.normal) return; // ray started inside the box — no face to stamp
+      const local = stickerLocalFrom(authoredHit.piece, authoredHit.point, authoredHit.normal);
+      onStampStickerRef.current(authoredHit.piece.id, 'surface', local);
+      return;
+    }
+    if (!hostHit) return;
     const role = faceRoleForHit(hostHit.piece.pieceId, hostHit.piece.yawDegrees, hostHit.normal);
     if (!role) return;
     const local = stickerLocalFrom(hostHit.piece, hostHit.point, hostHit.normal);
