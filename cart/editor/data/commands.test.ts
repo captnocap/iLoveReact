@@ -10,7 +10,7 @@
 //   tools/v8cli /tmp/editor-commands.test.js
 
 import {
-  commandById, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
+  COMMANDS, MENUS, commandById, menuNodes, meshPartCommands, meshToolCommands, meshTopoCommands, modelContextMenuLayout,
   worldActionBarCommands, type MenuNode,
 } from './commands';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
@@ -118,15 +118,24 @@ test('Export Prop exposes gameplay roles for intersections and transit stops', (
   }
 });
 
-test('Section D follows the armed tool and excludes unavailable roadmap rows', () => {
+test('dead placeholder commands and their empty menus are absent', () => {
+  const commandIds = new Set(COMMANDS.map((command) => command.id));
+  const removed = [
+    'compile-rle', 'toggle-view-mode', 'paint-material', 'sample-material',
+    'add-trigger', 'set-spawn', 'mission-point', 'author-sequence', 'show-pipeline',
+  ];
+  for (const id of removed) assert(!commandIds.has(id), `${id} is still registered`);
+  assert(!MENUS.some((menu) => menu === ('Story' as any) || menu === ('Help' as any)), 'an empty placeholder menu remains in chrome');
+});
+
+test('Section D follows the armed tool and contains only real Build tools', () => {
   const build = worldActionBarCommands({ activeCommandId: 'select-tool' });
   assert(build.every((command) => command.menu === 'Build'), 'default world bar mirrors unrelated menu history');
   assert(build.some((command) => command.id === 'place-piece'), 'real Build tools disappeared');
 
   const afterFloor = worldActionBarCommands({ activeCommandId: 'world.floor.step' });
   assert(afterFloor.map((command) => command.id).join('|') === build.map((command) => command.id).join('|'), 'floor report swapped Section D family');
-  assert(!afterFloor.some((command) => command.available === false), 'unavailable roadmap command projected into Section D');
-  assert(!afterFloor.some((command) => command.id === 'add-trigger' || command.id === 'set-spawn'), 'Trigger/Spawn leaked into Section D');
+  assert(!afterFloor.some((command) => command.id === 'paint-material' || command.id === 'sample-material'), 'legacy material tools leaked into Section D');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

@@ -33,19 +33,13 @@ const GLOBAL_CHORDS: Record<string, string> = {
 const WORLD_KEYS: Record<string, string> = {
   b: 'place-piece',
   v: 'move-selection',
-  p: 'paint-material',
   n: 'paint-faces',
   c: 'open-color-studio',
-  i: 'sample-material',
-  t: 'add-trigger',
-  g: 'mission-point',
-  q: 'author-sequence',
   m: 'toggle-minimap',
   f: 'focus-selection',
   // W/A/S/D are the camera pan (WorldViewport owns them) — so no bare-key world command may claim
   // them. 'd' used to be Duplicate, which fired on every strafe and spammed copies of the phantom
-  // selection (req_2558); 's' was the (inert) Set Spawn. Both move to menu-only so WASD is clean.
-  tab: 'toggle-view-mode',
+  // selection (req_2558); 's' was the inert Set Spawn placeholder. Neither owns a world key now.
   ']': 'world.floor.step',
   delete: 'delete-selection',
   // R rotates the selected placed piece 90° (req_2733) — free on the world surface; the model

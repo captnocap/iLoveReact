@@ -30,13 +30,13 @@
 // them. Each owning component is stamped `SECTION <X>` at its top; grep for
 // that to land in the right file.
 export const SECTIONS = {
-  A: { region: 'chrome', name: 'Window Chrome', file: 'shell/Chrome.tsx', contains: 'Shitty Games brand · File/Edit/View/Build menu bar · Compile · Editor/Play toggle · window controls' },
-  B: { region: 'leftRail', name: 'Left Rail', file: 'shell/LeftRail.tsx', contains: 'the vertical domain icon stack (Eye, Grid, Box, Actor, Data, Pipeline)' },
+  A: { region: 'chrome', name: 'Window Chrome', file: 'shell/Chrome.tsx', contains: 'Shitty Games brand · menu bar · active map · Editor/Play toggle · window controls' },
+  B: { region: 'leftRail', name: 'Left Rail', file: 'shell/LeftRail.tsx', contains: 'the vertical domain icon stack (Eye, Grid, Box, Actor, Data)' },
   C: { region: 'contentBrowser', name: 'Content Browser', file: 'library/LibraryPanel.tsx', contains: 'content tree · search · asset grids · model gallery' },
-  D: { region: 'actionBar', name: 'Action Bar', file: 'stage/ToolOptions.tsx', contains: 'THE toolbar: tool row above the stage — mesh tools, snap, floor ▼/▲, view modes, paint segment (shell/PaintToolbar.tsx), map-paint bar (stage/MapPaintBar.tsx)' },
+  D: { region: 'actionBar', name: 'Action Bar', file: 'stage/ToolOptions.tsx', contains: 'THE toolbar: tool row above the stage — mesh tools, snap, floor ▼/▲, paint segment (shell/PaintToolbar.tsx), map-paint bar (stage/MapPaintBar.tsx)' },
   E: { region: 'viewport', name: 'Stage', file: 'stage/Stage.tsx', contains: 'the flexing center surface (world / model / playtest / animation / material focus) + its in-viewport docks (BuildBar, MapPaintDock)' },
   F: { region: 'viewport', name: 'Stage Tabs', file: 'stage/StageTabs.tsx', contains: 'the open-document tab strip at the bottom edge of the stage' },
-  G: { region: 'focusPanel', name: 'Focus Panel', file: 'inspector/Inspector.tsx', contains: 'the right panel (inspector / layers / grid / mission / routes) + its 40px pane-switch rail' },
+  G: { region: 'focusPanel', name: 'Focus Panel', file: 'inspector/Inspector.tsx', contains: 'the right panel (inspector / layers / grid) + its 40px pane-switch rail' },
   H: { region: 'statusBar', name: 'Status Bar', file: 'shell/BuildDock.tsx', contains: 'build dock: undo/redo · build journal · eventbus · perf · memory · status line · coords' },
 } as const;
 
@@ -49,7 +49,7 @@ const BORDER = 1;
 const PANEL_GUTTER = 10;
 
 // ── Region outer dimensions (the fixed numbers) ────────────────────────────
-const CHROME_HEIGHT = 37; // window chrome: brand + menu bar + Compile + route toggle (HW_Chrome)
+const CHROME_HEIGHT = 37; // window chrome: brand + menu bar + active map + route toggle (HW_Chrome)
 const ACTION_BAR_HEIGHT = 36; // action bar: THE toolbar row above the stage (HW_ToolOptions)
 const LEFT_RAIL_WIDTH = 48; // domain rail on the far left edge (HW_LeftRail)
 const CONTENT_BROWSER_WIDTH = 350; // content browser, left panel (HW_SidePanel)
@@ -58,7 +58,7 @@ const FOCUS_RAIL_WIDTH = 40; // the pane-switch icon rail INSIDE the focus panel
 const STATUS_BAR_HEIGHT = 31; // status bar: the bottom build dock (HW_BuildDock)
 
 export const REGIONS = {
-  /** WINDOW CHROME — the top strip. Menu bar, Compile, Editor/Play toggle. */
+  /** WINDOW CHROME — the top strip. Menu bar, active map, Editor/Play toggle. */
   chrome: { height: CHROME_HEIGHT },
 
   /** ACTION BAR — the tool row (ToolOptions) pinned under the chrome, above the stage. */

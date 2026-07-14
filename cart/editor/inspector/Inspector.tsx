@@ -1,5 +1,5 @@
 // SECTION G — Focus Panel (see shell/regions.ts SECTIONS): the right panel
-// (inspector / layers / grid / mission / routes) + its pane-switch rail.
+// (inspector / layers / grid) + its pane-switch rail.
 import { useEffect, useState } from 'react';
 import { Box, Col, Pressable, Row, ScrollView, Text } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
@@ -10,7 +10,7 @@ import { REGIONS } from '../shell/regions';
 import type { ModelFocusBridge, ModelFocusShape } from '../stage/ModelView';
 import { commandById } from '../data/commands';
 import { FLOORS, PRESETS, RIGHT_PANES, SNAP_MODES, effectiveModelPackage } from '../data/content';
-import { missionCounts, objectMetricRows } from '../data/readouts';
+import { objectMetricRows } from '../data/readouts';
 import type { Asset, EditorState, WorldObject } from '../data/types';
 import type { MaterialRef } from '../world/pieces';
 import { assetById, resolveMaterialRef } from '../data/catalog';
@@ -20,7 +20,6 @@ import { skeletonToPropRig, type PropRig } from '../../../runtime/skeleton';
 import PieceBody from './PieceBody';
 import GlobalsSection from './GlobalsSection';
 import PresetSection from './PresetSection';
-import MissionSection from './MissionSection';
 import ModelDetailBody from '../library/ModelDetailBody';
 import ModelBrushDock, { type ColorSpineHandlers } from './ModelBrushDock';
 import ModelOutliner from '../stage/ModelOutliner';
@@ -312,7 +311,6 @@ export default function Inspector(props: {
   activeObject: WorldObject;
   activeAsset: Asset;
   onPane: (pane: string) => void;
-  onCommand: (id: string, source: string) => void;
   onPreset: () => void;
   onPresetOption: (preset: string) => void;
   onModelBrush: (brush: Brush) => void;
@@ -349,7 +347,6 @@ export default function Inspector(props: {
     ? effectiveModelPackage(activeDocument.sourceId, props.state.modelOverrides, props.state.modelDupes)
     : null;
   const activeCommand = commandById(props.state.activeCommandId);
-  const counts = missionCounts(props.state);
   const pathRows = props.activeObject.kind === 'TILE'
     ? [
       ['walkable', '—'],
@@ -378,7 +375,6 @@ export default function Inspector(props: {
       ['lightThru', '—'],
       ['soundOcc', '—'],
     ];
-  const showMission = props.state.rightPane === 'mission' || activeCommand.menu === 'Story';
   // Playtest surface (GLOBALS req_2770): the focus panel IS the globals editor —
   // tune a field, the playtest viewport pushes it live, the micro-save locks it in.
   if (activeDocument?.kind === 'playtest') {
@@ -575,19 +571,6 @@ export default function Inspector(props: {
         ) : null}
         <ReadOnlySection title="PLACEMENT" color="primary" rows={pathRows} />
         <ReadOnlySection title="VISIBILITY" color="primary" rows={visibilityRows} />
-        {showMission ? (
-          <MissionSection
-            rows={[
-              ['in mission', 'editing'],
-              ['trigger volumes', String(counts.triggers)],
-              ['mission points', String(counts.points)],
-              ['active sequence', '—'],
-            ]}
-            triggerCount={counts.triggers}
-            pointCount={counts.points}
-            onCommand={props.onCommand}
-          />
-        ) : null}
       </C.HW_Inspector>
       <FocusRail activePane={props.state.rightPane} onPane={props.onPane} />
     </C.HW_RightPanel>

@@ -32,7 +32,6 @@ classifier({
   // Button labels NEVER wrap (req_2626 II) — truncate loudly instead.
   HW_PillText: { type: 'Text', fontSize: 10, color: 'theme:textSecondary', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 700 } },
   HW_PillTextOn: { type: 'Text', fontSize: 10, color: 'theme:segActiveText', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO, fontWeight: 800 } },
-  HW_Compile: { type: 'Pressable', style: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 12, paddingRight: 12, borderRadius: 'theme:radiusLg', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:compileBg' }, hoverStyle: { backgroundColor: 'theme:compileBgHover' } },
   HW_WindowControls: { type: 'Box', style: { height: '100%', flexDirection: 'row', alignItems: 'center', marginRight: -10 } },
   HW_WindowButton: { type: 'Pressable', style: { width: 38, height: '100%', alignItems: 'center', justifyContent: 'center' }, hoverStyle: { backgroundColor: 'theme:surfaceHover' } },
   HW_WindowClose: { type: 'Pressable', style: { width: 38, height: '100%', alignItems: 'center', justifyContent: 'center' }, hoverStyle: { backgroundColor: 'theme:error' } },

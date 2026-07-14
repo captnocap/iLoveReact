@@ -16,8 +16,8 @@ export function worldToolFor(activeCommandId: string): WorldTool {
     case 'paint-faces': return 'paintFace';
     // Place Sticker (req_3025): a click stamps the armed sticker on the face hit.
     case 'place-sticker': return 'sticker';
-    // 'select-tool' and anything that isn't a viewport click-mode (paint-material, color studio,
-    // sample, …) fall to Select: a click picks the piece under it and never places.
+    // 'select-tool' and anything that isn't a viewport click-mode (Color Studio, floor
+    // controls, etc.) fall to Select: a click picks the piece under it and never places.
     default: return 'select';
   }
 }

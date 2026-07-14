@@ -1,5 +1,5 @@
 import { C } from '../workspace.cls';
-import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb, ViewMode } from '../data/types';
+import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { OutlinerHandlers } from './ModelDocumentSurface';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
@@ -23,7 +23,6 @@ export default function Workspace(props: {
   onFloor: (delta: number) => void;
   /** toggle hiding the ACTIVE floor's walls (storey cutaway extra, req_2567) */
   onWallsDown: () => void;
-  onViewMode: (mode: ViewMode) => void;
   /** The paint controls segment for the action bar (ToolOptions renders it while painting). */
   paintBar?: any;
   selectedPartCount: number;

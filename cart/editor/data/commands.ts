@@ -1,16 +1,16 @@
 // editor/data/commands.ts — command table + enablement + menu geometry/tree.
 //
 // The file menus are the source-of-truth command registry (DESIGN_INTAKE). Every command
-// declares the surface it's relevant on (`scope`) and whether it exists yet (`available`);
-// commandEnabled folds those into the sane-app "grayed-with-reason" state, and menuNodes
-// lays the registry out as the nested tree the dropdown renders. Pure data + pure helpers.
+// declares the surface it's relevant on (`scope`); commandEnabled folds that into the
+// sane-app "grayed-with-reason" state, and menuNodes lays the registry out as the nested
+// tree the dropdown renders. Commands enter this table when they have real behavior.
 import { activeSurface, hasSelection } from './surfaces';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import { PROP_EXPORT_TARGETS, propExportCommandId } from './propExports';
 import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
-export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Story', 'Globals', 'Window', 'Help'];
+export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Globals', 'Window'];
 export const MENU_DROPDOWN_WIDTH = 420;
 
 // The starter primitives under File → New Mesh (fresh document) and Edit → Mesh → Add Primitive
@@ -122,9 +122,6 @@ export const COMMANDS: Command[] = [
   ...EXPORT_BUILD_COMMANDS,
   ...EXPORT_PROP_COMMANDS,
   EXPORT_CHARACTER_COMMAND,
-  // Compile bakes the WORLD to RLE game data; the pipeline isn't wired yet (returns 0/0).
-  { id: 'compile-rle', menu: 'File', name: 'Compile RLE Game Data', icon: 'PackageCheck', key: 'F9', context: false, native: true, undoable: false, scope: 'world', available: false },
-
   // ── Edit ──────────────────────────────────────────────────────────────────────────────────
   // Undo/redo route per surface in runCommand (model → host mesh journal; world → local history).
   { id: 'undo-local', menu: 'Edit', name: 'Undo', icon: 'Undo2', key: 'Ctrl+Z', context: false, native: true, undoable: false, scope: 'global' },
@@ -137,7 +134,6 @@ export const COMMANDS: Command[] = [
   ...PAINT_RES_COMMANDS,
 
   // ── View ──────────────────────────────────────────────────────────────────────────────────
-  { id: 'toggle-view-mode', menu: 'View', name: 'Switch 2D/3D View', icon: 'PanelTop', key: 'Tab', context: false, native: true, undoable: false, scope: 'world' },
   { id: 'toggle-minimap', menu: 'View', name: 'Toggle Linked 2D Map', icon: 'Map', key: 'M', context: false, native: true, undoable: false, scope: 'world' },
   // Focus is an armable viewport MODE (req_2550): arm it, then click a piece to frame it. As a
   // mode it isn't selection-gated (the click provides the target), so no needsSelection.
@@ -150,8 +146,6 @@ export const COMMANDS: Command[] = [
   // Grow the world by 120 m chunks from a 2D topology view (req_2703): the dialog
   // shows the map's chunk occupancy with a "+" on every open edge slot.
   { id: 'add-chunk', menu: 'Map', name: 'Add Chunk...', icon: 'Grid2x2Plus', key: '', context: false, native: true, undoable: false, scope: 'world' },
-  { id: 'add-trigger', menu: 'Map', name: 'Add Trigger Volume', icon: 'BoxSelect', key: 'T', context: true, native: true, undoable: true, tool: true, scope: 'world', available: false },
-  { id: 'set-spawn', menu: 'Map', name: 'Set Spawn Point', icon: 'MapPin', key: 'S', context: true, native: true, undoable: true, tool: true, scope: 'world', available: false },
   // FLOORCTL req_2485: steps the REAL active storey (0 = Ground) up, wrapping past the cap.
   { id: 'world.floor.step', menu: 'Map', name: 'Step Active Floor', icon: 'Layers', key: ']', context: false, native: true, undoable: false, scope: 'world' },
 
@@ -167,7 +161,6 @@ export const COMMANDS: Command[] = [
   // exists, otherwise the armed placement ghost. The enablement gate below keeps
   // both routes discoverable on the world surface.
   { id: 'rotate-selection', menu: 'Build', name: 'Rotate Piece', icon: 'RotateCw', key: 'R', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
-  { id: 'paint-material', menu: 'Build', name: 'Paint Material', icon: 'Brush', key: 'P', context: true, native: true, undoable: true, tool: true, scope: 'world', needsSelection: true },
   // Paint Faces (req_2879): an armable brush MODE — touch a placed piece's face and the
   // browser's active material lands in THAT face's slot (front vs back stay separate, so the
   // exterior and interior of one wall paint independently). A drag sweeps across faces. Not
@@ -178,11 +171,6 @@ export const COMMANDS: Command[] = [
   // the target, like Paint Faces. The armed sticker/rot/scale live in state.stickerArm.
   { id: 'place-sticker', menu: 'Build', name: 'Place Sticker', icon: 'Sticker', key: 'K', context: true, native: true, undoable: true, tool: true, scope: 'world' },
   { id: 'open-color-studio', menu: 'Build', name: 'Open Color Studio', icon: 'Palette', key: 'C', context: true, native: true, undoable: false, tool: true, scope: 'world', needsSelection: true },
-  { id: 'sample-material', menu: 'Build', name: 'Sample Material', icon: 'Pipette', key: 'I', context: true, native: true, undoable: false, tool: true, scope: 'world', needsSelection: true },
-
-  // ── Story (world) ─────────────────────────────────────────────────────────────────────────
-  { id: 'mission-point', menu: 'Story', name: 'Place Mission Point', icon: 'Flag', key: 'G', context: true, native: true, undoable: true, tool: true, scope: 'world', available: false },
-  { id: 'author-sequence', menu: 'Story', name: 'Author Sequence Marker', icon: 'Route', key: 'Q', context: true, native: true, undoable: true, tool: true, scope: 'world', available: false },
 
   // ── Globals (GLOBALS req_2770) — the game's world-level tunables ──────────────────────────
   // Each leaf opens the PLAYTEST tab (the editor world with the embodied player) and puts
@@ -198,9 +186,6 @@ export const COMMANDS: Command[] = [
   { id: 'toggle-performance', menu: 'Window', name: 'Performance', icon: 'Gauge', key: '', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'toggle-memory', menu: 'Window', name: 'Memory', icon: 'MemoryStick', key: '', context: false, native: true, undoable: false, scope: 'global' },
   { id: 'toggle-build-journal', menu: 'Window', name: 'Build Journal', icon: 'BookOpen', key: '', context: false, native: true, undoable: false, scope: 'global' },
-
-  // ── Help ──────────────────────────────────────────────────────────────────────────────────
-  { id: 'show-pipeline', menu: 'Help', name: 'Show Feature Pipeline', icon: 'Workflow', key: '?', context: false, native: false, undoable: false, scope: 'global', available: false },
 
   // ── Model-surface mesh tools (Edit → Mesh; the host-native mesh editor) ──────────────────────
   // scope 'model' → only enabled when a model document is the active surface. Keys resolve per
@@ -315,15 +300,14 @@ let g_undoDepths: UndoDepths = { undo: 0, redo: 0, source: 'world' };
 export function publishUndoDepths(d: UndoDepths): void { g_undoDepths = d; }
 
 // ── Enablement (the sane-app grayed-with-reason gate) ─────────────────────────────────────────
-// A command is off when: a blocking overlay is unresolved (modal discipline), the capability
-// doesn't exist yet, its surface isn't in view, it needs a selection and there is none, or it's
-// undo/redo with an empty stack. Off commands render grayed with the reason; they never vanish.
+// A command is off when: a blocking overlay is unresolved (modal discipline), its surface isn't
+// in view, it needs a selection and there is none, or it's undo/redo with an empty stack. Off
+// commands render grayed with the reason; unimplemented commands are not registered at all.
 export function commandEnabled(cmd: Command, state: EditorState): { on: boolean; reason?: string } {
   const block = blockingOverlay(state);
   if (block && cmd.id !== block.closerCommandId) {
     return { on: false, reason: `resolve ${block.label} first` };
   }
-  if (cmd.available === false) return { on: false, reason: 'not available yet' };
   const surface = activeSurface(state);
   if (cmd.scope !== 'global' && cmd.scope !== surface) {
     return { on: false, reason: `only in the ${cmd.scope} editor` };
@@ -402,16 +386,13 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
         cmd('export-character'),
       ],
     },
-    cmd('compile-rle'),
   ],
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('delete-selection'), MESH_SUBMENU],
-  View: [cmd('toggle-view-mode'), cmd('toggle-minimap'), cmd('focus-selection'), cmd('model-ref-images')],
-  Map: [cmd('add-chunk'), cmd('add-trigger'), cmd('set-spawn'), cmd('world.floor.step')],
-  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-material'), cmd('paint-faces'), cmd('place-sticker'), cmd('open-color-studio'), cmd('sample-material')],
-  Story: [cmd('mission-point'), cmd('author-sequence')],
+  View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('model-ref-images')],
+  Map: [cmd('add-chunk'), cmd('world.floor.step')],
+  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-faces'), cmd('place-sticker'), cmd('open-color-studio')],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],
-  Help: [cmd('show-pipeline')],
 };
 
 export function menuNodes(menu: Menu): MenuNode[] {
@@ -570,6 +551,12 @@ export function commandById(id: string): Command {
   return found;
 }
 
+/** True only for commands with a live registry entry. Used to discard stale hot-view
+ * selections after a command is removed instead of silently resolving them to COMMANDS[0]. */
+export function commandExists(id: string): boolean {
+  return COMMANDS.some((command) => command.id === id);
+}
+
 function menuItemWidth(menu: Menu): number {
   return MENU_ITEM_PAD + menu.length * MENU_GLYPH_ADVANCE;
 }
@@ -589,11 +576,10 @@ export function activeMenuFor(state: EditorState): Menu {
 }
 
 /** Section D follows the armed world-tool family, not command/menu history.
- * Report-only commands therefore cannot swap the toolbar, and permanently
- * unavailable roadmap rows never become user-facing controls. */
+ * Report-only commands therefore cannot swap the toolbar. */
 export function worldActionBarCommands(state: Pick<EditorState, 'activeCommandId'>): Command[] {
   const activeTool = commandById(state.activeCommandId);
   const menu: Menu = activeTool.tool && activeTool.scope === 'world' ? activeTool.menu : 'Build';
   return COMMANDS.filter((command) =>
-    command.menu === menu && command.scope !== 'model' && !command.submenu && command.available !== false);
+    command.menu === menu && command.scope !== 'model' && !command.submenu);
 }

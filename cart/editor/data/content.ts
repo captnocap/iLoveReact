@@ -4,7 +4,7 @@ import { EDITOR_ASSET_CATALOG, fileModelPackage, modelCategoryNodes } from './as
 import { isMaterialized, listPackageFiles, type PackageFile } from './modelPackageStore';
 import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
 import { allocateBuildStarterModelId, allocatePlayerModelId, allocatePrimitiveModelId, BUILD_STARTER_MODEL_ID_PREFIX, PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
-import { commandById, PRIMITIVE_MESHES } from './commands';
+import { PRIMITIVE_MESHES } from './commands';
 import { buildPieceStarter, type BuildPieceStarterId } from './buildStarters';
 import { playerStarterSkeleton } from '../model/playerStarter';
 import { INITIAL_OBJECTS } from './initialState';
@@ -18,14 +18,11 @@ export const DOMAINS = [
   ['pieces', 'Box'],
   ['actors', 'UserRound'],
   ['data', 'Table2'],
-  ['pipeline', 'Workflow'],
 ];
 export const RIGHT_PANES = [
   ['inspector', 'SlidersHorizontal'],
   ['layers', 'Layers'],
   ['grid', 'LayoutGrid'],
-  ['mission', 'Flag'],
-  ['routes', 'Route'],
 ];
 export const CONTENT_TREE: ContentNode[] = EDITOR_ASSET_CATALOG.contentTree;
 export const SNAP_MODES = ['surface + edge', 'grid', 'free', 'vertex'];
@@ -394,10 +391,8 @@ export function selectedObject(state: EditorState): WorldObject {
 }
 
 export function panelModeFor(state: EditorState, object: WorldObject): LibraryTab {
-  const command = commandById(state.activeCommandId);
-  if (command.id === 'paint-material' || command.id === 'sample-material') return 'Skins';
   if (object.kind === 'TILE' || object.kind === 'CUTOUT') return 'Skins';
   if (object.kind === 'PROP') return 'Props';
-  if (command.id === 'place-piece' || object.kind === 'PIECE' || object.kind === 'PREFAB') return 'Build';
+  if (state.activeCommandId === 'place-piece' || object.kind === 'PIECE' || object.kind === 'PREFAB') return 'Build';
   return state.activeTab;
 }

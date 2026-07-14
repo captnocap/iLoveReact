@@ -1,12 +1,12 @@
 // SECTION D — Action Bar (see shell/regions.ts SECTIONS): THE toolbar — the
-// tool row pinned above the stage (mesh tools, snap, floor, view modes, paint
+// tool row pinned above the stage (mesh tools, snap, floor, paint
 // segment, map-paint bar).
 import { Fragment } from 'react';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 import { commandById, meshToolCommands, meshToolActive, meshTopoCommands, worldActionBarCommands } from '../data/commands';
 import { SNAP_MODES } from '../data/content';
-import type { EditorState, ViewMode } from '../data/types';
+import type { EditorState } from '../data/types';
 import MapPaintBar from './MapPaintBar';
 import { Effect } from '../../../runtime/primitives';
 import { importedSpecs } from '../textures/shaders';
@@ -32,7 +32,6 @@ export default function ToolOptions(props: {
   onFloor: (delta: number) => void;
   /** toggle hiding the ACTIVE floor's walls (storey cutaway extra, req_2567) */
   onWallsDown: () => void;
-  onViewMode: (mode: ViewMode) => void;
   /** The paint controls segment (AppFrame builds it — ink/size/flow/shape/resolution).
    *  THIS action bar is the toolbar paint tools belong to (req_2552: the row where the
    *  Paint/Vertex/wireframe buttons live), rendered while painting a model. */
@@ -181,12 +180,6 @@ export default function ToolOptions(props: {
           <C.HW_PillText>Up</C.HW_PillText>
         </C.HW_Pill>
       )}
-      <C.HW_Spacer />
-      {(['3D', '2D'] as ViewMode[]).map((mode) => {
-        const Pill = props.state.viewMode === mode ? C.HW_PillOn : C.HW_Pill;
-        const Label = props.state.viewMode === mode ? C.HW_PillTextOn : C.HW_PillText;
-        return <Pill key={mode} onPress={() => props.onViewMode(mode)}><Label>{mode}</Label></Pill>;
-      })}
     </C.HW_ToolOptions>
   );
 }

@@ -1,11 +1,6 @@
 import { selectedObject } from './content';
 import type { EditorState, WorldObject } from './types';
 
-export type MissionCounts = {
-  triggers: number;
-  points: number;
-};
-
 // No standing ERR/WARN tally exists here on purpose: the only real validator is the
 // mesh-edit guard, a contextual "live with it or revert now" alert you resolve at the
 // moment it fires — not something that accumulates into a counter. A permanently-0 badge
@@ -34,17 +29,6 @@ export function selectedPieceReadout(state: EditorState) {
     z: Math.round(piece.z),
     yawDegrees: Math.round(piece.yawDegrees),
   };
-}
-
-export function missionCounts(state: EditorState): MissionCounts {
-  let triggers = 0;
-  let points = 0;
-  for (const object of state.objects) {
-    if (object.hidden) continue;
-    if (object.kind === 'TRIGGER') triggers += 1;
-    if (object.kind === 'MISSION_POINT') points += 1;
-  }
-  return { triggers, points };
 }
 
 export function objectMetricRows(state: EditorState, object: WorldObject): Array<[string, string]> {

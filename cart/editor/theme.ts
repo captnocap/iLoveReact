@@ -37,8 +37,6 @@ export const EDITOR_COLORS: Partial<ThemeColors> = {
   segActiveText: '#c9f9ff',
   valText: '#d5e0e7',
   valNum: '#f0e1bf',
-  compileBg: '#0d3037',
-  compileBgHover: '#123d45',
   stageBg: '#05090d',
   stageGridBg: '#060b0f',
   stageTile: '#14202a',

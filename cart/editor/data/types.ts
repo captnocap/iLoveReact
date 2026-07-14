@@ -20,7 +20,7 @@ import type { WorldGlobals } from './globals';
 import type { PathArrayParams } from './pathArray';
 import type { PropExportRole } from './propExports';
 
-export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Story' | 'Globals' | 'Window' | 'Help';
+export type Menu = 'File' | 'Edit' | 'View' | 'Map' | 'Build' | 'Globals' | 'Window';
 // The starter primitives under File → New Mesh. Each maps to an in-cart editMesh generator
 // (cuboid/cylinder/…); see PRIMITIVE_MESHES (commands.ts) + primitiveMeshData (catalog).
 export type PrimitiveKind = 'cube' | 'cylinder' | 'cone' | 'pyramid' | 'plane' | 'sphere' | 'icosphere';
@@ -59,7 +59,6 @@ export type ModelPart = {
   hi?: number;
 };
 export type LibraryTab = 'Build' | 'Props' | 'Skins';
-export type ViewMode = '3D' | '2D';
 // 'playtest' (GLOBALS req_2770): the embodied drop-in tab — the SAME editor world
 // mounted with the loader's built-in player instead of the iso authoring camera,
 // where global tunables (Globals → Physics) are tested live.
@@ -118,9 +117,6 @@ export type Command = {
   // 'world'/'model'/'material' = only when that surface is loaded in view. Everything off
   // the active surface renders grayed-with-reason, never hidden (sane-app behaviour).
   scope: 'global' | 'world' | 'model' | 'material';
-  // The capability doesn't exist yet → the command is always disabled with a reason. Drop
-  // this (or set true) the moment a real handler lands. Keeps the roadmap visible without lying.
-  available?: boolean;
   // This command operates on an existing selection → disabled when nothing is selected on
   // its surface (Duplicate/Delete/Move/Paint/Sample/Focus…). Placement tools do NOT set this.
   needsSelection?: boolean;
@@ -505,7 +501,6 @@ export type EditorState = {
   /** Storey cutaway extra (req_2567): also hide the ACTIVE floor's walls, for
    *  interior editing / prop placement. Floors above are always cut away. */
   wallsDown: boolean;
-  viewMode: ViewMode;
   workspaceDocuments: WorkspaceDocument[];
   activeWorkspaceDocumentId: string;
   rightPane: string;

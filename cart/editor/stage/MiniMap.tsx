@@ -11,7 +11,7 @@ export default function MiniMap({ state, onObject }: { state: EditorState; onObj
         <Icon name="Map" size={12} color={accentFor('textDim')} />
         <C.HW_KeyText>2D MAP</C.HW_KeyText>
         <C.HW_PillOn style={{ height: 16, paddingLeft: 5, paddingRight: 5 }}>
-          <C.HW_PillTextOn>{state.viewMode === '3D' ? 'linked' : 'active'}</C.HW_PillTextOn>
+          <C.HW_PillTextOn>linked</C.HW_PillTextOn>
         </C.HW_PillOn>
         <C.HW_Spacer />
         <Icon name="SlidersHorizontal" size={12} color={accentFor('textFaint')} />

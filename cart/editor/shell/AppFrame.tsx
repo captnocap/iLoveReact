@@ -1408,15 +1408,6 @@ export default function AppFrame() {
       void importModelFromDisk();
       return;
     }
-    if (command.id === 'compile-rle') {
-      setState((prev) => ({
-        ...prev,
-        openMenu: null,
-        actionMenu: 'File',
-        status: 'compile output unavailable - validation 0/0',
-      }));
-      return;
-    }
     // Globals menu (GLOBALS req_2770): open (or re-focus) the PLAYTEST tab — the
     // editor world with the embodied player — and the focus panel becomes the
     // physics-globals editor (Inspector's playtest branch). Tune, jump, lock in.
@@ -1482,9 +1473,7 @@ export default function AppFrame() {
         contextOpen: source === 'context' ? false : prev.contextOpen,
       };
 
-      if (command.id === 'toggle-view-mode') {
-        next = { ...next, viewMode: prev.viewMode === '3D' ? '2D' : '3D' };
-      } else if (command.id === 'toggle-minimap') {
+      if (command.id === 'toggle-minimap') {
         next = { ...next, rightPane: prev.rightPane === 'grid' ? 'inspector' : 'grid' };
       } else if (command.id === 'focus-selection') {
         next = { ...next, cursor: { x: object.left, y: 0, z: object.top } };
@@ -1496,11 +1485,6 @@ export default function AppFrame() {
           status: prev.selectedPieceId
             ? 'Move armed — drag the selected placed piece to reposition it'
             : 'Move armed — drag a placed piece to reposition it',
-        };
-      } else if (command.id === 'paint-material') {
-        next = {
-          ...next,
-          objects: prev.objects.map((item) => item.id === object.id ? { ...item, assetId: asset.id, name: item.kind === 'TILE' ? asset.name : item.name } : item),
         };
       } else if (command.id === 'paint-faces') {
         // req_2879: the brush is the browser's active material; the viewport's
@@ -1525,8 +1509,6 @@ export default function AppFrame() {
           contextOpen: false,
           openMenu: null,
         };
-      } else if (command.id === 'sample-material') {
-        next = { ...next, activeAssetId: object.assetId, activeTab: assetById(object.assetId, prev.assetOverrides).tab };
       } else if (command.id === 'duplicate-selection') {
         const duplicate: WorldObject = { ...object, id: `obj-${prev.seq}`, name: `${object.name} copy`, left: object.left + 32, top: object.top + 22 };
         next = { ...next, objects: [...prev.objects, duplicate], selectedObjectId: duplicate.id };
@@ -1537,28 +1519,11 @@ export default function AppFrame() {
           objects: prev.objects.map((item) => item.id === object.id ? { ...item, hidden: true } : item),
           selectedObjectId: remaining[0]?.id ?? object.id,
         };
-      } else if (command.id === 'add-trigger' || command.id === 'mission-point') {
-        const placed: WorldObject = {
-          id: `obj-${prev.seq}`,
-          kind: command.id === 'add-trigger' ? 'TRIGGER' : 'MISSION_POINT',
-          name: command.id === 'add-trigger' ? 'Trigger Volume' : 'Mission Point',
-          assetId: object.assetId,
-          left: object.left + 24,
-          top: object.top + 18,
-          width: command.id === 'add-trigger' ? 56 : 24,
-          height: command.id === 'add-trigger' ? 40 : 24,
-          metrics: [],
-        };
-        next = { ...next, rightPane: 'mission', objects: [...prev.objects, placed], selectedObjectId: placed.id, cursor: { x: placed.left, y: prev.floorIndex, z: placed.top } };
-      } else if (command.id === 'set-spawn' || command.id === 'author-sequence') {
-        next = { ...next, rightPane: 'mission' };
-      } else if (command.id === 'show-pipeline') {
-        next = { ...next, activeDomain: 'pipeline', rightPane: 'routes' };
       }
 
-      const target = command.id === 'paint-material' || command.id === 'place-piece' ? asset.name : object.name;
+      const target = command.id === 'place-piece' ? asset.name : object.name;
       const editMs = Date.now() - t0;
-      const event = command.id === 'sample-material' || command.id === 'place-piece' || command.id === 'move-selection' || command.id === 'paint-faces'
+      const event = command.id === 'place-piece' || command.id === 'move-selection' || command.id === 'paint-faces'
         ? { history: prev.history, redo: prev.redo, seq: prev.seq }
         : pushHistory(prev, command, target, `${source} - ${command.native ? 'native-ready' : 'design-only'}`, editMs);
       // Any world slice this command touched becomes a REAL reversible entry
@@ -4241,7 +4206,6 @@ export default function AppFrame() {
             onSnap={guarded(() => setState((prev) => ({ ...prev, snapIndex: (prev.snapIndex + 1) % SNAP_MODES.length, status: `snap: ${SNAP_MODES[(prev.snapIndex + 1) % SNAP_MODES.length]}` })))}
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
-            onViewMode={guarded((viewMode: EditorState['viewMode']) => setState((prev) => ({ ...prev, viewMode, status: `view mode: ${viewMode}` })))}
             onMapPaint={patchMapPaint}
             paintBar={
               /* The paint controls segment for the ACTION BAR (ToolOptions) — the row the
@@ -4309,7 +4273,6 @@ export default function AppFrame() {
             activeObject={activeObject}
             activeAsset={assetById(activeObject.assetId, state.assetOverrides)}
             onPane={(rightPane) => setState((prev) => ({ ...prev, rightPane, status: `inspector pane: ${rightPane}` }))}
-            onCommand={runCommand}
             onPreset={() => setState((prev) => ({ ...prev, presetMenuOpen: !prev.presetMenuOpen, status: prev.presetMenuOpen ? 'surface preset menu closed' : 'surface preset menu opened' }))}
             onPresetOption={(surfacePreset) => setState((prev) => ({ ...prev, surfacePreset, presetMenuOpen: false, status: `surface preset: ${surfacePreset}` }))}
             onModelBrush={(brush) => modelToolApiRef.current?.setBrush(brush)}

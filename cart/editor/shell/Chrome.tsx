@@ -1,9 +1,9 @@
 // SECTION A — Window Chrome (see shell/regions.ts SECTIONS): brand + menu bar +
-// Compile + Editor/Play toggle + window controls. The top strip of the editor.
+// active map + Editor/Play toggle + window controls. The top strip of the editor.
 import { Icon } from '../../../runtime/icons/Icon';
 import { callHost } from '../../../runtime/ffi';
 import { C, accentFor } from '../workspace.cls';
-import { activeMenuFor, commandById, commandEnabled, MENUS } from '../data/commands';
+import { activeMenuFor, MENUS } from '../data/commands';
 import RouteToggle from '../RouteToggle';
 import type { Command, Menu, EditorState } from '../data/types';
 
@@ -31,9 +31,6 @@ export default function Chrome(props: {
   onClose: () => void;
 }) {
   const activeMenu = activeMenuFor(props.state);
-  // The Compile pill mirrors the File → Compile command's state — grayed + inert while the RLE
-  // pipeline isn't wired (available: false), instead of firing a "compile unavailable" no-op.
-  const compile = commandEnabled(commandById('compile-rle'), props.state);
   return (
     <C.HW_Chrome windowDrag>
       <C.HW_Brand>
@@ -56,13 +53,6 @@ export default function Chrome(props: {
         <Icon name="MapPinned" size={12} color={accentFor('primary')} />
         <C.HW_PillText>{props.state.activeMapName}</C.HW_PillText>
       </C.HW_Pill>
-      <C.HW_Compile
-        {...(compile.on ? { onPress: () => props.onCommand('compile-rle', 'chrome') } : { style: { opacity: 0.4 } })}
-        tooltip={compile.on ? 'Compile RLE game data' : `Compile — ${compile.reason}`}
-      >
-        <Icon name="Download" size={13} color={accentFor(compile.on ? 'primary' : 'textDim')} />
-        <C.HW_PillTextOn>Compile</C.HW_PillTextOn>
-      </C.HW_Compile>
       <RouteToggle />
       <WindowControls onClose={props.onClose} />
     </C.HW_Chrome>

@@ -18,6 +18,7 @@ import { initialState, defaultModelTool } from './initialState';
 import { readWorldSave } from './worldStore';
 import { createMapDocument, mapDocumentName, setActiveMapDocumentStem } from './mapDocuments';
 import { loadGlobalsSave } from './globalsStore';
+import { commandExists, MENUS } from './commands';
 import type { EditorState } from './types';
 
 const VIEW_HOT_KEY = 'editor:view:v2';
@@ -104,9 +105,13 @@ export function loadPersistedState(): EditorState {
   // named document boundary. The durable per-document files above are the only
   // source for those slices.
   const savedPaint = saved.mapPaint;
+  // v2 hot memory may contain UI concepts that no longer exist. Strip removed
+  // shape before merging so a code update cannot keep a phantom field alive.
+  const savedView = { ...saved } as Partial<EditorState> & { viewMode?: unknown };
+  delete savedView.viewMode;
   const merged: EditorState = {
     ...base,
-    ...saved,
+    ...savedView,
     ...(modelWork ?? {}),
     ...RESET_ON_RELOAD,
     activeMapStem: base.activeMapStem,
@@ -132,6 +137,12 @@ export function loadPersistedState(): EditorState {
     },
     status: bootStatus ?? 'restored your last view',
   };
+  // Removed commands/menus and their placeholder navigation projections may be
+  // selected at the instant a dev reload lands. Re-enter through real defaults.
+  if (!commandExists(merged.activeCommandId)) merged.activeCommandId = 'select-tool';
+  if (!MENUS.includes(merged.actionMenu)) merged.actionMenu = 'Build';
+  if (merged.activeDomain === 'pipeline') merged.activeDomain = 'world';
+  if (merged.rightPane === 'mission' || merged.rightPane === 'routes') merged.rightPane = 'inspector';
   // The id seq only ever grows: a stale hotstate seq must not re-mint ids the
   // disk save already handed out.
   merged.seq = Math.max(merged.seq, base.seq);

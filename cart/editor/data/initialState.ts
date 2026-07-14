@@ -118,7 +118,6 @@ export function initialState(): EditorState {
     // with the viewport instead of the old mock's "Floor 1" mismatch.
     floorIndex: 0,
     wallsDown: false,
-    viewMode: '3D',
     workspaceDocuments: [WORLD_DOCUMENT],
     activeWorkspaceDocumentId: WORLD_DOCUMENT_ID,
     rightPane: 'inspector',
