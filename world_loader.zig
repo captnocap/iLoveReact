@@ -36,6 +36,7 @@ const Node = layout.Node;
 const constructor = @import("framework/world/constructor.zig");
 const foliage = @import("framework/world/foliage.zig");
 const flora_geometry = @import("framework/world/flora_geometry.zig");
+const wl_geometry = @import("framework/world_loader/geometry.zig");
 const instance_collider_policy = @import("framework/world/instance_collider_policy.zig");
 const live_mesh_doors = @import("framework/world/live_mesh_doors.zig");
 const streaming = @import("framework/world/streaming.zig");
@@ -3662,6 +3663,10 @@ pub const Runtime = struct {
     windowed: bool = false,
     grid: ?SpatialGrid = null,
     cube: [36 * 8]f32 = undefined,
+    // Flat sticker quads, one per thin axis (req_3028) — 12 verts vs the cube's 36.
+    sticker_quad_x: [12 * 8]f32 = undefined,
+    sticker_quad_y: [12 * 8]f32 = undefined,
+    sticker_quad_z: [12 * 8]f32 = undefined,
     cube_open_run_min: [30 * 8]f32 = undefined,
     cube_open_run_max: [30 * 8]f32 = undefined,
     cube_open_run_both: [24 * 8]f32 = undefined,
@@ -4606,14 +4611,31 @@ pub const Runtime = struct {
         const out = SKIN_BOX_OUTSET;
         for (sb.boxes) |b| {
             const key = self.live_mat_keys.get(b.mat_hash) orelse continue; // material not materialized yet
+            // A zero dimension marks a FLAT sticker stamp (req_3028): stickers are
+            // planes, not solids — draw the matching 12-vert quad (4 tris vs the
+            // cube's 12) at EXACT size (the stamp already floats off its face; the
+            // slab-covering outset is a box concern). Scale on the thin axis stays 1
+            // so the normal math never multiplies by zero.
+            const flat_x = b.sx == 0;
+            const flat_y = b.sy == 0;
+            const flat_z = b.sz == 0;
+            const flat = flat_x or flat_y or flat_z;
             const start = self.skin_box_buf.items.len;
-            self.skin_box_buf.appendSliceAssumeCapacity(&[_]f32{ b.cx, b.cy, b.cz, 0, b.yaw, 0, b.sx + out, b.sy + out, b.sz + out, 1, 1, 1 });
+            if (flat) {
+                self.skin_box_buf.appendSliceAssumeCapacity(&[_]f32{
+                    b.cx, b.cy, b.cz, 0, b.yaw, 0,
+                    if (flat_x) 1 else b.sx, if (flat_y) 1 else b.sy, if (flat_z) 1 else b.sz,
+                    1, 1, 1,
+                });
+            } else {
+                self.skin_box_buf.appendSliceAssumeCapacity(&[_]f32{ b.cx, b.cy, b.cz, 0, b.yaw, 0, b.sx + out, b.sy + out, b.sz + out, 1, 1, 1 });
+            }
             const row = self.skin_box_buf.items[start .. start + INSTANCE_STRIDE];
             self.kid_list.append(self.allocator, .{
                 .scene3d_mesh = true,
-                .scene3d_geom_key = "box",
-                .scene3d_vertices = self.cube[0..],
-                .scene3d_vert_count = 36,
+                .scene3d_geom_key = if (flat_x) "sticker_quad_x" else if (flat_y) "sticker_quad_y" else if (flat_z) "sticker_quad_z" else "box",
+                .scene3d_vertices = if (flat_x) self.sticker_quad_x[0..] else if (flat_y) self.sticker_quad_y[0..] else if (flat_z) self.sticker_quad_z[0..] else self.cube[0..],
+                .scene3d_vert_count = if (flat) 12 else 36,
                 .scene3d_instance_data = row,
                 .scene3d_instance_count = 1,
                 .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
@@ -4921,6 +4943,9 @@ pub const Runtime = struct {
             .far = @max(far, bounds.radius * 4.0 + 64.0),
         };
         self.cube = buildCube();
+        self.sticker_quad_x = wl_geometry.buildStickerQuad(0);
+        self.sticker_quad_y = wl_geometry.buildStickerQuad(1);
+        self.sticker_quad_z = wl_geometry.buildStickerQuad(2);
         self.cube_open_run_min = buildCubeOpenRun(true, false);
         self.cube_open_run_max = buildCubeOpenRun(false, true);
         self.cube_open_run_both = buildCubeOpenRun(true, true);
