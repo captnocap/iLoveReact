@@ -38,7 +38,7 @@ import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture, MaterialRef } from '../world/pieces';
-import { PIECE_ROTATION_STEP_DEGREES, pieceKindOf, placementSlotKey } from '../world/pieces';
+import { pieceKindOf } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
@@ -58,9 +58,28 @@ import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialSt
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
 import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint, setMapDocumentAutosave } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
-import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
+import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPieceEditOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
-import { commandSource, createEditorApplicationCommands, isWorldToolCommandId, WORLD_FLOOR_STEP_COMMAND_ID, WORLD_PIECES_PLACE_COMMAND_ID, WORLD_REDO_COMMAND_ID, WORLD_UNDO_COMMAND_ID, type WorldFloorStepResult, type WorldHistoryControlResult, type WorldPiecesPlaceResult, type WorldToolArmResult } from '../data/applicationCommands';
+import {
+  commandSource,
+  createEditorApplicationCommands,
+  isWorldPieceEditCommandId,
+  isWorldToolCommandId,
+  WORLD_FLOOR_STEP_COMMAND_ID,
+  WORLD_PIECE_DELETE_COMMAND_ID,
+  WORLD_PIECE_MOVE_COMMAND_ID,
+  WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECES_PLACE_COMMAND_ID,
+  WORLD_PLACEMENT_ROTATE_COMMAND_ID,
+  WORLD_REDO_COMMAND_ID,
+  WORLD_UNDO_COMMAND_ID,
+  type WorldFloorStepResult,
+  type WorldHistoryControlResult,
+  type WorldPieceEditResult,
+  type WorldPiecesPlaceResult,
+  type WorldPlacementRotateResult,
+  type WorldToolArmResult,
+} from '../data/applicationCommands';
 import { activeSurface } from '../data/surfaces';
 import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
@@ -394,6 +413,22 @@ export default function AppFrame() {
         stateRef.current = next;
         setState(next);
       },
+      placementGhost: () => ({
+        activeCommandId: stateRef.current.activeCommandId,
+        armedPieceId: stateRef.current.armedPieceId,
+        yawDegrees: stateRef.current.armedYawDegrees,
+      }),
+      commitPlacementGhostRotation: (result) => {
+        const previous = stateRef.current;
+        const next: EditorState = {
+          ...previous,
+          openMenu: null,
+          armedYawDegrees: result.yawDegrees,
+          status: `placement ghost rotated → ${result.yawDegrees}°`,
+        };
+        stateRef.current = next;
+        setState(next);
+      },
       placement: {
         read: () => ({
           documentId: stateRef.current.activeMapStem,
@@ -474,6 +509,72 @@ export default function AppFrame() {
           return appliedAtMs;
         },
       },
+      pieceEdit: {
+        read: () => ({
+          documentId: stateRef.current.activeMapStem,
+          pieces: stateRef.current.worldPieces,
+          selectedPieceId: stateRef.current.selectedPieceId,
+        }),
+        now: Date.now,
+        commit: (plan, actionId, applyStartedAtMs) => {
+          const previous = stateRef.current;
+          const transaction = plan.transaction;
+          const before = transaction.before.piece;
+          const after = transaction.after;
+          const appliedAtMs = Date.now();
+          const applyMs = Math.max(0, appliedAtMs - applyStartedAtMs);
+          const meta = transaction.action === 'move' && after
+            ? [
+                `from=(${before.x.toFixed(2)},${before.y.toFixed(2)},${before.z.toFixed(2)})`,
+                `to=(${after.x.toFixed(2)},${after.y.toFixed(2)},${after.z.toFixed(2)})`,
+                `yaw=${Math.round(after.yawDegrees)}`,
+                transaction.replaced.length ? `replaced=${transaction.replaced.length}` : '',
+                `apply=${applyMs.toFixed(1)}ms`,
+              ].filter(Boolean).join(' ')
+            : transaction.action === 'rotate' && after
+              ? [
+                  `yaw=${Math.round(before.yawDegrees)}→${Math.round(after.yawDegrees)}`,
+                  transaction.replaced.length ? `replaced=${transaction.replaced.length}` : '',
+                  `apply=${applyMs.toFixed(1)}ms`,
+                ].filter(Boolean).join(' ')
+              : `at=(${before.x.toFixed(2)},${before.y.toFixed(2)},${before.z.toFixed(2)}) apply=${applyMs.toFixed(1)}ms`;
+          const status = transaction.action === 'move'
+            ? `moved ${before.pieceId}${transaction.replaced.length ? ` (replaced ${transaction.replaced.length})` : ''}`
+            : transaction.action === 'rotate'
+              ? `rotated ${before.pieceId} → ${after!.yawDegrees}°${transaction.replaced.length ? ` (replaced ${transaction.replaced.length})` : ''}`
+              : `deleted ${before.pieceId}`;
+          const nextBase: EditorState = {
+            ...previous,
+            history: [{
+              id: `h-${actionId}`,
+              actionId,
+              commandId: transaction.commandId,
+              verb: transaction.action,
+              target: before.pieceId,
+              meta,
+              undoable: true,
+              eventType: 'piece.edit',
+              atMs: appliedAtMs,
+              editMs: applyMs,
+              emptyMs: applyMs,
+              richMs: applyMs,
+            }, ...previous.history].slice(0, 8),
+            redo: [],
+            worldPieces: [...plan.next.pieces],
+            selectedPieceId: plan.next.selectedPieceId,
+            status,
+          };
+          const next = recordWorldEdit(
+            previous,
+            nextBase,
+            `${transaction.action} ${before.pieceId}`,
+            { actionId, commandId: transaction.commandId },
+          );
+          stateRef.current = next;
+          setState(next);
+          return appliedAtMs;
+        },
+      },
       history: {
         peekUndo: () => stateRef.current.worldUndo[0] ?? null,
         peekRedo: () => stateRef.current.worldRedo[0] ?? null,
@@ -536,6 +637,18 @@ export default function AppFrame() {
       }
       if (outcome.status === 'applied' && outcome.commandId === WORLD_PIECES_PLACE_COMMAND_ID) {
         dispatchPiecePlacementOutcome(outcome as CommandAppliedOutcome<WorldPiecesPlaceResult>);
+        return;
+      }
+      if (outcome.status === 'applied' && isWorldPieceEditCommandId(outcome.commandId)) {
+        dispatchPieceEditOutcome(outcome as CommandAppliedOutcome<WorldPieceEditResult>);
+        return;
+      }
+      if (outcome.status === 'applied' && outcome.commandId === WORLD_PLACEMENT_ROTATE_COMMAND_ID) {
+        const result = outcome.result as WorldPlacementRotateResult;
+        dispatchCommandOutcome(outcome, {
+          label: `placement preview → ${result.yawDegrees}°`,
+          targets: [{ kind: 'piece-kind', id: result.armedPieceId }],
+        });
         return;
       }
       if (outcome.status === 'applied' &&
@@ -1173,26 +1286,46 @@ export default function AppFrame() {
       setState((prev) => ({ ...prev, status: `${command.name} - ${source}` }));
       return;
     }
-    // World-piece quick verbs (req_2733): with a placed piece selected on the world
-    // surface, Delete / Copy / Rotate act on THAT piece — the phantom `objects` path
-    // below never sees them. R is mode-sensitive (req_0598): without a selection,
-    // an armed placement ghost turns in place before it is dropped.
-    if (command.id === 'delete-selection' || command.id === 'duplicate-selection' || command.id === 'rotate-selection') {
-      const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
-      if (doc?.kind === 'world' && state.selectedPieceId) {
-        if (command.id === 'delete-selection') deletePiece(state.selectedPieceId);
-        else if (command.id === 'duplicate-selection') copyPiece(state.selectedPieceId);
-        else rotatePiece(state.selectedPieceId);
+    // World-piece quick verbs: legacy menu/key ids are only input routing now.
+    // Authored Rotate/Delete and report-only placement-preview rotation cross
+    // distinct command identities; no branch below owns their mutation.
+    if (command.id === 'delete-selection' || command.id === WORLD_PIECE_DELETE_COMMAND_ID ||
+        command.id === 'duplicate-selection' || command.id === WORLD_PIECE_ROTATE_COMMAND_ID) {
+      const current = stateRef.current;
+      const doc = current.workspaceDocuments.find((d) => d.id === current.activeWorkspaceDocumentId);
+      if (doc?.kind === 'world') {
+        if (command.id === 'duplicate-selection') {
+          if (current.selectedPieceId) copyPiece(current.selectedPieceId);
+          else setState((prev) => ({ ...prev, status: 'select a placed piece to copy' }));
+          return;
+        }
+        if (command.id === 'delete-selection' || command.id === WORLD_PIECE_DELETE_COMMAND_ID) {
+          invokeApplicationCommand(WORLD_PIECE_DELETE_COMMAND_ID, {
+            documentId: current.activeMapStem,
+            pieceId: current.selectedPieceId ?? '',
+          }, source);
+          return;
+        }
+        if (current.selectedPieceId) {
+          invokeApplicationCommand(WORLD_PIECE_ROTATE_COMMAND_ID, {
+            documentId: current.activeMapStem,
+            pieceId: current.selectedPieceId,
+            quarterTurns: 1,
+          }, source);
+          return;
+        }
+        if (current.activeCommandId === 'place-piece' && current.armedPieceId) {
+          invokeApplicationCommand(WORLD_PLACEMENT_ROTATE_COMMAND_ID, {}, source);
+          return;
+        }
+        invokeApplicationCommand(WORLD_PIECE_ROTATE_COMMAND_ID, {
+          documentId: current.activeMapStem,
+          pieceId: '',
+          quarterTurns: 1,
+        }, source);
         return;
       }
-      if (command.id === 'rotate-selection' && doc?.kind === 'world' && state.activeCommandId === 'place-piece' && state.armedPieceId) {
-        setState((prev) => {
-          const yaw = (prev.armedYawDegrees + PIECE_ROTATION_STEP_DEGREES) % 360;
-          return { ...prev, armedYawDegrees: yaw, status: `placement ghost rotated → ${yaw}°` };
-        });
-        return;
-      }
-      if (command.id === 'rotate-selection') {
+      if (command.id === WORLD_PIECE_ROTATE_COMMAND_ID) {
         setState((prev) => ({ ...prev, status: 'select a placed piece, or arm one in Place mode, to rotate' }));
         return;
       }
@@ -1641,49 +1774,33 @@ export default function AppFrame() {
    *  frame path. Destination collisions follow placement's existing slot policy:
    *  moving a wall onto another wall replaces the destination, never duplicates. */
   const movePiece = (id: string, destination: PlacedPiece) => {
-    setState((prev) => {
-      const piece = prev.worldPieces.find((item) => item.id === id);
-      if (!piece) return { ...prev, status: 'move: that piece is gone' };
-      const unchanged = piece.x === destination.x
-        && piece.y === destination.y
-        && piece.z === destination.z
-        && piece.yawDegrees === destination.yawDegrees
-        && piece.floor === destination.floor;
-      if (unchanged) return { ...prev, status: `${piece.pieceId} stayed put` };
-
-      const destinationSlot = placementSlotKey(destination);
-      const replaced = prev.worldPieces.filter((item) => item.id !== id && placementSlotKey(item) === destinationSlot);
-      const worldPieces = [
-        ...prev.worldPieces.filter((item) => item.id !== id && placementSlotKey(item) !== destinationSlot),
-        destination,
-      ];
-      const committedAtMs = Date.now();
-      const meta = [
-        `from=(${piece.x.toFixed(2)},${piece.y.toFixed(2)},${piece.z.toFixed(2)})`,
-        `to=(${destination.x.toFixed(2)},${destination.y.toFixed(2)},${destination.z.toFixed(2)})`,
-        `yaw=${Math.round(destination.yawDegrees)}`,
-        replaced.length ? `replaced=${replaced.length}` : '',
-      ].filter(Boolean).join(' ');
-      return recordWorldEdit(prev, {
-        ...prev,
-        seq: prev.seq + 1,
-        history: [{
-          id: `h-${prev.seq}`,
-          verb: 'move',
-          target: piece.pieceId,
-          meta,
-          undoable: true,
-          atMs: committedAtMs,
-          editMs: 0,
-          emptyMs: 0,
-          richMs: 0,
-        }, ...prev.history].slice(0, 8),
-        redo: [],
-        worldPieces,
-        selectedPieceId: id,
-        status: `moved ${piece.pieceId}${replaced.length ? ` (replaced ${replaced.length})` : ''}`,
-      }, `move ${piece.pieceId}`);
-    });
+    const current = stateRef.current;
+    const piece = current.worldPieces.find((item) => item.id === id);
+    if (!piece) {
+      setState((prev) => ({ ...prev, status: 'move: that piece is gone' }));
+      return;
+    }
+    const floor = destination.floor ?? piece.floor ?? 0;
+    const unchanged = piece.x === destination.x
+      && piece.y === destination.y
+      && piece.z === destination.z
+      && piece.yawDegrees === destination.yawDegrees
+      && (piece.floor ?? 0) === floor;
+    if (unchanged) {
+      setState((prev) => ({ ...prev, status: `${piece.pieceId} stayed put` }));
+      return;
+    }
+    invokeApplicationCommand(WORLD_PIECE_MOVE_COMMAND_ID, {
+      documentId: current.activeMapStem,
+      pieceId: id,
+      transform: {
+        x: destination.x,
+        y: destination.y,
+        z: destination.z,
+        yawDegrees: destination.yawDegrees,
+        floor,
+      },
+    }, 'viewport');
   };
 
   const selectPiece = (id: string | null) => {
@@ -1820,35 +1937,6 @@ export default function AppFrame() {
       }),
       status: role ? `slot ${role} cleared` : 'all faces reset to default',
     }, role ? `clear slot ${role}` : 'clear all faces'));
-  };
-
-  // ── World-piece quick verbs (req_2733) — Copy / Rotate / Delete ──────────────
-  // One dispatch path: the right-click menu and the keymap (R / Del) both arrive
-  // through runCommand's piece-first routing; these are the write ends.
-  const rotatePiece = (id: string) => {
-    setState((prev) => {
-      const piece = prev.worldPieces.find((p) => p.id === id);
-      if (!piece) return { ...prev, status: 'rotate: that piece is gone' };
-      const yaw = (piece.yawDegrees + PIECE_ROTATION_STEP_DEGREES) % 360;
-      return recordWorldEdit(prev, {
-        ...prev,
-        worldPieces: prev.worldPieces.map((p) => (p.id === id ? { ...p, yawDegrees: yaw } : p)),
-        status: `rotated ${piece.pieceId} → ${yaw}°`,
-      }, `rotate ${piece.pieceId}`);
-    });
-  };
-
-  const deletePiece = (id: string) => {
-    setState((prev) => {
-      const piece = prev.worldPieces.find((p) => p.id === id);
-      if (!piece) return { ...prev, status: 'delete: that piece is gone' };
-      return recordWorldEdit(prev, {
-        ...prev,
-        worldPieces: prev.worldPieces.filter((p) => p.id !== id),
-        selectedPieceId: null,
-        status: `deleted ${piece.pieceId}`,
-      }, `delete ${piece.pieceId}`);
-    });
   };
 
   // Copy = pick the piece up into your hand (the Fortnite move): arm its definition

@@ -1,13 +1,14 @@
 // editor/data/commands.ts — command table + enablement + menu geometry/tree.
 //
-// The file menus are the source-of-truth command registry (DESIGN_INTAKE). Every command
-// declares the surface it's relevant on (`scope`); commandEnabled folds that into the
-// sane-app "grayed-with-reason" state, and menuNodes lays the registry out as the nested
-// tree the dropdown renders. Commands enter this table when they have real behavior.
+// Compatibility presentation table while editor commands migrate into the framework
+// CommandAuthority. Every row declares its relevant surface (`scope`); commandEnabled
+// supplies the grayed-with-reason gate and menuNodes lays out the current hand-authored
+// dropdown. Migrated rows use the exact authority command id—never a second callback id.
 import { activeSurface, hasSelection } from './surfaces';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import { PROP_EXPORT_TARGETS, propExportCommandId } from './propExports';
+import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID } from '../world/pieceCommandIds';
 import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
 export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Globals', 'Window'];
@@ -160,7 +161,8 @@ export const COMMANDS: Command[] = [
   // R is mode-sensitive (req_0598): it spins the selected placed piece when one
   // exists, otherwise the armed placement ghost. The enablement gate below keeps
   // both routes discoverable on the world surface.
-  { id: 'rotate-selection', menu: 'Build', name: 'Rotate Piece', icon: 'RotateCw', key: 'R', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
+  { id: WORLD_PIECE_ROTATE_COMMAND_ID, menu: 'Build', name: 'Rotate Piece', icon: 'RotateCw', key: 'R', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
+  { id: WORLD_PIECE_DELETE_COMMAND_ID, menu: 'Edit', name: 'Delete World Piece', icon: 'Trash2', key: 'Del', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
   // Paint Faces (req_2879): an armable brush MODE — touch a placed piece's face and the
   // browser's active material lands in THAT face's slot (front vs back stay separate, so the
   // exterior and interior of one wall paint independently). A drag sweeps across faces. Not
@@ -314,7 +316,7 @@ export function commandEnabled(cmd: Command, state: EditorState): { on: boolean;
   }
   // R follows the ruled build convention: selection turns first; with no
   // selection, an armed placement ghost turns in place before it is dropped.
-  const canRotateArmedGhost = cmd.id === 'rotate-selection'
+  const canRotateArmedGhost = cmd.id === WORLD_PIECE_ROTATE_COMMAND_ID
     && surface === 'world'
     && state.activeCommandId === 'place-piece'
     && state.armedPieceId !== null;
@@ -390,7 +392,7 @@ const MENU_TREE: Record<Menu, MenuNode[]> = {
   Edit: [cmd('undo-local'), cmd('redo-local'), cmd('duplicate-selection'), cmd('delete-selection'), MESH_SUBMENU],
   View: [cmd('toggle-minimap'), cmd('focus-selection'), cmd('model-ref-images')],
   Map: [cmd('add-chunk'), cmd('world.floor.step')],
-  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd('rotate-selection'), cmd('paint-faces'), cmd('place-sticker'), cmd('open-color-studio')],
+  Build: [cmd('select-tool'), cmd('place-piece'), cmd('move-selection'), cmd(WORLD_PIECE_ROTATE_COMMAND_ID), cmd('paint-faces'), cmd('place-sticker'), cmd('open-color-studio')],
   Globals: [cmd('globals-physics'), cmd('globals-animation')],
   Window: [cmd('toggle-eventbus'), cmd('toggle-performance'), cmd('toggle-memory'), cmd('toggle-build-journal')],
 };

@@ -7,7 +7,7 @@ import { defineEventType, dispatch } from '../../../runtime/editorbus';
 import type { EventCommandMetadata, TargetRef } from '../../../runtime/editorbus';
 import type { CommandAppliedOutcome, CommandOutcome } from '../../../runtime/commands';
 import type { HistoryEvent } from './types';
-import type { WorldPiecesPlaceResult } from './applicationCommands';
+import type { WorldPieceEditResult, WorldPiecesPlaceResult } from './applicationCommands';
 import { assetById } from './catalog';
 import { catalogRowFor } from '../world/buildCatalog';
 import { pieceKindOf, placementSlotKey, type MaterialRef } from '../world/pieces';
@@ -90,6 +90,18 @@ export type PiecePlacementPayload = {
    * and original indices, so replay and undo do not guess from counts. */
   transaction: WorldPiecesPlaceResult['plan']['transaction'];
 };
+export type PieceEditPayload = {
+  action: 'move' | 'rotate' | 'delete';
+  documentId: string;
+  instanceId: string;
+  pieceId: string;
+  label: string;
+  replaced: number;
+  applyStartedAtMs: number;
+  appliedAtMs: number;
+  applyMs: number;
+  transaction: WorldPieceEditResult['plan']['transaction'];
+};
 
 // One event type for now — a plain authoring edit. Richer per-system types (piece.place,
 // material.slot.fill, …) register themselves through this same seam as they get wired.
@@ -124,6 +136,18 @@ export const piecePlace = defineEventType<PiecePlacementPayload>({
     if (!p.documentId || !p.pieceId || !p.positions.length || p.positions.length !== p.count ||
         p.transaction.placed.length !== p.count) {
       throw new Error('piece.place: payload count/positions mismatch');
+    }
+  },
+});
+
+export const pieceEdit = defineEventType<PieceEditPayload>({
+  type: 'piece.edit',
+  undoable: true,
+  describe: (p) => `${p.action} ${p.label}`,
+  validate: (p) => {
+    if (!p.documentId || !p.instanceId || !p.pieceId || !p.label ||
+        p.transaction.action !== p.action || p.transaction.before.piece.id !== p.instanceId) {
+      throw new Error('piece.edit: malformed identity/transaction');
     }
   },
 });
@@ -249,6 +273,37 @@ export function dispatchPiecePlacementOutcome(outcome: CommandAppliedOutcome<Wor
       { kind: 'piece-kind', id: payload.pieceId },
       ...payload.positions.map((p) => ({ kind: 'piece', id: p.id })),
       ...payload.transaction.removed.map((row) => ({ kind: 'piece', id: row.piece.id })),
+    ],
+    commandMetadata(outcome),
+  ));
+}
+
+export function pieceEditPayload(result: WorldPieceEditResult): PieceEditPayload {
+  const transaction = result.plan.transaction;
+  const piece = transaction.before.piece;
+  return {
+    action: transaction.action,
+    documentId: transaction.documentId,
+    instanceId: piece.id,
+    pieceId: piece.pieceId,
+    label: catalogRowFor(piece.pieceId)?.label ?? piece.pieceId,
+    replaced: transaction.replaced.length,
+    applyStartedAtMs: result.applyStartedAtMs,
+    appliedAtMs: result.appliedAtMs,
+    applyMs: result.applyMs,
+    transaction,
+  };
+}
+
+export function dispatchPieceEditOutcome(outcome: CommandAppliedOutcome<WorldPieceEditResult>): number {
+  const payload = pieceEditPayload(outcome.result);
+  return dispatch(pieceEdit(
+    payload,
+    [
+      { kind: 'map', id: payload.documentId },
+      { kind: 'piece-kind', id: payload.pieceId },
+      { kind: 'piece', id: payload.instanceId },
+      ...payload.transaction.replaced.map((row) => ({ kind: 'piece', id: row.piece.id })),
     ],
     commandMetadata(outcome),
   ));

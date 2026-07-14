@@ -11,7 +11,8 @@
 //   tools/v8cli /tmp/editor-events.test.js
 
 import { describeEvent, head, since } from '../../../runtime/editorbus';
-import { commandOutcome, dispatchCommandOutcome, mapPaint, piecePlace, piecePlacementPayload, type MapPaintPayload } from './editorEvents';
+import { commandOutcome, dispatchCommandOutcome, mapPaint, pieceEdit, pieceEditPayload, piecePlace, piecePlacementPayload, type MapPaintPayload } from './editorEvents';
+import { planPieceMove } from '../world/pieceEditCommand';
 import { planPiecePlacement } from '../world/piecePlacementCommand';
 
 let passed = 0, failed = 0;
@@ -55,6 +56,31 @@ test('piece.place payload describes the placed floor, not the selected material'
   assert(payload.transaction.placed[0]?.id === 'bp_7' && payload.transaction.forward.append.length === 1, 'exact transaction carried');
   assert(event.actionId === 'place:7' && event.commandId === 'world.pieces.place', 'authority correlation carried');
   assert(describeEvent(event) === 'place Concrete Floor', `description uses piece label, got ${describeEvent(event)}`);
+});
+
+test('piece.edit payload carries the exact replacement transaction and authority identity', () => {
+  const plan = planPieceMove({
+    documentId: 'main',
+    pieces: [
+      { id: 'moving', pieceId: 'floor.concrete.common', x: 1.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 },
+      { id: 'victim', pieceId: 'floor.concrete.common', x: 4.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 },
+    ],
+    selectedPieceId: 'moving',
+  }, {
+    documentId: 'main', pieceId: 'moving',
+    transform: { x: 4.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 },
+  });
+  const payload = pieceEditPayload({ plan, applyStartedAtMs: 2000, appliedAtMs: 2002, applyMs: 2 });
+  const event = pieceEdit(payload, [{ kind: 'piece', id: 'moving' }], {
+    invocationId: 'move:1', commandId: 'world.piece.move', actionId: 'move:1',
+    source: 'viewport', phase: 'applied', effect: 'action', undoScope: { kind: 'document', key: 'world' },
+  });
+
+  assert(payload.action === 'move' && payload.instanceId === 'moving', 'edit identity drifted');
+  assert(payload.label === 'Concrete Floor' && payload.replaced === 1, 'semantic label/replacement count drifted');
+  assert(payload.transaction.replaced[0]?.piece.id === 'victim', 'exact replacement victim left the report');
+  assert(event.actionId === 'move:1' && event.commandId === 'world.piece.move', 'action correlation left the envelope');
+  assert(describeEvent(event) === 'move Concrete Floor', `description drifted, got ${describeEvent(event)}`);
 });
 
 test('map.paint payload describes native tile strokes with coordinates and timing', () => {

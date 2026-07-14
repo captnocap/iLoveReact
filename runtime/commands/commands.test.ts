@@ -128,11 +128,12 @@ test('every invocation source reaches one private handler and one published outc
 
 test('authored actions carry stable ids and controls can correlate to them', () => {
   const registry = new CommandRegistry();
+  const handlerActionIds: Array<string | undefined> = [];
   registry.register({
     id: 'world.piece.place', label: 'Place', icon: 'Box', effect: 'action',
     undoScope: { kind: 'document' }, projections: { toolbar: ['D.world'] },
     validateArgs: numberArgs,
-  }, () => 'placed');
+  }, ({ actionId }) => { handlerActionIds.push(actionId); return 'placed'; });
   registry.register({
     id: 'history.undo', label: 'Undo', icon: 'Undo2', effect: 'control',
     undoScope: 'none', outcomePhase: 'undone', projections: { menu: ['Edit'] },
@@ -156,6 +157,7 @@ test('authored actions carry stable ids and controls can correlate to them', () 
 
   assert(defaultId.status === 'applied' && defaultId.actionId === 'invoke:place:1', 'action defaults to invocation id');
   assert(suppliedId.status === 'applied' && suppliedId.actionId === 'action:piece:9', 'explicit action id survives');
+  assert(handlerActionIds.join('|') === 'invoke:place:1|action:piece:9', 'handler committed under a different action id than its outcome');
   assert(undo.status === 'applied' && undo.actionId === 'action:piece:9', 'control correlates to the authored action');
   assert(undo.status === 'applied' && undo.phase === 'undone', 'undo publishes its semantic phase');
 });

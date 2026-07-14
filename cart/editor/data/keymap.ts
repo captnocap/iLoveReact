@@ -10,6 +10,7 @@ import { activeSurface } from './surfaces';
 import { commandById, commandEnabled } from './commands';
 import type { Modifiers } from '../../../runtime/hooks/useModifiers';
 import type { EditorState, ModelToolSnapshot } from './types';
+import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID } from '../world/pieceCommandIds';
 
 // Global chords fire on any surface. Each command still self-gates through
 // commandEnabled. Keyed by a normalized chord string.
@@ -42,10 +43,10 @@ const WORLD_KEYS: Record<string, string> = {
   // them. 'd' used to be Duplicate, which fired on every strafe and spammed copies of the phantom
   // selection (req_2558); 's' was the inert Set Spawn placeholder. Neither owns a world key now.
   ']': 'world.floor.step',
-  delete: 'delete-selection',
+  delete: WORLD_PIECE_DELETE_COMMAND_ID,
   // R rotates the selected placed piece 90° (req_2733) — free on the world surface; the model
   // surface's R (rotate gizmo) lives in MODEL_KEYS and never collides.
-  r: 'rotate-selection',
+  r: WORLD_PIECE_ROTATE_COMMAND_ID,
   // Esc drops back to the neutral Select tool — the modal "put the click down" (req_2550).
   escape: 'select-tool',
 };

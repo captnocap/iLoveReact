@@ -81,6 +81,10 @@ export type ArgsValidation<Args> =
 
 export interface CommandGuardContext<Args> {
   readonly invocationId: string;
+  /** Stable authored-action identity resolved by the authority before the
+   * handler commits. Undefined for report-only commands unless explicitly used
+   * to correlate a control such as undo/redo. */
+  readonly actionId?: string;
   readonly commandId: string;
   readonly args: Args;
   readonly origin?: string;
@@ -433,8 +437,13 @@ export class CommandAuthority {
     }
     if (!validation.ok) return this.finish(reject(invocation, 'invalid-args', validation.reason));
 
+    const actionId = invocation.actionId ??
+      (record.projection.effect === 'action' || record.projection.effect === 'project-action'
+        ? invocation.invocationId
+        : undefined);
     const context: CommandGuardContext<unknown> = freezeObject({
       invocationId: invocation.invocationId,
+      actionId,
       commandId: invocation.commandId,
       args: validation.value,
       origin: invocation.origin,
@@ -466,10 +475,6 @@ export class CommandAuthority {
 
     try {
       const result = record.handler(context) as Result;
-      const actionId = invocation.actionId ??
-        (record.projection.effect === 'action' || record.projection.effect === 'project-action'
-          ? invocation.invocationId
-          : undefined);
       return this.finish(freezeObject({
         invocationId: invocation.invocationId,
         commandId: invocation.commandId,

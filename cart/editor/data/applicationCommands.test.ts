@@ -9,11 +9,16 @@ import { type CommandOutcome, type CommandSource } from '../../../runtime/comman
 import {
   WORLD_FLOOR_STEP_COMMAND_ID,
   WORLD_MAX_FLOOR,
+  WORLD_PIECE_DELETE_COMMAND_ID,
+  WORLD_PIECE_MOVE_COMMAND_ID,
+  WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PLACEMENT_ROTATE_COMMAND_ID,
   WORLD_SELECT_TOOL_COMMAND_ID,
   WORLD_TOOL_COMMAND_IDS,
   createEditorApplicationCommands,
   type EditorCommandAdapter,
   type WorldFloorStepResult,
+  type WorldPieceEditResult,
   type WorldPiecesPlaceResult,
 } from './applicationCommands';
 import type { PiecePlacementWorld } from '../world/piecePlacementCommand';
@@ -33,15 +38,18 @@ function harness(
   historyEntry: { label: string; actionId?: string; commandId?: string } | null = null,
   startTool = 'place-piece',
   startMapPaint = false,
+  startWorld: PiecePlacementWorld = { documentId: 'main', pieces: [], selectedPieceId: null, nextPieceId: 1 },
 ) {
   let floor = startFloor;
   let commits = 0;
-  let placementWorld: PiecePlacementWorld = { documentId: 'main', pieces: [], selectedPieceId: null, nextPieceId: 1 };
+  let placementWorld: PiecePlacementWorld = startWorld;
   let undo = historyEntry ? [historyEntry] : [];
   let redo: typeof undo = [];
   let now = 1000;
   let activeTool = startTool;
   let mapPaintActive = startMapPaint;
+  let ghostYawDegrees = 0;
+  let committedActionId: string | null = null;
   const outcomes: CommandOutcome[] = [];
   const adapter: EditorCommandAdapter = {
     activeSurface: () => surface,
@@ -50,6 +58,12 @@ function harness(
     commitFloor: (result) => { floor = result.floorIndex; commits += 1; },
     worldTool: () => ({ activeCommandId: activeTool, mapPaintActive }),
     commitWorldTool: (result) => { activeTool = result.toolId; mapPaintActive = false; commits += 1; },
+    placementGhost: () => ({
+      activeCommandId: activeTool,
+      armedPieceId: activeTool === 'place-piece' ? 'floor.concrete.common' : null,
+      yawDegrees: ghostYawDegrees,
+    }),
+    commitPlacementGhostRotation: (result) => { ghostYawDegrees = result.yawDegrees; commits += 1; },
     placement: {
       read: () => placementWorld,
       policy: {
@@ -59,7 +73,17 @@ function harness(
         },
       },
       now: () => now++,
-      commit: (plan) => { placementWorld = plan.next; commits += 1; return now++; },
+      commit: (plan, actionId) => { placementWorld = plan.next; committedActionId = actionId; commits += 1; return now++; },
+    },
+    pieceEdit: {
+      read: () => placementWorld,
+      now: () => now++,
+      commit: (plan, actionId) => {
+        placementWorld = { ...placementWorld, ...plan.next };
+        committedActionId = actionId;
+        commits += 1;
+        return now++;
+      },
     },
     history: {
       peekUndo: () => undo[0] ?? null,
@@ -88,6 +112,8 @@ function harness(
     redoDepth: () => redo.length,
     activeTool: () => activeTool,
     mapPaintActive: () => mapPaintActive,
+    ghostYaw: () => ghostYawDegrees,
+    committedActionId: () => committedActionId,
   };
 }
 
@@ -132,6 +158,8 @@ test('headless chord resolution returns the same inert command projection', () =
     assert(h.commands.resolveChord(chord!, { surface: 'world' })?.id === id, `${chord} did not resolve ${id}`);
     assert(h.commands.resolveChord(chord!, { surface: 'model' }) === undefined, `${chord} leaked onto the model surface`);
   }
+  assert(h.commands.resolveChord('R', { surface: 'world' })?.id === WORLD_PIECE_ROTATE_COMMAND_ID, 'R did not project authored rotate');
+  assert(h.commands.resolveChord('Delete', { surface: 'world' })?.id === WORLD_PIECE_DELETE_COMMAND_ID, 'Delete did not project authored delete');
 });
 
 test('every source arms every world tool through one report-only handler', () => {
@@ -215,6 +243,85 @@ test('a headless viewport or remote peer commits the same authored placement onc
     assert(h.pieces().length === 1 && h.commits() === 1, `${source} did not commit exactly once`);
     assert(h.outcomes.length === 1 && h.outcomes[0] === outcome, `${source} did not publish exactly once`);
   }
+});
+
+const selectedPieceWorld: PiecePlacementWorld = {
+  documentId: 'main',
+  pieces: [{
+    id: 'bp_7', pieceId: 'floor.concrete.common', x: 1.5, y: 0, z: 1.5,
+    yawDegrees: 0, floor: 0, slots: { top: { assetId: 'mat-kept' } },
+  }],
+  selectedPieceId: 'bp_7',
+  nextPieceId: 8,
+};
+
+test('menu, hotkey, Section D, context, and remote share one authored rotate action', () => {
+  for (const source of ['menu', 'hotkey', 'toolbar', 'context-menu', 'remote'] as CommandSource[]) {
+    const h = harness(0, 'world', null, null, 'select-tool', false, selectedPieceWorld);
+    const outcome = h.commands.invoke<WorldPieceEditResult>({
+      invocationId: `rotate:${source}`,
+      commandId: WORLD_PIECE_ROTATE_COMMAND_ID,
+      args: { documentId: 'main', pieceId: 'bp_7', quarterTurns: 1 },
+      source,
+    });
+    assert(outcome.status === 'applied' && outcome.actionId === `rotate:${source}`, `${source} lost action identity`);
+    assert(outcome.status === 'applied' && outcome.result.plan.transaction.action === 'rotate', `${source} ran another behavior`);
+    assert(h.pieces()[0]?.yawDegrees === 90 && h.pieces()[0]?.slots?.top, `${source} did not preserve and rotate the piece`);
+    assert(h.commits() === 1 && h.outcomes.length === 1, `${source} did not commit/publish exactly once`);
+  }
+});
+
+test('viewport and remote move use the same replacement transaction', () => {
+  const occupied: PiecePlacementWorld = {
+    ...selectedPieceWorld,
+    pieces: [
+      ...selectedPieceWorld.pieces,
+      { id: 'victim', pieceId: 'floor.concrete.common', x: 4.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 },
+    ],
+  };
+  for (const source of ['viewport', 'remote'] as CommandSource[]) {
+    const h = harness(0, 'world', null, null, 'move-selection', false, occupied);
+    const outcome = h.commands.invoke<WorldPieceEditResult>({
+      invocationId: `move:${source}`,
+      commandId: WORLD_PIECE_MOVE_COMMAND_ID,
+      args: {
+        documentId: 'main', pieceId: 'bp_7',
+        transform: { x: 4.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 },
+      },
+      source,
+    });
+    assert(outcome.status === 'applied' && outcome.result.plan.transaction.replaced[0]?.piece.id === 'victim', `${source} lost replacement`);
+    assert(h.pieces().length === 1 && h.pieces()[0]?.id === 'bp_7' && h.pieces()[0]?.x === 4.5, `${source} world drifted`);
+    assert(h.commits() === 1 && h.outcomes.length === 1, `${source} did not commit/publish exactly once`);
+  }
+});
+
+test('Delete is an authored action while placement-preview rotation is report-only', () => {
+  const deletion = harness(0, 'world', null, null, 'select-tool', false, selectedPieceWorld);
+  const deleted = deletion.commands.invoke({
+    invocationId: 'delete:context', actionId: 'piece-action:7', commandId: WORLD_PIECE_DELETE_COMMAND_ID,
+    args: { documentId: 'main', pieceId: 'bp_7' }, source: 'context-menu',
+  });
+  assert(deleted.status === 'applied' && deleted.actionId === 'piece-action:7' && deleted.effect === 'action', 'delete lost authored identity');
+  assert(deletion.committedActionId() === 'piece-action:7', 'delete committed under a different id than its outcome');
+  assert(deletion.pieces().length === 0 && deletion.commits() === 1, 'delete did not commit once');
+
+  const ghost = harness(0, 'world', null, null, 'place-piece');
+  const turned = ghost.commands.invoke({ commandId: WORLD_PLACEMENT_ROTATE_COMMAND_ID, args: {}, source: 'hotkey' });
+  assert(turned.status === 'applied' && turned.effect === 'report-only' && !('actionId' in turned), 'preview turn became authored history');
+  assert(ghost.ghostYaw() === 90 && ghost.commits() === 1, 'preview did not turn once');
+});
+
+test('stale, wrong-document, no-op, and malformed piece edits reject before commit', () => {
+  const h = harness(0, 'world', null, null, 'select-tool', false, selectedPieceWorld);
+  const calls = [
+    h.commands.invoke({ commandId: WORLD_PIECE_DELETE_COMMAND_ID, args: { documentId: 'other', pieceId: 'bp_7' }, source: 'remote' }),
+    h.commands.invoke({ commandId: WORLD_PIECE_ROTATE_COMMAND_ID, args: { documentId: 'main', pieceId: 'gone', quarterTurns: 1 }, source: 'remote' }),
+    h.commands.invoke({ commandId: WORLD_PIECE_MOVE_COMMAND_ID, args: { documentId: 'main', pieceId: 'bp_7', transform: { x: 1.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 } }, source: 'remote' }),
+    h.commands.invoke({ commandId: WORLD_PIECE_ROTATE_COMMAND_ID, args: { documentId: 'main', pieceId: 'bp_7', quarterTurns: 2 }, source: 'remote' }),
+  ];
+  assert(calls.every((outcome) => outcome.status === 'rejected' && outcome.code === 'invalid-args'), 'invalid edit crossed authority');
+  assert(h.commits() === 0 && h.pieces()[0]?.yawDegrees === 0, 'rejected edit mutated state');
 });
 
 test('undo and redo outcomes retain the authored action identity', () => {

@@ -21,6 +21,22 @@ import {
   type PiecePlacementPolicy,
   type PiecePlacementWorld,
 } from '../world/piecePlacementCommand';
+import {
+  PieceEditRejected,
+  WORLD_PIECE_DELETE_COMMAND_ID,
+  WORLD_PIECE_EDIT_COMMAND_IDS,
+  WORLD_PIECE_MOVE_COMMAND_ID,
+  WORLD_PIECE_ROTATE_COMMAND_ID,
+  planPieceDelete,
+  planPieceMove,
+  planPieceRotate,
+  type PieceDeleteArgs,
+  type PieceEditPlan,
+  type PieceEditWorld,
+  type PieceMoveArgs,
+  type PieceRotateArgs,
+  type WorldPieceEditCommandId,
+} from '../world/pieceEditCommand';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 
 export const WORLD_FLOOR_STEP_COMMAND_ID = 'world.floor.step';
@@ -42,7 +58,15 @@ export const WORLD_TOOL_COMMAND_IDS = [
 export type WorldToolCommandId = typeof WORLD_TOOL_COMMAND_IDS[number];
 export const WORLD_UNDO_COMMAND_ID = 'world.history.undo';
 export const WORLD_REDO_COMMAND_ID = 'world.history.redo';
+/** Turning the not-yet-authored placement preview is a report-only choice. It
+ * is intentionally not the authored `world.piece.rotate` action. */
+export const WORLD_PLACEMENT_ROTATE_COMMAND_ID = 'world.placement.rotate';
 export { WORLD_PIECES_PLACE_COMMAND_ID } from '../world/piecePlacementCommand';
+export {
+  WORLD_PIECE_DELETE_COMMAND_ID,
+  WORLD_PIECE_MOVE_COMMAND_ID,
+  WORLD_PIECE_ROTATE_COMMAND_ID,
+} from '../world/pieceEditCommand';
 
 export type WorldFloorStepArgs = { delta: -1 | 1 };
 export type WorldFloorStepResult = {
@@ -77,6 +101,19 @@ export type WorldPiecesPlaceResult = {
   inputToAppliedMs: number;
 };
 
+export type WorldPieceEditResult = {
+  plan: PieceEditPlan;
+  applyStartedAtMs: number;
+  appliedAtMs: number;
+  applyMs: number;
+};
+
+export type WorldPlacementRotateResult = {
+  previousYawDegrees: number;
+  yawDegrees: number;
+  armedPieceId: string;
+};
+
 export interface EditorPlacementAdapter {
   read(): PiecePlacementWorld;
   policy: PiecePlacementPolicy;
@@ -84,6 +121,13 @@ export interface EditorPlacementAdapter {
   /** Atomically commit a previously validated plan and return the timestamp at
    * which the new snapshot became authoritative. This method must not throw. */
   commit(plan: PiecePlacementPlan, actionId: string, gesture: PlacementGesture, applyStartedAtMs: number): number;
+}
+
+export interface EditorPieceEditAdapter {
+  read(): PieceEditWorld;
+  now(): number;
+  /** Atomically commit a validated forward/inverse transaction. */
+  commit(plan: PieceEditPlan, actionId: string, applyStartedAtMs: number): number;
 }
 
 export type WorldHistoryEntryRef = {
@@ -114,7 +158,10 @@ export interface EditorCommandAdapter {
   commitFloor(result: WorldFloorStepResult): void;
   worldTool(): { activeCommandId: string; mapPaintActive: boolean };
   commitWorldTool(result: WorldToolArmResult): void;
+  placementGhost(): { activeCommandId: string; armedPieceId: string | null; yawDegrees: number };
+  commitPlacementGhostRotation(result: WorldPlacementRotateResult): void;
   placement: EditorPlacementAdapter;
+  pieceEdit: EditorPieceEditAdapter;
   history: EditorHistoryAdapter;
 }
 
@@ -193,6 +240,52 @@ function placementArgs(adapter: EditorPlacementAdapter, args: unknown) {
     const reason = error instanceof PiecePlacementRejected ? `${error.code}: ${error.message}` : (error as Error).message;
     return { ok: false as const, reason: reason || 'placement validation failed' };
   }
+}
+
+function editRejectReason(error: unknown): string {
+  return error instanceof PieceEditRejected
+    ? `${error.code}: ${error.message}`
+    : ((error as Error)?.message || 'piece edit validation failed');
+}
+
+function moveArgs(adapter: EditorPieceEditAdapter, args: unknown) {
+  const value = args as Partial<PieceMoveArgs> | null;
+  if (!value || typeof value.documentId !== 'string' || typeof value.pieceId !== 'string' || !value.transform) {
+    return { ok: false as const, reason: 'documentId, pieceId, and transform are required' };
+  }
+  try {
+    return { ok: true as const, value: planPieceMove(adapter.read(), value as PieceMoveArgs) };
+  } catch (error) {
+    return { ok: false as const, reason: editRejectReason(error) };
+  }
+}
+
+function rotateArgs(adapter: EditorPieceEditAdapter, args: unknown) {
+  const value = args as Partial<PieceRotateArgs> | null;
+  if (!value || typeof value.documentId !== 'string' || typeof value.pieceId !== 'string') {
+    return { ok: false as const, reason: 'documentId and pieceId are required' };
+  }
+  try {
+    return { ok: true as const, value: planPieceRotate(adapter.read(), value as PieceRotateArgs) };
+  } catch (error) {
+    return { ok: false as const, reason: editRejectReason(error) };
+  }
+}
+
+function deleteArgs(adapter: EditorPieceEditAdapter, args: unknown) {
+  const value = args as Partial<PieceDeleteArgs> | null;
+  if (!value || typeof value.documentId !== 'string' || typeof value.pieceId !== 'string') {
+    return { ok: false as const, reason: 'documentId and pieceId are required' };
+  }
+  try {
+    return { ok: true as const, value: planPieceDelete(adapter.read(), value as PieceDeleteArgs) };
+  } catch (error) {
+    return { ok: false as const, reason: editRejectReason(error) };
+  }
+}
+
+export function isWorldPieceEditCommandId(id: string): id is WorldPieceEditCommandId {
+  return (WORLD_PIECE_EDIT_COMMAND_IDS as readonly string[]).includes(id);
 }
 
 /** Build one application-scoped registry + authority. Creating it does not run
@@ -282,9 +375,9 @@ export function createEditorApplicationCommands(
         ? true
         : { enabled: false, reason: 'only in the world editor' };
     },
-  }, ({ args, invocationId }) => {
+  }, ({ args, invocationId, actionId }) => {
     const applyStartedAtMs = adapter.placement.now();
-    const committedAtMs = adapter.placement.commit(args.plan, invocationId, args.gesture, applyStartedAtMs);
+    const committedAtMs = adapter.placement.commit(args.plan, actionId ?? invocationId, args.gesture, applyStartedAtMs);
     const appliedAtMs = Number.isFinite(committedAtMs) ? Math.max(applyStartedAtMs, committedAtMs) : applyStartedAtMs;
     const result: WorldPiecesPlaceResult = {
       plan: args.plan,
@@ -296,6 +389,90 @@ export function createEditorApplicationCommands(
       applyMs: Math.max(0, appliedAtMs - applyStartedAtMs),
       inputToAppliedMs: Math.max(0, appliedAtMs - args.gesture.inputAtMs),
     };
+    return result;
+  });
+
+  const pieceEditEnabled = () => {
+    const blocked = adapter.blockedReason();
+    if (blocked) return { enabled: false, reason: `resolve ${blocked} first` };
+    return adapter.activeSurface() === 'world'
+      ? true
+      : { enabled: false, reason: 'only in the world editor' };
+  };
+  const commitPieceEdit = (plan: PieceEditPlan, actionId: string): WorldPieceEditResult => {
+    const applyStartedAtMs = adapter.pieceEdit.now();
+    const committedAtMs = adapter.pieceEdit.commit(plan, actionId, applyStartedAtMs);
+    const appliedAtMs = Number.isFinite(committedAtMs) ? Math.max(applyStartedAtMs, committedAtMs) : applyStartedAtMs;
+    return {
+      plan,
+      applyStartedAtMs,
+      appliedAtMs,
+      applyMs: Math.max(0, appliedAtMs - applyStartedAtMs),
+    };
+  };
+
+  registry.register<PieceEditPlan, WorldPieceEditResult>({
+    id: WORLD_PIECE_MOVE_COMMAND_ID,
+    label: 'Move World Piece',
+    icon: 'Move',
+    effect: 'action',
+    undoScope: { kind: 'document', key: 'world' },
+    projections: { hiddenReason: 'semantic drag commit projected by the world viewport Move tool' },
+    validateArgs: (args) => moveArgs(adapter.pieceEdit, args),
+    isEnabled: pieceEditEnabled,
+  }, ({ args, invocationId, actionId }) => commitPieceEdit(args, actionId ?? invocationId));
+
+  registry.register<PieceEditPlan, WorldPieceEditResult>({
+    id: WORLD_PIECE_ROTATE_COMMAND_ID,
+    label: 'Rotate World Piece',
+    icon: 'RotateCw',
+    effect: 'action',
+    undoScope: { kind: 'document', key: 'world' },
+    projections: {
+      menu: ['Build'], toolbar: ['D.world'], contextMenu: ['world-piece'], palette: true,
+    },
+    keybindings: [{ chord: 'R', when: { surface: 'world' } }],
+    validateArgs: (args) => rotateArgs(adapter.pieceEdit, args),
+    isEnabled: pieceEditEnabled,
+  }, ({ args, invocationId, actionId }) => commitPieceEdit(args, actionId ?? invocationId));
+
+  registry.register<PieceEditPlan, WorldPieceEditResult>({
+    id: WORLD_PIECE_DELETE_COMMAND_ID,
+    label: 'Delete World Piece',
+    icon: 'Trash2',
+    effect: 'action',
+    undoScope: { kind: 'document', key: 'world' },
+    projections: { menu: ['Edit'], contextMenu: ['world-piece'], palette: true },
+    keybindings: [{ chord: 'Delete', when: { surface: 'world' } }],
+    validateArgs: (args) => deleteArgs(adapter.pieceEdit, args),
+    isEnabled: pieceEditEnabled,
+  }, ({ args, invocationId, actionId }) => commitPieceEdit(args, actionId ?? invocationId));
+
+  registry.register<{}, WorldPlacementRotateResult>({
+    id: WORLD_PLACEMENT_ROTATE_COMMAND_ID,
+    label: 'Rotate Placement Preview',
+    icon: 'RotateCw',
+    effect: 'report-only',
+    undoScope: 'none',
+    projections: { hiddenReason: 'R resolves here only while an unplaced piece is armed' },
+    validateArgs: noArgs,
+    isEnabled: () => {
+      const enabled = pieceEditEnabled();
+      if (enabled !== true) return enabled;
+      const ghost = adapter.placementGhost();
+      return ghost.activeCommandId === WORLD_PLACE_TOOL_COMMAND_ID && ghost.armedPieceId
+        ? true
+        : { enabled: false, reason: 'arm a piece in Place mode to rotate its preview' };
+    },
+  }, () => {
+    const ghost = adapter.placementGhost();
+    if (!ghost.armedPieceId) throw new Error('placement preview disappeared before rotation');
+    const result: WorldPlacementRotateResult = {
+      previousYawDegrees: ghost.yawDegrees,
+      yawDegrees: (ghost.yawDegrees + 90) % 360,
+      armedPieceId: ghost.armedPieceId,
+    };
+    adapter.commitPlacementGhostRotation(result);
     return result;
   });
 

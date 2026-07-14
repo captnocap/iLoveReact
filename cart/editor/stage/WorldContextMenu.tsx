@@ -29,6 +29,7 @@ import { pieceSlotRoles } from '../world/pieceSlots';
 import { pieceLook, type MaterialRef, type PlacedPiece } from '../world/pieces';
 import type { Asset } from '../data/types';
 import AssetPreview from '../library/AssetPreview';
+import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID } from '../world/pieceCommandIds';
 
 // The quick verbs, in reach order. Labels are the quick-menu voice ("Copy", not
 // "Duplicate Selection"); ids are the SAME registry commands the menus/keymap run,
@@ -38,8 +39,8 @@ const QUICK_VERBS: { id: string; label: string; keyHint: string; closes: boolean
   { id: 'duplicate-selection', label: 'Copy', keyHint: '', closes: true },
   // Rotate keeps the menu open (like the model menu's light switches) so 180°/270°
   // is two more clicks without re-picking; the header's yaw readout tracks live.
-  { id: 'rotate-selection', label: 'Rotate 90°', keyHint: 'R', closes: false },
-  { id: 'delete-selection', label: 'Delete', keyHint: 'Del', closes: true },
+  { id: WORLD_PIECE_ROTATE_COMMAND_ID, label: 'Rotate 90°', keyHint: 'R', closes: false },
+  { id: WORLD_PIECE_DELETE_COMMAND_ID, label: 'Delete', keyHint: 'Del', closes: true },
 ];
 
 const MENU_W = 240;

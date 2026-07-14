@@ -18,6 +18,7 @@ import { BUILD_PIECE_STARTERS } from './buildStarters';
 import { PROP_EXPORT_TARGETS, propExportCommandId } from './propExports';
 import { commandForKeyEvent } from './keymap';
 import type { EditorState } from './types';
+import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID } from '../world/pieceCommandIds';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -166,6 +167,9 @@ test('the live world key bridge reaches every authority-backed tool identity', (
   for (const [key, id] of expected) {
     assert(commandForKeyEvent(state, key!, mods) === id, `${key} did not reach ${id}`);
   }
+  const selected = { ...state, selectedPieceId: 'bp_7' } as EditorState;
+  assert(commandForKeyEvent(selected, 'r', mods) === WORLD_PIECE_ROTATE_COMMAND_ID, 'R did not resolve the authored rotate identity');
+  assert(commandForKeyEvent(selected, 'delete', mods) === WORLD_PIECE_DELETE_COMMAND_ID, 'Delete did not resolve the authored delete identity');
 });
 
 log(`\n${passed} passed, ${failed} failed`);
