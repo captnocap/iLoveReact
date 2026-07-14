@@ -72,10 +72,28 @@ density entirely by carrying their own texture — the far-LoD plan (bake
 stamps into the facade canvas beyond ~20m, where 256 px/m is exactly the
 across-the-street look) lands with the facade painter arc.
 
-## Not yet built (the next arc)
+## The facade painter (req_3057 — SHIPPED, first slice)
 
-The multi-piece facade painter (req_3018's graffiti half): select multiple
-pieces → merge coplanar faces into one meter-true canvas at 256 px/m → spray
-(strokes, stored as the paint program per the paint ruling) + stamp tools →
-bake back per face. Sticker deletion currently rides piece undo only — no
-per-stamp remove verb yet.
+Right-click a wall piece → **Paint Facade** (`WorldContextMenu`, command
+`paint-facade`): `world/facades.ts gatherFacade` BFS-collects the coplanar
+contiguous wall run (same facing mod 180°, same plane within a wall thickness,
+touching rects — multi-storey stacks join) and opens it as a `facade`
+workspace document (`stage/FacadePainterSurface.tsx`) — the whole run flat,
+meter-true, at the RULED 256 px/m. SPRAY records stroke rows (hex + radius +
+path in facade meters; host GPU dabs via the paintable doors, deterministic
+replay); STAMP drops the armed sticker as a row with degree rotation (the
+paint level has no quarter-turn limit — the blit rotates freely). SAVE bakes:
+stroke readback + CPU stamp compositing (`world/facadeBake.ts`, die-cut
+transparency) → PNG cached at `maps/<stem>/facades/<id>.png` (regenerable —
+the rows in world.json are the durable form per the paint ruling) → a
+two-sided quad floated 12mm off the wall rides the EXISTING resident-mesh
+doors (livePush). Unpainted texels keep alpha 0: the quad shows exactly the
+paint. Proven by `world/facades.test.ts` (7 cases).
+
+## Not yet built (follow-ups)
+
+Per-stamp remove verbs (facade stamps and quad stickers both ride undo/Clear
+only); free-angle rotation UI (the data + blit support any degree, the rail
+still steps quarters); stamp-as-paint on AUTHORED-mesh atlases + the isometric
+cylinder unwrap for pole wraps (req_3052/req_3054 design, greenlit direction);
+facade far-LoD baking of quad stickers.

@@ -57,8 +57,8 @@ export const editor_stickers: DocIndex = {
       name: 'no per-stamp remove verb; facade painter unbuilt',
       purpose: ['ui', 'building'],
       description:
-        'Sticker deletion rides piece undo only — no per-stamp remove verb yet. The multi-piece facade painter (req_3018\'s graffiti half: coplanar-face merge, 256 px/m canvas, spray strokes stored as the paint program) is the NEXT ARC, not built.',
-      evidence: ['docs/game/editor_stickers.md "Not yet built"'],
+        'Per-stamp remove verbs missing (facade stamps + quad stickers ride undo/Clear only); the facade painter SHIPPED its first slice (req_3057 — gatherFacade coplanar run, 256 px/m canvas, spray rows + free-rotation stamp rows, PNG bake cache, resident-mesh quad) but stamp-as-paint on authored-mesh atlases and the isometric cylinder unwrap (req_3052/3054 direction) remain.',
+      evidence: ['docs/game/editor_stickers.md "Not yet built (follow-ups)"'],
       severity: 'medium',
     },
   ],
