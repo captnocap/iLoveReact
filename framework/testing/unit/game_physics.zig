@@ -558,6 +558,37 @@ test "heightfield sample: bilinear interior height" {
     try testing.expect(physics.heightfieldSurfaceAt(1.5, 1.0) == null);
 }
 
+test "one heightfield can be released without dropping its neighbors" {
+    physics.clearHeightfields();
+    defer physics.clearHeightfields();
+    var low = [4]f32{ 1, 1, 1, 1 };
+    var high = [4]f32{ 5, 5, 5, 5 };
+    try testing.expect(physics.registerHeightfield(.{
+        .id = 2,
+        .origin_x = 0,
+        .origin_z = 0,
+        .cell = 1,
+        .cols = 2,
+        .rows = 2,
+        .base_y = 0,
+        .walk_cos = 0.5,
+    }, std.mem.sliceAsBytes(low[0..])));
+    try testing.expect(physics.registerHeightfield(.{
+        .id = 3,
+        .origin_x = 4,
+        .origin_z = 0,
+        .cell = 1,
+        .cols = 2,
+        .rows = 2,
+        .base_y = 0,
+        .walk_cos = 0.5,
+    }, std.mem.sliceAsBytes(high[0..])));
+
+    physics.unregisterHeightfield(2);
+    try testing.expect(physics.heightfieldSurfaceAt(0.5, 0.5) == null);
+    try testing.expectApproxEqAbs(@as(f32, 5), physics.heightfieldSurfaceAt(4.5, 0.5).?.height, 1e-5);
+}
+
 test "heightfield sample: rotated vertical link rises along the turned local depth" {
     physics.clearHeightfields();
     var samples = [18]f32{

@@ -11,6 +11,7 @@ const map_chunks = @import("../game/map/chunks.zig");
 const map_transport = @import("../game/map/transport.zig");
 const config = @import("config.zig");
 const paint_surface = @import("paint_surface.zig");
+const paint_revision = @import("paint_revision.zig");
 const transport_render = @import("transport_render.zig");
 const foliage_preview = @import("foliage_preview.zig");
 const Node = layout.Node;
@@ -30,6 +31,38 @@ const rebuildTransportPreview = transport_render.rebuildTransportPreview;
 const paintPreviewAnchor = foliage_preview.paintPreviewAnchor;
 const requestFoliageRegen = foliage_preview.requestFoliageRegen;
 const pollFoliageRegen = foliage_preview.pollFoliageRegen;
+
+/// Reset one loader's retained projection after the global map engine replaces
+/// its whole document. Slot buffers stay allocated for reuse, but no outgoing
+/// node, collider, water surface, or foliage batch remains publishable.
+fn reconcileMapRevision(runtime: anytype) bool {
+    const revision = map_paint.mapRevision();
+    if (!paint_revision.reconcile(&runtime.paint_map_revision, revision, runtime.paint_slot_used[0..])) return false;
+
+    const ground_first = runtime.paint_kids_first orelse return true;
+    const water_first = runtime.paint_water_kids_first;
+    for (0..MAX_PAINT_SLOTS) |i| {
+        runtime.paint_slot_chunk[i] = .{ 0, 0 };
+        runtime.kid_list.items[ground_first + i].scene3d_mesh = false;
+        if (water_first) |first| runtime.kid_list.items[first + i].scene3d_mesh = false;
+        game_physics.unregisterHeightfield(PAINT_COLLIDER_BASE + i);
+    }
+    if (runtime.paint_foliage_kids_first) |first| {
+        for (0..config.PAINT_FOLIAGE_FAMILY_COUNT) |i| {
+            const node = &runtime.kid_list.items[first + i];
+            node.scene3d_mesh = false;
+            node.scene3d_instance_count = 0;
+            node.scene3d_instance_segments = null;
+        }
+    }
+    runtime.paint_drop_warned = false;
+    runtime.paint_hover = null;
+    runtime.paint_stroking = false;
+    runtime.paint_foliage_clipped = false;
+    runtime.foliage_want = true;
+    runtime.foliage_want_log = false;
+    return true;
+}
 
 pub fn paintGizmoColor(tool: map_paint.Tool) [3]f32 {
     if (tool.mode == .erase) return .{ 0.95, 0.25, 0.2 };
@@ -143,6 +176,7 @@ pub fn dressPaintGizmo(runtime: anytype, node: *Node, hover: [3]f32, tool: map_p
 /// disarmed it is a cheap slot scan.
 pub fn applyPaintLayer(runtime: anytype) void {
     const first = runtime.paint_kids_first orelse return;
+    const map_replaced = reconcileMapRevision(runtime);
 
     // hover poll: the beam follows the mouse whenever the tool is armed, not
     // just during a drag — no per-motion tree walk needed for hover.
@@ -185,10 +219,10 @@ pub fn applyPaintLayer(runtime: anytype) void {
     }
     // Capture the height dirty bit before the chunk mirror clears it. Rail and
     // preview boxes then follow sculpted terrain without becoming frame work.
-    var path_terrain_dirty = false;
+    var path_terrain_dirty = map_replaced;
 
     // painted-chunk mirror: assign slots, re-bake dirty heights, refresh colliders
-    var foliage_stale = false;
+    var foliage_stale = map_replaced;
     for (map_chunks.slots()) |maybe| {
         const chunk = maybe orelse continue;
         path_terrain_dirty = path_terrain_dirty or chunk.dirty.height;

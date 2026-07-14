@@ -9,6 +9,7 @@ const foliage = @import("../world/foliage.zig");
 const map_paint = @import("../game/map/engine.zig");
 const map_chunks = @import("../game/map/chunks.zig");
 const config = @import("config.zig");
+const paint_revision = @import("paint_revision.zig");
 const state = @import("state.zig");
 const log = std.debug;
 const MAX_PAINT_SLOTS = config.MAX_PAINT_SLOTS;
@@ -183,6 +184,7 @@ pub const FoliageRowSet = struct {
 
 pub const FoliageJob = struct {
     set: u8,
+    map_revision: u64,
     anchor: [2]f32,
     log_full: bool,
     specs: [map_paint.MAX_PALETTE]?map_paint.FloraSpec,
@@ -190,6 +192,7 @@ pub const FoliageJob = struct {
 
 pub const FoliageResult = struct {
     set: u8,
+    map_revision: u64,
     counts: [PAINT_FOLIAGE_FAMILY_COUNT]u32,
     fulls: [PAINT_FOLIAGE_FAMILY_COUNT]bool,
     segs_ok: [PAINT_FOLIAGE_FAMILY_COUNT]bool,
@@ -340,7 +343,15 @@ pub fn requestFoliageRegen(runtime: anytype, log_full: bool) void {
 /// MAIN THREAD, every paint-layer frame: apply a finished regen, then feed
 /// the worker if a regen is wanted and the pipeline is idle.
 pub fn pollFoliageRegen(runtime: anytype) void {
-    if (runtime.foliage_box.poll()) |result| applyFoliageResult(runtime, result);
+    if (runtime.foliage_box.poll()) |result| {
+        if (paint_revision.resultIsCurrent(result.map_revision, runtime.paint_map_revision)) {
+            applyFoliageResult(runtime, result);
+        } else {
+            // A worker may finish an outgoing document after reset/load. Never
+            // flash those rows over the incoming map; request its snapshot.
+            runtime.foliage_want = true;
+        }
+    }
     if (!runtime.foliage_want) return;
     if (!runtime.foliage_box.idle()) return;
     if (runtime.foliage_worker == null) {
@@ -354,6 +365,7 @@ pub fn pollFoliageRegen(runtime: anytype) void {
     if (!snapshotPaintedChunks(runtime)) return; // OOM: keep the want, retry next frame
     var job = FoliageJob{
         .set = 1 - runtime.foliage_display,
+        .map_revision = runtime.paint_map_revision,
         .anchor = paintPreviewAnchor(runtime),
         .log_full = runtime.foliage_want_log,
         .specs = undefined,
@@ -435,6 +447,7 @@ pub fn buildFoliageRows(runtime: anytype, job: FoliageJob) FoliageResult {
     const set = &runtime.foliage_sets[job.set];
     var result = FoliageResult{
         .set = job.set,
+        .map_revision = job.map_revision,
         .counts = @splat(0),
         .fulls = @splat(false),
         .segs_ok = @splat(true),

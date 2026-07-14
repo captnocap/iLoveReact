@@ -1396,8 +1396,25 @@ pub fn build(b: *std.Build) void {
         .root_module = world_loader_geometry_test_mod,
     });
     const run_world_loader_geometry_test = b.addRunArtifact(world_loader_geometry_test);
-    const world_loader_geometry_test_step = b.step("test-world-loader", "Run split world-loader geometry parity tests");
+    const world_loader_paint_revision_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/world_loader/paint_revision.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const world_loader_paint_revision_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_loader_paint_revision.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    world_loader_paint_revision_test_mod.addImport("world_loader_paint_revision", world_loader_paint_revision_mod_for_tests);
+    const world_loader_paint_revision_test = b.addTest(.{
+        .name = "world-loader-paint-revision-test",
+        .root_module = world_loader_paint_revision_test_mod,
+    });
+    const run_world_loader_paint_revision_test = b.addRunArtifact(world_loader_paint_revision_test);
+    const world_loader_geometry_test_step = b.step("test-world-loader", "Run split world-loader geometry and map-revision tests");
     world_loader_geometry_test_step.dependOn(&run_world_loader_geometry_test.step);
+    world_loader_geometry_test_step.dependOn(&run_world_loader_paint_revision_test.step);
 
     // ── Game camera behavior tests (V23, P4) ───────────────────────
     // Exercises framework/game/camera.zig: Orbit/Aim fidelity against

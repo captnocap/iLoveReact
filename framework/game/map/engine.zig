@@ -254,6 +254,22 @@ pub fn reset() void {
     // Painted-material bindings are authored per map and ride the RMAP. A new
     // map must not inherit the outgoing map's material table.
     g_tile_binding_count = 0;
+    bumpMapRevision();
+}
+
+// Whole-document revision, distinct from per-chunk dirty channels. A loader
+// observing a changed value must release every retained `(cx, cz)` claim: the
+// incoming document can reuse the same coordinates with entirely different
+// content, or omit coordinates the outgoing document owned.
+var g_map_revision: u64 = 1;
+
+fn bumpMapRevision() void {
+    g_map_revision +%= 1;
+    if (g_map_revision == 0) g_map_revision = 1;
+}
+
+pub fn mapRevision() u64 {
+    return g_map_revision;
 }
 
 /// The profile and turn reach authored by the shared road/rail path tool.
@@ -1695,6 +1711,10 @@ fn loadMapInternal(bytes: []const u8, clear_history: bool) bool {
     const ok = store.load(bytes, g_tile_bindings[0..], &binding_count);
     g_tile_binding_count = if (ok) binding_count else 0;
     if (ok) roadsRestamp();
+    // store.load replaces/clears the whole sparse chunk registry even on a
+    // malformed blob. Publish that identity edge after the replacement is
+    // complete so retained loaders rebuild from the new registry next frame.
+    bumpMapRevision();
     return ok;
 }
 
@@ -1767,6 +1787,21 @@ test "heightAt bilinear-samples painted terrain, 0 off-chunk" {
     try std.testing.expectApproxEqAbs(@as(f32, 6), heightAt(0, 0), 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0), heightAt(50, 50), 0.0001);
     try std.testing.expectApproxEqAbs(@as(f32, 0), heightAt(500, 0), 0.0001); // no chunk there
+}
+
+test "whole-map revision advances on reset and snapshot replacement" {
+    const before_reset = mapRevision();
+    reset();
+    try std.testing.expect(mapRevision() != before_reset);
+
+    _ = chunks.growChunk(0, 0).?;
+    const bytes = try std.testing.allocator.alloc(u8, saveSizeUpperBound());
+    defer std.testing.allocator.free(bytes);
+    const used = saveMap(bytes);
+    try std.testing.expect(used > 0);
+    const before_load = mapRevision();
+    try std.testing.expect(loadMap(bytes[0..used]));
+    try std.testing.expect(mapRevision() != before_load);
 }
 
 test "groundHit lands a top-down ray on the sculpted cap" {

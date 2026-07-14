@@ -295,6 +295,9 @@ pub const Runtime = struct {
     transport_committed_revision: u64 = 0,
     transport_draft_revision: u64 = 0,
     transport_preview_active: bool = false,
+    /// Whole map-engine snapshot last reconciled into the retained paint slots.
+    /// Chunk dirty bits cover brush edits; this identity covers reset/load.
+    paint_map_revision: u64 = 0,
     paint_slot_used: [MAX_PAINT_SLOTS]bool = @splat(false),
     paint_slot_chunk: [MAX_PAINT_SLOTS][2]i32 = @splat(.{ 0, 0 }),
     paint_slot_ver: [MAX_PAINT_SLOTS]u32 = @splat(0),

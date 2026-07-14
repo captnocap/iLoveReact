@@ -323,6 +323,13 @@ pub fn registerHeightfield(desc: HeightfieldDesc, samples_bytes: []const u8) boo
     return true;
 }
 
+/// Drop one terrain grid without disturbing unrelated baked/world fields.
+/// Painted-map slots occupy a reserved id range and use this on document
+/// replacement; clearing the entire table would make authored ramps vanish.
+pub fn unregisterHeightfield(id: usize) void {
+    if (id < MAX_HEIGHTFIELDS) g_heightfields[id].active = false;
+}
+
 /// Drop all registered terrain (world reset / cart swap). TS re-registers
 /// what the new world needs.
 pub fn clearHeightfields() void {
