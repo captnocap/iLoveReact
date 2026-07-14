@@ -57,6 +57,22 @@ export function invalidateMeshDoc(dir: string): void {
 /** Write the resident host model into the package as its meshdoc (host door). True only
  *  when doc.blob landed; parts metadata rides along best-effort. */
 export function writeMeshDoc(dir: string, parts?: MeshDocPartMeta[]): boolean {
+  // Tripwire (req_3049): a save wrote Door_Wall_1's doc with ZERO ranges while its
+  // outliner showed two parts — the host's range truth had been silently cleared
+  // somewhere in the session, and the save faithfully persisted the damage (the
+  // reopened doc merges every part into one). The doc still writes (disk mirrors the
+  // host honestly), but a parts/ranges mismatch screams so the culprit names itself
+  // the moment this recurs.
+  if (parts && parts.length >= 2) {
+    let hostRanges = 0;
+    try {
+      const o = JSON.parse(host.__mesh_part_ranges?.() ?? 'null');
+      if (o?.ok && Array.isArray(o.ranges)) hostRanges = o.ranges.length;
+    } catch { /* unreadable host answer counts as zero — the scream below reports it */ }
+    if (hostRanges < parts.length) {
+      console.error(`[meshdoc] SAVING ${dir} WITH ${hostRanges} HOST PART RANGES while parts.json declares ${parts.length} parts (${parts.map((p) => p.name).join(', ')}) — the host's range truth was cleared this session; this doc will reopen with merged parts (req_3049)`);
+    }
+  }
   const ok = host.__model_meshdoc_write?.(`${dir}/${DOC_BLOB}`) === 1;
   if (ok && parts && parts.length > 0) {
     writeFile(`${dir}/${PARTS_META}`, JSON.stringify({ version: 1, parts }, null, 2));

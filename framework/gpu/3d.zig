@@ -2958,6 +2958,12 @@ fn journalInstall(e: *const JournalEntry) bool {
         };
     }
     if (e.groups) |g| model_source.setFaceGroups(g);
+    // Tripwire (req_3049): restoring a snapshot that carries NO ranges over a mesh
+    // that has them silently un-parts the model — the save then persists a doc that
+    // reopens merged. Name it when it happens.
+    if (e.part_ranges == null and model_source.partRanges() != null) {
+        std.debug.print("[mesh] undo/redo restored a snapshot WITHOUT part ranges over a mesh that had {d} parts — ranges cleared (req_3049)\n", .{model_source.partRanges().?.len / 2});
+    }
     model_source.setPartRanges(e.part_ranges orelse &.{});
     if (e.colors) |c| {
         model_paint.applyColors(c);
@@ -5468,6 +5474,12 @@ pub fn meshEditSetFaceGroups(groups: []const u32) void {
 /// This is also where a PERSISTED doc's ranges arrive on load/resume — a doc saved
 /// while the req_3029 minting bug was live heals here instead of reopening corrupt.
 pub fn meshEditSetPartRanges(pairs: []const u32) void {
+    // Tripwire (req_3049): a session lost its host part ranges and the next save
+    // persisted a doc that reopens with every part merged. An empty push over a mesh
+    // that HAS ranges is the one legal way to clear them — name it when it happens.
+    if (pairs.len < 2 and model_source.partRanges() != null) {
+        std.debug.print("[mesh] part ranges CLEARED by an empty cart push over a mesh that had {d} parts — if unintended this is the req_3049 merged-outliner save corruption\n", .{model_source.partRanges().?.len / 2});
+    }
     model_source.setPartRanges(pairs);
     _ = ensureDisjointPartRanges("cart range push");
     mesh_edit.reset();
