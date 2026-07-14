@@ -36,6 +36,7 @@ import type { MapZoneDef } from '../stage/mapPaint';
 import { useModifiers, currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { getHotState, setHotState } from '@reactjit/runtime/hooks/useHotState';
 import type { WorldTool } from './worldTool';
+import type { PieceMaterialTarget } from './pieceEditCommand';
 import { publishWorldHoverReadout } from '../data/worldHoverReadout';
 
 // authored placeable id → semantic resident key: authoredResidentKeyOf (authoredRegistry).
@@ -117,10 +118,9 @@ export default function WorldViewport(props: {
    *  quick context menu opens at the cursor. Fires in ANY tool mode — the whole point is
    *  editing the piece under the mouse without disarming the current tool. */
   onPieceContext: (id: string, x: number, y: number) => void;
-  /** Paint Faces (req_2879): the touched face's slot role on the touched piece — the
-   *  owner binds the active material into piece.slots[role]. Fired once per face per
-   *  stroke (a drag sweeps across faces; each (piece, role) pair paints once). */
-  onPaintFace: (id: string, role: string) => void;
+  /** Paint Faces (req_2879): one pointer gesture's unique semantic face targets.
+   *  The owner binds the active material in one authored transaction on release. */
+  onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   /** Place Sticker (req_3025): the click's face hit as the piece-local anchor +
    *  normal a StickerPlacement stores — the owner adds the armed sticker there. */
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
@@ -179,8 +179,8 @@ export default function WorldViewport(props: {
   onSelectRef.current = props.onSelect;
   const onPieceContextRef = useRef(props.onPieceContext);
   onPieceContextRef.current = props.onPieceContext;
-  const onPaintFaceRef = useRef(props.onPaintFace);
-  onPaintFaceRef.current = props.onPaintFace;
+  const onPaintFacesRef = useRef(props.onPaintFaces);
+  onPaintFacesRef.current = props.onPaintFaces;
   const onStampStickerRef = useRef(props.onStampSticker);
   onStampStickerRef.current = props.onStampSticker;
 
@@ -213,13 +213,13 @@ export default function WorldViewport(props: {
 
   // One stroke's painted faces — each (piece, role) takes the brush ONCE per gesture,
   // so a sweep doesn't re-write (and re-journal) the same face on every mousemove.
-  const paintFaceAt = useCallback((lx: number, ly: number, stroke: Set<string>): void => {
+  const paintFaceAt = useCallback((lx: number, ly: number, stroke: { seen: Set<string>; targets: PieceMaterialTarget[] }): void => {
     const hit = pickFaceAt(lx, ly);
     if (!hit) return;
     const key = `${hit.id}:${hit.role}`;
-    if (stroke.has(key)) return;
-    stroke.add(key);
-    onPaintFaceRef.current(hit.id, hit.role);
+    if (stroke.seen.has(key)) return;
+    stroke.seen.add(key);
+    stroke.targets.push({ pieceId: hit.id, roles: [hit.role] });
   }, [pickFaceAt]);
 
   // Place Sticker (req_3025/req_3050): the click's face hit, converted to the
@@ -561,9 +561,9 @@ export default function WorldViewport(props: {
     runAnchor: { x: number; z: number; terrainY: number } | null;
     runCell: { x: number; z: number } | null;
     move: MoveDrag | null;
-    /** Paint Faces stroke (req_2879): the (piece:role) keys already painted this
-     *  gesture. Non-null = the down painted and the drag keeps sweeping. */
-    paint: Set<string> | null;
+    /** Paint Faces stroke (req_2879): unique (piece:role) targets gathered during
+     *  this gesture. Non-null means release must commit or discard the batch. */
+    paint: { seen: Set<string>; targets: PieceMaterialTarget[] } | null;
   } | null>(null);
   const local = useCallback((e: any) => {
     const r = rectRef.current;
@@ -588,9 +588,11 @@ export default function WorldViewport(props: {
     const movingPiece = movingId ? piecesRef.current.find((piece) => piece.id === movingId) ?? null : null;
     const moveGround = movingPiece ? groundUnder(p.x, p.y) : null;
     if (movingPiece) onSelectRef.current(movingPiece.id);
-    // Paint Faces (req_2879): the down IS the first touch — paint the face under it
-    // now; the stroke set keeps the drag sweeping new faces without re-painting.
-    const paint = !e?.shiftKey && toolRef.current === 'paintFace' ? new Set<string>() : null;
+    // Paint Faces (req_2879): down gathers the first touch; later samples add new
+    // faces without mutating authored state until the whole gesture is committed.
+    const paint = !e?.shiftKey && toolRef.current === 'paintFace'
+      ? { seen: new Set<string>(), targets: [] as PieceMaterialTarget[] }
+      : null;
     // Place Sticker (req_3025): a click stamps once — no drag semantics.
     if (!e?.shiftKey && toolRef.current === 'sticker') stampStickerAt(p.x, p.y);
     setMovePreview(null);
@@ -708,9 +710,12 @@ export default function WorldViewport(props: {
       : null;
     setMovePreview(null);
     if (!d) { console.warn('[place] up with no down — click dropped'); return; }
-    // A paint gesture already landed everything on down/move — the up is inert
-    // (and never falls through to the select-click routing below).
-    if (d.paint) return;
+    // One pointer gesture is one authored action: down/move only gather unique
+    // semantic faces; up submits the whole batch through command authority.
+    if (d.paint) {
+      if (d.paint.targets.length > 0) onPaintFacesRef.current(d.paint.targets);
+      return;
+    }
     // req_2548 diagnostic — every way a click can silently place nothing.
     if (d.turned) {
       // Move commits precisely once on drop; its local preview never mutated the

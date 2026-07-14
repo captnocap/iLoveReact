@@ -9,17 +9,25 @@ import { placementSlotKey, type PlacedPiece } from './pieces';
 import {
   WORLD_PIECE_DELETE_COMMAND_ID,
   WORLD_PIECE_EDIT_COMMAND_IDS,
+  WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_COMMAND_IDS,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
   type WorldPieceEditCommandId,
+  type WorldPieceMaterialCommandId,
 } from './pieceCommandIds';
 export {
   WORLD_PIECE_DELETE_COMMAND_ID,
   WORLD_PIECE_EDIT_COMMAND_IDS,
+  WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_COMMAND_IDS,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
 } from './pieceCommandIds';
 export type { WorldPieceEditCommandId } from './pieceCommandIds';
+export type { WorldPieceMaterialCommandId } from './pieceCommandIds';
 export type WorldPieceEditAction = 'move' | 'rotate' | 'delete';
 
 export const WORLD_PIECE_EDIT_LIMITS = Object.freeze({ maxFloor: 128 });
@@ -49,6 +57,41 @@ export type PieceEditTransaction = {
 
 export type PieceEditPlan = {
   transaction: PieceEditTransaction;
+  next: PieceEditWorld;
+};
+
+export type PieceMaterialTarget = {
+  pieceId: string;
+  /** `all` expands through the semantic piece-role policy at the authority boundary. */
+  roles: readonly string[] | 'all';
+};
+export type PieceMaterialAssignArgs = {
+  documentId: string;
+  targets: readonly PieceMaterialTarget[];
+  materialAssetId: string;
+};
+export type PieceMaterialClearArgs = {
+  documentId: string;
+  targets: readonly PieceMaterialTarget[];
+};
+export type PieceMaterialPolicy = {
+  materialAssetExists(assetId: string): boolean;
+  rolesForPiece(pieceId: string): readonly string[];
+};
+export type PieceMaterialAssignment = { pieceId: string; roles: readonly string[] };
+export type PieceMaterialTransaction = {
+  commandId: WorldPieceMaterialCommandId;
+  documentId: string;
+  action: 'material.assign' | 'material.clear';
+  materialAssetId?: string;
+  assignments: readonly PieceMaterialAssignment[];
+  before: readonly IndexedPiece[];
+  after: readonly IndexedPiece[];
+  forward: PieceListPatch;
+  inverse: PieceListPatch;
+};
+export type PieceMaterialPlan = {
+  transaction: PieceMaterialTransaction;
   next: PieceEditWorld;
 };
 
@@ -114,7 +157,7 @@ function validateWorld(world: PieceEditWorld, documentId: string, pieceId: strin
   return found;
 }
 
-function applyPatch(world: PieceEditWorld, transaction: PieceEditTransaction, patch: PieceListPatch): PieceEditWorld {
+function applyPatch(world: PieceEditWorld, transaction: { documentId: string }, patch: PieceListPatch): PieceEditWorld {
   if (world.documentId !== transaction.documentId) {
     reject('wrong-document', `piece edit belongs to '${transaction.documentId}', not '${world.documentId}'`);
   }
@@ -249,4 +292,141 @@ export function planPieceDelete(world: PieceEditWorld, args: PieceDeleteArgs): P
     { removeIds: [before.piece.id], insert: [], append: [], selectedPieceId: null },
     { removeIds: [], insert: [before], append: [], selectedPieceId: world.selectedPieceId },
   );
+}
+
+type NormalizedMaterialTarget = { before: IndexedPiece; roles: string[] };
+
+function normalizeMaterialTargets(
+  world: PieceEditWorld,
+  documentId: string,
+  targets: readonly PieceMaterialTarget[],
+  policy: PieceMaterialPolicy,
+): NormalizedMaterialTarget[] {
+  if (!Array.isArray(targets) || targets.length === 0) reject('invalid-args', 'material edit requires at least one target');
+  const requested = new Map<string, Set<string> | 'all'>();
+  for (const target of targets) {
+    if (!target || typeof target.pieceId !== 'string' || !target.pieceId) {
+      reject('invalid-args', 'material target requires a pieceId');
+    }
+    if (target.roles === 'all') {
+      requested.set(target.pieceId, 'all');
+      continue;
+    }
+    if (!Array.isArray(target.roles) || target.roles.length === 0 || target.roles.some((role) => typeof role !== 'string' || !role)) {
+      reject('invalid-args', `material target '${target.pieceId}' requires one or more roles`);
+    }
+    if (requested.get(target.pieceId) === 'all') continue;
+    const current = requested.get(target.pieceId);
+    const roles = current instanceof Set ? current : new Set<string>();
+    for (const role of target.roles) roles.add(role);
+    requested.set(target.pieceId, roles);
+  }
+
+  const normalized: NormalizedMaterialTarget[] = [];
+  for (const [instanceId, rolesRequested] of requested) {
+    const before = validateWorld(world, documentId, instanceId);
+    const supported = [...policy.rolesForPiece(before.piece.pieceId)];
+    if (supported.length === 0) reject('invalid-args', `piece '${instanceId}' exposes no material roles`);
+    const roles = rolesRequested === 'all' ? supported : [...rolesRequested];
+    for (const role of roles) {
+      if (!supported.includes(role)) {
+        reject('invalid-args', `piece '${instanceId}' does not expose material role '${role}'`);
+      }
+    }
+    normalized.push({ before, roles });
+  }
+  return normalized.sort((a, b) => a.before.index - b.before.index);
+}
+
+function finishMaterial(
+  world: PieceEditWorld,
+  commandId: WorldPieceMaterialCommandId,
+  action: PieceMaterialTransaction['action'],
+  materialAssetId: string | undefined,
+  changed: readonly { before: IndexedPiece; after: IndexedPiece; roles: readonly string[] }[],
+): PieceMaterialPlan {
+  if (changed.length === 0) reject('no-change', 'material edit would not change any piece role');
+  const transaction: PieceMaterialTransaction = {
+    commandId,
+    documentId: world.documentId,
+    action,
+    ...(materialAssetId ? { materialAssetId } : {}),
+    assignments: changed.map((row) => ({ pieceId: row.before.piece.id, roles: row.roles })),
+    before: changed.map((row) => row.before),
+    after: changed.map((row) => row.after),
+    forward: {
+      removeIds: changed.map((row) => row.before.piece.id),
+      insert: changed.map((row) => row.after),
+      append: [],
+      selectedPieceId: world.selectedPieceId,
+    },
+    inverse: {
+      removeIds: changed.map((row) => row.after.piece.id),
+      insert: changed.map((row) => row.before),
+      append: [],
+      selectedPieceId: world.selectedPieceId,
+    },
+  };
+  return { transaction, next: applyPieceMaterialForward(world, transaction) };
+}
+
+export function applyPieceMaterialForward(
+  world: PieceEditWorld,
+  transaction: PieceMaterialTransaction,
+): PieceEditWorld {
+  return applyPatch(world, transaction, transaction.forward);
+}
+
+export function applyPieceMaterialInverse(
+  world: PieceEditWorld,
+  transaction: PieceMaterialTransaction,
+): PieceEditWorld {
+  return applyPatch(world, transaction, transaction.inverse);
+}
+
+export function planPieceMaterialAssign(
+  world: PieceEditWorld,
+  args: PieceMaterialAssignArgs,
+  policy: PieceMaterialPolicy,
+): PieceMaterialPlan {
+  if (typeof args.materialAssetId !== 'string' || !args.materialAssetId || !policy.materialAssetExists(args.materialAssetId)) {
+    reject('invalid-args', `unknown material asset '${args.materialAssetId}'`);
+  }
+  const targets = normalizeMaterialTargets(world, args.documentId, args.targets, policy);
+  const changed: Array<{ before: IndexedPiece; after: IndexedPiece; roles: string[] }> = [];
+  for (const target of targets) {
+    const slots = { ...(target.before.piece.slots ?? {}) };
+    const roles = target.roles.filter((role) => {
+      const current = slots[role];
+      return !current || !('assetId' in current) || current.assetId !== args.materialAssetId;
+    });
+    if (roles.length === 0) continue;
+    for (const role of roles) slots[role] = { assetId: args.materialAssetId };
+    changed.push({
+      before: target.before,
+      after: { index: target.before.index, piece: clonePiece({ ...target.before.piece, slots }) },
+      roles,
+    });
+  }
+  return finishMaterial(world, WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID, 'material.assign', args.materialAssetId, changed);
+}
+
+export function planPieceMaterialClear(
+  world: PieceEditWorld,
+  args: PieceMaterialClearArgs,
+  policy: PieceMaterialPolicy,
+): PieceMaterialPlan {
+  const targets = normalizeMaterialTargets(world, args.documentId, args.targets, policy);
+  const changed: Array<{ before: IndexedPiece; after: IndexedPiece; roles: string[] }> = [];
+  for (const target of targets) {
+    const slots = { ...(target.before.piece.slots ?? {}) };
+    const roles = target.roles.filter((role) => Object.prototype.hasOwnProperty.call(slots, role));
+    if (roles.length === 0) continue;
+    for (const role of roles) delete slots[role];
+    const piece = clonePiece(target.before.piece);
+    if (Object.keys(slots).length > 0) piece.slots = slots;
+    else delete piece.slots;
+    changed.push({ before: target.before, after: { index: target.before.index, piece }, roles });
+  }
+  return finishMaterial(world, WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID, 'material.clear', undefined, changed);
 }

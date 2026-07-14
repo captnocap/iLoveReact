@@ -5,6 +5,7 @@
 import { C } from '../workspace.cls';
 import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '../data/types';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
+import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import { modelPackageById } from '../data/content';
 import { modelDocument } from '../data/documents';
@@ -41,7 +42,7 @@ export default function Stage(props: {
   onMovePiece: (id: string, destination: PlacedPiece) => void;
   onSelectPiece: (id: string | null) => void;
   onPieceContext: (id: string, x: number, y: number) => void;
-  onPaintFace: (id: string, role: string) => void;
+  onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
   onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
   onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;
@@ -125,7 +126,7 @@ export default function Stage(props: {
             onMove={props.onMovePiece}
             onSelect={props.onSelectPiece}
             onPieceContext={props.onPieceContext}
-            onPaintFace={props.onPaintFace}
+            onPaintFaces={props.onPaintFaces}
             onStampSticker={props.onStampSticker}
           />
         ) : activeDocument.kind === 'model' ? (

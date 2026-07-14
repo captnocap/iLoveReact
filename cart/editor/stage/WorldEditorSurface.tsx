@@ -5,6 +5,7 @@ import { worldToolFor } from '../world/worldTool';
 import { retainPieceSequence, visibleStoreyPieces, type ArmedPiece, type PlacedPiece, type PlacementGesture } from '../world/pieces';
 import type { AuthoredBuildPiece } from '../world/authoredRegistry';
 import type { MapZoneDef } from './mapPaint';
+import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 
 // BLANKBOOT req_2490: the editor's world file is ITS OWN, fresh path — the old
 // main.gamefile is the condemned hmsc sandbox bake ("farts and dicks", ruled
@@ -45,8 +46,8 @@ export default function WorldEditorSurface(props: {
   onSelect: (id: string | null) => void;
   /** right-click hit a placed piece → open the quick context menu at window (x,y) (req_2733). */
   onPieceContext: (id: string, x: number, y: number) => void;
-  /** Paint Faces (req_2879): a touched face's slot role — the owner binds the active material. */
-  onPaintFace: (id: string, role: string) => void;
+  /** Paint Faces (req_2879): one gesture's unique face targets for one material action. */
+  onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
 }) {
   // The viewport is modal (req_2550): the armed command decides the click. The palette piece is
@@ -83,7 +84,7 @@ export default function WorldEditorSurface(props: {
         selectedId={props.selectedId}
         onSelect={props.onSelect}
         onPieceContext={props.onPieceContext}
-        onPaintFace={props.onPaintFace}
+        onPaintFaces={props.onPaintFaces}
         onStampSticker={props.onStampSticker}
         onPlace={props.onPlace}
         onMove={props.onMove}

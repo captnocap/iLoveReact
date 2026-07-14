@@ -11,8 +11,8 @@
 //   tools/v8cli /tmp/editor-events.test.js
 
 import { describeEvent, head, since } from '../../../runtime/editorbus';
-import { commandOutcome, dispatchCommandOutcome, mapPaint, pieceEdit, pieceEditPayload, piecePlace, piecePlacementPayload, type MapPaintPayload } from './editorEvents';
-import { planPieceMove } from '../world/pieceEditCommand';
+import { commandOutcome, dispatchCommandOutcome, mapPaint, pieceEdit, pieceEditPayload, pieceMaterial, pieceMaterialPayload, piecePlace, piecePlacementPayload, type MapPaintPayload } from './editorEvents';
+import { planPieceMaterialAssign, planPieceMove } from '../world/pieceEditCommand';
 import { planPiecePlacement } from '../world/piecePlacementCommand';
 
 let passed = 0, failed = 0;
@@ -81,6 +81,33 @@ test('piece.edit payload carries the exact replacement transaction and authority
   assert(payload.transaction.replaced[0]?.piece.id === 'victim', 'exact replacement victim left the report');
   assert(event.actionId === 'move:1' && event.commandId === 'world.piece.move', 'action correlation left the envelope');
   assert(describeEvent(event) === 'move Concrete Floor', `description drifted, got ${describeEvent(event)}`);
+});
+
+test('piece.material payload reports one batched face gesture with exact inverse data', () => {
+  const plan = planPieceMaterialAssign({
+    documentId: 'main',
+    pieces: [
+      { id: 'floor-a', pieceId: 'floor.concrete.common', x: 1.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 },
+      { id: 'floor-b', pieceId: 'floor.concrete.common', x: 4.5, y: 0, z: 1.5, yawDegrees: 0, floor: 0 },
+    ],
+    selectedPieceId: null,
+  }, {
+    documentId: 'main', materialAssetId: 'a-brick',
+    targets: [{ pieceId: 'floor-a', roles: ['top', 'edges'] }, { pieceId: 'floor-b', roles: ['top'] }],
+  }, {
+    materialAssetExists: (id) => id === 'a-brick',
+    rolesForPiece: () => ['top', 'bottom', 'edges'],
+  });
+  const payload = pieceMaterialPayload({ plan, applyStartedAtMs: 3000, appliedAtMs: 3001, applyMs: 1 });
+  const event = pieceMaterial(payload, [{ kind: 'piece', id: 'floor-a' }], {
+    invocationId: 'paint:1', commandId: 'world.piece.material.assign', actionId: 'paint:1',
+    source: 'viewport', phase: 'applied', effect: 'action', undoScope: { kind: 'document', key: 'world' },
+  });
+
+  assert(payload.pieceCount === 2 && payload.roleCount === 3, 'gesture counts split or drifted');
+  assert(payload.materialAssetId === 'a-brick' && payload.transaction.before.length === 2, 'material/exact inverse left the payload');
+  assert(event.actionId === 'paint:1' && event.commandId === 'world.piece.material.assign', 'material action correlation left the envelope');
+  assert(describeEvent(event) === 'paint 3 faces Abalone Shell', `material description drifted, got ${describeEvent(event)}`);
 });
 
 test('map.paint payload describes native tile strokes with coordinates and timing', () => {

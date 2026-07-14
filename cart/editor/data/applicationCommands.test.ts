@@ -11,6 +11,8 @@ import {
   WORLD_MAX_FLOOR,
   WORLD_PIECE_DELETE_COMMAND_ID,
   WORLD_PIECE_MOVE_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
   WORLD_PLACEMENT_ROTATE_COMMAND_ID,
   WORLD_SELECT_TOOL_COMMAND_ID,
@@ -19,6 +21,7 @@ import {
   type EditorCommandAdapter,
   type WorldFloorStepResult,
   type WorldPieceEditResult,
+  type WorldPieceMaterialResult,
   type WorldPiecesPlaceResult,
 } from './applicationCommands';
 import type { PiecePlacementWorld } from '../world/piecePlacementCommand';
@@ -77,6 +80,20 @@ function harness(
     },
     pieceEdit: {
       read: () => placementWorld,
+      now: () => now++,
+      commit: (plan, actionId) => {
+        placementWorld = { ...placementWorld, ...plan.next };
+        committedActionId = actionId;
+        commits += 1;
+        return now++;
+      },
+    },
+    pieceMaterial: {
+      read: () => placementWorld,
+      policy: {
+        materialAssetExists: (assetId) => assetId === 'mat-red' || assetId === 'mat-blue',
+        rolesForPiece: (pieceId) => pieceId.startsWith('wall.') ? ['front', 'back', 'sides'] : ['top', 'bottom', 'edges'],
+      },
       now: () => now++,
       commit: (plan, actionId) => {
         placementWorld = { ...placementWorld, ...plan.next };
@@ -294,6 +311,44 @@ test('viewport and remote move use the same replacement transaction', () => {
     assert(h.pieces().length === 1 && h.pieces()[0]?.id === 'bp_7' && h.pieces()[0]?.x === 4.5, `${source} world drifted`);
     assert(h.commits() === 1 && h.outcomes.length === 1, `${source} did not commit/publish exactly once`);
   }
+});
+
+test('viewport stroke, Inspector, context menu, and remote share one material action', () => {
+  for (const source of ['viewport', 'dock', 'context-menu', 'remote'] as CommandSource[]) {
+    const h = harness(0, 'world', null, null, 'paint-faces', false, selectedPieceWorld);
+    const outcome = h.commands.invoke<WorldPieceMaterialResult>({
+      invocationId: `material:${source}`,
+      commandId: WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID,
+      args: {
+        documentId: 'main', materialAssetId: 'mat-red',
+        targets: [{ pieceId: 'bp_7', roles: ['top', 'edges', 'top'] }],
+      },
+      source,
+    });
+    assert(outcome.status === 'applied' && outcome.actionId === `material:${source}`, `${source} lost material action identity`);
+    assert(outcome.status === 'applied' && outcome.result.plan.transaction.assignments[0]?.roles.length === 2, `${source} split/duplicated the stroke`);
+    assert(h.pieces()[0]?.slots?.top && h.pieces()[0]?.slots?.edges, `${source} did not apply all roles`);
+    assert(h.commits() === 1 && h.outcomes.length === 1, `${source} did not commit/publish exactly once`);
+  }
+});
+
+test('material clear is an exact action and no-op clear rejects before commit', () => {
+  const painted: PiecePlacementWorld = {
+    ...selectedPieceWorld,
+    pieces: [{ ...selectedPieceWorld.pieces[0]!, slots: { top: { assetId: 'mat-red' }, edges: { assetId: 'mat-blue' } } }],
+  };
+  const h = harness(0, 'world', null, null, 'select-tool', false, painted);
+  const cleared = h.commands.invoke<WorldPieceMaterialResult>({
+    invocationId: 'clear:1', commandId: WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
+    args: { documentId: 'main', targets: [{ pieceId: 'bp_7', roles: ['top'] }] }, source: 'dock',
+  });
+  assert(cleared.status === 'applied' && h.pieces()[0]?.slots?.edges && !h.pieces()[0]?.slots?.top, 'clear changed the wrong roles');
+  const noop = h.commands.invoke({
+    invocationId: 'clear:2', commandId: WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
+    args: { documentId: 'main', targets: [{ pieceId: 'bp_7', roles: ['top'] }] }, source: 'remote',
+  });
+  assert(noop.status === 'rejected' && noop.code === 'invalid-args', 'no-op clear produced an action');
+  assert(h.commits() === 1, 'no-op clear committed state');
 });
 
 test('Delete is an authored action while placement-preview rotation is report-only', () => {

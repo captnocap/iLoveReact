@@ -3,6 +3,7 @@ import type { Asset, EditorState, ModelToolApi, ModelToolSnapshot, Rgb } from '.
 import type { OutlinerHandlers } from './ModelDocumentSurface';
 import type { OklchColor } from '../../../runtime/paint/colors';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
+import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 import ToolOptions from './ToolOptions';
 import Stage from './Stage';
 
@@ -35,7 +36,7 @@ export default function Workspace(props: {
   onMovePiece: (id: string, destination: PlacedPiece) => void;
   onSelectPiece: (id: string | null) => void;
   onPieceContext: (id: string, x: number, y: number) => void;
-  onPaintFace: (id: string, role: string) => void;
+  onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
   onFacadeStroke: (facadeId: string, stroke: import('../world/facades').FacadeStroke) => void;
   onFacadeStamp: (facadeId: string, stamp: import('../world/facades').FacadeStamp) => void;

@@ -324,9 +324,7 @@ export default function Inspector(props: {
   // The RIG editor (req_2712/2713): pockets/placements/seats/cover/dynamics on
   // the open model; export compiles the draft into the manifest skeleton.
   onSetModelRig: (pkgId: string, rig: PropRig) => void;
-  // World-piece focus-panel edits (req_2563 Phase 3/4).
-  onSetPieceOverride: (id: string, path: string, value: number | boolean) => void;
-  onClearPieceOverride: (id: string, path: string) => void;
+  // World-piece focus-panel material edits.
   onAssignSlot: (id: string, role: string) => void;
   onClearSlot: (id: string, role: string) => void;
   // World-globals tuning (GLOBALS req_2770) — the playtest tab's focus panel.
@@ -416,8 +414,6 @@ export default function Inspector(props: {
             <PieceBody
               armedPieceId={props.state.armedPieceId}
               selected={selectedPiece}
-              onSetOverride={props.onSetPieceOverride}
-              onClearOverride={props.onClearPieceOverride}
               onAssignSlot={props.onAssignSlot}
               onClearSlot={props.onClearSlot}
               resolveMaterial={resolveMaterial}

@@ -25,17 +25,27 @@ import {
   PieceEditRejected,
   WORLD_PIECE_DELETE_COMMAND_ID,
   WORLD_PIECE_EDIT_COMMAND_IDS,
+  WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_COMMAND_IDS,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
   planPieceDelete,
+  planPieceMaterialAssign,
+  planPieceMaterialClear,
   planPieceMove,
   planPieceRotate,
   type PieceDeleteArgs,
   type PieceEditPlan,
   type PieceEditWorld,
   type PieceMoveArgs,
+  type PieceMaterialAssignArgs,
+  type PieceMaterialClearArgs,
+  type PieceMaterialPlan,
+  type PieceMaterialPolicy,
   type PieceRotateArgs,
   type WorldPieceEditCommandId,
+  type WorldPieceMaterialCommandId,
 } from '../world/pieceEditCommand';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 
@@ -64,6 +74,8 @@ export const WORLD_PLACEMENT_ROTATE_COMMAND_ID = 'world.placement.rotate';
 export { WORLD_PIECES_PLACE_COMMAND_ID } from '../world/piecePlacementCommand';
 export {
   WORLD_PIECE_DELETE_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
 } from '../world/pieceEditCommand';
@@ -108,6 +120,13 @@ export type WorldPieceEditResult = {
   applyMs: number;
 };
 
+export type WorldPieceMaterialResult = {
+  plan: PieceMaterialPlan;
+  applyStartedAtMs: number;
+  appliedAtMs: number;
+  applyMs: number;
+};
+
 export type WorldPlacementRotateResult = {
   previousYawDegrees: number;
   yawDegrees: number;
@@ -128,6 +147,13 @@ export interface EditorPieceEditAdapter {
   now(): number;
   /** Atomically commit a validated forward/inverse transaction. */
   commit(plan: PieceEditPlan, actionId: string, applyStartedAtMs: number): number;
+}
+
+export interface EditorPieceMaterialAdapter {
+  read(): PieceEditWorld;
+  policy: PieceMaterialPolicy;
+  now(): number;
+  commit(plan: PieceMaterialPlan, actionId: string, applyStartedAtMs: number): number;
 }
 
 export type WorldHistoryEntryRef = {
@@ -162,6 +188,7 @@ export interface EditorCommandAdapter {
   commitPlacementGhostRotation(result: WorldPlacementRotateResult): void;
   placement: EditorPlacementAdapter;
   pieceEdit: EditorPieceEditAdapter;
+  pieceMaterial: EditorPieceMaterialAdapter;
   history: EditorHistoryAdapter;
 }
 
@@ -284,8 +311,36 @@ function deleteArgs(adapter: EditorPieceEditAdapter, args: unknown) {
   }
 }
 
+function materialAssignArgs(adapter: EditorPieceMaterialAdapter, args: unknown) {
+  const value = args as Partial<PieceMaterialAssignArgs> | null;
+  if (!value || typeof value.documentId !== 'string' || !Array.isArray(value.targets) || typeof value.materialAssetId !== 'string') {
+    return { ok: false as const, reason: 'documentId, targets, and materialAssetId are required' };
+  }
+  try {
+    return { ok: true as const, value: planPieceMaterialAssign(adapter.read(), value as PieceMaterialAssignArgs, adapter.policy) };
+  } catch (error) {
+    return { ok: false as const, reason: editRejectReason(error) };
+  }
+}
+
+function materialClearArgs(adapter: EditorPieceMaterialAdapter, args: unknown) {
+  const value = args as Partial<PieceMaterialClearArgs> | null;
+  if (!value || typeof value.documentId !== 'string' || !Array.isArray(value.targets)) {
+    return { ok: false as const, reason: 'documentId and targets are required' };
+  }
+  try {
+    return { ok: true as const, value: planPieceMaterialClear(adapter.read(), value as PieceMaterialClearArgs, adapter.policy) };
+  } catch (error) {
+    return { ok: false as const, reason: editRejectReason(error) };
+  }
+}
+
 export function isWorldPieceEditCommandId(id: string): id is WorldPieceEditCommandId {
   return (WORLD_PIECE_EDIT_COMMAND_IDS as readonly string[]).includes(id);
+}
+
+export function isWorldPieceMaterialCommandId(id: string): id is WorldPieceMaterialCommandId {
+  return (WORLD_PIECE_MATERIAL_COMMAND_IDS as readonly string[]).includes(id);
 }
 
 /** Build one application-scoped registry + authority. Creating it does not run
@@ -448,6 +503,37 @@ export function createEditorApplicationCommands(
     isEnabled: pieceEditEnabled,
   }, ({ args, invocationId, actionId }) => commitPieceEdit(args, actionId ?? invocationId));
 
+  const commitPieceMaterial = (plan: PieceMaterialPlan, actionId: string): WorldPieceMaterialResult => {
+    const applyStartedAtMs = adapter.pieceMaterial.now();
+    const committedAtMs = adapter.pieceMaterial.commit(plan, actionId, applyStartedAtMs);
+    const appliedAtMs = Number.isFinite(committedAtMs) ? Math.max(applyStartedAtMs, committedAtMs) : applyStartedAtMs;
+    return { plan, applyStartedAtMs, appliedAtMs, applyMs: Math.max(0, appliedAtMs - applyStartedAtMs) };
+  };
+
+  registry.register<PieceMaterialPlan, WorldPieceMaterialResult>({
+    id: WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID,
+    label: 'Assign Piece Material',
+    icon: 'Paintbrush',
+    effect: 'action',
+    undoScope: { kind: 'document', key: 'world' },
+    projections: {
+      toolbar: ['D.world.paint-faces'], contextMenu: ['world-piece'], palette: true,
+    },
+    validateArgs: (args) => materialAssignArgs(adapter.pieceMaterial, args),
+    isEnabled: pieceEditEnabled,
+  }, ({ args, invocationId, actionId }) => commitPieceMaterial(args, actionId ?? invocationId));
+
+  registry.register<PieceMaterialPlan, WorldPieceMaterialResult>({
+    id: WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
+    label: 'Clear Piece Material',
+    icon: 'RotateCcw',
+    effect: 'action',
+    undoScope: { kind: 'document', key: 'world' },
+    projections: { contextMenu: ['world-piece'], palette: true },
+    validateArgs: (args) => materialClearArgs(adapter.pieceMaterial, args),
+    isEnabled: pieceEditEnabled,
+  }, ({ args, invocationId, actionId }) => commitPieceMaterial(args, actionId ?? invocationId));
+
   registry.register<{}, WorldPlacementRotateResult>({
     id: WORLD_PLACEMENT_ROTATE_COMMAND_ID,
     label: 'Rotate Placement Preview',
@@ -533,6 +619,7 @@ export function commandSource(source: string): CommandSource {
   if (source === 'action bar') return 'toolbar';
   if (source === 'context') return 'context-menu';
   if (source === 'stage') return 'viewport';
+  if (source === 'focus-panel') return 'dock';
   if (source === 'menu' || source === 'hotkey' || source === 'toolbar' || source === 'dock' || source === 'context-menu' ||
       source === 'palette' || source === 'viewport' || source === 'native' || source === 'remote' || source === 'automation') {
     return source;

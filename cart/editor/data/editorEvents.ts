@@ -7,7 +7,7 @@ import { defineEventType, dispatch } from '../../../runtime/editorbus';
 import type { EventCommandMetadata, TargetRef } from '../../../runtime/editorbus';
 import type { CommandAppliedOutcome, CommandOutcome } from '../../../runtime/commands';
 import type { HistoryEvent } from './types';
-import type { WorldPieceEditResult, WorldPiecesPlaceResult } from './applicationCommands';
+import type { WorldPieceEditResult, WorldPieceMaterialResult, WorldPiecesPlaceResult } from './applicationCommands';
 import { assetById } from './catalog';
 import { catalogRowFor } from '../world/buildCatalog';
 import { pieceKindOf, placementSlotKey, type MaterialRef } from '../world/pieces';
@@ -102,6 +102,18 @@ export type PieceEditPayload = {
   applyMs: number;
   transaction: WorldPieceEditResult['plan']['transaction'];
 };
+export type PieceMaterialPayload = {
+  action: 'material.assign' | 'material.clear';
+  documentId: string;
+  materialAssetId?: string;
+  materialLabel?: string;
+  pieceCount: number;
+  roleCount: number;
+  applyStartedAtMs: number;
+  appliedAtMs: number;
+  applyMs: number;
+  transaction: WorldPieceMaterialResult['plan']['transaction'];
+};
 
 // One event type for now — a plain authoring edit. Richer per-system types (piece.place,
 // material.slot.fill, …) register themselves through this same seam as they get wired.
@@ -148,6 +160,20 @@ export const pieceEdit = defineEventType<PieceEditPayload>({
     if (!p.documentId || !p.instanceId || !p.pieceId || !p.label ||
         p.transaction.action !== p.action || p.transaction.before.piece.id !== p.instanceId) {
       throw new Error('piece.edit: malformed identity/transaction');
+    }
+  },
+});
+
+export const pieceMaterial = defineEventType<PieceMaterialPayload>({
+  type: 'piece.material',
+  undoable: true,
+  describe: (p) => p.action === 'material.assign'
+    ? `paint ${p.roleCount} face${p.roleCount === 1 ? '' : 's'} ${p.materialLabel ?? p.materialAssetId}`
+    : `clear ${p.roleCount} face material${p.roleCount === 1 ? '' : 's'}`,
+  validate: (p) => {
+    if (!p.documentId || p.pieceCount < 1 || p.roleCount < 1 ||
+        p.transaction.action !== p.action || p.transaction.assignments.length !== p.pieceCount) {
+      throw new Error('piece.material: malformed count/transaction');
     }
   },
 });
@@ -304,6 +330,38 @@ export function dispatchPieceEditOutcome(outcome: CommandAppliedOutcome<WorldPie
       { kind: 'piece-kind', id: payload.pieceId },
       { kind: 'piece', id: payload.instanceId },
       ...payload.transaction.replaced.map((row) => ({ kind: 'piece', id: row.piece.id })),
+    ],
+    commandMetadata(outcome),
+  ));
+}
+
+export function pieceMaterialPayload(result: WorldPieceMaterialResult): PieceMaterialPayload {
+  const transaction = result.plan.transaction;
+  const materialAssetId = transaction.materialAssetId;
+  return {
+    action: transaction.action,
+    documentId: transaction.documentId,
+    ...(materialAssetId ? {
+      materialAssetId,
+      materialLabel: assetById(materialAssetId).name,
+    } : {}),
+    pieceCount: transaction.assignments.length,
+    roleCount: transaction.assignments.reduce((count, assignment) => count + assignment.roles.length, 0),
+    applyStartedAtMs: result.applyStartedAtMs,
+    appliedAtMs: result.appliedAtMs,
+    applyMs: result.applyMs,
+    transaction,
+  };
+}
+
+export function dispatchPieceMaterialOutcome(outcome: CommandAppliedOutcome<WorldPieceMaterialResult>): number {
+  const payload = pieceMaterialPayload(outcome.result);
+  return dispatch(pieceMaterial(
+    payload,
+    [
+      { kind: 'map', id: payload.documentId },
+      ...(payload.materialAssetId ? [{ kind: 'material', id: payload.materialAssetId }] : []),
+      ...payload.transaction.assignments.map((assignment) => ({ kind: 'piece', id: assignment.pieceId })),
     ],
     commandMetadata(outcome),
   ));

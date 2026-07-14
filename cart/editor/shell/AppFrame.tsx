@@ -37,7 +37,8 @@ import { useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
-import type { PlacedPiece, PlacementGesture, MaterialRef } from '../world/pieces';
+import type { PlacedPiece, PlacementGesture } from '../world/pieces';
+import type { PieceMaterialTarget } from '../world/pieceEditCommand';
 import { pieceKindOf } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
@@ -58,15 +59,18 @@ import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialSt
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
 import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint, setMapDocumentAutosave } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
-import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPieceEditOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
+import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import {
   commandSource,
   createEditorApplicationCommands,
   isWorldPieceEditCommandId,
+  isWorldPieceMaterialCommandId,
   isWorldToolCommandId,
   WORLD_FLOOR_STEP_COMMAND_ID,
   WORLD_PIECE_DELETE_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID,
+  WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
   WORLD_PIECES_PLACE_COMMAND_ID,
@@ -76,6 +80,7 @@ import {
   type WorldFloorStepResult,
   type WorldHistoryControlResult,
   type WorldPieceEditResult,
+  type WorldPieceMaterialResult,
   type WorldPiecesPlaceResult,
   type WorldPlacementRotateResult,
   type WorldToolArmResult,
@@ -578,6 +583,75 @@ export default function AppFrame() {
           return appliedAtMs;
         },
       },
+      pieceMaterial: {
+        read: () => ({
+          documentId: stateRef.current.activeMapStem,
+          pieces: stateRef.current.worldPieces,
+          selectedPieceId: stateRef.current.selectedPieceId,
+        }),
+        policy: {
+          materialAssetExists: (assetId) => ASSETS.some((asset) => asset.id === assetId && asset.tab === 'Skins'),
+          rolesForPiece: pieceSlotRoles,
+        },
+        now: Date.now,
+        commit: (plan, actionId, applyStartedAtMs) => {
+          const previous = stateRef.current;
+          const transaction = plan.transaction;
+          const appliedAtMs = Date.now();
+          const applyMs = Math.max(0, appliedAtMs - applyStartedAtMs);
+          const roleCount = transaction.assignments.reduce((count, assignment) => count + assignment.roles.length, 0);
+          const pieceCount = transaction.assignments.length;
+          const material = transaction.materialAssetId
+            ? ASSETS.find((asset) => asset.id === transaction.materialAssetId)
+            : undefined;
+          const target = `${roleCount} face${roleCount === 1 ? '' : 's'} on ${pieceCount} piece${pieceCount === 1 ? '' : 's'}`;
+          const status = transaction.action === 'material.assign'
+            ? `painted ${target} with ${material?.name ?? transaction.materialAssetId}`
+            : `cleared material from ${target}`;
+          const meta = [
+            `pieces=${pieceCount}`,
+            `roles=${roleCount}`,
+            transaction.materialAssetId ? `material=${transaction.materialAssetId}` : '',
+            `apply=${applyMs.toFixed(1)}ms`,
+          ].filter(Boolean).join(' ');
+          const nextBase: EditorState = {
+            ...previous,
+            history: [{
+              id: `h-${actionId}`,
+              actionId,
+              commandId: transaction.commandId,
+              verb: transaction.action,
+              target,
+              meta,
+              undoable: true,
+              eventType: 'piece.material',
+              atMs: appliedAtMs,
+              editMs: applyMs,
+              emptyMs: applyMs,
+              richMs: applyMs,
+            }, ...previous.history].slice(0, 8),
+            redo: [],
+            worldPieces: [...plan.next.pieces],
+            selectedPieceId: plan.next.selectedPieceId,
+            status,
+            ...(transaction.materialAssetId ? {
+              recentMaterialIds: [
+                transaction.materialAssetId,
+                ...previous.recentMaterialIds.filter((assetId) => assetId !== transaction.materialAssetId),
+              ].slice(0, 10),
+            } : {}),
+          };
+          const next = recordWorldEdit(
+            previous,
+            nextBase,
+            `${transaction.action} ${target}`,
+            { actionId, commandId: transaction.commandId },
+          );
+          stateRef.current = next;
+          setState(next);
+          return appliedAtMs;
+        },
+      },
       history: {
         peekUndo: () => stateRef.current.worldUndo[0] ?? null,
         peekRedo: () => stateRef.current.worldRedo[0] ?? null,
@@ -644,6 +718,10 @@ export default function AppFrame() {
       }
       if (outcome.status === 'applied' && isWorldPieceEditCommandId(outcome.commandId)) {
         dispatchPieceEditOutcome(outcome as CommandAppliedOutcome<WorldPieceEditResult>);
+        return;
+      }
+      if (outcome.status === 'applied' && isWorldPieceMaterialCommandId(outcome.commandId)) {
+        dispatchPieceMaterialOutcome(outcome as CommandAppliedOutcome<WorldPieceMaterialResult>);
         return;
       }
       if (outcome.status === 'applied' && outcome.commandId === WORLD_PLACEMENT_ROTATE_COMMAND_ID) {
@@ -1853,54 +1931,24 @@ export default function AppFrame() {
     }));
   };
 
-  // Per-instance override edits (req_2563 Phase 3): patch / clear one property on
-  // the selected placed piece. Authoring data on the piece; the host consumes it
-  // in a later world_loader slice (today it persists as intent on the instance).
-  const setPieceOverride = (id: string, path: string, value: number | boolean) => {
-    setState((prev) => recordWorldEdit(prev, {
-      ...prev,
-      worldPieces: prev.worldPieces.map((p) => (p.id === id ? { ...p, overrides: { ...p.overrides, [path]: value } } : p)),
-      status: `${path} = ${value}`,
-    }, `override ${path}`));
-  };
-
-  const clearPieceOverride = (id: string, path: string) => {
-    setState((prev) => recordWorldEdit(prev, {
-      ...prev,
-      worldPieces: prev.worldPieces.map((p) => {
-        if (p.id !== id) return p;
-        const next = { ...p.overrides };
-        delete next[path];
-        return { ...p, overrides: Object.keys(next).length ? next : undefined };
-      }),
-      status: `${path} reset to default`,
-    }, `clear override ${path}`));
-  };
-
-  // Material-slot assignment (req_2563 Phase 4 → req_2737): binds a material asset
-  // into the piece's named slot(s). One write path, three callers: the Inspector
-  // binds the browser's ACTIVE material to one role; the quick menu binds an
-  // explicit pick to the TARGETED face — or, FacePainter-style, role null paints
-  // EVERY face the piece exposes. Every assign records into the live RECENT row.
-  const assignPieceSlotAsset = (id: string, role: string | null, assetId: string) => {
-    setState((prev) => {
-      const ref: MaterialRef = { assetId };
-      const name = assetById(assetId, prev.assetOverrides).name;
-      const next = recordWorldEdit(prev, {
-        ...prev,
-        worldPieces: prev.worldPieces.map((p) => {
-          if (p.id !== id) return p;
-          const roles = role ? [role] : pieceSlotRoles(p.pieceId);
-          const slots = { ...p.slots };
-          for (const r of roles) slots[r] = ref;
-          return { ...p, slots };
-        }),
-        status: role ? `slot ${role} ← ${name}` : `all faces ← ${name}`,
-      }, role ? `slot ${role}` : 'skin all faces');
-      return { ...next, recentMaterialIds: [assetId, ...prev.recentMaterialIds.filter((m) => m !== assetId)].slice(0, 10) };
-    });
-  };
-  const assignPieceSlot = (id: string, role: string) => assignPieceSlotAsset(id, role, stateRef.current.activeAssetId);
+  // One semantic material command serves the viewport stroke, Inspector slot,
+  // and quick-menu projections. The viewport supplies a whole pointer gesture,
+  // so a drag across many faces remains one undo/eventbus action.
+  const assignPieceMaterials = (
+    targets: readonly PieceMaterialTarget[],
+    assetId: string,
+    source: string,
+  ) => invokeApplicationCommand(WORLD_PIECE_MATERIAL_ASSIGN_COMMAND_ID, {
+    documentId: stateRef.current.activeMapStem,
+    targets,
+    materialAssetId: assetId,
+  }, source);
+  const paintPieceFaces = (targets: readonly PieceMaterialTarget[]) =>
+    assignPieceMaterials(targets, stateRef.current.activeAssetId, 'viewport');
+  const assignPieceSlotAsset = (id: string, role: string | null, assetId: string, source = 'context') =>
+    assignPieceMaterials([{ pieceId: id, roles: role ? [role] : 'all' }], assetId, source);
+  const assignPieceSlot = (id: string, role: string) =>
+    assignPieceSlotAsset(id, role, stateRef.current.activeAssetId, 'focus-panel');
 
   // Paint Facade (req_3057): gather the coplanar wall run around the seed and
   // open it as ONE meter-true canvas document. A facade already covering the
@@ -1994,19 +2042,11 @@ export default function AppFrame() {
 
   // role null = clear EVERY slot back to the kind default (the quick menu's
   // untargeted "default" chip); a string clears just that face (req_2737).
-  const clearPieceSlot = (id: string, role: string | null) => {
-    setState((prev) => recordWorldEdit(prev, {
-      ...prev,
-      worldPieces: prev.worldPieces.map((p) => {
-        if (p.id !== id) return p;
-        if (!role) return { ...p, slots: undefined };
-        const next = { ...p.slots };
-        delete next[role];
-        return { ...p, slots: Object.keys(next).length ? next : undefined };
-      }),
-      status: role ? `slot ${role} cleared` : 'all faces reset to default',
-    }, role ? `clear slot ${role}` : 'clear all faces'));
-  };
+  const clearPieceSlot = (id: string, role: string | null, source = 'focus-panel') =>
+    invokeApplicationCommand(WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID, {
+      documentId: stateRef.current.activeMapStem,
+      targets: [{ pieceId: id, roles: role ? [role] : 'all' }],
+    }, source);
 
   // Copy = pick the piece up into your hand (the Fortnite move): arm its definition
   // in Place mode and carry its slots/overrides as the stamp placePieces applies, so
@@ -4388,7 +4428,7 @@ export default function AppFrame() {
             onMovePiece={movePiece}
             onSelectPiece={selectPiece}
             onPieceContext={openPieceQuickMenu}
-            onPaintFace={assignPieceSlot}
+            onPaintFaces={paintPieceFaces}
             onStampSticker={stampSticker}
             onStickerArm={(patch) => setState((prev) => ({ ...prev, stickerArm: { ...prev.stickerArm, ...patch } }))}
             onFacadeStroke={recordFacadeStroke}
@@ -4429,8 +4469,6 @@ export default function AppFrame() {
             onModelDocumentMutated={markActiveModelDirty}
             modelOnDisk={activeModelOnDisk}
             onSetModelRig={setModelRig}
-            onSetPieceOverride={setPieceOverride}
-            onClearPieceOverride={clearPieceOverride}
             onAssignSlot={assignPieceSlot}
             onClearSlot={clearPieceSlot}
             // World-globals tuning (GLOBALS req_2770): the playtest tab's panel.
@@ -4681,8 +4719,8 @@ export default function AppFrame() {
             materials={worldQuickMaterials}
             recentIds={state.recentMaterialIds}
             resolveMaterial={(ref) => resolveMaterialRef(ref, state.assetOverrides)}
-            onAssignSlot={assignPieceSlotAsset}
-            onClearSlot={clearPieceSlot}
+            onAssignSlot={(id, role, assetId) => assignPieceSlotAsset(id, role, assetId, 'context')}
+            onClearSlot={(id, role) => clearPieceSlot(id, role, 'context')}
             onCommand={runCommand}
             onClose={worldMenu.close}
           />
