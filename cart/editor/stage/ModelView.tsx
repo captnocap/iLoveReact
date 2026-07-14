@@ -450,6 +450,11 @@ const meshSetPartRanges = (ranges: { lo: number; hi: number }[]) => {
   const sorted = ranges.slice().sort((a, b) => a.lo - b.lo);
   const pairs = new Uint32Array(sorted.length * 2);
   sorted.forEach((r, i) => { pairs[i * 2] = r.lo; pairs[i * 2 + 1] = r.hi; });
+  // rangetrace (req_3056, TEMPORARY): the merged-parts save corruption reproduces on a
+  // plain open→export, so every host range push logs its size and caller until the
+  // clearing path is caught. Remove with the fix.
+  const stack = (new Error().stack || '').split('\n').slice(2, 5).map((s) => s.trim()).join(' « ');
+  console.error(`[rangetrace] push ${sorted.length} range(s) [${sorted.map((r) => `${r.lo},${r.hi}`).join(' ')}] → host « ${stack}`);
   host.__mesh_set_part_ranges?.(pairs);
 };
 // Host part-range truth (req_2644): after every topology op / undo / redo the cart
@@ -1613,6 +1618,18 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       atlasReadyRef.current = session.atlas;
       // Part ranges + selection are host truth — mirror them instead of re-seeding.
       resyncPartRanges();
+      // Resume HEAL (req_3058): the host process outlives window "restarts", so a
+      // session whose range truth was cleared once resumes DEGRADED forever — the
+      // mirror inherits nothing, no load path ever re-pushes, and every save writes
+      // a doc that reopens with merged parts. The doc's saved ranges are recovery
+      // truth: when the resumed host answers with fewer parts than the doc declares,
+      // re-seed the doc's ranges instead of mirroring the damage forward.
+      const docRanges = (initialMesh?.partColors ?? []).map((pc) => ({ lo: pc.lo, hi: pc.hi }));
+      if (docRanges.length > partRangesRef.current.length) {
+        console.error(`[rangetrace] resumed host session carries ${partRangesRef.current.length} part range(s) but the doc declares ${docRanges.length} — re-seeding the doc's ranges (req_3058)`);
+        partRangesRef.current = docRanges;
+        meshSetPartRanges(docRanges);
+      }
       const sel = adoptHostSelection();
       if (initialMesh?.faceGroups && initialMesh.faceGroups.length > 0) setAuthoredFaces(new Set(initialMesh.faceGroups).size);
       // A loop-cut POPUP can't survive the reload (its JS state died with the old
