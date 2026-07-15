@@ -1760,6 +1760,9 @@ const LcSession = struct {
     // One bool per BASE face: the active outliner scope captured at begin. Cut planes
     // are infinite, so this explicit mutation mask keeps sibling parts intact (req_2899).
     base_scope: []bool,
+    // Exact authored face selection at begin. Parametric cuts split only complete
+    // selected quad groups; selected triangles of a larger face are not enough.
+    base_cut_mask: []bool,
     // Part parentage (req_2644): one part index per BASE face at begin, and the same
     // carried through the LAST installed preview — commit renormalizes the minted
     // group ids back into contiguous per-part ranges from this.
@@ -1806,6 +1809,7 @@ fn lcFree() void {
     if (s.base_groups) |g| std.heap.c_allocator.free(g);
     std.heap.c_allocator.free(s.base_colors);
     std.heap.c_allocator.free(s.base_scope);
+    std.heap.c_allocator.free(s.base_cut_mask);
     if (s.base_face_part) |p| std.heap.c_allocator.free(p);
     if (s.last_face_part) |p| std.heap.c_allocator.free(p);
     journalDiscard(&s.snap);
@@ -2119,16 +2123,24 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
     };
     var scope_face: u32 = 0;
     while (scope_face < tri_count) : (scope_face += 1) base_scope[scope_face] = mesh_edit.faceInScopePub(scope_face);
+    const base_cut_mask = std.heap.c_allocator.dupe(bool, mask[0..tri_count]) catch {
+        std.heap.c_allocator.free(pos);
+        if (groups) |g| std.heap.c_allocator.free(g);
+        std.heap.c_allocator.free(base_scope);
+        return null;
+    };
     const base_colors = collectCurrentFaceColors() orelse {
         std.heap.c_allocator.free(pos);
         if (groups) |g| std.heap.c_allocator.free(g);
         std.heap.c_allocator.free(base_scope);
+        std.heap.c_allocator.free(base_cut_mask);
         return null;
     };
     if (base_colors.len != @as(usize, tri_count) * 4) {
         std.heap.c_allocator.free(pos);
         if (groups) |g| std.heap.c_allocator.free(g);
         std.heap.c_allocator.free(base_scope);
+        std.heap.c_allocator.free(base_cut_mask);
         std.heap.c_allocator.free(base_colors);
         return null;
     }
@@ -2139,6 +2151,7 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
         .base_groups = groups,
         .base_colors = base_colors,
         .base_scope = base_scope,
+        .base_cut_mask = base_cut_mask,
         .base_face_part = capturePartOfFaces(),
         .last_face_part = null, // no preview yet — commit falls back to the base parts
         .part_count = hostPartCount(),
@@ -2165,6 +2178,11 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     var planes: [64]f32 = undefined; // the studio popup's cut cap
     const offset = std.math.clamp(offset_frac, 0.0, 1.0) * (hi - lo);
     const n_planes = lcPlanes(lo, hi, @min(cuts, 64), offset, &planes);
+    // The ruled cuts+offset comb is now evaluated in the face's 0..1 parametric
+    // span. `planes` remains only overlay/read-back coordinates; it never reaches
+    // the cutting core for authored quads.
+    var fractions: [64]f32 = undefined;
+    const fraction_count = lcPlanes(0, 1, @min(cuts, 64), std.math.clamp(offset_frac, 0.0, 1.0), &fractions);
     // Remember the previewed comb so the editor overlay can accent the cut edges and
     // anchor the cut-plane handle while the popup is open (req_2625).
     s.last_dir = @intCast(d);
@@ -2173,6 +2191,30 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     s.last_cuts = @min(@max(cuts, 1), 64);
     s.last_offset_frac = std.math.clamp(offset_frac, 0.0, 1.0);
     s.drag_raw_frac = s.last_offset_frac; // steppers/popup moves re-seed the drag accumulator
+
+    if (s.base_groups) |groups| {
+        if (mesh_edit.parametricQuadCutsSoup(s.base_pos, s.tri_count, groups, s.base_cut_mask, @intCast(d), fractions[0..fraction_count])) |cut| {
+            defer std.heap.c_allocator.free(cut.positions);
+            defer std.heap.c_allocator.free(cut.src_face);
+            defer if (cut.groups) |g| std.heap.c_allocator.free(g);
+            const colors = std.heap.c_allocator.alloc(u8, @as(usize, cut.tri_count) * 4) catch return false;
+            defer std.heap.c_allocator.free(colors);
+            if (!mesh_edit.inheritFaceRgba(s.base_colors, cut.src_face, colors)) return false;
+            if (s.last_face_part) |p| std.heap.c_allocator.free(p);
+            s.last_face_part = null;
+            if (s.base_face_part) |parts| {
+                const next_parts = std.heap.c_allocator.alloc(u32, cut.tri_count) catch return false;
+                var t: u32 = 0;
+                while (t < cut.tri_count) : (t += 1) {
+                    const src = cut.src_face[t];
+                    next_parts[t] = if (src < parts.len) parts[src] else model_source.NO_PART;
+                }
+                s.last_face_part = next_parts;
+            }
+            return lcInstallSoup(cut.positions, cut.tri_count, cut.groups, colors);
+        }
+        std.debug.print("[mesh] loop cut needs complete authored quads; using plane fallback for this selection\n", .{});
+    }
 
     // Cut the BASE soup by each plane in turn (planeCutSoup allocs a fresh soup per
     // plane; intermediates free as we go — only the final result installs). Part

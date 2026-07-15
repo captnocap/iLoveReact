@@ -2604,17 +2604,11 @@ pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f3
 
     for (crossed.items) |c| {
         const q = c.q;
-        // Midpoints are (a+b)*0.5 of bit-identical corner copies, so the two quads
-        // sharing an edge mint the SAME point — the ring welds seamlessly.
-        const m1: [3]f32 = .{ (q[0][0] + q[1][0]) * 0.5, (q[0][1] + q[1][1]) * 0.5, (q[0][2] + q[1][2]) * 0.5 };
-        const m2: [3]f32 = .{ (q[2][0] + q[3][0]) * 0.5, (q[2][1] + q[3][1]) * 0.5, (q[2][2] + q[3][2]) * 0.5 };
         const tris_of = buckets.getPtr(c.og).?.items;
         const src = tris_of[0]; // one part per group — any member carries the parentage
-        const half_keep = [4][3]f32{ m2, q[3], q[0], m1 }; // keeps the authored id
-        const half_mint = [4][3]f32{ m1, q[1], q[2], m2 }; // the fresh twin
-        const gid_mint = remapGroup(&remap, c.og, &next_id);
-        if (!emitLoopFan(&out_pos, &out_src, &out_grp, true, half_keep[0..], src, c.og)) return null;
-        if (!emitLoopFan(&out_pos, &out_src, &out_grp, true, half_mint[0..], src, gid_mint)) return null;
+        // Edge mode is the same parametric operation as face mode: its one fraction
+        // is 0.5. `q` is rotated so the selected/ring entry edge is q0→q1.
+        if (!emitParametricQuadCuts(&out_pos, &out_src, &out_grp, q, 0, &.{0.5}, src, c.og, &remap, &next_id)) return null;
         for (tris_of) |tf| consumed[tf] = true;
     }
     {
@@ -2644,6 +2638,116 @@ pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f3
         return null;
     };
     return CutResult{ .positions = positions, .groups = groups, .src_face = src_face, .tri_count = tris_out };
+}
+
+/// The one loop-cut primitive. Each fraction connects equal-fraction points on a
+/// quad's opposite edges; it deliberately knows nothing about world axes, normals,
+/// or cutting planes. `direction = 0` uses q0→q1/q3→q2, direction 1 q1→q2/q0→q3.
+/// The first strip retains the authored group; later strips receive fresh groups.
+fn emitParametricQuadCuts(
+    out_pos: *std.ArrayListUnmanaged(f32),
+    out_src: *std.ArrayListUnmanaged(u32),
+    out_grp: *std.ArrayListUnmanaged(u32),
+    q: [4][3]f32,
+    direction: u32,
+    fractions: []const f32,
+    src: u32,
+    gid: u32,
+    remap: *std.AutoHashMapUnmanaged(u32, u32),
+    next_id: *u32,
+) bool {
+    if (fractions.len == 0) return emitLoopFan(out_pos, out_src, out_grp, true, q[0..], src, gid);
+    const lerp = struct {
+        fn at(a: [3]f32, b: [3]f32, t: f32) [3]f32 {
+            return .{ a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t };
+        }
+    }.at;
+    var previous: f32 = 0;
+    var i: usize = 0;
+    while (i <= fractions.len) : (i += 1) {
+        const next: f32 = if (i == fractions.len) 1 else fractions[i];
+        if (!(next > previous and next <= 1)) return false;
+        const strip: [4][3]f32 = if ((direction & 1) == 0)
+            .{ lerp(q[0], q[1], previous), lerp(q[0], q[1], next), lerp(q[3], q[2], next), lerp(q[3], q[2], previous) }
+        else
+            .{ lerp(q[0], q[3], previous), lerp(q[1], q[2], previous), lerp(q[1], q[2], next), lerp(q[0], q[3], next) };
+        const strip_gid = if (i == 0) gid else remapGroup(remap, gid, next_id);
+        if (!emitLoopFan(out_pos, out_src, out_grp, true, strip[0..], src, strip_gid)) return false;
+        previous = next;
+    }
+    return true;
+}
+
+/// Parametric face-mode loop cut. Every fully-selected authored quad is divided at
+/// `fractions`; non-selected faces copy through unchanged. A partial group or a
+/// selected non-quad returns null so the caller can choose its explicit fallback.
+pub fn parametricQuadCutsSoup(pos: []const f32, tri_count: u32, groups_in: []const u32, face_mask: []const bool, direction: u32, fractions: []const f32) ?CutResult {
+    if (tri_count == 0 or groups_in.len < tri_count or face_mask.len < tri_count) return null;
+    for (fractions) |t| if (!(t > 0 and t < 1)) return null;
+    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)){};
+    defer {
+        var bit = buckets.valueIterator();
+        while (bit.next()) |b| b.deinit(alloc);
+        buckets.deinit(alloc);
+    }
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        const gid = groups_in[f];
+        if (gid == model_source.NO_FACE_GROUP) continue;
+        const gop = buckets.getOrPut(alloc, gid) catch return null;
+        if (!gop.found_existing) gop.value_ptr.* = .{};
+        gop.value_ptr.append(alloc, f) catch return null;
+    }
+    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    defer remap.deinit(alloc);
+    var next_id: u32 = 0;
+    for (groups_in[0..tri_count]) |gid| {
+        if (gid != model_source.NO_FACE_GROUP and gid >= next_id) next_id = gid + 1;
+    }
+    var out_pos = std.ArrayListUnmanaged(f32){};
+    defer out_pos.deinit(alloc);
+    var out_grp = std.ArrayListUnmanaged(u32){};
+    defer out_grp.deinit(alloc);
+    var out_src = std.ArrayListUnmanaged(u32){};
+    defer out_src.deinit(alloc);
+    var handled = alloc.alloc(bool, tri_count) catch return null;
+    defer alloc.free(handled);
+    @memset(handled, false);
+    var any = false;
+    var it = buckets.iterator();
+    while (it.next()) |entry| {
+        const tris = entry.value_ptr.items;
+        var selected = true;
+        for (tris) |tf| selected = selected and face_mask[tf];
+        if (!selected) continue;
+        var loop = CutLoop{};
+        defer loop.deinit(alloc);
+        if (!chainGroupLoop(pos, tris, &loop) or loop.items.len != 4) return null;
+        if (!emitParametricQuadCuts(&out_pos, &out_src, &out_grp, .{ loop.items[0], loop.items[1], loop.items[2], loop.items[3] }, direction, fractions, tris[0], entry.key_ptr.*, &remap, &next_id)) return null;
+        for (tris) |tf| handled[tf] = true;
+        any = true;
+    }
+    if (!any) return null;
+    f = 0;
+    while (f < tri_count) : (f += 1) {
+        if (handled[f]) continue;
+        const base = @as(usize, f) * 9;
+        if (base + 8 >= pos.len) return null;
+        if (!emitTriPos(&out_pos, .{ pos[base], pos[base + 1], pos[base + 2] }, .{ pos[base + 3], pos[base + 4], pos[base + 5] }, .{ pos[base + 6], pos[base + 7], pos[base + 8] })) return null;
+        out_src.append(alloc, f) catch return null;
+        out_grp.append(alloc, groups_in[f]) catch return null;
+    }
+    const positions = out_pos.toOwnedSlice(alloc) catch return null;
+    const src_face = out_src.toOwnedSlice(alloc) catch {
+        alloc.free(positions);
+        return null;
+    };
+    const groups = out_grp.toOwnedSlice(alloc) catch {
+        alloc.free(positions);
+        alloc.free(src_face);
+        return null;
+    };
+    return .{ .positions = positions, .groups = groups, .src_face = src_face, .tri_count = @intCast(positions.len / 9) };
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────────
@@ -3373,6 +3477,36 @@ test "ring cut: flared tube splits every quad at edge midpoints — level relati
     defer distinct.deinit(alloc);
     for (cut.groups.?) |g| distinct.put(alloc, g, {}) catch unreachable;
     try testing.expectEqual(@as(usize, 8), distinct.count());
+}
+
+test "parametric quad cuts hit equal fractions on sheared opposite edges" {
+    // A deliberately irregular quad: its opposite edges have different vectors, so a
+    // plane-normal cut would not prove this invariant. Both emitted endpoints must be
+    // the literal t=1/4 and t=3/4 interpolants of their own authored edges.
+    const pos = [_]f32{
+        0, 0, 0, 4, 1, 0, 3, 5, 2,
+        0, 0, 0, 3, 5, 2, -2, 4, 1,
+    };
+    const groups = [_]u32{ 9, 9 };
+    const mask = [_]bool{ true, true };
+    const cuts = [_]f32{ 0.25, 0.75 };
+    const r = parametricQuadCutsSoup(pos[0..], 2, groups[0..], mask[0..], 0, cuts[0..]) orelse return error.TestExpectedCut;
+    defer alloc.free(r.positions);
+    defer alloc.free(r.src_face);
+    defer if (r.groups) |g| alloc.free(g);
+    try testing.expectEqual(@as(u32, 6), r.tri_count); // three quad strips
+    const want = [_][3]f32{
+        .{ 1, 0.25, 0 }, .{ -0.5, 3, 0.75 }, // t = 1/4 on q0→q1 and q3→q2
+        .{ 3, 0.75, 0 }, .{ 1.5, 3.5, 1.25 }, // t = 3/4 on the same edge pair
+    };
+    for (want) |p| {
+        var found = false;
+        var v: usize = 0;
+        while (v < r.positions.len) : (v += 3) {
+            if (@abs(r.positions[v] - p[0]) < 1e-6 and @abs(r.positions[v + 1] - p[1]) < 1e-6 and @abs(r.positions[v + 2] - p[2]) < 1e-6) found = true;
+        }
+        try testing.expect(found);
+    }
 }
 
 test "ring cut: open strip ends at the mesh boundary instead of wrapping" {
