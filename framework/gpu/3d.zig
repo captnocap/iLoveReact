@@ -2827,9 +2827,11 @@ pub fn meshJournalClear() void {
     g_journal_note = null;
 }
 
-pub fn meshJournalNoteSet(note: []const u8) void {
+pub fn meshJournalNoteSet(note: []const u8) bool {
+    const next = jalloc.dupe(u8, note) catch return false;
     if (g_journal_note) |n| jalloc.free(n);
-    g_journal_note = jalloc.dupe(u8, note) catch null;
+    g_journal_note = next;
+    return true;
 }
 
 pub fn meshJournalNoteGet() ?[]const u8 {
@@ -2838,6 +2840,26 @@ pub fn meshJournalNoteGet() ?[]const u8 {
 
 pub fn meshJournalCounts() [2]u32 {
     return .{ @intCast(g_journal_undo.items.len), @intCast(g_journal_redo.items.len) };
+}
+
+/// Append one metadata-only edit to the SAME journal as geometry. The explicit
+/// before note makes rapid React commands deterministic even when the effect
+/// that normally mirrors g_journal_note has not run between clicks.
+pub fn meshJournalMetadataCheckpoint(label: []const u8, before_note: []const u8, after_note: []const u8) bool {
+    if (!mesh_journal_log.metadataCheckpointValid(before_note, after_note)) return false;
+    if (!meshJournalNoteSet(before_note)) return false;
+    var snap = journalSnapshotCurrent(label);
+    if (snap == null) return false;
+    if (snap.?.note == null) {
+        journalDiscard(&snap);
+        return false;
+    }
+    if (!meshJournalNoteSet(after_note)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    journalCommit(&snap);
+    return true;
 }
 
 fn journalLogEntryView(entry: *const JournalEntry) mesh_journal_log.EntryView {

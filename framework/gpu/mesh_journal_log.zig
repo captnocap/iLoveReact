@@ -9,6 +9,16 @@
 const std = @import("std");
 
 pub const NO_FACE_GROUP: u32 = std.math.maxInt(u32);
+pub const MAX_METADATA_NOTE_BYTES: usize = 1024 * 1024;
+
+/// Metadata-only model actions share the resident mesh journal so Ctrl-Z keeps
+/// one chronological document history. Reject inert or unbounded checkpoints
+/// before the journal allocates a full mesh snapshot.
+pub fn metadataCheckpointValid(before: []const u8, after: []const u8) bool {
+    return before.len > 0 and after.len > 0 and
+        before.len <= MAX_METADATA_NOTE_BYTES and after.len <= MAX_METADATA_NOTE_BYTES and
+        !std.mem.eql(u8, before, after);
+}
 
 pub const StateView = struct {
     vertex_count: u32,

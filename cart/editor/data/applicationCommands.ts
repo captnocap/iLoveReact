@@ -67,6 +67,23 @@ import {
   type ColorStudioPolicy,
   type ColorStudioSnapshot,
 } from '../material/colorStudioCommand';
+import {
+  MODEL_GROUP_DISSOLVE_COMMAND_ID,
+  MODEL_GROUP_RENAME_COMMAND_ID,
+  MODEL_OUTLINER_ACTION_COMMAND_IDS,
+  MODEL_PART_RENAME_COMMAND_ID,
+  MODEL_PARTS_GROUP_COMMAND_ID,
+  MODEL_PARTS_UNGROUP_COMMAND_ID,
+  ModelOutlinerRejected,
+  planGroupDissolve,
+  planGroupRename,
+  planPartRename,
+  planPartsGroup,
+  planPartsUngroup,
+  type ModelOutlinerCommandId,
+  type ModelOutlinerPlan,
+  type ModelOutlinerSnapshot,
+} from '../model/outlinerCommand';
 
 export const WORLD_FLOOR_STEP_COMMAND_ID = 'world.floor.step';
 export const WORLD_MAX_FLOOR = 128;
@@ -126,6 +143,13 @@ export {
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
 } from '../world/pieceEditCommand';
+export {
+  MODEL_GROUP_DISSOLVE_COMMAND_ID,
+  MODEL_GROUP_RENAME_COMMAND_ID,
+  MODEL_PART_RENAME_COMMAND_ID,
+  MODEL_PARTS_GROUP_COMMAND_ID,
+  MODEL_PARTS_UNGROUP_COMMAND_ID,
+} from '../model/outlinerCommand';
 
 export type WorldFloorStepArgs = { delta: -1 | 1 };
 export type WorldFloorStepResult = {
@@ -195,6 +219,13 @@ export type ColorStudioHistoryControlResult = {
   transaction: ColorStudioHistoryEntry['transaction'];
 };
 
+export type ModelOutlinerActionResult = {
+  plan: ModelOutlinerPlan;
+  applyStartedAtMs: number;
+  appliedAtMs: number;
+  applyMs: number;
+};
+
 export interface EditorPlacementAdapter {
   read(): PiecePlacementWorld;
   policy: PiecePlacementPolicy;
@@ -250,6 +281,14 @@ export interface EditorColorStudioAdapter {
   };
 }
 
+export interface EditorModelOutlinerAdapter {
+  read(): ModelOutlinerSnapshot;
+  now(): number;
+  /** Commit both the host-journal checkpoint and its matching React metadata
+   * projection. Failure must occur before either becomes visible. */
+  commit(plan: ModelOutlinerPlan, actionId: string, applyStartedAtMs: number): number;
+}
+
 /** The smallest privileged surface needed by the migrated world-command slice. It is
  * deliberately not a React setter: the composition root owns how the one
  * committed result becomes the current read-only snapshot. */
@@ -267,6 +306,7 @@ export interface EditorCommandAdapter {
   pieceMaterial: EditorPieceMaterialAdapter;
   history: EditorHistoryAdapter;
   colorStudio: EditorColorStudioAdapter;
+  modelOutliner: EditorModelOutlinerAdapter;
 }
 
 export type EditorCommandRequest = Omit<CommandInvocation, 'invocationId'> & {
@@ -325,6 +365,29 @@ export function isColorStudioChoiceCommandId(id: string): id is typeof COLOR_STU
 
 export function isColorStudioActionCommandId(id: string): id is typeof COLOR_STUDIO_ACTION_COMMAND_IDS[number] {
   return (COLOR_STUDIO_ACTION_COMMAND_IDS as readonly string[]).includes(id);
+}
+
+export function isModelOutlinerActionCommandId(id: string): id is ModelOutlinerCommandId {
+  return (MODEL_OUTLINER_ACTION_COMMAND_IDS as readonly string[]).includes(id);
+}
+
+function modelOutlinerFailure(error: unknown): { ok: false; reason: string } {
+  const reason = error instanceof ModelOutlinerRejected
+    ? `${error.code}: ${error.message}`
+    : ((error as Error)?.message || 'model outliner validation failed');
+  return { ok: false, reason };
+}
+
+function modelOutlinerRecord(args: unknown): Record<string, unknown> {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    throw new ModelOutlinerRejected('INVALID_ARGS', 'command arguments must be an object');
+  }
+  return args as Record<string, unknown>;
+}
+
+function modelOutlinerPlan<Result>(planner: () => Result) {
+  try { return { ok: true as const, value: planner() }; }
+  catch (error) { return modelOutlinerFailure(error); }
 }
 
 const WORLD_TOOL_DEFS: readonly {
@@ -704,6 +767,73 @@ export function createEditorApplicationCommands(
       return adapter.history.peekRedo() ? true : { enabled: false, reason: 'nothing to redo on the world' };
     },
   }, () => adapter.history.commitRedo());
+
+  const modelSurfaceEnabled = () => {
+    const blocked = adapter.blockedReason();
+    if (blocked) return { enabled: false, reason: `resolve ${blocked} first` };
+    return adapter.activeSurface() === 'model'
+      ? true
+      : { enabled: false, reason: 'only in the model editor' };
+  };
+  const commitModelOutliner = (plan: ModelOutlinerPlan, actionId: string): ModelOutlinerActionResult => {
+    const applyStartedAtMs = adapter.modelOutliner.now();
+    const committedAtMs = adapter.modelOutliner.commit(plan, actionId, applyStartedAtMs);
+    const appliedAtMs = Number.isFinite(committedAtMs) ? Math.max(applyStartedAtMs, committedAtMs) : applyStartedAtMs;
+    return { plan, applyStartedAtMs, appliedAtMs, applyMs: Math.max(0, appliedAtMs - applyStartedAtMs) };
+  };
+  const outlinerRegistration = (
+    id: ModelOutlinerCommandId,
+    label: string,
+    icon: string,
+    validateArgs: (args: unknown) => { ok: true; value: ModelOutlinerPlan } | { ok: false; reason: string },
+  ) => registry.register<ModelOutlinerPlan, ModelOutlinerActionResult>({
+    id,
+    label,
+    icon,
+    effect: 'action',
+    undoScope: { kind: 'native', key: 'model' },
+    projections: { contextMenu: ['model-outliner'] },
+    validateArgs,
+    isEnabled: modelSurfaceEnabled,
+  }, ({ args, actionId, invocationId }) => commitModelOutliner(args, actionId ?? invocationId));
+
+  outlinerRegistration(MODEL_PART_RENAME_COMMAND_ID, 'Rename Model Part', 'PencilLine', (args) => modelOutlinerPlan(() => {
+    const value = modelOutlinerRecord(args);
+    return planPartRename(adapter.modelOutliner.read(), {
+      modelId: value.modelId as string,
+      partId: value.partId as string,
+      name: value.name as string,
+    });
+  }));
+  outlinerRegistration(MODEL_PARTS_GROUP_COMMAND_ID, 'Group Model Parts', 'FolderPlus', (args) => modelOutlinerPlan(() => {
+    const value = modelOutlinerRecord(args);
+    return planPartsGroup(adapter.modelOutliner.read(), {
+      modelId: value.modelId as string,
+      partIds: value.partIds as string[],
+    });
+  }));
+  outlinerRegistration(MODEL_PARTS_UNGROUP_COMMAND_ID, 'Ungroup Model Parts', 'FolderMinus', (args) => modelOutlinerPlan(() => {
+    const value = modelOutlinerRecord(args);
+    return planPartsUngroup(adapter.modelOutliner.read(), {
+      modelId: value.modelId as string,
+      partIds: value.partIds as string[],
+    });
+  }));
+  outlinerRegistration(MODEL_GROUP_RENAME_COMMAND_ID, 'Rename Model Part Group', 'PencilLine', (args) => modelOutlinerPlan(() => {
+    const value = modelOutlinerRecord(args);
+    return planGroupRename(adapter.modelOutliner.read(), {
+      modelId: value.modelId as string,
+      groupId: value.groupId as string,
+      name: value.name as string,
+    });
+  }));
+  outlinerRegistration(MODEL_GROUP_DISSOLVE_COMMAND_ID, 'Dissolve Model Part Group', 'FolderX', (args) => modelOutlinerPlan(() => {
+    const value = modelOutlinerRecord(args);
+    return planGroupDissolve(adapter.modelOutliner.read(), {
+      modelId: value.modelId as string,
+      groupId: value.groupId as string,
+    });
+  }));
 
   const authoringSurfaceEnabled = () => {
     const blocked = adapter.blockedReason();

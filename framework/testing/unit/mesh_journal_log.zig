@@ -5,6 +5,18 @@ const std = @import("std");
 const testing = std.testing;
 const journal_log = @import("mesh_journal_log");
 
+test "metadata checkpoints require a real bounded state transition" {
+    try testing.expect(journal_log.metadataCheckpointValid("before", "after"));
+    try testing.expect(!journal_log.metadataCheckpointValid("same", "same"));
+    try testing.expect(!journal_log.metadataCheckpointValid("", "after"));
+    try testing.expect(!journal_log.metadataCheckpointValid("before", ""));
+
+    const too_large = try testing.allocator.alloc(u8, journal_log.MAX_METADATA_NOTE_BYTES + 1);
+    defer testing.allocator.free(too_large);
+    @memset(too_large, 'x');
+    try testing.expect(!journal_log.metadataCheckpointValid("before", too_large));
+}
+
 test "part boundary accepts a complete live range and rejects a stale subrange" {
     const ranges = [_]u32{ 0, 16, 16, 32 };
     try testing.expect(journal_log.hasExactPartRange(&ranges, 0, 16));

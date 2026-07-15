@@ -11,10 +11,11 @@
 //   tools/v8cli /tmp/editor-events.test.js
 
 import { describeEvent, head, since } from '../../../runtime/editorbus';
-import { commandOutcome, dispatchColorStudioActionOutcome, dispatchCommandOutcome, mapPaint, pieceEdit, pieceEditPayload, pieceMaterial, pieceMaterialPayload, piecePlace, piecePlacementPayload, type MapPaintPayload, type MaterialStudioPayload, type PaletteStudioPayload } from './editorEvents';
+import { commandOutcome, dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchModelOutlinerActionOutcome, mapPaint, pieceEdit, pieceEditPayload, pieceMaterial, pieceMaterialPayload, piecePlace, piecePlacementPayload, type MapPaintPayload, type MaterialStudioPayload, type ModelOutlinerPayload, type PaletteStudioPayload } from './editorEvents';
 import { planPieceMaterialAssign, planPieceMove } from '../world/pieceEditCommand';
 import { planPiecePlacement } from '../world/piecePlacementCommand';
 import { planPaletteLoad, planSlotFill, type ColorStudioPolicy, type ColorStudioSnapshot } from '../material/colorStudioCommand';
+import { modelPartRecords, planPartsGroup } from '../model/outlinerCommand';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -236,6 +237,32 @@ test('Color Studio palette replacement emits its exact prior and next trays', ()
   const payload = event.payload as PaletteStudioPayload;
   assert(payload.transaction.action === 'palette.load' && payload.transaction.before.palette.length === 1 && payload.transaction.after.palette.length === 2, 'palette inverse left the report');
   assert(describeEvent(event) === 'load Dune Dusk palette', `palette description drifted: ${describeEvent(event)}`);
+});
+
+test('model organization emits one typed native-journal transaction', () => {
+  const plan = planPartsGroup({
+    modelId: 'bridge-model',
+    nextSequence: 9,
+    parts: modelPartRecords([
+      { id: 'deck', name: 'Deck', visible: true, color: '#999999', lo: 0, hi: 4 },
+      { id: 'rail', name: 'Rail', visible: true, color: '#aaaaaa', lo: 4, hi: 8 },
+    ]),
+  }, { modelId: 'bridge-model', partIds: ['deck', 'rail'] });
+  const before = head();
+  dispatchModelOutlinerActionOutcome({
+    invocationId: 'model:group:1', commandId: 'model.parts.group', actionId: 'model:group:1',
+    source: 'dock', status: 'applied', phase: 'applied', effect: 'action',
+    undoScope: { kind: 'native', key: 'model' },
+    result: { plan, applyStartedAtMs: 300, appliedAtMs: 301, applyMs: 1 },
+  });
+  const appended = since(before);
+  assert(appended.length === 1, `model group appended ${appended.length} reports`);
+  const event = appended[0]!;
+  assert(event.type === 'model.structure' && event.actionId === 'model:group:1', 'model action fell back to a generic receipt');
+  assert(event.undoScope?.kind === 'native' && event.targets.some((target) => target.id === 'part-group:9'), 'native scope/group target drifted');
+  const payload = event.payload as ModelOutlinerPayload;
+  assert(payload.transaction.before.every((row) => !row.groupId) && payload.transaction.after.every((row) => row.groupId === 'part-group:9'), 'exact group inverse left the report');
+  assert(describeEvent(event) === 'group 2 parts as Group 1', `model description drifted: ${describeEvent(event)}`);
 });
 
 log(`\n${passed} passed, ${failed} failed`);

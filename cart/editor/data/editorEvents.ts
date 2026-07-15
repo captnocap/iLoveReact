@@ -7,8 +7,9 @@ import { defineEventType, dispatch } from '../../../runtime/editorbus';
 import type { EventCommandMetadata, TargetRef } from '../../../runtime/editorbus';
 import type { CommandAppliedOutcome, CommandOutcome } from '../../../runtime/commands';
 import type { HistoryEvent } from './types';
-import type { ColorStudioActionResult, WorldPieceEditResult, WorldPieceMaterialResult, WorldPiecesPlaceResult } from './applicationCommands';
+import type { ColorStudioActionResult, ModelOutlinerActionResult, WorldPieceEditResult, WorldPieceMaterialResult, WorldPiecesPlaceResult } from './applicationCommands';
 import type { ColorStudioActionTransaction } from '../material/colorStudioCommand';
+import type { ModelOutlinerTransaction } from '../model/outlinerCommand';
 import { assetById } from './catalog';
 import { catalogRowFor } from '../world/buildCatalog';
 import { pieceKindOf, placementSlotKey, type MaterialRef } from '../world/pieces';
@@ -133,6 +134,14 @@ export type PaletteStudioPayload = {
   applyMs: number;
   transaction: PaletteStudioTransaction;
 };
+export type ModelOutlinerPayload = {
+  action: ModelOutlinerTransaction['action'];
+  label: string;
+  applyStartedAtMs: number;
+  appliedAtMs: number;
+  applyMs: number;
+  transaction: ModelOutlinerTransaction;
+};
 
 // One event type for now — a plain authoring edit. Richer per-system types (piece.place,
 // material.slot.fill, …) register themselves through this same seam as they get wired.
@@ -217,6 +226,18 @@ export const paletteStudio = defineEventType<PaletteStudioPayload>({
     if ((p.action !== 'palette.add' && p.action !== 'palette.load') || p.transaction.action !== p.action ||
         !Number.isFinite(p.applyMs)) {
       throw new Error('palette.edit: malformed action/transaction');
+    }
+  },
+});
+
+export const modelOutliner = defineEventType<ModelOutlinerPayload>({
+  type: 'model.structure',
+  undoable: true,
+  describe: (p) => p.label,
+  validate: (p) => {
+    if (!p.transaction.modelId || p.transaction.action !== p.action || p.transaction.partIds.length === 0 ||
+        p.transaction.before.length !== p.transaction.after.length || !Number.isFinite(p.applyMs)) {
+      throw new Error('model.structure: malformed action/transaction');
     }
   },
 });
@@ -434,6 +455,28 @@ export function dispatchColorStudioActionOutcome(outcome: CommandAppliedOutcome<
   return dispatch(paletteStudio(
     payload,
     [{ kind: 'palette', id: 'color-studio-tray' }],
+    commandMetadata(outcome),
+  ));
+}
+
+export function dispatchModelOutlinerActionOutcome(outcome: CommandAppliedOutcome<ModelOutlinerActionResult>): number {
+  const result = outcome.result;
+  const transaction = result.plan.transaction;
+  const payload: ModelOutlinerPayload = {
+    action: transaction.action,
+    label: result.plan.label,
+    applyStartedAtMs: result.applyStartedAtMs,
+    appliedAtMs: result.appliedAtMs,
+    applyMs: result.applyMs,
+    transaction,
+  };
+  return dispatch(modelOutliner(
+    payload,
+    [
+      { kind: 'model', id: transaction.modelId },
+      ...transaction.partIds.map((id) => ({ kind: 'model-part', id })),
+      ...(transaction.groupId ? [{ kind: 'model-part-group', id: transaction.groupId }] : []),
+    ],
     commandMetadata(outcome),
   ));
 }

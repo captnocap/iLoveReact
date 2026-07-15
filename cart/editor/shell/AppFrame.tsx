@@ -59,7 +59,7 @@ import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialSt
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
 import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint, setMapDocumentAutosave } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
-import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
+import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
@@ -79,6 +79,7 @@ import {
   createEditorApplicationCommands,
   isColorStudioActionCommandId,
   isColorStudioChoiceCommandId,
+  isModelOutlinerActionCommandId,
   isWorldPieceEditCommandId,
   isWorldPieceMaterialCommandId,
   isWorldToolCommandId,
@@ -101,13 +102,23 @@ import {
   type WorldToolArmResult,
   type ColorStudioActionResult,
   type ColorStudioHistoryControlResult,
+  type ModelOutlinerActionResult,
 } from '../data/applicationCommands';
 import { activeSurface } from '../data/surfaces';
 import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
 import { partsMetaFromRows, meshDocRangeCenters, meshDocRangeGeometry } from '../data/meshDoc';
-import { assignPartsToGroup, nextDuplicateGroupName, nextDuplicatePartName, nextModelGroupName, ungroupParts } from '../data/modelOutliner';
+import { nextDuplicateGroupName, nextDuplicatePartName } from '../data/modelOutliner';
+import {
+  MODEL_GROUP_DISSOLVE_COMMAND_ID,
+  MODEL_GROUP_RENAME_COMMAND_ID,
+  MODEL_PART_RENAME_COMMAND_ID,
+  MODEL_PARTS_GROUP_COMMAND_ID,
+  MODEL_PARTS_UNGROUP_COMMAND_ID,
+  modelOutlinerNote,
+  modelPartRecords,
+} from '../model/outlinerCommand';
 import { materializePathArrayRows, sanitizePathArrayParams, type PathArrayParams } from '../data/pathArray';
 import { cloneMesh, mirrorMesh, mergeMesh, type EditMesh } from '../model/editMesh';
 import ImportPartDialog from '../dialogs/ImportPartDialog';
@@ -723,6 +734,66 @@ export default function AppFrame() {
           return { direction: 'redo', label: entry.label, actionId: entry.actionId, commandId: entry.commandId, changedKeys };
         },
       },
+      modelOutliner: {
+        read: () => {
+          const current = stateRef.current;
+          const doc = current.workspaceDocuments.find((candidate) => candidate.id === current.activeWorkspaceDocumentId);
+          const modelId = doc?.kind === 'model' ? (doc.sourceId ?? '') : '';
+          return {
+            modelId,
+            parts: modelPartRecords(modelId ? (current.modelParts[modelId] ?? []) : []),
+            nextSequence: current.seq,
+          };
+        },
+        now: Date.now,
+        commit: (plan, actionId, applyStartedAtMs) => {
+          const previous = stateRef.current;
+          const transaction = plan.transaction;
+          const currentParts = previous.modelParts[transaction.modelId] ?? [];
+          const beforeNote = modelOutlinerNote(transaction.modelId, transaction.before);
+          const afterNote = modelOutlinerNote(transaction.modelId, transaction.after);
+          const checkpoint = (globalThis as any).__mesh_journal_checkpoint?.(
+            transaction.action,
+            beforeNote,
+            afterNote,
+          );
+          if (checkpoint !== 1) {
+            throw new Error('native model journal refused the outliner metadata checkpoint');
+          }
+          const meshById = new Map(currentParts.filter((part) => part.mesh).map((part) => [part.id, part.mesh!]));
+          const parts: ModelPart[] = plan.next.parts.map((record) => {
+            const mesh = meshById.get(record.id);
+            return mesh ? { ...record, mesh } : { ...record };
+          });
+          const appliedAtMs = Date.now();
+          const applyMs = Math.max(0, appliedAtMs - applyStartedAtMs);
+          const next: EditorState = {
+            ...previous,
+            seq: Math.max(previous.seq, plan.next.nextSequence),
+            modelParts: { ...previous.modelParts, [transaction.modelId]: parts },
+            modelDirty: { ...previous.modelDirty, [transaction.modelId]: true },
+            history: [{
+              id: `h-${actionId}`,
+              actionId,
+              commandId: transaction.commandId,
+              verb: transaction.action,
+              target: plan.label,
+              meta: `model=${transaction.modelId} parts=${transaction.partIds.length} apply=${applyMs.toFixed(1)}ms`,
+              undoable: true,
+              eventType: 'model.structure',
+              atMs: appliedAtMs,
+              editMs: applyMs,
+              emptyMs: applyMs,
+              richMs: applyMs,
+            }, ...previous.history].slice(0, 8),
+            redo: [],
+            status: plan.status,
+          };
+          stateRef.current = next;
+          setState(next);
+          return appliedAtMs;
+        },
+      },
       colorStudio: {
         read: () => ({
           materialId: stateRef.current.colorStudioMaterial,
@@ -927,6 +998,10 @@ export default function AppFrame() {
       }
       if (outcome.status === 'applied' && isColorStudioActionCommandId(outcome.commandId)) {
         dispatchColorStudioActionOutcome(outcome as CommandAppliedOutcome<ColorStudioActionResult>);
+        return;
+      }
+      if (outcome.status === 'applied' && isModelOutlinerActionCommandId(outcome.commandId)) {
+        dispatchModelOutlinerActionOutcome(outcome as CommandAppliedOutcome<ModelOutlinerActionResult>);
         return;
       }
       if (outcome.status === 'applied' &&
@@ -2706,7 +2781,6 @@ export default function AppFrame() {
   // A model in view is a list of PARTS (each its own mesh). These handlers own the parts
   // state; the surface composes them into the host mesh and reloads on change.
   const PART_TINTS = ['#c9b48f', '#8fb6c9', '#c98f9b', '#9cc98f', '#b49bc9', '#c9c08f', '#8fc9bb'];
-  const MODEL_PART_NAME_MAX_CHARS = 80;
   const activePartsModelId = (s: EditorState): string | null => {
     const doc = s.workspaceDocuments.find((d) => d.id === s.activeWorkspaceDocumentId);
     return doc?.kind === 'model' && doc.sourceId && s.modelParts[doc.sourceId] ? doc.sourceId : null;
@@ -3094,23 +3168,7 @@ export default function AppFrame() {
   }, [state.modelActivePartId, state.modelParts, state.activeWorkspaceDocumentId]);
   const renamePart = (id: string, rawName: string) => {
     const mid = activePartsModelId(state);
-    const name = rawName.trim().slice(0, MODEL_PART_NAME_MAX_CHARS);
-    if (!mid || !name) {
-      setState((prev) => ({ ...prev, status: !mid ? 'part not found' : 'part names cannot be blank' }));
-      return;
-    }
-    setState((prev) => {
-      const parts = prev.modelParts[mid] ?? [];
-      const part = parts.find((candidate) => candidate.id === id);
-      if (!part) return { ...prev, status: 'part not found' };
-      if (part.name === name) return prev;
-      return {
-        ...prev,
-        modelParts: { ...prev.modelParts, [mid]: parts.map((candidate) => (candidate.id === id ? { ...candidate, name } : candidate)) },
-        modelDirty: { ...prev.modelDirty, [mid]: true },
-        status: `renamed Outliner part "${part.name}" → "${name}"`,
-      };
-    });
+    invokeApplicationCommand(MODEL_PART_RENAME_COMMAND_ID, { modelId: mid ?? '', partId: id, name: rawName }, 'focus-panel');
   };
 
   // ── Organizational part groups (req_2911) ───────────────────────────────────
@@ -3144,89 +3202,24 @@ export default function AppFrame() {
     const mid = activePartsModelId(state);
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
     const ids = effectiveSelectedIds(state, parts, selectedPartIdsRef.current);
-    const selected = ids.map((id) => parts.find((part) => part.id === id)).filter((part): part is ModelPart => Boolean(part));
-    if (!mid || selected.length < 2) {
-      setState((prev) => ({ ...prev, status: 'group parts: Shift-click at least two outliner rows first' }));
-      return;
-    }
-    const existingGroupIds = [...new Set(selected.map((part) => part.groupId).filter((id): id is string => Boolean(id)))];
-    const addToExisting = existingGroupIds.length === 1 && selected.some((part) => part.groupId !== existingGroupIds[0]);
-    if (existingGroupIds.length === 1 && !addToExisting && selected.every((part) => part.groupId === existingGroupIds[0])) {
-      const name = selected[0]!.groupName ?? 'group';
-      setState((prev) => ({ ...prev, status: `${selected.length} selected parts are already in ${name}` }));
-      return;
-    }
-    const groupId = addToExisting ? existingGroupIds[0]! : `part-group:${state.seq}`;
-    const groupName = addToExisting
-      ? (parts.find((part) => part.groupId === groupId)?.groupName ?? nextModelGroupName(parts))
-      : nextModelGroupName(parts);
-    setState((prev) => ({
-      ...prev,
-      seq: addToExisting ? prev.seq : prev.seq + 1,
-      modelParts: {
-        ...prev.modelParts,
-        [mid]: assignPartsToGroup(prev.modelParts[mid] ?? [], ids, groupId, groupName),
-      },
-      modelDirty: { ...prev.modelDirty, [mid]: true },
-      status: addToExisting ? `added selected parts to ${groupName}` : `grouped ${selected.length} parts as ${groupName}`,
-    }));
+    invokeApplicationCommand(MODEL_PARTS_GROUP_COMMAND_ID, { modelId: mid ?? '', partIds: ids }, 'focus-panel');
   };
 
   const ungroupSelectedParts = () => {
     const mid = activePartsModelId(state);
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
-    const ids = new Set(effectiveSelectedIds(state, parts, selectedPartIdsRef.current));
-    const count = parts.filter((part) => ids.has(part.id) && part.groupId).length;
-    if (!mid || count === 0) {
-      setState((prev) => ({ ...prev, status: 'ungroup parts: the selected parts are already at the root' }));
-      return;
-    }
-    setState((prev) => ({
-      ...prev,
-      modelParts: { ...prev.modelParts, [mid]: ungroupParts(prev.modelParts[mid] ?? [], [...ids]) },
-      modelDirty: { ...prev.modelDirty, [mid]: true },
-      status: `moved ${count} selected part${count === 1 ? '' : 's'} to the outliner root — geometry kept`,
-    }));
+    const ids = effectiveSelectedIds(state, parts, selectedPartIdsRef.current);
+    invokeApplicationCommand(MODEL_PARTS_UNGROUP_COMMAND_ID, { modelId: mid ?? '', partIds: ids }, 'focus-panel');
   };
 
   const renamePartGroup = (groupId: string, rawName: string) => {
     const mid = activePartsModelId(state);
-    const name = rawName.trim().slice(0, MODEL_PART_NAME_MAX_CHARS);
-    if (!mid || !name) {
-      setState((prev) => ({ ...prev, status: !mid ? 'part group not found' : 'group names cannot be blank' }));
-      return;
-    }
-    setState((prev) => {
-      const parts = prev.modelParts[mid] ?? [];
-      const members = parts.filter((part) => part.groupId === groupId);
-      if (members.length === 0) return { ...prev, status: 'part group not found' };
-      if (parts.some((part) => part.groupId !== groupId && part.groupName?.toLowerCase() === name.toLowerCase())) {
-        return { ...prev, status: `group name already in use: ${name}` };
-      }
-      return {
-        ...prev,
-        modelParts: { ...prev.modelParts, [mid]: parts.map((part) => (part.groupId === groupId ? { ...part, groupName: name } : part)) },
-        modelDirty: { ...prev.modelDirty, [mid]: true },
-        status: `renamed group "${members[0]!.groupName ?? 'Group'}" → "${name}"`,
-      };
-    });
+    invokeApplicationCommand(MODEL_GROUP_RENAME_COMMAND_ID, { modelId: mid ?? '', groupId, name: rawName }, 'focus-panel');
   };
 
   const dissolvePartGroup = (groupId: string) => {
     const mid = activePartsModelId(state);
-    const parts = mid ? (state.modelParts[mid] ?? []) : [];
-    const members = parts.filter((part) => part.groupId === groupId);
-    if (!mid || members.length === 0) {
-      setState((prev) => ({ ...prev, status: 'part group not found' }));
-      return;
-    }
-    const name = members[0]!.groupName ?? 'Group';
-    setState((prev) => ({
-      ...prev,
-      modelParts: { ...prev.modelParts, [mid]: ungroupParts(prev.modelParts[mid] ?? [], members.map((part) => part.id)) },
-      modelDirty: { ...prev.modelDirty, [mid]: true },
-      status: `dissolved ${name} — kept ${members.length} independent part${members.length === 1 ? '' : 's'}`,
-    }));
+    invokeApplicationCommand(MODEL_GROUP_DISSOLVE_COMMAND_ID, { modelId: mid ?? '', groupId }, 'focus-panel');
   };
 
   const applyPartVisibility = (mid: string, parts: ModelPart[], targetIds: string[], hide: boolean, label: string) => {

@@ -1013,8 +1013,7 @@ fn hostMeshJournalNote(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (argToStringAlloc(info, 0)) |note| {
         defer std.heap.c_allocator.free(note);
-        scene3d.meshJournalNoteSet(note);
-        setReturnNumber(info, 1);
+        setReturnNumber(info, if (scene3d.meshJournalNoteSet(note)) 1 else 0);
         return;
     }
     const note = scene3d.meshJournalNoteGet() orelse {
@@ -1022,6 +1021,45 @@ fn hostMeshJournalNote(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         return;
     };
     setReturnString(info, note);
+}
+
+/// __mesh_journal_checkpoint(kind, beforeNote, afterNote) → 1/0. Metadata-only
+/// model edits become native journal units without fabricating a geometry op.
+fn hostMeshJournalCheckpoint(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const kind = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(kind);
+    const before = argToStringAlloc(info, 1) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(before);
+    const after = argToStringAlloc(info, 2) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer std.heap.c_allocator.free(after);
+
+    const label: []const u8 = if (std.mem.eql(u8, kind, "part.rename"))
+        "rename part"
+    else if (std.mem.eql(u8, kind, "parts.group"))
+        "group parts"
+    else if (std.mem.eql(u8, kind, "parts.ungroup"))
+        "ungroup parts"
+    else if (std.mem.eql(u8, kind, "group.rename"))
+        "rename group"
+    else if (std.mem.eql(u8, kind, "group.dissolve"))
+        "dissolve group"
+    else {
+        setReturnNumber(info, 0);
+        return;
+    };
+    const ok = scene3d.meshJournalMetadataCheckpoint(label, before, after);
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
 }
 
 /// __mesh_duplicate_range(lo, hi, mirrorAxis) → JSON {"ok","key","count","lo","hi"}.
@@ -2884,6 +2922,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_history", hostMeshHistory);
     v8_runtime.registerHostFn("__mesh_history_log", hostMeshHistoryLog);
     v8_runtime.registerHostFn("__mesh_journal_note", hostMeshJournalNote);
+    v8_runtime.registerHostFn("__mesh_journal_checkpoint", hostMeshJournalCheckpoint);
     v8_runtime.registerHostFn("__mesh_duplicate_range", hostMeshDuplicateRange);
     v8_runtime.registerHostFn("__mesh_path_array", hostMeshPathArray);
     v8_runtime.registerHostFn("__mesh_path_array_points", hostMeshPathArrayPoints);

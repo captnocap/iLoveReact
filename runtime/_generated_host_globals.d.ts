@@ -55,6 +55,7 @@ declare global {
   function __mesh_history(...args: unknown[]): unknown;
   function __mesh_history_log(...args: unknown[]): unknown;
   function __mesh_journal_note(...args: unknown[]): unknown;
+  function __mesh_journal_checkpoint(...args: unknown[]): unknown;
   function __mesh_duplicate_range(...args: unknown[]): unknown;
   function __mesh_path_array(...args: unknown[]): unknown;
   function __mesh_path_array_points(...args: unknown[]): unknown;

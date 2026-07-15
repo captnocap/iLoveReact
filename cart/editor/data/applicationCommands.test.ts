@@ -14,6 +14,11 @@ import {
   COLOR_STUDIO_SLOT_FILL_COMMAND_ID,
   COLOR_STUDIO_UNDO_COMMAND_ID,
   COLOR_STUDIO_VARIANT_SELECT_COMMAND_ID,
+  MODEL_GROUP_DISSOLVE_COMMAND_ID,
+  MODEL_GROUP_RENAME_COMMAND_ID,
+  MODEL_PART_RENAME_COMMAND_ID,
+  MODEL_PARTS_GROUP_COMMAND_ID,
+  MODEL_PARTS_UNGROUP_COMMAND_ID,
   WORLD_FLOOR_STEP_COMMAND_ID,
   WORLD_MAX_FLOOR,
   WORLD_PIECE_DELETE_COMMAND_ID,
@@ -30,6 +35,7 @@ import {
   type WorldPieceEditResult,
   type WorldPieceMaterialResult,
   type WorldPiecesPlaceResult,
+  type ModelOutlinerActionResult,
 } from './applicationCommands';
 import type { PiecePlacementWorld } from '../world/piecePlacementCommand';
 import type { ColorStudioHistoryEntry, ColorStudioSnapshot } from '../material/colorStudioCommand';
@@ -68,6 +74,15 @@ function harness(
   };
   let studioUndo: ColorStudioHistoryEntry[] = [];
   let studioRedo: ColorStudioHistoryEntry[] = [];
+  let modelOutliner = {
+    modelId: 'model-a',
+    nextSequence: 40,
+    parts: [
+      { id: 'part-a', name: 'Deck', visible: true, color: '#999999', lo: 0, hi: 4 },
+      { id: 'part-b', name: 'Rail', visible: true, color: '#aaaaaa', lo: 4, hi: 8 },
+      { id: 'part-c', name: 'Lamp', visible: true, color: '#bbbbbb', lo: 8, hi: 12 },
+    ],
+  };
   const outcomes: CommandOutcome[] = [];
   const adapter: EditorCommandAdapter = {
     activeSurface: () => surface,
@@ -131,6 +146,20 @@ function harness(
         undo.unshift(entry);
         commits += 1;
         return { ...entry, direction: 'redo' as const, changedKeys: ['worldPieces'] };
+      },
+    },
+    modelOutliner: {
+      read: () => modelOutliner,
+      now: () => now++,
+      commit: (plan, actionId) => {
+        modelOutliner = {
+          modelId: plan.next.modelId,
+          nextSequence: plan.next.nextSequence,
+          parts: plan.next.parts.map((part) => ({ ...part })),
+        };
+        committedActionId = actionId;
+        commits += 1;
+        return now++;
       },
     },
     colorStudio: {
@@ -210,6 +239,7 @@ function harness(
     studio: () => studio,
     studioUndoDepth: () => studioUndo.length,
     studioRedoDepth: () => studioRedo.length,
+    modelOutliner: () => modelOutliner,
   };
 }
 
@@ -555,6 +585,59 @@ test('palette workspace actions work from paint surfaces but slot edits stay in 
   });
   assert(wrong.status === 'rejected' && wrong.code === 'disabled', 'material slot edit escaped the Color Studio surface');
   assert(model.commits() === 1, 'rejected slot edit mutated model paint state');
+});
+
+test('Outliner organization is one native-journal action path for dock and remote callers', () => {
+  for (const source of ['dock', 'remote'] as CommandSource[]) {
+    const h = harness(0, 'model');
+    const grouped = h.commands.invoke<ModelOutlinerActionResult>({
+      invocationId: `group:${source}`,
+      commandId: MODEL_PARTS_GROUP_COMMAND_ID,
+      args: { modelId: 'model-a', partIds: ['part-a', 'part-b'] },
+      source,
+    });
+    assert(grouped.status === 'applied' && grouped.actionId === `group:${source}`, `${source} lost model action identity`);
+    assert(grouped.status === 'applied' && grouped.undoScope !== 'none' && grouped.undoScope.kind === 'native', `${source} escaped the mesh journal scope`);
+    assert(h.modelOutliner().parts[0]?.groupId === 'part-group:40' && h.modelOutliner().parts[1]?.groupId === 'part-group:40', `${source} did not commit the exact group`);
+    assert(h.modelOutliner().parts[2]?.groupId === undefined && h.commits() === 1 && h.outcomes.length === 1, `${source} mutated unrelated rows or published twice`);
+  }
+});
+
+test('rename, ungroup, group rename, and dissolve share exact outliner transactions', () => {
+  const h = harness(0, 'model');
+  const renamed = h.commands.invoke({
+    commandId: MODEL_PART_RENAME_COMMAND_ID,
+    args: { modelId: 'model-a', partId: 'part-a', name: 'Main Deck' },
+    source: 'dock',
+  });
+  assert(renamed.status === 'applied' && h.modelOutliner().parts[0]?.name === 'Main Deck', 'part rename bypassed the shared handler');
+  h.commands.invoke({ commandId: MODEL_PARTS_GROUP_COMMAND_ID, args: { modelId: 'model-a', partIds: ['part-a', 'part-b'] }, source: 'dock' });
+  const groupId = h.modelOutliner().parts[0]?.groupId!;
+  h.commands.invoke({ commandId: MODEL_GROUP_RENAME_COMMAND_ID, args: { modelId: 'model-a', groupId, name: 'Bridge' }, source: 'dock' });
+  assert(h.modelOutliner().parts.slice(0, 2).every((part) => part.groupName === 'Bridge'), 'group rename split member labels');
+  h.commands.invoke({ commandId: MODEL_PARTS_UNGROUP_COMMAND_ID, args: { modelId: 'model-a', partIds: ['part-a'] }, source: 'dock' });
+  assert(!h.modelOutliner().parts[0]?.groupId && h.modelOutliner().parts[1]?.groupId === groupId, 'ungroup changed the wrong rows');
+  h.commands.invoke({ commandId: MODEL_GROUP_DISSOLVE_COMMAND_ID, args: { modelId: 'model-a', groupId }, source: 'dock' });
+  assert(h.modelOutliner().parts.every((part) => !part.groupId), 'dissolve left group metadata behind');
+  assert(h.commits() === 5 && h.outcomes.length === 5, 'outliner actions did not commit/publish once each');
+});
+
+test('stale and wrong-surface outliner requests reject before commit', () => {
+  const model = harness(0, 'model');
+  const stale = model.commands.invoke({
+    commandId: MODEL_PART_RENAME_COMMAND_ID,
+    args: { modelId: 'model-a', partId: 'missing', name: 'Ghost' },
+    source: 'remote',
+  });
+  assert(stale.status === 'rejected' && stale.code === 'invalid-args' && model.commits() === 0, 'stale part crossed authority');
+
+  const world = harness(0, 'world');
+  const wrong = world.commands.invoke({
+    commandId: MODEL_PART_RENAME_COMMAND_ID,
+    args: { modelId: 'model-a', partId: 'part-a', name: 'Wrong Surface' },
+    source: 'remote',
+  });
+  assert(wrong.status === 'rejected' && wrong.code === 'disabled' && world.commits() === 0, 'model action escaped onto world surface');
 });
 
 log(`\n${passed} passed, ${failed} failed`);
