@@ -493,6 +493,23 @@ fn hostModelOrbitLock(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     scene3d.orbitSetLocked(on);
 }
 
+/// __model_cam_store() — bookmark the current mesh-editor orbit pose (req_3067), so the
+/// exact working angle+distance survives the stray drags and double-click focuses that
+/// otherwise make it unrecoverable by hand.
+fn hostModelCamStore(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    _ = v8.FunctionCallbackInfo.initFromV8(info_c);
+    scene3d.orbitStoreView();
+}
+
+/// __model_cam_recall() → 1|0 — return the orbit camera to the bookmarked pose. 0 when
+/// nothing is stored or the camera lock (req_2893) holds the view.
+fn hostModelCamRecall(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ok = scene3d.orbitRecallView();
+    if (ok) state.markDirty();
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
 /// __model_session_json() → {"key","count","radius","undo","redo","atlas"} | "".
 /// The resident mesh-editor session (req_2898): what model the host is STILL holding
 /// live across a hot reload — edit mesh key/count, orbit radius, journal depths, and
@@ -2788,6 +2805,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
     v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
     v8_runtime.registerHostFn("__model_orbit_lock", hostModelOrbitLock);
+    v8_runtime.registerHostFn("__model_cam_store", hostModelCamStore);
+    v8_runtime.registerHostFn("__model_cam_recall", hostModelCamRecall);
     v8_runtime.registerHostFn("__model_session_json", hostModelSessionJson);
     v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
     v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);

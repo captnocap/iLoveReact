@@ -59,11 +59,27 @@ import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialSt
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
 import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint, setMapDocumentAutosave } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
-import { dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
-import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
+import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
+import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import {
+  COLOR_STUDIO_ACTION_COMMAND_IDS,
+  COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
+  COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
+  COLOR_STUDIO_PALETTE_ADD_COMMAND_ID,
+  COLOR_STUDIO_PALETTE_LOAD_COMMAND_ID,
+  COLOR_STUDIO_QUALITY_SELECT_COMMAND_ID,
+  COLOR_STUDIO_REDO_COMMAND_ID,
+  COLOR_STUDIO_SEED_ROLL_COMMAND_ID,
+  COLOR_STUDIO_SLOT_FILL_COMMAND_ID,
+  COLOR_STUDIO_SLOT_SELECT_COMMAND_ID,
+  COLOR_STUDIO_SLOTS_RESET_COMMAND_ID,
+  COLOR_STUDIO_UNDO_COMMAND_ID,
+  COLOR_STUDIO_VARIANT_SELECT_COMMAND_ID,
+  COLOR_STUDIO_VIEW_SELECT_COMMAND_ID,
   commandSource,
   createEditorApplicationCommands,
+  isColorStudioActionCommandId,
+  isColorStudioChoiceCommandId,
   isWorldPieceEditCommandId,
   isWorldPieceMaterialCommandId,
   isWorldToolCommandId,
@@ -84,6 +100,8 @@ import {
   type WorldPiecesPlaceResult,
   type WorldPlacementRotateResult,
   type WorldToolArmResult,
+  type ColorStudioActionResult,
+  type ColorStudioHistoryControlResult,
 } from '../data/applicationCommands';
 import { activeSurface } from '../data/surfaces';
 import { propExportTargetForCommand } from '../data/propExports';
@@ -119,13 +137,13 @@ import { image as imageOps, quantize as quantizeImage } from '../../../runtime/i
 import { encodeRows, parseQuantizeProbe } from '../textures/pixelTexture';
 import { loadTexturePackages, textureSpec, savePixelTexture, saveExactImage } from '../data/texturePackage';
 import { loadStickers, registerStickers, ensureStickerForTexture } from '../data/stickerStore';
-import { gatherFacade, type Facade, type FacadeStroke, type FacadeStamp } from '../world/facades';
-import { setLiveFacades, saveFacadeBake } from '../world/facadeBake';
-import FacadePainterSurface from '../stage/FacadePainterSurface';
+import { FACADE_TEXELS_PER_METER, facadeFromSelection, facadeLayers, gatherFacade, type Facade, type FacadeStroke, type FacadeStamp } from '../world/facades';
+import { resizeFacadeRgba, setLiveFacades, saveFacadeBake } from '../world/facadeBake';
 import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageDialog';
 import { readFileBase64, remove } from '../../../runtime/hooks/fs';
-import { oklchName } from '../data/colorSpine';
+import { oklchName, SPINE_LIBRARY } from '../data/colorSpine';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
+import type { ColorStudioHistoryEntry } from '../material/colorStudioCommand';
 import { useBuildJournal } from '../data/journal';
 import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
 import { WORLD_DOCUMENT_ID, PLAYTEST_DOCUMENT, ANIMATION_DOCUMENT, materialDocument, modelDocument, upsertDocument } from '../data/documents';
@@ -139,6 +157,10 @@ import { buildCatalogIndex, validateBuildPlacement } from '../../../runtime/game
 import { TILE_KINDS, tileKindDefinition } from '../world/tileKinds';
 import { FLORA_KIND_DEFINITIONS } from '../world/floraKinds';
 import { floatsToBindings, GROUND_MATERIALS, tileBindingFor } from '../render3d/groundFormula';
+
+const FACADE_PREVIEW_DETAILS = [128, FACADE_TEXELS_PER_METER, 512] as const;
+const FACADE_PAINT_TOOLS = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'eyedropper', 'marquee', 'lasso'] as const;
+const COLOR_STUDIO_UNDO_CAP = 32;
 
 // FLOORCTL req_2485: floorIndex is the world viewport's REAL active storey
 // (0 = Ground) — the action bar's ▼/▲ is the one control. 128 storeys
@@ -357,6 +379,13 @@ export default function AppFrame() {
   // Live handle for the once-installed hotkey subscription (fresh closures per render).
   const blockingNowRef = useRef(blockingNow);
   blockingNowRef.current = blockingNow;
+  // Studio history is controller state, not another pair of keys in the editor
+  // state blob. It survives ordinary renders, resets with the application
+  // session, and contains exact immutable before/after workspace snapshots.
+  const colorStudioHistoryRef = useRef<{
+    undo: ColorStudioHistoryEntry[];
+    redo: ColorStudioHistoryEntry[];
+  }>({ undo: [], redo: [] });
 
   const applicationCommandsRef = useRef<ReturnType<typeof createEditorApplicationCommands> | null>(null);
   if (applicationCommandsRef.current === null) {
@@ -504,6 +533,7 @@ export default function AppFrame() {
             redo: [],
             worldPieces: [...plan.next.pieces],
             selectedPieceId: plan.next.selectedPieceId,
+            selectedPieceIds: plan.next.selectedPieceId ? [plan.next.selectedPieceId] : [],
             status: `${verb} ${what}${replaced && count > 1 ? ` (replaced ${replaced})` : ''}`,
           };
           const next = recordWorldEdit(
@@ -570,6 +600,9 @@ export default function AppFrame() {
             redo: [],
             worldPieces: [...plan.next.pieces],
             selectedPieceId: plan.next.selectedPieceId,
+            selectedPieceIds: previous.selectedPieceIds
+              .filter((id) => plan.next.pieces.some((piece) => piece.id === id))
+              .concat(plan.next.selectedPieceId && !previous.selectedPieceIds.includes(plan.next.selectedPieceId) ? [plan.next.selectedPieceId] : []),
             status,
           };
           const next = recordWorldEdit(
@@ -633,6 +666,7 @@ export default function AppFrame() {
             redo: [],
             worldPieces: [...plan.next.pieces],
             selectedPieceId: plan.next.selectedPieceId,
+            selectedPieceIds: previous.selectedPieceIds.filter((id) => plan.next.pieces.some((piece) => piece.id === id)),
             status,
             ...(transaction.materialAssetId ? {
               recentMaterialIds: [
@@ -786,7 +820,12 @@ export default function AppFrame() {
   // guarded: modal discipline — no quick verbs over an unresolved dialog.
   const worldMenu = useContextMenu();
   const openPieceQuickMenu = guarded((id: string, x: number, y: number) => {
-    selectPiece(id);
+    setState((prev) => ({
+      ...prev,
+      selectedPieceId: id,
+      selectedPieceIds: prev.selectedPieceIds.includes(id) ? prev.selectedPieceIds : [id],
+      status: `selected ${prev.worldPieces.find((piece) => piece.id === id)?.pieceId ?? id}`,
+    }));
     worldMenu.triggerProps.onRightClick({ x, y });
   });
 
@@ -1364,6 +1403,8 @@ export default function AppFrame() {
         else if (commandId === 'mesh-focus') api.focus();
         else if (commandId === 'mesh-wire') api.wire();
         else if (commandId === 'mesh-cam-lock') api.camLock();
+        else if (commandId === 'mesh-cam-store') api.camStore();
+        else if (commandId === 'mesh-cam-recall') api.camRecall();
         else if (commandId === 'mesh-sym-x') api.toggleMirror(0);
         else if (commandId === 'mesh-sym-y') api.toggleMirror(1);
         else if (commandId === 'mesh-sym-z') api.toggleMirror(2);
@@ -1766,7 +1807,7 @@ export default function AppFrame() {
   // EditorState): map paint strokes and in-viewer mesh edits — mesh docs route to
   // the host mesh journal instead (meshUndoRedo below).
   const WORLD_UNDO_CAP = 32;
-  const WORLD_UNDO_KEYS = ['worldPieces', 'objects', 'authoredBuildPieces', 'selectedPieceId', 'selectedObjectId', 'armedPieceId'] as const;
+  const WORLD_UNDO_KEYS = ['worldPieces', 'objects', 'authoredBuildPieces', 'selectedPieceId', 'selectedPieceIds', 'selectedObjectId', 'armedPieceId'] as const;
   const recordWorldEdit = (
     prev: EditorState,
     next: EditorState,
@@ -1896,12 +1937,22 @@ export default function AppFrame() {
     }, 'viewport');
   };
 
-  const selectPiece = (id: string | null) => {
-    setState((prev) => ({
-      ...prev,
-      selectedPieceId: id,
-      status: id ? `selected ${prev.worldPieces.find((p) => p.id === id)?.pieceId ?? id}` : 'cleared world selection',
-    }));
+  const selectPiece = (id: string | null, additive = false) => {
+    setState((prev) => {
+      // Shift without a drag is the additive-selection gesture. Missing empty
+      // ground while holding it must not discard the set the author is building.
+      if (!id && additive) return prev;
+      return {
+        ...prev,
+        selectedPieceId: id,
+        selectedPieceIds: id
+          ? (additive ? [...prev.selectedPieceIds.filter((selectedId) => selectedId !== id), id] : [id])
+          : [],
+        status: id
+          ? `${additive ? 'added' : 'selected'} ${prev.worldPieces.find((p) => p.id === id)?.pieceId ?? id}${additive ? ` · ${prev.selectedPieceIds.includes(id) ? prev.selectedPieceIds.length : prev.selectedPieceIds.length + 1} pieces` : ''}`
+          : 'cleared world selection',
+      };
+    });
   };
 
   const armPiece = (pieceId: string) => {
@@ -1915,6 +1966,7 @@ export default function AppFrame() {
       // Arming a piece opens the focus panel on it (Build mode) and clears any
       // placed-piece selection so the panel shows the DEFINITION, not an instance.
       selectedPieceId: null,
+      selectedPieceIds: [],
       status: `armed ${pieceId}`,
     }));
   };
@@ -1950,17 +2002,32 @@ export default function AppFrame() {
   const assignPieceSlot = (id: string, role: string) =>
     assignPieceSlotAsset(id, role, stateRef.current.activeAssetId, 'focus-panel');
 
-  // Paint Facade (req_3057): gather the coplanar wall run around the seed and
-  // open it as ONE meter-true canvas document. A facade already covering the
-  // seed re-opens (the re-edit law) instead of minting a duplicate.
+  // Paint Facade (req_3062): an additive selection is authoritative scope. A
+  // one-piece context action keeps gatherFacade's contiguous-run convenience.
   const openFacadePainter = (pieceId: string) => {
     setState((prev) => {
       const seed = prev.worldPieces.find((p) => p.id === pieceId);
       if (!seed) return prev;
-      const existing = prev.worldFacades.find((f) => f.pieceIds.includes(pieceId));
-      const facade = existing ?? gatherFacade(seed, prev.worldPieces, `facade-${prev.seq}`);
+      const selectedIds = prev.selectedPieceIds.includes(pieceId) ? prev.selectedPieceIds : [pieceId];
+      const selected = selectedIds
+        .map((id) => prev.worldPieces.find((piece) => piece.id === id))
+        .filter((piece): piece is NonNullable<typeof piece> => !!piece);
+      const created = selected.length > 1
+        ? facadeFromSelection(selected, `facade-${prev.seq}`)
+        : gatherFacade(seed, prev.worldPieces, `facade-${prev.seq}`);
+      const existing = created ? prev.worldFacades.find((candidate) => candidate.pieceIds.length === created.pieceIds.length
+        && candidate.pieceIds.every((id) => created.pieceIds.includes(id))) : undefined;
+      const facade = existing
+        ? { ...existing, layers: facadeLayers(existing), activeLayerId: existing.activeLayerId || facadeLayers(existing)[0]!.id, strokes: undefined }
+        : created;
       if (!facade) {
-        return { ...prev, contextOpen: false, status: 'Paint Facade — that piece has no wall face (wall / arch / fence / railing kinds paint)' };
+        return {
+          ...prev,
+          contextOpen: false,
+          status: selected.length > 1
+            ? 'Paint Facade — every selected piece must be a wall / arch / fence / railing face on the same plane'
+            : 'Paint Facade — that piece has no wall face (wall / arch / fence / railing kinds paint)',
+        };
       }
       const doc = {
         id: `doc-facade-${facade.id}`,
@@ -1972,7 +2039,7 @@ export default function AppFrame() {
       return {
         ...prev,
         seq: existing ? prev.seq : prev.seq + 1,
-        worldFacades: existing ? prev.worldFacades : [...prev.worldFacades, facade],
+        worldFacades: existing ? prev.worldFacades.map((item) => item.id === facade.id ? facade : item) : [...prev.worldFacades, facade],
         workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
         activeWorkspaceDocumentId: doc.id,
         contextOpen: false,
@@ -1981,20 +2048,35 @@ export default function AppFrame() {
     });
   };
   const recordFacadeStroke = (facadeId: string, stroke: FacadeStroke) => {
-    setState((prev) => ({ ...prev, worldFacades: prev.worldFacades.map((f) => (f.id === facadeId ? { ...f, strokes: [...f.strokes, stroke] } : f)) }));
+    setState((prev) => ({ ...prev, worldFacades: prev.worldFacades.map((f) => {
+      if (f.id !== facadeId) return f;
+      const source = facadeLayers(f);
+      const active = f.activeLayerId || source[0]!.id;
+      return { ...f, activeLayerId: active, layers: source.map((layer) => layer.id === active ? { ...layer, strokes: [...layer.strokes, stroke] } : layer), strokes: undefined };
+    }) }));
+  };
+  const updateFacadeLayers = (facadeId: string, layers: import('../world/facades').FacadeLayer[], activeLayerId: string) => {
+    if (!layers.length || !layers.some((layer) => layer.id === activeLayerId)) return;
+    setState((prev) => ({ ...prev, worldFacades: prev.worldFacades.map((facade) => facade.id === facadeId
+      ? { ...facade, layers, activeLayerId, strokes: undefined }
+      : facade) }));
   };
   const recordFacadeStamp = (facadeId: string, stamp: FacadeStamp) => {
     setState((prev) => ({ ...prev, worldFacades: prev.worldFacades.map((f) => (f.id === facadeId ? { ...f, stamps: [...f.stamps, stamp] } : f)) }));
   };
   const clearFacadePaint = (facadeId: string) => {
-    setState((prev) => ({ ...prev, worldFacades: prev.worldFacades.map((f) => (f.id === facadeId ? { ...f, strokes: [], stamps: [] } : f)) }));
+    setState((prev) => ({ ...prev, worldFacades: prev.worldFacades.map((f) => (f.id === facadeId
+      ? { ...f, layers: facadeLayers(f).map((layer) => ({ ...layer, strokes: [] })), strokes: undefined, stamps: [] }
+      : f)) }));
   };
   // Bake: the painter's stroke readback + stamps → cached PNG → the world
   // re-pushes (identity-bump retriggers the viewport's mesh/ref effects).
-  const saveFacadePainting = (facadeId: string, strokesRgba: Uint8Array) => {
+  const saveFacadePainting = (facadeId: string, strokesRgba: Uint8Array, width: number, height: number) => {
     const facade = stateRef.current.worldFacades.find((f) => f.id === facadeId);
     if (!facade) return;
-    const ok = saveFacadeBake(stateRef.current.activeMapStem, facade, strokesRgba);
+    const target = { w: Math.max(2, Math.round(facade.widthMeters * FACADE_TEXELS_PER_METER)), h: Math.max(2, Math.round(facade.heightMeters * FACADE_TEXELS_PER_METER)) };
+    const ambientRgba = resizeFacadeRgba(strokesRgba, width, height, target.w, target.h);
+    const ok = saveFacadeBake(stateRef.current.activeMapStem, facade, ambientRgba);
     setState((prev) => ({
       ...prev,
       worldPieces: [...prev.worldPieces],
@@ -2063,6 +2145,7 @@ export default function AppFrame() {
         armedYawDegrees: 0,
         armedStamp: piece.slots || piece.overrides ? { slots: piece.slots, overrides: piece.overrides } : null,
         selectedPieceId: null,
+        selectedPieceIds: [],
         activeCommandId: 'place-piece',
         actionMenu: 'Build',
         status: `copied ${piece.pieceId} — click to stamp copies, Esc to put it down`,
@@ -3900,6 +3983,13 @@ export default function AppFrame() {
     if (brush.ink.hex.toLowerCase() === hex.toLowerCase()) return;
     modelToolApiRef.current?.setBrush({ ...brush, ink: { kind: 'color', hex } });
   }, [state.colorSpineCurrent, state.modelTool.brush]);
+  useEffect(() => {
+    const brush = state.facadePaint.brush;
+    if (brush.ink.kind !== 'color') return;
+    const hex = oklchToHex(state.colorSpineCurrent);
+    if (brush.ink.hex.toLowerCase() === hex.toLowerCase()) return;
+    setState((prev) => ({ ...prev, facadePaint: { ...prev.facadePaint, brush: { ...prev.facadePaint.brush, ink: { kind: 'color', hex } } } }));
+  }, [state.colorSpineCurrent, state.facadePaint.brush]);
 
   // Color Studio slot overrides for the PAINT path: the shader-ink pickers ask
   // for (specId, variant) and fold the user's palette into the ink data[].
@@ -4269,6 +4359,40 @@ export default function AppFrame() {
   const workspaceState = state.mapPaint.active && (state.mapPaint.texturePickerOpen || blockingOverlay(state) !== null)
     ? { ...state, mapPaint: { ...state.mapPaint, active: false } }
     : state;
+  const activePaintDocument = state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId);
+  const facadePaintActive = activePaintDocument?.kind === 'facade';
+  const modelPaintActive = activePaintDocument?.kind === 'model' && state.modelTool.paint;
+  const paintUiActive = facadePaintActive || modelPaintActive;
+  const activePaintBrush = facadePaintActive ? state.facadePaint.brush : state.modelTool.brush;
+  const setActivePaintBrush = (brush: typeof activePaintBrush) => {
+    if (facadePaintActive) setState((prev) => ({ ...prev, facadePaint: { ...prev.facadePaint, brush } }));
+    else modelToolApiRef.current?.setBrush(brush);
+  };
+  const cycleFacadeDetail = () => setState((prev) => {
+    const at = FACADE_PREVIEW_DETAILS.indexOf(prev.facadePaint.detail as typeof FACADE_PREVIEW_DETAILS[number]);
+    const detail = FACADE_PREVIEW_DETAILS[(at + 1 + FACADE_PREVIEW_DETAILS.length) % FACADE_PREVIEW_DETAILS.length]!;
+    return { ...prev, facadePaint: { ...prev.facadePaint, detail }, status: `facade paint preview: ${detail} px/m · bake remains ${FACADE_TEXELS_PER_METER} px/m` };
+  });
+  const activePaintBar = paintUiActive ? (
+    <PaintToolbar
+      brush={activePaintBrush}
+      brushTool={facadePaintActive ? state.facadePaint.tool : state.modelTool.brushTool}
+      detail={facadePaintActive ? state.facadePaint.detail : state.modelTool.detail}
+      tools={facadePaintActive ? [...FACADE_PAINT_TOOLS] : undefined}
+      onBrush={setActivePaintBrush}
+      onBrushTool={(tool) => facadePaintActive
+        ? setState((prev) => ({ ...prev, facadePaint: { ...prev.facadePaint, tool } }))
+        : modelToolApiRef.current?.brushTool(tool)}
+      onCycleDetail={facadePaintActive ? cycleFacadeDetail : () => modelToolApiRef.current?.cycleDetail()}
+      popover={paintPopover}
+      onToggle={guarded((which: PaintPopover) => setPaintPopover((open) => (open === which ? null : which)))}
+      current={state.colorSpineCurrent}
+      palette={state.colorSpinePalette}
+      scenePick={state.colorSpineScenePick}
+      paletteFor={paintPaletteFor}
+      spine={{ onSetCurrent: setColorSpineCurrent, onAddToTray: addColorSpineToTray, onPickTray: pickColorSpineTray, onScenePick: pickColorSpineScene, onLoadLibrarySet: loadColorSpineLibrarySet }}
+    />
+  ) : null;
 
   // World quick-menu payload (req_2733/req_2737): the LIVE selected piece (yaw/slots
   // track edits while the menu stays open — Rotate keeps it open) + the RANKED
@@ -4388,35 +4512,7 @@ export default function AppFrame() {
             onFloor={(delta: number) => invokeApplicationCommand(WORLD_FLOOR_STEP_COMMAND_ID, { delta }, 'action bar')}
             onWallsDown={guarded(() => setState((prev) => ({ ...prev, wallsDown: !prev.wallsDown, status: prev.wallsDown ? 'walls up — this floor\'s walls show again' : 'walls down — this floor\'s walls hidden for interior editing' })))}
             onMapPaint={patchMapPaint}
-            paintBar={
-              /* The paint controls segment for the ACTION BAR (ToolOptions) — the row the
-                 Paint/Vertex/wireframe buttons live in, which is THE toolbar for tools
-                 (req_2552; the chrome/menu row was the wrong gutter). Popovers still
-                 render late at the root so they paint over the body. */
-              state.modelTool.paint ? (
-                <PaintToolbar
-                  brush={state.modelTool.brush}
-                  brushTool={state.modelTool.brushTool}
-                  detail={state.modelTool.detail}
-                  onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
-                  onBrushTool={(t) => modelToolApiRef.current?.brushTool(t)}
-                  onCycleDetail={() => modelToolApiRef.current?.cycleDetail()}
-                  popover={paintPopover}
-                  onToggle={guarded((which: PaintPopover) => setPaintPopover((p) => (p === which ? null : which)))}
-                  current={state.colorSpineCurrent}
-                  palette={state.colorSpinePalette}
-                  scenePick={state.colorSpineScenePick}
-                  paletteFor={paintPaletteFor}
-                  spine={{
-                    onSetCurrent: setColorSpineCurrent,
-                    onAddToTray: addColorSpineToTray,
-                    onPickTray: pickColorSpineTray,
-                    onScenePick: pickColorSpineScene,
-                    onLoadLibrarySet: loadColorSpineLibrarySet,
-                  }}
-                />
-              ) : null
-            }
+            paintBar={activePaintBar}
             // Doc switching mid-blocking-session would unmount the surface that owns the
             // session (loop cut's captured base mesh dies with it) — guarded (req_2626 HH).
             onWorkspaceDocument={guarded(selectWorkspaceDocument)}
@@ -4432,6 +4528,8 @@ export default function AppFrame() {
             onStampSticker={stampSticker}
             onStickerArm={(patch) => setState((prev) => ({ ...prev, stickerArm: { ...prev.stickerArm, ...patch } }))}
             onFacadeStroke={recordFacadeStroke}
+            onFacadeLayers={updateFacadeLayers}
+            onFacadePaint={(patch) => setState((prev) => ({ ...prev, facadePaint: { ...prev.facadePaint, ...patch } }))}
             onFacadeStamp={recordFacadeStamp}
             onFacadeClear={clearFacadePaint}
             onFacadeSave={saveFacadePainting}
@@ -4653,13 +4751,13 @@ export default function AppFrame() {
           <DropdownMenu state={state} onCommand={runCommand} onToggleLight={(which) => modelToolApiRef.current?.toggleLight(which)} />
         </RenderProbe>
       ) : null}
-      {!playing && state.modelTool.paint && paintPopover ? (
+      {!playing && paintUiActive && paintPopover ? (
         <RenderProbe id="Paint Popovers">
           <PaintPopovers
             popover={paintPopover}
             onClose={() => setPaintPopover(null)}
-            brush={state.modelTool.brush}
-            onBrush={(b) => modelToolApiRef.current?.setBrush(b)}
+            brush={activePaintBrush}
+            onBrush={setActivePaintBrush}
             current={state.colorSpineCurrent}
             palette={state.colorSpinePalette}
             scenePick={state.colorSpineScenePick}

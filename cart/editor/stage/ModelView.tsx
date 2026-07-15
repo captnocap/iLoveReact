@@ -85,7 +85,7 @@ export type LightId = 'flat' | 'key' | 'fill';
 // Paint Atlas prompt, or the unsafe-face-edit guard. The shell reads it off this
 // snapshot and holds every other input surface inert until it resolves.
 export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; camLock: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession; mirror: number };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; blocking: ModelBlockingSession; mirror: number };
 // ── Model-focus bridge (req_2643 OO / req_2618 G) ────────────────────────────────
 // The FOCUS PANEL (Inspector) renders the UV atlas section + SHAPE readouts, but their
 // truth lives in this viewer. Same global-door pattern as __modelPartRangesChanged:
@@ -120,6 +120,9 @@ export type ModelToolApi = {
   wire: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the orbit view host-side.
   camLock: () => void;
+  // Saved view (req_3067): bookmark the current orbit pose / jump the camera back to it.
+  camStore: () => void;
+  camRecall: () => void;
   extrudeEdge: () => void;
   extrudeFace: () => void;
   createFace: () => void;
@@ -329,7 +332,7 @@ const DOC_TWIG_KEY = 'editor:meshdoc:v1';
 const TOOL_TWIG_KEY = 'editor:meshtool:v1';
 type DocTwig = { docId: string; key: string };
 type ToolTwig = {
-  wire: boolean; camLock: boolean; gizmoTool: number; mirrorMask: number;
+  wire: boolean; camLock: boolean; camSaved: boolean; gizmoTool: number; mirrorMask: number;
   brush: Brush; brushTool: BrushTool; palette: Palette; safety: number; detail: number;
   litFlat: boolean; litKey: boolean; litFill: boolean; paint: boolean;
 };
@@ -598,6 +601,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [paintMode, setPaintMode] = useState(false); // twig-restored in the boot effect (needs the atlas)
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
   const [camLock, setCamLock] = useState(toolTwig?.camLock ?? false); // Camera lock (req_2893): view frozen where set
+  // Saved view (req_3067): whether a bookmarked orbit pose exists. The pose itself lives
+  // host-side (gpu/3d.zig g_orbit_saved) and survives hot reloads like the camera; this
+  // flag is the UI mirror, twig-restored so the Store button stays lit across reloads.
+  const [camSaved, setCamSaved] = useState(toolTwig?.camSaved ?? false);
   const [selMode, setSelMode] = useState(0); // 0 view · 1 vertex · 2 edge · 3 face
   const [gizmoTool, setGizmoTool] = useState(toolTwig?.gizmoTool ?? 0); // 0 move · 1 scale · 2 rotate
   // Live mirror editing (req_2758): enabled symmetry planes, bit 0/1/2 = X/Y/Z. The host
@@ -1101,12 +1108,17 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // hot-reloaded cart (fresh false state) re-syncs a host that was left locked.
   const toggleCamLock = () => setCamLock((v) => !v);
   useEffect(() => { orbitSetLocked(camLock); }, [camLock]);
+  // Saved view (req_3067): pin the current orbit pose host-side / jump back to it. The
+  // flag only tracks that a bookmark exists (lights the Store button); the pose truth
+  // stays in gpu/3d.zig with the rest of the camera.
+  const camStoreView = () => { host.__model_cam_store?.(); setCamSaved(true); };
+  const camRecallView = () => { host.__model_cam_recall?.(); };
 
   // Mirror the tool-holding state into its hot twig on every change (req_2898) —
   // cheap (one small JSON into the host map), and the next mount seeds from it.
   useEffect(() => {
-    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, camLock, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
-  }, [wire, camLock, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
+    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, camLock, camSaved, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
+  }, [wire, camLock, camSaved, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
 
   // Stamp which document owns the host's resident mesh, under its CURRENT key —
   // topology ops re-key the mesh, so this tracks every adopt. The next mount
@@ -1221,6 +1233,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     focus: toggleFocus,
     wire: () => setWire((v) => !v),
     camLock: toggleCamLock,
+    camStore: camStoreView,
+    camRecall: camRecallView,
     extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
     extrudeFace: () => { if (model) applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
@@ -1414,8 +1428,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, camLock, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, focusMode, wire, camLock, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, camLock, camSaved, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, focusMode, wire, camLock, camSaved, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.

@@ -9,6 +9,22 @@
       "tickDrain": "real",
       "hostFns": [
         {
+          "js": "__dev_reload_set_policy",
+          "zig": "hostDevReloadSetPolicy"
+        },
+        {
+          "js": "__dev_reload_waiting",
+          "zig": "hostDevReloadWaiting"
+        },
+        {
+          "js": "__dev_reload_apply",
+          "zig": "hostDevReloadApply"
+        },
+        {
+          "js": "__dev_reload_revision",
+          "zig": "hostDevReloadRevision"
+        },
+        {
           "js": "__getInputTextForNode",
           "zig": "hostGetInputTextForNode"
         },
@@ -23,6 +39,394 @@
         {
           "js": "__scene3d_patch_dyn",
           "zig": "hostScene3DPatchDyn"
+        },
+        {
+          "js": "__mesh_load_file",
+          "zig": "hostMeshLoadFile"
+        },
+        {
+          "js": "__mesh_preview_file",
+          "zig": "hostMeshPreviewFile"
+        },
+        {
+          "js": "__mesh_load_vertices",
+          "zig": "hostMeshLoadVertices"
+        },
+        {
+          "js": "__mesh_set_face_groups",
+          "zig": "hostMeshSetFaceGroups"
+        },
+        {
+          "js": "__model_orbit_drag",
+          "zig": "hostModelOrbitDrag"
+        },
+        {
+          "js": "__model_orbit_zoom",
+          "zig": "hostModelOrbitZoom"
+        },
+        {
+          "js": "__model_orbit_pan",
+          "zig": "hostModelOrbitPan"
+        },
+        {
+          "js": "__model_orbit_lock",
+          "zig": "hostModelOrbitLock"
+        },
+        {
+          "js": "__model_cam_store",
+          "zig": "hostModelCamStore"
+        },
+        {
+          "js": "__model_cam_recall",
+          "zig": "hostModelCamRecall"
+        },
+        {
+          "js": "__model_session_json",
+          "zig": "hostModelSessionJson"
+        },
+        {
+          "js": "__model_focus_at",
+          "zig": "hostModelFocusAt"
+        },
+        {
+          "js": "__mesh_edit_mode",
+          "zig": "hostMeshEditMode"
+        },
+        {
+          "js": "__mesh_edit_mirror",
+          "zig": "hostMeshEditMirror"
+        },
+        {
+          "js": "__mesh_edit_pick",
+          "zig": "hostMeshEditPick"
+        },
+        {
+          "js": "__mesh_edit_clear",
+          "zig": "hostMeshEditClear"
+        },
+        {
+          "js": "__mesh_edit_box",
+          "zig": "hostMeshEditBox"
+        },
+        {
+          "js": "__mesh_edit_capture",
+          "zig": "hostMeshEditCapture"
+        },
+        {
+          "js": "__mesh_edit_focus",
+          "zig": "hostMeshEditFocus"
+        },
+        {
+          "js": "__mesh_gizmo_tool",
+          "zig": "hostMeshGizmoTool"
+        },
+        {
+          "js": "__mesh_gizmo_nudge",
+          "zig": "hostMeshGizmoNudge"
+        },
+        {
+          "js": "__mesh_gizmo_scale_by",
+          "zig": "hostMeshGizmoScaleBy"
+        },
+        {
+          "js": "__mesh_topo_extrude_edge",
+          "zig": "hostMeshTopoExtrudeEdge"
+        },
+        {
+          "js": "__mesh_topo_extrude_face",
+          "zig": "hostMeshTopoExtrudeFace"
+        },
+        {
+          "js": "__mesh_topo_create_face",
+          "zig": "hostMeshTopoCreateFace"
+        },
+        {
+          "js": "__mesh_topo_flip_faces",
+          "zig": "hostMeshTopoFlipFaces"
+        },
+        {
+          "js": "__mesh_topo_loop_cut",
+          "zig": "hostMeshTopoLoopCut"
+        },
+        {
+          "js": "__mesh_lc_begin",
+          "zig": "hostMeshLcBegin"
+        },
+        {
+          "js": "__mesh_lc_preview",
+          "zig": "hostMeshLcPreview"
+        },
+        {
+          "js": "__mesh_lc_end",
+          "zig": "hostMeshLcEnd"
+        },
+        {
+          "js": "__mesh_lc_state",
+          "zig": "hostMeshLcState"
+        },
+        {
+          "js": "__mesh_delete_selection",
+          "zig": "hostMeshDeleteSelection"
+        },
+        {
+          "js": "__mesh_delete_group_range",
+          "zig": "hostMeshDeleteGroupRange"
+        },
+        {
+          "js": "__mesh_group_face_count",
+          "zig": "hostMeshGroupFaceCount"
+        },
+        {
+          "js": "__mesh_append_group",
+          "zig": "hostMeshAppendGroup"
+        },
+        {
+          "js": "__mesh_set_group_hidden",
+          "zig": "hostMeshSetGroupHidden"
+        },
+        {
+          "js": "__mesh_undo",
+          "zig": "hostMeshUndo"
+        },
+        {
+          "js": "__mesh_redo",
+          "zig": "hostMeshRedo"
+        },
+        {
+          "js": "__mesh_history",
+          "zig": "hostMeshHistory"
+        },
+        {
+          "js": "__mesh_history_log",
+          "zig": "hostMeshHistoryLog"
+        },
+        {
+          "js": "__mesh_journal_note",
+          "zig": "hostMeshJournalNote"
+        },
+        {
+          "js": "__mesh_duplicate_range",
+          "zig": "hostMeshDuplicateRange"
+        },
+        {
+          "js": "__mesh_path_array",
+          "zig": "hostMeshPathArray"
+        },
+        {
+          "js": "__mesh_path_array_points",
+          "zig": "hostMeshPathArrayPoints"
+        },
+        {
+          "js": "__mesh_path_array_spans",
+          "zig": "hostMeshPathArraySpans"
+        },
+        {
+          "js": "__mesh_topo_detach",
+          "zig": "hostMeshTopoDetach"
+        },
+        {
+          "js": "__mesh_merge_parts",
+          "zig": "hostMeshMergeParts"
+        },
+        {
+          "js": "__mesh_topo_merge_faces",
+          "zig": "hostMeshTopoMergeFaces"
+        },
+        {
+          "js": "__mesh_topo_glass",
+          "zig": "hostMeshTopoGlass"
+        },
+        {
+          "js": "__mesh_topo_solidify",
+          "zig": "hostMeshTopoSolidify"
+        },
+        {
+          "js": "__mesh_append_file",
+          "zig": "hostMeshAppendFile"
+        },
+        {
+          "js": "__mesh_surviving_groups",
+          "zig": "hostMeshSurvivingGroups"
+        },
+        {
+          "js": "__mesh_edit_snapshot",
+          "zig": "hostMeshEditSnapshot"
+        },
+        {
+          "js": "__mesh_edit_revert",
+          "zig": "hostMeshEditRevert"
+        },
+        {
+          "js": "__mesh_edit_select_face",
+          "zig": "hostMeshEditSelectFace"
+        },
+        {
+          "js": "__mesh_edit_select_group_range",
+          "zig": "hostMeshEditSelectGroupRange"
+        },
+        {
+          "js": "__mesh_edit_scope",
+          "zig": "hostMeshEditScope"
+        },
+        {
+          "js": "__mesh_edit_scope_ranges",
+          "zig": "hostMeshEditScopeRanges"
+        },
+        {
+          "js": "__mesh_paint_session",
+          "zig": "hostMeshPaintSession"
+        },
+        {
+          "js": "__mesh_paint_stroke_end",
+          "zig": "hostMeshPaintStrokeEnd"
+        },
+        {
+          "js": "__mesh_paint_undo",
+          "zig": "hostMeshPaintUndo"
+        },
+        {
+          "js": "__mesh_paint_redo",
+          "zig": "hostMeshPaintRedo"
+        },
+        {
+          "js": "__mesh_paint_history",
+          "zig": "hostMeshPaintHistory"
+        },
+        {
+          "js": "__mesh_paint_layers",
+          "zig": "hostMeshPaintLayers"
+        },
+        {
+          "js": "__mesh_paint_layer_op",
+          "zig": "hostMeshPaintLayerOp"
+        },
+        {
+          "js": "__mesh_set_part_ranges",
+          "zig": "hostMeshSetPartRanges"
+        },
+        {
+          "js": "__mesh_part_ranges",
+          "zig": "hostMeshPartRanges"
+        },
+        {
+          "js": "__model_paint_group_range",
+          "zig": "hostModelPaintGroupRange"
+        },
+        {
+          "js": "__mesh_edit_select_edge",
+          "zig": "hostMeshEditSelectEdge"
+        },
+        {
+          "js": "__mesh_edit_guard",
+          "zig": "hostMeshEditGuard"
+        },
+        {
+          "js": "__mesh_edit_guard_resolve",
+          "zig": "hostMeshEditGuardResolve"
+        },
+        {
+          "js": "__mesh_symmetry_report",
+          "zig": "hostMeshSymmetryReport"
+        },
+        {
+          "js": "__mesh_symmetrize",
+          "zig": "hostMeshSymmetrize"
+        },
+        {
+          "js": "__mesh_edit_counts",
+          "zig": "hostMeshEditCounts"
+        },
+        {
+          "js": "__model_paint_at",
+          "zig": "hostModelPaintAt"
+        },
+        {
+          "js": "__model_paint_face",
+          "zig": "hostModelPaintFace"
+        },
+        {
+          "js": "__model_paint_mode",
+          "zig": "hostModelPaintMode"
+        },
+        {
+          "js": "__model_paint_stroke_begin",
+          "zig": "hostModelPaintStrokeBegin"
+        },
+        {
+          "js": "__model_paint_stamp",
+          "zig": "hostModelPaintStamp"
+        },
+        {
+          "js": "__model_paint_material",
+          "zig": "hostModelPaintMaterial"
+        },
+        {
+          "js": "__model_paint_material_clear",
+          "zig": "hostModelPaintMaterialClear"
+        },
+        {
+          "js": "__model_set_paint_detail",
+          "zig": "hostModelSetPaintDetail"
+        },
+        {
+          "js": "__model_set_paint_fit",
+          "zig": "hostModelSetPaintFit"
+        },
+        {
+          "js": "__model_paint_atlas_estimate",
+          "zig": "hostModelPaintAtlasEstimate"
+        },
+        {
+          "js": "__model_paint_fit_estimate",
+          "zig": "hostModelPaintFitEstimate"
+        },
+        {
+          "js": "__model_atlas_read",
+          "zig": "hostModelAtlasRead"
+        },
+        {
+          "js": "__image_write_png",
+          "zig": "hostImageWritePng"
+        },
+        {
+          "js": "__model_mesh_write",
+          "zig": "hostModelMeshWrite"
+        },
+        {
+          "js": "__model_painted_mesh_write",
+          "zig": "hostModelPaintedMeshWrite"
+        },
+        {
+          "js": "__model_meshdoc_write",
+          "zig": "hostModelMeshdocWrite"
+        },
+        {
+          "js": "__model_atlas_base",
+          "zig": "hostModelAtlasBase"
+        },
+        {
+          "js": "__model_atlas_apply",
+          "zig": "hostModelAtlasApply"
+        },
+        {
+          "js": "__model_paint_program_read",
+          "zig": "hostModelPaintProgramRead"
+        },
+        {
+          "js": "__model_paint_program_apply",
+          "zig": "hostModelPaintProgramApply"
+        },
+        {
+          "js": "__model_face_count",
+          "zig": "hostModelFaceCount"
+        },
+        {
+          "js": "__model_set_quality",
+          "zig": "hostModelSetQuality"
+        },
+        {
+          "js": "__file_sha256",
+          "zig": "hostFileSha256"
         },
         {
           "js": "__hostReleaseFileBuffer",
@@ -67,6 +471,10 @@
         {
           "js": "getMouseRightDown",
           "zig": "hostGetMouseRightDown"
+        },
+        {
+          "js": "getMouseButtons",
+          "zig": "hostGetMouseButtons"
         },
         {
           "js": "__mouse_capture",
@@ -123,6 +531,10 @@
         {
           "js": "__selection_get",
           "zig": "hostSelectionGet"
+        },
+        {
+          "js": "__selection_clear",
+          "zig": "hostSelectionClear"
         },
         {
           "js": "__sys_drop_path",
@@ -238,6 +650,22 @@
           "zig": "hostBusDbPath"
         }
       ]
+    },
+    "editor_bus": {
+      "required": true,
+      "module": "framework/v8_bindings_editor_bus.zig",
+      "registerFn": "registerEditorBus",
+      "grepPrefix": "",
+      "tickDrain": "noop",
+      "hostFns": []
+    },
+    "editor_diag": {
+      "required": true,
+      "module": "framework/v8_bindings_editor_diag.zig",
+      "registerFn": "registerEditorDiag",
+      "grepPrefix": "",
+      "tickDrain": "noop",
+      "hostFns": []
     },
     "ifttt": {
       "required": true,
@@ -537,6 +965,18 @@
           "zig": "fsWrite"
         },
         {
+          "js": "__fs_config_dir",
+          "zig": "fsConfigDir"
+        },
+        {
+          "js": "__fs_write_bytes",
+          "zig": "fsWriteBytes"
+        },
+        {
+          "js": "__fs_write_bytes_atomic",
+          "zig": "fsWriteBytesAtomic"
+        },
+        {
           "js": "__fs_write_base64_atomic",
           "zig": "fsWriteBase64Atomic"
         },
@@ -629,10 +1069,6 @@
         {
           "js": "getPaintUs",
           "zig": "getPaintUsCb"
-        },
-        {
-          "js": "getTickUs",
-          "zig": "getTickUsCb"
         },
         {
           "js": "__tel_frame",
@@ -1635,7 +2071,7 @@
       "module": "framework/v8_bindings_onnx.zig",
       "registerFn": "registerOnnx",
       "grepPrefix": "__onnx_",
-      "tickDrain": "noop",
+      "tickDrain": "real",
       "hostFns": [
         {
           "js": "__onnx_test",
@@ -1652,6 +2088,18 @@
         {
           "js": "__segment_refine",
           "zig": "hostSegmentRefine"
+        },
+        {
+          "js": "__pose_estimate_async",
+          "zig": "hostPoseEstimateAsync"
+        },
+        {
+          "js": "__pose_estimate_image",
+          "zig": "hostPoseEstimateImage"
+        },
+        {
+          "js": "__pose_camera_devices",
+          "zig": "hostPoseCameraDevices"
         }
       ]
     },
@@ -2430,12 +2878,28 @@
           "zig": "paintBrush"
         },
         {
+          "js": "__paintable_brush_rgba",
+          "zig": "paintBrushRGBA"
+        },
+        {
+          "js": "__paintable_brush_erase",
+          "zig": "paintBrushErase"
+        },
+        {
+          "js": "__paintable_composite",
+          "zig": "paintComposite"
+        },
+        {
           "js": "__paintable_polygon",
           "zig": "paintPolygon"
         },
         {
           "js": "__paintable_clear",
           "zig": "paintClear"
+        },
+        {
+          "js": "__paintable_clear_rgba",
+          "zig": "paintClearRGBA"
         },
         {
           "js": "__paintable_upload",
@@ -2530,6 +2994,212 @@
         {
           "js": "__game_physics_camera_occlusion_hits",
           "zig": "hostCameraOcclusionHits"
+        }
+      ]
+    },
+    "game_build": {
+      "required": false,
+      "module": "framework/v8_bindings_game_build.zig",
+      "registerFn": "registerGameBuild",
+      "grepPrefix": "__game_build_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__game_build_raycast",
+          "zig": "hostRaycast"
+        },
+        {
+          "js": "__game_build_validate",
+          "zig": "hostValidate"
+        },
+        {
+          "js": "__game_build_catalog_count",
+          "zig": "hostCatalogCount"
+        },
+        {
+          "js": "__game_build_catalog_rows",
+          "zig": "hostCatalogRows"
+        }
+      ]
+    },
+    "game_map": {
+      "required": false,
+      "module": "framework/v8_bindings_game_map.zig",
+      "registerFn": "registerGameMap",
+      "grepPrefix": "__map_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__map_reset",
+          "zig": "hostReset"
+        },
+        {
+          "js": "__map_grow_chunk",
+          "zig": "hostGrowChunk"
+        },
+        {
+          "js": "__map_chunk_count",
+          "zig": "hostChunkCount"
+        },
+        {
+          "js": "__map_chunk_list",
+          "zig": "hostChunkList"
+        },
+        {
+          "js": "__map_open_neighbors",
+          "zig": "hostOpenNeighbors"
+        },
+        {
+          "js": "__map_set_tool",
+          "zig": "hostSetTool"
+        },
+        {
+          "js": "__map_set_brush_gizmo",
+          "zig": "hostSetBrushGizmo"
+        },
+        {
+          "js": "__map_set_ground_look",
+          "zig": "hostSetGroundLook"
+        },
+        {
+          "js": "__map_set_tile_bindings",
+          "zig": "hostSetTileBindings"
+        },
+        {
+          "js": "__map_get_tile_bindings",
+          "zig": "hostGetTileBindings"
+        },
+        {
+          "js": "__map_set_zone_palette",
+          "zig": "hostSetZonePalette"
+        },
+        {
+          "js": "__map_drop_zone",
+          "zig": "hostDropZone"
+        },
+        {
+          "js": "__map_set_flora_specs",
+          "zig": "hostSetFloraSpecs"
+        },
+        {
+          "js": "__map_road_set_profile",
+          "zig": "hostRoadSetProfile"
+        },
+        {
+          "js": "__map_path_set_profile",
+          "zig": "hostPathSetProfile"
+        },
+        {
+          "js": "__map_path_set_tool",
+          "zig": "hostPathSetTool"
+        },
+        {
+          "js": "__map_path_set_level",
+          "zig": "hostPathSetLevel"
+        },
+        {
+          "js": "__map_road_set_kinds",
+          "zig": "hostRoadSetKinds"
+        },
+        {
+          "js": "__map_road_commit",
+          "zig": "hostRoadCommit"
+        },
+        {
+          "js": "__map_road_cancel",
+          "zig": "hostRoadCancel"
+        },
+        {
+          "js": "__map_road_delete",
+          "zig": "hostRoadDelete"
+        },
+        {
+          "js": "__map_road_stats",
+          "zig": "hostRoadStats"
+        },
+        {
+          "js": "__map_path_commit",
+          "zig": "hostPathCommit"
+        },
+        {
+          "js": "__map_path_cancel",
+          "zig": "hostPathCancel"
+        },
+        {
+          "js": "__map_path_undo",
+          "zig": "hostPathUndo"
+        },
+        {
+          "js": "__map_path_delete",
+          "zig": "hostPathDelete"
+        },
+        {
+          "js": "__map_path_control_delete",
+          "zig": "hostPathControlDelete"
+        },
+        {
+          "js": "__map_path_stats",
+          "zig": "hostPathStats"
+        },
+        {
+          "js": "__map_history",
+          "zig": "hostMapHistory"
+        },
+        {
+          "js": "__map_undo",
+          "zig": "hostMapUndo"
+        },
+        {
+          "js": "__map_redo",
+          "zig": "hostMapRedo"
+        },
+        {
+          "js": "__map_save_file",
+          "zig": "hostSaveFile"
+        },
+        {
+          "js": "__map_inspect_file",
+          "zig": "hostInspectFile"
+        },
+        {
+          "js": "__map_set_autosave_file",
+          "zig": "hostSetAutosaveFile"
+        },
+        {
+          "js": "__map_load_file",
+          "zig": "hostLoadFile"
+        },
+        {
+          "js": "__map_stroke_begin",
+          "zig": "hostStrokeBegin"
+        },
+        {
+          "js": "__map_stroke_move",
+          "zig": "hostStrokeMove"
+        },
+        {
+          "js": "__map_stroke_end",
+          "zig": "hostStrokeEnd"
+        },
+        {
+          "js": "__map_event_drain",
+          "zig": "hostEventDrain"
+        },
+        {
+          "js": "__map_stats",
+          "zig": "hostStats"
+        },
+        {
+          "js": "__map_read_height",
+          "zig": "hostReadHeight"
+        },
+        {
+          "js": "__map_read_water",
+          "zig": "hostReadWater"
+        },
+        {
+          "js": "__map_read_cells",
+          "zig": "hostReadCells"
         }
       ]
     },
@@ -2704,6 +3374,10 @@
         {
           "js": "__game_camera_probe",
           "zig": "hostProbeSnapshot"
+        },
+        {
+          "js": "__game_camera_ray",
+          "zig": "hostCameraRay"
         }
       ]
     },
@@ -2725,6 +3399,102 @@
         {
           "js": "__compiled_world_status",
           "zig": "hostStatus"
+        },
+        {
+          "js": "__compiled_world_set_camera",
+          "zig": "hostSetCamera"
+        },
+        {
+          "js": "__compiled_world_clear_camera",
+          "zig": "hostClearCamera"
+        },
+        {
+          "js": "__compiled_world_set_live_pieces",
+          "zig": "hostSetLivePieces"
+        },
+        {
+          "js": "__compiled_world_clear_live_pieces",
+          "zig": "hostClearLivePieces"
+        },
+        {
+          "js": "__compiled_world_set_physics",
+          "zig": "hostSetPhysics"
+        },
+        {
+          "js": "__compiled_world_clear_physics",
+          "zig": "hostClearPhysics"
+        },
+        {
+          "js": "__compiled_world_set_live_mesh_props",
+          "zig": "hostSetLiveMeshProps"
+        },
+        {
+          "js": "__compiled_world_clear_live_mesh_props",
+          "zig": "hostClearLiveMeshProps"
+        },
+        {
+          "js": "__compiled_world_set_live_mesh_ghost",
+          "zig": "hostSetLiveMeshGhost"
+        },
+        {
+          "js": "__compiled_world_clear_live_mesh_ghost",
+          "zig": "hostClearLiveMeshGhost"
+        },
+        {
+          "js": "__compiled_world_set_live_material",
+          "zig": "hostSetLiveMaterial"
+        },
+        {
+          "js": "__compiled_world_set_live_skin_boxes",
+          "zig": "hostSetLiveSkinBoxes"
+        },
+        {
+          "js": "__compiled_world_set_dirty_erase",
+          "zig": "hostSetDirtyErase"
+        },
+        {
+          "js": "__compiled_world_set_hide_walls",
+          "zig": "hostSetHideWalls"
+        },
+        {
+          "js": "__compiled_world_ground_hit",
+          "zig": "hostGroundHit"
+        },
+        {
+          "js": "__compiled_world_set_paint_mode",
+          "zig": "hostSetPaintMode"
+        },
+        {
+          "js": "__compiled_world_set_resident_meshes",
+          "zig": "hostSetResidentMeshes"
+        },
+        {
+          "js": "__compiled_world_set_player_model",
+          "zig": "hostSetPlayerModel"
+        },
+        {
+          "js": "__compiled_world_set_player_animation",
+          "zig": "hostSetPlayerAnimation"
+        },
+        {
+          "js": "__compiled_world_set_player_live_pose",
+          "zig": "hostSetPlayerLivePose"
+        },
+        {
+          "js": "__compiled_world_clear_player_live_pose",
+          "zig": "hostClearPlayerLivePose"
+        },
+        {
+          "js": "__compiled_world_window",
+          "zig": "hostWindowOpen"
+        },
+        {
+          "js": "__compiled_world_window_close",
+          "zig": "hostWindowClose"
+        },
+        {
+          "js": "__compiled_world_window_status",
+          "zig": "hostWindowStatus"
         }
       ]
     },
@@ -2742,6 +3512,43 @@
         {
           "js": "__capture_surface_pixels",
           "zig": "surfaceReadback"
+        }
+      ]
+    },
+    "imageops": {
+      "required": false,
+      "module": "framework/v8_bindings_image_ops.zig",
+      "registerFn": "registerImageOps",
+      "grepPrefix": "__imageops_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__imageops_transcode",
+          "zig": "transcode"
+        },
+        {
+          "js": "__imageops_info",
+          "zig": "imageInfo"
+        },
+        {
+          "js": "__imageops_decode_raw",
+          "zig": "decodeRaw"
+        },
+        {
+          "js": "__imageops_encode_raw",
+          "zig": "encodeRaw"
+        },
+        {
+          "js": "__imageops_webp_available",
+          "zig": "webpAvailable"
+        },
+        {
+          "js": "__imageops_write_file",
+          "zig": "writeFile"
+        },
+        {
+          "js": "__imageops_quantize",
+          "zig": "quantizeOp"
         }
       ]
     }

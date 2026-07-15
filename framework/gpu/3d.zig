@@ -392,6 +392,30 @@ pub fn orbitSetLocked(on: bool) void {
     g_orbit.locked = on;
 }
 
+// Saved view (req_3067): one bookmarked orbit pose — a double-click focus or a stray
+// drag makes the exact working angle+distance unrecoverable by hand, so the user pins
+// it and jumps back. In-process like the rest of the camera: survives hot reloads,
+// resets with the view on a cold start.
+var g_orbit_saved: ?Orbit = null;
+
+/// Bookmark the current orbit pose (`__model_cam_store`).
+pub fn orbitStoreView() void {
+    g_orbit_saved = g_orbit;
+}
+/// Return the camera to the bookmarked pose (`__model_cam_recall`). False when nothing
+/// is stored or the camera is locked — recall is a camera motion like any other, so the
+/// req_2893 lock gates it too. radius/framed/locked stay live: they belong to the
+/// current model/session, not the view.
+pub fn orbitRecallView() bool {
+    if (g_orbit.locked) return false;
+    const saved = g_orbit_saved orelse return false;
+    g_orbit.yaw = saved.yaw;
+    g_orbit.pitch = saved.pitch;
+    g_orbit.dist = saved.dist;
+    g_orbit.target = saved.target;
+    return true;
+}
+
 /// Seed the orbit to frame a model of bounding `radius` about `target`. Called by the
 /// load door the moment a model finishes parsing.
 pub fn orbitFrame(target: [3]f32, radius: f32) void {

@@ -67,6 +67,7 @@ export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'fac
   { key: 'f', commandId: 'mesh-focus' },
   { key: 'w', commandId: 'mesh-wire' },
   { key: 'k', commandId: 'mesh-cam-lock' },
+  { key: 'h', commandId: 'mesh-cam-recall' },
   { key: 'e', commandId: 'mesh-extrude' },
   { key: 'l', commandId: 'mesh-loopcut' },
   { key: 'c', commandId: 'mesh-create-face' },

@@ -208,6 +208,10 @@ export const COMMANDS: Command[] = [
   // Camera lock (req_2893): freeze the orbit view where the user set it — every camera
   // motion (drag/zoom/pan/double-click focus/compass snap) no-ops host-side while on.
   { id: 'mesh-cam-lock', menu: 'Edit', scope: 'model', name: 'Lock Camera', icon: 'Lock', key: 'K', context: false, native: true, undoable: false, tool: true },
+  // Saved view (req_3067): pin the current orbit pose, then jump back to it after any
+  // amount of orbiting — a double-click focus otherwise loses the working angle for good.
+  { id: 'mesh-cam-store', menu: 'Edit', scope: 'model', name: 'Store View', icon: 'BookmarkPlus', key: '', context: false, native: true, undoable: false, tool: true },
+  { id: 'mesh-cam-recall', menu: 'Edit', scope: 'model', name: 'Recall View', icon: 'Bookmark', key: 'H', context: false, native: true, undoable: false, tool: true },
   // Live mirror editing (req_2758): toggle a symmetry plane — while on, gizmo edits land
   // reflected on each moved element's twin across that plane (plane at 0; Center first).
   { id: 'mesh-sym-x', menu: 'Edit', scope: 'model', name: 'Mirror Edit X', icon: 'FlipHorizontal2', key: '', context: true, native: true, undoable: false, tool: true },
@@ -270,8 +274,10 @@ export function blockingOverlay(state: EditorState): BlockingOverlay | null {
 // (__mesh_history — the door cart code never called before this), on the world the real
 // worldUndo/worldRedo stacks. Menus, the dock buttons, and the hotkey gate all read this — a
 // button that would do nothing renders disabled with the reason instead.
-export type UndoDepths = { undo: number; redo: number; source: 'mesh' | 'world' | 'strokes' };
+export type UndoDepths = { undo: number; redo: number; source: 'mesh' | 'world' | 'strokes' | 'material' };
+let g_colorStudioUndoDepths: UndoDepths = { undo: 0, redo: 0, source: 'material' };
 export function undoDepths(state: EditorState): UndoDepths {
+  if (activeSurface(state) === 'material') return g_colorStudioUndoDepths;
   if (activeSurface(state) === 'model') {
     // While the paint session is live the STROKE journal is the undo truth (req_2672):
     // menu rows read "Undo (N strokes)" and an empty journal refuses honestly instead
@@ -303,6 +309,9 @@ export function undoDepths(state: EditorState): UndoDepths {
 // row names — "Undo (3 mesh)" is the journal talking, not decoration.
 let g_undoDepths: UndoDepths = { undo: 0, redo: 0, source: 'world' };
 export function publishUndoDepths(d: UndoDepths): void { g_undoDepths = d; }
+export function publishColorStudioUndoDepths(undo: number, redo: number): void {
+  g_colorStudioUndoDepths = { undo, redo, source: 'material' };
+}
 
 // ── Enablement (the sane-app grayed-with-reason gate) ─────────────────────────────────────────
 // A command is off when: a blocking overlay is unresolved (modal discipline), its surface isn't
@@ -333,8 +342,8 @@ export function commandEnabled(cmd: Command, state: EditorState): { on: boolean;
       return {
         on: false,
         reason: cmd.id === 'undo-local'
-          ? (d.source === 'strokes' ? 'nothing to undo in paint' : d.source === 'mesh' ? 'mesh journal empty' : 'nothing to undo on the world')
-          : (d.source === 'strokes' ? 'nothing to redo in paint' : d.source === 'mesh' ? 'nothing to redo in the mesh journal' : 'nothing to redo on the world'),
+          ? (d.source === 'strokes' ? 'nothing to undo in paint' : d.source === 'mesh' ? 'mesh journal empty' : d.source === 'material' ? 'nothing to undo in Color Studio' : 'nothing to undo on the world')
+          : (d.source === 'strokes' ? 'nothing to redo in paint' : d.source === 'mesh' ? 'nothing to redo in the mesh journal' : d.source === 'material' ? 'nothing to redo in Color Studio' : 'nothing to redo on the world'),
       };
     }
   }
@@ -411,7 +420,7 @@ export function submenuEnabled(scope: Command['scope'], state: EditorState): boo
 
 // ── Model tool groups (toolbar + context menu; unchanged callers) ──────────────────────────────
 // The always-on model tool group (select / gizmo / toggles), in display order.
-const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-focus', 'mesh-wire', 'mesh-cam-lock'];
+const MESH_TOOL_IDS = ['mesh-vertex', 'mesh-edge', 'mesh-face', 'mesh-move', 'mesh-scale', 'mesh-rotate', 'mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z', 'mesh-paint', 'mesh-focus', 'mesh-wire', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'];
 
 export function meshToolCommands(): Command[] {
   return MESH_TOOL_IDS.map(commandById);
@@ -483,7 +492,7 @@ const MODEL_CONTEXT_GROUPS: {
   { id: 'select', label: 'Select Mode', icon: 'Grip', commandIds: ['mesh-vertex', 'mesh-edge', 'mesh-face'] },
   { id: 'gizmo', label: 'Gizmo', icon: 'Move', commandIds: ['mesh-move', 'mesh-scale', 'mesh-scale-by', 'mesh-rotate'] },
   { id: 'mirror', label: 'Mirror', icon: 'FlipHorizontal2', commandIds: ['mesh-sym-x', 'mesh-sym-y', 'mesh-sym-z'] },
-  { id: 'view', label: 'View', icon: 'Grid3x3', commandIds: ['mesh-focus', 'mesh-wire', 'mesh-cam-lock'] },
+  { id: 'view', label: 'View', icon: 'Grid3x3', commandIds: ['mesh-focus', 'mesh-wire', 'mesh-cam-lock', 'mesh-cam-store', 'mesh-cam-recall'] },
 ];
 
 const MODEL_CONTEXT_MIRROR_PART_IDS = new Set(['mesh-mirror-x', 'mesh-mirror-y', 'mesh-mirror-z']);
@@ -524,7 +533,7 @@ export function isMeshToolCommand(id: string): boolean {
 
 // Is this model tool the active one, given the live tool snapshot? Drives the toolbar/context-menu
 // highlight. Gizmo tools only read active inside a select mode; view/paint/focus are exclusive.
-export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; camLock?: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
+export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; camLock?: boolean; camSaved?: boolean; brushTool?: string; safety?: number; detail?: number; mirror?: number }): boolean {
   switch (id) {
     case 'mesh-sym-x': return ((tool.mirror ?? 0) & 1) !== 0;
     case 'mesh-sym-y': return ((tool.mirror ?? 0) & 2) !== 0;
@@ -541,6 +550,9 @@ export function meshToolActive(id: string, tool: { selMode: number; gizmoTool: n
     case 'mesh-focus': return tool.focus;
     case 'mesh-wire': return tool.wire;
     case 'mesh-cam-lock': return tool.camLock === true;
+    // "Active" = a view is pinned — the store button stays lit so the user can see a
+    // bookmark exists before trusting Recall with their camera.
+    case 'mesh-cam-store': return tool.camSaved === true;
     default: return false;
   }
 }

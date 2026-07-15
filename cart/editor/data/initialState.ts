@@ -67,7 +67,7 @@ export const INITIAL_OBJECTS: WorldObject[] = [
 // hot-reload reset so the toolbar highlight always matches a clean viewer. A fresh palette
 // per call (defaultPalette()) keeps the recents ring from being shared across resets.
 export function defaultModelTool(): ModelToolSnapshot {
-  return { selMode: 0, gizmoTool: 0, paint: false, focus: false, wire: false, camLock: false, sel: 0, quality: 1, tris: 0, brushTool: 'fill', safety: 0, detail: 1, brush: DEFAULT_BRUSH, palette: defaultPalette(), litFlat: false, litKey: true, litFill: true, litRim: false, blocking: null, mirror: 0 };
+  return { selMode: 0, gizmoTool: 0, paint: false, focus: false, wire: false, camLock: false, camSaved: false, sel: 0, quality: 1, tris: 0, brushTool: 'fill', safety: 0, detail: 1, brush: DEFAULT_BRUSH, palette: defaultPalette(), litFlat: false, litKey: true, litFill: true, litRim: false, blocking: null, mirror: 0 };
 }
 
 export function initialState(): EditorState {
@@ -82,6 +82,7 @@ export function initialState(): EditorState {
     activeAssetId: DEFAULT_ASSET_ID,
     stickerArm: { textureId: null, rot: 0, scale: 1 },
     worldFacades: [],
+    facadePaint: { brush: { ...DEFAULT_BRUSH, ink: { kind: 'color', hex: '#e0463f' } }, tool: 'brush', detail: 256 },
     assetPage: 0,
     materialFocused: false,
     colorStudioMaterial: 'b-rot-siding',
@@ -110,6 +111,7 @@ export function initialState(): EditorState {
     fileExplorerHistory: [],
     fileExplorerDirectoryHistory: [],
     selectedObjectId: 'obj-tile',
+    selectedPieceIds: [],
     contentFolder: DEFAULT_CONTENT_FOLDER,
     expandedFolders: { game: true, models: true, 'models-build': true, 'models-props': true, missions: true, bankheist: true, materials: true, architecture: true },
     search: '',

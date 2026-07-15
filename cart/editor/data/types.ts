@@ -137,7 +137,10 @@ export type LightId = 'flat' | 'key' | 'fill' | 'rim';
 // edit confirmation. Mirrored up through ModelToolSnapshot so the shell's central
 // gate (AppFrame) can see it without owning the session.
 export type ModelBlockingSession = 'loop-cut' | 'paint-atlas' | 'face-guard' | null;
-export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; camLock: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession };
+export type ModelToolSnapshot = { selMode: number; gizmoTool: number; paint: boolean; focus: boolean; wire: boolean; camLock: boolean; camSaved: boolean; sel: number; quality: number; tris: number; brushTool: BrushTool; safety: number; detail: number; brush: Brush; palette: Palette; litFlat: boolean; litKey: boolean; litFill: boolean; litRim: boolean; blocking: ModelBlockingSession };
+/** Shared studio-paint controls while a flat facade document is active. The
+ *  durable painting lives on Facade.layers; this is session/view state only. */
+export type FacadePaintState = { brush: Brush; tool: BrushTool; detail: number };
 export type ModelToolApi = {
   selMode: (m: number) => void;
   gizmo: (t: number) => void;
@@ -148,6 +151,9 @@ export type ModelToolApi = {
   wire: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the mesh editor's orbit view.
   camLock: () => void;
+  // Saved view (req_3067): bookmark the current orbit pose / jump the camera back to it.
+  camStore: () => void;
+  camRecall: () => void;
   extrudeEdge: () => void;
   extrudeFace: () => void;
   createFace: () => void;
@@ -422,7 +428,7 @@ export type HistoryEvent = {
 // conflated with the undo mechanism. Host-side map paint strokes are NOT covered
 // (they never flow through EditorState); the empty-stack status says so.
 export type WorldUndoSlices = Partial<Pick<EditorState,
-  'worldPieces' | 'objects' | 'authoredBuildPieces' | 'selectedPieceId' | 'selectedObjectId' | 'armedPieceId'>>;
+  'worldPieces' | 'objects' | 'authoredBuildPieces' | 'selectedPieceId' | 'selectedPieceIds' | 'selectedObjectId' | 'armedPieceId'>>;
 export type WorldUndoEntry = {
   label: string;
   before: WorldUndoSlices;
@@ -454,6 +460,7 @@ export type EditorState = {
   activeAssetId: string;
   // Graffiti facades on the active map (req_3057) — persisted with world.json.
   worldFacades: import('../world/facades').Facade[];
+  facadePaint: FacadePaintState;
   // Place Sticker (req_3025): the armed stamp — an imported texture's spec id,
   // quarter turns clockwise, and a uniform multiplier of the sticker's meter size.
   stickerArm: { textureId: string | null; rot: number; scale: number };
@@ -524,6 +531,9 @@ export type EditorState = {
   // These retire the phantom `objects`/`selectedObjectId` mock for world work.
   worldPieces: PlacedPiece[];
   selectedPieceId: string | null;
+  /** Additive world selection. `selectedPieceId` remains the primary/focused
+   *  member for the existing Inspector and edit commands. */
+  selectedPieceIds: string[];
   armedPieceId: string | null;
   /** User turn applied to the next placement ghost (R). Edge snaps add this
    *  to their natural edge-facing instead of losing their snap orientation. */
