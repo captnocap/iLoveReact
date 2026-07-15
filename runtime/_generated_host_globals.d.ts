@@ -122,6 +122,7 @@ declare global {
   function getMouseX(...args: unknown[]): unknown;
   function getMouseY(...args: unknown[]): unknown;
   function getMouseDown(...args: unknown[]): unknown;
+  function getMouseMods(...args: unknown[]): unknown;
   function getMouseRightDown(...args: unknown[]): unknown;
   function getMouseButtons(...args: unknown[]): unknown;
   function getPointerDevice(...args: unknown[]): unknown;

@@ -2351,6 +2351,12 @@ fn hostGetMouseDown(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnNumber(info, if (mouse_state.g_mouse_down) 1 else 0);
 }
 
+/// Live SDL_Keymod state for pointer payloads, including left/right variants.
+fn hostGetMouseMods(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, @floatFromInt(c.SDL_GetModState()));
+}
+
 /// Which device last drove the pointer: 0 = mouse, 1 = pen (Wacom/tablet).
 /// Flips on the first event from the other device; the change edge also fires
 /// the useIFTTT `system:pointerDevice` signal (engine.zig notePointerDevice).
@@ -3005,6 +3011,7 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("getMouseX", hostGetMouseX);
     v8_runtime.registerHostFn("getMouseY", hostGetMouseY);
     v8_runtime.registerHostFn("getMouseDown", hostGetMouseDown);
+    v8_runtime.registerHostFn("getMouseMods", hostGetMouseMods);
     v8_runtime.registerHostFn("getMouseRightDown", hostGetMouseRightDown);
     v8_runtime.registerHostFn("getMouseButtons", hostGetMouseButtons);
     v8_runtime.registerHostFn("getPointerDevice", hostGetPointerDevice);

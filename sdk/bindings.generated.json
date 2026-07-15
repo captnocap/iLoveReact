@@ -485,6 +485,10 @@
           "zig": "hostGetMouseDown"
         },
         {
+          "js": "getMouseMods",
+          "zig": "hostGetMouseMods"
+        },
+        {
           "js": "getMouseRightDown",
           "zig": "hostGetMouseRightDown"
         },
