@@ -2035,6 +2035,106 @@ fn chainGroupLoop(pos: []const f32, tris: []const u32, out: *CutLoop) bool {
     return cur == start_key and count == boundary_n; // one loop, fully consumed
 }
 
+/// Native counterpart of editMesh.ts dropCollinearLoop: remove cut-seam points on
+/// straight boundary runs.  Relative area makes this stable for transformed meshes.
+fn dropCollinearLoop(loop: *CutLoop) void {
+    const epsilon: f32 = 1e-5;
+    var changed = true;
+    while (changed and loop.items.len > 3) {
+        changed = false;
+        var i: usize = 0;
+        while (i < loop.items.len) : (i += 1) {
+            const a = loop.items[(i + loop.items.len - 1) % loop.items.len];
+            const b = loop.items[i];
+            const c = loop.items[(i + 1) % loop.items.len];
+            const e1 = vecSub(b, a);
+            const e2 = vecSub(c, b);
+            const len = @sqrt(vecDot(e1, e1)) * @sqrt(vecDot(e2, e2));
+            const area = @sqrt(vecDot(vecCross(e1, e2), vecCross(e1, e2)));
+            if (len < 1e-12 or area / len < epsilon) {
+                _ = loop.orderedRemove(i);
+                changed = true;
+                break;
+            }
+        }
+    }
+}
+
+fn triNormal(pos: []const f32, face: u32) [3]f32 {
+    const base = @as(usize, face) * 9;
+    const a: [3]f32 = .{ pos[base], pos[base + 1], pos[base + 2] };
+    const b: [3]f32 = .{ pos[base + 3], pos[base + 4], pos[base + 5] };
+    const c: [3]f32 = .{ pos[base + 6], pos[base + 7], pos[base + 8] };
+    return vecNorm(vecCross(vecSub(b, a), vecSub(c, a)));
+}
+
+pub const DissolveResult = struct {
+    positions: []f32,
+    groups: []u32,
+    src_face: []u32,
+
+    pub fn deinit(self: DissolveResult) void {
+        alloc.free(self.positions);
+        alloc.free(self.groups);
+        alloc.free(self.src_face);
+    }
+};
+
+/// Dissolve selected authored faces into one clean boundary fan.  This is the
+/// topology half of Studio's mergeFaces: it deliberately returns null for a
+/// non-coplanar, pinched, disconnected, or hole-y selection rather than retaining
+/// its seams behind one shared group id.
+pub fn dissolveSelectedGroups(pos: []const f32, tri_count: u32, groups: []const u32, selected: []const bool) ?DissolveResult {
+    if (pos.len < @as(usize, tri_count) * 9 or groups.len < tri_count or selected.len < tri_count) return null;
+    var selected_tris = std.ArrayListUnmanaged(u32){};
+    defer selected_tris.deinit(alloc);
+    var target: ?u32 = null;
+    var distinct: u32 = 0;
+    var seen = std.AutoHashMapUnmanaged(u32, void){};
+    defer seen.deinit(alloc);
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        if (!selected[f]) continue;
+        selected_tris.append(alloc, f) catch return null;
+        if (target == null) target = groups[f];
+        const gop = seen.getOrPut(alloc, groups[f]) catch return null;
+        if (!gop.found_existing) distinct += 1;
+    }
+    if (distinct < 2) return null;
+
+    const n0 = triNormal(pos, selected_tris.items[0]);
+    for (selected_tris.items) |face| if (vecDot(triNormal(pos, face), n0) < 0.5) return null;
+    var loop = CutLoop{};
+    defer loop.deinit(alloc);
+    if (!chainGroupLoop(pos, selected_tris.items, &loop)) return null;
+    dropCollinearLoop(&loop);
+    if (loop.items.len < 3) return null;
+
+    var out = std.ArrayListUnmanaged(f32){};
+    errdefer out.deinit(alloc);
+    var out_groups = std.ArrayListUnmanaged(u32){};
+    errdefer out_groups.deinit(alloc);
+    var src = std.ArrayListUnmanaged(u32){};
+    errdefer src.deinit(alloc);
+    f = 0;
+    while (f < tri_count) : (f += 1) {
+        if (selected[f]) continue;
+        const base = @as(usize, f) * 9;
+        out.appendSlice(alloc, pos[base .. base + 9]) catch return null;
+        out_groups.append(alloc, groups[f]) catch return null;
+        src.append(alloc, f) catch return null;
+    }
+    var i: usize = 1;
+    while (i + 1 < loop.items.len) : (i += 1) {
+        for ([_][3]f32{ loop.items[0], loop.items[i], loop.items[i + 1] }) |p| {
+            out.appendSlice(alloc, p[0..]) catch return null;
+        }
+        out_groups.append(alloc, target.?) catch return null;
+        src.append(alloc, selected_tris.items[0]) catch return null;
+    }
+    return .{ .positions = out.toOwnedSlice(alloc) catch return null, .groups = out_groups.toOwnedSlice(alloc) catch return null, .src_face = src.toOwnedSlice(alloc) catch return null };
+}
+
 // ── The concave-face guard predicate (PORT of the studio's req_0949 Auto-Fix) ──────
 // Verbatim port of cart/hmsc-int/editors/model/editMesh.ts isFaceConcave /
 // newConcaveFaces (req_2823): the only unsafe edit is an authored face newly buckled

@@ -3551,10 +3551,9 @@ pub fn meshFlipSelectionWinding() bool {
     return true;
 }
 
-/// Fuse the selected faces (face mode, spanning 2+ authored groups) into ONE authored
-/// face: they share a group id afterwards, so picking/painting treats them as one and
-/// their shared edges stop being boundary edges — the old studio's "merge faces"
-/// (the inverse of a loop cut) expressed as pure grouping.
+/// Fuse selected faces into ONE clean authored face.  Beyond regrouping, this rebuilds
+/// the selected region as a boundary fan: shared seams and their collinear midpoint
+/// verts disappear, exactly like Studio's mergeFaces.
 pub fn meshMergeSelectedFaces() bool {
     if (!model_paint.hasTarget()) return false;
     if (mesh_edit.mode() != .face) return false;
@@ -3583,18 +3582,48 @@ pub fn meshMergeSelectedFaces() bool {
     }
     if (distinct < 2) return false;
 
-    var snap = journalSnapshotCurrent("merge faces");
-    mesh_edit.clearSelection();
+    const cur_verts = g_edit_verts orelse return false;
+    const pos = jalloc.alloc(f32, @as(usize, tri_count) * 9) catch return false;
+    defer jalloc.free(pos);
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
-        if (mask[f]) groups[f] = target.?;
+        var corner: u32 = 0;
+        while (corner < 3) : (corner += 1) {
+            const src = (@as(usize, f) * 3 + corner) * 8;
+            const dst = (@as(usize, f) * 3 + corner) * 3;
+            if (src + 2 >= cur_verts.len) return false;
+            @memcpy(pos[dst .. dst + 3], cur_verts[src .. src + 3]);
+        }
     }
-    model_source.setFaceGroups(groups);
-    // Group ids are one of the welded topology's inputs: after this regroup, every
-    // edge shared by the fused faces is an internal triangulation seam. Invalidate the
-    // old boundary cache now or those dissolved edges keep drawing and stay selectable
-    // until some unrelated topology operation happens to rebuild it (req_2871).
-    mesh_edit.faceGroupsChanged();
+    const dissolved = mesh_edit.dissolveSelectedGroups(pos, tri_count, groups, mask) orelse return false;
+    defer dissolved.deinit();
+    const new_tri_count: u32 = @intCast(dissolved.positions.len / 9);
+    const old_colors = collectCurrentFaceColors() orelse return false;
+    defer std.heap.c_allocator.free(old_colors);
+    const new_colors = jalloc.alloc(u8, @as(usize, new_tri_count) * 4) catch return false;
+    defer jalloc.free(new_colors);
+    if (!mesh_edit.inheritFaceRgba(old_colors, dissolved.src_face, new_colors)) return false;
+    var out = std.ArrayListUnmanaged(f32){};
+    defer out.deinit(jalloc);
+    var i: u32 = 0;
+    while (i < new_tri_count) : (i += 1) {
+        const base = @as(usize, i) * 9;
+        const a: [3]f32 = .{ dissolved.positions[base], dissolved.positions[base + 1], dissolved.positions[base + 2] };
+        const b: [3]f32 = .{ dissolved.positions[base + 3], dissolved.positions[base + 4], dissolved.positions[base + 5] };
+        const c: [3]f32 = .{ dissolved.positions[base + 6], dissolved.positions[base + 7], dissolved.positions[base + 8] };
+        if (!appendTri(&out, a, b, c)) return false;
+    }
+    var snap = journalSnapshotCurrent("merge faces");
+    mesh_edit.clearSelection();
+    if (!replaceActiveEditMesh(out.items, new_tri_count * 3)) {
+        journalDiscard(&snap);
+        return false;
+    }
+    model_source.setFaceGroups(dissolved.groups);
+    if (!applyExactFaceColors(new_colors, new_tri_count)) {
+        journalDiscard(&snap);
+        return false;
+    }
     _ = refreshPaintLayout();
     journalCommit(&snap);
     return true;

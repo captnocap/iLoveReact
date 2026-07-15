@@ -125,6 +125,51 @@ test "merging authored faces dissolves their shared selectable edge (req_2871)" 
     try testing.expectEqual(@as(u32, 6), mesh_edit.boundaryEdgeCount());
 }
 
+test "dissolving an irregular four-quad grid drops seam verts and rebuilds a clean quad" {
+    // A sheared/transformed plane, not the unit-cube convenience case.  The four
+    // selected authored quads contain nine welded vertices and twelve visible edge
+    // runs before dissolve; the clean outer boundary is four corners / four runs.
+    const p = [_][3]f32{
+        .{ 3, -2, 5 },     .{ 5, -1, 5.5 },   .{ 7, 0, 6 },
+        .{ 2.5, 1, 5.25 }, .{ 4.5, 2, 5.75 }, .{ 6.5, 3, 6.25 },
+        .{ 2, 4, 5.5 },    .{ 4, 5, 6 },      .{ 6, 6, 6.5 },
+    };
+    var pos: [8 * 9]f32 = undefined;
+    const Emit = struct {
+        fn tri(out: []f32, n: *usize, a: [3]f32, b: [3]f32, c: [3]f32) void {
+            for ([_][3]f32{ a, b, c }) |v| {
+                out[n.*] = v[0];
+                out[n.* + 1] = v[1];
+                out[n.* + 2] = v[2];
+                n.* += 3;
+            }
+        }
+    };
+    var n: usize = 0;
+    for ([_][4]usize{ .{ 0, 1, 4, 3 }, .{ 1, 2, 5, 4 }, .{ 3, 4, 7, 6 }, .{ 4, 5, 8, 7 } }) |q| {
+        Emit.tri(pos[0..], &n, p[q[0]], p[q[1]], p[q[2]]);
+        Emit.tri(pos[0..], &n, p[q[0]], p[q[2]], p[q[3]]);
+    }
+    const result = mesh_edit.dissolveSelectedGroups(pos[0..], 8, &.{ 10, 10, 11, 11, 12, 12, 13, 13 }, &.{ true, true, true, true, true, true, true, true }) orelse return error.TestUnexpectedResult;
+    defer result.deinit();
+    try testing.expectEqual(@as(usize, 18), result.positions.len); // two fan triangles = one clean quad
+    try testing.expectEqualSlices(u32, &.{ 10, 10 }, result.groups);
+    // The output's four unique positions are exactly the transformed outer corners;
+    // no midpoint from either seam remains pickable.
+    var unique: usize = 0;
+    var i: usize = 0;
+    while (i < result.positions.len / 3) : (i += 1) {
+        var seen = false;
+        var j: usize = 0;
+        while (j < i) : (j += 1) if (std.mem.eql(f32, result.positions[i * 3 .. i * 3 + 3], result.positions[j * 3 .. j * 3 + 3])) {
+            seen = true;
+            break;
+        };
+        if (!seen) unique += 1;
+    }
+    try testing.expectEqual(@as(usize, 4), unique);
+}
+
 test "twelve sided cylinder keeps all authored rim and side edges (req_2953/req_2954)" {
     // Exact topology emitted by editMeshToGeometry(cylinder(..., 12)):
     // 12 side quads (two triangles/group), then two 12-gon cap fans
