@@ -4287,9 +4287,10 @@ const COMPASS_TEXT = [3]f32{ 0.72, 0.79, 0.95 }; // readout text (OV_FACE_DOT bl
 const COMPASS_AWAY_FADE: f32 = 0.72; // depth cue: ends pointing away sit dimmer
 
 /// Depth-coded vertex fill (req_3064): from an axis-on view every dot lands on the same
-/// pixel column and coplanarity is unreadable, so the FILL encodes view depth — verts at
-/// the exact same depth share the exact same colour, and one off-plane vert reads as the
-/// odd colour out. The hue wheel cycles once per OV_DEPTH_HUE_PERIOD_M of depth, so a
+/// pixel column and coplanarity is unreadable, so the FILL encodes depth along the view's
+/// dominant WORLD axis — verts at the exact same depth share the exact same colour, and
+/// one off-plane vert reads as the odd colour out. The hue wheel cycles once per
+/// OV_DEPTH_HUE_PERIOD_M of depth, so a
 /// centimetre of drift becomes a ~14° hue step instead of an invisible fraction of the
 /// mesh's whole depth range. Cyclic aliasing (two planes 25 cm apart sharing a hue) is
 /// fine — the comparison is always between neighbours expected coplanar.
@@ -5402,9 +5403,16 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     if (mode == 1) { // vertex: every vert as a haloed dot, selected ones orange + bigger
         const n = mesh_edit.vertCount();
         const draw_all = n <= OV_MAX_VERT_DOTS;
-        // Depth axis for the dot colours: anchored at the orbit TARGET, not the eye, so
-        // dollying in/out never reshuffles the palette; orbiting recolours smoothly.
+        // Depth axis for the dot colours: the camera forward SNAPPED to its dominant
+        // WORLD axis, anchored at the world origin. Raw view depth spread a genuinely
+        // flat plane into two hues whenever the view sat a few degrees off axis — and
+        // the compass TOP view deliberately stops at the pitch clamp (~86°, the Y-up
+        // pole is degenerate), so even dial-snapped views hit it (req_3066). Snapped,
+        // "same depth" means "same world coordinate": exact from any near-axis view,
+        // and the palette never swims with the camera at all.
         const fwd = vnorm(vsub(cam.target, cam.eye));
+        const dax: usize = if (@abs(fwd[0]) >= @abs(fwd[1]) and @abs(fwd[0]) >= @abs(fwd[2])) 0 else if (@abs(fwd[1]) >= @abs(fwd[2])) 1 else 2;
+        const dsign: f32 = if (fwd[dax] < 0) -1 else 1; // keep near/far sense with the view
         var i: u32 = 0;
         while (i < n) : (i += 1) {
             if (!mesh_edit.vertInScopePub(i)) continue; // only the focused part's verts
@@ -5415,7 +5423,7 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
             if (selected) {
                 overlayDot(sp[0], sp[1], OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 13);
             } else {
-                const c = ovDepthColor(vdot(vsub(p, cam.target), fwd));
+                const c = ovDepthColor(p[dax] * dsign);
                 overlayDot(sp[0], sp[1], c[0], c[1], c[2], 8);
             }
         }
