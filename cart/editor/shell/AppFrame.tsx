@@ -62,7 +62,6 @@ import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import {
-  COLOR_STUDIO_ACTION_COMMAND_IDS,
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
   COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
   COLOR_STUDIO_PALETTE_ADD_COMMAND_ID,
@@ -131,7 +130,7 @@ import { buildPieceExportTarget } from '../data/buildExports';
 import { compileDoorMesh, resolveDoorLeafPart } from '../model/doorModel';
 import { MODEL_PACKAGES } from '../data/catalog';
 import { materializeModelPackage, writeModelArtifacts, isMaterialized, updateManifestIdentity, updateManifestPlaceable, readManifest, copyModelPackage } from '../data/modelPackageStore';
-import { colorStudioSpec, colorStudioOverrideKey, paletteForSpecVariant, rgbToCss } from '../data/colorStudio';
+import { colorStudioSpec, paletteForSpecVariant } from '../data/colorStudio';
 import { FILL_GRADES, FILL_SEED_MAX, registerImportedSpecs, shaderSpec } from '../textures/shaders';
 import { image as imageOps, quantize as quantizeImage } from '../../../runtime/image';
 import { encodeRows, parseQuantizeProbe } from '../textures/pixelTexture';
@@ -724,6 +723,160 @@ export default function AppFrame() {
           return { direction: 'redo', label: entry.label, actionId: entry.actionId, commandId: entry.commandId, changedKeys };
         },
       },
+      colorStudio: {
+        read: () => ({
+          materialId: stateRef.current.colorStudioMaterial,
+          variant: stateRef.current.colorStudioVariant,
+          seed: stateRef.current.colorStudioSeed,
+          quality: stateRef.current.colorStudioQuality,
+          activeSlot: stateRef.current.colorStudioActiveSlot,
+          view: stateRef.current.colorStudioView,
+          currentColor: stateRef.current.colorSpineCurrent,
+          scenePick: stateRef.current.colorSpineScenePick,
+          overrides: stateRef.current.colorStudioOverrides,
+          palette: stateRef.current.colorSpinePalette,
+        }),
+        policy: {
+          qualityCount: FILL_GRADES.length,
+          seedMax: FILL_SEED_MAX,
+          spec: (id) => {
+            const spec = shaderSpec(id);
+            if (!spec || !spec.variants.length) return null;
+            return {
+              id: spec.id,
+              label: spec.label,
+              variants: spec.variants.map((variant) => ({ label: variant.label })),
+              slots: (spec.slots ?? []).map((slot) => ({
+                name: slot.name,
+                baked: [slot.rgb[0], slot.rgb[1], slot.rgb[2]] as Rgb,
+              })),
+            };
+          },
+        },
+        now: Date.now,
+        commitChoice: (result) => {
+          const previous = stateRef.current;
+          const patch = result.patch;
+          const next: EditorState = {
+            ...previous,
+            colorStudioMaterial: patch.materialId ?? previous.colorStudioMaterial,
+            colorStudioVariant: patch.variant ?? previous.colorStudioVariant,
+            colorStudioSeed: patch.seed ?? previous.colorStudioSeed,
+            colorStudioQuality: patch.quality ?? previous.colorStudioQuality,
+            colorStudioActiveSlot: patch.activeSlot ?? previous.colorStudioActiveSlot,
+            colorStudioView: patch.view ?? previous.colorStudioView,
+            colorSpineCurrent: patch.currentColor ? { ...patch.currentColor } : previous.colorSpineCurrent,
+            colorSpineScenePick: patch.scenePick !== undefined ? patch.scenePick : previous.colorSpineScenePick,
+            status: result.label,
+          };
+          stateRef.current = next;
+          setState(next);
+        },
+        commitAction: (plan, actionId, applyStartedAtMs) => {
+          const previous = stateRef.current;
+          const appliedAtMs = Date.now();
+          const applyMs = Math.max(0, appliedAtMs - applyStartedAtMs);
+          const commandId = plan.transaction.action === 'slot.fill'
+            ? COLOR_STUDIO_SLOT_FILL_COMMAND_ID
+            : plan.transaction.action === 'slots.reset'
+              ? COLOR_STUDIO_SLOTS_RESET_COMMAND_ID
+              : plan.transaction.action === 'palette.add'
+                ? COLOR_STUDIO_PALETTE_ADD_COMMAND_ID
+                : COLOR_STUDIO_PALETTE_LOAD_COMMAND_ID;
+          const eventType = plan.transaction.action === 'slot.fill' || plan.transaction.action === 'slots.reset'
+            ? 'material.edit'
+            : 'palette.edit';
+          const entry: ColorStudioHistoryEntry = {
+            label: plan.label,
+            actionId,
+            commandId,
+            transaction: plan.transaction,
+            before: plan.before,
+            after: plan.after,
+          };
+          colorStudioHistoryRef.current = {
+            undo: [entry, ...colorStudioHistoryRef.current.undo].slice(0, COLOR_STUDIO_UNDO_CAP),
+            redo: [],
+          };
+          const next: EditorState = {
+            ...previous,
+            colorStudioOverrides: { ...plan.after.overrides },
+            colorSpinePalette: plan.after.palette.map((color) => ({ ...color })),
+            colorSpineCurrent: { ...plan.after.currentColor },
+            history: [{
+              id: `h-${actionId}`,
+              actionId,
+              commandId,
+              verb: plan.transaction.action,
+              target: plan.label,
+              meta: `Color Studio workspace action · apply=${applyMs.toFixed(1)}ms`,
+              undoable: true,
+              eventType,
+              atMs: appliedAtMs,
+              editMs: applyMs,
+              emptyMs: applyMs,
+              richMs: applyMs,
+            }, ...previous.history].slice(0, 8),
+            redo: [],
+            status: plan.label,
+          };
+          stateRef.current = next;
+          setState(next);
+          return appliedAtMs;
+        },
+        history: {
+          peekUndo: () => colorStudioHistoryRef.current.undo[0] ?? null,
+          peekRedo: () => colorStudioHistoryRef.current.redo[0] ?? null,
+          commitUndo: () => {
+            const entry = colorStudioHistoryRef.current.undo[0]!;
+            colorStudioHistoryRef.current = {
+              undo: colorStudioHistoryRef.current.undo.slice(1),
+              redo: [entry, ...colorStudioHistoryRef.current.redo].slice(0, COLOR_STUDIO_UNDO_CAP),
+            };
+            const previous = stateRef.current;
+            const next: EditorState = {
+              ...previous,
+              colorStudioOverrides: { ...entry.before.overrides },
+              colorSpinePalette: entry.before.palette.map((color) => ({ ...color })),
+              colorSpineCurrent: { ...entry.before.currentColor },
+              status: `undid ${entry.label}`,
+            };
+            stateRef.current = next;
+            setState(next);
+            return {
+              direction: 'undo' as const,
+              label: entry.label,
+              actionId: entry.actionId,
+              commandId: entry.commandId,
+              transaction: entry.transaction,
+            };
+          },
+          commitRedo: () => {
+            const entry = colorStudioHistoryRef.current.redo[0]!;
+            colorStudioHistoryRef.current = {
+              undo: [entry, ...colorStudioHistoryRef.current.undo].slice(0, COLOR_STUDIO_UNDO_CAP),
+              redo: colorStudioHistoryRef.current.redo.slice(1),
+            };
+            const previous = stateRef.current;
+            const next: EditorState = {
+              ...previous,
+              colorStudioOverrides: { ...entry.after.overrides },
+              colorSpinePalette: entry.after.palette.map((color) => ({ ...color })),
+              colorSpineCurrent: { ...entry.after.currentColor },
+              status: `redid ${entry.label}`,
+            };
+            stateRef.current = next;
+            setState(next);
+            return {
+              direction: 'redo' as const,
+              label: entry.label,
+              actionId: entry.actionId,
+              commandId: entry.commandId,
+              transaction: entry.transaction,
+            };
+          },
+        },
+      },
     }, (outcome) => {
       if (outcome.status === 'applied' && outcome.commandId === WORLD_FLOOR_STEP_COMMAND_ID) {
         const result = outcome.result as WorldFloorStepResult;
@@ -756,6 +909,33 @@ export default function AppFrame() {
       }
       if (outcome.status === 'applied' && isWorldPieceMaterialCommandId(outcome.commandId)) {
         dispatchPieceMaterialOutcome(outcome as CommandAppliedOutcome<WorldPieceMaterialResult>);
+        return;
+      }
+      if (outcome.status === 'applied' && isColorStudioChoiceCommandId(outcome.commandId)) {
+        const result = outcome.result as import('../material/colorStudioCommand').ColorStudioChoiceResult;
+        // Re-clicking an already-active segment is inert. A settled color drag
+        // therefore appends at most one report, never one per pointer sample.
+        if (!result.changed) return;
+        const label = result.kind === 'color' && result.patch.currentColor
+          ? `current color → ${oklchName(result.patch.currentColor)} (${result.source ?? 'picker'})`
+          : result.label;
+        dispatchCommandOutcome(outcome, {
+          label,
+          targets: [{ kind: `studio-${result.kind}`, id: result.targetId }],
+        });
+        return;
+      }
+      if (outcome.status === 'applied' && isColorStudioActionCommandId(outcome.commandId)) {
+        dispatchColorStudioActionOutcome(outcome as CommandAppliedOutcome<ColorStudioActionResult>);
+        return;
+      }
+      if (outcome.status === 'applied' &&
+          (outcome.commandId === COLOR_STUDIO_UNDO_COMMAND_ID || outcome.commandId === COLOR_STUDIO_REDO_COMMAND_ID)) {
+        const result = outcome.result as ColorStudioHistoryControlResult;
+        dispatchCommandOutcome(outcome, {
+          label: `${result.direction} ${result.label}`,
+          targets: [{ kind: 'color-studio', id: 'workspace' }],
+        });
         return;
       }
       if (outcome.status === 'applied' && outcome.commandId === WORLD_PLACEMENT_ROTATE_COMMAND_ID) {
@@ -946,9 +1126,13 @@ export default function AppFrame() {
   }, []);
 
   // Publish the LIVE undo/redo depths (model → the host mesh journal via __mesh_history;
-  // world → the real worldUndo/worldRedo stacks) so the Edit-menu rows count-annotate and
+  // Color Studio → its scoped command journal; world → worldUndo/worldRedo) so menu rows count-annotate and
   // gray honestly. Every render is an event edge, so the menus read fresh depths whenever
   // they can possibly be looked at (req_2620 gap W).
+  publishColorStudioUndoDepths(
+    colorStudioHistoryRef.current.undo.length,
+    colorStudioHistoryRef.current.redo.length,
+  );
   const liveUndoDepths = undoDepths(state);
   publishUndoDepths(liveUndoDepths);
 
@@ -1311,6 +1495,17 @@ export default function AppFrame() {
         {},
         source,
         entry?.actionId ? { actionId: entry.actionId, causedBy: entry.actionId } : {},
+      );
+      return;
+    }
+    if ((commandId === 'undo-local' || commandId === 'redo-local') && activeSurface(stateRef.current) === 'material') {
+      const undo = commandId === 'undo-local';
+      const entry = undo ? colorStudioHistoryRef.current.undo[0] : colorStudioHistoryRef.current.redo[0];
+      invokeApplicationCommand(
+        undo ? COLOR_STUDIO_UNDO_COMMAND_ID : COLOR_STUDIO_REDO_COMMAND_ID,
+        {},
+        source,
+        entry ? { actionId: entry.actionId, causedBy: entry.actionId } : {},
       );
       return;
     }
@@ -2393,159 +2588,94 @@ export default function AppFrame() {
   };
 
   const selectColorStudioMaterial = (specId: string) => {
-    setState((prev) => {
-      const spec = shaderSpec(specId);
-      if (!spec) return { ...prev, status: `Color Studio: unknown material '${specId}'` };
-      return {
-        ...prev,
-        colorStudioMaterial: specId,
-        colorStudioVariant: 0,
-        colorStudioActiveSlot: 0,
-        status: `Color Studio material: ${spec.label} (${spec.slots?.length ?? 0} slots)`,
-      };
-    });
+    invokeApplicationCommand(COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID, { specId, variant: 0 }, 'stage');
   };
 
   const setColorStudioVariant = (variant: number) => {
-    setState((prev) => {
-      const spec = colorStudioSpec(prev);
-      return {
-        ...prev,
-        colorStudioVariant: variant,
-        colorStudioActiveSlot: Math.min(prev.colorStudioActiveSlot, Math.max(0, (spec.slots?.length ?? 1) - 1)),
-        status: `Color Studio variant ${spec.variants[variant]?.label ?? variant}: ${spec.label}`,
-      };
-    });
+    invokeApplicationCommand(COLOR_STUDIO_VARIANT_SELECT_COMMAND_ID, { variant }, 'stage');
   };
 
   const rollColorStudioSeed = () => {
-    setState((prev) => {
-      const nextSeed = ((prev.colorStudioSeed * 37 + 19) % FILL_SEED_MAX) + 1;
-      return {
-        ...prev,
-        colorStudioSeed: nextSeed,
-        status: `Color Studio seed rolled: ${nextSeed}`,
-      };
-    });
+    invokeApplicationCommand(COLOR_STUDIO_SEED_ROLL_COMMAND_ID, {}, 'stage');
   };
 
   const setColorStudioQuality = (quality: number) => {
-    setState((prev) => ({
-      ...prev,
-      colorStudioQuality: quality,
-      status: `Color Studio quality D[3]=${quality}: ${FILL_GRADES[quality] ?? quality}`,
-    }));
+    invokeApplicationCommand(COLOR_STUDIO_QUALITY_SELECT_COMMAND_ID, { quality }, 'stage');
   };
 
   const activateColorStudioSlot = (slot: number) => {
-    setState((prev) => {
-      const spec = colorStudioSpec(prev);
-      const slotName = spec.slots?.[slot]?.name ?? 'slot';
-      return {
-        ...prev,
-        colorStudioActiveSlot: slot,
-        status: `Color Studio active slot: ${spec.label} / ${slotName}`,
-      };
-    });
+    invokeApplicationCommand(COLOR_STUDIO_SLOT_SELECT_COMMAND_ID, { slot }, 'stage');
   };
 
   const fillColorStudioSlot = (rgb: Rgb, source: string) => {
-    setState((prev) => {
-      const t0 = Date.now();
-      const spec = colorStudioSpec(prev);
-      const slot = Math.min(prev.colorStudioActiveSlot, Math.max(0, (spec.slots?.length ?? 1) - 1));
-      const slotName = spec.slots?.[slot]?.name ?? 'slot';
-      const key = colorStudioOverrideKey(spec.id, prev.colorStudioVariant, slot);
-      const editMs = Date.now() - t0;
-      return {
-        ...prev,
-        colorStudioOverrides: { ...prev.colorStudioOverrides, [key]: rgb },
-        history: [
-          { id: `h-${prev.seq}`, verb: 'slot', target: `${spec.label} ${slotName}`, meta: `${source} -> ${rgbToCss(rgb)}`, undoable: true, editMs, emptyMs: editMs, richMs: editMs },
-          ...prev.history,
-        ].slice(0, 8),
-        redo: [],
-        seq: prev.seq + 1,
-        status: `filled ${spec.label} ${slotName} from ${source}`,
-      };
-    });
+    const current = stateRef.current;
+    const spec = colorStudioSpec(current);
+    const slot = Math.min(current.colorStudioActiveSlot, Math.max(0, (spec.slots?.length ?? 1) - 1));
+    invokeApplicationCommand(COLOR_STUDIO_SLOT_FILL_COMMAND_ID, {
+      specId: spec.id,
+      variant: current.colorStudioVariant,
+      slot,
+      rgb,
+      source,
+    }, 'stage');
   };
 
   const resetColorStudioSlots = () => {
-    setState((prev) => {
-      const t0 = Date.now();
-      const spec = colorStudioSpec(prev);
-      const nextOverrides = { ...prev.colorStudioOverrides };
-      (spec.slots ?? []).forEach((_, slot) => delete nextOverrides[colorStudioOverrideKey(spec.id, prev.colorStudioVariant, slot)]);
-      const editMs = Date.now() - t0;
-      return {
-        ...prev,
-        colorStudioOverrides: nextOverrides,
-        history: [
-          { id: `h-${prev.seq}`, verb: 'reset', target: `${spec.label} v${prev.colorStudioVariant}`, meta: 'Color Studio reset to baked vec3f defaults', undoable: true, editMs, emptyMs: editMs, richMs: editMs },
-          ...prev.history,
-        ].slice(0, 8),
-        redo: [],
-        seq: prev.seq + 1,
-        status: `reset ${spec.label} v${prev.colorStudioVariant} to baked defaults`,
-      };
-    });
+    const current = stateRef.current;
+    const spec = colorStudioSpec(current);
+    invokeApplicationCommand(COLOR_STUDIO_SLOTS_RESET_COMMAND_ID, {
+      specId: spec.id,
+      variant: current.colorStudioVariant,
+    }, 'stage');
   };
 
   const setColorStudioView = (view: EditorState['colorStudioView']) => {
-    setState((prev) => ({ ...prev, colorStudioView: view, status: `Color Studio view: ${view}` }));
+    invokeApplicationCommand(COLOR_STUDIO_VIEW_SELECT_COMMAND_ID, { view }, 'stage');
   };
 
-  const setColorSpineCurrent = (color: OklchColor) => {
-    setState((prev) => ({ ...prev, colorSpineCurrent: color, status: `Color Studio current: ${oklchName(color)}` }));
+  const setColorSpineCurrent = (color: OklchColor, invocationSource = 'stage') => {
+    invokeApplicationCommand(COLOR_STUDIO_COLOR_SELECT_COMMAND_ID, { color, source: 'color picker' }, invocationSource);
   };
 
-  const addColorSpineToTray = () => {
-    setState((prev) => ({ ...prev, colorSpinePalette: [...prev.colorSpinePalette, { ...prev.colorSpineCurrent }], status: 'added current color to palette' }));
+  const addColorSpineToTray = (invocationSource = 'stage') => {
+    invokeApplicationCommand(COLOR_STUDIO_PALETTE_ADD_COMMAND_ID, {
+      color: stateRef.current.colorSpineCurrent,
+      source: 'current color',
+    }, invocationSource);
   };
 
-  const pickColorSpineTray = (color: OklchColor) => {
-    setState((prev) => ({ ...prev, colorSpineCurrent: color, status: `Color Studio current: ${oklchName(color)}` }));
+  const pickColorSpineTray = (color: OklchColor, invocationSource = 'stage') => {
+    invokeApplicationCommand(COLOR_STUDIO_COLOR_SELECT_COMMAND_ID, { color, source: 'tray' }, invocationSource);
   };
 
-  const pickColorSpineScene = (color: OklchColor, css: string) => {
-    setState((prev) => ({ ...prev, colorSpineCurrent: color, colorSpineScenePick: css, status: `Color Studio current: ${oklchName(color)} (from scene)` }));
+  const pickColorSpineScene = (color: OklchColor, css: string, invocationSource = 'stage') => {
+    invokeApplicationCommand(COLOR_STUDIO_COLOR_SELECT_COMMAND_ID, { color, source: 'scene', scenePick: css }, invocationSource);
   };
 
-  const loadColorSpineLibrarySet = (colors: OklchColor[]) => {
-    setState((prev) => ({
-      ...prev,
-      colorSpinePalette: colors.map((c) => ({ ...c })),
-      colorSpineCurrent: colors[0] ? { ...colors[0] } : prev.colorSpineCurrent,
-      status: 'loaded library palette into tray',
-    }));
+  const loadColorSpineLibrarySet = (colors: OklchColor[], invocationSource = 'stage') => {
+    const setName = SPINE_LIBRARY.find((set) => set.colors === colors)?.name ?? 'library set';
+    invokeApplicationCommand(COLOR_STUDIO_PALETTE_LOAD_COMMAND_ID, { colors, setName }, invocationSource);
   };
 
   const focusMaterialDocument = (variant?: number) => {
-    setState((prev) => {
-      const asset = assetById(prev.activeAssetId, prev.assetOverrides);
-      const doc = materialDocument(asset);
-      // Route the selection INTO the Color Studio: a shader-recipe asset's
-      // recipe IS a catalog spec id, so focusing lands the studio on that
-      // material (and on the take, when a variant chip was the entry point).
-      const spec = asset.recipe ? shaderSpec(asset.recipe) : undefined;
-      const studio = spec
-        ? {
-            colorStudioMaterial: spec.id,
-            colorStudioVariant: Math.min(variant ?? prev.colorStudioVariant, Math.max(0, spec.variants.length - 1)),
-            colorStudioActiveSlot: 0,
-            colorStudioView: 'materialPalette' as const,
-          }
-        : {};
-      return {
-        ...prev,
-        materialFocused: true,
-        workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
-        activeWorkspaceDocumentId: doc.id,
-        ...studio,
-        status: spec ? `opened Color Studio: ${asset.name}` : `opened material document: ${asset.name}`,
-      };
-    });
+    const previous = stateRef.current;
+    const asset = assetById(previous.activeAssetId, previous.assetOverrides);
+    const doc = materialDocument(asset);
+    const spec = asset.recipe ? shaderSpec(asset.recipe) : undefined;
+    const next: EditorState = {
+      ...previous,
+      materialFocused: true,
+      workspaceDocuments: upsertDocument(previous.workspaceDocuments, doc),
+      activeWorkspaceDocumentId: doc.id,
+      colorStudioView: spec ? 'materialPalette' : previous.colorStudioView,
+      status: spec ? `opened Color Studio: ${asset.name}` : `opened material document: ${asset.name}`,
+    };
+    stateRef.current = next;
+    setState(next);
+    if (spec) {
+      const nextVariant = Math.min(variant ?? previous.colorStudioVariant, Math.max(0, spec.variants.length - 1));
+      invokeApplicationCommand(COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID, { specId: spec.id, variant: nextVariant }, 'stage');
+    }
   };
 
   // The ink popover's "open in Color Studio" — jump from a dipped shader ink to
@@ -2553,22 +2683,22 @@ export default function AppFrame() {
   const openColorStudioForSpec = (specId: string) => {
     const spec = shaderSpec(specId);
     if (!spec) return;
-    setState((prev) => {
-      const match = catalogAssets.find((a) => a.recipe === specId);
-      const asset = match ?? assetById(prev.activeAssetId, prev.assetOverrides);
-      const doc = materialDocument(asset);
-      return {
-        ...prev,
-        materialFocused: true,
-        activeAssetId: match ? match.id : prev.activeAssetId,
-        workspaceDocuments: upsertDocument(prev.workspaceDocuments, doc),
-        activeWorkspaceDocumentId: doc.id,
-        colorStudioMaterial: spec.id,
-        colorStudioActiveSlot: 0,
-        colorStudioView: 'materialPalette' as const,
-        status: `opened Color Studio: ${spec.label}`,
-      };
-    });
+    const previous = stateRef.current;
+    const match = catalogAssets.find((a) => a.recipe === specId);
+    const asset = match ?? assetById(previous.activeAssetId, previous.assetOverrides);
+    const doc = materialDocument(asset);
+    const next: EditorState = {
+      ...previous,
+      materialFocused: true,
+      activeAssetId: match ? match.id : previous.activeAssetId,
+      workspaceDocuments: upsertDocument(previous.workspaceDocuments, doc),
+      activeWorkspaceDocumentId: doc.id,
+      colorStudioView: 'materialPalette',
+      status: `opened Color Studio: ${spec.label}`,
+    };
+    stateRef.current = next;
+    setState(next);
+    invokeApplicationCommand(COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID, { specId: spec.id, variant: 0 }, 'toolbar');
     setPaintPopover(null);
   };
 
@@ -4390,7 +4520,13 @@ export default function AppFrame() {
       palette={state.colorSpinePalette}
       scenePick={state.colorSpineScenePick}
       paletteFor={paintPaletteFor}
-      spine={{ onSetCurrent: setColorSpineCurrent, onAddToTray: addColorSpineToTray, onPickTray: pickColorSpineTray, onScenePick: pickColorSpineScene, onLoadLibrarySet: loadColorSpineLibrarySet }}
+      spine={{
+        onSetCurrent: (color) => setColorSpineCurrent(color, 'toolbar'),
+        onAddToTray: () => addColorSpineToTray('toolbar'),
+        onPickTray: (color) => pickColorSpineTray(color, 'toolbar'),
+        onScenePick: (color, css) => pickColorSpineScene(color, css, 'toolbar'),
+        onLoadLibrarySet: (colors) => loadColorSpineLibrarySet(colors, 'toolbar'),
+      }}
     />
   ) : null;
 
@@ -4764,11 +4900,11 @@ export default function AppFrame() {
             paletteFor={paintPaletteFor}
             onEditMaterial={openColorStudioForSpec}
             spine={{
-              onSetCurrent: setColorSpineCurrent,
-              onAddToTray: addColorSpineToTray,
-              onPickTray: pickColorSpineTray,
-              onScenePick: pickColorSpineScene,
-              onLoadLibrarySet: loadColorSpineLibrarySet,
+              onSetCurrent: (color) => setColorSpineCurrent(color, 'toolbar'),
+              onAddToTray: () => addColorSpineToTray('toolbar'),
+              onPickTray: (color) => pickColorSpineTray(color, 'toolbar'),
+              onScenePick: (color, css) => pickColorSpineScene(color, css, 'toolbar'),
+              onLoadLibrarySet: (colors) => loadColorSpineLibrarySet(colors, 'toolbar'),
             }}
           />
         </RenderProbe>

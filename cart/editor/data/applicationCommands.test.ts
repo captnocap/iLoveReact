@@ -7,6 +7,13 @@
 //   tools/v8cli /tmp/editor-application-commands.test.js
 import { type CommandOutcome, type CommandSource } from '../../../runtime/commands';
 import {
+  COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
+  COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
+  COLOR_STUDIO_PALETTE_ADD_COMMAND_ID,
+  COLOR_STUDIO_REDO_COMMAND_ID,
+  COLOR_STUDIO_SLOT_FILL_COMMAND_ID,
+  COLOR_STUDIO_UNDO_COMMAND_ID,
+  COLOR_STUDIO_VARIANT_SELECT_COMMAND_ID,
   WORLD_FLOOR_STEP_COMMAND_ID,
   WORLD_MAX_FLOOR,
   WORLD_PIECE_DELETE_COMMAND_ID,
@@ -25,6 +32,7 @@ import {
   type WorldPiecesPlaceResult,
 } from './applicationCommands';
 import type { PiecePlacementWorld } from '../world/piecePlacementCommand';
+import type { ColorStudioHistoryEntry, ColorStudioSnapshot } from '../material/colorStudioCommand';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -53,6 +61,13 @@ function harness(
   let mapPaintActive = startMapPaint;
   let ghostYawDegrees = 0;
   let committedActionId: string | null = null;
+  let studio: ColorStudioSnapshot = {
+    materialId: 'brick', variant: 0, seed: 4, quality: 3, activeSlot: 0,
+    view: 'materialPalette', currentColor: { l: 0.6, c: 0.1, h: 20 }, scenePick: null,
+    overrides: {}, palette: [{ l: 0.5, c: 0.1, h: 10 }],
+  };
+  let studioUndo: ColorStudioHistoryEntry[] = [];
+  let studioRedo: ColorStudioHistoryEntry[] = [];
   const outcomes: CommandOutcome[] = [];
   const adapter: EditorCommandAdapter = {
     activeSurface: () => surface,
@@ -118,6 +133,67 @@ function harness(
         return { ...entry, direction: 'redo' as const, changedKeys: ['worldPieces'] };
       },
     },
+    colorStudio: {
+      read: () => studio,
+      policy: {
+        qualityCount: 5,
+        seedMax: 2200,
+        spec: (id) => id === 'brick' ? {
+          id: 'brick', label: 'Brick', variants: [{ label: 'Clean' }, { label: 'Dirty' }],
+          slots: [{ name: 'Mortar', baked: [0.6, 0.6, 0.6] }, { name: 'Face', baked: [0.7, 0.1, 0.05] }],
+        } : id === 'metal' ? {
+          id: 'metal', label: 'Metal', variants: [{ label: 'Plain' }],
+          slots: [{ name: 'Base', baked: [0.4, 0.4, 0.4] }],
+        } : null,
+      },
+      now: () => now++,
+      commitChoice: (result) => {
+        studio = { ...studio, ...result.patch };
+        commits += 1;
+      },
+      commitAction: (plan, actionId) => {
+        const commandId = plan.transaction.action === 'slot.fill'
+          ? COLOR_STUDIO_SLOT_FILL_COMMAND_ID
+          : plan.transaction.action === 'slots.reset'
+            ? 'material.slots.reset'
+            : plan.transaction.action === 'palette.add'
+              ? COLOR_STUDIO_PALETTE_ADD_COMMAND_ID
+              : 'studio.palette.load';
+        const entry: ColorStudioHistoryEntry = {
+          label: plan.label, actionId, commandId, transaction: plan.transaction,
+          before: plan.before, after: plan.after,
+        };
+        studio = {
+          ...studio,
+          overrides: plan.after.overrides,
+          palette: plan.after.palette,
+          currentColor: plan.after.currentColor,
+        };
+        studioUndo.unshift(entry);
+        studioRedo = [];
+        committedActionId = actionId;
+        commits += 1;
+        return now++;
+      },
+      history: {
+        peekUndo: () => studioUndo[0] ?? null,
+        peekRedo: () => studioRedo[0] ?? null,
+        commitUndo: () => {
+          const entry = studioUndo.shift()!;
+          studioRedo.unshift(entry);
+          studio = { ...studio, overrides: entry.before.overrides, palette: entry.before.palette, currentColor: entry.before.currentColor };
+          commits += 1;
+          return { direction: 'undo', label: entry.label, actionId: entry.actionId, commandId: entry.commandId, transaction: entry.transaction };
+        },
+        commitRedo: () => {
+          const entry = studioRedo.shift()!;
+          studioUndo.unshift(entry);
+          studio = { ...studio, overrides: entry.after.overrides, palette: entry.after.palette, currentColor: entry.after.currentColor };
+          commits += 1;
+          return { direction: 'redo', label: entry.label, actionId: entry.actionId, commandId: entry.commandId, transaction: entry.transaction };
+        },
+      },
+    },
   };
   return {
     commands: createEditorApplicationCommands(adapter, (outcome) => outcomes.push(outcome)),
@@ -131,6 +207,9 @@ function harness(
     mapPaintActive: () => mapPaintActive,
     ghostYaw: () => ghostYawDegrees,
     committedActionId: () => committedActionId,
+    studio: () => studio,
+    studioUndoDepth: () => studioUndo.length,
+    studioRedoDepth: () => studioRedo.length,
   };
 }
 
@@ -177,6 +256,8 @@ test('headless chord resolution returns the same inert command projection', () =
   }
   assert(h.commands.resolveChord('R', { surface: 'world' })?.id === WORLD_PIECE_ROTATE_COMMAND_ID, 'R did not project authored rotate');
   assert(h.commands.resolveChord('Delete', { surface: 'world' })?.id === WORLD_PIECE_DELETE_COMMAND_ID, 'Delete did not project authored delete');
+  assert(h.commands.resolveChord('Ctrl+Z', { surface: 'material' })?.id === COLOR_STUDIO_UNDO_COMMAND_ID, 'material Ctrl+Z did not resolve Studio history');
+  assert(h.commands.resolveChord('Ctrl+Y', { surface: 'material' })?.id === COLOR_STUDIO_REDO_COMMAND_ID, 'material Ctrl+Y did not resolve Studio history');
 });
 
 test('every source arms every world tool through one report-only handler', () => {
@@ -396,6 +477,84 @@ test('undo and redo outcomes retain the authored action identity', () => {
   assert(redone.status === 'applied' && redone.phase === 'redone' && redone.actionId === entry.actionId, 'redo correlation drifted');
   assert(h.undoDepth() === 1 && h.redoDepth() === 0, 'redo did not restore one history entry');
   assert(h.commits() === 2 && h.outcomes.length === 2, 'controls did not commit/publish exactly once each');
+});
+
+test('Color Studio choices are one report-only command for every invocation source', () => {
+  for (const source of ['viewport', 'toolbar', 'remote'] as CommandSource[]) {
+    const h = harness(0, 'material');
+    const selected = h.commands.invoke({
+      commandId: COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
+      args: { specId: 'metal', variant: 0 },
+      source,
+    });
+    assert(selected.status === 'applied' && selected.effect === 'report-only' && !('actionId' in selected), `${source} material choice became an action`);
+    assert(h.studio().materialId === 'metal' && h.commits() === 1, `${source} did not use the shared material handler once`);
+    assert(h.outcomes.length === 1 && h.outcomes[0] === selected, `${source} did not publish one authority outcome`);
+  }
+});
+
+test('settled current-color choice is idempotent and never enters Studio history', () => {
+  const h = harness(0, 'material');
+  const same = h.commands.invoke({
+    commandId: COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
+    args: { color: { l: 0.6, c: 0.1, h: 20 }, source: 'color map' },
+    source: 'viewport',
+  });
+  assert(same.status === 'applied' && same.result.changed === false, 'same settled color did not report a no-op');
+  assert(h.commits() === 0 && h.studioUndoDepth() === 0, 'same color mutated or consumed undo');
+
+  const changed = h.commands.invoke({
+    commandId: COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
+    args: { color: { l: 0.7, c: 0.1, h: 20 }, source: 'color map' },
+    source: 'viewport',
+  });
+  assert(changed.status === 'applied' && changed.result.changed === true, 'new settled color disappeared');
+  assert(h.studio().currentColor.l === 0.7 && h.commits() === 1 && h.studioUndoDepth() === 0, 'color choice became authored history');
+});
+
+test('material slot fill, undo, and redo retain one action identity and exact color state', () => {
+  const h = harness(0, 'material');
+  h.commands.invoke({ commandId: COLOR_STUDIO_VARIANT_SELECT_COMMAND_ID, args: { variant: 1 }, source: 'viewport' });
+  const filled = h.commands.invoke({
+    invocationId: 'studio-fill:1',
+    commandId: COLOR_STUDIO_SLOT_FILL_COMMAND_ID,
+    args: { specId: 'brick', variant: 1, slot: 1, rgb: [0.2, 0.3, 0.4], source: 'hex #334d66' },
+    source: 'viewport',
+  });
+  assert(filled.status === 'applied' && filled.actionId === 'studio-fill:1' && filled.effect === 'action', 'slot fill lost action identity');
+  assert(h.studio().overrides['brick:1:1']?.[1] === 0.3 && h.studioUndoDepth() === 1, 'slot fill did not commit exact state/history');
+
+  const undone = h.commands.invoke({
+    commandId: COLOR_STUDIO_UNDO_COMMAND_ID, args: {}, source: 'hotkey',
+    actionId: 'studio-fill:1', causedBy: 'studio-fill:1',
+  });
+  assert(undone.status === 'applied' && undone.phase === 'undone' && undone.actionId === 'studio-fill:1', 'Studio undo correlation drifted');
+  assert(h.studio().overrides['brick:1:1'] === undefined && h.studioRedoDepth() === 1, 'Studio undo did not restore exact inverse');
+
+  const redone = h.commands.invoke({
+    commandId: COLOR_STUDIO_REDO_COMMAND_ID, args: {}, source: 'dock',
+    actionId: 'studio-fill:1', causedBy: 'studio-fill:1',
+  });
+  assert(redone.status === 'applied' && redone.phase === 'redone' && redone.actionId === 'studio-fill:1', 'Studio redo correlation drifted');
+  assert(h.studio().overrides['brick:1:1']?.[2] === 0.4 && h.studioUndoDepth() === 1, 'Studio redo did not reapply exact state');
+});
+
+test('palette workspace actions work from paint surfaces but slot edits stay in Color Studio', () => {
+  const model = harness(0, 'model');
+  const added = model.commands.invoke({
+    commandId: COLOR_STUDIO_PALETTE_ADD_COMMAND_ID,
+    args: { color: { l: 0.8, c: 0.2, h: 90 }, source: 'current color' },
+    source: 'toolbar',
+  });
+  assert(added.status === 'applied' && model.studio().palette.length === 2, 'shared paint tray action was blocked from model paint');
+
+  const wrong = model.commands.invoke({
+    commandId: COLOR_STUDIO_SLOT_FILL_COMMAND_ID,
+    args: { specId: 'brick', variant: 0, slot: 0, rgb: [1, 0, 0], source: 'remote' },
+    source: 'remote',
+  });
+  assert(wrong.status === 'rejected' && wrong.code === 'disabled', 'material slot edit escaped the Color Studio surface');
+  assert(model.commits() === 1, 'rejected slot edit mutated model paint state');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

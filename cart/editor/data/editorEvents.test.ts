@@ -11,9 +11,10 @@
 //   tools/v8cli /tmp/editor-events.test.js
 
 import { describeEvent, head, since } from '../../../runtime/editorbus';
-import { commandOutcome, dispatchCommandOutcome, mapPaint, pieceEdit, pieceEditPayload, pieceMaterial, pieceMaterialPayload, piecePlace, piecePlacementPayload, type MapPaintPayload } from './editorEvents';
+import { commandOutcome, dispatchColorStudioActionOutcome, dispatchCommandOutcome, mapPaint, pieceEdit, pieceEditPayload, pieceMaterial, pieceMaterialPayload, piecePlace, piecePlacementPayload, type MapPaintPayload, type MaterialStudioPayload, type PaletteStudioPayload } from './editorEvents';
 import { planPieceMaterialAssign, planPieceMove } from '../world/pieceEditCommand';
 import { planPiecePlacement } from '../world/piecePlacementCommand';
+import { planPaletteLoad, planSlotFill, type ColorStudioPolicy, type ColorStudioSnapshot } from '../material/colorStudioCommand';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(s + '\n'));
@@ -182,6 +183,59 @@ test('tool authority outcomes append one correlated report to the eventbus', () 
   assert(event.effect === 'report-only' && event.undoScope?.kind === 'none', 'tool choice became authored history');
   assert(event.targets[0]?.kind === 'world-tool' && event.targets[0]?.id === 'paint-faces', 'tool target drifted');
   assert(describeEvent(event) === 'active tool → Paint Faces', 'tool report description drifted');
+});
+
+const studioPolicy: ColorStudioPolicy = {
+  qualityCount: 5,
+  seedMax: 2200,
+  spec: (id) => id === 'brick' ? {
+    id: 'brick', label: 'Brick', variants: [{ label: 'Clean' }],
+    slots: [{ name: 'Mortar', baked: [0.6, 0.6, 0.6] }],
+  } : null,
+};
+const studioSnapshot: ColorStudioSnapshot = {
+  materialId: 'brick', variant: 0, seed: 4, quality: 3, activeSlot: 0,
+  view: 'materialPalette', currentColor: { l: 0.6, c: 0.1, h: 20 }, scenePick: null,
+  overrides: {}, palette: [{ l: 0.5, c: 0.1, h: 10 }],
+};
+
+test('Color Studio material actions emit one typed replay-grade transaction', () => {
+  const plan = planSlotFill(studioSnapshot, {
+    specId: 'brick', variant: 0, slot: 0, rgb: [0.2, 0.3, 0.4], source: 'hex #334d66',
+  }, studioPolicy);
+  const before = head();
+  dispatchColorStudioActionOutcome({
+    invocationId: 'studio:fill:1', commandId: 'material.slot.fill', actionId: 'studio:fill:1',
+    source: 'viewport', status: 'applied', phase: 'applied', effect: 'action',
+    undoScope: { kind: 'workspace', key: 'color-studio' },
+    result: { plan, applyStartedAtMs: 100, appliedAtMs: 102, applyMs: 2 },
+  });
+  const appended = since(before);
+  assert(appended.length === 1, `slot fill appended ${appended.length} reports`);
+  const event = appended[0]!;
+  assert(event.type === 'material.edit' && event.commandId === 'material.slot.fill', 'slot fill fell back to a generic receipt');
+  assert(event.actionId === 'studio:fill:1' && event.targets.some((target) => target.id === 'brick:0:0'), 'slot action identity/target drifted');
+  const payload = event.payload as MaterialStudioPayload;
+  assert(payload.transaction.action === 'slot.fill' && payload.transaction.before === null && payload.transaction.after[1] === 0.3, 'exact forward/inverse colors left the report');
+  assert(describeEvent(event) === 'fill Brick Mortar', `material description drifted: ${describeEvent(event)}`);
+});
+
+test('Color Studio palette replacement emits its exact prior and next trays', () => {
+  const plan = planPaletteLoad(studioSnapshot, {
+    setName: 'Dune Dusk', colors: [{ l: 0.2, c: 0.05, h: 30 }, { l: 0.9, c: 0.02, h: 80 }],
+  });
+  const before = head();
+  dispatchColorStudioActionOutcome({
+    invocationId: 'studio:palette:1', commandId: 'studio.palette.load', actionId: 'studio:palette:1',
+    source: 'toolbar', status: 'applied', phase: 'applied', effect: 'action',
+    undoScope: { kind: 'workspace', key: 'color-studio' },
+    result: { plan, applyStartedAtMs: 200, appliedAtMs: 201, applyMs: 1 },
+  });
+  const event = since(before)[0]!;
+  assert(event.type === 'palette.edit' && event.targets[0]?.id === 'color-studio-tray', 'palette action used the wrong typed target');
+  const payload = event.payload as PaletteStudioPayload;
+  assert(payload.transaction.action === 'palette.load' && payload.transaction.before.palette.length === 1 && payload.transaction.after.palette.length === 2, 'palette inverse left the report');
+  assert(describeEvent(event) === 'load Dune Dusk palette', `palette description drifted: ${describeEvent(event)}`);
 });
 
 log(`\n${passed} passed, ${failed} failed`);

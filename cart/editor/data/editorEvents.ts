@@ -7,7 +7,8 @@ import { defineEventType, dispatch } from '../../../runtime/editorbus';
 import type { EventCommandMetadata, TargetRef } from '../../../runtime/editorbus';
 import type { CommandAppliedOutcome, CommandOutcome } from '../../../runtime/commands';
 import type { HistoryEvent } from './types';
-import type { WorldPieceEditResult, WorldPieceMaterialResult, WorldPiecesPlaceResult } from './applicationCommands';
+import type { ColorStudioActionResult, WorldPieceEditResult, WorldPieceMaterialResult, WorldPiecesPlaceResult } from './applicationCommands';
+import type { ColorStudioActionTransaction } from '../material/colorStudioCommand';
 import { assetById } from './catalog';
 import { catalogRowFor } from '../world/buildCatalog';
 import { pieceKindOf, placementSlotKey, type MaterialRef } from '../world/pieces';
@@ -114,6 +115,24 @@ export type PieceMaterialPayload = {
   applyMs: number;
   transaction: WorldPieceMaterialResult['plan']['transaction'];
 };
+type MaterialStudioTransaction = Extract<ColorStudioActionTransaction, { action: 'slot.fill' | 'slots.reset' }>;
+type PaletteStudioTransaction = Extract<ColorStudioActionTransaction, { action: 'palette.add' | 'palette.load' }>;
+export type MaterialStudioPayload = {
+  action: MaterialStudioTransaction['action'];
+  label: string;
+  applyStartedAtMs: number;
+  appliedAtMs: number;
+  applyMs: number;
+  transaction: MaterialStudioTransaction;
+};
+export type PaletteStudioPayload = {
+  action: PaletteStudioTransaction['action'];
+  label: string;
+  applyStartedAtMs: number;
+  appliedAtMs: number;
+  applyMs: number;
+  transaction: PaletteStudioTransaction;
+};
 
 // One event type for now — a plain authoring edit. Richer per-system types (piece.place,
 // material.slot.fill, …) register themselves through this same seam as they get wired.
@@ -174,6 +193,30 @@ export const pieceMaterial = defineEventType<PieceMaterialPayload>({
     if (!p.documentId || p.pieceCount < 1 || p.roleCount < 1 ||
         p.transaction.action !== p.action || p.transaction.assignments.length !== p.pieceCount) {
       throw new Error('piece.material: malformed count/transaction');
+    }
+  },
+});
+
+export const materialStudio = defineEventType<MaterialStudioPayload>({
+  type: 'material.edit',
+  undoable: true,
+  describe: (p) => p.label,
+  validate: (p) => {
+    if ((p.action !== 'slot.fill' && p.action !== 'slots.reset') || p.transaction.action !== p.action ||
+        !Number.isFinite(p.applyMs)) {
+      throw new Error('material.edit: malformed action/transaction');
+    }
+  },
+});
+
+export const paletteStudio = defineEventType<PaletteStudioPayload>({
+  type: 'palette.edit',
+  undoable: true,
+  describe: (p) => p.label,
+  validate: (p) => {
+    if ((p.action !== 'palette.add' && p.action !== 'palette.load') || p.transaction.action !== p.action ||
+        !Number.isFinite(p.applyMs)) {
+      throw new Error('palette.edit: malformed action/transaction');
     }
   },
 });
@@ -363,6 +406,34 @@ export function dispatchPieceMaterialOutcome(outcome: CommandAppliedOutcome<Worl
       ...(payload.materialAssetId ? [{ kind: 'material', id: payload.materialAssetId }] : []),
       ...payload.transaction.assignments.map((assignment) => ({ kind: 'piece', id: assignment.pieceId })),
     ],
+    commandMetadata(outcome),
+  ));
+}
+
+export function dispatchColorStudioActionOutcome(outcome: CommandAppliedOutcome<ColorStudioActionResult>): number {
+  const result = outcome.result;
+  const transaction = result.plan.transaction;
+  const timing = {
+    label: result.plan.label,
+    applyStartedAtMs: result.applyStartedAtMs,
+    appliedAtMs: result.appliedAtMs,
+    applyMs: result.applyMs,
+  };
+  if (transaction.action === 'slot.fill' || transaction.action === 'slots.reset') {
+    const payload: MaterialStudioPayload = { ...timing, action: transaction.action, transaction };
+    const slotTargets = transaction.action === 'slot.fill'
+      ? [{ kind: 'material-slot', id: transaction.key }]
+      : transaction.changes.map((change) => ({ kind: 'material-slot', id: change.key }));
+    return dispatch(materialStudio(
+      payload,
+      [{ kind: 'material', id: transaction.specId }, ...slotTargets],
+      commandMetadata(outcome),
+    ));
+  }
+  const payload: PaletteStudioPayload = { ...timing, action: transaction.action, transaction };
+  return dispatch(paletteStudio(
+    payload,
+    [{ kind: 'palette', id: 'color-studio-tray' }],
     commandMetadata(outcome),
   ));
 }

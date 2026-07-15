@@ -48,6 +48,25 @@ import {
   type WorldPieceMaterialCommandId,
 } from '../world/pieceEditCommand';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
+import {
+  ColorStudioRejected,
+  planCurrentColorChoice,
+  planMaterialChoice,
+  planPaletteAdd,
+  planPaletteLoad,
+  planQualityChoice,
+  planSeedRoll,
+  planSlotChoice,
+  planSlotFill,
+  planSlotsReset,
+  planVariantChoice,
+  planViewChoice,
+  type ColorStudioActionPlan,
+  type ColorStudioChoiceResult,
+  type ColorStudioHistoryEntry,
+  type ColorStudioPolicy,
+  type ColorStudioSnapshot,
+} from '../material/colorStudioCommand';
 
 export const WORLD_FLOOR_STEP_COMMAND_ID = 'world.floor.step';
 export const WORLD_MAX_FLOOR = 128;
@@ -71,6 +90,34 @@ export const WORLD_REDO_COMMAND_ID = 'world.history.redo';
 /** Turning the not-yet-authored placement preview is a report-only choice. It
  * is intentionally not the authored `world.piece.rotate` action. */
 export const WORLD_PLACEMENT_ROTATE_COMMAND_ID = 'world.placement.rotate';
+export const COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID = 'studio.material.select';
+export const COLOR_STUDIO_VARIANT_SELECT_COMMAND_ID = 'studio.variant.select';
+export const COLOR_STUDIO_SEED_ROLL_COMMAND_ID = 'studio.seed.roll';
+export const COLOR_STUDIO_QUALITY_SELECT_COMMAND_ID = 'studio.quality.select';
+export const COLOR_STUDIO_SLOT_SELECT_COMMAND_ID = 'studio.slot.select';
+export const COLOR_STUDIO_VIEW_SELECT_COMMAND_ID = 'studio.view.select';
+export const COLOR_STUDIO_COLOR_SELECT_COMMAND_ID = 'studio.color.select';
+export const COLOR_STUDIO_SLOT_FILL_COMMAND_ID = 'material.slot.fill';
+export const COLOR_STUDIO_SLOTS_RESET_COMMAND_ID = 'material.slots.reset';
+export const COLOR_STUDIO_PALETTE_ADD_COMMAND_ID = 'studio.palette.add';
+export const COLOR_STUDIO_PALETTE_LOAD_COMMAND_ID = 'studio.palette.load';
+export const COLOR_STUDIO_UNDO_COMMAND_ID = 'studio.history.undo';
+export const COLOR_STUDIO_REDO_COMMAND_ID = 'studio.history.redo';
+export const COLOR_STUDIO_CHOICE_COMMAND_IDS = [
+  COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
+  COLOR_STUDIO_VARIANT_SELECT_COMMAND_ID,
+  COLOR_STUDIO_SEED_ROLL_COMMAND_ID,
+  COLOR_STUDIO_QUALITY_SELECT_COMMAND_ID,
+  COLOR_STUDIO_SLOT_SELECT_COMMAND_ID,
+  COLOR_STUDIO_VIEW_SELECT_COMMAND_ID,
+  COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
+] as const;
+export const COLOR_STUDIO_ACTION_COMMAND_IDS = [
+  COLOR_STUDIO_SLOT_FILL_COMMAND_ID,
+  COLOR_STUDIO_SLOTS_RESET_COMMAND_ID,
+  COLOR_STUDIO_PALETTE_ADD_COMMAND_ID,
+  COLOR_STUDIO_PALETTE_LOAD_COMMAND_ID,
+] as const;
 export { WORLD_PIECES_PLACE_COMMAND_ID } from '../world/piecePlacementCommand';
 export {
   WORLD_PIECE_DELETE_COMMAND_ID,
@@ -133,6 +180,21 @@ export type WorldPlacementRotateResult = {
   armedPieceId: string;
 };
 
+export type ColorStudioActionResult = {
+  plan: ColorStudioActionPlan;
+  applyStartedAtMs: number;
+  appliedAtMs: number;
+  applyMs: number;
+};
+
+export type ColorStudioHistoryControlResult = {
+  direction: 'undo' | 'redo';
+  label: string;
+  actionId: string;
+  commandId: string;
+  transaction: ColorStudioHistoryEntry['transaction'];
+};
+
 export interface EditorPlacementAdapter {
   read(): PiecePlacementWorld;
   policy: PiecePlacementPolicy;
@@ -174,6 +236,20 @@ export interface EditorHistoryAdapter {
   commitRedo(): WorldHistoryControlResult;
 }
 
+export interface EditorColorStudioAdapter {
+  read(): ColorStudioSnapshot;
+  policy: ColorStudioPolicy;
+  now(): number;
+  commitChoice(result: ColorStudioChoiceResult): void;
+  commitAction(plan: ColorStudioActionPlan, actionId: string, applyStartedAtMs: number): number;
+  history: {
+    peekUndo(): ColorStudioHistoryEntry | null;
+    peekRedo(): ColorStudioHistoryEntry | null;
+    commitUndo(): ColorStudioHistoryControlResult;
+    commitRedo(): ColorStudioHistoryControlResult;
+  };
+}
+
 /** The smallest privileged surface needed by the migrated world-command slice. It is
  * deliberately not a React setter: the composition root owns how the one
  * committed result becomes the current read-only snapshot. */
@@ -190,6 +266,7 @@ export interface EditorCommandAdapter {
   pieceEdit: EditorPieceEditAdapter;
   pieceMaterial: EditorPieceMaterialAdapter;
   history: EditorHistoryAdapter;
+  colorStudio: EditorColorStudioAdapter;
 }
 
 export type EditorCommandRequest = Omit<CommandInvocation, 'invocationId'> & {
@@ -221,6 +298,33 @@ function noArgs(args: unknown) {
   return args == null || (typeof args === 'object' && !Array.isArray(args) && Object.keys(args).length === 0)
     ? { ok: true as const, value: {} }
     : { ok: false as const, reason: 'command takes no arguments' };
+}
+
+function studioFailure(error: unknown): { ok: false; reason: string } {
+  const reason = error instanceof ColorStudioRejected
+    ? `${error.code}: ${error.message}`
+    : ((error as Error)?.message || 'Color Studio validation failed');
+  return { ok: false, reason };
+}
+
+function studioRecord(args: unknown): Record<string, unknown> {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    throw new ColorStudioRejected('INVALID_ARGS', 'command arguments must be an object');
+  }
+  return args as Record<string, unknown>;
+}
+
+function studioPlan<Result>(planner: () => Result) {
+  try { return { ok: true as const, value: planner() }; }
+  catch (error) { return studioFailure(error); }
+}
+
+export function isColorStudioChoiceCommandId(id: string): id is typeof COLOR_STUDIO_CHOICE_COMMAND_IDS[number] {
+  return (COLOR_STUDIO_CHOICE_COMMAND_IDS as readonly string[]).includes(id);
+}
+
+export function isColorStudioActionCommandId(id: string): id is typeof COLOR_STUDIO_ACTION_COMMAND_IDS[number] {
+  return (COLOR_STUDIO_ACTION_COMMAND_IDS as readonly string[]).includes(id);
 }
 
 const WORLD_TOOL_DEFS: readonly {
@@ -600,6 +704,233 @@ export function createEditorApplicationCommands(
       return adapter.history.peekRedo() ? true : { enabled: false, reason: 'nothing to redo on the world' };
     },
   }, () => adapter.history.commitRedo());
+
+  const authoringSurfaceEnabled = () => {
+    const blocked = adapter.blockedReason();
+    if (blocked) return { enabled: false, reason: `resolve ${blocked} first` };
+    const surface = adapter.activeSurface();
+    return surface === 'world' || surface === 'model' || surface === 'material'
+      ? true
+      : { enabled: false, reason: 'only on an authoring surface' };
+  };
+  const materialSurfaceEnabled = () => {
+    const enabled = authoringSurfaceEnabled();
+    if (enabled !== true) return enabled;
+    return adapter.activeSurface() === 'material'
+      ? true
+      : { enabled: false, reason: 'only in Color Studio' };
+  };
+  const commitChoice = (result: ColorStudioChoiceResult): ColorStudioChoiceResult => {
+    if (result.changed) adapter.colorStudio.commitChoice(result);
+    return result;
+  };
+  const commitStudioAction = (plan: ColorStudioActionPlan, actionId: string): ColorStudioActionResult => {
+    const applyStartedAtMs = adapter.colorStudio.now();
+    const committedAtMs = adapter.colorStudio.commitAction(plan, actionId, applyStartedAtMs);
+    const appliedAtMs = Number.isFinite(committedAtMs) ? Math.max(applyStartedAtMs, committedAtMs) : applyStartedAtMs;
+    return { plan, applyStartedAtMs, appliedAtMs, applyMs: Math.max(0, appliedAtMs - applyStartedAtMs) };
+  };
+
+  registry.register<ColorStudioChoiceResult, ColorStudioChoiceResult>({
+    id: COLOR_STUDIO_MATERIAL_SELECT_COMMAND_ID,
+    label: 'Select Color Studio Material',
+    icon: 'SwatchBook',
+    effect: 'report-only',
+    undoScope: 'none',
+    projections: { hiddenReason: 'projected by material cards and paint-ink handoffs' },
+    validateArgs: (args) => studioPlan(() => {
+      const value = studioRecord(args);
+      if (typeof value.specId !== 'string') throw new ColorStudioRejected('INVALID_MATERIAL', 'material id is required');
+      return planMaterialChoice(adapter.colorStudio.read(), value.specId, adapter.colorStudio.policy, (value.variant ?? 0) as number);
+    }),
+    isEnabled: authoringSurfaceEnabled,
+  }, ({ args }) => commitChoice(args));
+
+  registry.register<ColorStudioChoiceResult, ColorStudioChoiceResult>({
+    id: COLOR_STUDIO_VARIANT_SELECT_COMMAND_ID,
+    label: 'Select Material Variant',
+    icon: 'Layers3',
+    effect: 'report-only',
+    undoScope: 'none',
+    projections: { hiddenReason: 'projected by Color Studio variant segments' },
+    validateArgs: (args) => studioPlan(() => {
+      const value = studioRecord(args);
+      return planVariantChoice(adapter.colorStudio.read(), value.variant as number, adapter.colorStudio.policy);
+    }),
+    isEnabled: materialSurfaceEnabled,
+  }, ({ args }) => commitChoice(args));
+
+  registry.register<ColorStudioChoiceResult, ColorStudioChoiceResult>({
+    id: COLOR_STUDIO_SEED_ROLL_COMMAND_ID,
+    label: 'Roll Material Seed',
+    icon: 'Dices',
+    effect: 'report-only',
+    undoScope: 'none',
+    projections: { hiddenReason: 'projected by the Color Studio seed control' },
+    validateArgs: (args) => {
+      const valid = noArgs(args);
+      return valid.ok ? studioPlan(() => planSeedRoll(adapter.colorStudio.read(), adapter.colorStudio.policy)) : valid;
+    },
+    isEnabled: materialSurfaceEnabled,
+  }, ({ args }) => commitChoice(args));
+
+  registry.register<ColorStudioChoiceResult, ColorStudioChoiceResult>({
+    id: COLOR_STUDIO_QUALITY_SELECT_COMMAND_ID,
+    label: 'Select Material Quality',
+    icon: 'Gauge',
+    effect: 'report-only',
+    undoScope: 'none',
+    projections: { hiddenReason: 'projected by Color Studio quality segments' },
+    validateArgs: (args) => studioPlan(() => {
+      const value = studioRecord(args);
+      return planQualityChoice(adapter.colorStudio.read(), value.quality as number, adapter.colorStudio.policy);
+    }),
+    isEnabled: materialSurfaceEnabled,
+  }, ({ args }) => commitChoice(args));
+
+  registry.register<ColorStudioChoiceResult, ColorStudioChoiceResult>({
+    id: COLOR_STUDIO_SLOT_SELECT_COMMAND_ID,
+    label: 'Select Material Slot',
+    icon: 'Pipette',
+    effect: 'report-only',
+    undoScope: 'none',
+    projections: { hiddenReason: 'projected by the Color Studio slot grid' },
+    validateArgs: (args) => studioPlan(() => {
+      const value = studioRecord(args);
+      return planSlotChoice(adapter.colorStudio.read(), value.slot as number, adapter.colorStudio.policy);
+    }),
+    isEnabled: materialSurfaceEnabled,
+  }, ({ args }) => commitChoice(args));
+
+  registry.register<ColorStudioChoiceResult, ColorStudioChoiceResult>({
+    id: COLOR_STUDIO_VIEW_SELECT_COMMAND_ID,
+    label: 'Select Color Studio View',
+    icon: 'PanelTop',
+    effect: 'report-only',
+    undoScope: 'none',
+    projections: { hiddenReason: 'projected by Color Studio view tabs' },
+    validateArgs: (args) => studioPlan(() => {
+      const value = studioRecord(args);
+      return planViewChoice(adapter.colorStudio.read(), value.view);
+    }),
+    isEnabled: materialSurfaceEnabled,
+  }, ({ args }) => commitChoice(args));
+
+  registry.register<ColorStudioChoiceResult, ColorStudioChoiceResult>({
+    id: COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
+    label: 'Select Current Paint Color',
+    icon: 'Palette',
+    effect: 'report-only',
+    undoScope: 'none',
+    projections: { hiddenReason: 'projected once when a paint-bucket color gesture settles' },
+    validateArgs: (args) => studioPlan(() => {
+      const value = studioRecord(args);
+      return planCurrentColorChoice(adapter.colorStudio.read(), value.color, value.source, value.scenePick);
+    }),
+    isEnabled: authoringSurfaceEnabled,
+  }, ({ args }) => commitChoice(args));
+
+  registry.register<ColorStudioActionPlan, ColorStudioActionResult>({
+    id: COLOR_STUDIO_SLOT_FILL_COMMAND_ID,
+    label: 'Fill Material Slot',
+    icon: 'PaintBucket',
+    effect: 'action',
+    undoScope: { kind: 'workspace', key: 'color-studio' },
+    projections: { toolbar: ['E.color-studio'], palette: true },
+    validateArgs: (args) => studioPlan(() => {
+      const value = studioRecord(args);
+      return planSlotFill(adapter.colorStudio.read(), {
+        specId: value.specId,
+        variant: value.variant,
+        slot: value.slot,
+        rgb: value.rgb,
+        source: value.source,
+      }, adapter.colorStudio.policy);
+    }),
+    isEnabled: materialSurfaceEnabled,
+  }, ({ args, actionId, invocationId }) => commitStudioAction(args, actionId ?? invocationId));
+
+  registry.register<ColorStudioActionPlan, ColorStudioActionResult>({
+    id: COLOR_STUDIO_SLOTS_RESET_COMMAND_ID,
+    label: 'Reset Material Slots',
+    icon: 'RotateCcw',
+    effect: 'action',
+    undoScope: { kind: 'workspace', key: 'color-studio' },
+    projections: { toolbar: ['E.color-studio'], palette: true },
+    validateArgs: (args) => studioPlan(() => {
+      const value = studioRecord(args);
+      return planSlotsReset(adapter.colorStudio.read(), {
+        specId: value.specId,
+        variant: value.variant,
+      }, adapter.colorStudio.policy);
+    }),
+    isEnabled: materialSurfaceEnabled,
+  }, ({ args, actionId, invocationId }) => commitStudioAction(args, actionId ?? invocationId));
+
+  registry.register<ColorStudioActionPlan, ColorStudioActionResult>({
+    id: COLOR_STUDIO_PALETTE_ADD_COMMAND_ID,
+    label: 'Add Current Color to Tray',
+    icon: 'Plus',
+    effect: 'action',
+    undoScope: { kind: 'workspace', key: 'color-studio' },
+    projections: { hiddenReason: 'projected by the shared paint bucket tray control' },
+    validateArgs: (args) => studioPlan(() => {
+      const value = studioRecord(args);
+      return planPaletteAdd(adapter.colorStudio.read(), { color: value.color, source: value.source });
+    }),
+    isEnabled: authoringSurfaceEnabled,
+  }, ({ args, actionId, invocationId }) => commitStudioAction(args, actionId ?? invocationId));
+
+  registry.register<ColorStudioActionPlan, ColorStudioActionResult>({
+    id: COLOR_STUDIO_PALETTE_LOAD_COMMAND_ID,
+    label: 'Load Palette Set',
+    icon: 'Library',
+    effect: 'action',
+    undoScope: { kind: 'workspace', key: 'color-studio' },
+    projections: { hiddenReason: 'projected by the shared paint bucket library rows' },
+    validateArgs: (args) => studioPlan(() => {
+      const value = studioRecord(args);
+      return planPaletteLoad(adapter.colorStudio.read(), { colors: value.colors, setName: value.setName });
+    }),
+    isEnabled: authoringSurfaceEnabled,
+  }, ({ args, actionId, invocationId }) => commitStudioAction(args, actionId ?? invocationId));
+
+  registry.register<{}, ColorStudioHistoryControlResult>({
+    id: COLOR_STUDIO_UNDO_COMMAND_ID,
+    label: 'Undo Color Studio Action',
+    icon: 'Undo2',
+    effect: 'control',
+    undoScope: { kind: 'workspace', key: 'color-studio' },
+    outcomePhase: 'undone',
+    projections: { menu: ['Edit'], toolbar: ['H.history'], palette: true },
+    keybindings: [{ chord: 'Ctrl+Z', when: { surface: 'material' } }],
+    validateArgs: noArgs,
+    isEnabled: () => {
+      const enabled = materialSurfaceEnabled();
+      if (enabled !== true) return enabled;
+      return adapter.colorStudio.history.peekUndo() ? true : { enabled: false, reason: 'nothing to undo in Color Studio' };
+    },
+  }, () => adapter.colorStudio.history.commitUndo());
+
+  registry.register<{}, ColorStudioHistoryControlResult>({
+    id: COLOR_STUDIO_REDO_COMMAND_ID,
+    label: 'Redo Color Studio Action',
+    icon: 'Redo2',
+    effect: 'control',
+    undoScope: { kind: 'workspace', key: 'color-studio' },
+    outcomePhase: 'redone',
+    projections: { menu: ['Edit'], toolbar: ['H.history'], palette: true },
+    keybindings: [
+      { chord: 'Ctrl+Shift+Z', when: { surface: 'material' } },
+      { chord: 'Ctrl+Y', when: { surface: 'material' } },
+    ],
+    validateArgs: noArgs,
+    isEnabled: () => {
+      const enabled = materialSurfaceEnabled();
+      if (enabled !== true) return enabled;
+      return adapter.colorStudio.history.peekRedo() ? true : { enabled: false, reason: 'nothing to redo in Color Studio' };
+    },
+  }, () => adapter.colorStudio.history.commitRedo());
 
   const authority = new CommandAuthority(registry, { outcomeSink });
   return Object.freeze({
