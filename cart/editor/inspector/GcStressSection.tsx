@@ -12,16 +12,21 @@
 //   HEAP  — retained-heap climber: grows a live object graph ~120MB over a
 //           few seconds, drops it, climbs again. Provokes repeated major
 //           (mark-sweep) collections, the expensive GC class.
-//   ALL   — all three at once.
+//   MARKET— the real framework/sim shitcoin hot path via __zig_call('sim',…):
+//           tick at 60Hz (4x game speed), drain the trade tape every tick,
+//           snapshot 256 token prices at ~10Hz, render a live ticker. The
+//           "market sim + world + UI at once" case that was never tried.
+//   ALL   — everything at once.
 //
 // Verdict channel: feel (does driving/walking hitch?) + the console — v8_app's
 // [apptick-split] line prints whenever a tick exceeds 40ms and names the GC ms
 // inside it. Everything here is component-local; unmount stops all torture.
 import { useEffect, useRef, useState } from 'react';
 import { Box } from '@reactjit/runtime/primitives';
+import { subscribe } from '../../../runtime/ffi';
 import { C, accentFor } from '../workspace.cls';
 
-type StressMode = 'idle' | 'alloc' | 'react' | 'heap' | 'all';
+type StressMode = 'idle' | 'alloc' | 'react' | 'heap' | 'market' | 'all';
 
 const STRESS_TUNING = {
   allocTickMs: 10,          // cadence of the short-lived garbage bursts
@@ -33,9 +38,21 @@ const STRESS_TUNING = {
   heapObjectsPerTick: 40_000,
   heapReleaseAtObjects: 1_500_000, // ~120MB live, then drop and climb again
   statusTickMs: 100,        // status-row refresh (itself mild churn, on purpose)
+  marketTickMs: 16,         // sim tick cadence (60Hz)
+  marketDtMs: 64,           // dt per tick → 4x game speed
+  marketSnapshotEvery: 6,   // price-snapshot cadence in ticks (~10Hz, 256 rows each)
+  marketTickerRows: 10,     // live ticker rows rendered while running
   runSeconds: 30,
   runSecondsAll: 60,
 } as const;
+
+const PATTERN_NAMES = ['crab', 'pump', 'dump', 'up', 'down', 'vol', 'rug'] as const;
+
+// framework/sim via the zigcall module table (v8_bindings_zigcall.zig row "sim").
+function simCall(fn: string, ...args: unknown[]): any {
+  const call = (globalThis as any).__zig_call;
+  return call ? call('sim', fn, ...args) : null;
+}
 
 export default function GcStressSection() {
   const [mode, setMode] = useState<StressMode>('idle');
@@ -49,6 +66,18 @@ export default function GcStressSection() {
   const retained = useRef<Array<{ a: number; b: string }>>([]);
   const heapCycles = useRef(0);
   const reactFrames = useRef(0);
+  const tapeDrained = useRef(0);
+  const simTicks = useRef(0);
+  const tokenSyms = useRef<Record<number, string>>({});
+  const tickerRows = useRef<Array<{ id: number; price: number; pat: number; rug: number; vol: number }>>([]);
+
+  // Symbol names arrive once via the sim's `sim:tokens` init emit.
+  useEffect(() => subscribe('sim:tokens', (payload) => {
+    try {
+      const rows = typeof payload === 'string' ? JSON.parse(payload) : payload;
+      for (const r of rows as Array<{ id: number; sym: string }>) tokenSyms.current[r.id] = r.sym;
+    } catch { /* stress rig — symbol names are cosmetic */ }
+  }), []);
 
   const stop = () => {
     for (const id of intervals.current) clearInterval(id);
@@ -85,6 +114,26 @@ export default function GcStressSection() {
         reactFrames.current += 1;
         setReactFrame((f) => f + 1);
       }, STRESS_TUNING.reactTickMs) as unknown as number);
+    }
+
+    if (next === 'market' || next === 'all') {
+      tapeDrained.current = 0;
+      simTicks.current = 0;
+      arm(setInterval(() => {
+        simCall('tick', STRESS_TUNING.marketDtMs);
+        const drained = simCall('drain_tape', 128);
+        if (Array.isArray(drained)) tapeDrained.current += drained.length;
+        simTicks.current += 1;
+        if (simTicks.current % STRESS_TUNING.marketSnapshotEvery === 0) {
+          const prices = simCall('snapshot_prices');
+          if (Array.isArray(prices)) {
+            tickerRows.current = (prices as Array<{ id: number; price: number; pat: number; rug: number; volume_usd: number }>)
+              .map((p) => ({ id: p.id, price: p.price, pat: p.pat, rug: p.rug, vol: p.volume_usd }))
+              .sort((a, b) => b.vol - a.vol)
+              .slice(0, STRESS_TUNING.marketTickerRows);
+          }
+        }
+      }, STRESS_TUNING.marketTickMs) as unknown as number);
     }
 
     if (next === 'heap' || next === 'all') {
@@ -134,6 +183,7 @@ export default function GcStressSection() {
         {modeButton('heap', 'HEAP')}
       </C.HW_ButtonRow>
       <C.HW_ButtonRow>
+        {modeButton('market', 'MARKET')}
         {modeButton('all', `ALL ${STRESS_TUNING.runSecondsAll}S`)}
         <C.HW_SmallButton onPress={stop}>
           <C.HW_PillText>STOP</C.HW_PillText>
@@ -157,6 +207,20 @@ export default function GcStressSection() {
         <C.HW_FormLabel>react</C.HW_FormLabel>
         <C.HW_ReadValue>{`${reactFrames.current} churn frames`}</C.HW_ReadValue>
       </C.HW_ReadRow>
+      <C.HW_ReadRow>
+        <C.HW_FormLabel>market</C.HW_FormLabel>
+        <C.HW_ReadValue>
+          {`${tapeDrained.current} trades · ${elapsedS > 0 ? Math.round(tapeDrained.current / elapsedS) : 0}/s`}
+        </C.HW_ReadValue>
+      </C.HW_ReadRow>
+      {(mode === 'market' || mode === 'all') && tickerRows.current.map((row, i) => (
+        <C.HW_ReadRow key={`ticker-${i}`}>
+          <C.HW_FormLabel>{tokenSyms.current[row.id] ?? `T${row.id}`}</C.HW_FormLabel>
+          <C.HW_ReadValue style={{ color: row.rug ? accentFor('error') : accentFor('textSecondary') }}>
+            {`${row.price >= 1 ? row.price.toFixed(2) : row.price.toPrecision(3)} · ${PATTERN_NAMES[row.pat] ?? '?'} · $${Math.round(row.vol / 1000)}k`}
+          </C.HW_ReadValue>
+        </C.HW_ReadRow>
+      ))}
       {(mode === 'react' || mode === 'all') && (
         <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3, paddingLeft: 12, paddingRight: 12, paddingTop: 6 }}>
           {Array.from({ length: STRESS_TUNING.reactChipCount }, (_, i) => (
