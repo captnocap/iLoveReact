@@ -3738,9 +3738,10 @@ pub fn modelGlassFirstVertex() u32 {
 /// Solidify the selected faces (face mode) IN PLACE: an inner skin offset by the
 /// selected AUTHORED face planes plus wall quads around the selection's boundary edges.
 /// Render triangles sharing a quad/ngon group collapse to one plane before the inset is
-/// solved, so triangulation diagonals cannot skew the shell. New triangles inherit their
-/// source face's authored group (inner skin picks/paints with its outer face) and colour,
-/// so part ranges are untouched. Thickness in meters; <= 0 uses the studio default 2/16.
+/// solved, so triangulation diagonals cannot skew the shell.  New logical faces mint
+/// fresh authored identities (one inner cap per source face, one per wall quad), while
+/// retaining their source colour and part ownership. Thickness in meters; <= 0 uses the
+/// studio default 2/16.
 pub fn meshSolidifySelection(thickness_raw: f32) bool {
     if (!model_paint.hasTarget()) return false;
     if (mesh_edit.mode() != .face) return false;
@@ -3755,6 +3756,11 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     const t: f32 = if (thickness_raw > 1e-5) thickness_raw else mesh_edit.SolidifyTuning.default_thickness_m;
 
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
+    const cur_groups: ?[]u32 = if (has_groups) captureFaceGroups() else null;
+    defer if (cur_groups) |g| jalloc.free(g);
+    const base_part = capturePartOfFaces();
+    defer if (base_part) |p| jalloc.free(p);
+    const part_count = hostPartCount();
 
     // Selected render triangles are reduced to authored planes by mesh_edit's deep
     // solidify boundary. Keeping that reduction outside this host orchestration is the
@@ -3811,6 +3817,11 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     defer add_groups.deinit(jalloc);
     var add_colors = std.ArrayListUnmanaged(u8){};
     defer add_colors.deinit(jalloc);
+    var add_part = std.ArrayListUnmanaged(u32){};
+    defer add_part.deinit(jalloc);
+    var next_group: u32 = if (has_groups) nextFreeGroupId(cur_groups.?) else 0;
+    var inner_groups = std.AutoHashMapUnmanaged(u32, u32){};
+    defer inner_groups.deinit(jalloc);
 
     // Inner skin: one reversed, offset triangle per selected face (group + colour inherit).
     f = 0;
@@ -3826,9 +3837,17 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
             p[k] = .{ p[k][0] + off[0], p[k][1] + off[1], p[k][2] + off[2] };
         }
         if (!appendTri(&out, p[0], p[2], p[1])) return false;
-        if (has_groups) add_groups.append(jalloc, model_source.faceGroupOf(f)) catch return false;
+        if (has_groups) {
+            const gop = inner_groups.getOrPut(jalloc, model_source.faceGroupOf(f)) catch return false;
+            if (!gop.found_existing) {
+                gop.value_ptr.* = next_group;
+                next_group += 1;
+            }
+            add_groups.append(jalloc, gop.value_ptr.*) catch return false;
+        }
         const c = trueFaceColor(f);
         add_colors.appendSlice(jalloc, c[0..]) catch return false;
+        if (base_part) |bp| add_part.append(jalloc, bp[f]) catch return false;
     }
     // Rim walls on the selection's boundary edges (incident to exactly ONE selected face).
     var it = euse.iterator();
@@ -3845,18 +3864,22 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         // Edge a→b runs in the face's winding, so (a, ai, bi, b) faces outward.
         if (!appendQuadSplit(&out, a, ai, bi, b)) return false;
         if (has_groups) {
-            add_groups.append(jalloc, model_source.faceGroupOf(fa)) catch return false;
-            add_groups.append(jalloc, model_source.faceGroupOf(fa)) catch return false;
+            const wall_group = next_group;
+            next_group += 1;
+            add_groups.append(jalloc, wall_group) catch return false;
+            add_groups.append(jalloc, wall_group) catch return false;
         }
         const c = trueFaceColor(fa);
         add_colors.appendSlice(jalloc, c[0..]) catch return false;
         add_colors.appendSlice(jalloc, c[0..]) catch return false;
+        if (base_part) |bp| {
+            add_part.append(jalloc, bp[fa]) catch return false;
+            add_part.append(jalloc, bp[fa]) catch return false;
+        }
     }
 
     var snap = journalSnapshotCurrent("solidify faces");
     mesh_edit.clearSelection();
-    const cur_groups: ?[]u32 = if (has_groups) captureFaceGroups() else null;
-    defer if (cur_groups) |g| jalloc.free(g);
     const first_new_face = tri_count;
     const new_count: u32 = @intCast(out.items.len / 8);
     if (!replaceActiveEditMesh(out.items, new_count)) {
@@ -3869,6 +3892,19 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         for (cur_groups.?) |g| all_groups.append(jalloc, g) catch {};
         for (add_groups.items) |g| all_groups.append(jalloc, g) catch {};
         model_source.setFaceGroups(all_groups.items);
+        // Fresh ids must join the source part's contiguous interval; preserve each
+        // output face's pre-solidify owner while re-numbering the whole partition.
+        if (base_part) |bp| {
+            const face_part = jalloc.alloc(u32, new_count / 3) catch null;
+            if (face_part) |fp| {
+                defer jalloc.free(fp);
+                var old_face: u32 = 0;
+                while (old_face < tri_count) : (old_face += 1) fp[old_face] = bp[old_face];
+                var new_face: u32 = 0;
+                while (new_face < add_part.items.len) : (new_face += 1) fp[tri_count + new_face] = add_part.items[new_face];
+                renormalizePartRanges(fp, part_count);
+            }
+        }
     }
     // The added skin/walls take their source face's colour.
     var i: u32 = 0;
