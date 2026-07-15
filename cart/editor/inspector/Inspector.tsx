@@ -19,6 +19,7 @@ import RigSection from './RigSection';
 import { skeletonToPropRig, type PropRig } from '../../../runtime/skeleton';
 import PieceBody from './PieceBody';
 import GlobalsSection from './GlobalsSection';
+import GcStressSection from './GcStressSection';
 import PresetSection from './PresetSection';
 import ModelDetailBody from '../library/ModelDetailBody';
 import ModelBrushDock, { type ColorSpineHandlers } from './ModelBrushDock';
@@ -352,6 +353,7 @@ export default function Inspector(props: {
               onSet={props.onSetGlobal}
               onReset={props.onResetGlobal}
             />
+            <GcStressSection />
           </C.HW_InspectorBody>
         </C.HW_Inspector>
         <FocusRail activePane={props.state.rightPane} onPane={props.onPane} />
