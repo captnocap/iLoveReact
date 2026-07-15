@@ -19,8 +19,8 @@ declare global {
   function __model_orbit_zoom(...args: unknown[]): unknown;
   function __model_orbit_pan(...args: unknown[]): unknown;
   function __model_orbit_lock(...args: unknown[]): unknown;
-  function __model_cam_store(...args: unknown[]): unknown;
-  function __model_cam_recall(...args: unknown[]): unknown;
+  function __model_cam_pose(...args: unknown[]): unknown;
+  function __model_cam_set_pose(...args: unknown[]): unknown;
   function __model_session_json(...args: unknown[]): unknown;
   function __model_focus_at(...args: unknown[]): unknown;
   function __mesh_edit_mode(...args: unknown[]): unknown;

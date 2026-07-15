@@ -493,19 +493,28 @@ fn hostModelOrbitLock(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     scene3d.orbitSetLocked(on);
 }
 
-/// __model_cam_store() — bookmark the current mesh-editor orbit pose (req_3067), so the
-/// exact working angle+distance survives the stray drags and double-click focuses that
-/// otherwise make it unrecoverable by hand.
-fn hostModelCamStore(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    _ = v8.FunctionCallbackInfo.initFromV8(info_c);
-    scene3d.orbitStoreView();
+/// __model_cam_pose() → "[yaw,pitch,dist,tx,ty,tz]" — read the mesh-editor orbit pose.
+/// The cart's view-bookmark list (req_3067/req_3074) stores these; the host stays the
+/// pose authority, the list stays authored data.
+fn hostModelCamPose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const p = scene3d.orbitPose();
+    var buf: [160]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "[{d},{d},{d},{d},{d},{d}]", .{ p[0], p[1], p[2], p[3], p[4], p[5] }) catch return;
+    setReturnString(info, json);
 }
 
-/// __model_cam_recall() → 1|0 — return the orbit camera to the bookmarked pose. 0 when
-/// nothing is stored or the camera lock (req_2893) holds the view.
-fn hostModelCamRecall(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+/// __model_cam_set_pose(yaw, pitch, dist, tx, ty, tz) → 1|0 — jump the orbit camera to
+/// a bookmarked pose. 0 when the camera lock (req_2893) holds the view.
+fn hostModelCamSetPose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const ok = scene3d.orbitRecallView();
+    const yaw: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const pitch: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const dist: f32 = @floatCast(argToF64(info, 2) orelse 0);
+    const tx: f32 = @floatCast(argToF64(info, 3) orelse 0);
+    const ty: f32 = @floatCast(argToF64(info, 4) orelse 0);
+    const tz: f32 = @floatCast(argToF64(info, 5) orelse 0);
+    const ok = scene3d.orbitSetPose(yaw, pitch, dist, .{ tx, ty, tz });
     if (ok) state.markDirty();
     setReturnNumber(info, if (ok) 1 else 0);
 }
@@ -2805,8 +2814,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_orbit_zoom", hostModelOrbitZoom);
     v8_runtime.registerHostFn("__model_orbit_pan", hostModelOrbitPan);
     v8_runtime.registerHostFn("__model_orbit_lock", hostModelOrbitLock);
-    v8_runtime.registerHostFn("__model_cam_store", hostModelCamStore);
-    v8_runtime.registerHostFn("__model_cam_recall", hostModelCamRecall);
+    v8_runtime.registerHostFn("__model_cam_pose", hostModelCamPose);
+    v8_runtime.registerHostFn("__model_cam_set_pose", hostModelCamSetPose);
     v8_runtime.registerHostFn("__model_session_json", hostModelSessionJson);
     v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
     v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);

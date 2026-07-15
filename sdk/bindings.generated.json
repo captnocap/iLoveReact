@@ -73,12 +73,12 @@
           "zig": "hostModelOrbitLock"
         },
         {
-          "js": "__model_cam_store",
-          "zig": "hostModelCamStore"
+          "js": "__model_cam_pose",
+          "zig": "hostModelCamPose"
         },
         {
-          "js": "__model_cam_recall",
-          "zig": "hostModelCamRecall"
+          "js": "__model_cam_set_pose",
+          "zig": "hostModelCamSetPose"
         },
         {
           "js": "__model_session_json",

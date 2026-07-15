@@ -392,27 +392,25 @@ pub fn orbitSetLocked(on: bool) void {
     g_orbit.locked = on;
 }
 
-// Saved view (req_3067): one bookmarked orbit pose — a double-click focus or a stray
-// drag makes the exact working angle+distance unrecoverable by hand, so the user pins
-// it and jumps back. In-process like the rest of the camera: survives hot reloads,
-// resets with the view on a cold start.
-var g_orbit_saved: ?Orbit = null;
+// View bookmarks (req_3067/req_3074): the host's job is the POSE — read it out, apply
+// one back. The bookmark LIST is authored data and lives cart-side (ModelView state +
+// hot twig), where naming/removal/ordering belong. This replaced the one-slot
+// store/recall doors the moment the user wanted more than one pin.
 
-/// Bookmark the current orbit pose (`__model_cam_store`).
-pub fn orbitStoreView() void {
-    g_orbit_saved = g_orbit;
+/// Read the orbit pose (`__model_cam_pose`): yaw, pitch, dist, target xyz.
+pub fn orbitPose() [6]f32 {
+    return .{ g_orbit.yaw, g_orbit.pitch, g_orbit.dist, g_orbit.target[0], g_orbit.target[1], g_orbit.target[2] };
 }
-/// Return the camera to the bookmarked pose (`__model_cam_recall`). False when nothing
-/// is stored or the camera is locked — recall is a camera motion like any other, so the
-/// req_2893 lock gates it too. radius/framed/locked stay live: they belong to the
-/// current model/session, not the view.
-pub fn orbitRecallView() bool {
+/// Apply a bookmarked orbit pose (`__model_cam_set_pose`). False under the req_2893
+/// lock — applying a bookmark is a camera motion like any other. radius/framed/locked
+/// stay live: they belong to the current model/session, not the view. Inputs are
+/// clamped like the drag path so a hand-edited twig can never wedge the camera.
+pub fn orbitSetPose(yaw: f32, pitch: f32, dist: f32, target: [3]f32) bool {
     if (g_orbit.locked) return false;
-    const saved = g_orbit_saved orelse return false;
-    g_orbit.yaw = saved.yaw;
-    g_orbit.pitch = saved.pitch;
-    g_orbit.dist = saved.dist;
-    g_orbit.target = saved.target;
+    g_orbit.yaw = yaw;
+    g_orbit.pitch = std.math.clamp(pitch, -ORBIT_PITCH_LIM, ORBIT_PITCH_LIM);
+    g_orbit.dist = @max(0.01, dist);
+    g_orbit.target = target;
     return true;
 }
 

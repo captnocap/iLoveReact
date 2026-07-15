@@ -105,7 +105,18 @@ export type ModelFocusShape = {
   radius: number; // host bounding-sphere radius (load-time)
   center: [number, number, number] | null; // cart-side bounds center (primitive/studio loads only)
 };
-export type ModelFocusBridge = { uv: ModelFocusUv | null; paintLive: boolean; refreshUv: () => void; shape: ModelFocusShape | null };
+// View bookmarks on the bridge (req_3074): the focus panel lists them below the UV
+// card — row click recalls, the trash verb removes, the + verb pins the current view.
+export type ModelFocusBridge = {
+  uv: ModelFocusUv | null;
+  paintLive: boolean;
+  refreshUv: () => void;
+  shape: ModelFocusShape | null;
+  camMarks: { name: string; active: boolean }[];
+  camStore: () => void;
+  camRecallAt: (index: number) => void;
+  camRemoveAt: (index: number) => void;
+};
 // The handlers the viewer owns, handed out so an external surface can invoke
 // them. Same functions the floating buttons and hotkeys call — one owner, no
 // split-brain: the shell remote-controls; the viewer stays the source of truth.
@@ -120,9 +131,12 @@ export type ModelToolApi = {
   wire: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the orbit view host-side.
   camLock: () => void;
-  // Saved view (req_3067): bookmark the current orbit pose / jump the camera back to it.
+  // View bookmarks (req_3067/req_3074): pin the current orbit pose; camRecall (the H
+  // key) returns to the active one; the indexed pair drives the focus panel's list.
   camStore: () => void;
   camRecall: () => void;
+  camRecallAt: (index: number) => void;
+  camRemoveAt: (index: number) => void;
   extrudeEdge: () => void;
   extrudeFace: () => void;
   createFace: () => void;
@@ -331,8 +345,11 @@ const orbitSetLocked = (on: boolean) => host.__model_orbit_lock?.(on ? 1 : 0);
 const DOC_TWIG_KEY = 'editor:meshdoc:v1';
 const TOOL_TWIG_KEY = 'editor:meshtool:v1';
 type DocTwig = { docId: string; key: string };
+// A view bookmark (req_3067/req_3074): a named orbit pose, exactly what
+// __model_cam_pose read — [yaw, pitch, dist, target x/y/z].
+export type CamBookmark = { name: string; pose: number[] };
 type ToolTwig = {
-  wire: boolean; camLock: boolean; camSaved: boolean; gizmoTool: number; mirrorMask: number;
+  wire: boolean; camLock: boolean; camMarks: CamBookmark[]; camMark: number; gizmoTool: number; mirrorMask: number;
   brush: Brush; brushTool: BrushTool; palette: Palette; safety: number; detail: number;
   litFlat: boolean; litKey: boolean; litFill: boolean; paint: boolean;
 };
@@ -601,10 +618,13 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   const [paintMode, setPaintMode] = useState(false); // twig-restored in the boot effect (needs the atlas)
   const [focusMode, setFocusMode] = useState(false); // Focus tool: drag pans the pivot
   const [camLock, setCamLock] = useState(toolTwig?.camLock ?? false); // Camera lock (req_2893): view frozen where set
-  // Saved view (req_3067): whether a bookmarked orbit pose exists. The pose itself lives
-  // host-side (gpu/3d.zig g_orbit_saved) and survives hot reloads like the camera; this
-  // flag is the UI mirror, twig-restored so the Store button stays lit across reloads.
-  const [camSaved, setCamSaved] = useState(toolTwig?.camSaved ?? false);
+  // View bookmarks (req_3067/req_3074): named orbit poses the user pins and jumps back
+  // to. The HOST owns the pose verbs (__model_cam_pose/__model_cam_set_pose); this list
+  // is authored data — names, order, which one is active — twig-restored across hot
+  // reloads, reset (with the rest of the view state) on a cold start. camMark tracks
+  // the last stored/recalled bookmark: it's what the H key returns to.
+  const [camMarks, setCamMarks] = useState<CamBookmark[]>(toolTwig?.camMarks ?? []);
+  const [camMark, setCamMark] = useState(toolTwig?.camMark ?? -1);
   const [selMode, setSelMode] = useState(0); // 0 view · 1 vertex · 2 edge · 3 face
   const [gizmoTool, setGizmoTool] = useState(toolTwig?.gizmoTool ?? 0); // 0 move · 1 scale · 2 rotate
   // Live mirror editing (req_2758): enabled symmetry planes, bit 0/1/2 = X/Y/Z. The host
@@ -1108,17 +1128,41 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // hot-reloaded cart (fresh false state) re-syncs a host that was left locked.
   const toggleCamLock = () => setCamLock((v) => !v);
   useEffect(() => { orbitSetLocked(camLock); }, [camLock]);
-  // Saved view (req_3067): pin the current orbit pose host-side / jump back to it. The
-  // flag only tracks that a bookmark exists (lights the Store button); the pose truth
-  // stays in gpu/3d.zig with the rest of the camera.
-  const camStoreView = () => { host.__model_cam_store?.(); setCamSaved(true); };
-  const camRecallView = () => { host.__model_cam_recall?.(); };
+  // View bookmarks (req_3067/req_3074). Store reads the live pose through the host door
+  // and appends a named bookmark; a recall applies one back (the host refuses under the
+  // camera lock, matching every other motion). The action-bar Store button and the
+  // focus panel's + verb both land in camStoreView; the H key returns to the ACTIVE
+  // bookmark — the one last stored or clicked.
+  const camStoreView = () => {
+    const j = host.__model_cam_pose?.();
+    if (typeof j !== 'string' || !j) return;
+    let pose: number[];
+    try { pose = JSON.parse(j) as number[]; } catch { return; }
+    if (!Array.isArray(pose) || pose.length !== 6) return;
+    // Number past the highest existing "View N" so a removed bookmark's name is
+    // never silently reissued to a different pose.
+    const top = camMarks.reduce((n, m) => Math.max(n, Number(m.name.match(/^View (\d+)$/)?.[1] ?? 0)), 0);
+    setCamMarks([...camMarks, { name: `View ${top + 1}`, pose }]);
+    setCamMark(camMarks.length);
+  };
+  const camRecallAt = (index: number) => {
+    const mark = camMarks[index];
+    if (!mark) return;
+    const p = mark.pose;
+    host.__model_cam_set_pose?.(p[0], p[1], p[2], p[3], p[4], p[5]);
+    setCamMark(index);
+  };
+  const camRecallView = () => camRecallAt(camMark >= 0 && camMark < camMarks.length ? camMark : camMarks.length - 1);
+  const camRemoveAt = (index: number) => {
+    setCamMarks((marks) => marks.filter((_, i) => i !== index));
+    setCamMark((active) => (active === index ? -1 : active > index ? active - 1 : active));
+  };
 
   // Mirror the tool-holding state into its hot twig on every change (req_2898) —
   // cheap (one small JSON into the host map), and the next mount seeds from it.
   useEffect(() => {
-    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, camLock, camSaved, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
-  }, [wire, camLock, camSaved, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
+    setHotState<ToolTwig>(TOOL_TWIG_KEY, { wire, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paint: paintMode });
+  }, [wire, camLock, camMarks, camMark, gizmoTool, mirrorMask, brush, brushTool, palette, safety, detail, litFlat, litKey, litFill, paintMode]);
 
   // Stamp which document owns the host's resident mesh, under its CURRENT key —
   // topology ops re-key the mesh, so this tracks every adopt. The next mount
@@ -1235,6 +1279,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     camLock: toggleCamLock,
     camStore: camStoreView,
     camRecall: camRecallView,
+    camRecallAt,
+    camRemoveAt,
     extrudeEdge: () => { if (model) applyTopo(meshExtrudeEdge(model.radius * 0.08), 'Select exactly one edge to extrude'); },
     extrudeFace: () => { if (model) applyTopo(meshExtrudeFace(model.radius * 0.08), 'Select exactly one face to extrude'); },
     createFace: () => applyTopo(meshCreateFace(), 'Select two separate edges or a closed 3/4-edge loop'),
@@ -1428,8 +1474,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // holds every other input surface inert until the user resolves it HERE.
   const blocking: ModelBlockingSession = lc ? 'loop-cut' : atlasPrompt ? 'paint-atlas' : guard?.pending ? 'face-guard' : null;
   useEffect(() => {
-    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, camLock, camSaved, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirror: mirrorMask });
-  }, [selMode, gizmoTool, paintMode, focusMode, wire, camLock, camSaved, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
+    onToolState?.({ selMode, gizmoTool, paint: paintMode, focus: focusMode, wire, camLock, camSaved: camMarks.length > 0, sel: selInfo.sel, quality, tris: model ? Math.floor(model.count / 3) : 0, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirror: mirrorMask });
+  }, [selMode, gizmoTool, paintMode, focusMode, wire, camLock, camMarks.length, selInfo.sel, quality, model?.count, brushTool, safety, detail, brush, palette, litFlat, litKey, litFill, blocking, mirrorMask]);
 
   // Publish the focus-panel snapshot (UV atlas + SHAPE counts) through the global
   // door (req_2643 OO / req_2618 G) — the Inspector's UV/SHAPE sections subscribe.
@@ -1456,10 +1502,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           center: boundsCenter,
         }
         : null,
+      camMarks: camMarks.map((mark, i) => ({ name: mark.name, active: i === camMark })),
+      // Route through the api ref so the bridge's verbs always close over fresh state,
+      // exactly like the shell's tool dispatch.
+      camStore: () => toolApiRef.current?.camStore(),
+      camRecallAt: (index) => toolApiRef.current?.camRecallAt(index),
+      camRemoveAt: (index) => toolApiRef.current?.camRemoveAt(index),
     };
     g.__modelFocusBridge = bridge;
     g.__modelFocusBridgeChanged?.();
-  }, [uvPanel, paintMode, model, selInfo.verts, selInfo.edges, authoredFaces, boundsCenter]);
+  }, [uvPanel, paintMode, model, selInfo.verts, selInfo.edges, authoredFaces, boundsCenter, camMarks, camMark]);
 
   // Viewport hotkeys. In the editor embed (hostChrome) the shell's central keymap owns every tool
   // key (W/P/F/G/S/R/1/2/3 and the topology/face/paint keys the shell adds), dispatching them

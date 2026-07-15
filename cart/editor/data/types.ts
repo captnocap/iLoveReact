@@ -151,9 +151,12 @@ export type ModelToolApi = {
   wire: () => void;
   // Camera lock toggle (req_2893): freeze/unfreeze the mesh editor's orbit view.
   camLock: () => void;
-  // Saved view (req_3067): bookmark the current orbit pose / jump the camera back to it.
+  // View bookmarks (req_3067/req_3074): pin the current orbit pose; camRecall (H)
+  // returns to the active one; the indexed pair drives the focus panel's list.
   camStore: () => void;
   camRecall: () => void;
+  camRecallAt: (index: number) => void;
+  camRemoveAt: (index: number) => void;
   extrudeEdge: () => void;
   extrudeFace: () => void;
   createFace: () => void;

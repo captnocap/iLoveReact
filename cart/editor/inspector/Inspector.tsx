@@ -1,7 +1,7 @@
 // SECTION G — Focus Panel (see shell/regions.ts SECTIONS): the right panel
 // (inspector / layers / grid) + its pane-switch rail.
 import { useEffect, useState } from 'react';
-import { Box, Col, Pressable, Row, ScrollView, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Pressable, Row, Text } from '@reactjit/runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { C, accentFor } from '../workspace.cls';
 // Fixed-region contract (req_2627): the UV preview sizes itself from the focus
@@ -25,6 +25,7 @@ import ModelBrushDock, { type ColorSpineHandlers } from './ModelBrushDock';
 import ModelOutliner from '../stage/ModelOutliner';
 import type { OutlinerHandlers } from '../stage/ModelDocumentSurface';
 import type { Brush } from '../../../runtime/paint/model';
+import PaintLayersPanel from './PaintLayersPanel';
 
 // ── Model-focus bridge (req_2643 OO / req_2618 G): the model viewer publishes the
 // UV-atlas + SHAPE truth on globalThis.__modelFocusBridge and pings
@@ -141,6 +142,48 @@ function UvSection({ bridge, partName, extraCount }: { bridge: ModelFocusBridge 
   );
 }
 
+// ── VIEW BOOKMARKS (req_3074) ───────────────────────────────────────────────────────
+// The camera bookmark list, directly below the UV card. Pins come from the viewer (the
+// action-bar Store View verb or the + here); clicking a row jumps the camera back to
+// that pose, the trash verb drops it. The active row (last stored/recalled — what the
+// H key returns to) carries the primary accent. List truth is view state in the
+// viewer's hot twig: it survives hot reloads and resets on a cold start.
+function ViewBookmarksSection({ bridge }: { bridge: ModelFocusBridge | null }) {
+  const marks = bridge?.camMarks ?? [];
+  return (
+    <C.HW_Section>
+      <C.HW_SectionHead>
+        <C.HW_AccentBar />
+        <C.HW_SectionTitle>VIEWS</C.HW_SectionTitle>
+        <C.HW_Spacer />
+        <C.HW_MiniVerb onPress={() => bridge?.camStore()} tooltip="Pin the current camera as a bookmark">
+          <Icon name="BookmarkPlus" size={11} color={accentFor('textDim')} />
+        </C.HW_MiniVerb>
+      </C.HW_SectionHead>
+      {marks.length === 0 ? (
+        <C.HW_ReadRow>
+          <C.HW_FormLabel>bookmarks</C.HW_FormLabel>
+          <C.HW_ReadValue>none</C.HW_ReadValue>
+        </C.HW_ReadRow>
+      ) : marks.map((mark, index) => (
+        <Row key={`view-mark-${index}`} style={{ alignItems: 'center', gap: 6, height: REGIONS.grid.rowHeight, width: '100%' }}>
+          <Pressable
+            onPress={() => bridge?.camRecallAt(index)}
+            tooltip="Jump the camera to this view"
+            style={{ flexGrow: 1, minWidth: 0, height: REGIONS.grid.rowHeight, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+          >
+            <Icon name="Bookmark" size={11} color={accentFor(mark.active ? 'primary' : 'textDim')} />
+            <C.HW_ReadValue>{mark.name}</C.HW_ReadValue>
+          </Pressable>
+          <C.HW_MiniVerb onPress={() => bridge?.camRemoveAt(index)} tooltip="Remove this bookmark">
+            <Icon name="Trash2" size={11} color={accentFor('textDim')} />
+          </C.HW_MiniVerb>
+        </Row>
+      ))}
+    </C.HW_Section>
+  );
+}
+
 // ── PAINT LAYERS (req_2672) ─────────────────────────────────────────────────────────
 // The stroke program's LAYER table (host truth: __mesh_paint_layers). A layer is an
 // ordered stroke GROUP — visibility/reorder/delete/merge are program edits + one host
@@ -148,15 +191,6 @@ function UvSection({ bridge, partName, extraCount }: { bridge: ModelFocusBridge 
 // layers once anything recorded), not only during paint mode. Rows sit on the regions
 // grid: fixed height, eye column, flexing name (the ACTIVE row's name is the rename
 // input — the existing rename-input pattern), fixed verb columns at the right edge.
-// The list is a bounded nested scroll capped at LAYER_ROWS_VISIBLE rows (req_2627).
-const LAYER_ROW_HEIGHT = 27;
-const LAYER_ROWS_VISIBLE = 5;
-
-const LAYER_ROW_CONTROL = {
-  width: REGIONS.grid.stepBtn, height: LAYER_ROW_HEIGHT,
-  alignItems: 'center', justifyContent: 'center',
-} as const;
-
 type PaintLayerRow = { id: number; name: string; visible: number; strokes: number };
 type PaintLayersSnap = { active: number; layers: PaintLayerRow[] };
 
@@ -172,7 +206,6 @@ function readPaintLayers(): PaintLayersSnap | null {
 
 function PaintLayersSection({ bridge, onDocumentMutated }: { bridge: ModelFocusBridge | null; onDocumentMutated: () => void }) {
   const [snap, setSnap] = useState<PaintLayersSnap | null>(() => readPaintLayers());
-  const [hint, setHint] = useState<string | null>(null);
   // Host-driven state (strokes/undo land without a React render) — poll at 1Hz like the
   // dock's journal badge, plus a re-read on every focus-bridge ping (stroke end).
   useEffect(() => {
@@ -202,89 +235,18 @@ function PaintLayersSection({ bridge, onDocumentMutated }: { bridge: ModelFocusB
     return false;
   };
   if (!snap || snap.layers.length === 0) return null; // no paint yet — honest-empty, no section
-  // Host order is bottom→top (composite order); the panel draws top layer FIRST, the
-  // convention every layer panel shares.
-  const rows = [...snap.layers].reverse();
-  const listHeight = Math.min(rows.length, LAYER_ROWS_VISIBLE) * LAYER_ROW_HEIGHT;
   return (
-    <Col
-      style={{
-        width: '100%', marginTop: 10,
-        backgroundColor: 'rgba(12,14,20,0.55)', borderWidth: 1, borderColor: '#1d2330',
-        borderRadius: 8, overflow: 'hidden',
-      }}
-    >
-      <Row style={{ alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 8, height: 30, backgroundColor: 'rgba(20,24,34,0.9)', borderBottomWidth: 1, borderColor: '#1d2330' }}>
-        <Icon name="Layers" size={13} color="#8fb6c9" />
-        <Text noWrap numberOfLines={1} style={{ color: '#cfe0f5', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>PAINT LAYERS</Text>
-        <Box style={{ flexGrow: 1 }} />
-        <Pressable
-          onPress={() => { if (runOp('add', 0)) setHint('New layer added on top — new strokes land on it.'); }}
-          tooltip="Add a layer on top (new strokes land on it)"
-          style={{ height: 20, paddingLeft: 7, paddingRight: 7, flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 5, backgroundColor: '#16233aee', borderWidth: 1, borderColor: '#2c4a6a' }}
-        >
-          <Icon name="Plus" size={11} color="#cfe0f5" />
-          <Text noWrap style={{ color: '#cfe0f5', fontSize: 10, fontWeight: 700 }}>layer</Text>
-        </Pressable>
-      </Row>
-      <ScrollView style={{ height: listHeight }} contentContainerStyle={{ flexDirection: 'column' }}>
-        {rows.map((layer) => {
-          const active = layer.id === snap.active;
-          return (
-            <Row
-              key={layer.id}
-              style={{
-                alignItems: 'center', gap: 4, paddingLeft: 5, paddingRight: 5, height: LAYER_ROW_HEIGHT,
-                backgroundColor: active ? '#2a466e' : 'transparent',
-                borderBottomWidth: 1, borderColor: '#161b26',
-              }}
-            >
-              <Pressable
-                style={LAYER_ROW_CONTROL}
-                onPress={() => runOp('visible', layer.id, layer.visible ? 0 : 1)}
-                tooltip={layer.visible ? 'Hide this layer\'s strokes' : 'Show this layer\'s strokes'}
-              >
-                <Icon name={layer.visible ? 'Eye' : 'EyeOff'} size={13} color={layer.visible ? '#9db4d0' : '#4a5464'} />
-              </Pressable>
-              {active ? (
-                // The ACTIVE layer renames in place — the rename-input pattern (req_2620 S).
-                <C.HW_RenameInput value={layer.name} onChange={(name: string) => runOp('rename', layer.id, name)} />
-              ) : (
-                <Pressable onPress={() => runOp('active', layer.id)} tooltip="Make this the active layer (new strokes land here)" style={{ flexGrow: 1, minWidth: 0, height: LAYER_ROW_HEIGHT, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text numberOfLines={1} noWrap style={{ color: layer.visible ? '#cfe0f5' : '#6b7686', fontSize: 12, fontWeight: 500 }}>{layer.name}</Text>
-                </Pressable>
-              )}
-              <Text noWrap style={{ color: '#5d6878', fontSize: 10, fontFamily: 'monospace' }}>{String(layer.strokes)}</Text>
-              <Pressable style={LAYER_ROW_CONTROL} onPress={() => runOp('up', layer.id)} tooltip="Move layer up (composites over)">
-                <Icon name="ChevronUp" size={12} color="#6f8296" />
-              </Pressable>
-              <Pressable style={LAYER_ROW_CONTROL} onPress={() => runOp('down', layer.id)} tooltip="Move layer down (composites under)">
-                <Icon name="ChevronDown" size={12} color="#6f8296" />
-              </Pressable>
-              <Pressable
-                style={LAYER_ROW_CONTROL}
-                onPress={() => { if (runOp('mergedown', layer.id)) setHint(`Merged ${layer.name} into the layer below (one undo step).`); else setHint('Nothing below to merge into.'); }}
-                tooltip="Merge this layer's strokes into the layer below (undoable)"
-              >
-                <Icon name="GitMerge" size={12} color="#6f8296" />
-              </Pressable>
-              <Pressable
-                style={LAYER_ROW_CONTROL}
-                onPress={() => { if (runOp('delete', layer.id)) setHint(`Deleted ${layer.name} (${layer.strokes} strokes) — Ctrl+Z in paint restores it.`); }}
-                tooltip="Delete this layer AND its strokes (one undoable step)"
-              >
-                <Icon name="Trash2" size={12} color="#7d5a5a" />
-              </Pressable>
-            </Row>
-          );
-        })}
-      </ScrollView>
-      {hint ? (
-        <Row style={{ alignItems: 'center', paddingLeft: 10, paddingRight: 10, paddingTop: 3, paddingBottom: 3, backgroundColor: 'rgba(18,22,31,0.9)', borderTopWidth: 1, borderColor: '#1d2330' }}>
-          <Text numberOfLines={1} noWrap style={{ color: '#8b97a8', fontSize: 9, fontFamily: 'monospace' }}>{hint}</Text>
-        </Row>
-      ) : null}
-    </Col>
+    <PaintLayersPanel
+      rows={snap.layers.map((layer) => ({ ...layer, visible: !!layer.visible }))}
+      activeId={snap.active}
+      onAdd={() => runOp('add', 0)}
+      onActive={(id) => runOp('active', id)}
+      onVisible={(id, visible) => runOp('visible', id, visible ? 1 : 0)}
+      onRename={(id, name) => runOp('rename', id, name)}
+      onMove={(id, direction) => runOp(direction, id)}
+      onMergeDown={(id) => runOp('mergedown', id)}
+      onDelete={(id) => runOp('delete', id)}
+    />
   );
 }
 
@@ -511,6 +473,9 @@ export default function Inspector(props: {
                 (req_2619 P). Sits below the outliner so a tall preview can never crowd
                 the part list out of the non-scrolling body. */}
             <UvSection bridge={focusBridge} partName={uvPartName} extraCount={uvExtraCount} />
+            {/* VIEW BOOKMARKS (req_3074) — pinned camera poses, below the atlas/scope
+                card: row click recalls, trash removes, + pins the current view. */}
+            <ViewBookmarksSection bridge={focusBridge} />
             {/* PAINT LAYERS (req_2672) — the stroke program's layer table, live whenever
                 the doc has paint (host truth; hidden honest-empty before any painting). */}
               <PaintLayersSection bridge={focusBridge} onDocumentMutated={props.onModelDocumentMutated} />
