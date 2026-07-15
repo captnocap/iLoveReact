@@ -36,16 +36,16 @@ export default function WorldEditorSurface(props: {
   // list, the selected instance, and the armed palette piece all arrive as props
   // from AppFrame (was this component's own useState). Placements/picks report up.
   pieces: readonly PlacedPiece[];
-  selectedId: string | null;
+  selectedIds: readonly string[];
   armedPieceId: string | null;
   armedYawDegrees: number;
   authoredPieces: readonly AuthoredBuildPiece[];
   /** one gesture's placements: a click is a one-piece batch, a drag-run (req_2747) is the lot. */
   onPlace: (pieces: PlacedPiece[], gesture: PlacementGesture) => void;
   onMove: (id: string, destination: PlacedPiece) => void;
-  onSelect: (id: string | null) => void;
+  onSelect: (id: string | null, additive: boolean) => void;
   /** right-click hit a placed piece → open the quick context menu at window (x,y) (req_2733). */
-  onPieceContext: (id: string, x: number, y: number) => void;
+  onPieceContext: (id: string, x: number, y: number, role: string | null) => void;
   /** Paint Faces (req_2879): one gesture's unique face targets for one material action. */
   onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
   onStampSticker: (id: string, role: string, local: { lx: number; ly: number; lz: number; nx: number; ny: number; nz: number }) => void;
@@ -81,7 +81,7 @@ export default function WorldEditorSurface(props: {
         authoredPieces={props.authoredPieces}
         armed={armed}
         tool={tool}
-        selectedId={props.selectedId}
+        selectedIds={props.selectedIds}
         onSelect={props.onSelect}
         onPieceContext={props.onPieceContext}
         onPaintFaces={props.onPaintFaces}

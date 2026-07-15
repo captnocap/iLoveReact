@@ -1,7 +1,7 @@
 // cart/editor/world/facades.test.ts — the graffiti facade contract (req_3057):
-// gatherFacade collects exactly the coplanar contiguous wall run, the canvas is
-// meter-true at the RULED 256 px/m, the baked quad lands on the wall plane, and
-// stamps blit with free rotation + die-cut transparency.
+// Explicit selection defines the facade scope, the canvas is meter-true at the
+// RULED 256 px/m, the baked quad lands on the clicked wall face, and stamps
+// blit with free rotation + die-cut transparency.
 //
 //   ROOT=/home/siah/creative/reactjit
 //   tools/esbuild cart/editor/world/facades.test.ts --bundle \
@@ -10,8 +10,8 @@
 //     --alias:@reactjit=$ROOT/runtime
 //   tools/v8cli /tmp/editor-facades.test.js
 
-import { gatherFacade, facadeCanvasSize, facadeQuadMesh, validFacade, FACADE_TEXELS_PER_METER, FACADE_LIFT_METERS } from './facades';
-import { decodePackedTexture, blitStampInto } from './facadeBake';
+import { facadeFromSelection, facadeLayers, facadeCanvasSize, facadeQuadMesh, validFacade, FACADE_TEXELS_PER_METER, FACADE_LIFT_METERS } from './facades';
+import { compositeFacadeStrokeMask, decodePackedTexture, blitStampInto, resizeFacadeRgba } from './facadeBake';
 import { pieceLook, type PlacedPiece } from './pieces';
 import { registerStickers } from '../data/stickerStore';
 import { registerImportedSpecs } from '../textures/shaders';
@@ -33,31 +33,26 @@ const W = look.w, H = look.h;
 const wall = (id: string, x: number, z: number, yaw = 0, y = 0): PlacedPiece =>
   ({ id, pieceId: WALL, x, y, z, yawDegrees: yaw });
 
-test('gather collects the contiguous coplanar run and nothing else', () => {
+test('a one-piece selection never gathers its contiguous wall run', () => {
   const run = [wall('a', 0, 5), wall('b', W, 5), wall('c', W * 2, 5)];
-  const detached = wall('far', W * 6, 5);
-  const perpendicular = wall('perp', 0, 8, 90);
-  const f = gatherFacade(run[1]!, [...run, detached, perpendicular], 'f1');
-  assert(!!f, 'facade gathers');
-  assert(f!.pieceIds.length === 3, `3 members, got ${f!.pieceIds.length}`);
-  assert(!f!.pieceIds.includes('far') && !f!.pieceIds.includes('perp'), 'detached + perpendicular excluded');
-  near(f!.widthMeters, W * 3, 'width spans the run');
-  near(f!.heightMeters, H, 'height is one storey');
+  const f = facadeFromSelection([run[1]!], 'one-piece');
+  assert(!!f, 'one selected wall creates a facade');
+  assert(f!.pieceIds.length === 1 && f!.pieceIds[0] === 'b', 'only the selected wall is in scope');
+  near(f!.widthMeters, W, 'canvas width is exactly one wall');
+  near(f!.heightMeters, H, 'canvas height is exactly one wall');
 });
 
-test('a second storey extends the canvas upward (contiguous in v)', () => {
-  const f = gatherFacade(wall('a', 0, 5), [wall('a', 0, 5), wall('up', 0, 5, 0, H)], 'f2');
-  assert(!!f && f!.pieceIds.length === 2, 'both storeys gather');
-  near(f!.heightMeters, H * 2, 'two storeys tall');
-});
-
-test('a 180-yaw piece in the same plane joins the run', () => {
-  const f = gatherFacade(wall('a', 0, 5), [wall('a', 0, 5), wall('flip', W, 5, 180)], 'f3');
-  assert(!!f && f!.pieceIds.length === 2, '180 sibling joins');
+test('explicit selection is exact scope, even across an unselected middle wall', () => {
+  const a = wall('a', 0, 5), middle = wall('middle', W, 5), c = wall('c', W * 2, 5);
+  const f = facadeFromSelection([a, c], 'selected');
+  assert(!!f, 'selected coplanar walls merge');
+  assert(f!.pieceIds.length === 2 && !f!.pieceIds.includes(middle.id), 'unselected middle wall stayed out of scope');
+  near(f!.widthMeters, W * 3, 'union rect spans the selected mural bounds');
+  assert(facadeFromSelection([a, wall('perp', 0, 8, 90)], 'bad') === null, 'non-coplanar selection rejected');
 });
 
 test('canvas size = meters x the RULED density; quad floats off the plane', () => {
-  const f = gatherFacade(wall('a', 0, 5), [wall('a', 0, 5)], 'f4')!;
+  const f = facadeFromSelection([wall('a', 0, 5)], 'f4')!;
   const size = facadeCanvasSize(f);
   near(size.w, Math.round(W * FACADE_TEXELS_PER_METER), 'canvas w');
   near(size.h, Math.round(H * FACADE_TEXELS_PER_METER), 'canvas h');
@@ -66,6 +61,60 @@ test('canvas size = meters x the RULED density; quad floats off the plane', () =
   // yaw-0 wall: plane z = 5, normal +z → every vert sits at z = 5 + lift.
   for (let v = 0; v < 12; v += 1) near(mesh[v * 8 + 2]!, 5 + FACADE_LIFT_METERS, `vert ${v} on the lifted plane`);
   assert(validFacade(f), 'round-trips the validator');
+});
+
+test('front stays byte-for-byte anchored while back mirrors to the clicked face', () => {
+  const piece = wall('a', 0, 5);
+  const front = facadeFromSelection([piece], 'front-facade', 'front')!;
+  const back = facadeFromSelection([piece], 'back-facade', 'back')!;
+  // Lock the established front contract so adding clicked-side selection cannot
+  // move the façade that existing saves and tests expect.
+  near(front.normal.x, 0, 'front normal x');
+  near(front.normal.z, 1, 'front normal z');
+  near(front.origin.x, -W / 2, 'front origin x');
+  near(front.origin.z, 5, 'front origin z');
+  near(back.normal.x, 0, 'back normal x');
+  near(back.normal.z, -1, 'back normal z');
+  near(back.origin.x, W / 2, 'back origin mirrors u origin');
+  near(back.origin.z, 5, 'back origin remains on the wall plane');
+  near(back.widthMeters, front.widthMeters, 'back preserves wall width');
+  near(back.heightMeters, front.heightMeters, 'back preserves wall height');
+  const frontMesh = facadeQuadMesh(front);
+  const backMesh = facadeQuadMesh(back);
+  for (let v = 0; v < 12; v += 1) {
+    near(frontMesh[v * 8 + 2]!, 5 + FACADE_LIFT_METERS, `front vert ${v} lifted outward`);
+    near(backMesh[v * 8 + 2]!, 5 - FACADE_LIFT_METERS, `back vert ${v} lifted outward`);
+  }
+});
+
+test('full studio stroke recipe + layers round-trip; legacy spray rows migrate', () => {
+  const f = facadeFromSelection([wall('a', 0, 5)], 'recipe')!;
+  f.layers[0]!.strokes.push({
+    ink: { kind: 'shader', surface: 'brick', data: [1, 2, 3], tiles: 2 },
+    brush: { stamp: { kind: 'analytic', shape: 'spray' }, sizeMeters: 0.2, hardness: 0.5, flow: 0.8, scatter: 1.2, angleDeg: 12, aspect: 1.5, spacing: 0.25, blend: 'normal' },
+    tool: 'brush', points: [0, 0, 1, 1], selection: { kind: 'lasso', points: [0, 0, 1, 0, 1, 1] },
+  });
+  assert(validFacade(f), 'full recipe validates');
+  const stroke = f.layers[0]!.strokes[0]!;
+  const invalid = { ...f, layers: [{ ...f.layers[0]!, strokes: [{ ...stroke, brush: { ...stroke.brush, blend: 'surprise-mode' } }] }] };
+  assert(!validFacade(invalid), 'boundary rejects a non-canonical brush recipe');
+  const legacy = { ...f, layers: undefined, activeLayerId: undefined, strokes: [{ hex: '#ff0000', radiusMeters: 0.1, points: [0, 0, 1, 1] }] };
+  assert(validFacade(legacy), 'legacy row remains loadable');
+  const migrated = facadeLayers(legacy as any);
+  assert(migrated.length === 1 && migrated[0]!.strokes[0]!.brush.sizeMeters === 0.2, 'legacy radius became a meter-space diameter recipe');
+});
+
+test('host brush mask composites shader pixels through an exact lasso', () => {
+  const base = new Uint8Array(4 * 4 * 4);
+  const mask = new Uint8Array(4 * 4 * 4);
+  for (let i = 3; i < mask.length; i += 4) mask[i] = 255;
+  const shader = { width: 1, height: 1, rgba: new Uint8Array([12, 34, 56, 255]) };
+  compositeFacadeStrokeMask(base, mask, 4, 4, { kind: 'shader', surface: 's' }, false, { kind: 'lasso', points: [0, 0, 2, 0, 0, 2] }, shader);
+  const alpha = (x: number, y: number) => base[(y * 4 + x) * 4 + 3];
+  assert(alpha(0, 0) === 255, 'inside lasso received shader ink');
+  assert(alpha(3, 3) === 0, 'outside lasso stayed transparent');
+  const resized = resizeFacadeRgba(base, 4, 4, 2, 2);
+  assert(resized.length === 16, 'preview density resizes to ambient bake dimensions');
 });
 
 // ── stamp blitting ────────────────────────────────────────────────────────────

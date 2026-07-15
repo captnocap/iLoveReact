@@ -62,7 +62,7 @@ import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialSt
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
 import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint, setMapDocumentAutosave } from '../stage/mapPaint';
 import MapTexturePicker from '../stage/MapTexturePicker';
-import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
+import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
 import {
   COLOR_STUDIO_COLOR_SELECT_COMMAND_ID,
@@ -112,6 +112,7 @@ import { propExportTargetForCommand } from '../data/propExports';
 import { commandForKeyEvent, modifiersFromKeyEvent, syntheticKeyEdge } from '../data/keymap';
 import { primitivePartMesh, primitiveMeshData, composeModelParts, fileModelPackage, importModelFilePackage, isViewerFile, modelPackageMeshData, packageMeshDoc, packageMeshDocParts, type PrimitiveParams } from '../data/assetCatalog';
 import { partsMetaFromRows, meshDocRangeCenters, meshDocRangeGeometry } from '../data/meshDoc';
+import { modelDocumentToken, nativeMeshActionDrain, withNativeMeshActionSource } from '../model/nativeMeshEvents';
 import { nextDuplicateGroupName, nextDuplicatePartName } from '../data/modelOutliner';
 import {
   MODEL_GROUP_DISSOLVE_COMMAND_ID,
@@ -150,7 +151,7 @@ import { image as imageOps, quantize as quantizeImage } from '../../../runtime/i
 import { encodeRows, parseQuantizeProbe } from '../textures/pixelTexture';
 import { loadTexturePackages, textureSpec, savePixelTexture, saveExactImage } from '../data/texturePackage';
 import { loadStickers, registerStickers, ensureStickerForTexture } from '../data/stickerStore';
-import { FACADE_TEXELS_PER_METER, facadeFromSelection, facadeLayers, gatherFacade, type Facade, type FacadeStroke, type FacadeStamp } from '../world/facades';
+import { FACADE_TEXELS_PER_METER, facadeFromSelection, facadeLayers, type Facade, type FacadeStroke, type FacadeStamp } from '../world/facades';
 import { resizeFacadeRgba, setLiveFacades, saveFacadeBake } from '../world/facadeBake';
 import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageDialog';
 import { readFileBase64, remove } from '../../../runtime/hooks/fs';
@@ -1090,7 +1091,9 @@ export default function AppFrame() {
   useDeej({ pollMs: 33 });
   const deejApplyRef = useRef<(move: DeejMove) => void>(() => {});
   useEffect(() => subscribeDeej((move) => deejApplyRef.current(move)), []);
-  const openPieceQuickMenu = guarded((id: string, x: number, y: number) => {
+  const facadeContextSideRef = useRef<'front' | 'back'>('front');
+  const openPieceQuickMenu = guarded((id: string, x: number, y: number, role: string | null) => {
+    facadeContextSideRef.current = role === 'back' ? 'back' : 'front';
     setState((prev) => ({
       ...prev,
       selectedPieceId: id,
@@ -1236,6 +1239,20 @@ export default function AppFrame() {
     const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
     return doc?.kind === 'model' ? (doc.sourceId ?? null) : null;
   })();
+  // Native journal outcomes are drained asynchronously. Stamp the resident mesh
+  // with this document's compact identity so a tab switch cannot attribute an
+  // already-queued transform to the newly active model. Keep prior mappings for
+  // the session because a close can race the drain too; a hash collision becomes
+  // an explicit unknown token rather than silently targeting either document.
+  const modelIdByMeshTokenRef = useRef(new Map<number, string | null>());
+  if (activeModelId) {
+    const token = modelDocumentToken(activeModelId);
+    const known = modelIdByMeshTokenRef.current.get(token);
+    modelIdByMeshTokenRef.current.set(token, known && known !== activeModelId ? null : activeModelId);
+  }
+  useEffect(() => {
+    (globalThis as any).__mesh_action_document?.(activeModelId ? modelDocumentToken(activeModelId) : 0);
+  }, [activeModelId]);
   const activeModelPkg = activeModelId ? effectiveModelPackage(activeModelId, state.modelOverrides, state.modelDupes) : null;
   const activeModelOnDisk = activeModelPkg ? isMaterialized(activeModelPkg.kind, activeModelPkg.id) : false;
   // Mesh-journal baseline per model: the depth recorded at the last save (reset to
@@ -1525,8 +1542,11 @@ export default function AppFrame() {
     setState((prev) => ({ ...prev, mapDocumentOpen: false, status: 'map workspaces closed' }));
   };
 
+  const scaleBySourceRef = useRef('dock');
+  const pathArraySourceRef = useRef('dock');
+  const addPartSourceRef = useRef('dock');
   const applyScaleBy = (factor: number) => {
-    const ok = modelToolApiRef.current?.scaleBy(factor) ?? false;
+    const ok = withNativeMeshActionSource(scaleBySourceRef.current, () => modelToolApiRef.current?.scaleBy(factor) ?? false);
     setScaleByOpen(false);
     setState((prev) => ({
       ...prev,
@@ -1577,7 +1597,7 @@ export default function AppFrame() {
     }
     if (commandId === 'paint-facade') {
       const pieceId = stateRef.current.selectedPieceId;
-      if (pieceId) openFacadePainter(pieceId);
+      if (pieceId) openFacadePainter(pieceId, source === 'world-context' ? facadeContextSideRef.current : 'front');
       else setState((prev) => ({ ...prev, status: 'Paint Facade — select or right-click a wall piece first', contextOpen: false }));
       return;
     }
@@ -1648,30 +1668,31 @@ export default function AppFrame() {
     // model in view. Opens the size/resolution dialog in add mode; the outliner + shares this path.
     if (commandId.startsWith('add-mesh-')) {
       const kind = commandId.slice('add-mesh-'.length) as PrimitiveKind;
+      addPartSourceRef.current = source;
       setState((prev) => ({ ...prev, openMenu: null, contextOpen: false, actionMenu: 'Edit', newMeshPrompt: { kind, mode: 'add' } }));
       return;
     }
     // Studio-parity mesh ops — these change PART structure (or journaled mesh state),
     // so they route through dedicated handlers that keep the outliner metadata true.
     // Must run BEFORE the generic model-tool router below (same 'model' surface).
-    if (commandId === 'mesh-detach') { runDetachSelection(); return; }
-    if (commandId === 'mesh-flip-face') { runFaceOp('flip'); return; }
-    if (commandId === 'mesh-glass') { runFaceOp('glass'); return; }
-    if (commandId === 'mesh-solidify') { runFaceOp('solidify'); return; }
+    if (commandId === 'mesh-detach') { runDetachSelection(source); return; }
+    if (commandId === 'mesh-flip-face') { runFaceOp('flip', source); return; }
+    if (commandId === 'mesh-glass') { runFaceOp('glass', source); return; }
+    if (commandId === 'mesh-solidify') { runFaceOp('solidify', source); return; }
     // Outliner multi-select is carried host-side as a face selection so the gizmo can
     // move the union. In that state M / the face command means structural PART merge,
     // never "turn every face in these parts into one face" (req_2870).
     if (commandId === 'mesh-merge-faces') {
-      if (selectedPartCount >= 2) mergeSelectedParts();
-      else runFaceOp('merge-faces');
+      if (selectedPartCount >= 2) mergeSelectedParts(source);
+      else runFaceOp('merge-faces', source);
       return;
     }
-    if (commandId === 'mesh-duplicate-part') { duplicatePartById(state.modelActivePartId, -1); return; }
-    if (commandId === 'mesh-path-array') { openPathArrayPrompt(); return; }
-    if (commandId === 'mesh-mirror-x') { duplicatePartById(state.modelActivePartId, 0); return; }
-    if (commandId === 'mesh-mirror-y') { duplicatePartById(state.modelActivePartId, 1); return; }
-    if (commandId === 'mesh-mirror-z') { duplicatePartById(state.modelActivePartId, 2); return; }
-    if (commandId === 'mesh-merge-down') { mergeSelectedParts(); return; }
+    if (commandId === 'mesh-duplicate-part') { duplicatePartById(state.modelActivePartId, -1, source); return; }
+    if (commandId === 'mesh-path-array') { pathArraySourceRef.current = source; openPathArrayPrompt(); return; }
+    if (commandId === 'mesh-mirror-x') { duplicatePartById(state.modelActivePartId, 0, source); return; }
+    if (commandId === 'mesh-mirror-y') { duplicatePartById(state.modelActivePartId, 1, source); return; }
+    if (commandId === 'mesh-mirror-z') { duplicatePartById(state.modelActivePartId, 2, source); return; }
+    if (commandId === 'mesh-merge-down') { mergeSelectedParts(source); return; }
     if (commandId === 'mesh-import-part') {
       setImportPartOpen(true);
       setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: 'pick a library model to append as part(s)' }));
@@ -1684,6 +1705,7 @@ export default function AppFrame() {
       return;
     }
     if (commandId === 'mesh-scale-by') {
+      scaleBySourceRef.current = source;
       setScaleByOpen(true);
       setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `Scale By opened — ${source}` }));
       return;
@@ -1697,7 +1719,7 @@ export default function AppFrame() {
     // (req_2585 — the export leaf hit this and silently no-op'd).
     if (commandId.startsWith('mesh-') && isMeshToolCommand(commandId)) {
       const api = modelToolApiRef.current;
-      if (api) {
+      if (api) withNativeMeshActionSource(source, () => {
         if (commandId === 'mesh-vertex') api.selMode(1);
         else if (commandId === 'mesh-edge') api.selMode(2);
         else if (commandId === 'mesh-face') api.selMode(3);
@@ -1721,7 +1743,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-paint-brush') api.brushTool('brush');
         else if (commandId === 'mesh-paint-safety') api.cycleSafety();
         else if (commandId === 'mesh-paint-detail') api.cycleDetail();
-      }
+      });
       setState((prev) => ({ ...prev, status: `${command.name} - ${source}` }));
       return;
     }
@@ -1773,7 +1795,7 @@ export default function AppFrame() {
     if (command.id === 'delete-selection') {
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
       if (doc?.kind === 'model') {
-        modelToolApiRef.current?.deleteSelection();
+        withNativeMeshActionSource(source, () => modelToolApiRef.current?.deleteSelection());
         setState((prev) => ({ ...prev, status: 'deleted mesh selection' }));
         return;
       }
@@ -1787,7 +1809,7 @@ export default function AppFrame() {
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
       if (doc?.kind === 'model') {
         if (state.modelTool.paint) { paintUndoRedo(false); return; }
-        meshUndoRedo(false);
+        meshUndoRedo(false, source);
         return;
       }
       if (doc?.kind === 'world' && state.mapPaint.active) {
@@ -1801,7 +1823,7 @@ export default function AppFrame() {
       const doc = state.workspaceDocuments.find((d) => d.id === state.activeWorkspaceDocumentId);
       if (doc?.kind === 'model') {
         if (state.modelTool.paint) { paintUndoRedo(true); return; }
-        meshUndoRedo(true);
+        meshUndoRedo(true, source);
         return;
       }
       if (doc?.kind === 'world' && state.mapPaint.active) {
@@ -2307,21 +2329,19 @@ export default function AppFrame() {
   const assignPieceSlot = (id: string, role: string) =>
     assignPieceSlotAsset(id, role, stateRef.current.activeAssetId, 'focus-panel');
 
-  // Paint Facade (req_3062): an additive selection is authoritative scope. A
-  // one-piece context action keeps gatherFacade's contiguous-run convenience.
-  const openFacadePainter = (pieceId: string) => {
+  // Paint Facade (req_3062): the explicit selection is authoritative scope,
+  // including a one-piece selection.
+  const openFacadePainter = (pieceId: string, side: 'front' | 'back' = 'front') => {
     setState((prev) => {
-      const seed = prev.worldPieces.find((p) => p.id === pieceId);
-      if (!seed) return prev;
+      if (!prev.worldPieces.some((piece) => piece.id === pieceId)) return prev;
       const selectedIds = prev.selectedPieceIds.includes(pieceId) ? prev.selectedPieceIds : [pieceId];
       const selected = selectedIds
         .map((id) => prev.worldPieces.find((piece) => piece.id === id))
         .filter((piece): piece is NonNullable<typeof piece> => !!piece);
-      const created = selected.length > 1
-        ? facadeFromSelection(selected, `facade-${prev.seq}`)
-        : gatherFacade(seed, prev.worldPieces, `facade-${prev.seq}`);
+      const created = facadeFromSelection(selected, `facade-${prev.seq}`, side);
       const existing = created ? prev.worldFacades.find((candidate) => candidate.pieceIds.length === created.pieceIds.length
-        && candidate.pieceIds.every((id) => created.pieceIds.includes(id))) : undefined;
+        && candidate.pieceIds.every((id) => created.pieceIds.includes(id))
+        && candidate.normal.x === created.normal.x && candidate.normal.z === created.normal.z) : undefined;
       const facade = existing
         ? { ...existing, layers: facadeLayers(existing), activeLayerId: existing.activeLayerId || facadeLayers(existing)[0]!.id, strokes: undefined }
         : created;
@@ -2832,7 +2852,10 @@ export default function AppFrame() {
   // Adding a mesh (menu or outliner) opens the size/resolution dialog instead of dropping a
   // fixed unit primitive — you author the dimensions upfront, like the old studio mesh editor.
   // The outliner + adds a part to the model in view → the 'add' verb (append), never a new document.
-  const addPart = (kind: PrimitiveKind) => setState((prev) => ({ ...prev, newMeshPrompt: { kind, mode: 'add' } }));
+  const addPart = (kind: PrimitiveKind) => {
+    addPartSourceRef.current = 'dock';
+    setState((prev) => ({ ...prev, newMeshPrompt: { kind, mode: 'add' } }));
+  };
   // Range of a part in the host mesh: its stored [lo, hi) (set on seed/append). The host mesh
   // is authoritative — these ids are stable across deletes and appends within a session.
   const partRange = (part: ModelPart): { lo: number; hi: number } | null =>
@@ -2840,7 +2863,7 @@ export default function AppFrame() {
 
   // 'add' verb — APPEND the primitive as a new PART to the model in view (preserving every prior
   // edit; no JS recompose). Reached from Edit → Mesh → Add Primitive and the outliner +.
-  const addPrimitivePart = (kind: PrimitiveKind, params: PrimitiveParams) => {
+  const addPrimitivePart = (kind: PrimitiveKind, params: PrimitiveParams, source = 'dock') => {
     const activeModel = activePartsModelId(state);
     if (!activeModel) {
       setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'Open a model first — Add Primitive appends a part to the model in view.' }));
@@ -2868,7 +2891,9 @@ export default function AppFrame() {
       return;
     }
     const geo = composeModelParts([{ ...part, visible: true }]);
-    const range = geo.positions.length > 0 ? api.appendPart(geo.positions, geo.faceGroups, part.color) : null;
+    const range = geo.positions.length > 0
+      ? withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, part.color))
+      : null;
     if (!range) {
       setState((prev) => ({ ...prev, newMeshPrompt: null, status: 'could not add mesh' }));
       return;
@@ -2913,7 +2938,7 @@ export default function AppFrame() {
 
   // The size/resolution dialog's confirm routes to the verb it was opened for.
   const submitMeshPrompt = (prompt: { kind: PrimitiveKind; mode: 'new' | 'add' }, params: PrimitiveParams) => {
-    if (prompt.mode === 'add') addPrimitivePart(prompt.kind, params);
+    if (prompt.mode === 'add') addPrimitivePart(prompt.kind, params, addPartSourceRef.current);
     else createNewMeshDocument(prompt.kind, params);
   };
 
@@ -3257,7 +3282,7 @@ export default function AppFrame() {
     invokeApplicationCommand(MODEL_GROUP_DISSOLVE_COMMAND_ID, { modelId: mid ?? '', groupId }, 'focus-panel');
   };
 
-  const applyPartVisibility = (mid: string, parts: ModelPart[], targetIds: string[], hide: boolean, label: string) => {
+  const applyPartVisibility = (mid: string, parts: ModelPart[], targetIds: string[], hide: boolean, label: string, source = 'dock') => {
     const targetSet = new Set(targetIds);
     const targets = parts.filter((part) => targetSet.has(part.id) && part.visible === hide);
     const flipped = new Set<string>();
@@ -3271,7 +3296,7 @@ export default function AppFrame() {
       // Write the synchronous mirror BEFORE the host changes displayed triangle count.
       if (hide) hiddenPartIdsRef.current.add(part.id);
       else hiddenPartIdsRef.current.delete(part.id);
-      const result = modelToolApiRef.current?.setPartHidden(range.lo, range.hi, hide);
+      const result = withNativeMeshActionSource(source, () => modelToolApiRef.current?.setPartHidden(range.lo, range.hi, hide));
       if (result?.ok) {
         flipped.add(part.id);
         lines.push(`${hide ? 'hid' : 'showed'} ${part.name} [${range.lo},${range.hi}) — ${result.count} tris remain`);
@@ -3310,7 +3335,7 @@ export default function AppFrame() {
     const hide = members.some((part) => part.visible);
     applyPartVisibility(mid, parts, members.map((part) => part.id), hide, members[0]!.groupName ?? 'group');
   };
-  const deletePart = (id: string) => {
+  const deletePart = (id: string, source = 'dock') => {
     const mid = activePartsModelId(state);
     const allParts = mid ? (state.modelParts[mid] ?? []) : [];
     if (!mid || allParts.length === 0) {
@@ -3331,7 +3356,9 @@ export default function AppFrame() {
       const range = partRange(part);
       // Each visible part is its own host op and its own journal entry — the status
       // reads one line per part (honest N entries, no faked atomicity; req_2659e).
-      const r = range && part.visible ? modelToolApiRef.current?.deletePartRange(range.lo, range.hi) : null;
+      const r = range && part.visible
+        ? withNativeMeshActionSource(source, () => modelToolApiRef.current?.deletePartRange(range.lo, range.hi))
+        : null;
       if (!part.visible || !range || r?.ok) removed.push(tid);
       lines.push(part.visible && range
         ? r?.ok
@@ -3398,6 +3425,7 @@ export default function AppFrame() {
     rows: ModelPart[],
     mirrorAxis: number,
     groupCopy?: { id: string; name: string; sourceName: string },
+    source = 'dock',
   ) => {
     const mid = activePartsModelId(state);
     const api = modelToolApiRef.current;
@@ -3420,7 +3448,7 @@ export default function AppFrame() {
         lines.push(`cannot duplicate ${part.name} while it is hidden — show it first`);
         continue;
       }
-      const r = api.duplicatePart(range.lo, range.hi, mirrorAxis);
+      const r = withNativeMeshActionSource(source, () => api.duplicatePart(range.lo, range.hi, mirrorAxis));
       if (!r) {
         lines.push(`could not duplicate ${part.name} [${range.lo},${range.hi}) — host op failed`);
         continue;
@@ -3478,13 +3506,13 @@ export default function AppFrame() {
 
   // A row duplicate acts on the WHOLE selected set when the pressed row belongs
   // to it (req_2659). The copied rows keep their existing folder membership.
-  const duplicatePartById = (id: string | null, mirrorAxis: number) => {
+  const duplicatePartById = (id: string | null, mirrorAxis: number, source = 'dock') => {
     const mid = activePartsModelId(state);
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
     const rows = id
       ? verbTargets(id, parts).map((tid) => parts.find((part) => part.id === tid)).filter((part): part is ModelPart => Boolean(part))
       : [];
-    duplicatePartRows(rows, mirrorAxis);
+    duplicatePartRows(rows, mirrorAxis, undefined, source);
   };
 
   // Folder duplicate = copy EVERY member, put the copies into a fresh folder,
@@ -3549,7 +3577,7 @@ export default function AppFrame() {
     setState((prev) => ({ ...prev, contextOpen: false, openMenu: null, status: `path array source: ${label}` }));
   };
 
-  const applyPathArray = (rawParams: PathArrayParams) => {
+  const applyPathArray = (rawParams: PathArrayParams, source = pathArraySourceRef.current) => {
     const prompt = pathArrayPrompt;
     const mid = activePartsModelId(state);
     const api = modelToolApiRef.current;
@@ -3567,18 +3595,18 @@ export default function AppFrame() {
       return;
     }
     const params = sanitizePathArrayParams(rawParams);
-    const hostResult = api.pathArray(ranges as { lo: number; hi: number }[], params);
+    const hostResult = withNativeMeshActionSource(source, () => api.pathArray(ranges as { lo: number; hi: number }[], params));
     const expectedRanges = (params.bays - 1) * sources.length;
     if (!hostResult || hostResult.ranges.length !== expectedRanges) {
       // A malformed post-success answer must never strand geometry without rows.
       // The host operation is one journal unit, so this is an exact rollback.
-      if (hostResult) api.undoMesh();
+      if (hostResult) withNativeMeshActionSource(source, () => api.undoMesh());
       setState((prev) => ({ ...prev, status: 'path array failed — source length/axis or host ranges were invalid; no partial array was kept' }));
       return;
     }
     const materialized = materializePathArrayRows(parts, prompt.sourceIds, hostResult.ranges, state.seq);
     if (!materialized || materialized.created.length !== expectedRanges) {
-      api.undoMesh();
+      withNativeMeshActionSource(source, () => api.undoMesh());
       setState((prev) => ({ ...prev, status: 'path array metadata failed validation — host append rolled back exactly' }));
       return;
     }
@@ -3604,14 +3632,14 @@ export default function AppFrame() {
 
   // Detach the face-mode selection into a NEW part (host group remap — geometry and
   // paint stay put). The panel becomes the focused part, ready to grab with the gizmo.
-  const runDetachSelection = () => {
+  const runDetachSelection = (source = 'dock') => {
     const mid = activePartsModelId(state);
     const api = modelToolApiRef.current;
     if (!mid || !api) {
       setState((prev) => ({ ...prev, status: 'detach needs an open multi-part model document' }));
       return;
     }
-    const r = api.detachSelection();
+    const r = withNativeMeshActionSource(source, () => api.detachSelection());
     if (!r) {
       setState((prev) => ({ ...prev, status: 'detach: select faces first (face mode) — and the whole mesh cannot detach from itself' }));
       return;
@@ -3632,7 +3660,7 @@ export default function AppFrame() {
   // List order is irrelevant (req_2811): the explicit set is the whole target contract.
   // The host op remaps every old authored group one-to-one into the fused part range, so
   // a cube's six faces remain six faces instead of becoming one giant face (req_2870).
-  const mergeSelectedParts = () => {
+  const mergeSelectedParts = (source = 'dock') => {
     const mid = activePartsModelId(state);
     const api = modelToolApiRef.current;
     const parts = mid ? (state.modelParts[mid] ?? []) : [];
@@ -3664,7 +3692,7 @@ export default function AppFrame() {
     for (const source of selected) {
       if (source.id === survivor.id) continue;
       const sourceRange = partRange(source)!;
-      const r = api.mergeParts(survivorRange.lo, survivorRange.hi, sourceRange.lo, sourceRange.hi);
+      const r = withNativeMeshActionSource(source, () => api.mergeParts(survivorRange.lo, survivorRange.hi, sourceRange.lo, sourceRange.hi));
       if (!r) {
         failedName = source.name;
         break;
@@ -3719,25 +3747,25 @@ export default function AppFrame() {
 
   // Face-selection ops that don't change part structure: winding / glass / solidify /
   // merge-faces. Each is a host-owned journaled mutation; the shell only reports it.
-  const runFaceOp = (kind: 'flip' | 'glass' | 'solidify' | 'merge-faces') => {
+  const runFaceOp = (kind: 'flip' | 'glass' | 'solidify' | 'merge-faces', source = 'dock') => {
     const api = modelToolApiRef.current;
     let ok = false;
     let okMsg = '';
     let failMsg = '';
     if (kind === 'flip') {
-      ok = api?.flipSelection() ?? false;
+      ok = withNativeMeshActionSource(source, () => api?.flipSelection() ?? false);
       okMsg = 'flipped the selected face(s) to the opposite side';
       failMsg = 'flip face: select face(s) first (face mode)';
     } else if (kind === 'glass') {
-      ok = api?.glassSelection() ?? false;
+      ok = withNativeMeshActionSource(source, () => api?.glassSelection() ?? false);
       okMsg = 'toggled glass on the selected faces';
       failMsg = 'glass: select faces first (face mode)';
     } else if (kind === 'solidify') {
-      ok = api?.solidifySelection() ?? false;
+      ok = withNativeMeshActionSource(source, () => api?.solidifySelection() ?? false);
       okMsg = 'solidified the selected faces (inner skin + rim walls)';
       failMsg = 'solidify: select faces first (face mode)';
     } else {
-      ok = api?.mergeFaces() ?? false;
+      ok = withNativeMeshActionSource(source, () => api?.mergeFaces() ?? false);
       okMsg = 'merged the selection into one face';
       failMsg = 'merge faces: select 2+ faces (face mode) first';
     }
@@ -3747,7 +3775,7 @@ export default function AppFrame() {
   // Cross-model reuse: append a saved package document into the OPEN model,
   // preserving its authored part ranges. File-backed packages host-parse their
   // copied .glb/.obj. Pick the same model again to reuse it any number of times.
-  const importModelAsParts = (pkg: ModelPackage) => {
+  const importModelAsParts = (pkg: ModelPackage, source = 'dock') => {
     setImportPartOpen(false);
     const mid = activePartsModelId(state);
     const api = modelToolApiRef.current;
@@ -3767,7 +3795,7 @@ export default function AppFrame() {
         if (geo.vertices.length === 0) continue;
         const row = meta[index];
         const color = row?.color ?? nextColor();
-        const r = api.appendPart(geo.positions, geo.faceGroups, color);
+        const r = withNativeMeshActionSource(source, () => api.appendPart(geo.positions, geo.faceGroups, color));
         if (!r) continue;
         added.push({
           id: `part:imp:${state.seq}:${added.length}`,
@@ -3782,11 +3810,13 @@ export default function AppFrame() {
     } else if (pkg.primitive) {
       const built = primitiveMeshData(pkg.primitive);
       const color = nextColor();
-      const r = built.positions.length > 0 ? api.appendPart(built.positions, built.faceGroups, color) : null;
+      const r = built.positions.length > 0
+        ? withNativeMeshActionSource(source, () => api.appendPart(built.positions, built.faceGroups, color))
+        : null;
       if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, kind: pkg.primitive, mesh: primitivePartMesh(pkg.primitive), visible: true, color, lo: r.lo, hi: r.hi });
     } else if (pkg.viewerPath && isViewerFile(pkg.viewerPath)) {
       const color = nextColor();
-      const r = api.appendModelFile(pkg.viewerPath, color);
+      const r = withNativeMeshActionSource(source, () => api.appendModelFile(pkg.viewerPath, color));
       if (r) added.push({ id: `part:imp:${state.seq}:0`, name: pkg.name, visible: true, color, lo: r.lo, hi: r.hi });
     }
     if (added.length === 0) {
@@ -3871,10 +3901,10 @@ export default function AppFrame() {
   // Seed meshes by part id, kept for the session so a restored part row regains its
   // seed (the journal note carries part METADATA only — meshes never ride the note).
   const partMeshSeedsRef = useRef<Record<string, EditMesh>>({});
-  const meshUndoRedo = (redo: boolean) => {
+  const meshUndoRedo = (redo: boolean, source = 'native') => {
     const api = modelToolApiRef.current;
     const mid = activePartsModelId(state);
-    const r = redo ? api?.redoMesh() : api?.undoMesh();
+    const r = withNativeMeshActionSource(source, () => (redo ? api?.redoMesh() : api?.undoMesh()));
     const verb = redo ? 'redo' : 'undo';
     if (!r?.ok) {
       setState((prev) => ({ ...prev, status: `nothing to ${verb} on this model` }));
@@ -4002,6 +4032,23 @@ export default function AppFrame() {
     drain();
     const t = setInterval(drain, 250);
     return () => clearInterval(t);
+  }, []);
+
+  // Geometry mutations converge on the resident mesh journal whether they came
+  // from a toolbar projection, an outliner verb, or the native viewport gizmo.
+  // Drain that authority at UI rate; this effect observes outcomes only and does
+  // not mirror mesh state through React.
+  useEffect(() => {
+    const drain = () => {
+      for (const report of nativeMeshActionDrain()) {
+        const mapped = modelIdByMeshTokenRef.current.get(report.documentToken);
+        const modelId = mapped || `native-model-token:${report.documentToken}`;
+        dispatchNativeMeshAction(report, modelId);
+      }
+    };
+    drain();
+    const timer = setInterval(drain, 250);
+    return () => clearInterval(timer);
   }, []);
 
   // ── RJIT_PARTOPS: headless outliner harness (req_2659) ────────────────────────

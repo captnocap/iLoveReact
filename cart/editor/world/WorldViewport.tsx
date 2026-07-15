@@ -110,14 +110,14 @@ export default function WorldViewport(props: {
   armed: ArmedPiece;
   /** the modal tool that owns a click: place / select / move / focus (req_2550) */
   tool: WorldTool;
-  /** the currently selected placed piece (highlighted), or null */
-  selectedId: string | null;
-  /** report the piece a Select/Move/Focus click hit (null = clicked empty ground) */
-  onSelect: (id: string | null) => void;
+  /** every selected placed piece; the last clicked id remains primary upstream. */
+  selectedIds: readonly string[];
+  /** report a click hit. Shift-click sets `additive`; shift-drag remains pan. */
+  onSelect: (id: string | null, additive: boolean) => void;
   /** a right-click hit a placed piece (req_2733): report it + the WINDOW coords so the
    *  quick context menu opens at the cursor. Fires in ANY tool mode — the whole point is
    *  editing the piece under the mouse without disarming the current tool. */
-  onPieceContext: (id: string, x: number, y: number) => void;
+  onPieceContext: (id: string, x: number, y: number, role: string | null) => void;
   /** Paint Faces (req_2879): one pointer gesture's unique semantic face targets.
    *  The owner binds the active material in one authored transaction on release. */
   onPaintFaces: (targets: readonly PieceMaterialTarget[]) => void;
@@ -558,6 +558,7 @@ export default function WorldViewport(props: {
     y0: number;
     turned: boolean;
     pan: boolean;
+    additive: boolean;
     runAnchor: { x: number; z: number; terrainY: number } | null;
     runCell: { x: number; z: number } | null;
     move: MoveDrag | null;
@@ -587,7 +588,7 @@ export default function WorldViewport(props: {
     const movingId = !e?.shiftKey && toolRef.current === 'move' ? pickPieceAt(p.x, p.y) : null;
     const movingPiece = movingId ? piecesRef.current.find((piece) => piece.id === movingId) ?? null : null;
     const moveGround = movingPiece ? groundUnder(p.x, p.y) : null;
-    if (movingPiece) onSelectRef.current(movingPiece.id);
+    if (movingPiece) onSelectRef.current(movingPiece.id, false);
     // Paint Faces (req_2879): down gathers the first touch; later samples add new
     // faces without mutating authored state until the whole gesture is committed.
     const paint = !e?.shiftKey && toolRef.current === 'paintFace'
@@ -602,6 +603,7 @@ export default function WorldViewport(props: {
       y0: p.y,
       turned: false,
       pan: !!e?.shiftKey,
+      additive: !!e?.shiftKey,
       runAnchor: anchor,
       runCell: null,
       move: movingPiece && moveGround
@@ -745,7 +747,7 @@ export default function WorldViewport(props: {
     // done through a re-render-safe path.)
     const tool = toolRef.current;
     if (tool !== 'place') {
-      onSelectRef.current(pickPieceAt(d.x0, d.y0));
+      onSelectRef.current(pickPieceAt(d.x0, d.y0), d.additive);
       return;
     }
     if (!armedRef.current) { console.warn('[place] click with nothing armed'); return; }
@@ -768,9 +770,13 @@ export default function WorldViewport(props: {
   // click keeps a stray right-click from dropping the current selection.
   const onRightClick = useCallback((e: any) => {
     const p = local(e);
-    const id = pickPieceAt(p.x, p.y);
-    if (id) onPieceContextRef.current(id, Number(e?.x ?? 0), Number(e?.y ?? 0));
-  }, [local, pickPieceAt]);
+    const hit = pickFaceAt(p.x, p.y);
+    if (hit) onPieceContextRef.current(hit.id, Number(e?.x ?? 0), Number(e?.y ?? 0), hit.role);
+    else {
+      const id = pickPieceAt(p.x, p.y);
+      if (id) onPieceContextRef.current(id, Number(e?.x ?? 0), Number(e?.y ?? 0), null);
+    }
+  }, [local, pickFaceAt, pickPieceAt]);
 
   const onScroll = useCallback((e: any) => {
     const dy = Number(e?.deltaY ?? 0);
@@ -834,8 +840,8 @@ export default function WorldViewport(props: {
   // in Place mode — there the green placement ghost owns the overlay, and a lingering cyan
   // selection from an earlier pick just reads as a confusing second outline (req_2554).
   const selectedSegs: number[] = [];
-  if (props.selectedId && props.tool !== 'place') {
-    const sel = props.pieces.find((p) => p.id === props.selectedId);
+  if (props.tool !== 'place') for (const selectedId of props.selectedIds) {
+    const sel = props.pieces.find((p) => p.id === selectedId);
     const look = sel ? pieceLook(sel.pieceId) : null;
     if (sel && look) selectedSegs.push(...boxSegments(stage, rect, sel.x, sel.y, sel.z, look.w, look.h, look.d, sel.yawDegrees));
   }
