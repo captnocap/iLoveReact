@@ -213,6 +213,9 @@ const v8_bindings_midi = if (enabledFor("midi")) @import("v8_bindings_midi.zig")
     pub fn registerMidi(_: anytype) void {}
     pub fn tickDrain() void {}
 };
+const v8_bindings_deej = if (enabledFor("deej")) @import("v8_bindings_deej.zig") else struct {
+    pub fn registerDeej(_: anytype) void {}
+};
 const v8_bindings_vterm = if (enabledFor("terminal")) @import("v8_bindings_vterm.zig") else struct {
     pub fn registerVterm(_: anytype) void {}
     pub fn tickDrain() void {}
@@ -379,6 +382,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "video", .required = false, .grep_prefix = "__video_", .reg_fn = "registerVideo", .mod = v8_bindings_video },
     .{ .name = "audio", .required = false, .grep_prefix = "__audio_", .reg_fn = "registerAudio", .mod = v8_bindings_audio },
     .{ .name = "midi", .required = false, .grep_prefix = "__midi_", .reg_fn = "registerMidi", .mod = v8_bindings_midi },
+    .{ .name = "deej", .required = false, .grep_prefix = "__deej_", .reg_fn = "registerDeej", .mod = v8_bindings_deej },
     .{ .name = "vterm", .required = false, .grep_prefix = "__vterm_", .reg_fn = "registerVterm", .mod = v8_bindings_vterm },
     .{ .name = "doom", .required = false, .grep_prefix = "__doom_", .reg_fn = "registerDoom", .mod = v8_bindings_doom },
     .{ .name = "paintable", .required = false, .grep_prefix = "__paintable_", .reg_fn = "registerPaintable", .mod = v8_bindings_paintable },

@@ -100,6 +100,7 @@ pub fn build(b: *std.Build) void {
     const has_terminal = b.option(bool, "has-terminal", "Link libvterm + real vterm.zig (otherwise stub)") orelse false;
     const has_audio = b.option(bool, "has-audio", "Compile framework/audio.zig (SDL3 audio + LuaJIT DSP via zluajit module)") orelse false;
     const has_midi = b.option(bool, "has-midi", "Link libasound + real midi.zig (ALSA snd_seq_* MIDI input) — otherwise stub") orelse false;
+    const has_deej = b.option(bool, "has-deej", "Compile framework/deej.zig (serial fader-board input, plain POSIX — no native libs)") orelse false;
     // -Dhas-window: cart imports <Window> (or <Notification>) from
     // @reactjit/runtime/primitives. For the GPU app (this target), the
     // window-rendering deps (SDL3, freetype, layout, text, windows.zig)
@@ -141,6 +142,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_terminal", has_terminal);
     options.addOption(bool, "has_audio", has_audio);
     options.addOption(bool, "has_midi", has_midi);
+    options.addOption(bool, "has_deej", has_deej);
     options.addOption(bool, "has_window", has_window);
     options.addOption([]const u8, "bundle_path", bundle_path);
     // GPU-substrate features that were always-on for the GPU shell.
@@ -685,6 +687,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/onnx.flag", if (has_onnx) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/audio.flag", if (has_audio) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/midi.flag", if (has_midi) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/deej.flag", if (has_deej) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/vterm.flag", if (has_terminal) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/doom.flag", if (has_doom) "1\n" else "0\n");
     const install_manifest = b.addInstallDirectory(.{

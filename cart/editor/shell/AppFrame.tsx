@@ -35,6 +35,7 @@ import RenderProbe from '../../../runtime/render_tracker';
 import PlayRoute from '../PlayRoute';
 import { useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
+import { useDeej, subscribeDeej, type DeejMove } from '../../../runtime/hooks/useDeej';
 import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
@@ -1074,6 +1075,14 @@ export default function AppFrame() {
   // window coords; opening = select that piece + land the menu at the cursor.
   // guarded: modal discipline — no quick verbs over an unresolved dialog.
   const worldMenu = useContextMenu();
+
+  // deej fader board (req_3085): physical faders nudge the live brush. The
+  // handler is re-pointed every render (down where the active paint context
+  // is known) so the one module-level subscription always sees fresh state;
+  // no board = zero events and the UI sliders behave exactly as before.
+  useDeej({ pollMs: 33 });
+  const deejApplyRef = useRef<(move: DeejMove) => void>(() => {});
+  useEffect(() => subscribeDeej((move) => deejApplyRef.current(move)), []);
   const openPieceQuickMenu = guarded((id: string, x: number, y: number) => {
     setState((prev) => ({
       ...prev,
@@ -4490,6 +4499,17 @@ export default function AppFrame() {
   const setActivePaintBrush = (brush: typeof activePaintBrush) => {
     if (facadePaintActive) setState((prev) => ({ ...prev, facadePaint: { ...prev.facadePaint, brush } }));
     else modelToolApiRef.current?.setBrush(brush);
+  };
+  // deej mapping: fader 1 = brush size (same 1..128 range as the toolbar
+  // slider), fader 2 = flow. Only fires on physical movement, and only while
+  // a paint surface is up — everywhere else the board is inert.
+  deejApplyRef.current = (move: DeejMove) => {
+    if (!paintUiActive) return;
+    if (move.slider === 0) {
+      setActivePaintBrush({ ...activePaintBrush, size: Math.round(1 + move.value * 127) });
+    } else if (move.slider === 1) {
+      setActivePaintBrush({ ...activePaintBrush, flow: Math.min(1, Math.max(0.02, 0.02 + move.value * 0.98)) });
+    }
   };
   const cycleFacadeDetail = () => setState((prev) => {
     const at = FACADE_PREVIEW_DETAILS.indexOf(prev.facadePaint.detail as typeof FACADE_PREVIEW_DETAILS[number]);

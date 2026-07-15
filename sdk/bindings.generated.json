@@ -217,6 +217,10 @@
           "zig": "hostMeshJournalNote"
         },
         {
+          "js": "__mesh_journal_checkpoint",
+          "zig": "hostMeshJournalCheckpoint"
+        },
+        {
           "js": "__mesh_duplicate_range",
           "zig": "hostMeshDuplicateRange"
         },
@@ -2785,6 +2789,39 @@
         {
           "js": "__midi_next_event_json",
           "zig": "hostMidiNextEventJson"
+        }
+      ]
+    },
+    "deej": {
+      "required": false,
+      "module": "framework/v8_bindings_deej.zig",
+      "registerFn": "registerDeej",
+      "grepPrefix": "__deej_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__deej_start",
+          "zig": "hostDeejStart"
+        },
+        {
+          "js": "__deej_stop",
+          "zig": "hostDeejStop"
+        },
+        {
+          "js": "__deej_is_available",
+          "zig": "hostDeejIsAvailable"
+        },
+        {
+          "js": "__deej_poll",
+          "zig": "hostDeejPoll"
+        },
+        {
+          "js": "__deej_state_json",
+          "zig": "hostDeejStateJson"
+        },
+        {
+          "js": "__deej_next_event_json",
+          "zig": "hostDeejNextEventJson"
         }
       ]
     },

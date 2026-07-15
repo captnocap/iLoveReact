@@ -145,6 +145,8 @@ export { useAudioInput };
 export type { AudioInputDevice, AudioInputHandle, AudioInputOptions } from './useAudioInput';
 export { useMIDI, subscribeMIDI };
 export type { MIDIHandle, MIDIOptions, MidiEvent, MidiEventType, MidiLearnTarget, MidiMapping, MidiPort } from './useMIDI';
+export { useDeej, subscribeDeej } from './useDeej';
+export type { DeejHandle, DeejMove, DeejOptions, DeejState } from './useDeej';
 export { useFileDrop } from './useFileDrop';
 export { pickFile } from './pickFile';
 export type { FileFilter, PickFileOptions } from './pickFile';

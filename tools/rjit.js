@@ -8720,6 +8720,7 @@ ${IMPORTS_MARKER}`).replace(
       onnx: hasBuildFlag(flags, "has-onnx"),
       audio: hasBuildFlag(flags, "has-audio"),
       midi: hasBuildFlag(flags, "has-midi"),
+      deej: hasBuildFlag(flags, "has-deej"),
       vterm: hasBuildFlag(flags, "has-terminal"),
       doom: hasBuildFlag(flags, "has-doom"),
       pathing: hasBuildFlag(flags, "has-pathing"),

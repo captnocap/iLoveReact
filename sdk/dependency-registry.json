@@ -435,6 +435,18 @@
       ],
       "note": "Linux MIDI input via ALSA sequencer (framework/midi_real.zig). Carts that don't import useMIDI get framework/midi_stub.zig; libasound is not linked. The dispatcher pattern matches audio.zig / luajit_worker.zig / sqlite.zig / vterm.zig."
     },
+    "deej": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useDeej.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-deej"
+      ],
+      "note": "Serial fader-board input (framework/deej.zig) for homemade deej mixers — Arduino printing '|'-separated 10-bit values over /dev/ttyACM*/ttyUSB*. Plain POSIX serial, no native libs. Carts import useDeej(); no hardware = clean degrade (connected:false, zero events)."
+    },
     "terminal": {
       "shipGate": "terminal",
       "triggers": [

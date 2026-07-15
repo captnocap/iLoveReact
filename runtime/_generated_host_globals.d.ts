@@ -692,6 +692,14 @@ declare global {
   function __midi_devices_json(...args: unknown[]): unknown;
   function __midi_next_event_json(...args: unknown[]): unknown;
 
+  // deej (framework/v8_bindings_deej.zig)
+  function __deej_start(...args: unknown[]): unknown;
+  function __deej_stop(...args: unknown[]): unknown;
+  function __deej_is_available(...args: unknown[]): unknown;
+  function __deej_poll(...args: unknown[]): unknown;
+  function __deej_state_json(...args: unknown[]): unknown;
+  function __deej_next_event_json(...args: unknown[]): unknown;
+
   // vterm (framework/v8_bindings_vterm.zig)
   function __terminal_set_cwd(...args: unknown[]): unknown;
   function __vterm_open(...args: unknown[]): unknown;
