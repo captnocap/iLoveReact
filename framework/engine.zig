@@ -434,6 +434,14 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn meshGizmoFinish() bool {
         return false;
     }
+    pub fn bdGizmoHit(_: f32, _: f32) i32 {
+        return -1;
+    }
+    pub fn bdGizmoBegin(_: i32) void {}
+    pub fn bdGizmoDrag(_: f32, _: f32, _: bool, _: bool) bool {
+        return false;
+    }
+    pub fn bdGizmoFinish() void {}
     pub fn meshGizmoNudge(_: u8, _: f32) bool {
         return false;
     }
@@ -847,6 +855,7 @@ var me_selecting: bool = false; // left held in a select mode (pick on press, ma
 var me_panning: bool = false; // left held with the Focus tool
 var me_gizmo_dragging: bool = false; // left held on a transform gizmo handle
 var me_gizmo_axis: i32 = -1;
+var me_bd_dragging: bool = false; // left held on the backdrop move gizmo (req_3080)
 var me_lc_dragging: bool = false; // left held on the loop-cut plane handle (req_2625 DD)
 var me_marquee: bool = false; // the select press travelled → became a marquee
 var me_down_x: f32 = 0;
@@ -4437,6 +4446,16 @@ pub fn run(config_in: AppConfig) !void {
                                 if (r3d.meshCompassSnap(compass_hit)) state_mod.markDirty();
                                 continue;
                             }
+                            // Backdrop move gizmo (req_3080) — its arms sit at the
+                            // reference image's center, never the selection pivot, so
+                            // checking it before the mesh gizmo can't steal a mesh grab.
+                            const bh = r3d.bdGizmoHit(mx, my);
+                            if (bh >= 0) {
+                                me_bd_dragging = true;
+                                r3d.bdGizmoBegin(bh);
+                                state_mod.markDirty();
+                                continue;
+                            }
                             const gh = r3d.meshGizmoHit(mx, my);
                             if (gh >= 0) {
                                 me_gizmo_dragging = true;
@@ -4883,6 +4902,19 @@ pub fn run(config_in: AppConfig) !void {
                             state_mod.markDirty();
                             continue;
                         }
+                        if (me_bd_dragging) {
+                            // Backdrop move gizmo (req_3080): same stepped mapping as the
+                            // mesh gizmo; the cart polls the pose back to move the quad.
+                            const bmod = c.SDL_GetModState();
+                            _ = r3d.bdGizmoDrag(
+                                event.motion.xrel,
+                                event.motion.yrel,
+                                (bmod & c.SDL_KMOD_SHIFT) != 0,
+                                (bmod & (c.SDL_KMOD_CTRL | c.SDL_KMOD_ALT)) != 0,
+                            );
+                            state_mod.markDirty();
+                            continue;
+                        }
                         if (me_gizmo_dragging) {
                             // Stepped drags (req_2759): no modifier = whole modeling units,
                             // Shift = the fine grid, Ctrl (or Alt, the old studio's key) = freeform.
@@ -5145,6 +5177,15 @@ pub fn run(config_in: AppConfig) !void {
                                 // Release just ends the grab — the previewed cut stays
                                 // live in the session (commit/cancel remain the popup's).
                                 me_lc_dragging = false;
+                                state_mod.markDirty();
+                                continue;
+                            }
+                            if (me_bd_dragging) {
+                                // Release ends the grab; the pose stays in the session
+                                // for the cart's poll to persist (no journal — a
+                                // backdrop is a tracing aid, never model data).
+                                me_bd_dragging = false;
+                                r3d.bdGizmoFinish();
                                 state_mod.markDirty();
                                 continue;
                             }

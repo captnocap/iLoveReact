@@ -9,7 +9,7 @@
 // Backdrops are TWIG (working state): they survive reloads via localstore but are a
 // tracing aid, never model data — they don't ride the model package.
 
-import { memo, useState } from 'react';
+import { memo } from 'react';
 import { Box, Col, Image, Pressable, Row, Slider, StaticSurface, Text } from '@reactjit/runtime/primitives';
 import { mesh, type GeometryData } from '@reactjit/geometries';
 import { base64ToBytes } from '@reactjit/workspace';
@@ -284,9 +284,13 @@ export function BackdropsPanel(props: {
   onAdd: () => void;
   onClose: () => void;
   status: string | null;
-}) {
   // one backdrop's controls expanded at a time — the card stays a card, not a wall.
-  const [openId, setOpenId] = useState<string | null>(props.backdrops[props.backdrops.length - 1]?.id ?? null);
+  // CONTROLLED by the viewer (req_3080): the expanded backdrop is the one wearing the
+  // in-viewport move gizmo, so the owner of that session owns this too.
+  openId: string | null;
+  onOpen: (id: string | null) => void;
+}) {
+  const { openId, onOpen: setOpenId } = props;
   return (
     <Box style={{ position: 'absolute', right: 10, top: 44, bottom: 62, width: 340, overflow: 'hidden' }}>
       <Col style={{ maxHeight: '100%', padding: 12, gap: 10, borderRadius: 8, backgroundColor: CARD_BG, borderWidth: 1, borderColor: EDGE }}>
@@ -338,11 +342,11 @@ export function BackdropsPanel(props: {
                         );
                       })}
                     </Row>
+                    {/* Position sliders are GONE (req_3080, USER: "the xyz pos blows
+                        chunks") — the expanded backdrop wears the move gizmo in the
+                        viewport; drag its arms to place the image. Size + opacity stay. */}
                     <SliderRow label="size" value={bd.scale} min={0.5} max={20} step={0.1} suffix="m" onChange={(n) => props.onUpdate(bd.id, { scale: n })} />
                     <SliderRow label="opacity" value={bd.opacity} min={0.05} max={1} step={0.05} onChange={(n) => props.onUpdate(bd.id, { opacity: n })} />
-                    <SliderRow label="pos x" value={bd.pos[0]} min={-8} max={8} step={0.05} suffix="m" onChange={(n) => props.onUpdate(bd.id, { pos: [n, bd.pos[1], bd.pos[2]] })} />
-                    <SliderRow label="pos y" value={bd.pos[1]} min={-8} max={8} step={0.05} suffix="m" onChange={(n) => props.onUpdate(bd.id, { pos: [bd.pos[0], n, bd.pos[2]] })} />
-                    <SliderRow label="pos z" value={bd.pos[2]} min={-8} max={8} step={0.05} suffix="m" onChange={(n) => props.onUpdate(bd.id, { pos: [bd.pos[0], bd.pos[1], n] })} />
                   </Col>
                 ) : null}
               </Col>

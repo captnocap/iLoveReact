@@ -4631,6 +4631,101 @@ pub fn meshGizmoHit(mx: f32, my: f32) i32 {
     return best;
 }
 
+// ── Backdrop move session (req_3080) ──────────────────────────────────────────────────
+// While the Reference Images panel has a backdrop expanded, the cart opens this session
+// and a MOVE gizmo rides the image's center — the native input loop drags it exactly
+// like the mesh gizmo (same arms, same stepped grid), and the cart polls the pose back
+// while the session is open to move the quad + persist. Position only: size/opacity
+// stay panel sliders (USER: keep those two, "the xyz pos blows chunks"). The session is
+// hit-tested BEFORE the mesh gizmo, but its arms sit at the backdrop, never the
+// selection pivot, so the two can't fight over a grab.
+var g_bd_pos: ?[3]f32 = null; // active backdrop's world center; null = no session
+var g_bd_active: i32 = -1; // grabbed arm (gold), -1 = none
+var g_bd_raw: f32 = 0; // cumulative raw drag on the grabbed axis (m)
+var g_bd_applied: f32 = 0; // stepped value already applied to the pose
+var g_bd_pos0: [3]f32 = .{ 0, 0, 0 }; // pose frozen at grab — the drag's screen mapping anchor
+
+/// Begin/update the session at the backdrop's center (`__model_bd_gizmo_set`).
+pub fn bdGizmoSet(x: f32, y: f32, z: f32) void {
+    g_bd_pos = .{ x, y, z };
+}
+/// End the session (`__model_bd_gizmo_clear`) — panel closed / row collapsed.
+pub fn bdGizmoClear() void {
+    g_bd_pos = null;
+    g_bd_active = -1;
+}
+pub fn bdGizmoActive() bool {
+    return g_bd_pos != null;
+}
+pub fn bdGizmoPos() [3]f32 {
+    return g_bd_pos orelse .{ 0, 0, 0 };
+}
+/// Hit-test the session's three move arms (tip or shaft, grabPx — the mesh gizmo's
+/// exact rule). Returns the axis 0..2, or -1.
+pub fn bdGizmoHit(mx: f32, my: f32) i32 {
+    const pos = g_bd_pos orelse return -1;
+    if (g_paint_session or !g_me_capture or !model_paint.hasTarget()) return -1;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const lmx = vpLocalX(mx);
+    const lmy = vpLocalY(my);
+    var best: i32 = -1;
+    var best_d2: f32 = GIZMO_HIT_PX * GIZMO_HIT_PX;
+    var axis: i32 = 0;
+    while (axis < 3) : (axis += 1) {
+        const s = axisScreenInfo(cam, pos, axisVec(axis)) orelse continue;
+        const h = gizmoArmEnd(s, 1);
+        const tdx = lmx - h[0];
+        const tdy = lmy - h[1];
+        const d2 = @min(tdx * tdx + tdy * tdy, segDist2(lmx, lmy, s.ax, s.ay, h[0], h[1]));
+        if (d2 < best_d2) {
+            best_d2 = d2;
+            best = axis;
+        }
+    }
+    return best;
+}
+pub fn bdGizmoBegin(code: i32) void {
+    g_bd_active = code;
+    g_bd_raw = 0;
+    g_bd_applied = 0;
+    g_bd_pos0 = g_bd_pos orelse .{ 0, 0, 0 };
+}
+/// Drag the grabbed arm — the mesh move-gizmo's exact stepped mapping (whole modeling
+/// units, Shift = fine grid, Ctrl/Alt = freeform), applied to the session pose.
+pub fn bdGizmoDrag(dx: f32, dy: f32, shift: bool, free: bool) bool {
+    if (g_bd_pos == null or g_bd_active < 0 or g_bd_active > 2) return false;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const s = axisScreenInfo(cam, g_bd_pos0, axisVec(g_bd_active)) orelse return false;
+    g_bd_raw += (dx * s.dx + dy * s.dy) / s.px_per_unit;
+    const target = snapStep(g_bd_raw, GIZMO_STEP_M, GIZMO_STEP_FINE_M, shift, free);
+    const d = target - g_bd_applied;
+    if (@abs(d) < 1e-7) return false;
+    const av = axisVec(g_bd_active);
+    g_bd_pos = vadd(g_bd_pos0, vmul(av, target));
+    g_bd_applied = target;
+    return true;
+}
+pub fn bdGizmoFinish() void {
+    g_bd_active = -1;
+}
+/// The session's move arms + hub, drawn beside the mesh dressing — same anatomy as the
+/// mesh MOVE gizmo (arm/chevron/hollow hub) so it reads as "the gizmo, on the image".
+fn drawBdGizmoOverlay(cam: model_paint.Camera, ox: f32, oy: f32) void {
+    const pos = g_bd_pos orelse return;
+    if (g_paint_session) return;
+    const pc = model_paint.project(cam, g_paint_vp_w, g_paint_vp_h, pos) orelse return;
+    var axis: i32 = 0;
+    while (axis < 3) : (axis += 1) {
+        const s = axisScreenInfo(cam, pos, axisVec(axis)) orelse continue;
+        const col = if (g_bd_active == axis) GIZMO_ACTIVE else axisColor(axis);
+        const h = gizmoArmEnd(s, 1);
+        overlayLine(s.ax + ox, s.ay + oy, h[0] + ox, h[1] + oy, col[0], col[1], col[2], GIZMO_SHAFT_W);
+        drawGizmoArrowHead(h[0] + ox, h[1] + oy, s.dx, s.dy, col);
+    }
+    overlayDot(pc[0] + ox, pc[1] + oy, GIZMO_HUB_RIM[0], GIZMO_HUB_RIM[1], GIZMO_HUB_RIM[2], GIZMO_CENTER_PX * 2 + 2);
+    capsules.drawCapsule(pc[0] + ox, pc[1] + oy, pc[0] + ox, pc[1] + oy, GIZMO_DARK[0], GIZMO_DARK[1], GIZMO_DARK[2], 1.0, GIZMO_CENTER_PX * 2 - 2);
+}
+
 // ── Stepped gizmo drags (req_2759; the studio's req_1023 USER RULING, host-native) ────
 // Every gizmo drag is STEPPED by default: the drag accumulates a RAW cumulative value
 // from grab, the cumulative target snaps to the step grid, and only the difference to
@@ -5453,6 +5548,9 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     drawLoopCutOverlay(cam, ox, oy);
     if (mode != 0) drawMirrorPlanesOverlay(cam, ox, oy); // req_2758: edit dressing, quiet in paint/view
     drawGizmoOverlay(cam, ox, oy);
+    // Backdrop move session (req_3080): the reference image's own move gizmo — drawn in
+    // ANY mode (tracing setup isn't an edit mode), quiet only while paint owns the surface.
+    drawBdGizmoOverlay(cam, ox, oy);
     // Scale ladder + mannequin (req_2869): passive stage furniture, always present even
     // in paint/view mode so the author can judge an asset before it ever reaches play.
     drawStageScaleCue(cam, ox, oy);

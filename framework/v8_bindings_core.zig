@@ -519,6 +519,40 @@ fn hostModelCamSetPose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnNumber(info, if (ok) 1 else 0);
 }
 
+/// __model_bd_gizmo_set(x, y, z) — open (or re-seat) the backdrop move-gizmo session at
+/// the reference image's world center (req_3080). The native input loop then drags the
+/// arms exactly like the mesh gizmo; the cart polls __model_bd_gizmo_pos to follow.
+fn hostModelBdGizmoSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const z: f32 = @floatCast(argToF64(info, 2) orelse 0);
+    scene3d.bdGizmoSet(x, y, z);
+    state.markDirty();
+}
+
+/// __model_bd_gizmo_clear() — end the backdrop move-gizmo session (panel closed / row
+/// collapsed / backdrop hidden).
+fn hostModelBdGizmoClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    _ = v8.FunctionCallbackInfo.initFromV8(info_c);
+    scene3d.bdGizmoClear();
+    state.markDirty();
+}
+
+/// __model_bd_gizmo_pos() → "[x,y,z]" | "" — the session's live pose (the drag mutates
+/// it host-side; the cart polls while the session is open and mirrors it into state).
+fn hostModelBdGizmoPos(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (!scene3d.bdGizmoActive()) {
+        setReturnString(info, "");
+        return;
+    }
+    const p = scene3d.bdGizmoPos();
+    var buf: [96]u8 = undefined;
+    const json = std.fmt.bufPrint(&buf, "[{d},{d},{d}]", .{ p[0], p[1], p[2] }) catch return;
+    setReturnString(info, json);
+}
+
 /// __model_session_json() → {"key","count","radius","undo","redo","atlas"} | "".
 /// The resident mesh-editor session (req_2898): what model the host is STILL holding
 /// live across a hot reload — edit mesh key/count, orbit radius, journal depths, and
@@ -2816,6 +2850,9 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_orbit_lock", hostModelOrbitLock);
     v8_runtime.registerHostFn("__model_cam_pose", hostModelCamPose);
     v8_runtime.registerHostFn("__model_cam_set_pose", hostModelCamSetPose);
+    v8_runtime.registerHostFn("__model_bd_gizmo_set", hostModelBdGizmoSet);
+    v8_runtime.registerHostFn("__model_bd_gizmo_clear", hostModelBdGizmoClear);
+    v8_runtime.registerHostFn("__model_bd_gizmo_pos", hostModelBdGizmoPos);
     v8_runtime.registerHostFn("__model_session_json", hostModelSessionJson);
     v8_runtime.registerHostFn("__model_focus_at", hostModelFocusAt);
     v8_runtime.registerHostFn("__mesh_edit_mode", hostMeshEditMode);

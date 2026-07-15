@@ -639,6 +639,11 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     setBackdropsState((prev) => { const next = typeof u === 'function' ? (u as (p: Backdrop[]) => Backdrop[])(prev) : u; saveBackdrops(next); return next; });
   const [backdropPanel, setBackdropPanel] = useState(false);
   const [bdStatus, setBdStatus] = useState<string | null>(null);
+  // The panel's one expanded backdrop (req_3080): it wears the in-viewport MOVE gizmo —
+  // the host session draws/drags the arms (gpu/3d.zig bdGizmo*), and the poll below
+  // mirrors the dragged pose back into state. Owned here, not in the panel, because
+  // the session's lifetime IS this id.
+  const [bdOpenId, setBdOpenId] = useState<string | null>(null);
   const bdEpochRef = useRef(Math.floor(Math.random() * 1e6));
   const addBackdrop = async () => {
     const r = await pickBackdrop(backdrops.length);
@@ -646,7 +651,47 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     if (typeof r === 'string') { setBdStatus(r); return; }
     setBdStatus(null);
     setBackdrops((list) => [...list, r]);
+    setBdOpenId(r.id); // a fresh image opens expanded, gizmo ready
   };
+  // The backdrop wearing the gizmo: panel open + row expanded + still visible.
+  const bdActive = backdropPanel ? backdrops.find((b) => b.id === bdOpenId && b.visible) ?? null : null;
+  // What the HOST last knew as the session pose — the seam that keeps the two writers
+  // apart: JS-originated pos changes (plane badge re-seat) push host-ward only when
+  // they differ from this; host-originated drags come back through the poll and land
+  // here first, so the push effect never snaps a live drag back.
+  const bdHostPosRef = useRef('');
+  useEffect(() => {
+    if (!bdActive) {
+      bdHostPosRef.current = '';
+      host.__model_bd_gizmo_clear?.();
+      return;
+    }
+    const key = bdActive.pos.join(',');
+    if (key !== bdHostPosRef.current) {
+      bdHostPosRef.current = key;
+      host.__model_bd_gizmo_set?.(bdActive.pos[0], bdActive.pos[1], bdActive.pos[2]);
+    }
+    // No per-run cleanup: a poll-mirrored pos change re-runs this effect mid-drag, and
+    // clearing here would kill the live session. The no-session branch above and the
+    // unmount effect below are the only closers.
+  }, [bdActive?.id, bdActive ? bdActive.pos.join(',') : '']);
+  useEffect(() => () => { host.__model_bd_gizmo_clear?.(); }, []);
+  useEffect(() => {
+    if (!bdActive) return;
+    const id = bdActive.id;
+    const t = setInterval(() => {
+      const j = host.__model_bd_gizmo_pos?.();
+      if (typeof j !== 'string' || !j) return;
+      let p: number[];
+      try { p = JSON.parse(j) as number[]; } catch { return; }
+      if (!Array.isArray(p) || p.length !== 3) return;
+      const key = p.join(',');
+      if (key === bdHostPosRef.current) return;
+      bdHostPosRef.current = key;
+      setBackdrops((list) => list.map((b) => (b.id === id ? { ...b, pos: [p[0]!, p[1]!, p[2]!] } : b)));
+    }, 50);
+    return () => clearInterval(t);
+  }, [bdActive?.id]);
   const [selInfo, setSelInfo] = useState<SelInfo>({ mode: 0, verts: 0, edges: 0, sel: 0 });
   const [guard, setGuard] = useState<GuardInfo | null>(null);
   // Shader-ink bake failure — surfaced LOUD. The old shape discarded the door's
@@ -2115,8 +2160,12 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
       </Scene3D>
 
       {/* Backdrop texture bakes — offscreen 2D surfaces the quads sample. Keyed on the
-          mount epoch so a remount re-bakes instead of sampling a stale host texture. */}
-      {backdrops.filter((b) => b.visible).map((b) => (
+          mount epoch so a remount re-bakes instead of sampling a stale host texture.
+          Mounted for EVERY backdrop, hidden or not (req_3079): unmounting on hide freed
+          the surface, and the re-bake on show could capture the image mid-load — the
+          quad then sampled a placeholder/misplaced picture. The quads filter on
+          visible; the bakes stay warm. */}
+      {backdrops.map((b) => (
         <BackdropSurface key={`${b.id}~${bdEpochRef.current}`} id={`${b.id}.${bdEpochRef.current}`} source={b.source} aspect={b.aspect} />
       ))}
 
@@ -2445,6 +2494,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         <BackdropsPanel
           backdrops={backdrops}
           status={bdStatus}
+          openId={bdOpenId}
+          onOpen={setBdOpenId}
           onAdd={() => { void addBackdrop(); }}
           onUpdate={(id, patch) => setBackdrops((list) => list.map((b) => (b.id === id ? { ...b, ...patch } : b)))}
           onRemove={(id) => setBackdrops((list) => list.filter((b) => b.id !== id))}
