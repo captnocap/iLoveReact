@@ -20,7 +20,7 @@ const MATERIAL_TILE_PX = m_config.MATERIAL_TILE_PX;
 const INSTANCE_STRIDE = m_config.INSTANCE_STRIDE;
 const WALL_SENTINEL_SHAPE = m_config.WALL_SENTINEL_SHAPE;
 const GLASS_TINT = m_state.GLASS_TINT;
-const LIVE_DOOR_TEXTURED_GLASS_ROUTE_ALPHA = m_state.LIVE_DOOR_TEXTURED_GLASS_ROUTE_ALPHA;
+const LIVE_TEXTURED_ALPHA_ROUTE_ALPHA = m_state.LIVE_TEXTURED_ALPHA_ROUTE_ALPHA;
 const LIVE_DOOR_FLAT_GLASS_ALPHA = m_state.LIVE_DOOR_FLAT_GLASS_ALPHA;
 const appendInstanceRow = m_instances.appendInstanceRow;
 const BakedRange = m_streaming_support.BakedRange;
@@ -201,7 +201,14 @@ pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
     // an independent node for the hinge animation.
     if (mesh.door == null and (mesh.slots.len == 0 or r.mats.len == 0)) {
         const override: ?[]const u8 = if (r.mats.len > 0 and r.mats[0] != 0) self.live_mat_keys.get(r.mats[0]) else null;
-        appendMeshPropNode(self, mesh, inst, mesh.key, 0, mesh.vertex_count, 0, alpha, override) catch {};
+        // A facade (and any other painted resident mesh) bakes its untouched
+        // texels as alpha-zero. Keep its draw out of the opaque depth-writing
+        // pass so those holes reveal the wall face underneath; the shared mesh
+        // shader discards the empty texels and blends the painted ones.
+        const textured_alpha_route = alpha == null and override == null and
+            live_mesh_doors.routeTexturedMeshTransparent(mesh.texture_has_translucency);
+        const node_alpha = if (textured_alpha_route) LIVE_TEXTURED_ALPHA_ROUTE_ALPHA else alpha;
+        appendMeshPropNode(self, mesh, inst, mesh.key, 0, mesh.vertex_count, 0, node_alpha, override) catch {};
         return;
     }
     // PER-SLOT (req_2025): mirror the baked slotted draw so a multi-slot cooked prop wears
@@ -227,7 +234,7 @@ pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
         else
             false;
         const slot_alpha = if (live_door_glass)
-            (if (mesh.tex_rgba != null or override != null) LIVE_DOOR_TEXTURED_GLASS_ROUTE_ALPHA else LIVE_DOOR_FLAT_GLASS_ALPHA)
+            (if (mesh.tex_rgba != null or override != null) LIVE_TEXTURED_ALPHA_ROUTE_ALPHA else LIVE_DOOR_FLAT_GLASS_ALPHA)
         else
             alpha;
         appendMeshPropNode(self, mesh, inst, key, slot.start, slot.count, 0, slot_alpha, override) catch {};

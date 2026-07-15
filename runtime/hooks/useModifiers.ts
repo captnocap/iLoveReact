@@ -14,6 +14,7 @@
 
 import { useEffect } from 'react';
 import { subscribe, emit } from '../ffi';
+import { decodeSdlModifiers } from '../input/sdlModifiers';
 
 export interface Modifiers {
   shift: boolean;
@@ -21,11 +22,6 @@ export interface Modifiers {
   ctrl: boolean;
   meta: boolean;
 }
-
-const SDL_KMOD_SHIFT = 0x0003;
-const SDL_KMOD_CTRL = 0x00c0;
-const SDL_KMOD_ALT = 0x0300;
-const SDL_KMOD_GUI = 0x0c00;
 
 const SDL_KEY_NAMES: Record<number, string> = {
   0x0d: 'enter', 0x1b: 'escape', 0x08: 'backspace', 0x09: 'tab', 0x20: 'space',
@@ -41,15 +37,8 @@ function decodeKey(packed: number): { key: string; mods: Modifiers } {
     if (sym >= 0x20 && sym < 0x7f) key = String.fromCharCode(sym).toLowerCase();
     else key = `sdl:${sym}`;
   }
-  return {
-    key,
-    mods: {
-      shift: (mod & SDL_KMOD_SHIFT) !== 0,
-      ctrl: (mod & SDL_KMOD_CTRL) !== 0,
-      alt: (mod & SDL_KMOD_ALT) !== 0,
-      meta: (mod & SDL_KMOD_GUI) !== 0,
-    },
-  };
+  const { shiftKey: shift, ctrlKey: ctrl, altKey: alt, metaKey: meta } = decodeSdlModifiers(mod);
+  return { key, mods: { shift, ctrl, alt, meta } };
 }
 
 // ── The global live state + bridge ───────────────────────────────────────────

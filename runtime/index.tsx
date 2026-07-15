@@ -331,6 +331,7 @@ const Reconciler: any = require('react-reconciler');
 
 import { hostConfig, setTransportFlush, handlerRegistry } from '../renderer/hostConfig';
 import { prepareContext, releaseContext } from './effectContext';
+import { decodeSdlModifiers } from './input/sdlModifiers';
 // @ts-ignore — bundle-time alias, resolved by esbuild-config.mjs (old path) or
 // scripts/cart-bundle.js via --alias:@cart-entry=<abs path> (v8cli path).
 import App from '@cart-entry';
@@ -391,6 +392,7 @@ function getPointerPayload(id: number, type: string) {
     return Number.isFinite(n) ? n : fallback;
   };
   const down = read('getMouseDown', 0) > 0;
+  const modifiers = decodeSdlModifiers(read('getMouseMods', 0));
   // Device-aware pointer (req_3089): the host tracks which physical device last
   // drove the cursor (getPointerDevice: 0 mouse, 1 pen) and the pen's live
   // pressure axis. A pen event carries real Wacom pressure; a mouse keeps the
@@ -405,6 +407,7 @@ function getPointerPayload(id: number, type: string) {
     pointerType: pen ? 'pen' : 'mouse',
     pressure: pen ? read('getPenPressure', 0) : (down ? 1 : 0),
     buttons: down ? 1 : 0,
+    ...modifiers,
     preventDefault() { this.defaultPrevented = true; },
     defaultPrevented: false,
   };

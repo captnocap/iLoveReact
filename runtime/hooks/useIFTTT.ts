@@ -93,6 +93,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLatest } from './useLatest';
 import { subscribe, emit, callHost } from '../ffi';
+import { decodeSdlModifiers } from '../input/sdlModifiers';
 import { G } from '../host-globals';
 import {
   registerIfttSource,
@@ -331,16 +332,6 @@ function bumpWire(id: number, ev?: any): void {
 // Max value < 2^48 — exact in the f64 crossing the V8 bridge. Decode with
 // arithmetic div/mod, NEVER 32-bit bitwise ops (they'd truncate the mod).
 
-// SDL3 keymod bitmask constants. Pinned to SDL3 (the version Zig links
-// against in framework/engine.zig). SDL2 had the same numeric values for
-// CTRL/SHIFT but the bit layout for ALT/GUI shifted in SDL3 — if Zig is
-// ever migrated to a different SDL major, re-verify these. Each constant
-// covers BOTH left and right variants (e.g. CTRL = LCTRL | RCTRL).
-const SDL_KMOD_SHIFT = 0x0003;
-const SDL_KMOD_CTRL = 0x00C0;
-const SDL_KMOD_ALT = 0x0300;
-const SDL_KMOD_GUI = 0x0C00;
-
 const SDL_KEY_NAMES: Record<number, string> = {
   8: 'backspace', 9: 'tab', 13: 'enter', 27: 'escape', 32: 'space', 127: 'delete',
   // Arrow keys (SDL3 scancode | 0x40000000)
@@ -366,10 +357,7 @@ function decodeKey(packed: number): {
     if (sym >= 0x20 && sym < 0x7f) key = String.fromCharCode(sym).toLowerCase();
     else key = `sdl:${sym}`;
   }
-  const ctrl = (mod & SDL_KMOD_CTRL) !== 0;
-  const shift = (mod & SDL_KMOD_SHIFT) !== 0;
-  const alt = (mod & SDL_KMOD_ALT) !== 0;
-  const meta = (mod & SDL_KMOD_GUI) !== 0;
+  const { ctrlKey: ctrl, shiftKey: shift, altKey: alt, metaKey: meta } = decodeSdlModifiers(mod);
   return {
     key,
     ctrlKey: ctrl,

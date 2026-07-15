@@ -271,10 +271,10 @@ pub const COOKED_DOOR_OPEN_SECONDS: f32 = 0.4;
 /// opacity only; appendMeshPropNode tints it this blue so /compiled glass panes
 /// match the React play view instead of falling back to the prop's gray.
 pub const GLASS_TINT = [3]f32{ 169.0 / 255.0, 200.0 / 255.0, 216.0 / 255.0 }; // #a9c8d8
-// A textured Studio glass face already carries ~0.34 alpha in its atlas. The
+// A textured resident mesh already carries its authored alpha in the atlas. The
 // node only needs to be below the transparent-pass cutoff; keeping this near 1
 // avoids multiplying that authored alpha down a second time.
-pub const LIVE_DOOR_TEXTURED_GLASS_ROUTE_ALPHA: f32 = 0.998;
+pub const LIVE_TEXTURED_ALPHA_ROUTE_ALPHA: f32 = 0.998;
 pub const LIVE_DOOR_FLAT_GLASS_ALPHA: f32 = 87.0 / 255.0;
 
 /// The world AABB of a cooked door's leaf panel (req_1864) — the leaf slot's

@@ -65,6 +65,14 @@ pub fn rgbaHasTranslucency(rgba: []const u8) bool {
     return false;
 }
 
+/// A resident mesh whose atlas has non-opaque texels cannot write depth in the
+/// opaque pass: its transparent texels would hide the world behind the mesh.
+/// The shared mesh shader still alpha-discards fully empty texels; this route
+/// supplies the matching depth-write-off draw for the painted texels.
+pub fn routeTexturedMeshTransparent(texture_has_translucency: bool) bool {
+    return texture_has_translucency;
+}
+
 test "identity separates storeys and mesh meanings while tolerating float noise below quantization" {
     const base = identity(11, 3.0, 0.0, 6.0, 90.0);
     try std.testing.expectEqual(base, identity(11, 3.0001, 0.0001, 6.0001, 90.001));
@@ -91,4 +99,9 @@ test "legacy mixed leaf and v2 glass tail both route through the transparent pas
 test "atlas alpha detection finds the Studio glass value without flagging opaque paint" {
     try std.testing.expect(rgbaHasTranslucency(&.{ 10, 20, 30, 255, 40, 50, 60, 87 }));
     try std.testing.expect(!rgbaHasTranslucency(&.{ 10, 20, 30, 255, 40, 50, 60, 255 }));
+}
+
+test "painted atlas with an empty background routes through the transparent pass" {
+    try std.testing.expect(routeTexturedMeshTransparent(rgbaHasTranslucency(&.{ 0, 0, 0, 0, 220, 90, 30, 255 })));
+    try std.testing.expect(!routeTexturedMeshTransparent(rgbaHasTranslucency(&.{ 220, 90, 30, 255 })));
 }
