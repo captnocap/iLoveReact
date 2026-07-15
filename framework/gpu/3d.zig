@@ -17,6 +17,7 @@ const effect_assemble = @import("effect_assemble.zig");
 const compile_progress = @import("compile_progress.zig");
 const static_instance_policy = @import("static_instance_policy.zig");
 const model_paint = @import("model_paint.zig");
+const effects_ctx = @import("effects_ctx.zig");
 const paint_islands_mod = @import("paint_islands.zig");
 const paint_program = @import("paint_program.zig");
 const model_source = @import("model_source.zig");
@@ -4162,7 +4163,6 @@ pub fn meshClearMarquee() void {
 // twice — a dark HALO under a bright fill — so it pops on a white model AND a dark void (a
 // single colour can't contrast with both).
 const OV_ORANGE = [3]f32{ 1.0, 0.52, 0.16 }; // selected
-const OV_VERT = [3]f32{ 0.95, 0.97, 1.0 }; // unselected vertex fill
 const OV_HALO = [4]f32{ 0.02, 0.03, 0.07, 0.95 }; // dark outline behind every marker
 const OV_MARQUEE = [4]f32{ 0.62, 0.78, 1.0, 0.98 };
 // ── Gizmo (PORT of the studio's meshGizmo.tsx, req_2827) ────────────────────────────
@@ -4286,6 +4286,17 @@ const COMPASS_RIM = [4]f32{ 0.35, 0.42, 0.58, 0.55 }; // 1.5px rim ring
 const COMPASS_TEXT = [3]f32{ 0.72, 0.79, 0.95 }; // readout text (OV_FACE_DOT blue)
 const COMPASS_AWAY_FADE: f32 = 0.72; // depth cue: ends pointing away sit dimmer
 
+/// Depth-coded vertex fill (req_3064): from an axis-on view every dot lands on the same
+/// pixel column and coplanarity is unreadable, so the FILL encodes view depth — verts at
+/// the exact same depth share the exact same colour, and one off-plane vert reads as the
+/// odd colour out. The hue wheel cycles once per OV_DEPTH_HUE_PERIOD_M of depth, so a
+/// centimetre of drift becomes a ~14° hue step instead of an invisible fraction of the
+/// mesh's whole depth range. Cyclic aliasing (two planes 25 cm apart sharing a hue) is
+/// fine — the comparison is always between neighbours expected coplanar.
+const OV_DEPTH_HUE_PERIOD_M: f32 = 0.25;
+fn ovDepthColor(depth: f32) [3]f32 {
+    return effects_ctx.EffectContext.hsvToRgb(depth / OV_DEPTH_HUE_PERIOD_M, 0.65, 1.0);
+}
 /// A haloed dot: a dark disc, then the bright fill on top — visible on any background.
 fn overlayDot(px: f32, py: f32, r: f32, g: f32, b: f32, size: f32) void {
     capsules.drawCapsule(px, py, px, py, OV_HALO[0], OV_HALO[1], OV_HALO[2], OV_HALO[3], size + 3.5);
@@ -5391,16 +5402,21 @@ pub fn drawEditorOverlay(ox: f32, oy: f32) void {
     if (mode == 1) { // vertex: every vert as a haloed dot, selected ones orange + bigger
         const n = mesh_edit.vertCount();
         const draw_all = n <= OV_MAX_VERT_DOTS;
+        // Depth axis for the dot colours: anchored at the orbit TARGET, not the eye, so
+        // dollying in/out never reshuffles the palette; orbiting recolours smoothly.
+        const fwd = vnorm(vsub(cam.target, cam.eye));
         var i: u32 = 0;
         while (i < n) : (i += 1) {
             if (!mesh_edit.vertInScopePub(i)) continue; // only the focused part's verts
             const selected = mesh_edit.vertSelectedPub(i);
             if (!selected and !draw_all) continue;
-            const sp = ovProject(cam, mesh_edit.vertPosPub(i), ox, oy) orelse continue;
+            const p = mesh_edit.vertPosPub(i);
+            const sp = ovProject(cam, p, ox, oy) orelse continue;
             if (selected) {
                 overlayDot(sp[0], sp[1], OV_ORANGE[0], OV_ORANGE[1], OV_ORANGE[2], 13);
             } else {
-                overlayDot(sp[0], sp[1], OV_VERT[0], OV_VERT[1], OV_VERT[2], 8);
+                const c = ovDepthColor(vdot(vsub(p, cam.target), fwd));
+                overlayDot(sp[0], sp[1], c[0], c[1], c[2], 8);
             }
         }
     }
