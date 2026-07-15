@@ -36,6 +36,8 @@ import PlayRoute from '../PlayRoute';
 import { useRoute } from '../../../runtime/router';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
 import { useDeej, subscribeDeej, type DeejMove } from '../../../runtime/hooks/useDeej';
+import { getPointerDevice } from '../../../runtime/hooks/usePointerDevice';
+import { busOn } from '../../../runtime/hooks/useIFTTT';
 import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, ModelOverride, ModelPackage, ModelPlaceable, ModelPart, PrimitiveKind, ModelToolApi, ModelToolSnapshot, Rgb, WorldUndoSlices, CharacterRole } from '../data/types';
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
@@ -280,6 +282,11 @@ export default function AppFrame() {
   const stateRef = useRef(state);
   stateRef.current = state;
   useEffect(() => installDevReloadCheckpoint(() => persistState(stateRef.current)), []);
+  // Per-device tool memory (req_3089): which physical device is driving the
+  // cursor now, and the last tool runCommand dispatched per surface scope
+  // (the dedupe that keeps a device flip from re-firing toggle-style tools).
+  const pointerDeviceRef = useRef<'mouse' | 'pen'>(getPointerDevice());
+  const lastToolByScopeRef = useRef<{ world: string | null; model: string | null }>({ world: null, model: null });
   const { snapshot: journal, actions: journalActions } = useBuildJournal();
   // The open paint-toolbar popover (ink / brush). Local, not persisted — the popovers render
   // LATE (below) so they sit over the body; the bar (early) only toggles this.
@@ -1549,6 +1556,25 @@ export default function AppFrame() {
   };
 
   const runCommand = (commandId: string, source: string) => {
+    // Per-device tool memory (req_3089, GIMP semantics): activating a TOOL
+    // command stamps the active device's slot for that tool's surface scope.
+    // The device-flip subscription (below, next to runCommandRef) replays the
+    // slot with source 'device' — which must not re-stamp, so replays skip.
+    if (source !== 'device') {
+      const cmd = commandById(commandId);
+      if (cmd?.tool && (cmd.scope === 'world' || cmd.scope === 'model')) {
+        const scope = cmd.scope;
+        const dev = pointerDeviceRef.current;
+        lastToolByScopeRef.current[scope] = commandId;
+        setState((prev) => (prev.deviceTools[scope][dev] === commandId ? prev : {
+          ...prev,
+          deviceTools: { ...prev.deviceTools, [scope]: { ...prev.deviceTools[scope], [dev]: commandId } },
+        }));
+      }
+    } else {
+      const cmd = commandById(commandId);
+      if (cmd?.tool && (cmd.scope === 'world' || cmd.scope === 'model')) lastToolByScopeRef.current[cmd.scope] = commandId;
+    }
     if (commandId === 'paint-facade') {
       const pieceId = stateRef.current.selectedPieceId;
       if (pieceId) openFacadePainter(pieceId);
@@ -3939,6 +3965,27 @@ export default function AppFrame() {
   // first, so typing in a field never triggers a command.)
   const runCommandRef = useRef(runCommand);
   runCommandRef.current = runCommand;
+
+  // ── Per-device tool memory (req_3089) ─────────────────────────────────────────
+  // The host flips system:pointerDevice on the mouse ⇄ pen change edge (pen
+  // proximity counts, so hovering the stylus over the tablet pre-switches before
+  // it touches). Restore the incoming device's remembered tool for the surface
+  // in view. lastToolByScopeRef dedupes: re-dispatching an already-active tool
+  // would EXIT toggle-style mesh tools, so an unchanged tool never re-fires.
+  useEffect(() => busOn('system:pointerDevice', (p: any) => {
+    const dev: 'mouse' | 'pen' = p?.device === 'pen' ? 'pen' : 'mouse';
+    if (pointerDeviceRef.current === dev) return;
+    pointerDeviceRef.current = dev;
+    const s = stateRef.current;
+    const surface = activeSurface(s);
+    if (surface !== 'world' && surface !== 'model') return;
+    const remembered = s.deviceTools[surface]?.[dev];
+    if (!remembered || remembered === lastToolByScopeRef.current[surface]) return;
+    // A slot persisted across a code update may name a removed command.
+    if (!commandById(remembered)) return;
+    if (surface === 'world' && s.activeCommandId === remembered) return;
+    runCommandRef.current(remembered, 'device');
+  }), []);
 
   // Native map painting bypasses React hit-testing while the WorldLoader owns
   // the pointer stream. Drain completed host-side authoring events at UI rate

@@ -33,6 +33,7 @@ import { game_activities } from './records/game_activities';
 import { game_build } from './records/game_build';
 import { game_animation } from './records/game_animation';
 import { editor_deej } from './records/editor_deej';
+import { editor_pen_device } from './records/editor_pen_device';
 import { game_cutscene } from './records/game_cutscene';
 import { game_missions } from './records/game_missions';
 import { game_world } from './records/game_world';
@@ -47,7 +48,7 @@ export type {
 };
 
 export const ALL_DOCS: DocIndex[] = [
-  bake_geometry, editor_deej, editor_face_paint, editor_flora, editor_stickers, editor_hot_reload, editor_map_documents, editor_map_paint_history, editor_sections, editor_transport_paths, game_activities, game_animation, game_build, game_cutscene,
+  bake_geometry, editor_deej, editor_pen_device, editor_face_paint, editor_flora, editor_stickers, editor_hot_reload, editor_map_documents, editor_map_paint_history, editor_sections, editor_transport_paths, game_activities, game_animation, game_build, game_cutscene,
   game_missions, game_world, hmsc_int, physics3d, skybox_void, request_ledger,
 ];
 

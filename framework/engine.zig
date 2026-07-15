@@ -1995,6 +1995,17 @@ var input_drag_node_x: f32 = 0; // node rect x (for computing local_x)
 var input_drag_node_y: f32 = 0; // node rect y (for computing local_y)
 var input_drag_node_pl: f32 = 0; // node padding-left
 var input_drag_node_pt: f32 = 0; // node padding-top
+// Device-aware pointer (req_3089): SDL3 synthesizes mouse events from a tablet
+// pen with `which == SDL_PEN_MOUSEID`, so the whole mouse pipeline keeps working
+// unchanged for a pen — this only records WHO is driving the cursor. On the
+// change edge (mouse ⇄ pen) the useIFTTT `system:pointerDevice` signal fires so
+// carts can swap tools per device (GIMP semantics: pen and mouse each remember
+// their own tool).
+fn notePointerDevice(which: c.SDL_MouseID) void {
+    const dev: mouse_state.PointerDevice = if (which == c.SDL_PEN_MOUSEID) .pen else .mouse;
+    if (mouse_state.updatePointerDevice(dev)) system_signals.notifyPointerDevice(@intFromEnum(dev));
+}
+
 // Coalesced drag position — set per SDL_EVENT_MOUSE_MOTION, consumed once
 // per frame after the event pump. Avoids N hit-tests per frame when SDL
 // delivers a burst of motion events during rapid dragging.
@@ -4369,7 +4380,23 @@ pub fn run(config_in: AppConfig) !void {
                 c.SDL_EVENT_WINDOW_MOVED => {
                     geometry.save(window);
                 },
+                c.SDL_EVENT_PEN_PROXIMITY_IN => {
+                    // Pen hovered into tablet range — pre-switch before it touches,
+                    // so the pen's remembered tool is already active on contact.
+                    if (mouse_state.updatePointerDevice(.pen)) system_signals.notifyPointerDevice(1);
+                },
+                c.SDL_EVENT_PEN_DOWN, c.SDL_EVENT_PEN_UP => {
+                    if (mouse_state.updatePointerDevice(.pen)) system_signals.notifyPointerDevice(1);
+                    if (!event.ptouch.down) mouse_state.g_pen_pressure = 0;
+                },
+                c.SDL_EVENT_PEN_AXIS => {
+                    // Live pressure (0..1) — the JS pointer payload reads this getter,
+                    // so brush strokes finally get real Wacom pressure.
+                    if (event.paxis.axis == c.SDL_PEN_AXIS_PRESSURE)
+                        mouse_state.g_pen_pressure = event.paxis.value;
+                },
                 c.SDL_EVENT_MOUSE_BUTTON_DOWN => {
+                    notePointerDevice(event.button.which);
                     // Standard OS window behavior: double-click on a drag region
                     // (the borderless app's titlebar) toggles maximize/restore.
                     if (config.borderless and event.button.button == c.SDL_BUTTON_LEFT) {
@@ -4885,6 +4912,7 @@ pub fn run(config_in: AppConfig) !void {
                     }
                 },
                 c.SDL_EVENT_MOUSE_MOTION => {
+                    notePointerDevice(event.motion.which);
                     const mx: f32 = event.motion.x;
                     const my: f32 = event.motion.y;
                     mouse_state.updateMouse(mx, my);
@@ -5159,6 +5187,7 @@ pub fn run(config_in: AppConfig) !void {
                     }
                 },
                 c.SDL_EVENT_MOUSE_BUTTON_UP => {
+                    notePointerDevice(event.button.which);
                     mouse_state.updateMouse(event.button.x, event.button.y);
                     mouse_state.updateMouseButton(false, event.button.button == c.SDL_BUTTON_RIGHT);
                     // Native mesh-editor release: end the orbit/pan, or commit the selection

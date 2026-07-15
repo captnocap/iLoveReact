@@ -461,6 +461,12 @@ export type EditorState = {
   activeTab: LibraryTab;
   activeCommandId: string;
   activeAssetId: string;
+  // Per-device tool memory (req_3089, GIMP semantics): each physical pointer
+  // device remembers the last TOOL command it activated, keyed per surface
+  // scope so a model-scope tool never fires on the world surface. Flipping
+  // devices (mouse ⇄ pen, host system:pointerDevice signal) re-dispatches the
+  // incoming device's remembered tool — the pen paints, the mouse pulls verts.
+  deviceTools: Record<'world' | 'model', { mouse: string | null; pen: string | null }>;
   // Graffiti facades on the active map (req_3057) — persisted with world.json.
   worldFacades: import('../world/facades').Facade[];
   facadePaint: FacadePaintState;

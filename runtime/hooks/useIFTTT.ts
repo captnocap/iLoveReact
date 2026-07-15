@@ -164,6 +164,7 @@ declare module '../host-globals' {
     __ifttt_onSystemRam?(used: number, total: number): void;
     __ifttt_onSystemVram?(used: number, total: number): void;
     __ifttt_onSystemResize?(w: number, h: number): void;
+    __ifttt_onSystemPointerDevice?(dev: number): void;
     __ifttt_onSystemSelection?(
       textLen: number,
       downX: number,
@@ -410,6 +411,11 @@ if (!G.__ifttt_handlers_installed) {
   };
   G.__ifttt_onSystemResize = (w: number, h: number) => {
     emit('system:resize', { w, h });
+  };
+  // Fired by engine.zig notePointerDevice on the mouse ⇄ pen change edge only
+  // (never per event). Carts use it for GIMP-style per-device tool memory.
+  G.__ifttt_onSystemPointerDevice = (dev: number) => {
+    emit('system:pointerDevice', { device: dev ? 'pen' : 'mouse', at: Date.now() });
   };
   G.__ifttt_onSystemSelection = (
     textLen: number,

@@ -26,6 +26,8 @@ export { useBrowse, browseRequest, setBrowsePort } from './useBrowse';
 export type { BrowseHandle, BrowseOptions, PageContent as BrowsePageContent } from './useBrowse';
 export { useHotState, getHotState, setHotState, removeHotState, clearHotState, hotStateKeys } from './useHotState';
 export { useRerender } from './useRerender';
+export { usePointerDevice, getPointerDevice } from './usePointerDevice';
+export type { PointerDevice } from './usePointerDevice';
 export { useInterval } from './useInterval';
 export { useDuring } from './useDuring';
 export type { DuringBody, DuringLifetime, UseDuringHandle } from './useDuring';

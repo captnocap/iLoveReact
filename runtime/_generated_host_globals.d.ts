@@ -124,6 +124,8 @@ declare global {
   function getMouseDown(...args: unknown[]): unknown;
   function getMouseRightDown(...args: unknown[]): unknown;
   function getMouseButtons(...args: unknown[]): unknown;
+  function getPointerDevice(...args: unknown[]): unknown;
+  function getPenPressure(...args: unknown[]): unknown;
   function __mouse_capture(...args: unknown[]): unknown;
   function __mouse_delta(...args: unknown[]): unknown;
   function __input_unfocus(...args: unknown[]): unknown;

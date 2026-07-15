@@ -391,13 +391,19 @@ function getPointerPayload(id: number, type: string) {
     return Number.isFinite(n) ? n : fallback;
   };
   const down = read('getMouseDown', 0) > 0;
+  // Device-aware pointer (req_3089): the host tracks which physical device last
+  // drove the cursor (getPointerDevice: 0 mouse, 1 pen) and the pen's live
+  // pressure axis. A pen event carries real Wacom pressure; a mouse keeps the
+  // old binary button-state pressure, matching the web PointerEvent contract.
+  const pen = read('getPointerDevice', 0) > 0;
   return {
     targetId: id,
     type,
     x: read('getMouseX', 0),
     y: read('getMouseY', 0),
     button: 1,
-    pressure: down ? 1 : 0,
+    pointerType: pen ? 'pen' : 'mouse',
+    pressure: pen ? read('getPenPressure', 0) : (down ? 1 : 0),
     buttons: down ? 1 : 0,
     preventDefault() { this.defaultPrevented = true; },
     defaultPrevented: false,

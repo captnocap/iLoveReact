@@ -493,6 +493,14 @@
           "zig": "hostGetMouseButtons"
         },
         {
+          "js": "getPointerDevice",
+          "zig": "hostGetPointerDevice"
+        },
+        {
+          "js": "getPenPressure",
+          "zig": "hostGetPenPressure"
+        },
+        {
           "js": "__mouse_capture",
           "zig": "hostMouseCapture"
         },

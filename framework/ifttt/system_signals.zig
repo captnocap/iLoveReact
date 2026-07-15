@@ -106,6 +106,15 @@ pub fn notifyDrop(path: []const u8) void {
     fire("__ifttt_onSystemDrop()");
 }
 
+/// Pointer device flipped (mouse ⇄ pen). Engine calls this on the change edge
+/// only (mouse_state.updatePointerDevice returns true), so no dedupe needed here.
+/// dev: 0 = mouse, 1 = pen — matches mouse_state.PointerDevice.
+pub fn notifyPointerDevice(dev: u8) void {
+    var buf: [96]u8 = undefined;
+    const sentinel = std.fmt.bufPrintZ(&buf, "__ifttt_onSystemPointerDevice({d})", .{dev}) catch return;
+    fire(sentinel);
+}
+
 pub fn notifyResize(w: f32, h: f32) void {
     last_w = w;
     last_h = h;

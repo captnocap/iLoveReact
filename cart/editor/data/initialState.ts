@@ -80,6 +80,7 @@ export function initialState(): EditorState {
     activeTab: 'Skins',
     activeCommandId: 'select-tool',
     activeAssetId: DEFAULT_ASSET_ID,
+    deviceTools: { world: { mouse: null, pen: null }, model: { mouse: null, pen: null } },
     stickerArm: { textureId: null, rot: 0, scale: 1 },
     worldFacades: [],
     facadePaint: { brush: { ...DEFAULT_BRUSH, ink: { kind: 'color', hex: '#e0463f' } }, tool: 'brush', detail: 256 },

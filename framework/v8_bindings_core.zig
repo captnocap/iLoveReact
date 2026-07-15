@@ -2351,6 +2351,22 @@ fn hostGetMouseDown(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnNumber(info, if (mouse_state.g_mouse_down) 1 else 0);
 }
 
+/// Which device last drove the pointer: 0 = mouse, 1 = pen (Wacom/tablet).
+/// Flips on the first event from the other device; the change edge also fires
+/// the useIFTTT `system:pointerDevice` signal (engine.zig notePointerDevice).
+fn hostGetPointerDevice(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, @floatFromInt(@intFromEnum(mouse_state.g_pointer_device)));
+}
+
+/// Live pen pressure 0..1 (SDL_PEN_AXIS_PRESSURE; 0 when the pen is lifted).
+/// Meaningless for a mouse — the JS pointer payload only reads it when
+/// getPointerDevice() says pen.
+fn hostGetPenPressure(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, @floatCast(mouse_state.g_pen_pressure));
+}
+
 fn hostGetMouseRightDown(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     setReturnNumber(info, if (mouse_state.g_mouse_right_down) 1 else 0);
@@ -2991,6 +3007,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("getMouseDown", hostGetMouseDown);
     v8_runtime.registerHostFn("getMouseRightDown", hostGetMouseRightDown);
     v8_runtime.registerHostFn("getMouseButtons", hostGetMouseButtons);
+    v8_runtime.registerHostFn("getPointerDevice", hostGetPointerDevice);
+    v8_runtime.registerHostFn("getPenPressure", hostGetPenPressure);
     v8_runtime.registerHostFn("__mouse_capture", hostMouseCapture);
     v8_runtime.registerHostFn("__mouse_delta", hostMouseDelta);
     v8_runtime.registerHostFn("__input_unfocus", hostInputUnfocus);
