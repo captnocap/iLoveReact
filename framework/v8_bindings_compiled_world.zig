@@ -214,6 +214,24 @@ fn hostSetLiveMeshProps(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     setReturnString(info, "ok");
 }
 
+// __compiled_world_set_live_mesh_props2(nodeId, Uint8Array refs) — the v2 wire (SPINPROP
+// req_3128): a 28-byte header per ref (u32 keyHash, f32 x,y,z,yaw,spinDegPerSec, u32
+// matCount) then matCount×u32. The editor presence-gates on this door and falls back to
+// the v1 push (no spin) when the host predates it.
+fn hostSetLiveMeshProps2(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "error:BadNodeId");
+        return;
+    };
+    const bytes = argView(info, 1) orelse {
+        setReturnString(info, "error:BadRefs");
+        return;
+    };
+    world_loader.setLiveMeshProps2(node_id, bytes);
+    setReturnString(info, "ok");
+}
+
 fn hostClearLiveMeshProps(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (argToNodeId(info, 0)) |node_id| world_loader.clearLiveMeshProps(node_id);
@@ -530,6 +548,7 @@ pub fn registerCompiledWorld(_: anytype) void {
     v8_runtime.registerHostFn("__compiled_world_set_physics", hostSetPhysics);
     v8_runtime.registerHostFn("__compiled_world_clear_physics", hostClearPhysics);
     v8_runtime.registerHostFn("__compiled_world_set_live_mesh_props", hostSetLiveMeshProps);
+    v8_runtime.registerHostFn("__compiled_world_set_live_mesh_props2", hostSetLiveMeshProps2);
     v8_runtime.registerHostFn("__compiled_world_clear_live_mesh_props", hostClearLiveMeshProps);
     v8_runtime.registerHostFn("__compiled_world_set_live_mesh_ghost", hostSetLiveMeshGhost);
     v8_runtime.registerHostFn("__compiled_world_clear_live_mesh_ghost", hostClearLiveMeshGhost);

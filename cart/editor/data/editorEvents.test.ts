@@ -11,7 +11,7 @@
 //   tools/v8cli /tmp/editor-events.test.js
 
 import { describeEvent, head, since } from '../../../runtime/editorbus';
-import { commandOutcome, dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchModelOutlinerActionOutcome, mapPaint, pieceEdit, pieceEditPayload, pieceMaterial, pieceMaterialPayload, piecePlace, piecePlacementPayload, type MapPaintPayload, type MaterialStudioPayload, type ModelOutlinerPayload, type PaletteStudioPayload } from './editorEvents';
+import { commandOutcome, dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, mapPaint, pieceEdit, pieceEditPayload, pieceMaterial, pieceMaterialPayload, piecePlace, piecePlacementPayload, type MapPaintPayload, type MaterialStudioPayload, type ModelMeshPayload, type ModelOutlinerPayload, type PaletteStudioPayload } from './editorEvents';
 import { planPieceMaterialAssign, planPieceMove } from '../world/pieceEditCommand';
 import { planPiecePlacement } from '../world/piecePlacementCommand';
 import { planPaletteLoad, planSlotFill, type ColorStudioPolicy, type ColorStudioSnapshot } from '../material/colorStudioCommand';
@@ -263,6 +263,36 @@ test('model organization emits one typed native-journal transaction', () => {
   const payload = event.payload as ModelOutlinerPayload;
   assert(payload.transaction.before.every((row) => !row.groupId) && payload.transaction.after.every((row) => row.groupId === 'part-group:9'), 'exact group inverse left the report');
   assert(describeEvent(event) === 'group 2 parts as Group 1', `model description drifted: ${describeEvent(event)}`);
+});
+
+test('native mesh apply, undo, and redo retain one action identity', () => {
+  const before = head();
+  const base = {
+    id: 17,
+    documentToken: 404,
+    kind: 'transform' as const,
+    label: 'transform',
+    commandId: 'model.mesh.transform',
+    source: 'viewport' as const,
+    beforeVertices: 24,
+    afterVertices: 24,
+    beforeParts: 2,
+    afterParts: 2,
+    droppedBefore: 0,
+  };
+  dispatchNativeMeshAction({ ...base, phase: 'applied' }, 'bridge-model');
+  dispatchNativeMeshAction({ ...base, phase: 'undone', source: 'hotkey' }, 'bridge-model');
+  dispatchNativeMeshAction({ ...base, phase: 'redone', source: 'hotkey' }, 'bridge-model');
+  const events = since(before);
+  assert(events.length === 3, `mesh phases appended ${events.length} reports`);
+  assert(events.every((event) => event.type === 'model.mesh' && event.actionId === 'native-mesh:404:17'), 'stable native action identity drifted');
+  assert(events.every((event) => event.commandId === 'model.mesh.transform'), 'original semantic command identity drifted');
+  assert(events[0]?.phase === 'applied' && events[1]?.phase === 'undone' && events[2]?.phase === 'redone', 'phase order drifted');
+  assert(events[1]?.causedBy === events[0]?.actionId && events[2]?.causedBy === events[0]?.actionId, 'undo/redo causation drifted');
+  const payload = events[1]?.payload as ModelMeshPayload;
+  assert(payload.modelId === 'bridge-model' && payload.label === 'undo transform', 'model/undo description drifted');
+  assert(events[0]?.targets.some((target) => target.kind === 'model' && target.id === 'bridge-model'), 'model target missing');
+  assert(describeEvent(events[2]!) === 'redo transform', `redo description drifted: ${describeEvent(events[2]!)}`);
 });
 
 log(`\n${passed} passed, ${failed} failed`);

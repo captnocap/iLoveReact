@@ -247,6 +247,10 @@ pub const Runtime = struct {
     // mesh nodes each frame (streaming truncates to stream_tail_start in refreshStreamNodes).
     perm_node_count: usize = 0,
     ticker_seconds: f32 = 0,
+    // SPINPROP req_3128: the live spinning-prop clock. appendLiveMeshRef draws a
+    // ref carrying spin_deg_per_sec at yaw + rate×seconds — the live tail is
+    // rebuilt every frame anyway, so spin is pure arithmetic at append time.
+    live_spin_seconds: f32 = 0,
     // Ambient road traffic (req_2056): three MUTABLE instance nodes (box / cyl16 /
     // sphere — vehicle parts bucket by shape), their row buffers rebuilt each
     // frame by stepTraffic as every vehicle advances along its baked route.

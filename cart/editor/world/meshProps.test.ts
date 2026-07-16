@@ -5,7 +5,7 @@
 //   tools/esbuild cart/editor/world/meshProps.test.ts --bundle \
 //     --outfile=/tmp/editor-mesh-props.test.js --format=iife --platform=neutral --target=es2022
 //   tools/v8cli /tmp/editor-mesh-props.test.js
-import { encodeResidentMeshes } from './meshProps';
+import { encodeResidentMeshes, encodeMeshRefs, encodeMeshRefsV2, meshKeyHash } from './meshProps';
 
 let passed = 0, failed = 0;
 const log = (globalThis as any).print ?? ((s: string) => (globalThis as any).__writeStdout?.(`${s}\n`));
@@ -71,6 +71,20 @@ test('encoder rejects a degenerate authored collision box', () => {
     }]);
   } catch { threw = true; }
   assert(threw, 'degenerate collider reached the host decoder');
+});
+
+test('v2 mesh refs carry spin between yaw and matCount; v1 stays 24-byte (req_3128)', () => {
+  const ref = { key: 'model:sign', x: 1, y: 2, z: 3, yaw: 90, spin: 45 };
+  const v2 = encodeMeshRefsV2([ref, { ...ref, spin: undefined }]);
+  assert(v2.byteLength === 2 * 28, 'v2 stride is not 28 bytes');
+  const dv = new DataView(v2.buffer, v2.byteOffset, v2.byteLength);
+  assert(dv.getUint32(0, true) === meshKeyHash('model:sign'), 'v2 hash moved');
+  assert(Math.abs(dv.getFloat32(16, true) - 90) < 1e-5, 'v2 yaw moved');
+  assert(Math.abs(dv.getFloat32(20, true) - 45) < 1e-5, 'v2 spin not at offset 20');
+  assert(dv.getUint32(24, true) === 0, 'v2 matCount not at offset 24');
+  assert(dv.getFloat32(28 + 20, true) === 0, 'absent spin did not encode as 0');
+  const v1 = encodeMeshRefs([ref]);
+  assert(v1.byteLength === 24, 'v1 stride drifted — an older host would misparse every push');
 });
 
 log(`\n${passed} passed, ${failed} failed`);

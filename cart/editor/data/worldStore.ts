@@ -75,6 +75,7 @@ function validPiece(value: unknown): value is PlacedPiece {
       if (typeof override !== 'boolean' && !finite(override)) return false;
     }
   }
+  if (piece.spinDegPerSec !== undefined && !finite(piece.spinDegPerSec)) return false;
   if (piece.stickers !== undefined) {
     if (!Array.isArray(piece.stickers)) return false;
     for (const s of piece.stickers) {

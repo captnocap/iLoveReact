@@ -187,7 +187,14 @@ pub fn liveCookedDoorIndex(self: anytype, r: LiveMeshRef) ?usize {
 // the per-slot skin rides as a tex_key_override, the base/atlas slots ride mesh.tex_rgba).
 pub fn appendLiveMeshRef(self: anytype, r: LiveMeshRef, alpha: ?f32) void {
     const mesh = meshForHash(self, r.hash) orelse return;
-    const inst: constructor.MeshPropInstance = .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = r.yaw };
+    // SPINPROP req_3128: a spinning prop DRAWS at yaw + rate×clock (the live tail is
+    // rebuilt every frame, so this is the whole animation). Everything identity-shaped —
+    // door state, the coincident baked-hide key, colliders — keeps the authored r.yaw.
+    const draw_yaw = if (r.spin_deg_per_sec != 0)
+        @mod(r.yaw + r.spin_deg_per_sec * self.live_spin_seconds, 360.0)
+    else
+        r.yaw;
+    const inst: constructor.MeshPropInstance = .{ .mesh = 0, .x = r.x, .y = r.y, .z = r.z, .yaw_degrees = draw_yaw };
     // A placement (never the translucent ghost) binds to the live two-state
     // machine compiled by applyLiveColliders. Node indices are refreshed on
     // every append because the live draw tail is rebuilt every frame.

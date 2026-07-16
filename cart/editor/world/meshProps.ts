@@ -156,8 +156,14 @@ export function encodeResidentMeshes(meshes: readonly ResidentMesh[]): Uint8Arra
   return bytes;
 }
 
-export type MeshRef = { key: string; x: number; y: number; z: number; yaw: number };
-const MESH_REF_HEADER_BYTES = 24; // u32 hash, f32 x,y,z,yaw, u32 matCount
+export type MeshRef = {
+  key: string; x: number; y: number; z: number; yaw: number;
+  /** SPINPROP req_3128: continuous visual spin, deg/s (absent or 0 = static).
+   *  Rides the v2 wire only — the v1 fallback drops it (older host, no spin). */
+  spin?: number;
+};
+const MESH_REF_HEADER_BYTES = 24; // v1: u32 hash, f32 x,y,z,yaw, u32 matCount
+const MESH_REF_HEADER_BYTES_V2 = 28; // v2: u32 hash, f32 x,y,z,yaw,spin, u32 matCount
 
 /** Pack one live mesh ref (no per-slot materials → the mesh's own look). */
 export function encodeMeshGhost(ref: MeshRef): Uint8Array {
@@ -172,7 +178,8 @@ export function encodeMeshGhost(ref: MeshRef): Uint8Array {
   return new Uint8Array(buf);
 }
 
-/** Pack all placed mesh refs into one contiguous buffer (24 bytes each, no mats). */
+/** Pack all placed mesh refs into one contiguous buffer (24 bytes each, no mats).
+ *  The v1 wire for __compiled_world_set_live_mesh_props — spin does not ride it. */
 export function encodeMeshRefs(refs: readonly MeshRef[]): Uint8Array {
   const buf = new ArrayBuffer(refs.length * MESH_REF_HEADER_BYTES);
   const dv = new DataView(buf);
@@ -185,6 +192,26 @@ export function encodeMeshRefs(refs: readonly MeshRef[]): Uint8Array {
     dv.setFloat32(o + 16, r.yaw, true);
     dv.setUint32(o + 20, 0, true);
     o += MESH_REF_HEADER_BYTES;
+  }
+  return new Uint8Array(buf);
+}
+
+/** The v2 wire for __compiled_world_set_live_mesh_props2 (SPINPROP req_3128):
+ *  28 bytes each — spin lands between yaw and matCount, matching the host's
+ *  setLiveMeshProps2 decode verbatim. */
+export function encodeMeshRefsV2(refs: readonly MeshRef[]): Uint8Array {
+  const buf = new ArrayBuffer(refs.length * MESH_REF_HEADER_BYTES_V2);
+  const dv = new DataView(buf);
+  let o = 0;
+  for (const r of refs) {
+    dv.setUint32(o, meshKeyHash(r.key), true);
+    dv.setFloat32(o + 4, r.x, true);
+    dv.setFloat32(o + 8, r.y, true);
+    dv.setFloat32(o + 12, r.z, true);
+    dv.setFloat32(o + 16, r.yaw, true);
+    dv.setFloat32(o + 20, r.spin ?? 0, true);
+    dv.setUint32(o + 24, 0, true); // matCount
+    o += MESH_REF_HEADER_BYTES_V2;
   }
   return new Uint8Array(buf);
 }

@@ -505,6 +505,7 @@ pub fn stepNow(self: anytype) void {
     updateDynamicPropNodes(self);
     stepTickers(self, dt);
     stepTraffic(self, dt); // req_2056: drive the ambient vehicles along their baked routes
+    self.live_spin_seconds += dt; // SPINPROP req_3128: spinning live props sample this in applyLiveMeshProps
     if (self.scene.traffic != null) { // [traffic-paths req_2072] P toggles the route ribbon
         const pdown = keyDown(SCAN_P);
         if (pdown and !self.prev_paths_key_down) self.traffic_paths_on = !self.traffic_paths_on;

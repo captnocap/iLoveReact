@@ -29,7 +29,8 @@ import { pieceSlotRoles } from '../world/pieceSlots';
 import { pieceLook, type MaterialRef, type PlacedPiece } from '../world/pieces';
 import type { Asset } from '../data/types';
 import AssetPreview from '../library/AssetPreview';
-import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID } from '../world/pieceCommandIds';
+import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID, WORLD_PIECE_SPIN_COMMAND_ID } from '../world/pieceCommandIds';
+import { isAuthoredPiece } from '../world/authoredRegistry';
 
 // The quick verbs, in reach order. Labels are the quick-menu voice ("Copy", not
 // "Duplicate Selection"); ids are the SAME registry commands the menus/keymap run,
@@ -101,6 +102,12 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
   const [page, setPage] = useState(0);
   const roles = pieceSlotRoles(piece.pieceId);
   const label = pieceLook(piece.pieceId)?.label ?? piece.pieceId;
+  // Spin (SPINPROP req_3128) is an authored-prop verb: only mesh placements render
+  // through the live mesh-ref path that animates; catalog boxes would ignore it.
+  const spinning = (piece.spinDegPerSec ?? 0) !== 0;
+  const verbs = isAuthoredPiece(piece.pieceId)
+    ? [...QUICK_VERBS, { id: WORLD_PIECE_SPIN_COMMAND_ID, label: spinning ? 'Stop Spin' : 'Spin', keyHint: '', closes: false }]
+    : QUICK_VERBS;
 
   const q = query.trim().toLowerCase();
   const filtered = q ? materials.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)) : materials;
@@ -125,14 +132,14 @@ export default function WorldContextMenu({ piece, materials, recentIds, resolveM
 
   return (
     <C.HW_StageContextMenu style={{ width: MENU_W }}>
-      {/* What the verbs apply to + live yaw readout. */}
+      {/* What the verbs apply to + live yaw (and spin, when on) readout. */}
       <Box style={{ height: 24, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 8 }}>
         <Icon name="Box" size={12} color={accentFor('textDim')} />
         <C.HW_ContextText style={{ color: accentFor('textDim') }}>{label}</C.HW_ContextText>
         <C.HW_Spacer />
-        <C.HW_KeyText>{piece.yawDegrees}°</C.HW_KeyText>
+        <C.HW_KeyText>{spinning ? `${piece.yawDegrees}° · ${piece.spinDegPerSec}°/s` : `${piece.yawDegrees}°`}</C.HW_KeyText>
       </Box>
-      {QUICK_VERBS.map((verb) => (
+      {verbs.map((verb) => (
         <C.HW_ContextRow key={verb.id} onPress={() => { onCommand(verb.id, 'world-context'); if (verb.closes) onClose(); }}>
           <Icon name={commandById(verb.id).icon} size={12} color={accentFor('primary')} />
           <C.HW_ContextText>{verb.label}</C.HW_ContextText>

@@ -15,6 +15,7 @@ import {
   planPieceMaterialClear,
   planPieceMove,
   planPieceRotate,
+  planPieceSpin,
   type PieceEditWorld,
   type PieceMaterialPolicy,
 } from './pieceEditCommand';
@@ -86,6 +87,33 @@ test('rotate changes only yaw, replaces its edge destination, and round-trips ex
   same(plan.next.pieces.map((p) => p.id), ['keep', 'wall'], 'rotate changed source order or kept destination victim');
   assert(plan.next.pieces[1]?.slots?.sides && plan.next.pieces[1]?.overrides?.opacity === 0.8, 'rotate erased authored data');
   same(applyPieceEditInverse(plan.next, plan.transaction), before, 'rotate undo drifted');
+});
+
+test('spin sets/clears only spinDegPerSec in place and round-trips exactly (req_3128)', () => {
+  const target = piece('sign', 4.5, { slots: { top: { assetId: 'kept' } }, overrides: { walkable: true } });
+  const before = world([piece('head', 1.5), target, piece('tail', 7.5)], 'tail');
+  const plan = planPieceSpin(before, { documentId: 'main', pieceId: 'sign', spinDegPerSec: 45 });
+  assert(plan.transaction.commandId === 'world.piece.spin' && plan.transaction.action === 'spin', 'stable spin identity missing');
+  same(plan.next.pieces.map((p) => p.id), ['head', 'sign', 'tail'], 'spin churned list order');
+  const spun = plan.next.pieces[1]!;
+  assert(spun.spinDegPerSec === 45, 'spin rate did not land');
+  assert(spun.x === target.x && spun.yawDegrees === target.yawDegrees, 'spin changed the transform');
+  same(spun.slots, target.slots, 'spin changed slots');
+  same(spun.overrides, target.overrides, 'spin changed overrides');
+  assert(plan.transaction.replaced.length === 0, 'spin invented destination victims');
+  same(applyPieceEditInverse(plan.next, plan.transaction), before, 'spin undo drifted');
+
+  // Rate 0 CLEARS the field (a stopped sign persists as a plain piece).
+  const stopPlan = planPieceSpin(plan.next, { documentId: 'main', pieceId: 'sign', spinDegPerSec: 0 });
+  assert(!('spinDegPerSec' in stopPlan.next.pieces[1]!), 'stop did not clear the field');
+
+  // No-change and non-finite rates reject.
+  let rejected = 0;
+  try { planPieceSpin(plan.next, { documentId: 'main', pieceId: 'sign', spinDegPerSec: 45 }); }
+  catch (e) { if (e instanceof PieceEditRejected && e.code === 'no-change') rejected += 1; }
+  try { planPieceSpin(before, { documentId: 'main', pieceId: 'sign', spinDegPerSec: Number.NaN }); }
+  catch (e) { if (e instanceof PieceEditRejected && e.code === 'invalid-args') rejected += 1; }
+  assert(rejected === 2, 'spin accepted a no-op or a non-finite rate');
 });
 
 test('delete captures the complete row and its original index', () => {

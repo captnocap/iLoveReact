@@ -42,7 +42,7 @@ import type { EditorState, Command, Asset, Menu, WorldObject, ContentFolderId, M
 import type { ExplorerFolderId, ExplorerHistoryEntry } from '../data/fileExplorer';
 import type { PlacedPiece, PlacementGesture } from '../world/pieces';
 import type { PieceMaterialTarget } from '../world/pieceEditCommand';
-import { pieceKindOf } from '../world/pieces';
+import { pieceKindOf, PIECE_SPIN_RATE_DEG_PER_SEC } from '../world/pieces';
 import { pieceSlotRoles } from '../world/pieceSlots';
 import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type AuthoredBuildPiece, type PlaceableKind } from '../world/authoredRegistry';
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
@@ -92,6 +92,7 @@ import {
   WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECE_SPIN_COMMAND_ID,
   WORLD_PIECES_PLACE_COMMAND_ID,
   WORLD_PLACEMENT_ROTATE_COMMAND_ID,
   WORLD_REDO_COMMAND_ID,
@@ -595,12 +596,16 @@ export default function AppFrame() {
                   transaction.replaced.length ? `replaced=${transaction.replaced.length}` : '',
                   `apply=${applyMs.toFixed(1)}ms`,
                 ].filter(Boolean).join(' ')
-              : `at=(${before.x.toFixed(2)},${before.y.toFixed(2)},${before.z.toFixed(2)}) apply=${applyMs.toFixed(1)}ms`;
+              : transaction.action === 'spin' && after
+                ? `spin=${before.spinDegPerSec ?? 0}→${after.spinDegPerSec ?? 0}°/s apply=${applyMs.toFixed(1)}ms`
+                : `at=(${before.x.toFixed(2)},${before.y.toFixed(2)},${before.z.toFixed(2)}) apply=${applyMs.toFixed(1)}ms`;
           const status = transaction.action === 'move'
             ? `moved ${before.pieceId}${transaction.replaced.length ? ` (replaced ${transaction.replaced.length})` : ''}`
             : transaction.action === 'rotate'
               ? `rotated ${before.pieceId} → ${after!.yawDegrees}°${transaction.replaced.length ? ` (replaced ${transaction.replaced.length})` : ''}`
-              : `deleted ${before.pieceId}`;
+              : transaction.action === 'spin'
+                ? ((after!.spinDegPerSec ?? 0) !== 0 ? `spinning ${before.pieceId} at ${after!.spinDegPerSec}°/s` : `stopped ${before.pieceId} spinning`)
+                : `deleted ${before.pieceId}`;
           const nextBase: EditorState = {
             ...previous,
             history: [{
@@ -1804,6 +1809,23 @@ export default function AppFrame() {
         setState((prev) => ({ ...prev, status: 'select a placed piece, or arm one in Place mode, to rotate' }));
         return;
       }
+    }
+    // Spin (SPINPROP req_3128): toggle the selected piece's continuous visual spin —
+    // ON at the one shared sign rate, OFF back to static. The transaction owns undo.
+    if (command.id === WORLD_PIECE_SPIN_COMMAND_ID) {
+      const current = stateRef.current;
+      const doc = current.workspaceDocuments.find((d) => d.id === current.activeWorkspaceDocumentId);
+      if (doc?.kind !== 'world' || !current.selectedPieceId) {
+        setState((prev) => ({ ...prev, status: 'select a placed prop to spin' }));
+        return;
+      }
+      const piece = current.worldPieces.find((p) => p.id === current.selectedPieceId);
+      invokeApplicationCommand(WORLD_PIECE_SPIN_COMMAND_ID, {
+        documentId: current.activeMapStem,
+        pieceId: current.selectedPieceId,
+        spinDegPerSec: (piece?.spinDegPerSec ?? 0) !== 0 ? 0 : PIECE_SPIN_RATE_DEG_PER_SEC,
+      }, source);
+      return;
     }
     // Delete Selection on a model document deletes the mesh selection (not a world object).
     if (command.id === 'delete-selection') {

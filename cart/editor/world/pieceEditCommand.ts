@@ -14,6 +14,7 @@ import {
   WORLD_PIECE_MATERIAL_COMMAND_IDS,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECE_SPIN_COMMAND_ID,
   type WorldPieceEditCommandId,
   type WorldPieceMaterialCommandId,
 } from './pieceCommandIds';
@@ -25,16 +26,20 @@ export {
   WORLD_PIECE_MATERIAL_COMMAND_IDS,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECE_SPIN_COMMAND_ID,
 } from './pieceCommandIds';
 export type { WorldPieceEditCommandId } from './pieceCommandIds';
 export type { WorldPieceMaterialCommandId } from './pieceCommandIds';
-export type WorldPieceEditAction = 'move' | 'rotate' | 'delete';
+export type WorldPieceEditAction = 'move' | 'rotate' | 'spin' | 'delete';
 
 export const WORLD_PIECE_EDIT_LIMITS = Object.freeze({ maxFloor: 128 });
 
 export type PieceTransform = Pick<PlacedPiece, 'x' | 'y' | 'z' | 'yawDegrees'> & { floor: number };
 export type PieceMoveArgs = { documentId: string; pieceId: string; transform: PieceTransform };
 export type PieceRotateArgs = { documentId: string; pieceId: string; quarterTurns: -1 | 1 };
+/** spinDegPerSec 0 stops the spin (the field clears); any other finite rate spins.
+ *  Negative = counter-clockwise. */
+export type PieceSpinArgs = { documentId: string; pieceId: string; spinDegPerSec: number };
 export type PieceDeleteArgs = { documentId: string; pieceId: string };
 
 export type PieceEditWorld = {
@@ -277,6 +282,38 @@ export function planPieceRotate(world: PieceEditWorld, args: PieceRotateArgs): P
       selectedPieceId: after.id,
     },
     { removeIds: [after.id], insert: [before, ...replaced], append: [], selectedPieceId: world.selectedPieceId },
+  );
+}
+
+/** SPINPROP req_3128: set (or clear, rate 0) a piece's continuous visual spin.
+ *  The footprint never changes — no destination victims; the row keeps its list
+ *  position so toggling spin causes zero ordering churn. */
+export function planPieceSpin(world: PieceEditWorld, args: PieceSpinArgs): PieceEditPlan {
+  const before = validateWorld(world, args.documentId, args.pieceId);
+  if (!finite(args.spinDegPerSec)) {
+    reject('invalid-args', 'spinDegPerSec must be a finite number (0 stops the spin)');
+  }
+  const current = before.piece.spinDegPerSec ?? 0;
+  if (current === args.spinDegPerSec) {
+    reject('no-change', `piece '${args.pieceId}' already spins at ${args.spinDegPerSec}°/s`);
+  }
+  const after = clonePiece(before.piece);
+  if (args.spinDegPerSec === 0) delete after.spinDegPerSec;
+  else after.spinDegPerSec = args.spinDegPerSec;
+  return finish(
+    world,
+    WORLD_PIECE_SPIN_COMMAND_ID,
+    'spin',
+    before,
+    after,
+    [],
+    {
+      removeIds: [before.piece.id],
+      insert: [{ index: before.index, piece: after }],
+      append: [],
+      selectedPieceId: after.id,
+    },
+    { removeIds: [after.id], insert: [before], append: [], selectedPieceId: world.selectedPieceId },
   );
 }
 

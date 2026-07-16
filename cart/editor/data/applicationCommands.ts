@@ -30,11 +30,13 @@ import {
   WORLD_PIECE_MATERIAL_COMMAND_IDS,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECE_SPIN_COMMAND_ID,
   planPieceDelete,
   planPieceMaterialAssign,
   planPieceMaterialClear,
   planPieceMove,
   planPieceRotate,
+  planPieceSpin,
   type PieceDeleteArgs,
   type PieceEditPlan,
   type PieceEditWorld,
@@ -44,6 +46,7 @@ import {
   type PieceMaterialPlan,
   type PieceMaterialPolicy,
   type PieceRotateArgs,
+  type PieceSpinArgs,
   type WorldPieceEditCommandId,
   type WorldPieceMaterialCommandId,
 } from '../world/pieceEditCommand';
@@ -142,6 +145,7 @@ export {
   WORLD_PIECE_MATERIAL_CLEAR_COMMAND_ID,
   WORLD_PIECE_MOVE_COMMAND_ID,
   WORLD_PIECE_ROTATE_COMMAND_ID,
+  WORLD_PIECE_SPIN_COMMAND_ID,
 } from '../world/pieceEditCommand';
 export {
   MODEL_GROUP_DISSOLVE_COMMAND_ID,
@@ -466,6 +470,18 @@ function rotateArgs(adapter: EditorPieceEditAdapter, args: unknown) {
   }
 }
 
+function spinArgs(adapter: EditorPieceEditAdapter, args: unknown) {
+  const value = args as Partial<PieceSpinArgs> | null;
+  if (!value || typeof value.documentId !== 'string' || typeof value.pieceId !== 'string' || typeof value.spinDegPerSec !== 'number') {
+    return { ok: false as const, reason: 'documentId, pieceId, and spinDegPerSec are required' };
+  }
+  try {
+    return { ok: true as const, value: planPieceSpin(adapter.read(), value as PieceSpinArgs) };
+  } catch (error) {
+    return { ok: false as const, reason: editRejectReason(error) };
+  }
+}
+
 function deleteArgs(adapter: EditorPieceEditAdapter, args: unknown) {
   const value = args as Partial<PieceDeleteArgs> | null;
   if (!value || typeof value.documentId !== 'string' || typeof value.pieceId !== 'string') {
@@ -655,6 +671,17 @@ export function createEditorApplicationCommands(
     },
     keybindings: [{ chord: 'R', when: { surface: 'world' } }],
     validateArgs: (args) => rotateArgs(adapter.pieceEdit, args),
+    isEnabled: pieceEditEnabled,
+  }, ({ args, invocationId, actionId }) => commitPieceEdit(args, actionId ?? invocationId));
+
+  registry.register<PieceEditPlan, WorldPieceEditResult>({
+    id: WORLD_PIECE_SPIN_COMMAND_ID,
+    label: 'Spin World Piece',
+    icon: 'Orbit',
+    effect: 'action',
+    undoScope: { kind: 'document', key: 'world' },
+    projections: { menu: ['Build'], contextMenu: ['world-piece'], palette: true },
+    validateArgs: (args) => spinArgs(adapter.pieceEdit, args),
     isEnabled: pieceEditEnabled,
   }, ({ args, invocationId, actionId }) => commitPieceEdit(args, actionId ?? invocationId));
 

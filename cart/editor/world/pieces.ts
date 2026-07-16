@@ -77,7 +77,16 @@ export type PlacedPiece = {
   overrides?: Record<string, number | boolean>;
   // Stickers stamped on this piece's faces (req_3025) — see StickerPlacement.
   stickers?: StickerPlacement[];
+  // Continuous visual spin about the placement anchor, degrees/second (SPINPROP
+  // req_3128 — the rotating business-sign prop). Authored-mesh pieces only: the
+  // live loader draws them at yaw + rate×clock; colliders keep the authored yaw.
+  // Absent or 0 ⇒ static.
+  spinDegPerSec?: number;
 };
+
+/** The Spin quick-verb's one rate (SPINPROP req_3128) — a storefront-sign turn:
+ *  slow enough to read the prop, fast enough to catch the eye. */
+export const PIECE_SPIN_RATE_DEG_PER_SEC = 45;
 
 /** The build-bar selection carried by Place mode. `yawDegrees` is the user's
  *  turn from the snap's natural facing: edge pieces still align to the picked

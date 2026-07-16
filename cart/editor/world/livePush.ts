@@ -9,7 +9,7 @@
 //                        (req_2577); returns false until the loader node exists.
 import { pieceInstanceRows, type PlacedPiece } from './pieces';
 import { pieceSkinBoxes } from './pieceSkins';
-import { encodeResidentMeshes, encodeMeshRefs, type ResidentMesh, type MeshRef } from './meshProps';
+import { encodeResidentMeshes, encodeMeshRefs, encodeMeshRefsV2, type ResidentMesh, type MeshRef } from './meshProps';
 import { isAuthoredPiece, authoredResidentKeyOf, skinnedPieceId, type AuthoredBuildPiece } from './authoredRegistry';
 import { authoredMeshData } from './authoredMesh';
 import { exists, readFileBase64 } from '../../../runtime/hooks/fs';
@@ -134,12 +134,23 @@ export function pushLiveWorld(nodeId: number, pieces: readonly PlacedPiece[]): v
     const refs: MeshRef[] = [];
     for (const piece of pieces) {
       if (!isAuthoredPiece(piece.pieceId)) continue;
-      refs.push({ key: authoredResidentKeyOf(piece.pieceId), x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees });
+      refs.push({
+        key: authoredResidentKeyOf(piece.pieceId),
+        x: piece.x, y: piece.y, z: piece.z, yaw: piece.yawDegrees,
+        ...(piece.spinDegPerSec ? { spin: piece.spinDegPerSec } : {}),
+      });
     }
     // Graffiti facades (req_3057): baked paint quads ride the same ref stream —
     // world-space meshes, so the ref is identity.
     refs.push(...liveFacadeRefs());
-    g.__compiled_world_set_live_mesh_props(nodeId, encodeMeshRefs(refs));
+    // SPINPROP req_3128: the v2 door carries per-placement spin. Presence-gated —
+    // a host binary that predates it still draws everything via v1 (spin dropped).
+    if (typeof g.__compiled_world_set_live_mesh_props2 === 'function') {
+      g.__compiled_world_set_live_mesh_props2(nodeId, encodeMeshRefsV2(refs));
+    } else {
+      if (refs.some((r) => r.spin)) console.warn('[place] this host predates spinning props — rebuild the dev host to see them turn');
+      g.__compiled_world_set_live_mesh_props(nodeId, encodeMeshRefs(refs));
+    }
   }
 }
 

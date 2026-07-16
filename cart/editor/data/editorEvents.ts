@@ -10,6 +10,7 @@ import type { HistoryEvent } from './types';
 import type { ColorStudioActionResult, ModelOutlinerActionResult, WorldPieceEditResult, WorldPieceMaterialResult, WorldPiecesPlaceResult } from './applicationCommands';
 import type { ColorStudioActionTransaction } from '../material/colorStudioCommand';
 import type { ModelOutlinerTransaction } from '../model/outlinerCommand';
+import type { NativeMeshActionReport } from '../model/nativeMeshEvents';
 import { assetById } from './catalog';
 import { catalogRowFor } from '../world/buildCatalog';
 import { pieceKindOf, placementSlotKey, type MaterialRef } from '../world/pieces';
@@ -93,7 +94,7 @@ export type PiecePlacementPayload = {
   transaction: WorldPiecesPlaceResult['plan']['transaction'];
 };
 export type PieceEditPayload = {
-  action: 'move' | 'rotate' | 'delete';
+  action: 'move' | 'rotate' | 'spin' | 'delete';
   documentId: string;
   instanceId: string;
   pieceId: string;
@@ -141,6 +142,17 @@ export type ModelOutlinerPayload = {
   appliedAtMs: number;
   applyMs: number;
   transaction: ModelOutlinerTransaction;
+};
+export type ModelMeshPayload = {
+  action: NativeMeshActionReport['kind'];
+  label: string;
+  modelId: string;
+  nativeActionId: number;
+  beforeVertices: number;
+  afterVertices: number;
+  beforeParts: number;
+  afterParts: number;
+  droppedBefore: number;
 };
 
 // One event type for now — a plain authoring edit. Richer per-system types (piece.place,
@@ -238,6 +250,19 @@ export const modelOutliner = defineEventType<ModelOutlinerPayload>({
     if (!p.transaction.modelId || p.transaction.action !== p.action || p.transaction.partIds.length === 0 ||
         p.transaction.before.length !== p.transaction.after.length || !Number.isFinite(p.applyMs)) {
       throw new Error('model.structure: malformed action/transaction');
+    }
+  },
+});
+
+export const modelMesh = defineEventType<ModelMeshPayload>({
+  type: 'model.mesh',
+  undoable: true,
+  describe: (p) => p.label,
+  validate: (p) => {
+    if (!p.modelId || !p.action || !p.label || p.nativeActionId < 1 ||
+        !Number.isFinite(p.beforeVertices) || !Number.isFinite(p.afterVertices) ||
+        !Number.isFinite(p.beforeParts) || !Number.isFinite(p.afterParts)) {
+      throw new Error('model.mesh: malformed native journal report');
     }
   },
 });
@@ -478,6 +503,42 @@ export function dispatchModelOutlinerActionOutcome(outcome: CommandAppliedOutcom
       ...(transaction.groupId ? [{ kind: 'model-part-group', id: transaction.groupId }] : []),
     ],
     commandMetadata(outcome),
+  ));
+}
+
+/** Board one outcome from the resident mesh journal. Applied/undone/redone
+ * reports deliberately share actionId and commandId: they are phases of one
+ * accepted native action, not three unrelated callbacks. */
+export function dispatchNativeMeshAction(report: NativeMeshActionReport, modelId: string): number {
+  const actionId = `native-mesh:${report.documentToken}:${report.id}`;
+  const phasePrefix = report.phase === 'applied' ? '' : report.phase === 'undone' ? 'undo ' : 'redo ';
+  const payload: ModelMeshPayload = {
+    action: report.kind,
+    label: `${phasePrefix}${report.label}`,
+    modelId,
+    nativeActionId: report.id,
+    beforeVertices: report.beforeVertices,
+    afterVertices: report.afterVertices,
+    beforeParts: report.beforeParts,
+    afterParts: report.afterParts,
+    droppedBefore: report.droppedBefore,
+  };
+  return dispatch(modelMesh(
+    payload,
+    [
+      { kind: 'model', id: modelId },
+      { kind: 'model-mesh-action', id: report.kind },
+    ],
+    {
+      invocationId: `${actionId}:${report.phase}:${report.source}`,
+      commandId: report.commandId,
+      actionId,
+      source: report.source,
+      phase: report.phase,
+      ...(report.phase === 'applied' ? {} : { causedBy: actionId }),
+      effect: 'action',
+      undoScope: { kind: 'native', key: modelId },
+    },
   ));
 }
 

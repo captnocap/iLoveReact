@@ -8,7 +8,7 @@ import { activeSurface, hasSelection } from './surfaces';
 import { BUILD_PIECE_STARTERS } from './buildStarters';
 import { BUILD_PIECE_EXPORT_TARGETS } from './buildExports';
 import { PROP_EXPORT_TARGETS, propExportCommandId } from './propExports';
-import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID } from '../world/pieceCommandIds';
+import { WORLD_PIECE_DELETE_COMMAND_ID, WORLD_PIECE_ROTATE_COMMAND_ID, WORLD_PIECE_SPIN_COMMAND_ID } from '../world/pieceCommandIds';
 import type { Command, Menu, EditorState, PrimitiveKind } from './types';
 
 export const MENUS: Menu[] = ['File', 'Edit', 'View', 'Map', 'Build', 'Globals', 'Window'];
@@ -162,6 +162,9 @@ export const COMMANDS: Command[] = [
   // exists, otherwise the armed placement ghost. The enablement gate below keeps
   // both routes discoverable on the world surface.
   { id: WORLD_PIECE_ROTATE_COMMAND_ID, menu: 'Build', name: 'Rotate Piece', icon: 'RotateCw', key: 'R', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
+  // Spin (SPINPROP req_3128): toggles a continuous visual spin on the selected AUTHORED
+  // prop — the rotating business-sign. Visual only; the collider keeps the placed yaw.
+  { id: WORLD_PIECE_SPIN_COMMAND_ID, menu: 'Build', name: 'Spin Piece', icon: 'Orbit', key: '', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
   { id: WORLD_PIECE_DELETE_COMMAND_ID, menu: 'Edit', name: 'Delete World Piece', icon: 'Trash2', key: 'Del', context: true, native: true, undoable: true, scope: 'world', needsSelection: true },
   // Paint Faces (req_2879): an armable brush MODE — touch a placed piece's face and the
   // browser's active material lands in THAT face's slot (front vs back stay separate, so the

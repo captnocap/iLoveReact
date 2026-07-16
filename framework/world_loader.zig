@@ -80,6 +80,7 @@ pub const clearPhysicsConfig = live_inputs.clearPhysicsConfig;
 pub const setLivePieces = live_inputs.setLivePieces;
 pub const clearLivePieces = live_inputs.clearLivePieces;
 pub const setLiveMeshProps = live_inputs.setLiveMeshProps;
+pub const setLiveMeshProps2 = live_inputs.setLiveMeshProps2;
 pub const clearLiveMeshProps = live_inputs.clearLiveMeshProps;
 pub const setLiveMaterial = live_inputs.setLiveMaterial;
 pub const setLiveSkinBoxes = live_inputs.setLiveSkinBoxes;
