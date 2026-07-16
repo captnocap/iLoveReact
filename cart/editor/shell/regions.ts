@@ -32,7 +32,7 @@
 export const SECTIONS = {
   A: { region: 'chrome', name: 'Window Chrome', file: 'shell/Chrome.tsx', contains: 'Shitty Games brand · menu bar · active map · Editor/Play toggle · window controls' },
   B: { region: 'leftRail', name: 'Left Rail', file: 'shell/LeftRail.tsx', contains: 'the vertical domain icon stack (Eye, Grid, Box, Actor, Data)' },
-  C: { region: 'contentBrowser', name: 'Content Browser', file: 'library/LibraryPanel.tsx', contains: 'content tree · search · asset grids · model gallery' },
+  C: { region: 'contentBrowser', name: 'Content Browser', file: 'library/LibraryPanel.tsx', contains: 'the asset dock (req_3135): search · Favorites/Recent · content tree · count footer · detail card; expand toggle attaches the thumbnail-grid column (350 ⇄ 680)' },
   D: { region: 'actionBar', name: 'Action Bar', file: 'stage/ToolOptions.tsx', contains: 'THE toolbar: tool row above the stage — mesh tools, snap, floor ▼/▲, paint segment (shell/PaintToolbar.tsx), map-paint bar (stage/MapPaintBar.tsx)' },
   E: { region: 'viewport', name: 'Stage', file: 'stage/Stage.tsx', contains: 'the flexing center surface (world / model / playtest / animation / material focus) + its in-viewport docks (BuildBar, MapPaintDock)' },
   F: { region: 'viewport', name: 'Stage Tabs', file: 'stage/StageTabs.tsx', contains: 'the open-document tab strip at the bottom edge of the stage' },
@@ -53,6 +53,12 @@ const CHROME_HEIGHT = 37; // window chrome: brand + menu bar + active map + rout
 const ACTION_BAR_HEIGHT = 36; // action bar: THE toolbar row above the stage (HW_ToolOptions)
 const LEFT_RAIL_WIDTH = 48; // domain rail on the far left edge (HW_LeftRail)
 const CONTENT_BROWSER_WIDTH = 350; // content browser, left panel (HW_SidePanel)
+// The content browser is the ONE region with TWO fixed states (req_3135): the
+// tucked micro dock (350) and the expanded dock with the thumbnail grid
+// attached to the tree's right. Both are constants — content still lays out
+// against fixed numbers per state; nothing is deduced from window size.
+const CONTENT_BROWSER_WIDTH_EXPANDED = 680; // content browser, expanded (HW_SidePanelWide)
+const CONTENT_BROWSER_TREE_WIDTH = 218; // expanded mode: the fixed tree column (HW_LibTreeCol)
 const FOCUS_PANEL_WIDTH = 326; // focus panel, right panel (HW_RightPanel)
 const FOCUS_RAIL_WIDTH = 40; // the pane-switch icon rail INSIDE the focus panel (HW_RightRail)
 const STATUS_BAR_HEIGHT = 31; // status bar: the bottom build dock (HW_BuildDock)
@@ -74,8 +80,13 @@ export const REGIONS = {
    */
   contentBrowser: {
     width: CONTENT_BROWSER_WIDTH,
+    expandedWidth: CONTENT_BROWSER_WIDTH_EXPANDED,
+    treeWidth: CONTENT_BROWSER_TREE_WIDTH,
     gutter: PANEL_GUTTER,
     innerWidth: CONTENT_BROWSER_WIDTH - BORDER - PANEL_GUTTER * 2, // 329
+    // Expanded grid column's usable width: expanded outer minus the panel's right
+    // border, the tree column + its divider, and the standard gutters.
+    gridInnerWidth: CONTENT_BROWSER_WIDTH_EXPANDED - BORDER - CONTENT_BROWSER_TREE_WIDTH - BORDER - PANEL_GUTTER * 2, // 440
   },
 
   /** VIEWPORT — the center stage. The ONE region that flexes; no fixed number. */

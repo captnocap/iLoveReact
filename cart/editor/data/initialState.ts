@@ -118,6 +118,7 @@ export function initialState(): EditorState {
     selectedPieceIds: [],
     contentFolder: DEFAULT_CONTENT_FOLDER,
     expandedFolders: { game: true, models: true, 'models-build': true, 'models-props': true, missions: true, bankheist: true, materials: true, architecture: true },
+    libraryExpanded: false,
     search: '',
     surfacePreset: 'default',
     snapIndex: 0,

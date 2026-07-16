@@ -60,6 +60,19 @@ export function contentFolderLabel(folder: ContentFolderId): string {
   return model?.name ?? folder;
 }
 
+// The ancestor chain root → … → folder inside a (live) content tree — the
+// expanded dock's breadcrumb. Every segment is a real tree node, so each crumb
+// press is a normal folder selection. Null when the id isn't in the tree
+// (defensive: a stale model id after delete).
+export function contentFolderTrail(folder: ContentFolderId, tree: ContentNode[]): ContentNode[] | null {
+  for (const node of tree) {
+    if (node.id === folder) return [node];
+    const below = node.children ? contentFolderTrail(folder, node.children) : null;
+    if (below) return [node, ...below];
+  }
+  return null;
+}
+
 export function isMaterialFolder(folder: ContentFolderId): boolean {
   return tabForContentFolder(folder) === 'Skins';
 }
@@ -104,6 +117,13 @@ export function subfolderFilesForFolder(
 // How many model thumbnails fill one gallery page. Shared by the picture
 // gallery and AppFrame's page clamp so paging never disagrees with the grid.
 export const MODEL_GALLERY_PAGE_SIZE = 12;
+// Expanded dock (req_3135): the 440px grid column fits 4 cells per row and the
+// grid area flexes taller than the tucked gallery, so pages hold more.
+export const MODEL_GALLERY_PAGE_SIZE_EXPANDED = 20;
+
+export function modelGalleryPageSizeFor(expanded: boolean): number {
+  return expanded ? MODEL_GALLERY_PAGE_SIZE_EXPANDED : MODEL_GALLERY_PAGE_SIZE;
+}
 
 // The live model list: the catalog packages plus any duplicates, with per-model
 // renames/favorites applied and deleted (hidden) models removed. Everything that

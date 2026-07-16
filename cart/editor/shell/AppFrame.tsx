@@ -138,7 +138,7 @@ import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { removeHotState } from '@reactjit/runtime/hooks/useHotState';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
 import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor, resolveMaterialRef } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, MODEL_GALLERY_PAGE_SIZE, SNAP_MODES } from '../data/content';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, modelGalleryPageSizeFor, SNAP_MODES } from '../data/content';
 import { playerStarterParts } from '../model/playerStarter';
 import { buildPieceStarterParts } from '../model/buildPieceStarter';
 import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarters';
@@ -4763,13 +4763,21 @@ export default function AppFrame() {
             onAsset={selectAsset}
             onFolder={selectContentFolder}
             onToggleFolder={toggleContentFolder}
+            onToggleExpanded={() => setState((prev) => ({
+              ...prev,
+              libraryExpanded: !prev.libraryExpanded,
+              assetPage: 0,
+              status: prev.libraryExpanded ? 'content browser tucked' : 'content browser expanded — grid attached',
+            }))}
             onFavorite={toggleFavorite}
             onRename={renameAsset}
             onPage={(delta) => setState((prev) => {
               const itemCount = isModelFolder(prev.contentFolder)
                 ? modelPackagesForFolder(prev.contentFolder, prev.search, visibleModelPackages(prev.modelOverrides, prev.modelDupes)).length
                 : filteredAssets.length;
-              const pageSize = isModelFolder(prev.contentFolder) ? MODEL_GALLERY_PAGE_SIZE : assetPageSizeFor(panelMode);
+              const pageSize = isModelFolder(prev.contentFolder)
+                ? modelGalleryPageSizeFor(prev.libraryExpanded)
+                : assetPageSizeFor(panelMode, prev.libraryExpanded);
               const maxPage = Math.max(0, Math.ceil(itemCount / pageSize) - 1);
               return { ...prev, assetPage: Math.max(0, Math.min(maxPage, prev.assetPage + delta)) };
             })}

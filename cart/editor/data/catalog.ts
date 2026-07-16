@@ -5,6 +5,11 @@ import type { MaterialRef } from '../world/pieces';
 
 export const ASSET_PAGE_SIZE = 12;
 export const MATERIAL_PAGE_SIZE = 16;
+// Expanded-dock page sizes (req_3135): the attached grid column is 440px wide
+// (REGIONS.contentBrowser.gridInnerWidth) — 6 material tiles / 5 asset cards
+// per row, more rows in the flexing grid area.
+export const ASSET_PAGE_SIZE_EXPANDED = 20;
+export const MATERIAL_PAGE_SIZE_EXPANDED = 36;
 
 export const ASSETS: Asset[] = EDITOR_ASSET_CATALOG.assets;
 export const MODEL_PACKAGES: ModelPackage[] = EDITOR_ASSET_CATALOG.modelPackages;
@@ -48,7 +53,8 @@ export function assetById(id: string, overrides: Record<string, AssetOverride> =
   return applyAssetOverride(asset, overrides[asset.id]);
 }
 
-export function assetPageSizeFor(tab: LibraryTab): number {
+export function assetPageSizeFor(tab: LibraryTab, expanded = false): number {
+  if (expanded) return tab === 'Skins' ? MATERIAL_PAGE_SIZE_EXPANDED : ASSET_PAGE_SIZE_EXPANDED;
   return tab === 'Skins' ? MATERIAL_PAGE_SIZE : ASSET_PAGE_SIZE;
 }
 

@@ -8,7 +8,7 @@
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import type { ContentFolderId, ModelPackage } from '../data/types';
-import { MODEL_GALLERY_PAGE_SIZE, modelPackagesForFolder } from '../data/content';
+import { modelGalleryPageSizeFor, modelPackagesForFolder } from '../data/content';
 import ModelThumbnail from './ModelThumbnail';
 
 export default function ModelPackageBrowser({
@@ -17,6 +17,7 @@ export default function ModelPackageBrowser({
   page,
   activeDocumentId,
   models,
+  expanded,
   onPage,
   onModel,
   onModelRightClick,
@@ -26,19 +27,22 @@ export default function ModelPackageBrowser({
   page: number;
   activeDocumentId: string;
   models: ModelPackage[];
+  // Expanded dock (req_3135): the gallery lives in the flexing grid column.
+  expanded: boolean;
   onPage: (delta: number) => void;
   onModel: (model: ModelPackage) => void;
   onModelRightClick: (model: ModelPackage, event: { x: number; y: number }) => void;
 }) {
   const shown = modelPackagesForFolder(folder, search, models);
-  const pageSize = MODEL_GALLERY_PAGE_SIZE;
+  const pageSize = modelGalleryPageSizeFor(expanded);
   const maxPage = Math.max(0, Math.ceil(shown.length / pageSize) - 1);
   const safePage = Math.min(page, maxPage);
   const pageModels = shown.slice(safePage * pageSize, safePage * pageSize + pageSize);
   const firstModel = shown.length === 0 ? 0 : safePage * pageSize + 1;
   const lastModel = Math.min(shown.length, firstModel + pageModels.length - 1);
+  const Gallery = expanded ? C.HW_ModelGalleryWide : C.HW_ModelGallery;
   return (
-    <C.HW_ModelGallery>
+    <Gallery>
       <C.HW_GalleryPager>
         <C.HW_IconMiniButton onPress={() => onPage(-1)}><Icon name="ChevronLeft" size={11} color={accentFor('textDim')} /></C.HW_IconMiniButton>
         <C.HW_StatusText>{firstModel}-{lastModel} / {shown.length}</C.HW_StatusText>
@@ -66,6 +70,6 @@ export default function ModelPackageBrowser({
           );
         })}
       </C.HW_GalleryGrid>
-    </C.HW_ModelGallery>
+    </Gallery>
   );
 }

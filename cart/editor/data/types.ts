@@ -515,6 +515,9 @@ export type EditorState = {
   selectedObjectId: string;
   contentFolder: ContentFolderId;
   expandedFolders: Partial<Record<ContentFolderId, boolean>>;
+  // Content browser dock state (req_3135): tucked micro dock (false) or the
+  // expanded tree + thumbnail-grid dock (true). Both widths are region constants.
+  libraryExpanded: boolean;
   search: string;
   surfacePreset: string;
   snapIndex: number;

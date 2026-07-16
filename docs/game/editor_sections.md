@@ -1,6 +1,6 @@
 # Editor UI sections — the prompting vocabulary (A–H)
 
-Active surface: `cart/editor/`. Last verified: 2026-07-11.
+Active surface: `cart/editor/`. Last verified: 2026-07-16.
 USER ASK req_2970 ("i am sick and tired of trying to point out a specific area
 of the ui that i want something to land in ... we are going to recategorize
 everything by a section number so prompting can turn into 'add that to
@@ -20,7 +20,7 @@ geometry.
 ┌──────────────────── A window chrome (37) ──────────────────────┐
 │  B   │        C        │  D  [action bar 36]       │           │
 │ rail │ content browser │  E     viewport (flexes)  │  G focus  │
-│ (48) │      (350)      │                           │  panel    │
+│ (48) │   (350 ⇄ 680)   │                           │  panel    │
 │      │                 │  F  [stage tabs]          │  (326)    │
 └──────────────────── H status bar (31) ─────────────────────────┘
 ```
@@ -29,7 +29,7 @@ geometry.
 |----|-----------------|-----------------------------|------------------|
 | A  | Window Chrome   | `shell/Chrome.tsx`          | "Shitty Games" brand · File/Edit/View/Build menu bar · Compile · Editor/Play toggle · window controls |
 | B  | Left Rail       | `shell/LeftRail.tsx`        | the vertical domain icon stack (Eye, Grid, Box, Actor, Data, Pipeline) |
-| C  | Content Browser | `library/LibraryPanel.tsx`  | content tree · search · asset grids · model gallery |
+| C  | Content Browser | `library/LibraryPanel.tsx`  | the asset dock (req_3135): search · Favorites/Recent · content tree · count footer · selected-asset detail card; expand toggle attaches the thumbnail-grid column (tucked 350 ⇄ expanded 680, both fixed constants) |
 | D  | Action Bar      | `stage/ToolOptions.tsx`     | THE toolbar (req_2552): mesh tools, snap, floor ▼/▲, view modes, the paint segment (`shell/PaintToolbar.tsx`), the map-paint bar (`stage/MapPaintBar.tsx`) |
 | E  | Stage           | `stage/Stage.tsx`           | the flexing center viewport — world / model / playtest / animation / material-focus surfaces + in-viewport docks (`BuildBar`, `MapPaintDock`) |
 | F  | Stage Tabs      | `stage/StageTabs.tsx`       | the open-document tab strip at the bottom edge of the stage |

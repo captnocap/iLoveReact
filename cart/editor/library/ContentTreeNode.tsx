@@ -15,7 +15,12 @@ export default function ContentTreeNode(props: {
 }) {
   const hasChildren = Boolean(props.node.children?.length);
   const isExpanded = Boolean(props.expanded[props.node.id]);
-  const Row = props.selected === props.node.id ? C.HW_TreeRowOn : C.HW_TreeRow;
+  const selected = props.selected === props.node.id;
+  const Row = selected ? C.HW_TreeRowOn : C.HW_TreeRow;
+  // The selected row is a solid accent fill — every glyph on it goes dark.
+  const Label = selected ? C.HW_TreeLabelOn : C.HW_TreeLabel;
+  const Count = selected ? C.HW_TreeCountOn : C.HW_TreeCount;
+  const glyph = selected ? accentFor('stageBadgeText') : accentFor('textDim');
   const count = countAssetsForFolder(props.assets, props.node.id);
   return (
     <>
@@ -25,12 +30,12 @@ export default function ContentTreeNode(props: {
       >
         {Array.from({ length: props.depth }, (_, index) => <C.HW_TreeIndent key={index} />)}
         <C.HW_TreeToggle onPress={() => hasChildren ? props.onToggle(props.node.id) : props.onFolder(props.node.id)}>
-          <Icon name={hasChildren ? (isExpanded ? 'ChevronDown' : 'ChevronRight') : 'Minus'} size={11} color={accentFor('textDim')} />
+          <Icon name={hasChildren ? (isExpanded ? 'ChevronDown' : 'ChevronRight') : 'Minus'} size={11} color={glyph} />
         </C.HW_TreeToggle>
-        <Icon name={props.node.icon ?? 'Folder'} size={13} color={accentFor(props.selected === props.node.id ? 'primary' : 'textDim')} />
-        <C.HW_TreeLabel>{props.node.label}</C.HW_TreeLabel>
+        <Icon name={props.node.icon ?? 'Folder'} size={13} color={glyph} />
+        <Label>{props.node.label}</Label>
         <C.HW_Spacer />
-        {count > 0 ? <C.HW_TreeCount>{count}</C.HW_TreeCount> : null}
+        {count > 0 ? <Count>{count}</Count> : null}
       </Row>
       {hasChildren && isExpanded ? props.node.children!.map((child) => (
         <ContentTreeNode
