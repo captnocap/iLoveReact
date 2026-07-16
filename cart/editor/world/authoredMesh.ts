@@ -16,8 +16,10 @@ const BOUNDS_CACHE = new Map<string, MeshBounds>();
  *  placeable as one authored on the floor. Placement y IS the base; vertical
  *  position in the WORLD comes from terrain + storey + the place-time lift,
  *  never from studio-space authoring. Copies before shifting (the source array
- *  belongs to the package resolver / live edit state). */
-function groundRebase(vertices: Float32Array): Float32Array {
+ *  belongs to the package resolver / live edit state). Exported for the one
+ *  other geometry source placements accept — the current painted DISPLAYED
+ *  form (req_3133) — so both enter world space through the same rebase. */
+export function groundRebase(vertices: Float32Array): Float32Array {
   let minY = Infinity;
   for (let i = 1; i + 1 < vertices.length; i += 8) if (vertices[i]! < minY) minY = vertices[i]!;
   if (!Number.isFinite(minY) || Math.abs(minY) < 1e-4) return vertices;

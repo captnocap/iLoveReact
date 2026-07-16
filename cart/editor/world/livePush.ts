@@ -11,8 +11,8 @@ import { pieceInstanceRows, type PlacedPiece } from './pieces';
 import { pieceSkinBoxes } from './pieceSkins';
 import { encodeResidentMeshes, encodeMeshRefs, encodeMeshRefsV2, type ResidentMesh, type MeshRef } from './meshProps';
 import { isAuthoredPiece, authoredResidentKeyOf, skinnedPieceId, type AuthoredBuildPiece } from './authoredRegistry';
-import { authoredMeshData } from './authoredMesh';
-import { exists, readFileBase64 } from '../../../runtime/hooks/fs';
+import { authoredMeshData, groundRebase } from './authoredMesh';
+import { exists, readFile, readFileBase64, stat } from '../../../runtime/hooks/fs';
 import { base64ToBytes } from '../../../runtime/workspace';
 import { modelPackageById } from '../data/content';
 import { resolvePackageDir } from '../data/modelPackageStore';
@@ -56,6 +56,24 @@ function packagePaintedForm(dir: string): PaintedForm | null {
   return readPaintedForm(dir, 'mesh/painted.blob', 'atlases/base.png');
 }
 
+/** req_3133: does the saved painted form belong to the meshdoc on disk RIGHT NOW?
+ *  writeModelArtifacts stamps painted.json with the doc revision it wrote beside;
+ *  a matching stamp means a count-mismatched painted.blob is the DISPLAYED
+ *  quality-DECIMATED mesh the user painted (the doc keeps the full-res source by
+ *  design) — the intended exported look, not stale paint. Absent/mismatched
+ *  stamp keeps the req_2832 stale-paint rule: drop the painting, draw the doc. */
+function paintedFormIsCurrent(dir: string): boolean {
+  const text = readFile(`${dir}/mesh/painted.json`);
+  if (!text) return false;
+  try {
+    const meta = JSON.parse(text) as { docStamp?: unknown } | null;
+    const doc = stat(`${dir}/mesh/doc.blob`);
+    return !!doc && typeof meta?.docStamp === 'string' && meta.docStamp === `${doc.size}:${doc.mtimeMs}`;
+  } catch {
+    return false;
+  }
+}
+
 /** Apply the semantic export declaration to one visual vertex form. Door meshes
  *  compile into body-first + a trailing named leaf slot; ordinary pieces pass
  *  through untouched. A broken door contract is rejected loudly, never flattened
@@ -66,11 +84,14 @@ function residentMeshFor(
   key: string,
   vertices: Float32Array,
   png?: Uint8Array,
+  /** req_3133: when the RENDER geometry is the decimated displayed form, the
+   *  full-res doc still owns collision — Outliner bands index source faces. */
+  collisionVertices?: Float32Array,
 ): ResidentMesh | null {
   if (ap.edit !== 'door' && ap.edit !== 'garageDoor') {
     const doc = pkg ? packageMeshDoc(pkg) : null;
     const parts = pkg ? packageMeshDocParts(pkg) : null;
-    const collisionBoxes = compileOutlinerCollisionBoxes(vertices, doc, parts);
+    const collisionBoxes = compileOutlinerCollisionBoxes(collisionVertices ?? vertices, doc, parts);
     return { key, vertices, png, ...(collisionBoxes.length > 0 ? { collisionBoxes } : {}) };
   }
   if (!pkg) {
@@ -169,13 +190,26 @@ export function pushResidentMeshes(nodeId: number, authoredPieces: readonly Auth
     // contributes its UV layout only (req_2832/2833). This keeps the rendered
     // resident mesh and placement bounds on one model revision.
     const paintedForm = dir ? packagePaintedForm(dir) : null;
-    const currentPaintedVertices = currentGeometry && paintedForm
+    const bound = currentGeometry && paintedForm
       ? bindPaintSkinToCurrentMesh(currentGeometry, paintedForm.vertices)
-      : paintedForm?.vertices ?? null;
-    const verts = currentPaintedVertices ?? currentGeometry;
+      : null;
+    // req_3133: a painted form that CANNOT bind (vertex count ≠ doc) but whose
+    // stamp matches the doc on disk is the DISPLAYED quality-decimated mesh the
+    // user painted — the intended exported look. It becomes the render geometry
+    // (ground-rebased like every placeable); the full-res doc keeps collision.
+    // A mismatched/absent stamp stays the req_2832 rule: stale paint drops.
+    const displayedForm = !bound && paintedForm && dir && ap.edit !== 'door' && ap.edit !== 'garageDoor' && paintedFormIsCurrent(dir)
+      ? groundRebase(paintedForm.vertices)
+      : null;
+    const paintedVertices = bound ?? displayedForm ?? (currentGeometry ? null : paintedForm?.vertices ?? null);
+    const verts = paintedVertices ?? currentGeometry;
     if (verts && verts.length >= 8) {
-      if (currentPaintedVertices && paintedForm) painted += 1;
-      const resident = residentMeshFor(ap, pkg, ap.id, verts, currentPaintedVertices ? paintedForm?.png : undefined);
+      if (paintedVertices && paintedForm) painted += 1;
+      const resident = residentMeshFor(
+        ap, pkg, ap.id, verts,
+        paintedVertices ? paintedForm?.png : undefined,
+        displayedForm && currentGeometry ? currentGeometry : undefined,
+      );
       if (resident) meshes.push(resident);
     } else console.warn(`[authored] no mesh data for '${ap.modelId}' (${ap.label}) — not resident (re-open + re-export the model)`);
     // Every stored paint SKIN is its own resident mesh (req_2834): key

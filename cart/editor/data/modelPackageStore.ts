@@ -12,7 +12,7 @@
 // manifest.json — so the store resolves id → dir by scanning manifests (the
 // same walk loadMaterializedPackages already does), cached in a module map.
 // Renaming a model MOVES its folder to match; a name collision suffixes _2/_3.
-import { exists, listDir, mkdir, readFile, readFileBase64, remove, writeFile, writeFileBase64Atomic, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
+import { exists, listDir, mkdir, readFile, readFileBase64, remove, stat, writeFile, writeFileBase64Atomic, writeFileBytesAtomic } from '../../../runtime/hooks/fs';
 import {
   MODELS_HOME,
   MODEL_PACKAGE_SUBDIRS,
@@ -432,7 +432,19 @@ export function writeModelArtifacts(pkg: Pick<ModelPackage, 'kind' | 'id' | 'nam
       // UVs base.blob/doc.blob carry (req_2833: pairing them scrambles the painting)
       // — persist the paint-space verts beside the atlas so placement consumers
       // render the painted model exactly as the editor shows it.
-      host.__model_painted_mesh_write?.(`${meshDir}/painted.blob`);
+      const paintedWritten = host.__model_painted_mesh_write?.(`${meshDir}/painted.blob`) === 1;
+      // req_3133: stamp WHICH meshdoc revision this painted form belongs to. A
+      // painted.blob whose vertex count mismatches the doc is ambiguous — stale
+      // paint from before a geometry edit (drop it, req_2832) OR the CURRENT
+      // quality-DECIMATED display the user painted (the doc keeps the full-res
+      // source by design). A matching stamp resolves it: same save, same look.
+      const paintedMetaPath = `${meshDir}/painted.json`;
+      if (paintedWritten) {
+        const doc = stat(`${meshDir}/doc.blob`);
+        if (doc) writeFileBytesAtomic(paintedMetaPath, textBytes(JSON.stringify({ version: 1, docStamp: `${doc.size}:${doc.mtimeMs}` })));
+      } else if (exists(paintedMetaPath)) {
+        remove(paintedMetaPath); // a failed painted write must not leave a stamp endorsing the old blob
+      }
     }
     const program = host.__model_paint_program_read?.();
     if (typeof program === 'string' && program.length > 0) {
