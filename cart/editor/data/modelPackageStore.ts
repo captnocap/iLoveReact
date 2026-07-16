@@ -18,6 +18,7 @@ import {
   MODEL_PACKAGE_SUBDIRS,
   categoryDir,
   modelFolderIdFor,
+  modelSlug,
   packageDir,
   packageDirForName,
   packageToManifest,
@@ -96,7 +97,10 @@ export function resolvePackageDir(kind: ModelPackageKind, id: string): string | 
 // owns one under that name, otherwise the first free _2/_3-suffixed slot —
 // a different model squatting the name never gets clobbered.
 function nameDirFor(kind: ModelPackageKind, id: string, name: string): string {
-  const base = packageDirForName(kind, name);
+  // An empty/symbol-only name slugs to '' — packageDirForName would then claim the
+  // CATEGORY ROOT itself (the stray props/manifest.json bug). Fall back to the
+  // id-slug home so a nameless save still gets its own directory.
+  const base = modelSlug(name) ? packageDirForName(kind, name) : packageDir(kind, id);
   let dir = base;
   for (let n = 2; exists(`${dir}/manifest.json`); n += 1) {
     try {

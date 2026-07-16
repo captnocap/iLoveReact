@@ -45,17 +45,18 @@ const std = @import("std");
 const model_paint = @import("model_paint.zig");
 const model_source = @import("model_source.zig");
 const material_tex = @import("material_tex.zig");
+const paint_ops = @import("paint_ops.zig");
 
 const alloc = std.heap.c_allocator;
 
-const OP_INK_COLOR: u8 = 0; // r,g,b
-const OP_INK_MATERIAL: u8 = 1; // matIndex u16
-const OP_DAB: u8 = 2; // v2: group u32, ord u32, u f32, v f32, radius f32, flow f32
-const OP_FILL: u8 = 3; // v2: group u32, ord u32
+const OP_INK_COLOR = paint_ops.OP_INK_COLOR; // r,g,b
+const OP_INK_MATERIAL = paint_ops.OP_INK_MATERIAL; // matIndex u16
+const OP_DAB = paint_ops.OP_DAB; // v2: group u32, ord u32, u f32, v f32, radius f32, flow f32
+const OP_FILL = paint_ops.OP_FILL; // v2: group u32, ord u32
 // v3 (req_2831): OP_DAB + the brush footprint (the BRUSH_SHAPE_ID contract) — kind u32,
 // hardness f32, angle_rad f32, aspect f32, scatter f32. Older blobs never contain it,
 // so v1/v2 replay is untouched; newer blobs are version-gated at the header.
-const OP_DAB_SHAPED: u8 = 4;
+const OP_DAB_SHAPED = paint_ops.OP_DAB_SHAPED;
 const MAGIC = [4]u8{ 'R', 'J', 'P', 'P' };
 const VERSION: u16 = 3; // v1 = flat face-indexed stream, v2 = hide-stable keys — both readable
 const MAT_BAKE_SIZE: u32 = 256;
@@ -82,6 +83,12 @@ var g_mats: std.ArrayList(MatRecipe) = .{};
 var g_open: std.ArrayList(u8) = .{};
 var g_open_live: bool = false;
 var g_open_label: []const u8 = "stroke";
+
+// Faces already fill-recorded in the OPEN unit with the CURRENT ink — a repeat fill of
+// the same face is a hard-overwrite no-op, so recording it again only bloats the blob
+// (the 69k-fill keyboard). Cleared on unit open, on any ink change, and on any dab
+// (a dab layered on a face makes the next fill of it meaningful again).
+var g_open_fill_seen: std.AutoHashMapUnmanaged(u64, void) = .{};
 
 // Active-ink dedup so an INK op is emitted only when the ink actually changes. Reset at
 // every stroke open so each stroke's op stream is SELF-CONTAINED (layer reorder/skip
@@ -548,12 +555,14 @@ fn emitInk(mat: bool, rgb: [3]u8) void {
         if (!g_have_active or !g_active_is_mat) {
             g_open.append(alloc, OP_INK_MATERIAL) catch {};
             appendOpenU16(g_active_mat);
+            g_open_fill_seen.clearRetainingCapacity();
             g_have_active = true;
             g_active_is_mat = true;
         }
     } else if (!g_have_active or g_active_is_mat or !std.mem.eql(u8, &g_active_rgb, &rgb)) {
         g_open.append(alloc, OP_INK_COLOR) catch {};
         g_open.appendSlice(alloc, &rgb) catch {};
+        g_open_fill_seen.clearRetainingCapacity();
         g_have_active = true;
         g_active_is_mat = false;
         g_active_rgb = rgb;
@@ -575,6 +584,7 @@ fn openUnit(label: []const u8) void {
     ensureLayers();
     captureBaselineIfNeeded(); // anchor undo BEFORE the first program op mutates the atlas
     g_open.clearRetainingCapacity();
+    g_open_fill_seen.clearRetainingCapacity();
     g_open_live = true;
     g_open_label = label;
     g_have_active = false; // each stroke's op stream re-states its ink (self-contained)
@@ -585,6 +595,7 @@ pub fn recordDab(face: u32, u: f32, v: f32, radius: f32, flow: f32, mat: bool, r
     if (!g_recording) return;
     openUnit("stroke");
     emitInk(mat, rgb);
+    g_open_fill_seen.clearRetainingCapacity();
     const key = faceKeyOf(face);
     g_open.append(alloc, OP_DAB) catch {};
     appendOpenU32(key.group);
@@ -601,6 +612,7 @@ pub fn recordDabShaped(face: u32, u: f32, v: f32, radius: f32, flow: f32, mat: b
     if (!g_recording) return;
     openUnit("stroke");
     emitInk(mat, rgb);
+    g_open_fill_seen.clearRetainingCapacity();
     const key = faceKeyOf(face);
     g_open.append(alloc, OP_DAB_SHAPED) catch {};
     appendOpenU32(key.group);
@@ -622,6 +634,9 @@ pub fn recordFill(face: u32, mat: bool, rgb: [3]u8) void {
     openUnit("fill");
     emitInk(mat, rgb);
     const key = faceKeyOf(face);
+    const seen_key = resolverKey(key.group, key.ord);
+    if (g_open_fill_seen.contains(seen_key)) return; // idempotent repeat — record nothing
+    g_open_fill_seen.put(alloc, seen_key, {}) catch {}; // OOM: fall through, over-record safely
     g_open.append(alloc, OP_FILL) catch {};
     appendOpenU32(key.group);
     appendOpenU32(key.ord);
@@ -855,29 +870,54 @@ fn bakeMatRecipe(key: []const u8, wgsl: []const u8, data: []const f32, tiles: f3
     return model_paint.setMaterialInk(raw[8..], w, h, tiles);
 }
 
-// Run ONE stroke's op stream against the atlas (v2 keys). Ink state threads through the
-// caller so consecutive strokes with the same ink don't re-bake a material per stroke.
-const ReplayInk = struct { mat_active: bool = false, mat_idx: u16 = std.math.maxInt(u16), rgb: [3]u8 = .{ 255, 255, 255 } };
+// Ink state threads through the caller so consecutive strokes with the same ink don't
+// re-bake a material per stroke. Ink ops only STATE intent; flushInk applies the last
+// stated ink right before a dab/fill executes, so ink for fully-skipped ops never bakes.
+const ReplayInk = struct {
+    mat_active: bool = false,
+    mat_idx: u16 = std.math.maxInt(u16),
+    rgb: [3]u8 = .{ 255, 255, 255 },
+    pending_mat: ?u16 = null,
+    pending_rgb: ?[3]u8 = null,
+};
+
+fn flushInk(ink: *ReplayInk) void {
+    if (ink.pending_rgb) |c| {
+        ink.rgb = c;
+        if (ink.mat_active) model_paint.clearMaterialInk();
+        ink.mat_active = false;
+        ink.pending_rgb = null;
+    } else if (ink.pending_mat) |idx| {
+        if (!ink.mat_active or ink.mat_idx != idx) {
+            const m = g_mats.items[idx];
+            ink.mat_active = bakeMatRecipe(m.key, m.wgsl, m.data, m.tiles);
+            ink.mat_idx = idx;
+        }
+        ink.pending_mat = null;
+    }
+}
 
 fn runStrokeOps(ops: []const u8, res: *const Resolver, ink: *ReplayInk, dabs: *usize) void {
+    var skips: []usize = &.{};
+    var skips_owned = false;
+    if (paint_ops.redundantFillOffsets(alloc, ops)) |s| { skips = s; skips_owned = true; } else |_| {}
+    defer if (skips_owned) alloc.free(skips);
+    var skip_i: usize = 0;
     var c = Cursor{ .b = ops };
     while (c.p < c.b.len) {
+        const op_off = c.p;
         const tag = c.u8v() orelse return;
         switch (tag) {
             OP_INK_COLOR => {
                 const cc = c.bytes(3) orelse return;
-                ink.rgb = .{ cc[0], cc[1], cc[2] };
-                if (ink.mat_active) model_paint.clearMaterialInk();
-                ink.mat_active = false;
+                ink.pending_rgb = .{ cc[0], cc[1], cc[2] };
+                ink.pending_mat = null;
             },
             OP_INK_MATERIAL => {
                 const idx = c.u16v() orelse return;
                 if (idx >= g_mats.items.len) return;
-                if (!ink.mat_active or ink.mat_idx != idx) {
-                    const m = g_mats.items[idx];
-                    ink.mat_active = bakeMatRecipe(m.key, m.wgsl, m.data, m.tiles);
-                    ink.mat_idx = idx;
-                }
+                ink.pending_mat = idx;
+                ink.pending_rgb = null;
             },
             OP_DAB => {
                 const group = c.u32v() orelse return;
@@ -888,6 +928,7 @@ fn runStrokeOps(ops: []const u8, res: *const Resolver, ink: *ReplayInk, dabs: *u
                 const flow = c.f32v() orelse return;
                 dabs.* += 1;
                 const face = resolveFace(res, group, ord) orelse continue;
+                flushInk(ink);
                 if (ink.mat_active) model_paint.paintStampTex(face, u, v, radius, flow) else model_paint.paintStamp(face, u, v, radius, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2], 255 }, flow);
             },
             OP_DAB_SHAPED => {
@@ -905,14 +946,17 @@ fn runStrokeOps(ops: []const u8, res: *const Resolver, ink: *ReplayInk, dabs: *u
                 dabs.* += 1;
                 const face = resolveFace(res, group, ord) orelse continue;
                 const spec = model_paint.BrushShape{ .kind = @intCast(@min(kind, 255)), .hardness = hardness, .angle_rad = angle, .aspect = aspect, .scatter = scatter };
+                flushInk(ink);
                 if (ink.mat_active) model_paint.paintStampTexShaped(face, u, v, radius, flow, spec) else model_paint.paintStampShaped(face, u, v, radius, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2], 255 }, flow, spec);
             },
             OP_FILL => {
                 const group = c.u32v() orelse return;
                 const ord = c.u32v() orelse return;
+                if (skip_i < skips.len and skips[skip_i] == op_off) { skip_i += 1; continue; }
                 dabs.* += 1;
                 const face = resolveFace(res, group, ord) orelse continue;
                 // RGB-only fill: replay must not un-glass a face any more than the live fill does (req_2928).
+                flushInk(ink);
                 if (ink.mat_active) model_paint.paintFaceTex(face) else model_paint.paintFaceRgb(face, .{ ink.rgb[0], ink.rgb[1], ink.rgb[2] });
             },
             else => return,

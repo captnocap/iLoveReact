@@ -1217,6 +1217,28 @@ pub fn build(b: *std.Build) void {
     const mesh_journal_log_test_step = b.step("test-mesh-journal-log", "Run the mesh journal ownership/log tests");
     mesh_journal_log_test_step.dependOn(&run_mesh_journal_log_test.step);
 
+    // ── paint ops (stroke-program fill dedupe helpers) unit tests ─
+    const paint_ops_impl_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/paint_ops.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const paint_ops_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/paint_ops.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    paint_ops_test_mod.addImport("paint_ops", paint_ops_impl_test_mod);
+    const paint_ops_test = b.addTest(.{
+        .name = "paint-ops-test",
+        .root_module = paint_ops_test_mod,
+    });
+    const run_paint_ops_test = b.addRunArtifact(paint_ops_test);
+    const paint_ops_test_step = b.step("test-paint-ops", "Run the paint op-stream dedupe helper tests");
+    paint_ops_test_step.dependOn(&run_paint_ops_test.step);
+
     // ── path array (constant-radius turn + elevation profile) unit tests ─────
     const path_array_test_mod = b.createModule(.{
         .root_source_file = b.path("framework/testing/unit/path_array.zig"),

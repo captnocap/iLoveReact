@@ -2,7 +2,7 @@
 import { MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
 import { EDITOR_ASSET_CATALOG, fileModelPackage, modelCategoryNodes } from './assetCatalog';
 import { isMaterialized, listPackageFiles, type PackageFile } from './modelPackageStore';
-import { MODEL_PACKAGE_SUBDIRS } from './modelPackage';
+import { MODEL_PACKAGE_SUBDIRS, modelFolderIdFor } from './modelPackage';
 import { allocateBuildStarterModelId, allocatePlayerModelId, allocatePrimitiveModelId, BUILD_STARTER_MODEL_ID_PREFIX, PLAYER_MODEL_ID_PREFIX } from './modelIdentity';
 import { PRIMITIVE_MESHES } from './commands';
 import { buildPieceStarter, type BuildPieceStarterId } from './buildStarters';
@@ -179,7 +179,7 @@ export function primitiveModelPackage(id: string): ModelPackage {
   const meta = PRIMITIVE_MESHES.find((p) => p.kind === kind) ?? PRIMITIVE_MESHES[0]!;
   return {
     id,
-    folderId: 'props',
+    folderId: modelFolderIdFor(id),
     name: seq ? `Model ${seq}` : 'Model',
     path: `primitive/${meta.kind}`,
     kind: 'prop',
@@ -209,7 +209,7 @@ export function playerModelPackage(id: string): ModelPackage {
   const seq = id.slice(PLAYER_MODEL_ID_PREFIX.length);
   return {
     id,
-    folderId: 'models-characters',
+    folderId: modelFolderIdFor(id),
     name: seq ? `Player Model ${seq}` : 'Player Model',
     path: 'character/player',
     kind: 'character',
@@ -247,7 +247,7 @@ export function buildStarterModelPackage(id: string): ModelPackage {
   const row = catalogRowFor(starter.catalogPieceId);
   return {
     id,
-    folderId: 'models-build',
+    folderId: modelFolderIdFor(id),
     name: seq ? `${starter.name} ${seq}` : starter.name,
     path: `starter/build/${starterId}`,
     kind: 'build',
