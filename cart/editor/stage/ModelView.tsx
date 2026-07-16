@@ -550,6 +550,13 @@ const stampAt = (x: number, y: number, rgb: RGB, radius: number, b: Brush) =>
     b.hardness, b.angleDeg, b.aspect, b.scatter,
   ) === 1;
 const strokeBeginAt = (x: number, y: number) => host.__model_paint_stroke_begin?.(x, y) ?? -1;
+// Eyedropper read (req_3097): the painted atlas colour under the viewport pixel as
+// #rrggbb, null on a miss. The host raycasts + reads the texel; JS just formats.
+const samplePaintHexAt = (x: number, y: number): string | null => {
+  const packed = host.__model_paint_sample?.(x, y);
+  if (typeof packed !== 'number' || packed < 0) return null;
+  return `#${(packed >>> 0).toString(16).padStart(6, '0')}`;
+};
 // Face-safety mode for free-form: 0 = clip (paint whatever face the dab is over), 1 = lock
 // (mask the whole stroke to the face pressed at stroke-begin).
 const setPaintSafety = (mode: number) => host.__model_paint_mode?.(mode);
@@ -929,6 +936,16 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // Last painted viewport point, so a fast drag interpolates dabs along the segment instead of
   // leaving gaps (the host stamps one disc per call; JS walks the segment between moves).
   const lastPtRef = useRef<{ x: number; y: number } | null>(null);
+  // Eyedropper drag (req_3097): sampling live while the pointer is down. Dedupe by hex so a
+  // hold over one face doesn't spam the color-select command per mouse-move.
+  const dropperRef = useRef(false);
+  const dropperHexRef = useRef<string | null>(null);
+  const sampleColorAt = (x: number, y: number) => {
+    const hex = samplePaintHexAt(x, y);
+    if (!hex || hex === dropperHexRef.current) return;
+    dropperHexRef.current = hex;
+    (globalThis as any).__modelColorSampled?.(hex);
+  };
 
   // Native selection can change mode without going through chooseSelMode: engine clicks,
   // marquee, Ctrl+A, and the shell's outliner group-select all mutate host state directly.
@@ -2196,6 +2213,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         <Pressable
           onMouseDown={(p: any) => {
             const x = p?.x ?? 0, y = p?.y ?? 0;
+            // Eyedropper: SAMPLE the painted atlas under the cursor (req_3097 — the
+            // tool used to fall through and stamp paint). Drag keeps sampling live;
+            // the pick funnels through the spine via the announce global.
+            if (brushTool === 'eyedropper') { dropperRef.current = true; sampleColorAt(x, y); return; }
             paintingRef.current = true;
             lastPtRef.current = { x, y };
             const rgb = brushRgb(brush);
@@ -2204,6 +2225,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             stampAt(x, y, rgb, brushRadius(brush.size), brush);
           }}
           onMouseMove={(p: any) => {
+            if (dropperRef.current) { sampleColorAt(p?.x ?? 0, p?.y ?? 0); return; }
             if (!paintingRef.current) return;
             const x = p?.x ?? 0, y = p?.y ?? 0;
             const rgb = brushRgb(brush);
@@ -2224,8 +2246,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
           // pointer-down→up is one stroke, fills included), then refresh the live UV
           // panel (req_2625 GG) — once per stroke, never per dab (a read+encode per dab
           // would drag the brush).
-          onMouseUp={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) { host.__mesh_paint_stroke_end?.(); onDocumentMutated?.(); refreshUvIfLive(); } }}
-          onMouseLeave={() => { const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) { host.__mesh_paint_stroke_end?.(); onDocumentMutated?.(); refreshUvIfLive(); } }}
+          onMouseUp={() => { dropperRef.current = false; const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) { host.__mesh_paint_stroke_end?.(); onDocumentMutated?.(); refreshUvIfLive(); } }}
+          onMouseLeave={() => { dropperRef.current = false; const was = paintingRef.current; paintingRef.current = false; lastPtRef.current = null; if (was) { host.__mesh_paint_stroke_end?.(); onDocumentMutated?.(); refreshUvIfLive(); } }}
           onScroll={(e: any) => orbitZoom(e?.deltaY ?? 0)}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.001)' }}
         />

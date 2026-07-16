@@ -4,15 +4,20 @@
 // the No-Modes orbit are gone; they were five faces of the same derivations).
 // Pure data + pure helpers, same shape as colorStudio.ts (which owns the
 // Material Palette / shader slots).
-import { hueDistance, oklchToHex, rotateHue, type OklchColor } from '../../../runtime/paint/colors';
+import { hueDistance, oklchToHex, rgb01ToOklch, rotateHue, type OklchColor } from '../../../runtime/paint/colors';
 
 export const SPINE_DEFAULT_CURRENT: OklchColor = { l: 0.68, c: 0.15, h: 55 };
 
-export const SPINE_DEFAULT_PALETTE: OklchColor[] = [
-  { l: 0.55, c: 0.18, h: 28 },
-  { l: 0.60, c: 0.12, h: 230 },
-  { l: 0.70, c: 0.13, h: 155 },
-];
+/** Raw use-history cap — RECENT holds this many, newest first (req_3097). */
+export const SPINE_RECENTS_CAP = 14;
+
+/** Record a used color into the raw history: newest first, deduped by hex, capped.
+ *  Every color-select commit funnels through here — pick it once, it's never lost. */
+export function pushRecentColor(recents: OklchColor[], color: OklchColor): OklchColor[] {
+  const hex = oklchToHex(color);
+  const rest = recents.filter((c) => oklchToHex(c) !== hex);
+  return [{ ...color }, ...rest].slice(0, SPINE_RECENTS_CAP);
+}
 
 const NAME_BANDS: Array<[number, string]> = [
   [15, 'red'], [45, 'amber'], [80, 'citron'], [140, 'green'], [195, 'teal'],
@@ -73,17 +78,22 @@ export function mixPigments(): Pigment[] {
 
 export type SceneSwatch = { color: OklchColor; css: string; picked: boolean };
 
-const SCENE_COLOR_DEFS: OklchColor[] = [
-  { l: 0.30, c: 0.06, h: 245 }, { l: 0.48, c: 0.07, h: 200 }, { l: 0.70, c: 0.05, h: 210 },
-  { l: 0.80, c: 0.08, h: 90 }, { l: 0.72, c: 0.12, h: 62 }, { l: 0.55, c: 0.14, h: 35 }, { l: 0.22, c: 0.03, h: 250 },
-];
-
-/** World Sampler extraction — colors already present in "the current scene". */
+/** The colors REALLY in the scene: the host's dominant-color read of the live paint
+ *  atlas (__model_atlas_palette, req_3097 — the hardcoded pretend-scene rows are gone).
+ *  Empty when nothing is adopted for paint, and the SCENE section hides itself. */
 export function sceneSwatches(pickedCss: string | null): SceneSwatch[] {
-  return SCENE_COLOR_DEFS.map((color) => {
-    const css = oklchToHex(color);
-    return { color, css, picked: css === pickedCss };
-  });
+  const door = (globalThis as any).__model_atlas_palette as ((n: number) => unknown) | undefined;
+  if (!door) return [];
+  let rgbs: unknown;
+  try { rgbs = JSON.parse(String(door(7) ?? '[]')); } catch { return []; }
+  if (!Array.isArray(rgbs)) return [];
+  return rgbs
+    .filter((t): t is [number, number, number] => Array.isArray(t) && t.length === 3)
+    .map(([r, g, b]) => {
+      const color = rgb01ToOklch(r / 255, g / 255, b / 255);
+      const css = oklchToHex(color);
+      return { color, css, picked: css === pickedCss };
+    });
 }
 
 export type RampStep = { color: OklchColor; css: string };

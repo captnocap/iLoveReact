@@ -54,6 +54,9 @@ declare global {
   function __mesh_redo(...args: unknown[]): unknown;
   function __mesh_history(...args: unknown[]): unknown;
   function __mesh_history_log(...args: unknown[]): unknown;
+  function __mesh_action_source(...args: unknown[]): unknown;
+  function __mesh_action_document(...args: unknown[]): unknown;
+  function __mesh_action_drain(...args: unknown[]): unknown;
   function __mesh_journal_note(...args: unknown[]): unknown;
   function __mesh_journal_checkpoint(...args: unknown[]): unknown;
   function __mesh_duplicate_range(...args: unknown[]): unknown;
@@ -101,6 +104,8 @@ declare global {
   function __model_paint_atlas_estimate(...args: unknown[]): unknown;
   function __model_paint_fit_estimate(...args: unknown[]): unknown;
   function __model_atlas_read(...args: unknown[]): unknown;
+  function __model_paint_sample(...args: unknown[]): unknown;
+  function __model_atlas_palette(...args: unknown[]): unknown;
   function __image_write_png(...args: unknown[]): unknown;
   function __model_mesh_write(...args: unknown[]): unknown;
   function __model_painted_mesh_write(...args: unknown[]): unknown;

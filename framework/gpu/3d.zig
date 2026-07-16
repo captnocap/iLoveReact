@@ -2745,13 +2745,80 @@ const JournalEntry = struct {
     hidden: []JournalHidden,
     note: ?[]u8,
     label: []const u8, // static string — the op that FOLLOWED this snapshot
+    action_id: u32 = 0,
+    action_kind: ?mesh_journal_log.ActionKind = null,
 };
 const JOURNAL_CAP = 32;
 const JOURNAL_BYTE_BUDGET: usize = 192 * 1024 * 1024;
+pub const MESH_ACTION_CAP: usize = 128;
+pub const MeshActionEvent = mesh_journal_log.ActionEvent;
 var g_journal_undo: std.ArrayListUnmanaged(JournalEntry) = .{};
 var g_journal_redo: std.ArrayListUnmanaged(JournalEntry) = .{};
 var g_journal_note: ?[]u8 = null; // the cart's CURRENT parts metadata (rides each snapshot)
 var g_gizmo_snap: ?JournalEntry = null; // taken at gizmo-begin; committed only if the drag moved something
+var g_mesh_action_events: [MESH_ACTION_CAP]MeshActionEvent = undefined;
+var g_mesh_action_len: usize = 0;
+var g_mesh_action_seq: u32 = 0;
+var g_mesh_action_dropped: u32 = 0;
+var g_mesh_action_document_token: u32 = 0;
+var g_mesh_action_source: mesh_journal_log.ActionSource = .native;
+
+fn partCountFromRanges(ranges: ?[]const u32) u32 {
+    return if (ranges) |rows| @intCast(rows.len / 2) else 0;
+}
+
+fn currentPartCount() u32 {
+    return partCountFromRanges(model_source.partRanges());
+}
+
+fn enqueueMeshAction(
+    id: u32,
+    kind: mesh_journal_log.ActionKind,
+    phase: mesh_journal_log.ActionPhase,
+    before_vertices: u32,
+    after_vertices: u32,
+    before_parts: u32,
+    after_parts: u32,
+) void {
+    if (g_mesh_action_len == MESH_ACTION_CAP) {
+        var i: usize = 1;
+        while (i < g_mesh_action_len) : (i += 1) g_mesh_action_events[i - 1] = g_mesh_action_events[i];
+        g_mesh_action_len -= 1;
+        g_mesh_action_dropped +%= 1;
+    }
+    g_mesh_action_events[g_mesh_action_len] = .{
+        .id = id,
+        .document_token = g_mesh_action_document_token,
+        .kind = kind,
+        .phase = phase,
+        .source = g_mesh_action_source,
+        .before_vertices = before_vertices,
+        .after_vertices = after_vertices,
+        .before_parts = before_parts,
+        .after_parts = after_parts,
+        .dropped_before = g_mesh_action_dropped,
+    };
+    g_mesh_action_dropped = 0;
+    g_mesh_action_len += 1;
+}
+
+pub fn meshActionSourceSet(raw: u8) void {
+    g_mesh_action_source = std.meta.intToEnum(mesh_journal_log.ActionSource, raw) catch .native;
+}
+
+pub fn meshActionDocumentSet(token: u32) void {
+    g_mesh_action_document_token = token;
+}
+
+pub fn meshActionDrain(out: []MeshActionEvent) usize {
+    const n = @min(out.len, g_mesh_action_len);
+    if (n == 0) return 0;
+    @memcpy(out[0..n], g_mesh_action_events[0..n]);
+    const remain = g_mesh_action_len - n;
+    if (remain > 0) std.mem.copyForwards(MeshActionEvent, g_mesh_action_events[0..remain], g_mesh_action_events[n..g_mesh_action_len]);
+    g_mesh_action_len = remain;
+    return n;
+}
 
 fn journalEntryBytes(e: *const JournalEntry) usize {
     var n: usize = e.verts.len * @sizeOf(f32);
@@ -2798,6 +2865,8 @@ fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
         .hidden = &.{},
         .note = null,
         .label = label,
+        .action_id = 0,
+        .action_kind = null,
     };
     if (model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP) entry.groups = captureFaceGroups();
     if (model_source.partRanges()) |pr| entry.part_ranges = jalloc.dupe(u32, pr) catch null;
@@ -2824,8 +2893,23 @@ fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
 /// Adopt a pre-op snapshot as an undo step (the op SUCCEEDED). Clears redo and
 /// bounds the stack. Sets *snap to null so the op's discard defer no-ops.
 fn journalCommit(snap: *?JournalEntry) void {
-    const e = snap.* orelse return;
+    var e = snap.* orelse return;
     snap.* = null;
+    if (mesh_journal_log.actionKindForLabel(e.label)) |kind| {
+        g_mesh_action_seq +%= 1;
+        if (g_mesh_action_seq == 0) g_mesh_action_seq = 1;
+        e.action_id = g_mesh_action_seq;
+        e.action_kind = kind;
+        enqueueMeshAction(
+            e.action_id,
+            kind,
+            .applied,
+            e.count,
+            g_edit_count,
+            partCountFromRanges(e.part_ranges),
+            currentPartCount(),
+        );
+    }
     journalFreeStack(&g_journal_redo);
     g_journal_undo.append(jalloc, e) catch {
         var x = e;
@@ -2856,6 +2940,15 @@ fn journalDropLast() void {
     if (g_journal_undo.items.len == 0) return;
     var e = g_journal_undo.items[g_journal_undo.items.len - 1];
     g_journal_undo.items.len -= 1;
+    if (e.action_kind) |kind| enqueueMeshAction(
+        e.action_id,
+        kind,
+        .undone,
+        g_edit_count,
+        e.count,
+        currentPartCount(),
+        partCountFromRanges(e.part_ranges),
+    );
     journalFreeEntry(&e);
 }
 
@@ -2867,6 +2960,7 @@ pub fn meshJournalClear() void {
     lcFree(); // a live loop-cut popup can't outlive the mesh it captured
     if (g_journal_note) |n| jalloc.free(n);
     g_journal_note = null;
+    g_mesh_action_source = .native;
 }
 
 pub fn meshJournalNoteSet(note: []const u8) bool {
@@ -3072,19 +3166,32 @@ fn journalStep(from_undo: bool) bool {
     const src = if (from_undo) &g_journal_undo else &g_journal_redo;
     const dst = if (from_undo) &g_journal_redo else &g_journal_undo;
     if (src.items.len == 0) return false;
-    const top_label = src.items[src.items.len - 1].label;
+    const top = src.items[src.items.len - 1];
+    const top_label = top.label;
     const cur = journalSnapshotCurrent(top_label) orelse return false;
+    var current = cur;
+    current.action_id = top.action_id;
+    current.action_kind = top.action_kind;
     var entry = src.items[src.items.len - 1];
     src.items.len -= 1;
     if (!journalInstall(&entry)) {
         src.append(jalloc, entry) catch journalFreeEntry(&entry);
-        var c = cur;
+        var c = current;
         journalFreeEntry(&c);
         return false;
     }
+    if (entry.action_kind) |kind| enqueueMeshAction(
+        entry.action_id,
+        kind,
+        if (from_undo) .undone else .redone,
+        current.count,
+        entry.count,
+        partCountFromRanges(current.part_ranges),
+        partCountFromRanges(entry.part_ranges),
+    );
     journalFreeEntry(&entry);
-    dst.append(jalloc, cur) catch {
-        var c = cur;
+    dst.append(jalloc, current) catch {
+        var c = current;
         journalFreeEntry(&c);
     };
     return true;
@@ -6172,6 +6279,23 @@ pub const PaintAtlas = struct { rgba: []const u8, w: u32, h: u32, detail: u32 };
 pub fn paintAtlas() ?PaintAtlas {
     const a = model_paint.atlas() orelse return null;
     return .{ .rgba = a.rgba, .w = a.w, .h = a.h, .detail = model_paint.detail() };
+}
+
+/// Eyedropper: the painted colour under the viewport pixel — pickBary against the
+/// resident model, then the atlas texel at the hit. Null on a miss / no paint target.
+pub fn samplePaintAt(mx: f32, my: f32) ?[3]u8 {
+    if (!model_paint.hasTarget()) return null;
+    const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
+    const hit = model_paint.pickBary(cam, g_paint_vp_w, g_paint_vp_h, vpLocalX(mx), vpLocalY(my)) orelse return null;
+    const px = model_paint.sampleTexel(hit.face, hit.u, hit.v) orelse return null;
+    return .{ px[0], px[1], px[2] };
+}
+
+/// The painting's dominant colours (the colour library's SCENE swatches) — see
+/// model_paint.atlasPalette. Returns 0 when no model is adopted for paint.
+pub fn paintAtlasPalette(out: [][3]u8) usize {
+    if (!model_paint.hasTarget()) return 0;
+    return model_paint.atlasPalette(out);
 }
 /// The active DISPLAYED mesh — the verts the painted preview actually renders, whose
 /// UVs the island layout rewrote into paint-atlas space (req_2833: the source mesh's

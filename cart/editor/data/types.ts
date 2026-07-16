@@ -488,6 +488,8 @@ export type EditorState = {
   colorStudioView: 'materialPalette' | 'library';
   colorSpineCurrent: OklchColor;
   colorSpinePalette: OklchColor[];
+  /** Raw use-history — every committed color select, newest first (req_3097). */
+  colorSpineRecents: OklchColor[];
   colorSpineScenePick: string | null;
   buildDialogOpen: boolean;
   /** Named map-document picker. Map documents own BOTH native painting and

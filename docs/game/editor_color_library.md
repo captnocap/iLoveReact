@@ -1,0 +1,60 @@
+# Editor Color Library + shader browser
+
+Active surface: `cart/editor/`. Last verified: 2026-07-15.
+
+## User contract — req_3097
+
+The ink popover (PaintToolbar → Color / Shader tabs) was ruled "the most
+un-friendly color picking component" — six named defects, each now a mechanism:
+
+1. **Hex overlap** — the HTML-hex field drew over the color name. The CURRENT
+   header is two rows now (swatch + name/readout, then hex + save); nothing
+   shares a line it can't fit on (`cart/editor/stage/ColorLibraryPanel.tsx`).
+2. **Fake SAVED** — the tray seeded three pretend colors and evaporated on cold
+   restart. The seeds are gone; SAVED starts from
+   `zig-out/game/editor/color-library.json`
+   (`cart/editor/data/colorLibraryStore.ts`, globalsStore pattern: load at boot
+   in `persistView.loadPersistedState`, debounced micro-save on every change).
+3. **No raw history** — RECENT: every committed color select funnels through the
+   Color Studio color-select command; `AppFrame` commitChoice pushes it into
+   `colorSpineRecents` (`pushRecentColor`, newest first, deduped by hex, cap
+   14). Persisted beside SAVED. Use a color, never save it — it's still there.
+4. **Fake SCENE** — the hardcoded scene rows are dead. `sceneSwatches()`
+   (`cart/editor/data/colorSpine.ts`) reads `__model_atlas_palette(n)`: the
+   host histograms the LIVE paint atlas (4-bit/channel bins over island texels,
+   strided past 1M, top-N bins averaged back to true colors —
+   `model_paint.atlasPalette`). No paint target → empty → the section hides.
+5. **Dead eyedropper** — `__model_paint_sample(x, y)`: host pickBary raycast +
+   atlas texel read (`model_paint.sampleTexel`, selection tint lifted), packed
+   0xRRGGBB or -1. ModelView's paint surface routes the eyedropper tool through
+   it (click or drag = live sampling) and announces via the
+   `__modelColorSampled` global → spine color-select → RECENT + ink sync. The
+   facade painter's readback eyedropper announces through the same global.
+6. **Shader browser** — searchable (label/group/id substring over all specs),
+   a FIXED 5-wide grid (group shelving used to restart the wrap per group, so
+   pages ran 4–8 ragged rows), group names in one caption line + per-thumb
+   tooltips, and the popover REMEMBERS tab/page/search across close/reopen
+   (module-scope memos in `PaintToolbar.tsx`); opening with a shader dipped
+   lands on that shader's page until you page by hand.
+
+## Mechanism map
+
+- `framework/gpu/model_paint.zig` — `sampleTexel(face, u, v)` (bary → island
+  texel, affine inverse of the dab mapping), `atlasPalette(out)` (dominant-color
+  histogram).
+- `framework/gpu/3d.zig` — `samplePaintAt(mx, my)`, `paintAtlasPalette(out)`
+  (viewport-pixel + hasTarget guards).
+- `framework/v8_bindings_core.zig` — `__model_paint_sample`,
+  `__model_atlas_palette` (JSON `[[r,g,b],...]`), both tint-lifted like
+  `__model_atlas_read`.
+- `cart/editor/data/colorLibraryStore.ts` — the per-concern disk file (V20).
+- `cart/editor/data/colorSpine.ts` — `pushRecentColor`, host-fed
+  `sceneSwatches`; the pretend palettes deleted.
+- `cart/editor/shell/AppFrame.tsx` — RECENT recording in the color-select
+  commit, color-library micro-save effect, `__modelColorSampled` installer.
+- `cart/editor/stage/ColorLibraryPanel.tsx` — two-row CURRENT header, RECENT +
+  SAVED rows, SCENE hidden when empty (host read memoized per mount).
+- `cart/editor/shell/PaintToolbar.tsx` — shader search + uniform grid +
+  remembered position.
+
+Rebuild required for the two new host doors; everything else hot-reloads.

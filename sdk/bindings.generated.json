@@ -213,6 +213,18 @@
           "zig": "hostMeshHistoryLog"
         },
         {
+          "js": "__mesh_action_source",
+          "zig": "hostMeshActionSource"
+        },
+        {
+          "js": "__mesh_action_document",
+          "zig": "hostMeshActionDocument"
+        },
+        {
+          "js": "__mesh_action_drain",
+          "zig": "hostMeshActionDrain"
+        },
+        {
           "js": "__mesh_journal_note",
           "zig": "hostMeshJournalNote"
         },
@@ -399,6 +411,14 @@
         {
           "js": "__model_atlas_read",
           "zig": "hostModelAtlasRead"
+        },
+        {
+          "js": "__model_paint_sample",
+          "zig": "hostModelPaintSample"
+        },
+        {
+          "js": "__model_atlas_palette",
+          "zig": "hostModelAtlasPalette"
         },
         {
           "js": "__image_write_png",

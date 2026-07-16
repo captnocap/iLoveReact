@@ -113,6 +113,7 @@ export default function MaterialFocusSurface(props: {
               <ColorLibraryPanel
                 current={props.state.colorSpineCurrent}
                 palette={props.state.colorSpinePalette}
+                recents={props.state.colorSpineRecents}
                 scenePick={props.state.colorSpineScenePick}
                 onSetCurrent={props.onSpineCurrent}
                 onAddToTray={props.onSpineAddToTray}

@@ -76,6 +76,28 @@ fn setReturnNumber(info: v8.FunctionCallbackInfo, value: f64) void {
     info.getReturnValue().set(v8.Number.init(iso, value));
 }
 
+fn noopMeshActionBackingStoreDeleter(_: ?*anyopaque, _: usize, _: ?*anyopaque) callconv(.c) void {}
+
+/// Return a borrowed static Uint32 buffer. The mesh-action drain owns its
+/// storage for the process lifetime and overwrites it on the next drain.
+fn setReturnU32Buffer(info: v8.FunctionCallbackInfo, words: []u32) void {
+    const iso = info.getIsolate();
+    const bytes = std.mem.sliceAsBytes(words);
+    const bs_raw = v8.c.v8__ArrayBuffer__NewBackingStore2(
+        @ptrCast(bytes.ptr),
+        bytes.len,
+        noopMeshActionBackingStoreDeleter,
+        null,
+    ) orelse {
+        info.getReturnValue().set(iso.initNull());
+        return;
+    };
+    var shared = v8.c.v8__BackingStore__TO_SHARED_PTR(bs_raw);
+    defer v8.BackingStore.sharedPtrReset(&shared);
+    const ab = v8.ArrayBuffer.initWithBackingStore(iso, &shared);
+    info.getReturnValue().set(ab);
+}
+
 fn newObject(info: v8.FunctionCallbackInfo) v8.Object {
     return v8.Object.init(info.getIsolate());
 }
@@ -1003,6 +1025,49 @@ fn hostMeshHistoryLog(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         defer allocator.free(json);
         setReturnString(info, json);
     } else setReturnString(info, "");
+}
+
+const MESH_ACTION_WORDS: usize = 10;
+var mesh_action_buf: [scene3d.MESH_ACTION_CAP]scene3d.MeshActionEvent = undefined;
+var mesh_action_out: [1 + scene3d.MESH_ACTION_CAP * MESH_ACTION_WORDS]u32 = undefined;
+
+/// __mesh_action_source(sourceOrdinal) — scope the next synchronous JS-invoked
+/// mesh mutation. Engine-owned gestures remain `native` without crossing JS.
+fn hostMeshActionSource(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const raw: u8 = @intCast(std.math.clamp(argToI32(info, 0) orelse 0, 0, 9));
+    scene3d.meshActionSourceSet(raw);
+}
+
+/// __mesh_action_document(token) — stable cart-supplied document token stamped
+/// into queued outcomes so a fast tab switch cannot retarget an older action.
+fn hostMeshActionDocument(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const token: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
+    scene3d.meshActionDocumentSet(token);
+}
+
+/// __mesh_action_drain() → Uint32 ArrayBuffer. One fixed row per accepted
+/// journal commit/control: id, document, kind, phase, source, before/after
+/// vertex counts, before/after part counts, and prior queue overflow.
+fn hostMeshActionDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const n = scene3d.meshActionDrain(mesh_action_buf[0..]);
+    mesh_action_out[0] = @intCast(n);
+    for (mesh_action_buf[0..n], 0..) |event, i| {
+        const base = 1 + i * MESH_ACTION_WORDS;
+        mesh_action_out[base + 0] = event.id;
+        mesh_action_out[base + 1] = event.document_token;
+        mesh_action_out[base + 2] = @intFromEnum(event.kind);
+        mesh_action_out[base + 3] = @intFromEnum(event.phase);
+        mesh_action_out[base + 4] = @intFromEnum(event.source);
+        mesh_action_out[base + 5] = event.before_vertices;
+        mesh_action_out[base + 6] = event.after_vertices;
+        mesh_action_out[base + 7] = event.before_parts;
+        mesh_action_out[base + 8] = event.after_parts;
+        mesh_action_out[base + 9] = event.dropped_before;
+    }
+    setReturnU32Buffer(info, mesh_action_out[0 .. 1 + n * MESH_ACTION_WORDS]);
 }
 
 /// __mesh_journal_note(json?) — with an argument: SET the cart's opaque parts-metadata
@@ -2010,6 +2075,45 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     setReturnString(info, out.items);
 }
 
+/// __model_paint_sample(x, y) → packed 0xRRGGBB colour under the viewport pixel, -1 on a
+/// miss — the model painter's eyedropper (req_3097). Reads TRUE paint: the selection tint
+/// is lifted for the read, same law as __model_atlas_read.
+fn hostModelPaintSample(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const y: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    scene3d.paintTintSuspend();
+    defer scene3d.paintTintResume();
+    const rgb = scene3d.samplePaintAt(x, y) orelse {
+        setReturnNumber(info, -1);
+        return;
+    };
+    const packed_rgb: u32 = (@as(u32, rgb[0]) << 16) | (@as(u32, rgb[1]) << 8) | rgb[2];
+    setReturnNumber(info, @floatFromInt(packed_rgb));
+}
+
+/// __model_atlas_palette(n) → JSON [[r,g,b],...] — the current painting's n dominant
+/// colours, most-covered first; "[]" when no paint target. The colour library's SCENE
+/// row reads real scene colours from here (req_3097). Tint lifted, as every atlas read.
+fn hostModelAtlasPalette(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.c_allocator;
+    const n: usize = @intCast(std.math.clamp(argToI32(info, 0) orelse 8, 1, 16));
+    var colors: [16][3]u8 = undefined;
+    scene3d.paintTintSuspend();
+    defer scene3d.paintTintResume();
+    const wrote = scene3d.paintAtlasPalette(colors[0..n]);
+    var out: std.ArrayList(u8) = .{};
+    defer out.deinit(alloc);
+    const w = out.writer(alloc);
+    w.writeAll("[") catch return setReturnString(info, "[]");
+    for (colors[0..wrote], 0..) |rgb, i| {
+        w.print("{s}[{d},{d},{d}]", .{ if (i == 0) "" else ",", rgb[0], rgb[1], rgb[2] }) catch return setReturnString(info, "[]");
+    }
+    w.writeAll("]") catch return setReturnString(info, "[]");
+    setReturnString(info, out.items);
+}
+
 /// __model_atlas_apply(detail, base64) → 1 on success, 0 on failure. Restore a saved painting:
 /// the host re-tessellates to `detail` then blits the decoded atlas back over the texture.
 fn hostModelAtlasApply(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -2943,6 +3047,9 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__mesh_redo", hostMeshRedo);
     v8_runtime.registerHostFn("__mesh_history", hostMeshHistory);
     v8_runtime.registerHostFn("__mesh_history_log", hostMeshHistoryLog);
+    v8_runtime.registerHostFn("__mesh_action_source", hostMeshActionSource);
+    v8_runtime.registerHostFn("__mesh_action_document", hostMeshActionDocument);
+    v8_runtime.registerHostFn("__mesh_action_drain", hostMeshActionDrain);
     v8_runtime.registerHostFn("__mesh_journal_note", hostMeshJournalNote);
     v8_runtime.registerHostFn("__mesh_journal_checkpoint", hostMeshJournalCheckpoint);
     v8_runtime.registerHostFn("__mesh_duplicate_range", hostMeshDuplicateRange);
@@ -2990,6 +3097,8 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__model_paint_atlas_estimate", hostModelPaintAtlasEstimate);
     v8_runtime.registerHostFn("__model_paint_fit_estimate", hostModelPaintFitEstimate);
     v8_runtime.registerHostFn("__model_atlas_read", hostModelAtlasRead);
+    v8_runtime.registerHostFn("__model_paint_sample", hostModelPaintSample);
+    v8_runtime.registerHostFn("__model_atlas_palette", hostModelAtlasPalette);
     v8_runtime.registerHostFn("__image_write_png", hostImageWritePng);
     v8_runtime.registerHostFn("__model_mesh_write", hostModelMeshWrite);
     v8_runtime.registerHostFn("__model_painted_mesh_write", hostModelPaintedMeshWrite);

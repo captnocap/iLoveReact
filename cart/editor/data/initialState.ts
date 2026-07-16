@@ -2,7 +2,7 @@
 import { CATALOG_DIAGNOSTICS, DEFAULT_ASSET_ID, DEFAULT_CONTENT_FOLDER, MATERIAL_ASSET_COUNT, MODEL_PACKAGES, MODEL_PACKAGE_COUNT } from './catalog';
 import { WORLD_DOCUMENT, WORLD_DOCUMENT_ID } from './documents';
 import type { EditorState, ModelToolSnapshot, WorldObject } from './types';
-import { SPINE_DEFAULT_CURRENT, SPINE_DEFAULT_PALETTE } from './colorSpine';
+import { SPINE_DEFAULT_CURRENT } from './colorSpine';
 import { DEFAULT_BRUSH, defaultPalette } from '../../../runtime/paint/model';
 import { defaultMapPaint } from '../stage/mapPaint';
 import { activeMapDocumentStem, mapDocumentName } from './mapDocuments';
@@ -94,7 +94,10 @@ export function initialState(): EditorState {
     colorStudioOverrides: {},
     colorStudioView: 'materialPalette',
     colorSpineCurrent: { ...SPINE_DEFAULT_CURRENT },
-    colorSpinePalette: SPINE_DEFAULT_PALETTE.map((c) => ({ ...c })),
+    // SAVED and RECENT start from the on-disk color library (persistView loads it) —
+    // never from pretend seed colors (req_3097: "the saved key is literally fake").
+    colorSpinePalette: [],
+    colorSpineRecents: [],
     colorSpineScenePick: null,
     buildDialogOpen: false,
     mapDocumentOpen: false,

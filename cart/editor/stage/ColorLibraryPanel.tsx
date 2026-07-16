@@ -212,6 +212,7 @@ function ColorMapPicker(props: {
         showSwatch={false}
         width={104}
       />
+      <Box style={{ flexGrow: 1 }} />
       <Pressable tooltip="Save this color to your library" onPress={props.onAddToTray}
         style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 7, borderWidth: 1, borderColor: LINE }}>
         <Text style={{ color: TEXT, fontSize: 10, fontWeight: '700' }}>save</Text>
@@ -224,12 +225,16 @@ function ColorMapPicker(props: {
 
   return (
     <>
+      {/* Name and hex live on separate rows — the hex field drawing over the color
+          name was req_3097's first complaint. Nothing shares a line it can't fit on. */}
       <Row style={{ alignItems: 'center', gap: 8 }}>
         <Box style={{ width: 34, height: 34, borderRadius: 8, backgroundColor: currentCss, borderWidth: 1, borderColor: LINE }} />
         <Col style={{ flexGrow: 1, minWidth: 0, gap: 2 }}>
           <Text numberOfLines={1} noWrap style={{ color: TEXT, fontSize: 12, fontWeight: '700' }}>{oklchName(current)}</Text>
           <Text numberOfLines={1} noWrap style={{ color: DIM, fontSize: 9, fontFamily: 'ui-monospace' }}>{oklchReadout(current)}</Text>
         </Col>
+      </Row>
+      <Row style={{ alignItems: 'center', gap: 8 }}>
         {commitControls}
       </Row>
 
@@ -269,6 +274,8 @@ function ColorMapPicker(props: {
 export default function ColorLibraryPanel(props: {
   current: OklchColor;
   palette: OklchColor[];
+  /** Raw use-history, newest first (req_3097) — shown as RECENT when present. */
+  recents?: OklchColor[];
   scenePick: string | null;
   onSetCurrent: (color: OklchColor) => void;
   onAddToTray: () => void;
@@ -277,27 +284,45 @@ export default function ColorLibraryPanel(props: {
   onLoadLibrarySet: (colors: OklchColor[]) => void;
 }) {
   const current = props.current;
+  const recents = props.recents ?? [];
   const fits = fitsWellNow(current);
   const ramp = rampForge(current, RAMP_STEPS);
   const pigments = mixPigments();
-  const scene = sceneSwatches(props.scenePick);
+  // The host histograms the live paint atlas — real work, so once per mount
+  // (each popover open re-reads), never per color-pick render.
+  const sceneBase = useMemo(() => sceneSwatches(null), []);
+  const scene = sceneBase.map((s) => ({ ...s, picked: s.css === props.scenePick }));
   const sets = libraryRows(current);
 
   return (
     <Col style={{ gap: 8 }}>
-      {/* CURRENT + SAVED + MAP. Drag preview stays inside this small subtree. */}
+      {/* CURRENT + RECENT + SAVED + MAP. Drag preview stays inside this small subtree. */}
       <ColorMapPicker
         current={current}
         onCommit={props.onSetCurrent}
         onAddToTray={props.onAddToTray}
-        saved={props.palette.length > 0 ? (
-          <Col style={{ gap: 4 }}>
-            <SectionLabel>SAVED</SectionLabel>
-            <SwatchRow
-              entries={props.palette.map((c) => ({ css: oklchToHex(c) }))}
-              onPick={(index) => props.onPickTray(props.palette[index]!)}
-            />
-          </Col>
+        saved={recents.length > 0 || props.palette.length > 0 ? (
+          <>
+            {recents.length > 0 ? (
+              <Col style={{ gap: 4 }}>
+                <SectionLabel>RECENT</SectionLabel>
+                <SwatchRow
+                  size={18}
+                  entries={recents.map((c) => ({ css: oklchToHex(c) }))}
+                  onPick={(index) => props.onSetCurrent(recents[index]!)}
+                />
+              </Col>
+            ) : null}
+            {props.palette.length > 0 ? (
+              <Col style={{ gap: 4 }}>
+                <SectionLabel>SAVED</SectionLabel>
+                <SwatchRow
+                  entries={props.palette.map((c) => ({ css: oklchToHex(c) }))}
+                  onPick={(index) => props.onPickTray(props.palette[index]!)}
+                />
+              </Col>
+            ) : null}
+          </>
         ) : null}
       />
 
@@ -329,14 +354,18 @@ export default function ColorLibraryPanel(props: {
             onPick={(index) => props.onSetCurrent(pigments[index]!.color)}
           />
         </Col>
-        <Col style={{ gap: 4, flexGrow: 1, minWidth: 0 }}>
-          <SectionLabel>SCENE</SectionLabel>
-          <SwatchRow
-            entries={scene.map((s) => ({ css: s.css, ring: s.picked }))}
-            size={20}
-            onPick={(index) => props.onScenePick(scene[index]!.color, scene[index]!.css)}
-          />
-        </Col>
+        {/* SCENE only exists when there IS a scene — the host's dominant-color read
+            of the live paint atlas (req_3097: no more pretend scene colors). */}
+        {scene.length > 0 ? (
+          <Col style={{ gap: 4, flexGrow: 1, minWidth: 0 }}>
+            <SectionLabel>SCENE</SectionLabel>
+            <SwatchRow
+              entries={scene.map((s) => ({ css: s.css, ring: s.picked }))}
+              size={20}
+              onPick={(index) => props.onScenePick(scene[index]!.color, scene[index]!.css)}
+            />
+          </Col>
+        ) : null}
       </Row>
       <Col style={{ gap: 4 }}>
         <SectionLabel>SETS</SectionLabel>

@@ -18,6 +18,7 @@ import { initialState, defaultModelTool } from './initialState';
 import { readWorldSave } from './worldStore';
 import { createMapDocument, mapDocumentName, setActiveMapDocumentStem } from './mapDocuments';
 import { loadGlobalsSave } from './globalsStore';
+import { loadColorLibrary } from './colorLibraryStore';
 import { commandExists, MENUS } from './commands';
 import type { EditorState } from './types';
 
@@ -93,6 +94,13 @@ export function loadPersistedState(): EditorState {
   // a locked-in jump height survives the cold restart like placed pieces do.
   const globals = loadGlobalsSave();
   if (globals) base.worldGlobals = globals;
+  // Saved colors + the raw use-history rehydrate from the color library save
+  // (req_3097) — a saved color is a real save, not a session-lifetime illusion.
+  const colorLibrary = loadColorLibrary();
+  if (colorLibrary) {
+    base.colorSpinePalette = colorLibrary.saved;
+    base.colorSpineRecents = colorLibrary.recents;
+  }
   const saved = getHotState<Partial<EditorState> | null>(VIEW_HOT_KEY, null);
   const modelWork = getHotState<Partial<ModelWorkHot> | null>(MODEL_WORK_HOT_KEY, null);
   if (!saved) {
@@ -120,6 +128,7 @@ export function loadPersistedState(): EditorState {
     objects: base.objects,
     selectedObjectId: base.selectedObjectId,
     selectedPieceId: null,
+    selectedPieceIds: [],
     armedStamp: null,
     worldUndo: [],
     worldRedo: [],
@@ -180,6 +189,7 @@ export function persistState(state: EditorState): void {
     objects: [],
     selectedObjectId: 'obj-tile',
     selectedPieceId: null,
+    selectedPieceIds: [],
     armedStamp: null,
     worldUndo: [],
     worldRedo: [],

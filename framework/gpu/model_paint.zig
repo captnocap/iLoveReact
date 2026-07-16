@@ -807,6 +807,75 @@ pub fn atlas() ?Atlas {
     return .{ .rgba = buf, .w = g_atlas_w, .h = g_atlas_h };
 }
 
+/// Eyedropper read: the atlas texel colour at a bary point on a face — the affine
+/// inverse of stampInner's dab-centre mapping. Null when nothing is paintable.
+pub fn sampleTexel(face: u32, cu: f32, cv: f32) ?[4]u8 {
+    const buf = g_rgba orelse return null;
+    const lay = &(g_layout orelse return null);
+    if (face >= g_facecount or g_atlas_w == 0 or g_atlas_h == 0) return null;
+    const c = triTexelCorners(lay, face);
+    const fx = c[0][0] + cu * (c[1][0] - c[0][0]) + cv * (c[2][0] - c[0][0]);
+    const fy = c[0][1] + cu * (c[1][1] - c[0][1]) + cv * (c[2][1] - c[0][1]);
+    const tx: u32 = @intFromFloat(std.math.clamp(@floor(fx), 0, @as(f32, @floatFromInt(g_atlas_w - 1))));
+    const ty: u32 = @intFromFloat(std.math.clamp(@floor(fy), 0, @as(f32, @floatFromInt(g_atlas_h - 1))));
+    const i = (@as(usize, ty) * g_atlas_w + tx) * 4;
+    return .{ buf[i], buf[i + 1], buf[i + 2], buf[i + 3] };
+}
+
+/// The painting's dominant colours: a coarse 4-bit/channel histogram over the island
+/// texels (strided on big atlases so the pass stays bounded), each surviving bin
+/// averaged back to a true colour. Only island texels count — the space between
+/// islands is not paint. Fills `out` most-covered first; returns how many were written.
+pub fn atlasPalette(out: [][3]u8) usize {
+    const buf = g_rgba orelse return 0;
+    const lay = &(g_layout orelse return 0);
+    if (out.len == 0 or g_atlas_w == 0 or g_atlas_h == 0) return 0;
+    const BINS = 16 * 16 * 16;
+    var count = [_]u32{0} ** BINS;
+    var sum_r = [_]u64{0} ** BINS;
+    var sum_g = [_]u64{0} ** BINS;
+    var sum_b = [_]u64{0} ** BINS;
+    var total_texels: u64 = 0;
+    for (lay.islands) |isl| total_texels += @as(u64, isl.w) * isl.h;
+    const stride: u32 = if (total_texels > 1_000_000) 4 else 1;
+    for (lay.islands) |isl| {
+        var y: u32 = 0;
+        while (y < isl.h) : (y += stride) {
+            var x: u32 = 0;
+            while (x < isl.w) : (x += stride) {
+                const px = isl.x + x;
+                const py = isl.y + y;
+                if (px >= g_atlas_w or py >= g_atlas_h) continue;
+                const i = (@as(usize, py) * g_atlas_w + px) * 4;
+                const bin = (@as(usize, buf[i] >> 4) << 8) | (@as(usize, buf[i + 1] >> 4) << 4) | @as(usize, buf[i + 2] >> 4);
+                count[bin] += 1;
+                sum_r[bin] += buf[i];
+                sum_g[bin] += buf[i + 1];
+                sum_b[bin] += buf[i + 2];
+            }
+        }
+    }
+    var written: usize = 0;
+    while (written < out.len) : (written += 1) {
+        var best: usize = 0;
+        var best_n: u32 = 0;
+        for (count, 0..) |n, bin| {
+            if (n > best_n) {
+                best_n = n;
+                best = bin;
+            }
+        }
+        if (best_n == 0) break;
+        out[written] = .{
+            @intCast(sum_r[best] / best_n),
+            @intCast(sum_g[best] / best_n),
+            @intCast(sum_b[best] / best_n),
+        };
+        count[best] = 0;
+    }
+    return written;
+}
+
 // ── Raycast (Möller–Trumbore) ───────────────────────────────────────────────────
 pub const Camera = struct { eye: [3]f32, target: [3]f32, fov_deg: f32 };
 

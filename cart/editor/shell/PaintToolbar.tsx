@@ -15,11 +15,11 @@
 // be a late root child to sit over the body — same as DropdownMenu). The popovers hang from
 // the action bar's bottom edge, over the workspace column.
 import { useState } from 'react';
-import { Box, Row, Col, Text, Pressable, Slider, Effect } from '../../../runtime/primitives';
+import { Box, Row, Col, Text, TextInput, Pressable, Slider, Effect } from '../../../runtime/primitives';
 import { Icon } from '../../../runtime/icons/Icon';
 import { type Brush, type BrushTool } from '@reactjit/runtime/paint';
 import { brushFromPreset, BRUSH_PRESETS, type BrushShape } from '../../../runtime/paint/model';
-import { BrushIcon } from '../../../runtime/paint/controls';
+import { BrushIcon, ToolIcon } from '../../../runtime/paint/controls';
 import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import ColorLibraryPanel from '../stage/ColorLibraryPanel';
 import type { ColorSpineHandlers } from '../inspector/ModelBrushDock';
@@ -38,6 +38,7 @@ type Ink = {
   onBrush: (b: Brush) => void;
   current: OklchColor;
   palette: OklchColor[];
+  recents: OklchColor[];
   scenePick: string | null;
   spine: ColorSpineHandlers;
   // Color Studio slot overrides for (specId, variant) — folded into a picked
@@ -47,11 +48,17 @@ type Ink = {
   onEditMaterial?: (specId: string) => void;
 };
 
-type Tool = { id: BrushTool; icon: string; tip: string };
+type Tool = { id: BrushTool; tip: string };
 const TOOLS: Tool[] = [
-  { id: 'fill', icon: 'PaintBucket', tip: 'Fill — flood a whole face' },
-  { id: 'brush', icon: 'Brush', tip: 'Brush — free-form strokes' },
-  { id: 'eyedropper', icon: 'Pipette', tip: 'Pick — sample a color off the model' },
+  { id: 'fill', tip: 'Fill — flood a whole face' },
+  { id: 'brush', tip: 'Brush — free-form strokes' },
+  { id: 'eraser', tip: 'Eraser — reveal the layer below' },
+  { id: 'line', tip: 'Line — drag a straight stroke' },
+  { id: 'rect', tip: 'Rectangle — drag an outline' },
+  { id: 'ellipse', tip: 'Ellipse — drag an outline' },
+  { id: 'eyedropper', tip: 'Pick — sample a color' },
+  { id: 'marquee', tip: 'Marquee — rectangular paint selection' },
+  { id: 'lasso', tip: 'Lasso — freehand paint selection' },
 ];
 
 // A live shader preview: the actual WGSL recipe rendered into a small quad — so you pick a
@@ -81,6 +88,7 @@ export default function PaintToolbar(props: Ink & {
   detail: number;
   onBrushTool: (t: BrushTool) => void;
   onCycleDetail: () => void;
+  tools?: BrushTool[];
   popover: PaintPopover;
   onToggle: (which: 'ink' | 'brush') => void;
 }) {
@@ -99,12 +107,12 @@ export default function PaintToolbar(props: Ink & {
       <Divider />
 
       <Row style={{ gap: 3 }}>
-        {TOOLS.map((t) => {
+        {TOOLS.filter((tool) => (props.tools ?? ['fill', 'brush', 'eyedropper']).includes(tool.id)).map((t) => {
           const on = props.brushTool === t.id;
           return (
             <Pressable key={t.id} tooltip={t.tip} onPress={() => props.onBrushTool(t.id)}
               style={{ width: 30, height: 26, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? ACCENT : 'transparent' }}>
-              <Icon name={t.icon} size={15} color={on ? '#0d0e10' : DIM} />
+              <ToolIcon tool={t.id} size={17} color={on ? '#0d0e10' : DIM} />
             </Pressable>
           );
         })}
@@ -184,12 +192,39 @@ export function PaintPopovers(props: Ink & { popover: PaintPopover; onClose: () 
 // the live-shader budget: rendering the whole catalog at once (136 quads) dropped the editor
 // 240fps → ~50fps. The library panel's pager is the proven answer — same move here.
 const SHADER_PAGE_SIZE = 15;
+const SHADER_GRID_COLS = 5;
+
+// The ink popover REMEMBERS where you were (req_3097: closing and reopening dropped
+// you back at page 1 every time). Tab, page, and search survive close/reopen for the
+// process lifetime — module scope, not hotstate: this is view memory, not a document.
+let inkTabMemo: 'color' | 'shader' | null = null;
+let shaderPageMemo = 0;
+let shaderPageTouched = false;
+let shaderQueryMemo = '';
 
 function InkPanel(props: Ink & { pickShader: (s: ShaderSpec, variantIndex?: number) => void; pickColor: (c: OklchColor) => void; shaderInk: ShaderInk | null }) {
-  // Which section is showing — seeded from the current ink, but freely switchable so you can
-  // browse shaders even while a color is active (and back).
-  const [tab, setTab] = useState<'color' | 'shader'>(props.shaderInk ? 'shader' : 'color');
-  const [shaderPage, setShaderPage] = useState(0);
+  // Which section is showing — remembered across opens, seeded from the current ink
+  // the first time, and freely switchable so you can browse shaders while a color is
+  // active (and back).
+  const [tab, setTabState] = useState<'color' | 'shader'>(inkTabMemo ?? (props.shaderInk ? 'shader' : 'color'));
+  const setTab = (t: 'color' | 'shader') => { inkTabMemo = t; setTabState(t); };
+  const [query, setQueryState] = useState(shaderQueryMemo);
+  const [shaderPage, setShaderPageState] = useState(() => {
+    // Until you page by hand, opening with a shader dipped lands on ITS page —
+    // never back at the front of the catalog.
+    if (!shaderPageTouched && !shaderQueryMemo && props.shaderInk) {
+      const at = shaderGroups().flatMap((g) => g.specs).findIndex((s) => s.id === props.shaderInk!.surface);
+      if (at >= 0) return Math.floor(at / SHADER_PAGE_SIZE);
+    }
+    return shaderPageMemo;
+  });
+  const setShaderPage = (p: number) => { shaderPageMemo = p; shaderPageTouched = true; setShaderPageState(p); };
+  const setQuery = (q: string) => {
+    shaderQueryMemo = q;
+    shaderPageMemo = 0;
+    setShaderPageState(0);
+    setQueryState(q);
+  };
   return (
     <Box style={{ position: 'absolute', left: 410, top: 0, width: 300, backgroundColor: POP, borderWidth: 1, borderColor: LINE, borderRadius: 12, padding: 12 }}>
       <Row style={{ gap: 4, marginBottom: 10 }}>
@@ -206,21 +241,35 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec, variantIndex?: numb
       </Row>
       {tab === 'color' ? (
         <ColorLibraryPanel
-          current={props.current} palette={props.palette} scenePick={props.scenePick}
+          current={props.current} palette={props.palette} recents={props.recents} scenePick={props.scenePick}
           onSetCurrent={props.pickColor} onAddToTray={props.spine.onAddToTray} onPickTray={props.pickColor}
           onScenePick={(c, css) => { props.spine.onScenePick(c, css); props.pickColor(c); }}
           onLoadLibrarySet={props.spine.onLoadLibrarySet}
         />
       ) : (
         (() => {
-          // Flatten in shelf order, page, then re-shelve the page: a group caption
-          // renders wherever the page crosses into a new group.
+          // Flatten in shelf order, filter by the search, page the hits. The grid is
+          // a FIXED 5-wide chunking of the page — group shelving used to restart the
+          // wrap per group, so pages ran 4 rows or 8 depending on how the groups
+          // split (req_3097). Group names now live in one caption line + tooltips.
           const flat = shaderGroups().flatMap((g) => g.specs.map((spec) => ({ group: g.group, spec })));
-          const maxPage = Math.max(0, Math.ceil(flat.length / SHADER_PAGE_SIZE) - 1);
+          const needle = query.trim().toLowerCase();
+          const hits = needle
+            ? flat.filter((item) => `${item.spec.label} ${item.spec.group} ${item.spec.id}`.toLowerCase().includes(needle))
+            : flat;
+          const maxPage = Math.max(0, Math.ceil(hits.length / SHADER_PAGE_SIZE) - 1);
           const page = Math.min(shaderPage, maxPage);
-          const pageItems = flat.slice(page * SHADER_PAGE_SIZE, page * SHADER_PAGE_SIZE + SHADER_PAGE_SIZE);
-          const first = flat.length === 0 ? 0 : page * SHADER_PAGE_SIZE + 1;
-          const last = Math.min(flat.length, first + pageItems.length - 1);
+          const pageItems = hits.slice(page * SHADER_PAGE_SIZE, page * SHADER_PAGE_SIZE + SHADER_PAGE_SIZE);
+          const first = hits.length === 0 ? 0 : page * SHADER_PAGE_SIZE + 1;
+          const last = Math.min(hits.length, first + pageItems.length - 1);
+          const groupsOnPage = pageItems
+            .map((item) => item.group)
+            .filter((group, index, all) => all.indexOf(group) === index)
+            .join(' · ');
+          const gridRows: Array<typeof pageItems> = [];
+          for (let i = 0; i < pageItems.length; i += SHADER_GRID_COLS) {
+            gridRows.push(pageItems.slice(i, i + SHADER_GRID_COLS));
+          }
           const activeSpec = props.shaderInk ? shaderSpec(props.shaderInk.surface) : null;
           const activeVariant = activeSpec ? shaderVariantIndex(activeSpec, props.shaderInk?.data) : 0;
           return (
@@ -246,12 +295,27 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec, variantIndex?: numb
                   ) : null}
                 </Col>
               ) : null}
+              {/* Search — 413 shaders were unfindable without one (req_3097). */}
+              <Row style={{ alignItems: 'center', gap: 6 }}>
+                <Icon name="Search" size={12} color={DIM} />
+                <TextInput
+                  value={query}
+                  onChange={(value: string) => setQuery(value)}
+                  style={{ flexGrow: 1, minWidth: 0, height: 24, paddingLeft: 8, paddingRight: 8, borderRadius: 6, borderWidth: 1, borderColor: LINE, backgroundColor: '#0d1015', color: TEXT, fontSize: 11 }}
+                />
+                {query ? (
+                  <Pressable tooltip="Clear search" onPress={() => setQuery('')}
+                    style={{ width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: LINE }}>
+                    <Icon name="X" size={11} color={DIM} />
+                  </Pressable>
+                ) : null}
+              </Row>
               <Row style={{ alignItems: 'center', gap: 8 }}>
                 <Pressable onPress={() => setShaderPage(Math.max(0, page - 1))}
                   style={{ width: 24, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: LINE }}>
                   <Icon name="ChevronLeft" size={11} color={DIM} />
                 </Pressable>
-                <Text style={{ color: DIM, fontSize: 10, fontFamily: 'ui-monospace' }}>{first}-{last} / {flat.length}</Text>
+                <Text style={{ color: DIM, fontSize: 10, fontFamily: 'ui-monospace' }}>{first}-{last} / {hits.length}</Text>
                 <Box style={{ flexGrow: 1 }} />
                 <Text style={{ color: DIM, fontSize: 10, fontFamily: 'ui-monospace' }}>{page + 1}/{maxPage + 1}</Text>
                 <Pressable onPress={() => setShaderPage(Math.min(maxPage, page + 1))}
@@ -259,29 +323,27 @@ function InkPanel(props: Ink & { pickShader: (s: ShaderSpec, variantIndex?: numb
                   <Icon name="ChevronRight" size={11} color={DIM} />
                 </Pressable>
               </Row>
-              <Col style={{ gap: 8, minHeight: 290 }}>
-                {pageItems.reduce<Array<{ group: string; specs: ShaderSpec[] }>>((shelves, item) => {
-                  const tail = shelves[shelves.length - 1];
-                  if (tail && tail.group === item.group) tail.specs.push(item.spec);
-                  else shelves.push({ group: item.group, specs: [item.spec] });
-                  return shelves;
-                }, []).map((shelf) => (
-                  <Col key={shelf.group} style={{ gap: 5 }}>
-                    <Text style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{shelf.group.toUpperCase()}</Text>
-                    <Row style={{ flexWrap: 'wrap', gap: 6 }}>
-                      {shelf.specs.map((spec) => {
-                        const on = spec.id === props.shaderInk?.surface;
-                        const variantIndex = on ? activeVariant : 0;
-                        return (
-                          <Pressable key={spec.id} tooltip={spec.label} onPress={() => props.pickShader(spec, variantIndex)}
-                            style={{ padding: 2, borderRadius: 8, borderWidth: 2, borderColor: on ? ACCENT : 'transparent' }}>
-                            <ShaderThumb shader={spec.shader} data={shaderVariantData(spec, variantIndex, props.paletteFor)} size={44} />
-                          </Pressable>
-                        );
-                      })}
-                    </Row>
-                  </Col>
+              <Col style={{ gap: 6, minHeight: 290 }}>
+                {groupsOnPage ? (
+                  <Text numberOfLines={1} noWrap style={{ color: DIM, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{groupsOnPage.toUpperCase()}</Text>
+                ) : null}
+                {gridRows.map((row, rowIndex) => (
+                  <Row key={`${page}-${rowIndex}`} style={{ gap: 6 }}>
+                    {row.map((item) => {
+                      const on = item.spec.id === props.shaderInk?.surface;
+                      const variantIndex = on ? activeVariant : 0;
+                      return (
+                        <Pressable key={item.spec.id} tooltip={`${item.spec.label} — ${item.group}`} onPress={() => props.pickShader(item.spec, variantIndex)}
+                          style={{ padding: 2, borderRadius: 8, borderWidth: 2, borderColor: on ? ACCENT : 'transparent' }}>
+                          <ShaderThumb shader={item.spec.shader} data={shaderVariantData(item.spec, variantIndex, props.paletteFor)} size={44} />
+                        </Pressable>
+                      );
+                    })}
+                  </Row>
                 ))}
+                {hits.length === 0 ? (
+                  <Text style={{ color: DIM, fontSize: 11 }}>{`no shader matches "${query}"`}</Text>
+                ) : null}
               </Col>
               {props.shaderInk && props.onEditMaterial ? (
                 <Pressable

@@ -155,8 +155,9 @@ import { FACADE_TEXELS_PER_METER, facadeFromSelection, facadeLayers, type Facade
 import { resizeFacadeRgba, setLiveFacades, saveFacadeBake } from '../world/facadeBake';
 import ImportImageDialog, { type ImportImagePlan } from '../dialogs/ImportImageDialog';
 import { readFileBase64, remove } from '../../../runtime/hooks/fs';
-import { oklchName, SPINE_LIBRARY } from '../data/colorSpine';
-import { oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
+import { oklchName, pushRecentColor, SPINE_LIBRARY } from '../data/colorSpine';
+import { scheduleColorLibrarySave } from '../data/colorLibraryStore';
+import { hexToOklch, oklchToHex, type OklchColor } from '../../../runtime/paint/colors';
 import type { ColorStudioHistoryEntry } from '../material/colorStudioCommand';
 import { useBuildJournal } from '../data/journal';
 import { explorerIndex, refreshExplorerIndex, explorerMatchesFolder, explorerFolderLabel, explorerFileById, explorerNowLabel } from '../data/fileExplorer';
@@ -846,6 +847,11 @@ export default function AppFrame() {
             colorStudioActiveSlot: patch.activeSlot ?? previous.colorStudioActiveSlot,
             colorStudioView: patch.view ?? previous.colorStudioView,
             colorSpineCurrent: patch.currentColor ? { ...patch.currentColor } : previous.colorSpineCurrent,
+            // The raw use-history (req_3097): every committed color select lands in
+            // RECENT — pick a color anywhere, forget to save it, it's still here.
+            colorSpineRecents: patch.currentColor
+              ? pushRecentColor(previous.colorSpineRecents, patch.currentColor)
+              : previous.colorSpineRecents,
             colorSpineScenePick: patch.scenePick !== undefined ? patch.scenePick : previous.colorSpineScenePick,
             status: result.label,
           };
@@ -1112,6 +1118,13 @@ export default function AppFrame() {
     const checkpoint = setTimeout(() => persistState(state), 60);
     return () => clearTimeout(checkpoint);
   }, [state]);
+
+  // Micro-save the color library (req_3097): SAVED tray + RECENT use-history go
+  // to their per-concern disk file on every change, so a saved color is a real
+  // save — it survives the cold restart, not just the hot reload.
+  useEffect(() => {
+    scheduleColorLibrarySave(state.colorSpinePalette, state.colorSpineRecents);
+  }, [state.colorSpinePalette, state.colorSpineRecents]);
 
   // Micro-save the world's authored edits to disk (SESSIONSAVE req_2765): every
   // worldPieces / semantic-object / zone-def change — placements, verbs,
@@ -4195,6 +4208,17 @@ export default function AppFrame() {
     });
   }, []);
 
+  // Eyedropper (req_3097): ModelView samples the painted atlas under the cursor
+  // (__model_paint_sample) and announces the hex here — same announce-global
+  // pattern as __modelPartRangesChanged. The pick funnels through the spine's
+  // color-select command, so RECENT records it and the ink sync below deposits it.
+  useEffect(() => {
+    (globalThis as any).__modelColorSampled = (hex: string) => {
+      setColorSpineCurrent(hexToOklch(hex), 'eyedropper');
+    };
+    return () => { delete (globalThis as any).__modelColorSampled; };
+  }, []);
+
   // Studio colour → brush ink. The viewer owns the live brush; this is the ONE
   // sync point pouring the spine's current colour into a colour-kind ink.
   // It reconciles on EITHER side changing (req_2538): keying only on spine picks
@@ -4625,6 +4649,7 @@ export default function AppFrame() {
       onToggle={guarded((which: PaintPopover) => setPaintPopover((open) => (open === which ? null : which)))}
       current={state.colorSpineCurrent}
       palette={state.colorSpinePalette}
+      recents={state.colorSpineRecents}
       scenePick={state.colorSpineScenePick}
       paletteFor={paintPaletteFor}
       spine={{
@@ -5003,6 +5028,7 @@ export default function AppFrame() {
             onBrush={setActivePaintBrush}
             current={state.colorSpineCurrent}
             palette={state.colorSpinePalette}
+            recents={state.colorSpineRecents}
             scenePick={state.colorSpineScenePick}
             paletteFor={paintPaletteFor}
             onEditMaterial={openColorStudioForSpec}
