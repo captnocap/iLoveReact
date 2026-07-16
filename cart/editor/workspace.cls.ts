@@ -133,7 +133,11 @@ classifier({
   // Selected-asset detail card (concept 4's bottom card).
   HW_DetailCard: { type: 'Box', style: { flexDirection: 'column', gap: 7, marginLeft: 10, marginRight: 10, marginTop: 8, marginBottom: 10, padding: 8, borderRadius: 'theme:radiusLg', backgroundColor: 'theme:cardBg', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder' } },
   HW_DetailTop: { type: 'Box', style: { flexDirection: 'row', gap: 9 } },
-  HW_DetailThumb: { type: 'Box', style: { width: 64, height: 64, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', overflow: 'hidden' } },
+  // MUST stay 68×68 — AssetPreview's StaticSurface cache is keyed per asset with
+  // ONE size; the material tiles (HW_MaterialTilePreview) mount the same keys at
+  // 68, and a second mount at a different size resizes the cached target under a
+  // queued capture pass (wgpu scissor-vs-target abort, req_2743/req_3136).
+  HW_DetailThumb: { type: 'Box', style: { width: 68, height: 68, borderRadius: 'theme:radiusMd', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', overflow: 'hidden' } },
   HW_DetailText: { type: 'Box', style: { flexGrow: 1, minWidth: 0, flexDirection: 'column', gap: 4 } },
   HW_DetailNameRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6 } },
   HW_DetailMeta: { type: 'Text', fontSize: 9, color: 'theme:textDim', noWrap: true, numberOfLines: 1, style: { fontFamily: MONO } },
