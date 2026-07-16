@@ -404,6 +404,43 @@ the replayable sim/state, or determinism (and the whole replay-media engine)
 breaks. AI *reads* the deterministic record and voices it; it never *writes* the
 record. Non-determinism stays quarantined in the presentation layer.
 
+### The dial: content density as a budget (local model = free ceiling)
+
+Dynamic mode isn't a binary switch — it's a **budget dial**. Instead of a fixed
+cadence of canned social posts, the user sets *how many tokens to spend over a
+time horizon* (e.g. a 30-day game period ≈ 30 real minutes at GAME_DAY_MS=60s).
+Crank it up → the in-world internet **booms** with generated content: news,
+FlockBook/DeadDrop posts, radio banter, NPC chatter all become model-written.
+
+This is **not new** — engAIge already ships the exact mechanism: an **AI queue
+with per-priority budget reserves** (CRITICAL user DMs / court, HIGH NPC
+reactions, MEDIUM scheduled posts, LOW background NPC↔NPC, IDLE pre-generation)
++ cost logging per call. It ports as **design** (concept + tuning; not code — no
+Bun in reactjit). The dial just raises the budget floor: low budget → only
+CRITICAL generates, everything else falls to the baked templates; high budget →
+even background gossip is model-written. **Graceful degradation as a continuous
+knob.**
+
+**Local model = the ceiling is free.** reactjit **already embeds llama.cpp** —
+`framework/assistant/local_ai_runtime.zig` runs a subprocess inference service
+against bundled libllama, deliberately on a **separate compute path so the
+renderer's wgpu/Vulkan never fights llama's compute** (the engine was built for
+this). Consequences:
+
+- Anyone with a gaming PC runs dynamic mode **locally** — "tokens" become GPU
+  time, not a bill. The dial's ceiling for a local user is "how much GPU do you
+  want to spend," bounded by throughput, not dollars.
+- **The engine's lightness IS the AI budget.** Because the game is frugal
+  everywhere (1.77MB sim, native JS-free world, no per-frame churn, baked
+  content), the compute headroom to run a local model *alongside* the game
+  exists — a normal AAA title couldn't spare it. Frugality upstream buys
+  intelligence downstream.
+- Background generation runs at **IDLE priority on spare inference throughput**,
+  so it never starves the interactive roles (the judge answering, a DM reply);
+  pre-generation front-loads content during idle so it's ready when the player
+  arrives at it. Cloud users pay per token; local users pay in watts; either way
+  it's the same queue and the same dial.
+
 ### Why this is the right shape for AI-in-a-game
 
 - **Graceful degradation by construction:** endpoint down / model slow / no key /
