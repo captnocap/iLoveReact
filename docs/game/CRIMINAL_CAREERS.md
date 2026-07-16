@@ -203,31 +203,88 @@ the hash*. Nobody's collection is the same.
 
 ---
 
-## Blueprints & Crafting (Studio as the crafting system)
+## Blueprints, 3D Printing & Crafting (Studio as the crafting system)
 
-**"It's just the same Studio anyway"** — we ship the editor; crafting is the
-editor with a rubric.
+> **This is a flagship system — execute flawlessly.** It is the deepest reuse of
+> the "we ship the editor" thesis: crafting is not a separate minigame, it is
+> **the Studio mesh editor with a rubric**. The player fabricates real geometry;
+> the game grades the geometry. Nothing here is a stat roll behind a progress
+> bar — the item's quality *is* the fidelity of the thing you actually built.
 
-**The loop:**
-1. Take a free/base asset (e.g. a gun), **decompose into parts**, turn each part
-   into a **blueprint**.
-2. A blueprint is deliberately *confusing* — e.g. a 3-picture diagram, not a
-   step-by-step. The player builds what they *think* they see.
-3. **Score = shape fidelity of the submitted mesh vs. the target.** Use the SDF
-   path (`sdf_roundtrip_lab`): sample both meshes as SDFs on a grid, score
-   symmetric (chamfer-style) distance — rotation/topology-forgiving, rewards
-   *shape* not vertex-order luck. Grade thresholds → **quality tiers** on the
-   resulting stat item.
-4. **Replayable forever:** come back anytime, improve the mesh, raise the grade.
+### The fiction: fabrication, not "crafting"
 
-**Customization layer (same Studio again):**
-- On top of a built gun: build the stock, then paint it, add charms — all just
-  Studio operations (mesh + face paint + stickers/attachments).
+The player is a **3D printer / machinist**. You don't "unlock" a gun — you
+**fabricate** it from a blueprint, and how well you fabricate it is how good it
+is. This makes the crime economy's supply chain diegetic: contraband is printed,
+not bought from a menu. (Ties to the world: SilkRoad/ShopLifter sell base stock;
+the printer turns stock into stat-bearing objects.)
 
-**Two reward types, one pipeline:**
-- Achievement rewards resolve into *either* a finished **cosmetic attachment**
-  (a mesh asset — pure looks) *or* a **blueprint** (target mesh + diagram — the
-  stat-based thing). Same content store; one flag decides stats-vs-paint.
+### A blueprint is a TARGET + a DIAGRAM (deliberately under-specified)
+
+1. Take a base asset (found, bought, or achievement-granted — e.g. a gun),
+   **decompose it into parts** (barrel, receiver, stock, …). Each part becomes a
+   blueprint entry: a **target mesh** (ground truth, never shown directly) + a
+   **diagram** the player reads to reconstruct it.
+2. The diagram is **intentionally under-specified** — e.g. a 3-view orthographic
+   set (front/side/top) or 3 reference photos, NOT a step-by-step. The player
+   models what they *think* they see in the Studio. Ambiguity is the difficulty
+   knob: a cheap blueprint gives clean orthographic views; a rare one gives three
+   bad polaroids. (Difficulty = information withheld, authored per-blueprint.)
+
+### The grade IS the geometry (SDF fidelity scoring)
+
+3. **Score = shape fidelity of the submitted mesh vs. the hidden target.** Use
+   the SDF path (`sdf_roundtrip_lab`): voxel-sample both meshes to signed-distance
+   fields on a shared grid, score a **symmetric (chamfer-style) distance**.
+   Properties that make this the RIGHT metric (and why it must be SDF, not
+   vertex/triangle compare):
+   - **Topology-agnostic:** the player's mesh can have any vertex count / edge
+     flow and still score well if the *shape* matches — rewards the silhouette
+     and volume, not modeling technique.
+   - **Pose-normalized before scoring:** align by centroid + principal axes (or a
+     small ICP pass) so the player isn't punished for orientation/position — only
+     shape counts. (DECIDE: also normalize scale, or is matching real-world size
+     part of the grade? Recommend: normalize scale for the fabrication grade,
+     keep dimensional accuracy as a *separate* optional bonus.)
+   - **Continuous, not pass/fail:** the raw distance is a smooth 0..1 fidelity,
+     which is what makes step 5 (replay-to-improve) meaningful.
+4. **Grade thresholds → quality tiers** on the resulting stat item (e.g.
+   ≥0.95 = Pristine, ≥0.85 = Fine, … → maps to the item's stat block). Tuning
+   table owns the thresholds (P2 — never hardcode the cutoffs).
+
+### Replayable forever + the customization layer
+
+5. **The fabrication is never "done."** The item stores its best fidelity score;
+   the player can re-open the blueprint anytime, refine the mesh, and *raise the
+   grade* — an evergreen skill-expression loop, not a one-shot craft.
+6. **Customization is the same Studio, layered on top** of the graded base:
+   fabricate the stock, then **paint it** (face paint), **add charms / stickers /
+   attachments** — all existing Studio operations. Cosmetics ride on top of the
+   stat-bearing base without touching its grade.
+
+### One pipeline, two reward classes
+
+7. Achievement/loot rewards resolve into *either*:
+   - a **blueprint** (target mesh + diagram) → the **stat** path (fabricate to
+     grade), or
+   - a finished **cosmetic attachment** (a ready mesh asset) → the **paint** path
+     (pure looks, no fabrication).
+
+   Same content store, **one flag** decides stats-vs-paint. This means every gun
+   part, attachment, charm, and skin flows through one authoring + storage path —
+   and all of it is just Studio output, so it also rides the V29 baked-asset
+   pipeline like every other mesh in the game.
+
+### Build status (do not start from scratch)
+
+| Piece | Exists | New work |
+|---|---|---|
+| Studio mesh editor (model, parts, paint, stickers) | ✅ editor | — |
+| SDF sampling / roundtrip | ✅ `sdf_roundtrip_lab` | chamfer grade + pose-normalize |
+| Asset store + baked-asset pipeline | ✅ (V29) | blueprint = target-mesh + diagram record |
+| Blueprint authoring (decompose asset → parts → diagram) | 🟡 | tooling: pick views, set ambiguity |
+| Grade→tier tuning table | 🟡 | P2 table |
+| Reward pipeline (blueprint vs cosmetic flag) | 🟡 | one enum on the reward record |
 
 ---
 
