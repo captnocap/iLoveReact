@@ -285,6 +285,19 @@ So the rule — do NOT try to make this literally infinite / all-levels-live:
 > child. It's never "N live worlds" — it's one live world plus a stack of paused
 > snapshots the player climbs. Inception's rule: one dream real at a time.
 
+**Memory is not the bound either (measured 2026-07-16).** One full resident
+market sim (256 tokens w/ 64-candle history, 512 NPC wallets, 16k trade ring,
+all buffers) = **1.77 MB** — computed from `@sizeOf` over the `SimState` layout,
+exact because it's fixed-pool (tokens 698KB, npcs 352KB, live ring 576KB, rest
+~190KB). And the sim is **seed-derived**, so a *frozen* level costs ~kilobytes
+(its `run_id` + player-caused deltas), not 1.77MB — an untouched level you left
+is 8 bytes and a promise. So nesting cost ≈ one live sim + a stack of seeds,
+regardless of depth. On the machine that shrugged at 155M tris you could hold
+hundreds of live markets resident; the depth bound is CPU (one live perception+
+market tick at a time, per the embodiment rule), never memory or triangles. NB:
+1.77MB is the crypto sim only — the ~300-NPC perception sim is designed-not-built
+but is the same fixed-pool shape, expected similarly tiny.
+
 Free consequences: each level has a **new seed** → genuinely different world,
 NPCs, café placement, and (via `hash(child_run_id, npc_id)`) its own whale-wallet
 distribution — the broke alleyway guy up here may be the whale down there. Not a
