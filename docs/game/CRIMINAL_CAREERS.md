@@ -455,6 +455,70 @@ this). Consequences:
 
 ---
 
+## NPC Memory & the "Dumb Fine-Tune" (persistent character without training)
+
+**Reference architecture to port: M3A** — the 5-layer Multi-Modal Memory
+Architecture in `~/creative/ai/app/src/bun/lib/memory/` (TS/Bun; ports as design
++ math, hot path Zig-able like the market sim). It models *human* memory, which
+is exactly what a witnessing, remembering, gossiping NPC needs.
+
+### The five layers (M3A), mapped to NPC needs
+
+| Layer | Codename | What it is | NPC use |
+|---|---|---|---|
+| **L1** | RIVER | sliding-window buffer, evicts on overflow → triggers consolidation | what the NPC just saw/heard |
+| **L2** | FEELING | affect index — 6 categories on arousal/valence + intensity | how an event felt (a witnessed murder = high-arousal/negative) → colors tone |
+| **L3** | ECHO | redundant encode: vector + lexical + entity-graph; "resonance" = how many match | factual recall (who/what/where) |
+| **L4** | WOUND | salience store: score, **prediction-error** (surprise), pinned, retention priority | the thing that STUCK — the NPC never forgets they saw you kill someone |
+| **L5** | COMPANION | co-occurrence graph, weighted edges, temporal decay | social knowledge — who they associate you with (feeds the wallet hunt / social graph) |
+
+Retrieval is an **ensemble** across all five (tunable weights, temporal bias
+recent/salient/balanced, affect boost). Consolidation is the **Shadow Curator**:
+on overflow/schedule it summarizes evicted L1, **detects stance conflicts** (the
+NPC used to like you, now doesn't), and reconciles them — the memory curates and
+*changes its mind* over time.
+
+### The "dumb fine-tune" (the key idea)
+
+**You never touch model weights.** Every time an NPC acts, wrap the base model's
+context in that NPC's **identity core** (static: name, disposition, faction,
+voice) + the **ensemble-retrieved slice** of their memory relevant to *this*
+moment. The base model, so wrapped, *behaves as if fine-tuned on that character* —
+but the "fine-tune" is just context assembly ("their entry into the context").
+Strictly better than real fine-tuning here:
+
+- **Zero training cost, any base model** — embedded llama.cpp or a cloud endpoint,
+  identical. Swap models → every NPC gets smarter but keeps their exact identity.
+- **Per-NPC identity is DATA, not weights** — no 300 model copies; each NPC's
+  "fine-tune" is their memory rows retrieved + injected. The *a-game-is-data*
+  doctrine applied to personality.
+- **It evolves** — the Shadow Curator updates the fine-tune as the NPC lives
+  (including changing its mind), with no retraining.
+- **Small but characterful context** — the ensemble retrieves the *relevant* slice,
+  not the whole history: L4 guarantees the pinned trauma always surfaces (they
+  never forget the murder), L2 sets tone, L5 supplies who-they-know, L3 the facts.
+  Context stays cheap; character stays deep.
+
+### Boundaries & scale (keep it honest)
+
+- **Replay-safe:** the memory (what was witnessed) is deterministic *record*; the
+  generated dialogue is ephemeral *presentation* — same membrane as the media
+  engine. AI reads the record and voices the NPC; it never writes the record.
+- **Scales via promotion (V21):** only **promoted/individual** NPCs carry a full
+  M3A store; ambient trash NPCs are distributions with no memory. Only NPCs
+  actually speaking/acting generate — so 300+ NPCs is fine, because the rich path
+  is the few who matter this moment.
+- **Budget-aware:** retrieval + injection is cheap; generation is the cost, and it
+  rides the same IDLE-priority queue + dial as all dynamic content. Baked floor:
+  an unpromoted or budget-starved NPC falls back to templated lines.
+
+**Dependency it shares:** the same appearance-fingerprint + witness-event record
+the stealth/justice/media systems need is what *populates* L1→L4 here. One
+witness event feeds four systems — design it first (said a fourth time, on
+purpose).
+
+---
+
 ## Blueprints, 3D Printing & Crafting (Studio as the crafting system)
 
 > **This is a flagship system — execute flawlessly.** It is the deepest reuse of
