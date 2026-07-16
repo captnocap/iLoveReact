@@ -203,6 +203,82 @@ the hash*. Nobody's collection is the same.
 
 ---
 
+## The Justice Loop (Arrest → Court → Jury) — where the slow loop RESOLVES
+
+This is the payoff of "the game's memory is the internet the player polluted."
+The detection meter (fast loop) and the news/social cycle (slow loop) finally
+land somewhere: **the criminal justice system, run entirely on the records the
+player already generated.** Near-zero authored content — the evidence *is* the
+cold TS layer, read aloud in a courtroom.
+
+### The chain
+
+1. **Investigation.** Witness events (from the perception sim) + social posts +
+   news accumulate against an open **case file** (heat that didn't decay). KYC.org
+   notoriety is its public face.
+2. **Arrest.** Enough builds up (or a botched job in front of cops) → arrest.
+   **Booking** records your **current appearance** (the outfit/face you were
+   caught in) — this becomes a tracked identity fact, and itself generates
+   records (mugshot, arrest report, a news blip).
+3. **Court date or discharge.** Minor → discharged. Severe → a court date is set,
+   and you're released until then. The world keeps running (time never stops).
+4. **The defendant is an NPC — pattern-matched from the witness reports.** The
+   accused is whoever the witness descriptions best match. If you worked in a
+   disguise resembling a specific NPC, *that innocent NPC* is charged. **Framing
+   is emergent** from the perception sim's appearance memory, not scripted.
+5. **Show up to court — but only in a disguise that is NOT your booking
+   appearance.** Booking recorded what you looked like; matching it in the
+   courtroom blows you. Identity management is the price of attending your own
+   trial.
+6. **Sit in the jury box. Steer deliberation.** (The Hung Jury crossover — you
+   networked/farmed your way onto the panel via "Dating and networking for
+   indecisive legal professionals.") Dialogue is pure **event-cadence** over the
+   generated records. Three outcomes:
+   - **Convict the innocent NPC** → case file **closes permanently** (heat
+     purge). But an innocent is imprisoned — the sim registers it (their social
+     graph reacts: family posts, a Public Defunder appeal, a wrongful-conviction
+     thread; small standing risk a witness later **recants** and reopens it).
+   - **Hang the jury** → case stays **open** (kicked down the road; re-arms).
+   - **Acquit** → the investigation **continues** (the defendant walks; heat
+     persists on you).
+
+### The lore sites ARE the trial verbs (coherence win)
+
+The crime registry already names the manipulation toolkit — these stop being
+jokes and become the pre-trial mechanics:
+
+- **WRJ (Witness Rejection Program)** — suppress/discredit witnesses *before* they
+  testify = deleting or degrading witness-event records feeding the case.
+- **Beyond a Reasonable Drought** ("attorneys specializing in making evidence
+  disappear") — literally delete cold-TS records (posts, threads, footage) from
+  the evidence pool.
+- **The Fine Print / Probable Claws / CanISueThisIndividual** — representation,
+  agentic-swarm lawyering, countersuit pressure.
+- **Public Defunder** — petition/social pressure on the case.
+
+So "tampering with the trial" is not a new content system — it's **operating the
+existing lore sites against the existing record rings.** The wanted system, the
+social sim, and the lore registry converge in one courtroom.
+
+### Build status
+
+| Piece | Exists | New work |
+|---|---|---|
+| Record rings (witness/social/news) | 🟡 designed (rings pattern proven) | case-file accumulation |
+| Appearance-at-time-of-witness tracking | 🟡 **dependency** | perception sim must record *what you looked like*, not just "seen" |
+| Arrest/booking flow | 🟡 | states + record emission |
+| Defendant pattern-match | 🟡 | match witness descriptions → NPC |
+| Jury/deliberation UI | 🟡 | event-cadence dialogue over records |
+| Trial-tamper verbs (WRJ, Reasonable Drought, …) | 🟡 | wire lore sites → record mutations |
+
+**Load-bearing dependency to flag early:** the perception sim must store
+**appearance at the moment of witnessing** (disguise/face/outfit), not just a
+"player was seen" bit. Framing an innocent, the booking-vs-courtroom disguise
+rule, and the pattern-matched defendant ALL depend on it. Design the witness
+event to carry an appearance fingerprint from day one.
+
+---
+
 ## Blueprints, 3D Printing & Crafting (Studio as the crafting system)
 
 > **This is a flagship system — execute flawlessly.** It is the deepest reuse of
