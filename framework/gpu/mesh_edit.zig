@@ -2640,6 +2640,64 @@ pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f3
     return CutResult{ .positions = positions, .groups = groups, .src_face = src_face, .tri_count = tris_out };
 }
 
+/// Shared cut-point lerp — parametricQuadCutsSoup recomputes strip points with
+/// the SAME expression, so de-T-junction candidates match strips bit-for-bit.
+fn lerp3(a: [3]f32, b: [3]f32, t: f32) [3]f32 {
+    return .{ a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t };
+}
+
+/// De-T-junction pass over an assembled soup (req_3125): split any triangle whose
+/// edge runs straight THROUGH one of `points`. The neighbor keeps its authored
+/// group and src parentage — it only gains triangles — so every cut point becomes
+/// a real corner of everything touching its line and the welded edge graph reads
+/// vertex-to-vertex again (a slab rim no longer keeps ONE full-height edge over
+/// the cut face's two segments). Points sitting on a corner already are skipped,
+/// so the cut strips themselves pass through unchanged.
+fn splitSoupEdgesOnPoints(
+    out_pos: *std.ArrayListUnmanaged(f32),
+    out_grp: *std.ArrayListUnmanaged(u32),
+    out_src: *std.ArrayListUnmanaged(u32),
+    points: []const [3]f32,
+) bool {
+    if (points.len == 0) return true;
+    const EDGE_EPS2: f32 = 1e-10; // squared point-to-segment distance
+    var t: usize = 0;
+    scan: while (t * 9 < out_pos.items.len) {
+        var k: usize = 0;
+        while (k < 3) : (k += 1) {
+            const ia = t * 9 + k * 3;
+            const ib = t * 9 + ((k + 1) % 3) * 3;
+            const ic = t * 9 + ((k + 2) % 3) * 3;
+            const a: [3]f32 = .{ out_pos.items[ia], out_pos.items[ia + 1], out_pos.items[ia + 2] };
+            const b: [3]f32 = .{ out_pos.items[ib], out_pos.items[ib + 1], out_pos.items[ib + 2] };
+            const ab: [3]f32 = .{ b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+            const len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+            if (len2 < 1e-12) continue;
+            for (points) |p| {
+                const ap: [3]f32 = .{ p[0] - a[0], p[1] - a[1], p[2] - a[2] };
+                const s = (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / len2;
+                if (!(s > 1e-3 and s < 1.0 - 1e-3)) continue; // corners pass through
+                const on: [3]f32 = .{ a[0] + ab[0] * s, a[1] + ab[1] * s, a[2] + ab[2] * s };
+                const d2 = (p[0] - on[0]) * (p[0] - on[0]) + (p[1] - on[1]) * (p[1] - on[1]) + (p[2] - on[2]) * (p[2] - on[2]);
+                if (d2 > EDGE_EPS2) continue;
+                // split (a,b,c) at p on edge a→b: (a,p,c) rewrites in place, (p,b,c)
+                // appends with the same group/src. Values are captured before the
+                // append can reallocate the list.
+                const c: [3]f32 = .{ out_pos.items[ic], out_pos.items[ic + 1], out_pos.items[ic + 2] };
+                out_pos.items[ib] = p[0];
+                out_pos.items[ib + 1] = p[1];
+                out_pos.items[ib + 2] = p[2];
+                if (!emitTriPos(out_pos, p, b, c)) return false;
+                out_grp.append(alloc, out_grp.items[t]) catch return false;
+                out_src.append(alloc, out_src.items[t]) catch return false;
+                continue :scan; // rescan this triangle — more points may remain
+            }
+        }
+        t += 1;
+    }
+    return true;
+}
+
 /// The one loop-cut primitive. Each fraction connects equal-fraction points on a
 /// quad's opposite edges; it deliberately knows nothing about world axes, normals,
 /// or cutting planes. `direction = 0` uses q0→q1/q3→q2, direction 1 q1→q2/q0→q3.
@@ -2657,20 +2715,15 @@ fn emitParametricQuadCuts(
     next_id: *u32,
 ) bool {
     if (fractions.len == 0) return emitLoopFan(out_pos, out_src, out_grp, true, q[0..], src, gid);
-    const lerp = struct {
-        fn at(a: [3]f32, b: [3]f32, t: f32) [3]f32 {
-            return .{ a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t };
-        }
-    }.at;
     var previous: f32 = 0;
     var i: usize = 0;
     while (i <= fractions.len) : (i += 1) {
         const next: f32 = if (i == fractions.len) 1 else fractions[i];
         if (!(next > previous and next <= 1)) return false;
         const strip: [4][3]f32 = if ((direction & 1) == 0)
-            .{ lerp(q[0], q[1], previous), lerp(q[0], q[1], next), lerp(q[3], q[2], next), lerp(q[3], q[2], previous) }
+            .{ lerp3(q[0], q[1], previous), lerp3(q[0], q[1], next), lerp3(q[3], q[2], next), lerp3(q[3], q[2], previous) }
         else
-            .{ lerp(q[0], q[3], previous), lerp(q[1], q[2], previous), lerp(q[1], q[2], next), lerp(q[0], q[3], next) };
+            .{ lerp3(q[0], q[3], previous), lerp3(q[1], q[2], previous), lerp3(q[1], q[2], next), lerp3(q[0], q[3], next) };
         const strip_gid = if (i == 0) gid else remapGroup(remap, gid, next_id);
         if (!emitLoopFan(out_pos, out_src, out_grp, true, strip[0..], src, strip_gid)) return false;
         previous = next;
@@ -2714,6 +2767,10 @@ pub fn parametricQuadCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
     defer alloc.free(handled);
     @memset(handled, false);
     var any = false;
+    // The exact interpolated cut points (same lerp as emitParametricQuadCuts), so
+    // UNCUT neighbors sharing a cut edge can absorb them (de-T-junction below).
+    var cut_points = std.ArrayListUnmanaged([3]f32){};
+    defer cut_points.deinit(alloc);
     var it = buckets.iterator();
     while (it.next()) |entry| {
         const tris = entry.value_ptr.items;
@@ -2723,7 +2780,16 @@ pub fn parametricQuadCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
         var loop = CutLoop{};
         defer loop.deinit(alloc);
         if (!chainGroupLoop(pos, tris, &loop) or loop.items.len != 4) return null;
-        if (!emitParametricQuadCuts(&out_pos, &out_src, &out_grp, .{ loop.items[0], loop.items[1], loop.items[2], loop.items[3] }, direction, fractions, tris[0], entry.key_ptr.*, &remap, &next_id)) return null;
+        const q = [4][3]f32{ loop.items[0], loop.items[1], loop.items[2], loop.items[3] };
+        if (!emitParametricQuadCuts(&out_pos, &out_src, &out_grp, q, direction, fractions, tris[0], entry.key_ptr.*, &remap, &next_id)) return null;
+        for (fractions) |t| {
+            const pair: [2][3]f32 = if ((direction & 1) == 0)
+                .{ lerp3(q[0], q[1], t), lerp3(q[3], q[2], t) }
+            else
+                .{ lerp3(q[0], q[3], t), lerp3(q[1], q[2], t) };
+            cut_points.append(alloc, pair[0]) catch return null;
+            cut_points.append(alloc, pair[1]) catch return null;
+        }
         for (tris) |tf| handled[tf] = true;
         any = true;
     }
@@ -2737,6 +2803,13 @@ pub fn parametricQuadCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
         out_src.append(alloc, f) catch return null;
         out_grp.append(alloc, groups_in[f]) catch return null;
     }
+    // De-T-junction (req_3125): a selection-scoped cut lands vertices on edges its
+    // uncut neighbors still span in one piece — a slab rim keeps ONE full-height
+    // edge while the cut face has two segments, and both render along the same
+    // line. Splitting the neighbor triangles at each cut point keeps their
+    // authored faces whole while the welded edge graph gains the shared vertex:
+    // vertex-to-vertex is an edge again, everywhere.
+    if (!splitSoupEdgesOnPoints(&out_pos, &out_grp, &out_src, cut_points.items)) return null;
     const positions = out_pos.toOwnedSlice(alloc) catch return null;
     const src_face = out_src.toOwnedSlice(alloc) catch {
         alloc.free(positions);
@@ -3011,6 +3084,15 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
         out_src.append(alloc, f) catch return null;
         out_grp.append(alloc, groups_in[f]) catch return null;
     }
+    // De-T-junction (req_3125): ring cut points normally land on edges the NEXT
+    // ring quad also cuts, but a face outside the ring can share a crossed edge
+    // (a flap rooted on it, a border-adjacent face) and would keep spanning the
+    // point in one piece. Split such triangles so vertex-to-vertex holds.
+    var all_points = std.ArrayListUnmanaged([3]f32){};
+    defer all_points.deinit(alloc);
+    var pit = edge_points.valueIterator();
+    while (pit.next()) |pts| all_points.appendSlice(alloc, pts.*) catch return null;
+    if (!splitSoupEdgesOnPoints(&out_pos, &out_grp, &out_src, all_points.items)) return null;
     const positions = out_pos.toOwnedSlice(alloc) catch return null;
     const src_face = out_src.toOwnedSlice(alloc) catch {
         alloc.free(positions);
@@ -3780,6 +3862,54 @@ test "parametric quad cuts hit equal fractions on sheared opposite edges" {
             if (@abs(r.positions[v] - p[0]) < 1e-6 and @abs(r.positions[v + 1] - p[1]) < 1e-6 and @abs(r.positions[v + 2] - p[2]) < 1e-6) found = true;
         }
         try testing.expect(found);
+    }
+}
+
+test "parametric cut splits the uncut neighbor's edge at the cut point (req_3125)" {
+    // Two unit quads sharing the edge x=1: cutting ONLY quad A (group 0) at t=0.5
+    // lands points on the shared edge. Quad B must absorb the point — one extra
+    // triangle, same group — so no B edge runs straight through the new vertex.
+    const pos = [_]f32{
+        0, 0, 0, 1, 0, 0, 1, 1, 0,
+        0, 0, 0, 1, 1, 0, 0, 1, 0,
+        1, 0, 0, 2, 0, 0, 2, 1, 0,
+        1, 0, 0, 2, 1, 0, 1, 1, 0,
+    };
+    const groups = [_]u32{ 0, 0, 1, 1 };
+    const mask = [_]bool{ true, true, false, false };
+    const cuts = [_]f32{0.5};
+    // direction 1 cuts A along y=0.5 — endpoints on x=0 (border) and x=1 (shared).
+    const r = parametricQuadCutsSoup(pos[0..], 4, groups[0..], mask[0..], 1, cuts[0..]) orelse return error.TestExpectedCut;
+    defer alloc.free(r.positions);
+    defer alloc.free(r.src_face);
+    defer if (r.groups) |g| alloc.free(g);
+    // A → 2 strips (4 tris); B keeps group 1 but gains one triangle from the split.
+    try testing.expectEqual(@as(u32, 7), r.tri_count);
+    var b_tris: u32 = 0;
+    for (r.groups.?) |gid| {
+        if (gid == 1) b_tris += 1;
+    }
+    try testing.expectEqual(@as(u32, 3), b_tris);
+    // No edge of ANY output triangle may pass straight through the cut point (1, 0.5, 0).
+    const p = [3]f32{ 1, 0.5, 0 };
+    var t: usize = 0;
+    while (t * 9 < r.positions.len) : (t += 1) {
+        var k: usize = 0;
+        while (k < 3) : (k += 1) {
+            const ia = t * 9 + k * 3;
+            const ib = t * 9 + ((k + 1) % 3) * 3;
+            const a = [3]f32{ r.positions[ia], r.positions[ia + 1], r.positions[ia + 2] };
+            const b = [3]f32{ r.positions[ib], r.positions[ib + 1], r.positions[ib + 2] };
+            const ab = [3]f32{ b[0] - a[0], b[1] - a[1], b[2] - a[2] };
+            const len2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+            if (len2 < 1e-12) continue;
+            const ap = [3]f32{ p[0] - a[0], p[1] - a[1], p[2] - a[2] };
+            const s = (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / len2;
+            if (!(s > 1e-3 and s < 1.0 - 1e-3)) continue;
+            const on = [3]f32{ a[0] + ab[0] * s, a[1] + ab[1] * s, a[2] + ab[2] * s };
+            const d2 = (p[0] - on[0]) * (p[0] - on[0]) + (p[1] - on[1]) * (p[1] - on[1]) + (p[2] - on[2]) * (p[2] - on[2]);
+            try testing.expect(d2 > 1e-10); // interior hit = a surviving T-junction
+        }
     }
 }
 

@@ -118,6 +118,27 @@ const groupTriangleCounts = (groups: Uint32Array): number[] => {
   const counts = new Map<number, number>(); for (const gid of groups) counts.set(gid, (counts.get(gid) ?? 0) + 1); return [...counts.values()].sort((a, b) => a - b);
 };
 const loweredDoc = (m: EditMesh): Doc => { const groups: number[] = []; const geo = editMeshToGeometry(m, undefined, groups); return { vertices: geo.positions, groups: new Uint32Array(groups) }; };
+/** No output edge may run straight THROUGH another output vertex (req_3125) — a
+ *  surviving T-junction means some face kept one unsplit edge over a cut point
+ *  (the slab rim's "one big edge" against the cut face's two segments). */
+const tJunctionFree = (d: Doc): boolean => {
+  const verts = [...positions(d).values()];
+  for (let t = 0; t < d.groups.length; t += 1) for (let c = 0; c < 3; c += 1) {
+    const a: V3 = [d.vertices[(t * 3 + c) * 8]!, d.vertices[(t * 3 + c) * 8 + 1]!, d.vertices[(t * 3 + c) * 8 + 2]!];
+    const n = (c + 1) % 3;
+    const b: V3 = [d.vertices[(t * 3 + n) * 8]!, d.vertices[(t * 3 + n) * 8 + 1]!, d.vertices[(t * 3 + n) * 8 + 2]!];
+    const ab: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const len2 = ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2;
+    if (len2 < 1e-12) continue;
+    for (const p of verts) {
+      const s = ((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1] + (p[2] - a[2]) * ab[2]) / len2;
+      if (!(s > 1e-3 && s < 1 - 1e-3)) continue;
+      const q: V3 = [a[0] + ab[0] * s, a[1] + ab[1] * s, a[2] + ab[2] * s];
+      if (Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < 1e-4) return false;
+    }
+  }
+  return true;
+};
 
 let expectedText = '';
 let details = '';
@@ -175,14 +196,20 @@ if (op === 'merge') {
   // (non-quad path). Two level +Y planes cross all four triangle sides (3 pieces
   // each) and never touch the base: S=4, groups=13, and every new vert sits at a
   // span-third fraction of a slant edge — the anti-lopsided contract (req_3115).
+  // cut: the basic cut subdivides ONLY face 0 (+2 groups), but its cut points land
+  // on edges shared with UNCUT neighbors — the de-T-junction pass (req_3125)
+  // re-fans those neighbors in place (same groups, more triangles), so they lose
+  // byte-identity: S = 1 cut face + 2 re-fanned neighbors (3 when a crossed edge
+  // carries the bridge flap too).
   const shapeOk = op === 'cut'
-    ? subdivided === 1 && actual.groups === seedGroupCount + 2
+    ? subdivided >= 3 && subdivided <= 4 && actual.groups === seedGroupCount + 2
     : fixture === 'bridge' ? subdivided >= 3 && subdivided <= 5 && actual.groups === 7 + 2 * subdivided
     : fixture === 'pyramid' ? subdivided === 4 && actual.groups === 13
     : subdivided === 4 && actual.groups === 14;
-  equal = fractionsOk && untouchedOk && editableOk && shapeOk;
-  expectedText = `groups=${op === 'cut' ? seedGroupCount + 2 : fixture === 'bridge' ? `7+2*S` : fixture === 'pyramid' ? 13 : 14} S=${op === 'cut' ? 1 : fixture === 'bridge' ? '3..5' : 4}`;
-  details = ` S=${subdivided} newVertices=${newCount} fractions=${fractionsOk ? 1 : 0} untouched=${untouchedOk ? 1 : 0} editable=${journalEditable}/${derivedEditable}`;
+  const noTJunctions = tJunctionFree(nativeDoc);
+  equal = fractionsOk && untouchedOk && editableOk && shapeOk && noTJunctions;
+  expectedText = `groups=${op === 'cut' ? seedGroupCount + 2 : fixture === 'bridge' ? `7+2*S` : fixture === 'pyramid' ? 13 : 14} S=${op === 'cut' ? '3..4' : fixture === 'bridge' ? '3..5' : 4} tjunctions=0`;
+  details = ` S=${subdivided} newVertices=${newCount} fractions=${fractionsOk ? 1 : 0} untouched=${untouchedOk ? 1 : 0} editable=${journalEditable}/${derivedEditable} tjunctionFree=${noTJunctions ? 1 : 0}`;
 } else if (op === 'loopcutmix') {
   // req_3119 (pyramid only): one horizontal band cut, then a vertical cut seeded on
   // a band QUAD. The vertical belt ring CLOSES around the four frustum bands while
@@ -199,9 +226,10 @@ if (op === 'merge') {
   }
   const derivedEditable = edgeContract(nativeDoc.vertices, nativeDoc.groups).editableEdges;
   const journalEditable = nativeJournal?.topology?.editableEdges;
-  equal = actual.groups === 15 && touching.size === 4 && journalEditable === derivedEditable;
-  expectedText = 'groups=15 apexGroups=4';
-  details = ` apexGroups=${touching.size} editable=${journalEditable}/${derivedEditable}`;
+  const noTJunctions = tJunctionFree(nativeDoc);
+  equal = actual.groups === 15 && touching.size === 4 && journalEditable === derivedEditable && noTJunctions;
+  expectedText = 'groups=15 apexGroups=4 tjunctions=0';
+  details = ` apexGroups=${touching.size} editable=${journalEditable}/${derivedEditable} tjunctionFree=${noTJunctions ? 1 : 0}`;
 } else {
   throw new Error(`unknown op ${op}`);
 }
