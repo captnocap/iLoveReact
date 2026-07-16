@@ -258,6 +258,40 @@ already used by the no-V8 world_loader):
 Vendor Work, the Rug Run's Telegram, the darknet market, the OnlyFans DMs — all
 are screen channels. Mission UIs are content on monitors, not overlays.
 
+### Easter Egg: the recursive game (turtles all the way down)
+
+A café (or wherever) has a computer whose screen channel is not a website — it's
+**this game**, booted from a fresh-seed gamefile. Engage it, and you descend into
+a new instance of the same game. In *that* world is another café with another
+computer, and it keeps nesting.
+
+**It is literally free** — it's the same compiled game the player is already
+running, loaded with a new seed. The rendering capability exists:
+`framework/gpu/world_window.zig` already renders a second compiled world to its
+own wgpu surface (WORLDWIN-0611); a screen texture is just a different render
+target for it.
+
+**The bound is EMBODIMENT, not triangles.** (Render cost is a non-issue —
+unculled tri budget doesn't choke until ~155M, and an interior scene culls ~99%
+of the parent's chunks anyway: the moment the player sits at a machine inside a
+building, the parent world collapses to a room + a window.) What actually costs
+per level is the **live sim** (perception for ~300 NPCs, market ticks, physics).
+So the rule — do NOT try to make this literally infinite / all-levels-live:
+
+> **Only ONE level is embodied at a time.** Descending makes the child the
+> embodied world and drops the parent to a frozen/ambient snapshot (V21
+> distributions, no active perception — the frozen-world ruling). Ascending
+> (WASD, same as any engagement exit) re-embodies the parent and freezes the
+> child. It's never "N live worlds" — it's one live world plus a stack of paused
+> snapshots the player climbs. Inception's rule: one dream real at a time.
+
+Free consequences: each level has a **new seed** → genuinely different world,
+NPCs, café placement, and (via `hash(child_run_id, npc_id)`) its own whale-wallet
+distribution — the broke alleyway guy up here may be the whale down there. Not a
+hall of mirrors; turtles all the way down, each turtle its own city. Per the 847
+doctrine, the deepest reachable machine should be running something slightly
+wrong.
+
 ---
 
 ## Cross-System Fusion (why this is one game, not five features)
