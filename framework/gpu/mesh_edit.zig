@@ -2770,6 +2770,11 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
         while (bit.next()) |b| b.deinit(alloc);
         buckets.deinit(alloc);
     }
+    // Raw undirected edge-use counts over the WHOLE soup: the walk uses these to
+    // tell a true open border (1 use — a clean parametric stop) from an edge that
+    // has a neighbor the ring simply cannot pass through (2+ uses).
+    var tri_edge_uses = std.AutoHashMapUnmanaged(u128, u32){};
+    defer tri_edge_uses.deinit(alloc);
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
         const gid = groups_in[f];
@@ -2780,6 +2785,18 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
             order.append(alloc, gid) catch return null;
         }
         gop.value_ptr.append(alloc, f) catch return null;
+        var k: u32 = 0;
+        while (k < 3) : (k += 1) {
+            const ia = (@as(usize, f) * 3 + k) * 3;
+            const ib = (@as(usize, f) * 3 + (k + 1) % 3) * 3;
+            const ka = cutPosKey(.{ pos[ia], pos[ia + 1], pos[ia + 2] });
+            const kb = cutPosKey(.{ pos[ib], pos[ib + 1], pos[ib + 2] });
+            if (ka == kb) continue;
+            const uk: u128 = (@as(u128, @min(ka, kb)) << 64) | @max(ka, kb);
+            const ugop = tri_edge_uses.getOrPut(alloc, uk) catch return null;
+            if (!ugop.found_existing) ugop.value_ptr.* = 0;
+            ugop.value_ptr.* += 1;
+        }
     }
     if (order.items.len == 0) return null;
 
@@ -2824,6 +2841,7 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
     var visited = std.AutoHashMapUnmanaged(u32, void){};
     defer visited.deinit(alloc);
     var seed_count: u32 = 0;
+    var blocked = false;
     for (order.items) |seed_gid| {
         const tris = buckets.getPtr(seed_gid).?.items;
         var seeded = true;
@@ -2849,16 +2867,41 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
             if (eka == ekb) continue;
             var entry_key: u128 = (@as(u128, @min(eka, ekb)) << 64) | @max(eka, ekb);
             var current_gid = seed_gid;
+            // A walk stop is only CLEAN at ring closure or a true open border.
+            // Anything the ring cannot pass through — a non-quad (a pyramid's apex
+            // triangle after horizontal band cuts, req_3119), an unchainable or
+            // out-of-scope neighbor, a non-manifold junction — leaves the cut
+            // incomplete, so it flags `blocked` and the caller's plane comb runs
+            // the whole cut end-to-end instead.
             walk: while (true) {
-                const owners = edge_groups.get(entry_key) orelse break :walk;
-                if (owners.n != 2) break :walk;
-                const next_gid = if (owners.g[0] == current_gid) owners.g[1] else if (owners.g[1] == current_gid) owners.g[0] else break :walk;
-                if (visited.contains(next_gid)) break :walk;
-                const next_loop = loops.getPtr(next_gid) orelse break :walk;
-                if (next_loop.items.len != 4) break :walk;
+                const pass_needed = (tri_edge_uses.get(entry_key) orelse 0) > 1;
+                const owners = edge_groups.get(entry_key) orelse {
+                    blocked = blocked or pass_needed;
+                    break :walk;
+                };
+                if (owners.n != 2) {
+                    blocked = blocked or pass_needed;
+                    break :walk;
+                }
+                const next_gid = if (owners.g[0] == current_gid) owners.g[1] else if (owners.g[1] == current_gid) owners.g[0] else {
+                    blocked = true;
+                    break :walk;
+                };
+                if (visited.contains(next_gid)) break :walk; // ring closure — clean
+                const next_loop = loops.getPtr(next_gid) orelse {
+                    blocked = true;
+                    break :walk;
+                };
+                if (next_loop.items.len != 4) {
+                    blocked = true;
+                    break :walk;
+                }
                 if (cut_mask) |mask| {
                     for (buckets.getPtr(next_gid).?.items) |tf| {
-                        if (!mask[tf]) break :walk;
+                        if (!mask[tf]) {
+                            blocked = true;
+                            break :walk;
+                        }
                     }
                 }
                 var entry: usize = 4;
@@ -2873,7 +2916,10 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
                         break;
                     }
                 }
-                if (entry == 4) break :walk;
+                if (entry == 4) {
+                    blocked = true;
+                    break :walk;
+                }
                 var q: [4][3]f32 = undefined;
                 qi = 0;
                 while (qi < 4) : (qi += 1) q[qi] = next_loop.items[(entry + qi) % 4];
@@ -2881,13 +2927,17 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
                 crossed.append(alloc, .{ .gid = next_gid, .q = q }) catch return null;
                 const xka = cutPosKey(q[2]);
                 const xkb = cutPosKey(q[3]);
-                if (xka == xkb) break :walk;
+                if (xka == xkb) {
+                    blocked = true;
+                    break :walk;
+                }
                 entry_key = (@as(u128, @min(xka, xkb)) << 64) | @max(xka, xkb);
                 current_gid = next_gid;
             }
         }
     }
     if (seed_count == 0 or crossed.items.len == 0) return null;
+    if (blocked) return null; // an arm couldn't finish — the plane comb completes the cut
 
     var edge_points = std.AutoHashMapUnmanaged(u128, [][3]f32){};
     defer {
@@ -3819,6 +3869,26 @@ test "ring parametric cuts stop at an open two-quad strip boundary" {
     defer distinct.deinit(alloc);
     for (r.groups.?) |gid| try distinct.put(alloc, gid, {});
     try testing.expectEqual(@as(u32, 4), distinct.count());
+}
+
+test "ring parametric cuts refuse when an arm dies on a non-quad (req_3119)" {
+    // One quad with a triangle glued to every edge: whichever edge pair the walk
+    // crosses, the neighbor is a non-quad, so a parametric result would leave
+    // those faces uncut (the pyramid's horizontal-bands-then-vertical-cut bug).
+    // The cutter must return null so the caller's plane comb cuts end-to-end.
+    const pos = [_]f32{
+        0, 0, 0, 1, 0, 0, 1,   1,   0,
+        0, 0, 0, 1, 1, 0, 0,   1,   0,
+        0, 0, 0, 1, 0, 0, 0.5, -1,  0,
+        1, 0, 0, 1, 1, 0, 2,   0.5, 0,
+        1, 1, 0, 0, 1, 0, 0.5, 2,   0,
+        0, 1, 0, 0, 0, 0, -1,  0.5, 0,
+    };
+    const groups = [_]u32{ 0, 0, 1, 2, 3, 4 };
+    const seed = [_]bool{ true, true, false, false, false, false };
+    const cuts = [_]f32{0.5};
+    try testing.expect(ringParametricCutsSoup(pos[0..], 6, groups[0..], seed[0..], null, 0, cuts[0..]) == null);
+    try testing.expect(ringParametricCutsSoup(pos[0..], 6, groups[0..], seed[0..], null, 1, cuts[0..]) == null);
 }
 
 test "ring cut: open strip ends at the mesh boundary instead of wrapping" {

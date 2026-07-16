@@ -2081,6 +2081,50 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
 /// the live mesh — the popup's live preview. offset_frac is 0..1 of the span (0.5 = the
 /// even comb). Zero surviving planes (offset pushed them all out) restores the bare base,
 /// so scrubbing the offset never strands a stale cut on screen.
+/// Whether a parametric ring result covers every in-scope authored face the
+/// equivalent plane comb would cross. Subdivided groups are recovered from the
+/// result itself (a subdivided quad always emits at least one MINTED strip whose
+/// group differs from its source face's); any base group a plane strictly
+/// crosses that was never subdivided is a face the ring skipped.
+fn lcRingCoversPlanes(s: *const LcSession, d: usize, planes: []const f32, groups: []const u32, cut: mesh_edit.CutResult) bool {
+    var visited = std.AutoHashMapUnmanaged(u32, void){};
+    defer visited.deinit(std.heap.c_allocator);
+    if (cut.groups) |cut_groups| {
+        var t: u32 = 0;
+        while (t < cut.tri_count) : (t += 1) {
+            const src = cut.src_face[t];
+            if (src >= s.tri_count) continue;
+            if (cut_groups[t] != groups[src]) visited.put(std.heap.c_allocator, groups[src], {}) catch return false;
+        }
+    }
+    const n = s.dirs[d];
+    for (planes) |p| {
+        var side = std.AutoHashMapUnmanaged(u32, [2]bool){};
+        defer side.deinit(std.heap.c_allocator);
+        var f: u32 = 0;
+        while (f < s.tri_count) : (f += 1) {
+            const g = groups[f];
+            if (g == model_source.NO_FACE_GROUP) continue;
+            if (visited.contains(g)) continue;
+            if (!s.base_scope[f]) continue;
+            var k: u32 = 0;
+            while (k < 3) : (k += 1) {
+                const b = (@as(usize, f) * 3 + k) * 3;
+                const sd = n[0] * s.base_pos[b] + n[1] * s.base_pos[b + 1] + n[2] * s.base_pos[b + 2] - p;
+                const gop = side.getOrPut(std.heap.c_allocator, g) catch return false;
+                if (!gop.found_existing) gop.value_ptr.* = .{ false, false };
+                if (sd > 1e-4) gop.value_ptr.*[0] = true;
+                if (sd < -1e-4) gop.value_ptr.*[1] = true;
+            }
+        }
+        var it = side.iterator();
+        while (it.next()) |e| {
+            if (e.value_ptr.*[0] and e.value_ptr.*[1]) return false; // crossed, never cut
+        }
+    }
+    return true;
+}
+
 pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     const s: *LcSession = if (g_lc) |*sp| sp else return false;
     const d: usize = @min(dir, 1);
@@ -2109,7 +2153,21 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
             mesh_edit.parametricQuadCutsSoup(s.base_pos, s.tri_count, groups, s.base_cut_mask, @intCast(d), fractions[0..fraction_count])
         else
             mesh_edit.ringParametricCutsSoup(s.base_pos, s.tri_count, groups, s.base_cut_mask, s.base_scope, @intCast(d), fractions[0..fraction_count]);
-        if (cut_result) |cut| {
+        if (cut_result) |cut| ring: {
+            // The ring result only stands when it covers every in-scope face the
+            // equivalent plane comb would cross. A ring can CLOSE cleanly and still
+            // skip faces in the cut's path — after horizontal band cuts, a pyramid's
+            // vertical belt closes around four frustum quads while the apex
+            // triangles and base sit squarely in the planes' way (req_3119) — and
+            // the studio contract is a FULL slice. Basic cuts are selection-scoped
+            // by design and skip the check.
+            if (!s.basic and !lcRingCoversPlanes(s, d, planes[0..n_planes], groups, cut)) {
+                std.heap.c_allocator.free(cut.positions);
+                std.heap.c_allocator.free(cut.src_face);
+                if (cut.groups) |g| std.heap.c_allocator.free(g);
+                std.debug.print("[mesh] loop cut ring skips faces in the cut's path; using the plane comb for a full slice\n", .{});
+                break :ring;
+            }
             defer std.heap.c_allocator.free(cut.positions);
             defer std.heap.c_allocator.free(cut.src_face);
             defer if (cut.groups) |g| std.heap.c_allocator.free(g);
@@ -2152,8 +2210,9 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
                 s.last_face_part = next_parts;
             }
             return lcInstallSoup(cut.positions, cut.tri_count, cut.groups, colors);
+        } else {
+            std.debug.print("[mesh] loop cut needs complete authored quads; using plane fallback for this selection\n", .{});
         }
-        std.debug.print("[mesh] loop cut needs complete authored quads; using plane fallback for this selection\n", .{});
     }
 
     // Cut the BASE soup by each plane in turn (planeCutSoup allocs a fresh soup per

@@ -183,6 +183,25 @@ if (op === 'merge') {
   equal = fractionsOk && untouchedOk && editableOk && shapeOk;
   expectedText = `groups=${op === 'cut' ? seedGroupCount + 2 : fixture === 'bridge' ? `7+2*S` : fixture === 'pyramid' ? 13 : 14} S=${op === 'cut' ? 1 : fixture === 'bridge' ? '3..5' : 4}`;
   details = ` S=${subdivided} newVertices=${newCount} fractions=${fractionsOk ? 1 : 0} untouched=${untouchedOk ? 1 : 0} editable=${journalEditable}/${derivedEditable}`;
+} else if (op === 'loopcutmix') {
+  // req_3119 (pyramid only): one horizontal band cut, then a vertical cut seeded on
+  // a band QUAD. The vertical belt ring CLOSES around the four frustum bands while
+  // the apex triangles and base sit in the planes' path, so the coverage gate must
+  // hand the cut to the plane comb for the full slice. After the horizontal cut the
+  // model is 9 groups; the vertical plane at x=0.1 crosses front/back bands,
+  // front/back/right apex triangles, and the base: 9 + 6 splits = 15 groups. Of
+  // each split apex triangle only ONE piece keeps the apex vertex, so exactly 4
+  // output groups touch the apex: the three apex-side pieces + the whole left apex.
+  const apex = key([0, 1, 0] as V3);
+  const touching = new Set<number>();
+  for (let t = 0; t < nativeDoc.groups.length; t += 1) {
+    if ([0, 1, 2].some((c) => key([nativeDoc.vertices[(t * 3 + c) * 8]!, nativeDoc.vertices[(t * 3 + c) * 8 + 1]!, nativeDoc.vertices[(t * 3 + c) * 8 + 2]!]) === apex)) touching.add(nativeDoc.groups[t]!);
+  }
+  const derivedEditable = edgeContract(nativeDoc.vertices, nativeDoc.groups).editableEdges;
+  const journalEditable = nativeJournal?.topology?.editableEdges;
+  equal = actual.groups === 15 && touching.size === 4 && journalEditable === derivedEditable;
+  expectedText = 'groups=15 apexGroups=4';
+  details = ` apexGroups=${touching.size} editable=${journalEditable}/${derivedEditable}`;
 } else {
   throw new Error(`unknown op ${op}`);
 }

@@ -30,7 +30,9 @@ run_native() {
 status=0
 for fixture in sheared nonsquare bridge pyramid; do
   run_native "$fixture" "$fixture-seed" 'report'
-  for op in solidify merge loopcut cut; do
+  ops_list='solidify merge loopcut cut'
+  [ "$fixture" = pyramid ] && ops_list="$ops_list loopcutmix"
+  for op in $ops_list; do
     case "$op" in
       solidify) native='mode:3;sel:0;solidify' ;;
       merge) native='mode:3;range:0,2;merge' ;;
@@ -40,6 +42,11 @@ for fixture in sheared nonsquare bridge pyramid; do
       # at the span thirds (dir 0 = X planes = the vertical cut family).
       loopcut) if [ "$fixture" = pyramid ]; then native='mode:3;sel:2;lcbegin;lcprev:1,2,0.5;lcend:1'; else native='mode:3;sel:0;lcbegin;lcprev:0,2,0.5;lcend:1'; fi ;;
       cut) native='mode:3;sel:0;lcbegin:1;lcprev:0,2,0.5;lcend:1' ;;
+      # the req_3119 order bug: one horizontal band cut, then a VERTICAL cut seeded
+      # on a band quad (tri 0 after the first commit). The vertical belt ring closes
+      # around the four frustum bands while the apex triangles + base sit in the
+      # planes' path — the coverage gate must hand the cut to the plane comb.
+      loopcutmix) native='mode:3;sel:2;lcbegin;lcprev:1,1,0.5;lcend:1;sel:0;lcbegin;lcprev:0,1,0.4;lcend:1' ;;
     esac
     tag="$fixture-$op"
     run_native "$fixture" "$tag" "$native"
