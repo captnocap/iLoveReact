@@ -279,6 +279,71 @@ event to carry an appearance fingerprint from day one.
 
 ---
 
+## The Media Engine + Diegetic Intel (the game makes its own content, live)
+
+**The game generates its own media as events happen, and that media is BOTH the
+prosecution's evidence AND the player's early-warning system.** Crime → the world
+reports on it → the player consumes those reports to decide the next move. The
+content pipeline, the tension engine, and the tutorial are the same loop.
+
+### The media is real capture, not fakery
+
+`framework/gpu/capture.zig` already does screenshots + live H.264/VP9 recording
+(ffmpeg pipe, hooked at end-of-frame). So the game's media surfaces are a
+*targeted use of a shipped capability*, played back on the **screen-channel**
+system (any in-world TV) and the **phone**:
+
+- **Major-network news** about the crime (DailyBuzz/VidTube-equivalent channels).
+- **Police bodycam** + **FlockCamera** footage (Flock/FlockBook crossover — the
+  surveillance grid is diegetic).
+- **The courtroom is recorded and plays over the news too.** The trial from the
+  Justice Loop becomes content, closing the circle.
+
+Cheap-path note (storage): full recorded video of every past event is expensive.
+The realistic build is a **short ring-buffer of actual clips** for recent/hot
+events + **stylized reconstructions** (a captured still + the record's text) for
+everything older — reconstructed from the same record rings, not stored as video.
+
+### The core mechanic: the "dirty outfit" state is NEVER exposed
+
+Each distinct **look** (outfit + face/mask) carries its own hidden accumulated
+exposure (built from the appearance fingerprints on witness/camera events). **The
+player is never shown a burn number or a "compromised" flag.** They find out the
+way a real criminal would — **by watching the news and reading how specifically it
+describes them:**
+
+- "Police seek a *male suspect*" → vague, probably still safe.
+- "…wore a *red jacket and backwards cap*" → your fit is now a description; review
+  it, decide whether to change threads.
+- "…and this **FlockCamera photo**" → burned; that look is done.
+
+This is **diegetic intel as a design law:** the tension is *uncertainty*. You're
+never told you got away with it — you infer your exposure from the media the game
+generated, and you can guess wrong. Change threads too early = paranoid waste;
+too late = you wore a burned fit into a cop's line of sight.
+
+### What this turns wardrobe into
+
+A real **identity/appearance system**: the player maintains multiple looks, each
+with an **independent, hidden burn level**; rotating threads is active play, not
+cosmetics. Booking (Justice Loop) hard-locks one look as *known to police*. Framing
+(commit crimes resembling an NPC) pushes exposure onto *their* description instead
+of yours. All of it reads from the one appearance-fingerprint dependency above —
+which is now load-bearing for a THIRD system, reinforcing: **design it first.**
+
+### Build status
+
+| Piece | Exists | New work |
+|---|---|---|
+| Screenshot + H.264/VP9 capture | ✅ `capture.zig` | ring-buffer recent events |
+| Screen channels / phone playback | 🟡 (screens designed) | news/bodycam/court channels |
+| Appearance fingerprint on events | 🟡 **shared dependency** | (same one the Justice Loop needs) |
+| Per-look hidden burn state | 🟡 | accumulate exposure per outfit+face |
+| News description generation | 🟡 | fingerprint → specificity-scaled text/media |
+| Wardrobe / look rotation | 🟡 | identity inventory |
+
+---
+
 ## Blueprints, 3D Printing & Crafting (Studio as the crafting system)
 
 > **This is a flagship system — execute flawlessly.** It is the deepest reuse of
