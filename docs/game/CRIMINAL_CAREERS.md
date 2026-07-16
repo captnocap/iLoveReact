@@ -514,6 +514,32 @@ this). Consequences:
 - **One substrate, two fidelities:** baked and dynamic read the same rings, so
   content authored for one is never wasted on the other.
 
+### Radio formats (KCHAT et al.) — content sinks for the record rings
+
+Radio (heard while driving) is the ambient audio surface for generated content.
+Formats are **content sinks**: each is a lens that turns the record rings into a
+stream. Flagship bit —
+
+**The Confessional (a priest's booth, mic'd up).** A station that is just an
+open confessional booth on air — a slew of confessions. Systemically it's rich,
+not just flavor:
+- **Confessions = the crime records read aloud, first-person.** Every crime in
+  the sim (NPC-committed, or player-adjacent) can surface as someone unburdening
+  it. Infinite self-generating content from the rings; the schizo/unhinged register
+  fits (mundane "I skim the tip jar" → 847-tier).
+- **It's a diegetic INTEL LEAK** (same law as the burn state): a witness confessing
+  guilt tells you a witness *exists* — "I saw a man in a red jacket do it and said
+  nothing, forgive me." Now you know to find and silence them (→ WRJ). You learn
+  about the case against you by hearing someone else's guilt.
+- **Lore-owned:** of course **Prophet Margin / Indie Jesus** (feargod.org / Terms
+  of Worship) mic'd the confessional and sells the ad slots — monetized absolution,
+  same energy as Holy Shit.
+- **Baked vs dynamic:** floor = MS-Sam reads templated confessions assembled from
+  records; ceiling = the model writes genuine, specific, unhinged ones, TTS-voiced.
+
+Other format seeds (same sink pattern): news/headlines, a shitcoin-market call-in,
+schizo-post AM ranting, a wallet-whale gossip show (feeds the treasure hunt).
+
 ---
 
 ## NPC Memory & the "Dumb Fine-Tune" (persistent character without training)
