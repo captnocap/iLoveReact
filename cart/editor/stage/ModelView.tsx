@@ -1859,7 +1859,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     // RJIT_MESHOPS: a ';'-separated gesture script run against the live host doors — the
     // headless repro harness for selection/tint bugs (req_2613). Each op waits a few
     // frames so camera-dependent doors (pick/box) act on a drawn viewport. Ops:
-    //   mode:N sel:N add:N range:lo,hi pick:x,y pickadd:x,y box:x0,y0,x1,y1 snap revert
+    //   mode:N sel:N vertex:N edge:N add:N range:lo,hi pick:x,y pickadd:x,y box:x0,y0,x1,y1 snap revert
     //   clear scope:lo,hi nudge:axis,amt scaleby:factor gizmo:N undo redo del flip glass spiketrace:0|1
     //   grouppaint:lo,hi,r,g,b
     //   detail:px wait:frames report atlas:/path.png parts historylog duprange:lo,hi dupalias:lo,hi addpart:kind orbit:dx,dy
@@ -1868,7 +1868,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     //   progapply  (stroke journal + paint layers, req_2672)
     //   patharc:lo,hi,axis,bays,turnDeg,riseModel
     //   patharcmulti:axis,bays,turnDeg,riseModel,lo,hi[,lo,hi…]
-    //   pathpoints:lo,hi,axis,x,y,z,...
+    //   pathpoints:lo,hi,axis,x,y,z,... solidify merge extrudeface:distance extrudeedge:distance
+    //   detach contract:/absolute/output-prefix (port-parity fixture dump)
     // `RJIT_MESHOPS=@/path/ops.txt` reads the script from a FILE — re-read on every
     // eval, so a reload-torture run (req_2914) can rewrite the file between reloads
     // and script a DIFFERENT phase per remount (env vars are fixed for the process).
@@ -1899,6 +1900,8 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         const a = (sepIdx < 0 ? '' : op.slice(sepIdx + 1)).split(',').map((s) => s.trim());
         if (name === 'mode') chooseSelMode(num(a[0]));
         else if (name === 'sel') host.__mesh_edit_select_face?.(num(a[0]), 0);
+        else if (name === 'vertex') host.__mesh_edit_select_vertex?.(num(a[0]), 0);
+        else if (name === 'edge') host.__mesh_edit_select_edge?.(num(a[0]), 0);
         else if (name === 'add') host.__mesh_edit_select_face?.(num(a[0]), 1);
         else if (name === 'range') host.__mesh_edit_select_group_range?.(num(a[0]), num(a[1]), 0);
         else if (name === 'pick') host.__mesh_edit_pick?.(num(a[0]), num(a[1]), 0);
@@ -1954,6 +1957,21 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         // lcstate: log the raw __mesh_lc_state JSON — the headless proof the read-back
         // door echoes the session's last-previewed dir/cuts/offsetFrac + live key.
         else if (name === 'lcstate') console.error(`[meshops] lcstate → ${host.__mesh_lc_state?.() ?? 'n/a'}`);
+        // Native-op parity harness doors. These deliberately stay in the existing
+        // headless replay language: the UI continues to own the normal buttons,
+        // while a fixture can drive the identical resident operation and capture its
+        // observable mesh document + journal topology without a screenshot.
+        else if (name === 'solidify') { const r = meshSolidify(); adoptMesh(r); console.error(`[meshops] solidify → ${JSON.stringify(r)}`); }
+        else if (name === 'merge') { const r = meshMergeFaces(); adoptMesh(r); console.error(`[meshops] merge → ${JSON.stringify(r)}`); }
+        else if (name === 'extrudeface') { const r = meshExtrudeFace(Number(a[0]) || 0); adoptMesh(r); console.error(`[meshops] extrudeface:${a[0]} → ${JSON.stringify(r)}`); }
+        else if (name === 'extrudeedge') { const r = meshExtrudeEdge(Number(a[0]) || 0); adoptMesh(r); console.error(`[meshops] extrudeedge:${a[0]} → ${JSON.stringify(r)}`); }
+        else if (name === 'detach') { const r = meshDetach(); adoptMesh(r); console.error(`[meshops] detach → ${JSON.stringify(r)}`); }
+        else if (name === 'contract') {
+          const prefix = a.join(',');
+          const mesh = prefix ? host.__model_meshdoc_write?.(`${prefix}.rjmd`) : 0;
+          const journal = prefix ? host.__fs_write?.(`${prefix}.json`, host.__mesh_history_log?.() ?? '') : false;
+          console.error(`[meshops] contract → mesh=${mesh} journal=${journal} prefix=${prefix}`);
+        }
         else if (name === 'del') adoptMesh(meshDeleteSelection());
         else if (name === 'flip') { const r = meshFlipFaces(); adoptMesh(r); console.error(`[meshops] flip → ${JSON.stringify(r)}`); }
         // glass — toggle the selected faces as glass through the real door (req_2928's
