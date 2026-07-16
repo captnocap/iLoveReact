@@ -363,6 +363,67 @@ which is now load-bearing for a THIRD system, reinforcing: **design it first.**
 
 ---
 
+## Conformity as Camouflage (behavioral stealth — the inverse tell)
+
+A third suspicion axis, alongside the fast loop (vision/hearing/light → detection
+meter) and the slow loop (records → justice). This one is **social-surveillance
+cadence**, and it *inverts* stealth: everywhere else you evade by minimizing your
+footprint — here **being too clean is the tell.**
+
+### The idea
+
+The culture is engineered to waste time (Drown = "Sink Your Life Away"; FlockBook;
+the doomscroll). Everyone participates for hours. So **not** participating is
+anomalous: you have a Drown account but never sink; everyone else does — *bit odd,
+don't you think?* Your **behavioral signature** (time-on-apps, post cadence, the
+rituals) is compared against the **population baseline**, and deviation reads as:
+burner account, bot, or an operator with somewhere better to be. **The healthy
+person is the suspect.** Satire that bites — and true.
+
+### How it works
+
+- Each citizen (the social cold systems already model Drown/FlockBook activity)
+  contributes to a **population baseline distribution** of participation.
+- The player's alias has an **activity signature**; low participation = a rising
+  **conformity anomaly** on that identity.
+- **Who notices is not a cop — it's the platform / the algorithm** (WHY-C, the
+  FlockBook "Human Tracking" grid). Slow-loop, ambient. Enforcement is diegetic
+  and darkly funny: a **Hot Fixed** (WHY-C psychiatric telemedicine) "we noticed
+  you've been quiet — mandatory wellness check-in," a KYC review flag, ad-targeting
+  that singles you out. Non-engagement triggers the dystopia's immune response.
+- **Diegetic intel (same law as the burn state):** the conformity score is NOT
+  shown as a number. You infer you're becoming an anomaly from in-world signals —
+  the Hot Fixed prompt, an NPC remarking you're "never on," the ads changing.
+- **NPC awareness** (via M3A): "you never sink" becomes a social fact an NPC holds
+  (L5 co-occurrence, L2 "this person is odd"), referenced in dialogue.
+
+### The tension + counterplay (and the tuning warning)
+
+- **Time is the resource; the culture taxes it.** Performing normalcy (actually
+  opening Drown, sinking, posting) costs the same game-time you'd rather spend on
+  jobs. Opting out is efficient but suspicious. Pure no-pause-world tension: cover
+  maintenance competes with crime.
+- **Counterplay = laundering behavior:** bot/idle your presence (leave Drown
+  farming engagement hours while you work) — but inauthentic patterns are
+  detectable too, exactly like wash-trading is detectable. Or genuinely spend the
+  time (safe, slow). Same risk/reward shape as everything else.
+- **⚠ Tuning law:** this must be a **soft, optional-depth pressure**, NOT a
+  mandatory doomscroll chore. Low conformity should *slightly* raise baseline
+  suspicion / make you more memorable / unlock the enforcement gags — never
+  instant-bust. Keep it thematic first, mechanical second; a grind here would
+  punish the player for the game's own satirical point.
+
+### Build status
+
+| Piece | Exists | New work |
+|---|---|---|
+| Social activity sim (Drown/FlockBook) | 🟡 (engAIge cold systems, port as design) | population baseline distribution |
+| Player alias activity signature | 🟡 | per-identity participation tracking |
+| Conformity-anomaly score (hidden) | 🟡 | deviation vs baseline; diegetic-only surfacing |
+| Enforcement gags (Hot Fixed / KYC / ads) | 🟡 | wire lore apps → anomaly response |
+
+---
+
 ## Static Floor / Dynamic Ceiling (the AI content toggle)
 
 The game has **two presentation tiers over one shared substrate** (the event bus
