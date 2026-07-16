@@ -225,6 +225,8 @@ export const COMMANDS: Command[] = [
   // reverse winding + UV corner order so an inside-out created face points outward.
   { id: 'mesh-flip-face', menu: 'Edit', scope: 'model', name: 'Flip Face', icon: 'FlipVertical2', key: 'X', context: true, native: true, undoable: true, tool: true },
   { id: 'mesh-loopcut', menu: 'Edit', scope: 'model', name: 'Loop Cut', icon: 'Scissors', key: 'L', context: true, native: true, undoable: true, tool: true },
+  // Basic cut subdivides ONLY selected faces; loop cut propagates around the ring.
+  { id: 'mesh-cut', menu: 'Edit', scope: 'model', name: 'Cut', icon: 'Slice', key: 'T', context: true, native: true, undoable: true, tool: true },
   // Face-selection ops: detach peels the selection into a NEW part; glass toggles translucency;
   // solidify thickens in place; merge fuses 2+ authored faces into one.
   { id: 'mesh-detach', menu: 'Edit', scope: 'model', name: 'Detach Faces', icon: 'Ungroup', key: 'D', context: true, native: true, undoable: true, tool: true },
@@ -368,7 +370,7 @@ const MESH_SUBMENU: MenuNode = {
   children: [
     section('Select'), cmd('mesh-vertex'), cmd('mesh-edge'), cmd('mesh-face'),
     section('Transform'), cmd('mesh-move'), cmd('mesh-scale'), cmd('mesh-scale-by'), cmd('mesh-rotate'), cmd('mesh-sym-x'), cmd('mesh-sym-y'), cmd('mesh-sym-z'), cmd('mesh-focus'), cmd('mesh-wire'),
-    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
+    section('Topology'), cmd('mesh-extrude'), cmd('mesh-extrude-face'), cmd('mesh-create-face'), cmd('mesh-flip-face'), cmd('mesh-loopcut'), cmd('mesh-cut'), cmd('mesh-detach'), cmd('mesh-glass'), cmd('mesh-solidify'), cmd('mesh-merge-faces'),
     section('Parts'),
     { kind: 'sub', id: 'Add Primitive', label: 'Add Primitive', icon: 'Boxes', scope: 'model', children: ADD_MESH_COMMANDS.map((c) => cmd(c.id)) },
     cmd('mesh-duplicate-part'), cmd('mesh-path-array'), cmd('mesh-mirror-x'), cmd('mesh-mirror-y'), cmd('mesh-mirror-z'), cmd('mesh-merge-down'), cmd('mesh-import-part'),
@@ -426,6 +428,7 @@ export function meshToolCommands(): Command[] {
   return MESH_TOOL_IDS.map(commandById);
 }
 
+// The contextual topology pair stays ordered as cmd('mesh-loopcut'), cmd('mesh-cut').
 // The contextual topology ops that apply to the current selection: extrude/loop-cut on a single
 // edge, create-face on two or more, and the face-selection toolset (loop-cut/detach/glass/
 // solidify/merge) in face mode — loop cut on a FACE is the studio's Blockbench treatment
@@ -441,7 +444,7 @@ export function meshTopoCommands(tool: { selMode: number; sel: number }, selecte
   if (tool.selMode === 3) {
     return [
       ...(tool.sel === 1 ? [commandById('mesh-extrude-face')] : []),
-      commandById('mesh-flip-face'), commandById('mesh-loopcut'), commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'),
+      commandById('mesh-flip-face'), commandById('mesh-loopcut'), commandById('mesh-cut'), commandById('mesh-detach'), commandById('mesh-glass'), commandById('mesh-solidify'),
       // Outliner multi-select is represented host-side by selecting every authored face
       // in those parts. Offering Merge Faces here would collapse all of those groups to
       // one face and strand zero-face outliner rows (req_2870). The parts command below

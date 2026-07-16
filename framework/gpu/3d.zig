@@ -1753,6 +1753,7 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
 // at begin, every preview re-cuts from a captured base, journal-commit only on
 // end(commit) — cancel restores the base exactly, leaving no undo entry.
 const LcSession = struct {
+    basic: bool,
     base_pos: []f32, // positions-only soup at begin (tri_count * 9)
     tri_count: u32,
     base_groups: ?[]u32, // per-tri authored groups at begin (null = ungrouped import)
@@ -2018,7 +2019,7 @@ pub const LcInfo = struct { size0: f32, size1: f32 };
 /// the normal axis; the other two are the cut candidates) and the selection's extent on
 /// each. Returns the two span sizes for the popup, or null when not in face mode /
 /// nothing selected. A prior session (stale popup) is dropped, not committed.
-pub fn meshLoopCutFaceBegin() ?LcInfo {
+pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
     lcFree();
     if (!model_paint.hasTarget()) return null;
     if (mesh_edit.mode() != .face) return null;
@@ -2146,6 +2147,7 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
     }
 
     g_lc = .{
+        .basic = basic,
         .base_pos = pos,
         .tri_count = tri_count,
         .base_groups = groups,
@@ -2159,7 +2161,7 @@ pub fn meshLoopCutFaceBegin() ?LcInfo {
         .lo = lo,
         .hi = hi,
         .keep_group = keep_group,
-        .snap = journalSnapshotCurrent("loop cut"),
+        .snap = journalSnapshotCurrent(if (basic) "cut" else "loop cut"),
         .sel_center = center,
     };
     return .{ .size0 = hi[0] - lo[0], .size1 = hi[1] - lo[1] };
@@ -2193,10 +2195,38 @@ pub fn meshLoopCutFacePreview(dir: u32, cuts: u32, offset_frac: f32) bool {
     s.drag_raw_frac = s.last_offset_frac; // steppers/popup moves re-seed the drag accumulator
 
     if (s.base_groups) |groups| {
-        if (mesh_edit.parametricQuadCutsSoup(s.base_pos, s.tri_count, groups, s.base_cut_mask, @intCast(d), fractions[0..fraction_count])) |cut| {
+        const cut_result = if (s.basic)
+            mesh_edit.parametricQuadCutsSoup(s.base_pos, s.tri_count, groups, s.base_cut_mask, @intCast(d), fractions[0..fraction_count])
+        else
+            mesh_edit.ringParametricCutsSoup(s.base_pos, s.tri_count, groups, s.base_cut_mask, s.base_scope, @intCast(d), fractions[0..fraction_count]);
+        if (cut_result) |cut| {
             defer std.heap.c_allocator.free(cut.positions);
             defer std.heap.c_allocator.free(cut.src_face);
             defer if (cut.groups) |g| std.heap.c_allocator.free(g);
+            // A basic multi-cut keeps the primitive byte-for-byte and separates its
+            // later two-triangle strips here so every authored interval is addressable.
+            if (s.basic and fraction_count > 1) {
+                if (cut.groups) |cut_groups| {
+                    var next_group: u32 = 0;
+                    for (cut_groups) |gid| {
+                        if (gid != model_source.NO_FACE_GROUP and gid >= next_group) next_group = gid + 1;
+                    }
+                    var run_start: usize = 0;
+                    while (run_start < cut.src_face.len) {
+                        var run_end = run_start + 1;
+                        while (run_end < cut.src_face.len and cut.src_face[run_end] == cut.src_face[run_start]) : (run_end += 1) {}
+                        if (run_end - run_start == @as(usize, fraction_count + 1) * 2) {
+                            var strip: usize = 2;
+                            while (strip <= fraction_count) : (strip += 1) {
+                                cut_groups[run_start + strip * 2] = next_group;
+                                cut_groups[run_start + strip * 2 + 1] = next_group;
+                                next_group += 1;
+                            }
+                        }
+                        run_start = run_end;
+                    }
+                }
+            }
             const colors = std.heap.c_allocator.alloc(u8, @as(usize, cut.tri_count) * 4) catch return false;
             defer std.heap.c_allocator.free(colors);
             if (!mesh_edit.inheritFaceRgba(s.base_colors, cut.src_face, colors)) return false;

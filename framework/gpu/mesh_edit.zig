@@ -2750,6 +2750,230 @@ pub fn parametricQuadCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
     return .{ .positions = positions, .groups = groups, .src_face = src_face, .tri_count = @intCast(positions.len / 9) };
 }
 
+/// Face-mode loop cut: seed complete selected quads, then carry their terminating
+/// edge pair through the authored quad ring. Every undirected crossed edge owns one
+/// interpolated point list so both incident faces emit identical f32 positions.
+pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []const u32, seed_mask: []const bool, cut_mask: ?[]const bool, direction: u32, fractions: []const f32) ?CutResult {
+    if (tri_count == 0 or pos.len < @as(usize, tri_count) * 9 or groups_in.len < tri_count or seed_mask.len < tri_count) return null;
+    if (cut_mask) |mask| if (mask.len < tri_count) return null;
+    var previous: f32 = 0;
+    for (fractions) |t| {
+        if (!(t > previous and t < 1)) return null;
+        previous = t;
+    }
+
+    var order = std.ArrayListUnmanaged(u32){};
+    defer order.deinit(alloc);
+    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)){};
+    defer {
+        var bit = buckets.valueIterator();
+        while (bit.next()) |b| b.deinit(alloc);
+        buckets.deinit(alloc);
+    }
+    var f: u32 = 0;
+    while (f < tri_count) : (f += 1) {
+        const gid = groups_in[f];
+        if (gid == model_source.NO_FACE_GROUP) continue;
+        const gop = buckets.getOrPut(alloc, gid) catch return null;
+        if (!gop.found_existing) {
+            gop.value_ptr.* = .{};
+            order.append(alloc, gid) catch return null;
+        }
+        gop.value_ptr.append(alloc, f) catch return null;
+    }
+    if (order.items.len == 0) return null;
+
+    var loops = std.AutoHashMapUnmanaged(u32, CutLoop){};
+    defer {
+        var lit = loops.valueIterator();
+        while (lit.next()) |loop| loop.deinit(alloc);
+        loops.deinit(alloc);
+    }
+    const EdgeGroups = struct { g: [2]u32, n: u32 };
+    var edge_groups = std.AutoHashMapUnmanaged(u128, EdgeGroups){};
+    defer edge_groups.deinit(alloc);
+    for (order.items) |gid| {
+        var loop = CutLoop{};
+        if (!chainGroupLoop(pos, buckets.getPtr(gid).?.items, &loop)) {
+            loop.deinit(alloc);
+            continue;
+        }
+        var i: usize = 0;
+        while (i < loop.items.len) : (i += 1) {
+            const ka = cutPosKey(loop.items[i]);
+            const kb = cutPosKey(loop.items[(i + 1) % loop.items.len]);
+            if (ka == kb) continue;
+            const edge_key: u128 = (@as(u128, @min(ka, kb)) << 64) | @max(ka, kb);
+            const eop = edge_groups.getOrPut(alloc, edge_key) catch {
+                loop.deinit(alloc);
+                return null;
+            };
+            if (!eop.found_existing) eop.value_ptr.* = .{ .g = .{ 0, 0 }, .n = 0 };
+            if (eop.value_ptr.n < 2) eop.value_ptr.g[eop.value_ptr.n] = gid;
+            eop.value_ptr.n += 1;
+        }
+        loops.put(alloc, gid, loop) catch {
+            loop.deinit(alloc);
+            return null;
+        };
+    }
+
+    const Crossed = struct { gid: u32, q: [4][3]f32 };
+    var crossed = std.ArrayListUnmanaged(Crossed){};
+    defer crossed.deinit(alloc);
+    var visited = std.AutoHashMapUnmanaged(u32, void){};
+    defer visited.deinit(alloc);
+    var seed_count: u32 = 0;
+    for (order.items) |seed_gid| {
+        const tris = buckets.getPtr(seed_gid).?.items;
+        var seeded = true;
+        for (tris) |tf| seeded = seeded and seed_mask[tf];
+        if (!seeded) continue;
+        const seed_loop = loops.getPtr(seed_gid) orelse continue;
+        if (seed_loop.items.len != 4) continue;
+        seed_count += 1;
+        if (visited.contains(seed_gid)) continue;
+        var seed_q: [4][3]f32 = undefined;
+        const rotate: usize = if ((direction & 1) == 0) 0 else 1;
+        var qi: usize = 0;
+        while (qi < 4) : (qi += 1) seed_q[qi] = seed_loop.items[(rotate + qi) % 4];
+        visited.put(alloc, seed_gid, {}) catch return null;
+        crossed.append(alloc, .{ .gid = seed_gid, .q = seed_q }) catch return null;
+
+        var arm: u32 = 0;
+        while (arm < 2) : (arm += 1) {
+            const ea = if (arm == 0) seed_q[0] else seed_q[2];
+            const eb = if (arm == 0) seed_q[1] else seed_q[3];
+            const eka = cutPosKey(ea);
+            const ekb = cutPosKey(eb);
+            if (eka == ekb) continue;
+            var entry_key: u128 = (@as(u128, @min(eka, ekb)) << 64) | @max(eka, ekb);
+            var current_gid = seed_gid;
+            walk: while (true) {
+                const owners = edge_groups.get(entry_key) orelse break :walk;
+                if (owners.n != 2) break :walk;
+                const next_gid = if (owners.g[0] == current_gid) owners.g[1] else if (owners.g[1] == current_gid) owners.g[0] else break :walk;
+                if (visited.contains(next_gid)) break :walk;
+                const next_loop = loops.getPtr(next_gid) orelse break :walk;
+                if (next_loop.items.len != 4) break :walk;
+                if (cut_mask) |mask| {
+                    for (buckets.getPtr(next_gid).?.items) |tf| {
+                        if (!mask[tf]) break :walk;
+                    }
+                }
+                var entry: usize = 4;
+                qi = 0;
+                while (qi < 4) : (qi += 1) {
+                    const ka = cutPosKey(next_loop.items[qi]);
+                    const kb = cutPosKey(next_loop.items[(qi + 1) % 4]);
+                    if (ka == kb) continue;
+                    const edge_key: u128 = (@as(u128, @min(ka, kb)) << 64) | @max(ka, kb);
+                    if (edge_key == entry_key) {
+                        entry = qi;
+                        break;
+                    }
+                }
+                if (entry == 4) break :walk;
+                var q: [4][3]f32 = undefined;
+                qi = 0;
+                while (qi < 4) : (qi += 1) q[qi] = next_loop.items[(entry + qi) % 4];
+                visited.put(alloc, next_gid, {}) catch return null;
+                crossed.append(alloc, .{ .gid = next_gid, .q = q }) catch return null;
+                const xka = cutPosKey(q[2]);
+                const xkb = cutPosKey(q[3]);
+                if (xka == xkb) break :walk;
+                entry_key = (@as(u128, @min(xka, xkb)) << 64) | @max(xka, xkb);
+                current_gid = next_gid;
+            }
+        }
+    }
+    if (seed_count == 0 or crossed.items.len == 0) return null;
+
+    var edge_points = std.AutoHashMapUnmanaged(u128, [][3]f32){};
+    defer {
+        var pit = edge_points.valueIterator();
+        while (pit.next()) |points| alloc.free(points.*);
+        edge_points.deinit(alloc);
+    }
+    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    defer remap.deinit(alloc);
+    var next_id: u32 = 0;
+    for (groups_in[0..tri_count]) |gid| {
+        if (gid != model_source.NO_FACE_GROUP and gid >= next_id) next_id = gid + 1;
+    }
+    var out_pos = std.ArrayListUnmanaged(f32){};
+    defer out_pos.deinit(alloc);
+    var out_grp = std.ArrayListUnmanaged(u32){};
+    defer out_grp.deinit(alloc);
+    var out_src = std.ArrayListUnmanaged(u32){};
+    defer out_src.deinit(alloc);
+    const handled = alloc.alloc(bool, tri_count) catch return null;
+    defer alloc.free(handled);
+    @memset(handled, false);
+
+    for (crossed.items) |item| {
+        const q = item.q;
+        const directed = [2][2][3]f32{ .{ q[0], q[1] }, .{ q[3], q[2] } };
+        var cached: [2][]const [3]f32 = undefined;
+        var forward: [2]bool = undefined;
+        var edge_i: usize = 0;
+        while (edge_i < 2) : (edge_i += 1) {
+            const ka = cutPosKey(directed[edge_i][0]);
+            const kb = cutPosKey(directed[edge_i][1]);
+            const edge_key: u128 = (@as(u128, @min(ka, kb)) << 64) | @max(ka, kb);
+            const pop = edge_points.getOrPut(alloc, edge_key) catch return null;
+            if (!pop.found_existing) {
+                const points = alloc.alloc([3]f32, fractions.len) catch return null;
+                const a = if (ka < kb) directed[edge_i][0] else directed[edge_i][1];
+                const b = if (ka < kb) directed[edge_i][1] else directed[edge_i][0];
+                for (fractions, 0..) |t, i| points[i] = .{
+                    a[0] + (b[0] - a[0]) * t,
+                    a[1] + (b[1] - a[1]) * t,
+                    a[2] + (b[2] - a[2]) * t,
+                };
+                pop.value_ptr.* = points;
+            }
+            cached[edge_i] = pop.value_ptr.*;
+            forward[edge_i] = ka < kb;
+        }
+        const src = buckets.getPtr(item.gid).?.items[0];
+        var strip: usize = 0;
+        while (strip <= fractions.len) : (strip += 1) {
+            const entry_prev = if (strip == 0) q[0] else cached[0][if (forward[0]) strip - 1 else fractions.len - strip];
+            const entry_next = if (strip == fractions.len) q[1] else cached[0][if (forward[0]) strip else fractions.len - 1 - strip];
+            const exit_prev = if (strip == 0) q[3] else cached[1][if (forward[1]) strip - 1 else fractions.len - strip];
+            const exit_next = if (strip == fractions.len) q[2] else cached[1][if (forward[1]) strip else fractions.len - 1 - strip];
+            const strip_gid = if (strip == 0) item.gid else blk: {
+                const fresh = remapGroup(&remap, item.gid, &next_id);
+                _ = remap.remove(item.gid);
+                break :blk fresh;
+            };
+            const quad = [_][3]f32{ entry_prev, entry_next, exit_next, exit_prev };
+            if (!emitLoopFan(&out_pos, &out_src, &out_grp, true, quad[0..], src, strip_gid)) return null;
+        }
+        for (buckets.getPtr(item.gid).?.items) |tf| handled[tf] = true;
+    }
+    f = 0;
+    while (f < tri_count) : (f += 1) {
+        if (handled[f]) continue;
+        const base = @as(usize, f) * 9;
+        if (!emitTriPos(&out_pos, .{ pos[base], pos[base + 1], pos[base + 2] }, .{ pos[base + 3], pos[base + 4], pos[base + 5] }, .{ pos[base + 6], pos[base + 7], pos[base + 8] })) return null;
+        out_src.append(alloc, f) catch return null;
+        out_grp.append(alloc, groups_in[f]) catch return null;
+    }
+    const positions = out_pos.toOwnedSlice(alloc) catch return null;
+    const src_face = out_src.toOwnedSlice(alloc) catch {
+        alloc.free(positions);
+        return null;
+    };
+    const groups = out_grp.toOwnedSlice(alloc) catch {
+        alloc.free(positions);
+        alloc.free(src_face);
+        return null;
+    };
+    return .{ .positions = positions, .groups = groups, .src_face = src_face, .tri_count = @intCast(positions.len / 9) };
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────────
 const testing = std.testing;
 
@@ -3484,7 +3708,7 @@ test "parametric quad cuts hit equal fractions on sheared opposite edges" {
     // plane-normal cut would not prove this invariant. Both emitted endpoints must be
     // the literal t=1/4 and t=3/4 interpolants of their own authored edges.
     const pos = [_]f32{
-        0, 0, 0, 4, 1, 0, 3, 5, 2,
+        0, 0, 0, 4, 1, 0, 3,  5, 2,
         0, 0, 0, 3, 5, 2, -2, 4, 1,
     };
     const groups = [_]u32{ 9, 9 };
@@ -3507,6 +3731,94 @@ test "parametric quad cuts hit equal fractions on sheared opposite edges" {
         }
         try testing.expect(found);
     }
+}
+
+test "ring parametric cuts subdivide four faces of a closed cube ring" {
+    var interleaved: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&interleaved);
+    var pos: [12 * 9]f32 = undefined;
+    var v: usize = 0;
+    while (v < 12 * 3) : (v += 1) {
+        pos[v * 3 + 0] = interleaved[v * 8 + 0];
+        pos[v * 3 + 1] = interleaved[v * 8 + 1];
+        pos[v * 3 + 2] = interleaved[v * 8 + 2];
+    }
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    const seed = [_]bool{ true, true, false, false, false, false, false, false, false, false, false, false };
+    const cuts = [_]f32{ 1.0 / 3.0, 2.0 / 3.0 };
+    const r = ringParametricCutsSoup(pos[0..], 12, groups[0..], seed[0..], null, 0, cuts[0..]) orelse return error.TestExpectedRing;
+    defer alloc.free(r.positions);
+    defer alloc.free(r.src_face);
+    defer if (r.groups) |g| alloc.free(g);
+    var distinct = std.AutoHashMapUnmanaged(u32, void){};
+    defer distinct.deinit(alloc);
+    for (r.groups.?) |gid| try distinct.put(alloc, gid, {});
+    try testing.expectEqual(@as(u32, 14), distinct.count());
+    var untouched: u32 = 0;
+    for (r.src_face, 0..) |src, out_tri| {
+        if (groups[src] != 4 and groups[src] != 5) continue;
+        const in_base = @as(usize, src) * 9;
+        const out_base = out_tri * 9;
+        var k: usize = 0;
+        while (k < 9) : (k += 1) try testing.expectEqual(@as(u32, @bitCast(pos[in_base + k])), @as(u32, @bitCast(r.positions[out_base + k])));
+        untouched += 1;
+    }
+    try testing.expectEqual(@as(u32, 4), untouched);
+}
+
+test "ring parametric shared-edge cut points are bit-identical" {
+    var interleaved: [12 * 3 * 8]f32 = undefined;
+    buildCubeSoup(&interleaved);
+    var pos: [12 * 9]f32 = undefined;
+    var v: usize = 0;
+    while (v < 12 * 3) : (v += 1) {
+        pos[v * 3 + 0] = interleaved[v * 8 + 0];
+        pos[v * 3 + 1] = interleaved[v * 8 + 1];
+        pos[v * 3 + 2] = interleaved[v * 8 + 2];
+    }
+    const groups = [_]u32{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5 };
+    const seed = [_]bool{ true, true, false, false, false, false, false, false, false, false, false, false };
+    const cuts = [_]f32{ 1.0 / 3.0, 2.0 / 3.0 };
+    const r = ringParametricCutsSoup(pos[0..], 12, groups[0..], seed[0..], null, 0, cuts[0..]) orelse return error.TestExpectedRing;
+    defer alloc.free(r.positions);
+    defer alloc.free(r.src_face);
+    defer if (r.groups) |g| alloc.free(g);
+    const Bits = [3]u32;
+    const Seen = struct { source_group: u32, shared: bool };
+    var points = std.AutoHashMapUnmanaged(Bits, Seen){};
+    defer points.deinit(alloc);
+    v = 0;
+    while (v < r.tri_count * 3) : (v += 1) {
+        const p = r.positions[v * 3 ..][0..3];
+        if (@abs(p[0]) == 0.5 and @abs(p[1]) == 0.5 and @abs(p[2]) == 0.5) continue;
+        const src_group = groups[r.src_face[v / 3]];
+        const bits: Bits = .{ @bitCast(p[0]), @bitCast(p[1]), @bitCast(p[2]) };
+        const gop = try points.getOrPut(alloc, bits);
+        if (!gop.found_existing) gop.value_ptr.* = .{ .source_group = src_group, .shared = false } else if (gop.value_ptr.source_group != src_group) gop.value_ptr.shared = true;
+    }
+    var point_it = points.valueIterator();
+    while (point_it.next()) |seen| try testing.expect(seen.shared);
+}
+
+test "ring parametric cuts stop at an open two-quad strip boundary" {
+    const pos = [_]f32{
+        0, 0, 0, 1, 0, 0, 1, 1, 0,
+        0, 0, 0, 1, 1, 0, 0, 1, 0,
+        1, 0, 0, 2, 0, 0, 2, 1, 0,
+        1, 0, 0, 2, 1, 0, 1, 1, 0,
+    };
+    const groups = [_]u32{ 0, 0, 1, 1 };
+    const seed = [_]bool{ true, true, false, false };
+    const cuts = [_]f32{0.5};
+    const r = ringParametricCutsSoup(pos[0..], 4, groups[0..], seed[0..], null, 1, cuts[0..]) orelse return error.TestExpectedRing;
+    defer alloc.free(r.positions);
+    defer alloc.free(r.src_face);
+    defer if (r.groups) |g| alloc.free(g);
+    try testing.expectEqual(@as(u32, 8), r.tri_count);
+    var distinct = std.AutoHashMapUnmanaged(u32, void){};
+    defer distinct.deinit(alloc);
+    for (r.groups.?) |gid| try distinct.put(alloc, gid, {});
+    try testing.expectEqual(@as(u32, 4), distinct.count());
 }
 
 test "ring cut: open strip ends at the mesh boundary instead of wrapping" {

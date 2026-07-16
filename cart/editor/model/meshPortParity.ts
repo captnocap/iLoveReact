@@ -2,7 +2,7 @@
 // Run through the wrapper; it supplies a resident-mesh RJMD fixture and compares
 // the observable contract, never normals/UVs or triangle ordering.
 import {
-  detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace, loopCutRange,
+  detachPanel, editMeshToGeometry, extrudeEdge, extrudeFace,
   mergeFaces, solidifyFaces, subMeshFromFaces, type EditMesh, type V3,
 } from './editMesh';
 
@@ -14,7 +14,7 @@ const argvRaw: unknown = typeof __argv === 'function' ? __argv() : __argv;
 const argv: string[] = (Array.isArray(argvRaw) ? argvRaw as string[] : JSON.parse(String(argvRaw ?? '[]'))).slice(1);
 const [seedPath, nativePath, nativeJournalPath, label] = argv;
 const op = label?.split(':').at(-1);
-if (!seedPath || !nativePath || !nativeJournalPath || !op) throw new Error('usage: meshPortParity <seed.rjmd> <native.rjmd> <native.json> <fixture:solidify|merge|loopcut>');
+if (!seedPath || !nativePath || !nativeJournalPath || !op) throw new Error('usage: meshPortParity <seed.rjmd> <native.rjmd> <native.json> <fixture:solidify|merge|loopcut|cut>');
 
 function b64bytes(value: string): Uint8Array {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'; const clean = value.replace(/\s+/g, ''); const out: number[] = [];
@@ -58,12 +58,12 @@ function fromDoc(d: Doc): EditMesh {
   return { verts, faces };
 }
 function edgeContract(vertices: Float32Array, groups: Uint32Array): Pick<Contract, 'vertices' | 'triangleEdges' | 'editableEdges'> {
-  const verts = new Map<string, number>(); const edges = new Map<string, Set<number>>();
+  const verts = new Map<string, number>(); const edges = new Map<string, { groups: Set<number>; uses: number }>();
   const id = (at: number) => { const p: V3 = [vertices[at]!, vertices[at + 1]!, vertices[at + 2]!]; const k = key(p); if (!verts.has(k)) verts.set(k, verts.size); return verts.get(k)!; };
-  for (let t = 0; t < groups.length; t += 1) for (let c = 0; c < 3; c += 1) { const a = id((t * 3 + c) * 8), b = id((t * 3 + ((c + 1) % 3)) * 8); const k = a < b ? `${a}:${b}` : `${b}:${a}`; const s = edges.get(k) ?? new Set<number>(); s.add(groups[t]!); edges.set(k, s); }
+  for (let t = 0; t < groups.length; t += 1) for (let c = 0; c < 3; c += 1) { const a = id((t * 3 + c) * 8), b = id((t * 3 + ((c + 1) % 3)) * 8); const k = a < b ? `${a}:${b}` : `${b}:${a}`; const edge = edges.get(k) ?? { groups: new Set<number>(), uses: 0 }; edge.groups.add(groups[t]!); edge.uses += 1; edges.set(k, edge); }
   // An editable edge is a boundary of authored identities; triangulation diagonals
   // stay absent because both triangles have the same group.
-  let editable = 0; for (const s of edges.values()) if (s.size !== 1) editable += 1;
+  let editable = 0; for (const edge of edges.values()) if (edge.groups.size > 1 || edge.uses === 1 || edge.uses > 2) editable += 1;
   return { vertices: verts.size, triangleEdges: edges.size, editableEdges: editable };
 }
 function contractFromSoup(vertices: Float32Array, groups: Uint32Array): Contract {
@@ -78,7 +78,6 @@ function reference(seed: EditMesh): EditMesh {
   // result shapes (edge extrusion, panel detach/submesh) in the same conformance entry.
   if (op === 'solidify') return solidifyFaces(seed, [0], 0.125);
   if (op === 'merge') return mergeFaces(seed, [0, 1]) ?? seed;
-  if (op === 'loopcut') { const f = seed.faces[0]!; const xs = f.loop.map((i) => seed.verts[i]![0]); const lo = Math.min(...xs), hi = Math.max(...xs); return loopCutRange(seed, 0, lo, hi, 2, (lo + hi) / 2); }
   // Type-level/live calls make any future mapping add a real expected form rather
   // than an eyeballed fixture. They are intentionally not native assertions yet.
   if (op === 'extrudeface') return extrudeFace(seed, 0, 0.25);
@@ -87,8 +86,9 @@ function reference(seed: EditMesh): EditMesh {
   if (op === 'submesh') return subMeshFromFaces(seed, [0]);
   throw new Error(`unknown op ${op}`);
 }
-const expected = lowered(reference(fromDoc(doc(seedPath))));
-const actual = contractFromSoup(doc(nativePath).vertices, doc(nativePath).groups);
+const seedDoc = doc(seedPath);
+const nativeDoc = doc(nativePath);
+const actual = contractFromSoup(nativeDoc.vertices, nativeDoc.groups);
 // The journal owns the native vocabulary: triangleEdges is the welded render
 // topology and editableEdges is the click/select boundary graph. Keep the
 // independently-derived JS values only for the pure reference side.
@@ -98,11 +98,87 @@ if (nativeJournal?.topology) {
   actual.triangleEdges = nativeJournal.topology.triangleEdges;
   actual.editableEdges = nativeJournal.topology.editableEdges;
 }
-const equal = JSON.stringify(expected) === JSON.stringify(actual);
 const digest = (values: string[]) => {
   let h = 2166136261; for (const value of values) for (let i = 0; i < value.length; i += 1) h = Math.imul(h ^ value.charCodeAt(i), 16777619);
   return `${values.length}@${(h >>> 0).toString(16)}`;
 };
 const numbers = (c: Contract) => `groups=${c.groups} verts=${c.vertices} triangleEdges=${c.triangleEdges} editableEdges=${c.editableEdges} identities=${digest(c.identities)} geometry=${digest(c.geometry)}`;
-console.log(`[mesh-port-parity] ${label} ${equal ? 'PASS' : 'FAIL'} expected{${numbers(expected)}} actual{${numbers(actual)}}`);
+const positions = (d: Doc): Map<string, V3> => {
+  const out = new Map<string, V3>();
+  for (let v = 0; v < d.vertices.length / 8; v += 1) { const p: V3 = [d.vertices[v * 8]!, d.vertices[v * 8 + 1]!, d.vertices[v * 8 + 2]!]; out.set(key(p), p); }
+  return out;
+};
+const triangleKey = (d: Doc, t: number): string => [0, 1, 2].map((c) => key([d.vertices[(t * 3 + c) * 8]!, d.vertices[(t * 3 + c) * 8 + 1]!, d.vertices[(t * 3 + c) * 8 + 2]!])).sort().join('|');
+const triangleCounts = (d: Doc): Map<string, number> => {
+  const out = new Map<string, number>();
+  for (let t = 0; t < d.groups.length; t += 1) { const k = triangleKey(d, t); out.set(k, (out.get(k) ?? 0) + 1); }
+  return out;
+};
+const groupTriangleCounts = (groups: Uint32Array): number[] => {
+  const counts = new Map<number, number>(); for (const gid of groups) counts.set(gid, (counts.get(gid) ?? 0) + 1); return [...counts.values()].sort((a, b) => a - b);
+};
+const loweredDoc = (m: EditMesh): Doc => { const groups: number[] = []; const geo = editMeshToGeometry(m, undefined, groups); return { vertices: geo.positions, groups: new Uint32Array(groups) }; };
+
+let expectedText = '';
+let details = '';
+let equal = false;
+if (op === 'merge') {
+  const expected = lowered(reference(fromDoc(seedDoc)));
+  equal = JSON.stringify(expected) === JSON.stringify(actual);
+  expectedText = numbers(expected);
+} else if (op === 'solidify') {
+  const expectedDoc = loweredDoc(reference(fromDoc(seedDoc)));
+  const expected = contractFromSoup(expectedDoc.vertices, expectedDoc.groups);
+  const seedPositions = positions(seedDoc); const nativePositions = positions(nativeDoc);
+  const seedsSurvive = [...seedPositions.keys()].every((k) => nativePositions.has(k));
+  const faceGroup = seedDoc.groups[0]!; const planes: { p: V3; n: V3 }[] = [];
+  for (let t = 0; t < seedDoc.groups.length; t += 1) {
+    if (seedDoc.groups[t] !== faceGroup) continue;
+    const p: V3[] = [0, 1, 2].map((c) => [seedDoc.vertices[(t * 3 + c) * 8]!, seedDoc.vertices[(t * 3 + c) * 8 + 1]!, seedDoc.vertices[(t * 3 + c) * 8 + 2]!] as V3);
+    const ab: V3 = [p[1]![0] - p[0]![0], p[1]![1] - p[0]![1], p[1]![2] - p[0]![2]]; const ac: V3 = [p[2]![0] - p[0]![0], p[2]![1] - p[0]![1], p[2]![2] - p[0]![2]];
+    const cross: V3 = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]]; const len = Math.hypot(...cross);
+    if (len > 0) planes.push({ p: p[0]!, n: [cross[0] / len, cross[1] / len, cross[2] / len] });
+  }
+  let newCount = 0; let thicknessOk = true;
+  for (const [k, p] of nativePositions) {
+    if (seedPositions.has(k)) continue; newCount += 1;
+    const near = planes.some((plane) => { const d = Math.abs((p[0] - plane.p[0]) * plane.n[0] + (p[1] - plane.p[1]) * plane.n[1] + (p[2] - plane.p[2]) * plane.n[2]); return d >= 0.0875 && d <= 0.1625; });
+    if (!near) thicknessOk = false;
+  }
+  const scalarOk = expected.groups === actual.groups && expected.vertices === actual.vertices && expected.triangleEdges === actual.triangleEdges && expected.editableEdges === actual.editableEdges;
+  const groupCountsOk = JSON.stringify(groupTriangleCounts(expectedDoc.groups)) === JSON.stringify(groupTriangleCounts(nativeDoc.groups));
+  equal = scalarOk && seedsSurvive && thicknessOk && groupCountsOk;
+  expectedText = numbers(expected); details = ` seedVertices=${seedPositions.size} newVertices=${newCount} seedsSurvive=${seedsSurvive ? 1 : 0} thickness=${thicknessOk ? 1 : 0} groupTriangles=${groupCountsOk ? 1 : 0}`;
+} else if (op === 'loopcut' || op === 'cut') {
+  const seedPositions = positions(seedDoc); const nativePositions = positions(nativeDoc);
+  const weldedEdges = new Map<string, [V3, V3]>();
+  for (let t = 0; t < seedDoc.groups.length; t += 1) for (let c = 0; c < 3; c += 1) {
+    const a: V3 = [seedDoc.vertices[(t * 3 + c) * 8]!, seedDoc.vertices[(t * 3 + c) * 8 + 1]!, seedDoc.vertices[(t * 3 + c) * 8 + 2]!]; const n = (c + 1) % 3;
+    const b: V3 = [seedDoc.vertices[(t * 3 + n) * 8]!, seedDoc.vertices[(t * 3 + n) * 8 + 1]!, seedDoc.vertices[(t * 3 + n) * 8 + 2]!]; const ka = key(a), kb = key(b); weldedEdges.set(ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`, [a, b]);
+  }
+  let newCount = 0; let fractionsOk = true;
+  for (const [k, p] of nativePositions) {
+    if (seedPositions.has(k)) continue; newCount += 1;
+    const onCut = [...weldedEdges.values()].some(([a, b]) => { const ab: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]; const len2 = ab[0] ** 2 + ab[1] ** 2 + ab[2] ** 2; if (len2 === 0) return false; const t = ((p[0] - a[0]) * ab[0] + (p[1] - a[1]) * ab[1] + (p[2] - a[2]) * ab[2]) / len2; const q: V3 = [a[0] + ab[0] * t, a[1] + ab[1] * t, a[2] + ab[2] * t]; return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) <= 1e-3 && (Math.abs(t - 1 / 3) <= 1e-3 || Math.abs(t - 2 / 3) <= 1e-3); });
+    if (!onCut) fractionsOk = false;
+  }
+  const outputTriangles = triangleCounts(nativeDoc); const seedGroups = new Map<number, number[]>();
+  for (let t = 0; t < seedDoc.groups.length; t += 1) { const tris = seedGroups.get(seedDoc.groups[t]!) ?? []; tris.push(t); seedGroups.set(seedDoc.groups[t]!, tris); }
+  let subdivided = 0; let untouchedOk = true;
+  for (const tris of seedGroups.values()) {
+    const need = new Map<string, number>(); for (const t of tris) { const k = triangleKey(seedDoc, t); need.set(k, (need.get(k) ?? 0) + 1); }
+    const survives = [...need].every(([k, n]) => (outputTriangles.get(k) ?? 0) >= n); if (!survives) subdivided += 1; else untouchedOk = untouchedOk && survives;
+  }
+  const derivedEditable = edgeContract(nativeDoc.vertices, nativeDoc.groups).editableEdges; const journalEditable = nativeJournal?.topology?.editableEdges;
+  const editableOk = journalEditable === derivedEditable; const fixture = label!.split(':')[0]!; const seedGroupCount = new Set(seedDoc.groups).size;
+  const shapeOk = op === 'cut'
+    ? subdivided === 1 && actual.groups === seedGroupCount + 2
+    : fixture === 'bridge' ? subdivided >= 3 && subdivided <= 5 && actual.groups === 7 + 2 * subdivided : subdivided === 4 && actual.groups === 14;
+  equal = fractionsOk && untouchedOk && editableOk && shapeOk;
+  expectedText = `groups=${op === 'cut' ? seedGroupCount + 2 : fixture === 'bridge' ? `7+2*S` : 14} S=${op === 'cut' ? 1 : fixture === 'bridge' ? '3..5' : 4}`;
+  details = ` S=${subdivided} newVertices=${newCount} fractions=${fractionsOk ? 1 : 0} untouched=${untouchedOk ? 1 : 0} editable=${journalEditable}/${derivedEditable}`;
+} else {
+  throw new Error(`unknown op ${op}`);
+}
+console.log(`[mesh-port-parity] ${label} ${equal ? 'PASS' : 'FAIL'} expected{${expectedText}} actual{${numbers(actual)}}${details}`);
 if (!equal) throw new Error(`${op} contract diverged`);

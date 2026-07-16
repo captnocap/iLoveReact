@@ -163,6 +163,7 @@ export type ModelToolApi = {
   // Reverse selected face winding so its normal points to the opposite side.
   flipSelection: () => boolean;
   loopCut: () => void;
+  basicCut: () => void;
   deleteSelection: () => void;
   appendPart: (positions: Float32Array, faceGroups: Uint32Array, color: string) => { lo: number; hi: number } | null;
   // Returns the host op's outcome (count = triangles remaining in the live mesh) so the

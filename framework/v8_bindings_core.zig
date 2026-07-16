@@ -791,13 +791,14 @@ fn hostMeshTopoLoopCut(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setMeshTopoReturn(info, ok);
 }
 
-/// __mesh_lc_begin() → JSON {"ok","size0","size1"}. Open a face loop-cut session on the
+/// __mesh_lc_begin(basic?) → JSON {"ok","size0","size1"}. Open a face loop-cut session on the
 /// CURRENT face selection (the studio's Blockbench treatment): captures the base mesh and
 /// the clicked face's two in-plane axes + spans. Previews re-cut from that base until
 /// __mesh_lc_end closes the session. size0/size1 are the spans for direction 0/1.
 fn hostMeshLcBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const lc = scene3d.meshLoopCutFaceBegin() orelse {
+    const basic = (argToF64(info, 0) orelse 0) != 0;
+    const lc = scene3d.meshLoopCutFaceBegin(basic) orelse {
         setReturnString(info, "{\"ok\":0}");
         return;
     };

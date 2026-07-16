@@ -26,11 +26,12 @@ run_native() {
 status=0
 for fixture in sheared nonsquare bridge; do
   run_native "$fixture" "$fixture-seed" 'report'
-  for op in solidify merge loopcut; do
+  for op in solidify merge loopcut cut; do
     case "$op" in
       solidify) native='mode:3;sel:0;solidify' ;;
       merge) native='mode:3;range:0,2;merge' ;;
       loopcut) native='mode:3;sel:0;lcbegin;lcprev:0,2,0.5;lcend:1' ;;
+      cut) native='mode:3;sel:0;lcbegin:1;lcprev:0,2,0.5;lcend:1' ;;
     esac
     tag="$fixture-$op"
     run_native "$fixture" "$tag" "$native"

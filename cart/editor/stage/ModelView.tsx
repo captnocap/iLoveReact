@@ -142,6 +142,7 @@ export type ModelToolApi = {
   createFace: () => void;
   flipSelection: () => boolean;
   loopCut: () => void;
+  basicCut: () => void;
   deleteSelection: () => void;
   // Live mirror editing (req_2758): flip one symmetry plane (0 = X, 1 = Y, 2 = Z) on/off.
   toggleMirror: (axis: number) => void;
@@ -385,9 +386,9 @@ const meshLoopCut = () => readTopoResult(host.__mesh_topo_loop_cut?.());
 // the cut live at (direction, cuts, offset); end commits ONE journal entry or restores
 // the base exactly. size0/size1 are the face's spans for direction 0/1.
 type LcInfo = { ok: number; size0?: number; size1?: number };
-const meshLcBegin = (): LcInfo | null => {
+const meshLcBegin = (basic: boolean): LcInfo | null => {
   try {
-    const j = host.__mesh_lc_begin?.();
+    const j = host.__mesh_lc_begin?.(basic ? 1 : 0);
     return typeof j === 'string' && j ? (JSON.parse(j) as LcInfo) : null;
   } catch {
     return null;
@@ -819,14 +820,14 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
   // and routes the motion to meshLcHandleDrag, which re-previews HOST-side. The popup
   // polls `__mesh_lc_state` (~4 Hz, effect below) to adopt each drag's new mesh key and
   // mirror dir/cuts/offset back into this state WITHOUT re-previewing.
-  const [lc, setLc] = useState<null | { dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent'; sizes: [number, number] }>(null);
-  const openLoopCut = () => {
-    const info = meshLcBegin();
+  const [lc, setLc] = useState<null | { basic: boolean; dir: 0 | 1; cuts: number; offset: number; unit: 'units' | 'percent'; sizes: [number, number] }>(null);
+  const openLoopCut = (basic = false) => {
+    const info = meshLcBegin(basic);
     if (!info?.ok) {
       setError('Select a face to loop-cut (face mode)');
       return;
     }
-    const next = { dir: 0 as 0 | 1, cuts: 1, offset: 50, unit: 'units' as const, sizes: [info.size0 ?? 0, info.size1 ?? 0] as [number, number] };
+    const next = { basic, dir: 0 as 0 | 1, cuts: 1, offset: 50, unit: 'units' as const, sizes: [info.size0 ?? 0, info.size1 ?? 0] as [number, number] };
     setLc(next);
     adoptMesh(meshLcPreview(next.dir, next.cuts, next.offset / 100));
   };
@@ -1352,6 +1353,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
     loopCut: () => {
       if (selMode === 3) { openLoopCut(); return; }
       applyTopo(meshLoopCut(), 'Select exactly one edge to loop-cut across');
+    },
+    basicCut: () => {
+      if (selMode === 3) { openLoopCut(true); return; }
+      setError('Select a face to cut (face mode)');
     },
     deleteSelection: () => applyTopo(meshDeleteSelection(), 'Nothing selected to delete'),
     toggleMirror: (axis) => setMirrorMask((m) => m ^ (1 << axis)),
@@ -1956,9 +1961,10 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
         // setLc's FUNCTIONAL form — this harness closure is mount-frozen, so the `lc`
         // snapshot inside changeLoopCut/closeLoopCut is stale (null) here.
         else if (name === 'lcbegin') {
-          const info = meshLcBegin();
+          const basic = num(a[0]) !== 0;
+          const info = meshLcBegin(basic);
           if (info?.ok) {
-            setLc({ dir: 0, cuts: 1, offset: 50, unit: 'units', sizes: [info.size0 ?? 0, info.size1 ?? 0] });
+            setLc({ basic, dir: 0, cuts: 1, offset: 50, unit: 'units', sizes: [info.size0 ?? 0, info.size1 ?? 0] });
             adoptMesh(meshLcPreview(0, 1, 0.5));
           }
           console.error(`[meshops] lcbegin → ${JSON.stringify(info)}`);
@@ -2500,7 +2506,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
                     <Text style={{ color: '#ddf5e8', fontSize: 12, fontWeight: 600 }}>Flip</Text>
                   </Pressable>
                   <Pressable
-                    onPress={openLoopCut}
+                    onPress={() => openLoopCut()}
                     tooltip="Loop cut across this face — popup picks direction, cuts, and offset (L)"
                     style={{
                       paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6,
@@ -2565,7 +2571,7 @@ export default function ModelView({ initialPath, initialTitle, initialMesh, init
             }}
           >
             <Row style={{ alignItems: 'center' }}>
-              <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700, flexGrow: 1, minWidth: 0 }}>Loop Cut</Text>
+              <Text numberOfLines={1} noWrap style={{ color: '#e6eefb', fontSize: 13, fontWeight: 700, flexGrow: 1, minWidth: 0 }}>{lc.basic ? 'Cut' : 'Loop Cut'}</Text>
               <Pressable
                 onPress={() => closeLoopCut(false)}
                 tooltip="Cancel (Esc) — restore the uncut mesh"

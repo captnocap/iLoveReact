@@ -1752,6 +1752,7 @@ export default function AppFrame() {
         else if (commandId === 'mesh-extrude-face') api.extrudeFace();
         else if (commandId === 'mesh-create-face') api.createFace();
         else if (commandId === 'mesh-loopcut') api.loopCut();
+        else if (commandId === 'mesh-cut') api.basicCut();
         else if (commandId === 'mesh-paint-fill') api.brushTool('fill');
         else if (commandId === 'mesh-paint-brush') api.brushTool('brush');
         else if (commandId === 'mesh-paint-safety') api.cycleSafety();

@@ -162,7 +162,14 @@
         },
         {
           "js": "__mesh_lc_begin",
-          "zig": "hostMeshLcBegin"
+          "zig": "hostMeshLcBegin",
+          "args": [
+            {
+              "name": "basic",
+              "type": "number",
+              "optional": true
+            }
+          ]
         },
         {
           "js": "__mesh_lc_preview",

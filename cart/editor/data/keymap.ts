@@ -70,6 +70,7 @@ export const MODEL_KEYS: { key: string; commandId: string; mode?: 'paint' | 'fac
   { key: 'h', commandId: 'mesh-cam-recall' },
   { key: 'e', commandId: 'mesh-extrude' },
   { key: 'l', commandId: 'mesh-loopcut' },
+  { key: 't', commandId: 'mesh-cut' },
   { key: 'c', commandId: 'mesh-create-face' },
   // X is contextual exactly as the Studio control contract was: flip winding in
   // face mode, Face Safety while painting.

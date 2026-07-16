@@ -41,7 +41,7 @@ declare global {
   function __mesh_topo_create_face(...args: unknown[]): unknown;
   function __mesh_topo_flip_faces(...args: unknown[]): unknown;
   function __mesh_topo_loop_cut(...args: unknown[]): unknown;
-  function __mesh_lc_begin(...args: unknown[]): unknown;
+  function __mesh_lc_begin(basic?: number): unknown;
   function __mesh_lc_preview(...args: unknown[]): unknown;
   function __mesh_lc_end(...args: unknown[]): unknown;
   function __mesh_lc_state(...args: unknown[]): unknown;
