@@ -286,23 +286,40 @@ prosecution's evidence AND the player's early-warning system.** Crime → the wo
 reports on it → the player consumes those reports to decide the next move. The
 content pipeline, the tension engine, and the tutorial are the same loop.
 
-### The media is real capture, not fakery
+### The media is REPLAY, not recording (no footage is ever stored)
 
-`framework/gpu/capture.zig` already does screenshots + live H.264/VP9 recording
-(ffmpeg pipe, hooked at end-of-frame). So the game's media surfaces are a
-*targeted use of a shipped capability*, played back on the **screen-channel**
-system (any in-world TV) and the **phone**:
+The game is deterministic **data in a streaming loader** — frozen/seed-derived
+world (V29/V30), seed-derived sim (1.77MB reconstructs from a `run_id`), RLE
+reference map. So the full game state at any past moment = **f(seed, checkpoint,
+input log)**. You never record pixels — you **replay the game and point a new
+camera at it.** This is the Doom-`.lmp` / Quake-demo / rollback-netcode model:
+store *inputs*, not frames. An input log is bytes.
 
-- **Major-network news** about the crime (DailyBuzz/VidTube-equivalent channels).
-- **Police bodycam** + **FlockCamera** footage (Flock/FlockBook crossover — the
-  surveillance grid is diegetic).
-- **The courtroom is recorded and plays over the news too.** The trial from the
-  Justice Loop becomes content, closing the circle.
+**It is the SAME primitive as the recursive-game easter egg** — render a game
+instance to a screen texture. Media surfaces differ only by camera transform +
+input source, played on the **screen-channel** system (any in-world TV) and the
+**phone**:
 
-Cheap-path note (storage): full recorded video of every past event is expensive.
-The realistic build is a **short ring-buffer of actual clips** for recent/hot
-events + **stylized reconstructions** (a captured still + the record's text) for
-everything older — reconstructed from the same record rings, not stored as video.
+- **Major-network news** — replay from a news-chopper / establishing cam.
+- **Police bodycam** — replay with the camera bolted to the cop NPC's head.
+- **FlockCamera** — replay from a fixed surveillance-cam transform (Flock/FlockBook
+  crossover; the surveillance grid is diegetic).
+- **Courtroom playback** — replay the crime from any angle, projected on a TV, in
+  a courtroom that is itself being played. Turtles again.
+
+Strictly better than recording: **bytes not gigabytes**, and **any angle after the
+fact** (you're re-running the sim, not replaying fixed pixels — you point a camera
+where no camera was). `framework/gpu/capture.zig` (H.264/VP9 ffmpeg pipe) stays
+useful for *exporting/sharing* a clip out of the game, but is NOT how in-world
+media works.
+
+**The real constraint is determinism, not storage.** The sim/physics must replay
+bit-identically from inputs (the classic rollback problem — float drift the usual
+culprit). Mitigation the architecture already implies: **checkpoints.** The
+compile-cache manifest (CACHE-0630) already snapshots content-addressed state;
+replay needs determinism only over the **short window from the nearest checkpoint
+to the event**, never the whole playthrough — tractable where full-game
+determinism isn't. Store: seed + periodic state checkpoints + the input log.
 
 ### The core mechanic: the "dirty outfit" state is NEVER exposed
 
@@ -335,7 +352,9 @@ which is now load-bearing for a THIRD system, reinforcing: **design it first.**
 
 | Piece | Exists | New work |
 |---|---|---|
-| Screenshot + H.264/VP9 capture | ✅ `capture.zig` | ring-buffer recent events |
+| Deterministic streaming loader + seed/RLE world | ✅ (V29/V30) | input log + checkpoint replay; determinism audit (float drift) |
+| Render game instance → screen texture | ✅ `world_window.zig` / material_tex | retarget camera + input source per media surface |
+| Clip export (out of game) | ✅ `capture.zig` | optional share path only |
 | Screen channels / phone playback | 🟡 (screens designed) | news/bodycam/court channels |
 | Appearance fingerprint on events | 🟡 **shared dependency** | (same one the Justice Loop needs) |
 | Per-look hidden burn state | 🟡 | accumulate exposure per outfit+face |
