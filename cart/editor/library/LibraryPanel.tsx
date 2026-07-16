@@ -5,12 +5,18 @@
 // a count footer, and the selected-asset detail card. Expanded (680) it
 // attaches the concept-1 grid column (breadcrumb + thumbnail grid + pager) to
 // the tree's right. Both widths are region constants (shell/regions.ts).
+//
+// req_3137: the grid area MEASURES itself (useMeasure/onLayout) and pages fill
+// the measured space — no fixed page size leaving dead rows. Selecting a
+// single model shows its parent folder's gallery with that cell highlighted,
+// and the detail card resolves models as well as materials in both states.
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { Image } from '../../../runtime/primitives';
+import { Box, Image } from '../../../runtime/primitives';
 import { C, accentFor } from '../workspace.cls';
 import { Icon } from '../../../runtime/icons/Icon';
 import { useContextMenu } from '../../../runtime/hooks/useContextMenu';
+import { useMeasure } from '../../../runtime/hooks/useMeasure';
 import type { Asset, ContentFolderId, ContentNode, LibraryTab, EditorState, ModelPackage, WorldObject } from '../data/types';
 import { assetPageSizeFor, CATALOG_DIAGNOSTICS, MATERIAL_ASSET_COUNT } from '../data/catalog';
 import {
@@ -20,16 +26,22 @@ import {
   isMaterialFolder,
   isModelFolder,
   isModelSubfolder,
+  modelPackagesForFolder,
+  MODEL_GALLERY_PAGE_SIZE,
   subfolderFilesForFolder,
   tabForContentFolder,
 } from '../data/content';
 import ContentTree from './ContentTree';
 import ModelPackageBrowser from './ModelPackageBrowser';
 import ModelActionMenu from './ModelActionMenu';
+import ModelDetailCard from './ModelDetailCard';
 import MaterialCatalogRow from './MaterialCatalogRow';
 import FolderSummary from './FolderSummary';
 import MaterialControls from './MaterialControls';
 import ContextToolControls from './ContextToolControls';
+
+// The grids' own inner padding (workspace.cls HW_Lib*Grid / HW_GalleryGrid).
+const GRID_PAD = 10;
 
 export default function LibraryPanel(props: {
   state: EditorState;
@@ -47,7 +59,7 @@ export default function LibraryPanel(props: {
   onToggleExpanded: () => void;
   onFavorite: (assetId: string) => void;
   onRename: (assetId: string, name: string) => void;
-  onPage: (delta: number) => void;
+  onPage: (delta: number, maxPage: number) => void;
   onFocusMaterial: (variant?: number) => void;
   onModel: (model: ModelPackage) => void;
   contentTree: ContentNode[];
@@ -62,16 +74,11 @@ export default function LibraryPanel(props: {
 }) {
   const modelMenu = useContextMenu();
   const [menuModel, setMenuModel] = useState<ModelPackage | null>(null);
+  const gridArea = useMeasure();
   const expanded = props.state.libraryExpanded;
   const renamingModel = props.modelRenamingId
     ? props.models.find((model) => model.id === props.modelRenamingId) ?? null
     : null;
-  const pageSize = assetPageSizeFor(props.mode, expanded);
-  const maxPage = Math.max(0, Math.ceil(props.assets.length / pageSize) - 1);
-  const page = Math.min(props.state.assetPage, maxPage);
-  const pageAssets = props.assets.slice(page * pageSize, page * pageSize + pageSize);
-  const firstAsset = props.assets.length === 0 ? 0 : page * pageSize + 1;
-  const lastAsset = Math.min(props.assets.length, firstAsset + pageAssets.length - 1);
   const folderTab = tabForContentFolder(props.contentFolder);
   // A model subdir (…/mesh|atlases|paints|shaders) lists FILES, not model
   // thumbnails, so it gets its own branch and is excluded from the gallery.
@@ -83,15 +90,44 @@ export default function LibraryPanel(props: {
   const selectedFolderCount = countAssetsForFolder(props.catalogAssets, props.contentFolder, props.models);
   const trail = contentFolderTrail(props.contentFolder, props.contentTree);
 
-  // Tucked mode has no gallery, so pressing a model's home row in the tree
-  // opens its document directly — one click, same as the gallery thumb.
-  const handleFolder = (folder: ContentFolderId) => {
-    props.onFolder(folder);
-    if (!expanded) {
-      const model = props.models.find((item) => item.folderId === folder);
-      if (model) props.onModel(model);
-    }
+  // ── Measured paging (req_3137): a page holds exactly what the grid area fits.
+  // Cell footprints mirror the cls classes — HW_MaterialTile 68 + gap 4 (20px
+  // vertical padding), HW_AssetCard 76×68 + gap 7 (20px), HW_GalleryCell 104 +
+  // gap 6 (unpadded vertically). Zero until the first onLayout lands, then the
+  // catalog fallbacks give way to the measured capacity.
+  const capacity = (cellW: number, cellH: number, gap: number, vpad: number): number => {
+    const rect = gridArea.rect;
+    if (!rect) return 0;
+    const cols = Math.max(1, Math.floor((rect.width - GRID_PAD * 2 + gap) / (cellW + gap)));
+    const rows = Math.max(1, Math.floor((rect.height - vpad + gap) / (cellH + gap)));
+    return cols * rows;
   };
+  const pageSize = (showMaterialCatalog ? capacity(68, 68, 4, GRID_PAD * 2) : capacity(76, 68, 7, GRID_PAD * 2))
+    || assetPageSizeFor(props.mode, true);
+  const modelPageSize = capacity(104, 104, 6, 0) || MODEL_GALLERY_PAGE_SIZE;
+
+  // Selecting a single model keeps the gallery on its PARENT folder with the
+  // model's cell highlighted — one thumbnail in an empty grid is dead space.
+  const selectedModel = props.models.find((model) => model.folderId === props.contentFolder) ?? null;
+  const galleryFolder = selectedModel && trail && trail.length > 1 ? trail[trail.length - 2]!.id : props.contentFolder;
+  const galleryModels = showModelPackages ? modelPackagesForFolder(galleryFolder, props.state.search, props.models) : null;
+
+  // One pager for every paged branch (models page like materials/assets do).
+  const pagedCount = galleryModels ? galleryModels.length : canBrowseAssets ? props.assets.length : null;
+  const activePageSize = galleryModels ? modelPageSize : pageSize;
+  const maxPage = Math.max(0, Math.ceil((pagedCount ?? 0) / activePageSize) - 1);
+  const page = Math.min(props.state.assetPage, maxPage);
+  const firstItem = !pagedCount ? 0 : page * activePageSize + 1;
+  const lastItem = !pagedCount ? 0 : Math.min(pagedCount, page * activePageSize + activePageSize);
+  const pageAssets = props.assets.slice(page * pageSize, page * pageSize + pageSize);
+
+  // The detail card resolves the dock's current selection: the tree-selected
+  // model home, a model subdir's owner, or the open model document.
+  const docId = props.state.activeWorkspaceDocumentId;
+  const docModel = typeof docId === 'string' && docId.startsWith('model:')
+    ? props.models.find((model) => `model:${model.id}` === docId) ?? null
+    : null;
+  const detailModel = selectedModel ?? subfolderView?.model ?? docModel;
 
   const onNodeContext = (id: ContentFolderId, event: { x: number; y: number }) => {
     // Only model-home rows (whose id is a model's folderId) open the menu.
@@ -130,7 +166,7 @@ export default function LibraryPanel(props: {
       assets={props.catalogAssets}
       selected={props.contentFolder}
       expanded={props.expandedFolders}
-      onFolder={handleFolder}
+      onFolder={props.onFolder}
       onToggle={props.onToggleFolder}
       onNodeContext={onNodeContext}
     />
@@ -145,8 +181,7 @@ export default function LibraryPanel(props: {
   );
 
   // The expanded grid column's content: files / model gallery / material tiles /
-  // asset cards / folder summary — same data branches the tucked panel had
-  // before the grid moved out of it (req_3135).
+  // asset cards / folder summary.
   const gridContent = showModelSubfolder ? (
     <C.HW_LibAssetGrid>
       {(subfolderView?.files.length ?? 0) === 0 ? (
@@ -171,13 +206,13 @@ export default function LibraryPanel(props: {
     </C.HW_LibAssetGrid>
   ) : showModelPackages ? (
     <ModelPackageBrowser
-      folder={props.contentFolder}
+      folder={galleryFolder}
       search={props.state.search}
-      page={props.state.assetPage}
+      page={page}
+      pageSize={modelPageSize}
       activeDocumentId={props.state.activeWorkspaceDocumentId}
+      selectedFolderId={selectedModel ? props.contentFolder : undefined}
       models={props.models}
-      expanded
-      onPage={props.onPage}
       onModel={props.onModel}
       onModelRightClick={(model, event) => { setMenuModel(model); modelMenu.triggerProps.onRightClick(event); }}
     />
@@ -266,16 +301,21 @@ export default function LibraryPanel(props: {
                 <C.HW_CrumbTextOn>{contentFolderLabel(props.contentFolder)}</C.HW_CrumbTextOn>
               )}
             </C.HW_LibCrumb>
-            {canBrowseAssets && !showModelPackages && !showModelSubfolder ? (
+            {pagedCount !== null ? (
               <C.HW_PageBar>
-                <C.HW_Pill onPress={() => props.onPage(-1)}><Icon name="ChevronLeft" size={11} color={accentFor('textDim')} /></C.HW_Pill>
-                <C.HW_PageText>{firstAsset}-{lastAsset} / {props.assets.length}</C.HW_PageText>
+                <C.HW_Pill onPress={() => props.onPage(-1, maxPage)}><Icon name="ChevronLeft" size={11} color={accentFor('textDim')} /></C.HW_Pill>
+                <C.HW_PageText>{firstItem}-{lastItem} / {pagedCount}</C.HW_PageText>
                 <C.HW_Spacer />
                 <C.HW_PageText>{page + 1}/{maxPage + 1}</C.HW_PageText>
-                <C.HW_Pill onPress={() => props.onPage(1)}><Icon name="ChevronRight" size={11} color={accentFor('textDim')} /></C.HW_Pill>
+                <C.HW_Pill onPress={() => props.onPage(1, maxPage)}><Icon name="ChevronRight" size={11} color={accentFor('textDim')} /></C.HW_Pill>
               </C.HW_PageBar>
             ) : null}
-            {gridContent}
+            <Box
+              onLayout={gridArea.onLayout}
+              style={{ flexGrow: 1, minHeight: 0, flexDirection: 'column', overflow: 'hidden' }}
+            >
+              {gridContent}
+            </Box>
             {footer}
           </C.HW_LibGridCol>
         </C.HW_LibBody>
@@ -293,6 +333,8 @@ export default function LibraryPanel(props: {
           onFavorite={props.onFavorite}
           onRename={props.onRename}
         />
+      ) : detailModel ? (
+        <ModelDetailCard model={detailModel} onOpen={props.onModel} onFavorite={props.onModelFavorite} />
       ) : folderTab ? (
         <ContextToolControls mode={props.mode} activeObject={props.activeObject} />
       ) : null}

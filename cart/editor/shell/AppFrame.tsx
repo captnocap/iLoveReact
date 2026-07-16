@@ -137,8 +137,8 @@ import { subscribe } from '@reactjit/runtime/ffi';
 import { currentModifiers } from '@reactjit/runtime/hooks/useModifiers';
 import { removeHotState } from '@reactjit/runtime/hooks/useHotState';
 import { pickFile } from '@reactjit/runtime/hooks/pickFile';
-import { ASSETS, applyAssetOverrides, assetById, assetPageSizeFor, resolveMaterialRef } from '../data/catalog';
-import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, isModelFolder, modelPackagesForFolder, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, modelGalleryPageSizeFor, SNAP_MODES } from '../data/content';
+import { ASSETS, applyAssetOverrides, assetById, resolveMaterialRef } from '../data/catalog';
+import { selectedObject, panelModeFor, tabForContentFolder, assetMatchesContentFolder, rankAssets, folderForAsset, contentFolderLabel, visibleModelPackages, liveContentTree, primitiveModelPackage, buildStarterModelPackage, playerModelPackage, nextBuildStarterDocId, nextPlayerModelDocId, modelPackageById, effectiveModelPackage, nextPrimitiveDocId, registerSavedPackage, upsertSavedPackage, SNAP_MODES } from '../data/content';
 import { playerStarterParts } from '../model/playerStarter';
 import { buildPieceStarterParts } from '../model/buildPieceStarter';
 import { buildPieceStarter, type BuildPieceStarterId } from '../data/buildStarters';
@@ -4771,16 +4771,12 @@ export default function AppFrame() {
             }))}
             onFavorite={toggleFavorite}
             onRename={renameAsset}
-            onPage={(delta) => setState((prev) => {
-              const itemCount = isModelFolder(prev.contentFolder)
-                ? modelPackagesForFolder(prev.contentFolder, prev.search, visibleModelPackages(prev.modelOverrides, prev.modelDupes)).length
-                : filteredAssets.length;
-              const pageSize = isModelFolder(prev.contentFolder)
-                ? modelGalleryPageSizeFor(prev.libraryExpanded)
-                : assetPageSizeFor(panelMode, prev.libraryExpanded);
-              const maxPage = Math.max(0, Math.ceil(itemCount / pageSize) - 1);
-              return { ...prev, assetPage: Math.max(0, Math.min(maxPage, prev.assetPage + delta)) };
-            })}
+            // The dock owns paging geometry (req_3137): its measured grid area
+            // computes the page size, so it hands the clamp ceiling over.
+            onPage={(delta, maxPage) => setState((prev) => ({
+              ...prev,
+              assetPage: Math.max(0, Math.min(maxPage, prev.assetPage + delta)),
+            }))}
             onFocusMaterial={focusMaterialDocument}
             onModel={openModelDocument}
             contentTree={contentTreeNodes}

@@ -114,16 +114,10 @@ export function subfolderFilesForFolder(
   return { model, sub, files: listPackageFiles(model, sub) };
 }
 
-// How many model thumbnails fill one gallery page. Shared by the picture
-// gallery and AppFrame's page clamp so paging never disagrees with the grid.
-export const MODEL_GALLERY_PAGE_SIZE = 12;
-// Expanded dock (req_3135): the 440px grid column fits 4 cells per row and the
-// grid area flexes taller than the tucked gallery, so pages hold more.
-export const MODEL_GALLERY_PAGE_SIZE_EXPANDED = 20;
-
-export function modelGalleryPageSizeFor(expanded: boolean): number {
-  return expanded ? MODEL_GALLERY_PAGE_SIZE_EXPANDED : MODEL_GALLERY_PAGE_SIZE;
-}
+// Fallback gallery page size for the expanded dock's first render, before its
+// grid area's measure lands (req_3137) — after that, pages size themselves to
+// fill the measured space.
+export const MODEL_GALLERY_PAGE_SIZE = 20;
 
 // The live model list: the catalog packages plus any duplicates, with per-model
 // renames/favorites applied and deleted (hidden) models removed. Everything that
