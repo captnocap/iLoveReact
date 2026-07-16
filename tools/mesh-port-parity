@@ -12,25 +12,33 @@ SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor >/dev/null
 ./tools/esbuild cart/editor/model/meshPortParity.ts --bundle --platform=neutral --format=iife --target=es2022 \
   --alias:@reactjit/geometries="$ROOT/runtime/geometries" --outfile="$OUT/reference.js" >/dev/null
 # Every fixture is replayed for seed and operation runs. These are deliberately
-# irregular: transformed/sheared cube, non-square quad, and an edge-extruded bridge.
-declare -A FIXTURE
+# irregular: transformed/sheared cube, non-square quad, an edge-extruded bridge —
+# and a pyramid, whose triangle sides exercise the NON-QUAD plane-comb fallback
+# (the path the quad ring never takes; req_3115's lopsided cut lived here).
+declare -A FIXTURE MODELDOC
 FIXTURE[sheared]='mode:1;vertex:0;nudge:x,0.19;vertex:3;nudge:z,-0.13;mode:3;sel:0;nudge:y,0.11'
 FIXTURE[nonsquare]='mode:1;vertex:0;nudge:x,0.31;vertex:2;nudge:z,0.17;mode:3'
 FIXTURE[bridge]='mode:2;edge:0;extrudeedge:0.27;mode:3'
+FIXTURE[pyramid]='mode:3'
+MODELDOC[sheared]=cube MODELDOC[nonsquare]=cube MODELDOC[bridge]=cube MODELDOC[pyramid]=pyramid
 run_native() {
   local fixture="$1" tag="$2" ops="$3"
-  RJIT_MODELDOC=cube RJIT_MESHOPS="${FIXTURE[$fixture]};$ops;contract:$OUT/$tag" ./tools/rjit shot editor --frames 360 --out "$OUT/$tag.png" >/dev/null
+  RJIT_MODELDOC="${MODELDOC[$fixture]}" RJIT_MESHOPS="${FIXTURE[$fixture]};$ops;contract:$OUT/$tag" ./tools/rjit shot editor --frames 360 --out "$OUT/$tag.png" >/dev/null
   test -s "$OUT/$tag.rjmd" && test -s "$OUT/$tag.json"
   base64 "$OUT/$tag.rjmd" > "$OUT/$tag.rjmd.b64"
 }
 status=0
-for fixture in sheared nonsquare bridge; do
+for fixture in sheared nonsquare bridge pyramid; do
   run_native "$fixture" "$fixture-seed" 'report'
   for op in solidify merge loopcut cut; do
     case "$op" in
       solidify) native='mode:3;sel:0;solidify' ;;
       merge) native='mode:3;range:0,2;merge' ;;
-      loopcut) native='mode:3;sel:0;lcbegin;lcprev:0,2,0.5;lcend:1' ;;
+      # pyramid loop cut seeds a SIDE TRIANGLE (tris 0-1 are the base quad) so the
+      # comb fallback runs. sel:2 is the -Z front face: its dominant normal axis is
+      # Z, so the flanking world axes are [X, Y] — dir 1 = +Y planes = level rings
+      # at the span thirds (dir 0 = X planes = the vertical cut family).
+      loopcut) if [ "$fixture" = pyramid ]; then native='mode:3;sel:2;lcbegin;lcprev:1,2,0.5;lcend:1'; else native='mode:3;sel:0;lcbegin;lcprev:0,2,0.5;lcend:1'; fi ;;
       cut) native='mode:3;sel:0;lcbegin:1;lcprev:0,2,0.5;lcend:1' ;;
     esac
     tag="$fixture-$op"

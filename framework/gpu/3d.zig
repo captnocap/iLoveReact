@@ -1107,6 +1107,24 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
     return true;
 }
 
+/// Select the welded edge whose endpoints sit at (p, q) — how a topo op hands its NEW
+/// edge to the gizmo so the user can move it without re-clicking (req_3114).
+fn selectWeldedEdgeAt(p: [3]f32, q: [3]f32) bool {
+    if (!mesh_edit.ensureTopologyPub()) return false;
+    const eps2: f32 = 1e-8;
+    const n = mesh_edit.edgeCount();
+    var e: u32 = 0;
+    while (e < n) : (e += 1) {
+        const ep = mesh_edit.edgeEndpointsPub(e);
+        const va = mesh_edit.vertPosPub(ep[0]);
+        const vb = mesh_edit.vertPosPub(ep[1]);
+        if ((dist2(va, p) <= eps2 and dist2(vb, q) <= eps2) or
+            (dist2(va, q) <= eps2 and dist2(vb, p) <= eps2))
+            return mesh_edit.selectEdgeByIndex(e, false);
+    }
+    return false;
+}
+
 pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
     if (!model_paint.hasTarget()) return false;
     const edge_idx = mesh_edit.selectedEdgeIndexPub() orelse return false;
@@ -1142,6 +1160,7 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
     const ok = replaceActiveEditMesh(owned, g_edit_count + 6);
     if (ok) {
         adoptAppendedFaces(old_groups, old_faces, src_part);
+        _ = selectWeldedEdgeAt(c, d);
         mesh_edit.setMode(.edge);
         journalCommit(&snap);
     } else journalDiscard(&snap);
@@ -1826,137 +1845,28 @@ fn domAxis(v: [3]f32) u8 {
     return if (x >= y and x >= z) 0 else if (y >= z) 1 else 2;
 }
 
-/// Canonical sign for a cut direction: dominant component positive, so repeat sessions
-/// on the same face comb the same way regardless of triangle winding.
-fn lcCanonSign(v: [3]f32) [3]f32 {
-    return if (v[domAxis(v)] < 0) vmul(v, -1) else v;
-}
-
-/// The loop-cut session's two CUT-PLANE NORMALS, from the selection's ACTUAL geometry
-/// (req_2794). The governing rule: a loop's cut planes must be PARALLEL to the two
-/// faces the loop does not cross — those are the selection's NEIGHBOR faces across
-/// the boundary edges the cut lines run parallel to, so each direction's plane normal
-/// is the (sign-aligned) average normal of the neighbors across the OTHER direction's
-/// edges. On a straight cuboid that IS the world axis; on a sheared/leaned column it
-/// reproduces the Blender loop exactly (planes contain both the lean and the uncrossed
-/// faces' edges). The first attempt used dirs from the face alone (U = longest boundary
-/// edge, V = n×U): right for a single-plane lean, but on a doubly-sheared column V-planes
-/// still clip the side faces and split their edges at arbitrary heights — the neighbor's
-/// normal is information the clicked face simply doesn't carry.
-/// Boundary edges are endpoint-keyed by position: the shared triangulation diagonals
-/// appear twice among the masked tris and drop out. Falls back per-direction to the
-/// in-plane guess (U / n×U) when a neighbor is missing or coplanar with the selection
-/// (an in-sheet cut must stay in-sheet), and to the axes flanking the normal's dominant
-/// axis when the boundary walk itself degenerates; null only with no usable normal.
-fn lcDeriveDirs(pos: []const f32, tri_count: u32, mask: []const bool, nrm: [3]f32) ?[2][3]f32 {
+/// The loop-cut session's two CUT-PLANE NORMALS: the WORLD AXES flanking the
+/// selection normal's dominant axis — the old studio's loopCutRange contract,
+/// straight by construction. The plane comb only ever cuts NON-QUAD selections
+/// now (every complete authored quad takes the parametric ring, which is what
+/// follows leaned/sheared shapes), so req_2794's neighbor-normal heuristic is
+/// retired: averaged neighbors tilt the comb on irregular shapes — a pyramid
+/// side cut level on the picked face and lopsided across the rest — and can
+/// collapse both directions onto one plane, deadening the dir toggle. Null only
+/// with no usable normal.
+fn lcDeriveDirs(nrm: [3]f32) ?[2][3]f32 {
     if (vdot(nrm, nrm) < 0.5) return null; // vnorm zeroed it — degenerate selection
-    const Edge = struct { a: [3]f32, b: [3]f32, n: u32, nbr: [3]f32 };
-    var edges = std.AutoHashMapUnmanaged(u128, Edge){};
-    defer edges.deinit(std.heap.c_allocator);
-    const vertKey = struct {
-        fn of(p: [3]f32) u64 {
-            const q: [3]f32 = .{ p[0] + 0.0, p[1] + 0.0, p[2] + 0.0 }; // −0 → +0
-            var h = std.hash.Wyhash.init(0x2794);
-            h.update(std.mem.asBytes(&q));
-            return h.final();
-        }
-    }.of;
-    const edgeKeyOf = struct {
-        fn of(ka: u64, kb: u64) u128 {
-            return (@as(u128, @min(ka, kb)) << 64) | @max(ka, kb);
-        }
-    }.of;
-    var f: u32 = 0;
-    while (f < tri_count) : (f += 1) {
-        if (!mask[f]) continue;
-        var k: u32 = 0;
-        while (k < 3) : (k += 1) {
-            const ia = (@as(usize, f) * 3 + k) * 3;
-            const ib = (@as(usize, f) * 3 + (k + 1) % 3) * 3;
-            const a: [3]f32 = .{ pos[ia + 0], pos[ia + 1], pos[ia + 2] };
-            const b: [3]f32 = .{ pos[ib + 0], pos[ib + 1], pos[ib + 2] };
-            const key = edgeKeyOf(vertKey(a), vertKey(b));
-            const gop = edges.getOrPut(std.heap.c_allocator, key) catch break;
-            if (!gop.found_existing) gop.value_ptr.* = .{ .a = a, .b = b, .n = 0, .nbr = .{ 0, 0, 0 } };
-            gop.value_ptr.n += 1;
+    const na = domAxis(nrm);
+    var out: [2][3]f32 = undefined;
+    var w: u8 = 0;
+    var a: u8 = 0;
+    while (a < 3) : (a += 1) {
+        if (a != na) {
+            out[w] = axisVec(a);
+            w += 1;
         }
     }
-    // The neighbor pass: every UNMASKED tri touching a selection-boundary edge donates
-    // its area normal — that's the face the loop must run parallel to, not across.
-    f = 0;
-    while (f < tri_count) : (f += 1) {
-        if (mask[f]) continue;
-        var k: u32 = 0;
-        while (k < 3) : (k += 1) {
-            const ia = (@as(usize, f) * 3 + k) * 3;
-            const ib = (@as(usize, f) * 3 + (k + 1) % 3) * 3;
-            const a: [3]f32 = .{ pos[ia + 0], pos[ia + 1], pos[ia + 2] };
-            const b: [3]f32 = .{ pos[ib + 0], pos[ib + 1], pos[ib + 2] };
-            const entry = edges.getPtr(edgeKeyOf(vertKey(a), vertKey(b))) orelse continue;
-            entry.nbr = vadd(entry.nbr, faceCrossFromPositions(pos, f));
-        }
-    }
-    // Longest boundary edge (in-plane) → U, the reference frame for classifying edges.
-    var best: [3]f32 = .{ 0, 0, 0 };
-    var best_l2: f32 = 0;
-    var it = edges.iterator();
-    while (it.next()) |e| {
-        if (e.value_ptr.n != 1) continue; // interior edge (diagonal) — shared by 2 tris
-        var dv = vsub(e.value_ptr.b, e.value_ptr.a);
-        dv = vsub(dv, vmul(nrm, vdot(dv, nrm))); // in-plane component
-        const l2 = vdot(dv, dv);
-        if (l2 > best_l2) {
-            best_l2 = l2;
-            best = dv;
-        }
-    }
-    if (best_l2 <= 1e-10) {
-        // Degenerate boundary (nothing masked, zero-length edges): the pre-req_2794
-        // world-axis behavior — the two axes flanking the normal's dominant axis.
-        const na = domAxis(nrm);
-        var out: [2][3]f32 = undefined;
-        var w: u8 = 0;
-        var a: u8 = 0;
-        while (a < 3) : (a += 1) {
-            if (a != na) {
-                out[w] = axisVec(a);
-                w += 1;
-            }
-        }
-        return out;
-    }
-    const u = lcCanonSign(vnorm(best));
-    const v_guess = vnorm(vcross(nrm, u));
-    if (vdot(v_guess, v_guess) < 0.5) return null;
-    // Each direction's plane normal accumulates the neighbors across the OTHER
-    // direction's edges, sign-aligned to the in-plane guess so opposite-end neighbors
-    // (top vs bottom face) reinforce instead of cancelling.
-    var sum0: [3]f32 = .{ 0, 0, 0 }; // direction 0 marches along U → neighbors across the SHORT edges
-    var sum1: [3]f32 = .{ 0, 0, 0 }; // direction 1 marches across → neighbors across the LONG edges
-    it = edges.iterator();
-    while (it.next()) |e| {
-        if (e.value_ptr.n != 1) continue;
-        const g = e.value_ptr.nbr;
-        if (vdot(g, g) < 1e-12) continue; // open border — no neighbor to honor
-        const gn = vnorm(g);
-        const ed = vnorm(vsub(e.value_ptr.b, e.value_ptr.a));
-        const long_parallel = @abs(vdot(ed, u)) >= 0.7071;
-        const ref = if (long_parallel) v_guess else u;
-        const aligned = if (vdot(gn, ref) < 0) vmul(gn, -1) else gn;
-        if (long_parallel) sum1 = vadd(sum1, aligned) else sum0 = vadd(sum0, aligned);
-    }
-    // A neighbor normal within ~25° of the selection's own normal means the neighbor is
-    // coplanar-ish (a cut inside a flat sheet) — the plane would slab toward the face
-    // and leave it whole. Keep such cuts in-sheet via the in-plane guess.
-    const pick = struct {
-        fn dir(sum: [3]f32, in_plane: [3]f32, n: [3]f32) [3]f32 {
-            const s = vnorm(sum);
-            if (vdot(s, s) < 0.5) return in_plane;
-            if (@abs(vdot(s, n)) > 0.9) return in_plane;
-            return lcCanonSign(s);
-        }
-    }.dir;
-    return .{ pick(sum0, u, nrm), pick(sum1, v_guess, nrm) };
+    return out;
 }
 
 /// The plane comb for `cuts` planes at `offset` within [lo,hi] — the studio's
@@ -2073,7 +1983,7 @@ pub fn meshLoopCutFaceBegin(basic: bool) ?LcInfo {
             if (keep_group == model_source.NO_FACE_GROUP) keep_group = model_source.faceGroupOf(f);
         }
     }
-    const dirs = lcDeriveDirs(pos, tri_count, mask, vnorm(acc)) orelse {
+    const dirs = lcDeriveDirs(vnorm(acc)) orelse {
         std.heap.c_allocator.free(pos);
         return null;
     };

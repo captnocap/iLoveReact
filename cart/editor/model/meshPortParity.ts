@@ -171,11 +171,17 @@ if (op === 'merge') {
   }
   const derivedEditable = edgeContract(nativeDoc.vertices, nativeDoc.groups).editableEdges; const journalEditable = nativeJournal?.topology?.editableEdges;
   const editableOk = journalEditable === derivedEditable; const fixture = label!.split(':')[0]!; const seedGroupCount = new Set(seedDoc.groups).size;
+  // pyramid: the loop cut seeds a SIDE TRIANGLE, so the plane-comb fallback runs
+  // (non-quad path). Two level +Y planes cross all four triangle sides (3 pieces
+  // each) and never touch the base: S=4, groups=13, and every new vert sits at a
+  // span-third fraction of a slant edge — the anti-lopsided contract (req_3115).
   const shapeOk = op === 'cut'
     ? subdivided === 1 && actual.groups === seedGroupCount + 2
-    : fixture === 'bridge' ? subdivided >= 3 && subdivided <= 5 && actual.groups === 7 + 2 * subdivided : subdivided === 4 && actual.groups === 14;
+    : fixture === 'bridge' ? subdivided >= 3 && subdivided <= 5 && actual.groups === 7 + 2 * subdivided
+    : fixture === 'pyramid' ? subdivided === 4 && actual.groups === 13
+    : subdivided === 4 && actual.groups === 14;
   equal = fractionsOk && untouchedOk && editableOk && shapeOk;
-  expectedText = `groups=${op === 'cut' ? seedGroupCount + 2 : fixture === 'bridge' ? `7+2*S` : 14} S=${op === 'cut' ? 1 : fixture === 'bridge' ? '3..5' : 4}`;
+  expectedText = `groups=${op === 'cut' ? seedGroupCount + 2 : fixture === 'bridge' ? `7+2*S` : fixture === 'pyramid' ? 13 : 14} S=${op === 'cut' ? 1 : fixture === 'bridge' ? '3..5' : 4}`;
   details = ` S=${subdivided} newVertices=${newCount} fractions=${fractionsOk ? 1 : 0} untouched=${untouchedOk ? 1 : 0} editable=${journalEditable}/${derivedEditable}`;
 } else {
   throw new Error(`unknown op ${op}`);
