@@ -1,5 +1,11 @@
 Mission ideas
 
+> Individual mission plots live here. The **career genres, crypto economy,
+> wallet↔face join, blueprint crafting, and screen-channel mission UIs** — the
+> end-to-end concept these plots hang on — are documented in
+> [CRIMINAL_CAREERS.md](CRIMINAL_CAREERS.md). Read that first for the systems;
+> this file is the plot catalog.
+
 
 name: Vertical Integration
 type: delivery + heist
