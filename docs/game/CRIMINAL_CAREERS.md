@@ -363,6 +363,61 @@ which is now load-bearing for a THIRD system, reinforcing: **design it first.**
 
 ---
 
+## Static Floor / Dynamic Ceiling (the AI content toggle)
+
+The game has **two presentation tiers over one shared substrate** (the event bus
++ record rings). This is the "prebaked OR dynamic gameplay" toggle, and its
+discipline is what makes AI safe to use here: **the AI is never load-bearing.**
+
+### The baked floor (always on, offline, deterministic, free)
+
+Every event/record has a **template representation** that always works: event →
+canned/templated text → a local **MS-Sam-tier TTS** voice over the radio (KCHAT)
+or TV. The news reports crimes in a robotic voice; the radio reads headlines and
+schizo-posts; the courtroom (Justice Loop) is event-cadence dialogue over records
+with button choices. Ships with the game, works with no network, no keys, forever.
+Deterministic → **replay-safe.**
+
+### The dynamic ceiling (toggle ON → the AI integrations light up)
+
+The **same events/records** are intercepted by models that produce richer output:
+
+- **AI writes the scripts** — news copy, radio-host banter, NPC dialogue, court
+  arguments — all generated *from the real event/record data* (the cold TS layer).
+- **Models EMBODY roles.** The courtroom stops being buttons and becomes real 3D
+  models in a room where the **judge IS Claude** (or whatever model the user
+  wires), the prosecutor/anchor/radio-host each a driven role, *reasoning over the
+  actual evidence rings.* The mechanics are unchanged (convict/hang/acquit, heat
+  purge) — the **fidelity** changes, not the game.
+- **TTS tiers, user-plugged:** local synth (the floor) → premium endpoints
+  (ElevenLabs-class) → the user's own **self-hosted** TTS. Same provider-abstraction
+  pattern the AI providers already use (`useAssistant`/`worker_bindings`/
+  `local_ai_runtime.zig`; the IDE cart already runs a `claude_code` chat).
+
+### The boundary that keeps replay intact (design law)
+
+**AI output is PRESENTATION, never authoritative state.** The deterministic
+record — *crime happened, outfit was X, witness fingerprint was Y, verdict was
+convict* — is what replays and what the game logic reads. The **script Claude
+wrote about it is ephemeral flavor** layered on top and MUST NOT feed back into
+the replayable sim/state, or determinism (and the whole replay-media engine)
+breaks. AI *reads* the deterministic record and voices it; it never *writes* the
+record. Non-determinism stays quarantined in the presentation layer.
+
+### Why this is the right shape for AI-in-a-game
+
+- **Graceful degradation by construction:** endpoint down / model slow / no key /
+  toggle off → fall back to the baked floor. The game never breaks because the AI
+  is optional, always.
+- **Two-clock safe:** generation is event-cadence or slower (a news script fires
+  when the news event fires, not per frame), runs on worker threads, latency never
+  touches the game loop. A judge taking 3s to "think" is fine — it's the UI/social
+  loop; the world keeps running (time never stops).
+- **One substrate, two fidelities:** baked and dynamic read the same rings, so
+  content authored for one is never wasted on the other.
+
+---
+
 ## Blueprints, 3D Printing & Crafting (Studio as the crafting system)
 
 > **This is a flagship system — execute flawlessly.** It is the deepest reuse of
