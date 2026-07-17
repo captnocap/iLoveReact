@@ -211,7 +211,7 @@ fn hostLoadFileToBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     }
 
     ensureContentStore();
-    const data = std.fs.cwd().readFileAlloc(std.heap.c_allocator, path, 64 * 1024 * 1024) catch |e| {
+    const data = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, std.heap.c_allocator, .limited(64 * 1024 * 1024)) catch |e| {
         std.log.warn("[content-store] read failed path={s}: {}", .{ path, e });
         setReturnNumber(info, 0);
         return;
@@ -328,9 +328,9 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     state.markDirty();
 
     // Build {"key":"<escaped path>","count":N,"radius":R} for the cart to mount.
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(std.heap.c_allocator);
-    const w = buf.writer(std.heap.c_allocator);
+    var buf: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
+    defer buf.deinit();
+    const w = &buf.writer;
     w.writeAll("{\"key\":\"") catch {
         setReturnString(info, "");
         return;
@@ -347,7 +347,7 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         setReturnString(info, "");
         return;
     };
-    setReturnString(info, buf.items);
+    setReturnString(info, buf.written());
 }
 
 /// __mesh_preview_file(path) → JSON {"key","count","radius"} | "" on failure.
@@ -386,9 +386,9 @@ fn hostMeshPreviewFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     scene3d.orbitFrame(mesh.center, mesh.radius);
     state.markDirty();
 
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(std.heap.c_allocator);
-    const w = buf.writer(std.heap.c_allocator);
+    var buf: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
+    defer buf.deinit();
+    const w = &buf.writer;
     w.writeAll("{\"key\":\"") catch {
         setReturnString(info, "");
         return;
@@ -405,7 +405,7 @@ fn hostMeshPreviewFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         setReturnString(info, "");
         return;
     };
-    setReturnString(info, buf.items);
+    setReturnString(info, buf.written());
 }
 
 /// __mesh_load_vertices(key, float32Verts, vertCount?) → JSON {"key","count","radius"} | "".
@@ -454,9 +454,9 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     scene3d.orbitFrame(mesh.center, mesh.radius);
     state.markDirty();
 
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(std.heap.c_allocator);
-    const w = buf.writer(std.heap.c_allocator);
+    var buf: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
+    defer buf.deinit();
+    const w = &buf.writer;
     w.writeAll("{\"key\":\"") catch {
         setReturnString(info, "");
         return;
@@ -473,7 +473,7 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
         setReturnString(info, "");
         return;
     };
-    setReturnString(info, buf.items);
+    setReturnString(info, buf.written());
 }
 
 /// __model_orbit_drag(dx, dy) — orbit the drop-to-view camera by a screen-space drag
@@ -1161,9 +1161,9 @@ fn setMeshPathArrayReturn(info: v8.FunctionCallbackInfo, result: scene3d.PathArr
         setReturnString(info, "{\"ok\":0}");
         return;
     };
-    var json = std.ArrayListUnmanaged(u8){};
-    defer json.deinit(std.heap.c_allocator);
-    const w = json.writer(std.heap.c_allocator);
+    var json: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
+    defer json.deinit();
+    const w = &json.writer;
     w.print("{{\"ok\":1,\"key\":\"{s}\",\"count\":{d},\"ranges\":[", .{ key, result.count }) catch {
         setReturnString(info, "{\"ok\":0}");
         return;
@@ -1180,7 +1180,7 @@ fn setMeshPathArrayReturn(info: v8.FunctionCallbackInfo, result: scene3d.PathArr
         return;
     };
     state.markDirty();
-    setReturnString(info, json.items);
+    setReturnString(info, json.written());
 }
 
 fn hostMeshPathArray(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -1455,14 +1455,14 @@ fn hostMeshPaintHistory(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     setReturnString(info, json);
 }
 
-fn appendJsonEscaped(out: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) !void {
+fn appendJsonEscaped(w: *std.Io.Writer, s: []const u8) !void {
     for (s) |ch| {
         switch (ch) {
-            '"' => try out.appendSlice(a, "\\\""),
-            '\\' => try out.appendSlice(a, "\\\\"),
+            '"' => try w.writeAll("\\\""),
+            '\\' => try w.writeAll("\\\\"),
             else => {
                 if (ch < 0x20) continue; // control chars have no place in a layer name
-                try out.append(a, ch);
+                try w.writeByte(ch);
             },
         }
     }
@@ -1475,27 +1475,27 @@ fn writePaintLayersJson(info: v8.FunctionCallbackInfo) void {
         setReturnString(info, "{\"ok\":0}");
         return;
     }
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(alloc_);
+    var out: std.Io.Writer.Allocating = .init(alloc_);
+    defer out.deinit();
     const build = struct {
-        fn run(o: *std.ArrayList(u8), a: std.mem.Allocator) !void {
-            const w = o.writer(a);
+        fn run(o: *std.Io.Writer.Allocating) !void {
+            const w = &o.writer;
             try w.print("{{\"ok\":1,\"active\":{d},\"layers\":[", .{scene3d.paintActiveLayer()});
             var i: usize = 0;
             while (i < scene3d.paintLayerCount()) : (i += 1) {
                 const l = scene3d.paintLayerAt(i);
                 try w.print("{s}{{\"id\":{d},\"name\":\"", .{ if (i == 0) "" else ",", l.id });
-                try appendJsonEscaped(o, a, l.name);
+                try appendJsonEscaped(w, l.name);
                 try w.print("\",\"visible\":{d},\"strokes\":{d}}}", .{ @as(u8, if (l.visible) 1 else 0), l.strokes });
             }
             try w.writeAll("]}");
         }
     };
-    build.run(&out, alloc_) catch {
+    build.run(&out) catch {
         setReturnString(info, "{\"ok\":0}");
         return;
     };
-    setReturnString(info, out.items);
+    setReturnString(info, out.written());
 }
 
 /// __mesh_paint_layers() → the layer list JSON above, or {"ok":0} before any painting.
@@ -1578,9 +1578,9 @@ fn hostMeshPartRanges(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         setReturnString(info, "{\"ok\":0}");
         return;
     };
-    var buf = std.ArrayListUnmanaged(u8){};
-    defer buf.deinit(std.heap.c_allocator);
-    const w = buf.writer(std.heap.c_allocator);
+    var buf: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
+    defer buf.deinit();
+    const w = &buf.writer;
     w.writeAll("{\"ok\":1,\"ranges\":[") catch {
         setReturnString(info, "{\"ok\":0}");
         return;
@@ -1596,7 +1596,7 @@ fn hostMeshPartRanges(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         setReturnString(info, "{\"ok\":0}");
         return;
     };
-    setReturnString(info, buf.items);
+    setReturnString(info, buf.written());
 }
 
 /// __model_paint_group_range(lo, hi, r, g, b) → face count. Paint every face in the group
@@ -1755,9 +1755,9 @@ fn hostModelMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     if (verts.len == 0) return setReturnNumber(info, 0);
     const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
     defer alloc.free(pathz);
-    const file = std.fs.cwd().createFile(pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
-    defer file.close();
-    file.writeAll(std.mem.sliceAsBytes(verts)) catch return setReturnNumber(info, 0);
+    const file = std.Io.Dir.cwd().createFile(host_io.io(), pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
+    defer file.close(host_io.io());
+    file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(verts)) catch return setReturnNumber(info, 0);
     setReturnNumber(info, 1);
 }
 
@@ -1776,9 +1776,9 @@ fn hostModelPaintedMeshWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     if (verts.len == 0) return setReturnNumber(info, 0);
     const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
     defer alloc.free(pathz);
-    const file = std.fs.cwd().createFile(pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
-    defer file.close();
-    file.writeAll(std.mem.sliceAsBytes(verts)) catch return setReturnNumber(info, 0);
+    const file = std.Io.Dir.cwd().createFile(host_io.io(), pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
+    defer file.close(host_io.io());
+    file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(verts)) catch return setReturnNumber(info, 0);
     setReturnNumber(info, 1);
 }
 
@@ -1805,17 +1805,17 @@ fn hostModelMeshdocWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     const range_count: u32 = if (ranges) |r| @intCast(r.len / 2) else 0;
     const pathz = alloc.dupeZ(u8, path) catch return setReturnNumber(info, 0);
     defer alloc.free(pathz);
-    const file = std.fs.cwd().createFile(pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
-    defer file.close();
+    const file = std.Io.Dir.cwd().createFile(host_io.io(), pathz, .{ .truncate = true }) catch return setReturnNumber(info, 0);
+    defer file.close(host_io.io());
     const glass_first_vertex = @min(scene3d.modelGlassFirstVertex(), vert_count);
     const header = [7]u32{ 0x444D4A52, 2, vert_count, face_count, has_groups, range_count, glass_first_vertex };
-    file.writeAll(std.mem.sliceAsBytes(header[0..])) catch return setReturnNumber(info, 0);
-    file.writeAll(std.mem.sliceAsBytes(verts[0 .. @as(usize, vert_count) * 8])) catch return setReturnNumber(info, 0);
+    file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(header[0..])) catch return setReturnNumber(info, 0);
+    file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(verts[0 .. @as(usize, vert_count) * 8])) catch return setReturnNumber(info, 0);
     if (has_groups == 1) {
-        file.writeAll(std.mem.sliceAsBytes(groups.?[0..face_count])) catch return setReturnNumber(info, 0);
+        file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(groups.?[0..face_count])) catch return setReturnNumber(info, 0);
     }
     if (range_count > 0) {
-        file.writeAll(std.mem.sliceAsBytes(ranges.?)) catch return setReturnNumber(info, 0);
+        file.writeStreamingAll(host_io.io(), std.mem.sliceAsBytes(ranges.?)) catch return setReturnNumber(info, 0);
     }
     setReturnNumber(info, 1);
 }
@@ -2044,9 +2044,9 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     defer alloc.free(b64);
     _ = enc.encode(b64, pa.rgba);
 
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(alloc);
-    const w = out.writer(alloc);
+    var out: std.Io.Writer.Allocating = .init(alloc);
+    defer out.deinit();
+    const w = &out.writer;
     w.print("{{\"w\":{d},\"h\":{d},\"detail\":{d}", .{ pa.w, pa.h, pa.detail }) catch {
         setReturnString(info, "");
         return;
@@ -2074,7 +2074,7 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         setReturnString(info, "");
         return;
     };
-    setReturnString(info, out.items);
+    setReturnString(info, out.written());
 }
 
 /// __model_paint_sample(x, y) → packed 0xRRGGBB colour under the viewport pixel, -1 on a
@@ -2105,15 +2105,15 @@ fn hostModelAtlasPalette(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     scene3d.paintTintSuspend();
     defer scene3d.paintTintResume();
     const wrote = scene3d.paintAtlasPalette(colors[0..n]);
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(alloc);
-    const w = out.writer(alloc);
+    var out: std.Io.Writer.Allocating = .init(alloc);
+    defer out.deinit();
+    const w = &out.writer;
     w.writeAll("[") catch return setReturnString(info, "[]");
     for (colors[0..wrote], 0..) |rgb, i| {
         w.print("{s}[{d},{d},{d}]", .{ if (i == 0) "" else ",", rgb[0], rgb[1], rgb[2] }) catch return setReturnString(info, "[]");
     }
     w.writeAll("]") catch return setReturnString(info, "[]");
-    setReturnString(info, out.items);
+    setReturnString(info, out.written());
 }
 
 /// __model_atlas_apply(detail, base64) → 1 on success, 0 on failure. Restore a saved painting:
@@ -2207,7 +2207,7 @@ fn hostFileSha256(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer std.heap.c_allocator.free(path);
-    const data = std.fs.cwd().readFileAlloc(std.heap.c_allocator, path, 512 * 1024 * 1024) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, std.heap.c_allocator, .limited(512 * 1024 * 1024)) catch {
         setReturnString(info, "");
         return;
     };
@@ -2276,9 +2276,9 @@ fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     model_source.setFaceMap(dec.face_to_source);
     state.markDirty();
 
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(std.heap.c_allocator);
-    const w = buf.writer(std.heap.c_allocator);
+    var buf: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
+    defer buf.deinit();
+    const w = &buf.writer;
     w.writeAll("{\"key\":\"") catch {
         setReturnString(info, "");
         return;
@@ -2295,7 +2295,7 @@ fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         setReturnString(info, "");
         return;
     };
-    setReturnString(info, buf.items);
+    setReturnString(info, buf.written());
 }
 
 fn hostReleaseFileBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -2642,9 +2642,9 @@ fn hostExecAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn emitExecResult(rid: []const u8, stdout: []const u8, code: i32) void {
     // Build JSON payload. Only escape the couple of chars we need for stdout;
     // stdout can be arbitrary text with quotes/newlines/backslashes.
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(std.heap.c_allocator);
-    const w = buf.writer(std.heap.c_allocator);
+    var buf: std.Io.Writer.Allocating = .init(std.heap.c_allocator);
+    defer buf.deinit();
+    const w = &buf.writer;
     w.print("{{\"code\":{d},\"stdout\":\"", .{code}) catch return;
     for (stdout) |ch| {
         switch (ch) {
@@ -2658,7 +2658,7 @@ fn emitExecResult(rid: []const u8, stdout: []const u8, code: i32) void {
         }
     }
     w.writeAll("\"}") catch return;
-    const payload = buf.items;
+    const payload = buf.written();
 
     // Build channel string "exec:<rid>" nul-terminated for callGlobal2Str.
     var chan: std.ArrayList(u8) = .empty;

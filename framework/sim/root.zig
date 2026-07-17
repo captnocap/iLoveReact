@@ -9,6 +9,7 @@
 //! results back through the `apply_*` mutators below.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const Rng = @import("rng.zig").Rng;
 const market_mod = @import("market.zig");
 const basecoin_mod = @import("basecoin.zig");
@@ -187,7 +188,7 @@ fn seedN(n_in: usize) void {
 
 fn freshRunId() u64 {
     var bytes: [8]u8 = undefined;
-    std.crypto.random.bytes(&bytes);
+    host_io.io().random(&bytes);
     return std.mem.readInt(u64, &bytes, .little);
 }
 

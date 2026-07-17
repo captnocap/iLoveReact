@@ -44,7 +44,7 @@ pub const Telemetry = struct {
 };
 
 var g_mode: Mode = .sync;
-var g_pending: std.ArrayList([]u8) = .{};
+var g_pending: std.ArrayList([]u8) = .empty;
 var g_pending_bytes: u64 = 0;
 var g_last_drain_batches: u32 = 0;
 var g_last_drain_bytes: u64 = 0;

@@ -81,7 +81,7 @@ var g_display: ?Display = null;
 fn ioctl(fd: i32, request: u32, arg: usize) !void {
     while (true) {
         const rc = linux.ioctl(fd, request, arg);
-        switch (linux.E.init(rc)) {
+        switch (linux.errno(rc)) {
             .SUCCESS => return,
             .INTR, .AGAIN => continue,
             else => |e| {
@@ -127,7 +127,7 @@ pub fn init() !void {
 
 fn openCard(path: [:0]const u8) ?i32 {
     const rc = linux.open(path, .{ .ACCMODE = .RDWR, .CLOEXEC = true }, 0);
-    if (linux.E.init(rc) != .SUCCESS) return null;
+    if (linux.errno(rc) != .SUCCESS) return null;
     return @intCast(rc);
 }
 
@@ -214,7 +214,7 @@ fn setupCard(fd: i32) !void {
     const map = std.posix.mmap(
         null,
         create.size,
-        std.posix.PROT.READ | std.posix.PROT.WRITE,
+        .{ .READ = true, .WRITE = true },
         .{ .TYPE = .SHARED },
         fd,
         mapreq.offset,

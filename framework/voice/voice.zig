@@ -77,7 +77,7 @@ const State = struct {
     utterance: std.array_list.Managed(i16) = undefined,
 
     // Stable id → owned PCM. JS-side hook reads via rjit_voice_take_buffer.
-    buffers: std.AutoArrayHashMap(u32, []i16) = undefined,
+    buffers: std.AutoArrayHashMapUnmanaged(u32, []i16) = .empty,
     next_buf_id: u32 = 1,
 
     // Running RMS over the last drained frame. Reported via __voice_onLevel
@@ -115,7 +115,7 @@ pub fn init(allocator: std.mem.Allocator) void {
     if (S.initialized) return;
     S.allocator = allocator;
     S.utterance = std.array_list.Managed(i16).init(allocator);
-    S.buffers = std.AutoArrayHashMap(u32, []i16).init(allocator);
+    S.buffers = .empty;
     S.initialized = true;
     // Stream + fvad created lazily on first start().
 }
@@ -128,7 +128,7 @@ pub fn deinit() void {
     S.utterance.deinit();
     var it = S.buffers.iterator();
     while (it.next()) |entry| S.allocator.free(entry.value_ptr.*);
-    S.buffers.deinit();
+    S.buffers.deinit(S.allocator);
     S.initialized = false;
 }
 
@@ -379,7 +379,7 @@ fn finaliseUtterance() void {
     S.next_buf_id +%= 1;
     const owned = S.allocator.alloc(i16, S.utterance.items.len) catch return;
     @memcpy(owned, S.utterance.items);
-    S.buffers.put(id, owned) catch {
+    S.buffers.put(S.allocator, id, owned) catch {
         S.allocator.free(owned);
         return;
     };
@@ -401,7 +401,7 @@ fn snapshotPreview() void {
     S.next_buf_id +%= 1;
     const owned = S.allocator.alloc(i16, S.utterance.items.len) catch return;
     @memcpy(owned, S.utterance.items);
-    S.buffers.put(id, owned) catch {
+    S.buffers.put(S.allocator, id, owned) catch {
         S.allocator.free(owned);
         return;
     };

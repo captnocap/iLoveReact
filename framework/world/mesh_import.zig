@@ -19,6 +19,23 @@
 //! material; the Studio import path is where texturing lives.
 
 const std = @import("std");
+// Dual-context file (app module member AND standalone test root): cannot
+// import host_io.zig by relative path, so reach the SAME process-wide Io
+// instance via the std global.
+const host_io = struct {
+    fn io() std.Io {
+        return std.Io.Threaded.global_single_threaded.io();
+    }
+    fn getEnvVarOwned(alloc: std.mem.Allocator, name: []const u8) error{ OutOfMemory, EnvironmentVariableNotFound }![]u8 {
+        var it: usize = 0;
+        while (std.c.environ[it]) |entry_ptr| : (it += 1) {
+            const entry = std.mem.span(entry_ptr);
+            const eq = std.mem.indexOfScalar(u8, entry, '=') orelse continue;
+            if (std.mem.eql(u8, entry[0..eq], name)) return alloc.dupe(u8, entry[eq + 1 ..]);
+        }
+        return error.EnvironmentVariableNotFound;
+    }
+};
 
 /// Interleaved vertex, byte-identical to `Vertex` in framework/gpu/3d.zig. Kept as a
 /// local mirror so this module has no dependency on the GPU layer (it stays headless-
@@ -55,7 +72,7 @@ pub const Error = error{
 /// Read `path` and parse it into a ParsedMesh. Caller owns the result (deinit). The
 /// extension picks the parser; `.glb`/`.gltf` → GLB, everything else → OBJ.
 pub fn loadFile(alloc: std.mem.Allocator, path: []const u8) Error!ParsedMesh {
-    const bytes = std.fs.cwd().readFileAlloc(alloc, path, 256 * 1024 * 1024) catch {
+    const bytes = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, alloc, .limited(256 * 1024 * 1024)) catch {
         return Error.MalformedGlb;
     };
     defer alloc.free(bytes);

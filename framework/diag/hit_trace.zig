@@ -18,6 +18,7 @@
 //! Event-rate only (one block per click) — never in a per-frame path.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 
@@ -26,7 +27,7 @@ const MAX_CONTAINS = 24;
 const MAX_NEAR = 6;
 const NEAR_RADIUS = 400.0; // px — ignore far-away rects in the nearest list
 
-var log_file: ?std.fs.File = null;
+var log_file: ?std.Io.File = null;
 var file_init = false;
 var stderr_on = false;
 
@@ -42,8 +43,8 @@ var near_n: usize = 0;
 fn ensureFile() void {
     if (file_init) return;
     file_init = true;
-    log_file = std.fs.createFileAbsolute(LOG_PATH, .{ .truncate = true }) catch null;
-    stderr_on = std.posix.getenv("ZIGOS_HIT_TRACE") != null;
+    log_file = std.Io.Dir.createFileAbsolute(host_io.io(), LOG_PATH, .{ .truncate = true }) catch null;
+    stderr_on = host_io.getenv("ZIGOS_HIT_TRACE") != null;
 }
 
 /// Write one formatted chunk to the log file (and stderr when opted in).
@@ -51,7 +52,7 @@ fn out(comptime fmt: []const u8, args: anytype) void {
     var buf: [1024]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, fmt, args) catch return;
     if (stderr_on) std.debug.print("{s}", .{s});
-    if (log_file) |f| _ = f.write(s) catch {};
+    if (log_file) |f| f.writeStreamingAll(host_io.io(), s) catch {};
 }
 
 /// Mirrors layout.zig's private hasHandlers + the href/input/canvas/blocker extras —

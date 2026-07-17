@@ -2,6 +2,7 @@
 //! tracks PnL from average buy price.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 
 pub const MAX_HOLDINGS: usize = 64;
 
@@ -29,7 +30,7 @@ pub const WalletState = struct {
 
 pub fn generateAddress() [20]u8 {
     var addr: [20]u8 = undefined;
-    std.crypto.random.bytes(&addr);
+    host_io.io().random(&addr);
     return addr;
 }
 

@@ -9,6 +9,7 @@
 //!   // engine calls harness.tick() each frame — runs after frame 1
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
@@ -87,6 +88,6 @@ pub fn runAll(root: *Node) u8 {
 
 /// Check if ZIGOS_TEST=1 is set in the environment.
 pub fn envEnabled() bool {
-    const val = std.posix.getenv("ZIGOS_TEST") orelse return false;
+    const val = host_io.getenv("ZIGOS_TEST") orelse return false;
     return std.mem.eql(u8, val, "1");
 }

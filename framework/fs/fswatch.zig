@@ -13,6 +13,7 @@
 // Polling matches Lua behavior and keeps cross-platform semantics stable.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 
 pub const MAX_WATCHERS = 8;
 pub const MAX_FILES = 512;
@@ -157,7 +158,7 @@ pub fn addWatcher(config: WatcherConfig) error{ TooManyWatchers, NameTooLong }!u
 
     // Detect if path is a directory
     w.is_dir = blk: {
-        const s = std.fs.cwd().statFile(config.path) catch break :blk false;
+        const s = std.Io.Dir.cwd().statFile(host_io.io(), config.path, .{}) catch break :blk false;
         break :blk s.kind == .directory;
     };
 
@@ -256,26 +257,26 @@ fn buildSnapshotInto(w: *const Watcher, out: *[MAX_FILES]SnapEntry) !usize {
 
     if (!w.is_dir) {
         // Single file watch
-        const s = std.fs.cwd().statFile(watch_path) catch return 0;
+        const s = std.Io.Dir.cwd().statFile(host_io.io(), watch_path, .{}) catch return 0;
         const basename = std.fs.path.basename(watch_path);
         const len: u16 = @intCast(@min(basename.len, SNAP_PATH_MAX));
         @memcpy(out[0].rel_path[0..len], basename[0..len]);
         out[0].rel_len = len;
         out[0].size = s.size;
-        out[0].mtime_ns = s.mtime;
+        out[0].mtime_ns = @intCast(s.mtime.toNanoseconds());
         return 1;
     }
 
     // Directory watch
-    var dir = std.fs.cwd().openDir(watch_path, .{ .iterate = true }) catch return 0;
-    defer dir.close();
+    var dir = std.Io.Dir.cwd().openDir(host_io.io(), watch_path, .{ .iterate = true }) catch return 0;
+    defer dir.close(host_io.io());
 
     if (w.recursive) {
         // Recursive scan using Dir.walk (requires allocator)
         var walker = dir.walk(std.heap.page_allocator) catch return 0;
         defer walker.deinit();
 
-        while (walker.next() catch null) |entry| {
+        while (walker.next(host_io.io()) catch null) |entry| {
             if (count >= MAX_FILES) break;
             if (entry.kind == .directory) continue;
 
@@ -286,18 +287,18 @@ fn buildSnapshotInto(w: *const Watcher, out: *[MAX_FILES]SnapEntry) !usize {
             if (w.has_pattern and !matchGlob(w.pattern[0..w.pattern_len], entry.basename)) continue;
 
             // Stat
-            const s = entry.dir.statFile(entry.basename) catch continue;
+            const s = entry.dir.statFile(host_io.io(), entry.basename, .{}) catch continue;
             const plen: u16 = @intCast(@min(entry.path.len, SNAP_PATH_MAX));
             @memcpy(out[count].rel_path[0..plen], entry.path[0..plen]);
             out[count].rel_len = plen;
             out[count].size = s.size;
-            out[count].mtime_ns = s.mtime;
+            out[count].mtime_ns = @intCast(s.mtime.toNanoseconds());
             count += 1;
         }
     } else {
         // Shallow scan
         var iter = dir.iterate();
-        while (iter.next() catch null) |entry| {
+        while (iter.next(host_io.io()) catch null) |entry| {
             if (count >= MAX_FILES) break;
             if (entry.kind == .directory) continue;
 
@@ -305,12 +306,12 @@ fn buildSnapshotInto(w: *const Watcher, out: *[MAX_FILES]SnapEntry) !usize {
             if (w.has_pattern and !matchGlob(w.pattern[0..w.pattern_len], entry.name)) continue;
 
             // Stat
-            const s = dir.statFile(entry.name) catch continue;
+            const s = dir.statFile(host_io.io(), entry.name, .{}) catch continue;
             const nlen: u16 = @intCast(@min(entry.name.len, SNAP_PATH_MAX));
             @memcpy(out[count].rel_path[0..nlen], entry.name[0..nlen]);
             out[count].rel_len = nlen;
             out[count].size = s.size;
-            out[count].mtime_ns = s.mtime;
+            out[count].mtime_ns = @intCast(s.mtime.toNanoseconds());
             count += 1;
         }
     }

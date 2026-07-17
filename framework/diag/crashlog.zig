@@ -3,6 +3,8 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const host_io = @import("../host_io.zig");
+const sysx = @import("../net/sysx.zig");
 
 var g_fd: ?std.posix.fd_t = null;
 var g_initialized = false;
@@ -65,24 +67,16 @@ pub fn init() void {
         path_buf[path.len] = 0;
         const path_z: [*:0]const u8 = @ptrCast(path_buf[0..path.len]);
 
-        g_fd = std.posix.openZ(
-            path_z,
-            .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true },
-            0o644,
-        ) catch null;
+        g_fd = if (std.Io.Dir.createFileAbsolute(host_io.io(), std.mem.span(path_z), .{ .permissions = .fromMode(0o644) })) |file| file.handle else |_| null;
     } else {
         // macOS: write to ~/Library/Logs/
         var path_buf: [256]u8 = undefined;
-        const home = std.posix.getenv("HOME") orelse return;
+        const home = host_io.getenv("HOME") orelse return;
         const path = std.fmt.bufPrint(&path_buf, "{s}/Library/Logs/reactjit-crash.log", .{home}) catch return;
         path_buf[path.len] = 0;
         const path_z: [*:0]const u8 = @ptrCast(path_buf[0..path.len]);
 
-        g_fd = std.posix.openZ(
-            path_z,
-            .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true },
-            0o644,
-        ) catch null;
+        g_fd = if (std.Io.Dir.createFileAbsolute(host_io.io(), std.mem.span(path_z), .{ .permissions = .fromMode(0o644) })) |file| file.handle else |_| null;
     }
 
     // Install crash handlers with SA_SIGINFO for faulting address
@@ -116,9 +110,9 @@ fn atexitHandler() callconv(.c) void {
     // (SDL init failure, wgpu panic, C library assertion, etc.)
     logRaw("EXIT: abnormal — exit() called without engine shutdown\n");
     const stderr = 2;
-    _ = std.posix.write(stderr, "\n[CRASH] Process called exit() without clean shutdown.\n") catch {};
-    _ = std.posix.write(stderr, "[CRASH] Likely cause: SDL init failure, wgpu error, or C library abort.\n") catch {};
-    _ = std.posix.write(stderr, "[CRASH] Check stderr output above for the actual error.\n\n") catch {};
+    _ = sysx.write(stderr, "\n[CRASH] Process called exit() without clean shutdown.\n") catch {};
+    _ = sysx.write(stderr, "[CRASH] Likely cause: SDL init failure, wgpu error, or C library abort.\n") catch {};
+    _ = sysx.write(stderr, "[CRASH] Check stderr output above for the actual error.\n\n") catch {};
 }
 
 /// Install a normal (non-SA_SIGINFO) signal handler. Use for SIGINT/SIGTERM
@@ -175,16 +169,16 @@ fn crashHandlerSiginfo(sig: c_int, info: *siginfo_t, ctx: ?*anyopaque) callconv(
     // Must be unmissable. Signal handler context: no allocator, no formatting
     // beyond bufPrint, only write() is async-signal-safe.
     const stderr = 2;
-    _ = std.posix.write(stderr, "\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n") catch {};
-    _ = std.posix.write(stderr, "!!!  CRASH: ") catch {};
-    _ = std.posix.write(stderr, name) catch {};
-    _ = std.posix.write(stderr, "  !!!\n") catch {};
-    _ = std.posix.write(stderr, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n") catch {};
+    _ = sysx.write(stderr, "\n\n!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n") catch {};
+    _ = sysx.write(stderr, "!!!  CRASH: ") catch {};
+    _ = sysx.write(stderr, name) catch {};
+    _ = sysx.write(stderr, "  !!!\n") catch {};
+    _ = sysx.write(stderr, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n") catch {};
 
     if (info.si_addr) |addr| {
         var buf: [80]u8 = undefined;
         const s = std.fmt.bufPrint(&buf, "fault address: 0x{x}\n", .{@intFromPtr(addr)}) catch "fault address: ?\n";
-        _ = std.posix.write(stderr, s) catch {};
+        _ = sysx.write(stderr, s) catch {};
     }
 
     if (ctx) |uctx| {
@@ -195,17 +189,17 @@ fn crashHandlerSiginfo(sig: c_int, info: *siginfo_t, ctx: ?*anyopaque) callconv(
             const rip_ptr: *const u64 = @ptrCast(@alignCast(uctx_bytes + rip_offset));
             var buf2: [80]u8 = undefined;
             const s2 = std.fmt.bufPrint(&buf2, "instruction ptr: 0x{x}\n", .{rip_ptr.*}) catch "instruction ptr: ?\n";
-            _ = std.posix.write(stderr, s2) catch {};
+            _ = sysx.write(stderr, s2) catch {};
         } else {
             var buf2: [80]u8 = undefined;
             const s2 = std.fmt.bufPrint(&buf2, "ucontext: 0x{x}\n", .{@intFromPtr(uctx_bytes)}) catch "ucontext: ?\n";
-            _ = std.posix.write(stderr, s2) catch {};
+            _ = sysx.write(stderr, s2) catch {};
         }
     }
 
-    _ = std.posix.write(stderr, "Rebuild with --debug for symbols, then:\n") catch {};
-    _ = std.posix.write(stderr, "  addr2line -e zig-out/bin/APP 0xADDRESS\n") catch {};
-    _ = std.posix.write(stderr, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n") catch {};
+    _ = sysx.write(stderr, "Rebuild with --debug for symbols, then:\n") catch {};
+    _ = sysx.write(stderr, "  addr2line -e zig-out/bin/APP 0xADDRESS\n") catch {};
+    _ = sysx.write(stderr, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n\n") catch {};
 
     // Also write to log file
     logRaw("CRASH: signal ");
@@ -238,7 +232,7 @@ pub fn log(msg: []const u8) void {
 
 fn logRaw(msg: []const u8) void {
     if (g_fd) |fd| {
-        _ = std.posix.write(fd, msg) catch {};
+        _ = sysx.write(fd, msg) catch {};
     }
 }
 

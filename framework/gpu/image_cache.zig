@@ -13,6 +13,7 @@
 //! to `queueForPaint(node, rect)` which queues a quad via gpu.images.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const gpu = @import("gpu.zig");
@@ -102,7 +103,7 @@ fn decodeDataUrl(src: []const u8, alloc: std.mem.Allocator) ?[]u8 {
 
 /// Read a file path's contents. Caller frees.
 fn readFile(path: []const u8, alloc: std.mem.Allocator) ?[]u8 {
-    return std.fs.cwd().readFileAlloc(alloc, path, 64 * 1024 * 1024) catch null;
+    return std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, alloc, .limited(64 * 1024 * 1024)) catch null;
 }
 
 /// Bilinear box-downscale of an RGBA8 buffer into `dst` (dw×dh). Source-edge
@@ -239,7 +240,7 @@ fn load(src: []const u8) ?*Entry {
     }
 
     const post_top_hash = std.hash.Wyhash.hash(0, pixels_slice[0..row_bytes]);
-    if (std.posix.getenv("REACTJIT_VERBOSE_IMAGE_CACHE") != null) {
+    if (host_io.getenv("REACTJIT_VERBOSE_IMAGE_CACHE") != null) {
         const tag_len: usize = @min(src.len, 48);
         log.print(
             "[image_cache] load src=\"{s}\" {d}x{d} fmt={s} pre_top={x} pre_bot={x} post_top={x} flipped={}\n",

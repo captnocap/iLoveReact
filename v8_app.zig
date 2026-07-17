@@ -1723,27 +1723,35 @@ fn routeCommandToHostWindow(cmd: std.json.Value) void {
             const cid_v = cmd.object.get("childId") orelse return;
             const cid = jsonInt(cid_v) orelse return;
             if (std.mem.eql(u8, op_str, "APPEND")) {
-                line.writer(g_alloc).print("{{\"op\":\"APPEND_TO_ROOT\",\"childId\":{d}}}", .{cid}) catch return;
+                var print_buf: [96]u8 = undefined;
+                const rendered = std.fmt.bufPrint(&print_buf, "{{\"op\":\"APPEND_TO_ROOT\",\"childId\":{d}}}", .{cid}) catch return;
+                line.appendSlice(g_alloc, rendered) catch return;
                 translated = "APPEND_TO_ROOT";
             } else if (std.mem.eql(u8, op_str, "INSERT_BEFORE")) {
                 const bid_v = cmd.object.get("beforeId") orelse return;
                 const bid = jsonInt(bid_v) orelse return;
-                line.writer(g_alloc).print("{{\"op\":\"INSERT_BEFORE_ROOT\",\"childId\":{d},\"beforeId\":{d}}}", .{ cid, bid }) catch return;
+                var print_buf: [128]u8 = undefined;
+                const rendered = std.fmt.bufPrint(&print_buf, "{{\"op\":\"INSERT_BEFORE_ROOT\",\"childId\":{d},\"beforeId\":{d}}}", .{ cid, bid }) catch return;
+                line.appendSlice(g_alloc, rendered) catch return;
                 translated = "INSERT_BEFORE_ROOT";
             } else { // REMOVE
-                line.writer(g_alloc).print("{{\"op\":\"REMOVE_FROM_ROOT\",\"childId\":{d}}}", .{cid}) catch return;
+                var print_buf: [96]u8 = undefined;
+                const rendered = std.fmt.bufPrint(&print_buf, "{{\"op\":\"REMOVE_FROM_ROOT\",\"childId\":{d}}}", .{cid}) catch return;
+                line.appendSlice(g_alloc, rendered) catch return;
                 translated = "REMOVE_FROM_ROOT";
             }
         };
     }
     if (translated == null) {
-        line.writer(g_alloc).print("{f}", .{std.json.fmt(cmd, .{})}) catch return;
+        const rendered = std.fmt.allocPrint(g_alloc, "{f}", .{std.json.fmt(cmd, .{})}) catch return;
+        defer g_alloc.free(rendered);
+        line.appendSlice(g_alloc, rendered) catch return;
     }
     line.appendSlice(g_alloc, "]}") catch return;
     // Per-mutation log — gated behind ZIGOS_TRACE_IPC=1 to avoid drowning
     // the rest of the host log on a fat initial cart paint.
     const trace_ipc = blk: {
-        const env = std.posix.getenv("ZIGOS_TRACE_IPC") orelse break :blk false;
+        const env = host_io.getenv("ZIGOS_TRACE_IPC") orelse break :blk false;
         break :blk env.len > 0 and env[0] != '0';
     };
     if (trace_ipc) {
@@ -2679,7 +2687,14 @@ fn dispatchWindowEvent(id: u32, handler: []const u8) void {
 }
 
 fn writeJsonString(out: *std.ArrayList(u8), value: []const u8) !void {
-    try out.writer(g_alloc).print("{f}", .{std.json.fmt(value, .{})});
+    const rendered = try std.fmt.allocPrint(g_alloc, "{f}", .{std.json.fmt(value, .{})});
+    defer g_alloc.free(rendered);
+    try out.appendSlice(g_alloc, rendered);
+}
+
+fn appendBoundedPrint(out: *std.ArrayList(u8), comptime fmt: []const u8, args: anytype) !void {
+    var print_buf: [160]u8 = undefined;
+    try out.appendSlice(g_alloc, try std.fmt.bufPrint(&print_buf, fmt, args));
 }
 
 // ── Command application ─────────────────────────────────────────
@@ -2826,10 +2841,10 @@ fn applyCommandBatch(json_bytes: []const u8) void {
     const t2 = host_io.microTimestamp();
 
     const trace_ops = blk: {
-        const env = std.posix.getenv("ZIGOS_TRACE_BATCH_OPS") orelse break :blk false;
+        const env = host_io.getenv("ZIGOS_TRACE_BATCH_OPS") orelse break :blk false;
         break :blk env.len > 0 and env[0] != '0';
     };
-    const verbose = std.posix.getenv("REACTJIT_VERBOSE_BATCHES") != null;
+    const verbose = host_io.getenv("REACTJIT_VERBOSE_BATCHES") != null;
     if (!trace_ops and !verbose) return;
 
     // Re-parse for diagnostics. Gated behind env vars, so the double-parse
@@ -2864,7 +2879,7 @@ fn applyCommandBatch(json_bytes: []const u8) void {
                     if (cmd.object.get("id")) |idv| if (jsonInt(idv)) |i| {
                         id_v = i;
                     };
-                    update_summary.writer(g_alloc).print(" #{d}=id:{d}[", .{ update_seen, id_v }) catch {};
+                    appendBoundedPrint(&update_summary, " #{d}=id:{d}[", .{ update_seen, id_v }) catch {};
                     if (cmd.object.get("props")) |pv| if (pv == .object) {
                         var iter = pv.object.iterator();
                         var first = true;
@@ -2899,11 +2914,11 @@ fn applyCommandBatch(json_bytes: []const u8) void {
                     if (cmd.object.get("id")) |idv| if (jsonInt(idv)) |i| {
                         id_v = i;
                     };
-                    update_summary.writer(g_alloc).print(" other=id:{d}", .{id_v}) catch {};
+                    appendBoundedPrint(&update_summary, " other=id:{d}", .{id_v}) catch {};
                     if (cmd.object.get("text")) |tv| if (tv == .string) {
                         const t = tv.string;
                         const head_len = if (t.len > 24) 24 else t.len;
-                        update_summary.writer(g_alloc).print(" text:{s}", .{t[0..head_len]}) catch {};
+                        appendBoundedPrint(&update_summary, " text:{s}", .{t[0..head_len]}) catch {};
                     };
                 }
             }
@@ -3445,18 +3460,18 @@ fn rebuildTree() void {
 // ── Dev reload helpers ──────────────────────────────────────────
 
 fn readBundleFromDisk() ![]u8 {
-    const file = try std.fs.cwd().openFile(DEV_BUNDLE_PATH, .{});
-    defer file.close();
-    const stat = try file.stat();
+    const file = try std.Io.Dir.cwd().openFile(host_io.io(), DEV_BUNDLE_PATH, .{});
+    defer file.close(host_io.io());
+    const stat = try file.stat(host_io.io());
     const buf = try g_alloc.alloc(u8, stat.size);
     errdefer g_alloc.free(buf);
-    const n = try file.readAll(buf);
+    const n = try file.readPositionalAll(host_io.io(), buf, 0);
     return buf[0..n];
 }
 
 fn bundleMtimeOrZero() i128 {
-    const s = std.fs.cwd().statFile(DEV_BUNDLE_PATH) catch return 0;
-    return s.mtime;
+    const s = std.Io.Dir.cwd().statFile(host_io.io(), DEV_BUNDLE_PATH) catch return 0;
+    return @intCast(s.mtime.toNanoseconds());
 }
 
 fn maybeScheduleReload() void {
@@ -3920,7 +3935,7 @@ fn appTick(now: u32) void {
         g_scroll_prop_slots.clearRetainingCapacity();
         _snap_us = t1 - t0;
         _rebuild_us = t2 - t1;
-        if (std.posix.getenv("REACTJIT_VERBOSE_BATCHES") != null) {
+        if (host_io.getenv("REACTJIT_VERBOSE_BATCHES") != null) {
             // Count the tree size for context.
             var node_count: usize = 0;
             var kid_it = g_children_ids.valueIterator();
@@ -3946,7 +3961,7 @@ fn appTick(now: u32) void {
 }
 
 fn childTitle() [*:0]const u8 {
-    if (std.posix.getenv("ZIGOS_WINDOW_TITLE")) |title| {
+    if (host_io.getenv("ZIGOS_WINDOW_TITLE")) |title| {
         const owned = g_alloc.dupeZ(u8, title) catch return "Window";
         return owned.ptr;
     }
@@ -3982,7 +3997,7 @@ fn childInit() void {
         \\globalThis.__ffiEmit = function(){};
     );
 
-    const port_s = std.posix.getenv("ZIGOS_IPC_PORT") orelse return;
+    const port_s = host_io.getenv("ZIGOS_IPC_PORT") orelse return;
     const port = std.fmt.parseInt(u16, port_s, 10) catch return;
     std.debug.print("[window-child] init port={d} window_id={d}\n", .{ port, g_child_window_id });
     g_child_client = ipc.Client.connect(port) catch |err| {
@@ -3992,7 +4007,7 @@ fn childInit() void {
     if (g_child_client) |*client| {
         _ = client.sendLine("{\"type\":\"ready\"}");
     }
-    if (std.posix.getenv("ZIGOS_WINDOW_AUTO_DISMISS_MS")) |dismiss_s| {
+    if (host_io.getenv("ZIGOS_WINDOW_AUTO_DISMISS_MS")) |dismiss_s| {
         g_child_auto_dismiss_ms = std.fmt.parseInt(u32, dismiss_s, 10) catch 0;
     }
     g_child_started_ms = @truncate(host_io.milliTimestamp());
@@ -4002,7 +4017,9 @@ fn childDispatchEvent(id: u32, handler: []const u8) void {
     var client = &(g_child_client orelse return);
     var line: std.ArrayList(u8) = .empty;
     defer line.deinit(g_alloc);
-    line.writer(g_alloc).print("{{\"type\":\"event\",\"targetId\":{d},\"handler\":", .{id}) catch return;
+    var print_buf: [96]u8 = undefined;
+    const rendered = std.fmt.bufPrint(&print_buf, "{{\"type\":\"event\",\"targetId\":{d},\"handler\":", .{id}) catch return;
+    line.appendSlice(g_alloc, rendered) catch return;
     writeJsonString(&line, handler) catch return;
     line.appendSlice(g_alloc, "}") catch return;
     _ = client.sendLine(line.items);
@@ -4011,7 +4028,7 @@ fn childDispatchEvent(id: u32, handler: []const u8) void {
 fn childApplyMessage(line: []const u8) void {
     // Per-message recv/apply lines gated behind ZIGOS_TRACE_IPC=1.
     const trace = blk: {
-        const env = std.posix.getenv("ZIGOS_TRACE_IPC") orelse break :blk false;
+        const env = host_io.getenv("ZIGOS_TRACE_IPC") orelse break :blk false;
         break :blk env.len > 0 and env[0] != '0';
     };
     if (trace) std.debug.print("[window-child] recv bytes={d} {s}\n", .{ line.len, line });
@@ -4070,7 +4087,11 @@ fn childShutdown() void {
     if (g_child_client) |*client| {
         var line: std.ArrayList(u8) = .empty;
         defer line.deinit(g_alloc);
-        line.writer(g_alloc).print("{{\"type\":\"windowEvent\",\"targetId\":{d},\"handler\":\"onClose\"}}", .{g_child_window_id}) catch {};
+        format_line: {
+            var print_buf: [128]u8 = undefined;
+            const rendered = std.fmt.bufPrint(&print_buf, "{{\"type\":\"windowEvent\",\"targetId\":{d},\"handler\":\"onClose\"}}", .{g_child_window_id}) catch break :format_line;
+            line.appendSlice(g_alloc, rendered) catch {};
+        }
         if (line.items.len > 0) _ = client.sendLine(line.items);
         client.close();
         g_child_client = null;
@@ -4270,9 +4291,9 @@ pub fn main(init: std.process.Init) !void {
     for (raw_argv[1..], 1..) |a, i| script_argv[i] = a;
     cli_bindings.setArgv(@constCast(script_argv));
 
-    if (std.posix.getenv("ZIGOS_WINDOW_CHILD") != null) {
+    if (host_io.getenv("ZIGOS_WINDOW_CHILD") != null) {
         g_is_window_child = true;
-        if (std.posix.getenv("ZIGOS_WINDOW_ID")) |id_s| {
+        if (host_io.getenv("ZIGOS_WINDOW_ID")) |id_s| {
             g_child_window_id = std.fmt.parseInt(u32, id_s, 10) catch 0;
         }
         try engine.run(.{
@@ -4283,9 +4304,9 @@ pub fn main(init: std.process.Init) !void {
             .init = childInit,
             .tick = childTick,
             .shutdown = childShutdown,
-            .borderless = std.posix.getenv("ZIGOS_WINDOW_BORDERLESS") != null,
-            .always_on_top = std.posix.getenv("ZIGOS_WINDOW_ALWAYS_ON_TOP") != null,
-            .not_focusable = std.posix.getenv("ZIGOS_WINDOW_NOT_FOCUSABLE") != null,
+            .borderless = host_io.getenv("ZIGOS_WINDOW_BORDERLESS") != null,
+            .always_on_top = host_io.getenv("ZIGOS_WINDOW_ALWAYS_ON_TOP") != null,
+            .not_focusable = host_io.getenv("ZIGOS_WINDOW_NOT_FOCUSABLE") != null,
             .dispatch_js_event = childDispatchEvent,
             .set_canvas_node_position = setCanvasNodePosition,
         });

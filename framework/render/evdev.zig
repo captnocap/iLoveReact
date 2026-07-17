@@ -105,7 +105,7 @@ pub fn init(window: *c.SDL_Window, width: f32, height: f32) void {
     while (n < 64 and g_ndev < MAX_DEVS) : (n += 1) {
         const path = std.fmt.bufPrintZ(&path_buf, "/dev/input/event{d}", .{n}) catch continue;
         const rc = linux.open(path, .{ .ACCMODE = .RDONLY, .NONBLOCK = true, .CLOEXEC = true }, 0);
-        if (linux.E.init(rc) != .SUCCESS) continue;
+        if (linux.errno(rc) != .SUCCESS) continue;
         const fd: i32 = @intCast(rc);
 
         // Absolute pointer? Probe the X/Y axis ranges.
@@ -114,7 +114,7 @@ pub fn init(window: *c.SDL_Window, width: f32, height: f32) void {
         var ay: ie.struct_input_absinfo = undefined;
         const got_x = linux.ioctl(fd, eviocgabs(ie.ABS_X), @intFromPtr(&ax));
         const got_y = linux.ioctl(fd, eviocgabs(ie.ABS_Y), @intFromPtr(&ay));
-        if (linux.E.init(got_x) == .SUCCESS and linux.E.init(got_y) == .SUCCESS and ax.maximum > ax.minimum) {
+        if (linux.errno(got_x) == .SUCCESS and linux.errno(got_y) == .SUCCESS and ax.maximum > ax.minimum) {
             dev.abs = true;
             dev.ax_min = @floatFromInt(ax.minimum);
             dev.ax_max = @floatFromInt(ax.maximum);
@@ -138,7 +138,7 @@ pub fn poll() void {
     for (g_devs[0..g_ndev]) |*dev| {
         while (true) {
             const rc = linux.read(dev.fd, &buf, buf.len);
-            const e = linux.E.init(rc);
+            const e = linux.errno(rc);
             if (e != .SUCCESS) break; // EAGAIN / EWOULDBLOCK — nothing more
             const got: usize = rc;
             if (got < ev_size) break;

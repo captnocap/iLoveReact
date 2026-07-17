@@ -5,7 +5,23 @@
 //! Application Support conventions independently.
 
 const std = @import("std");
-const host_io = @import("../host_io.zig");
+// Dual-context file (app module member AND standalone test root): cannot
+// import host_io.zig by relative path, so reach the SAME process-wide Io
+// instance via the std global.
+const host_io = struct {
+    fn io() std.Io {
+        return std.Io.Threaded.global_single_threaded.io();
+    }
+    fn getEnvVarOwned(alloc: std.mem.Allocator, name: []const u8) error{ OutOfMemory, EnvironmentVariableNotFound }![]u8 {
+        var it: usize = 0;
+        while (std.c.environ[it]) |entry_ptr| : (it += 1) {
+            const entry = std.mem.span(entry_ptr);
+            const eq = std.mem.indexOfScalar(u8, entry, '=') orelse continue;
+            if (std.mem.eql(u8, entry[0..eq], name)) return alloc.dupe(u8, entry[eq + 1 ..]);
+        }
+        return error.EnvironmentVariableNotFound;
+    }
+};
 
 pub const ResolveError = error{
     AppNameRequired,

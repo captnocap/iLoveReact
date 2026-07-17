@@ -22,6 +22,7 @@
 //! Status lifecycle per src: null → loading → ready | error
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const builtin = @import("builtin");
 const wgpu = @import("wgpu");
@@ -518,7 +519,7 @@ fn loadVideo(src: []const u8) void {
     }
 
     if (!isRemoteUrl(src)) {
-        const f = std.fs.cwd().openFile(src, .{}) catch {
+        const f = std.Io.Dir.cwd().openFile(host_io.io(), src, .{}) catch {
             log.print("[videos] file not found: {s}\n", .{src});
             mpv_fns.render_ctx_free(render_ctx);
             mpv_fns.terminate_destroy(handle);
@@ -526,7 +527,7 @@ fn loadVideo(src: []const u8) void {
             entry_count += 1;
             return;
         };
-        f.close();
+        f.close(host_io.io());
     }
 
     @memcpy(path_buf[0..src.len], src);

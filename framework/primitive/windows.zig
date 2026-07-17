@@ -27,6 +27,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const host_io = @import("../host_io.zig");
 const c = @import("../c.zig").imports;
 const layout = @import("../layout.zig");
 const state_mod = @import("../state/dirty.zig");
@@ -278,7 +279,7 @@ fn openIndependent(idx: usize, opts: OpenOptions) ?usize {
     errdefer server.close();
 
     const alloc = std.heap.c_allocator;
-    const exe_path = std.fs.selfExePathAlloc(alloc) catch |err| {
+    const exe_path = std.process.executablePathAlloc(host_io.io(), alloc) catch |err| {
         log.err(.engine, "windows: self exe path failed: {}", .{err});
         return null;
     };
@@ -298,7 +299,7 @@ fn openIndependent(idx: usize, opts: OpenOptions) ?usize {
     var id_buf: [16]u8 = undefined;
     const id_s = std.fmt.bufPrint(&id_buf, "{d}", .{opts.window_id}) catch return null;
 
-    var env = std.process.getEnvMap(alloc) catch |err| {
+    var env = host_io.environ().createMap(alloc) catch |err| {
         log.err(.engine, "windows: child env inherit failed: {}", .{err});
         return null;
     };
@@ -330,12 +331,13 @@ fn openIndependent(idx: usize, opts: OpenOptions) ?usize {
     }
 
     const argv = [_][]const u8{ launcher_path, "--window-child" };
-    var child = std.process.Child.init(&argv, alloc);
-    child.env_map = &env;
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
-    child.spawn() catch |err| {
+    const child = std.process.spawn(host_io.io(), .{
+        .argv = &argv,
+        .environ_map = &env,
+        .stdin = .ignore,
+        .stdout = .inherit,
+        .stderr = .inherit,
+    }) catch |err| {
         log.err(.engine, "windows: child spawn failed: {}", .{err});
         return null;
     };
@@ -370,7 +372,7 @@ fn openIndependent(idx: usize, opts: OpenOptions) ?usize {
 fn findChildLauncher(alloc: std.mem.Allocator, exe_path: []const u8) ![]u8 {
     const dir = std.fs.path.dirname(exe_path) orelse return alloc.dupe(u8, exe_path);
     const run_path = try std.fs.path.join(alloc, &.{ dir, "run" });
-    if (std.fs.accessAbsolute(run_path, .{})) |_| {
+    if (std.Io.Dir.accessAbsolute(host_io.io(), run_path, .{})) |_| {
         return run_path;
     } else |_| {
         alloc.free(run_path);
@@ -381,7 +383,7 @@ fn findChildLauncher(alloc: std.mem.Allocator, exe_path: []const u8) ![]u8 {
     // runnable entrypoint is one directory above that loader.
     const parent = std.fs.path.dirname(dir) orelse return alloc.dupe(u8, exe_path);
     const parent_run_path = try std.fs.path.join(alloc, &.{ parent, "run" });
-    if (std.fs.accessAbsolute(parent_run_path, .{})) |_| {
+    if (std.Io.Dir.accessAbsolute(host_io.io(), parent_run_path, .{})) |_| {
         return parent_run_path;
     } else |_| {
         alloc.free(parent_run_path);
@@ -405,7 +407,7 @@ pub fn close(idx: usize) void {
                 server.close();
             }
             if (slots[idx].child) |*child| {
-                _ = child.kill() catch {};
+                child.kill(host_io.io());
             }
             slots[idx].pending.deinit(std.heap.c_allocator);
         },
@@ -439,7 +441,7 @@ pub fn setRoot(idx: usize, root: *Node) void {
 /// everything else. Once-per-window logs (spawn/accept/flush/recv) stay
 /// on unconditionally.
 fn ipcTracePerMessage() bool {
-    const env = std.posix.getenv("ZIGOS_TRACE_IPC") orelse return false;
+    const env = host_io.getenv("ZIGOS_TRACE_IPC") orelse return false;
     return env.len > 0 and env[0] != '0';
 }
 

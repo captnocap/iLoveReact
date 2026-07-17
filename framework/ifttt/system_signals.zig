@@ -11,6 +11,7 @@
 // interval to avoid 60Hz spam.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const c = @import("../c.zig").imports;
 const v8_runtime = @import("../v8_runtime.zig");
 
@@ -216,10 +217,10 @@ pub fn tickPostPaint(dt_sec: f32) void {
 // ── Mem pollers ────────────────────────────────────────────────────────
 
 fn pollMem() void {
-    var file = std.fs.openFileAbsolute("/proc/meminfo", .{}) catch return;
-    defer file.close();
+    const file = std.Io.Dir.openFileAbsolute(host_io.io(), "/proc/meminfo", .{}) catch return;
+    defer file.close(host_io.io());
     var buf: [4096]u8 = undefined;
-    const n = file.read(&buf) catch return;
+    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return;
     var total: u64 = 0;
     var avail: u64 = 0;
     var line_iter = std.mem.splitScalar(u8, buf[0..n], '\n');
@@ -280,10 +281,10 @@ fn parseFirstNumber(line: []const u8) u64 {
 }
 
 fn readU64File(path: []const u8) ?u64 {
-    var file = std.fs.openFileAbsolute(path, .{}) catch return null;
-    defer file.close();
+    const file = std.Io.Dir.openFileAbsolute(host_io.io(), path, .{}) catch return null;
+    defer file.close(host_io.io());
     var buf: [64]u8 = undefined;
-    const n = file.read(&buf) catch return null;
+    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return null;
     if (n == 0) return null;
     return parseFirstNumber(buf[0..n]);
 }

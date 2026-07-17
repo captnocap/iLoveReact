@@ -857,7 +857,7 @@ fn chainExtrudeBoundary(verts: []const f32, tri_count: u32, entity: FaceExtrudeE
     const Dir = struct { from_key: u64, to_key: u64, ukey: u128, from: [3]f32 };
     var undirected = std.AutoHashMapUnmanaged(u128, u32){};
     defer undirected.deinit(std.heap.c_allocator);
-    var dirs = std.ArrayListUnmanaged(Dir){};
+    var dirs: std.ArrayListUnmanaged(Dir) = .empty;
     defer dirs.deinit(std.heap.c_allocator);
 
     var f: u32 = 0;
@@ -1002,7 +1002,7 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
     defer if (old_groups) |g| std.heap.c_allocator.free(g);
     const part_count = hostPartCount();
 
-    var loop = std.ArrayListUnmanaged([3]f32){};
+    var loop: std.ArrayListUnmanaged([3]f32) = .empty;
     defer loop.deinit(std.heap.c_allocator);
     if (!chainExtrudeBoundary(cur_verts, tri_count, ent, &loop) or loop.items.len < 3) return false;
     const n = faceLoopNormal(loop.items);
@@ -1010,13 +1010,13 @@ pub fn meshTopoExtrudeFace(distance_raw: f32) bool {
     const off = vmul(n, dist);
     const center = faceLoopCentroid(loop.items);
 
-    var out = std.ArrayListUnmanaged(f32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
     defer out.deinit(std.heap.c_allocator);
-    var groups = std.ArrayListUnmanaged(u32){};
+    var groups: std.ArrayListUnmanaged(u32) = .empty;
     defer groups.deinit(std.heap.c_allocator);
-    var face_part = std.ArrayListUnmanaged(u32){};
+    var face_part: std.ArrayListUnmanaged(u32) = .empty;
     defer face_part.deinit(std.heap.c_allocator);
-    var colors = std.ArrayListUnmanaged(u8){};
+    var colors: std.ArrayListUnmanaged(u8) = .empty;
     defer colors.deinit(std.heap.c_allocator);
 
     f = 0;
@@ -1138,7 +1138,7 @@ pub fn meshTopoExtrudeEdge(distance_raw: f32) bool {
     const c = vadd(a, vmul(n, dist));
     const d = vadd(b, vmul(n, dist));
 
-    var verts = std.ArrayListUnmanaged(f32){};
+    var verts: std.ArrayListUnmanaged(f32) = .empty;
     if (!appendCurrentDisplayed(&verts)) {
         verts.deinit(std.heap.c_allocator);
         return false;
@@ -1235,7 +1235,7 @@ pub fn meshTopoCreateFaceFromEdges() bool {
     if (selected_count < 2 or selected_count > selected.len) return false;
     const edges = selected[0..@as(usize, @intCast(selected_count))];
 
-    var verts = std.ArrayListUnmanaged(f32){};
+    var verts: std.ArrayListUnmanaged(f32) = .empty;
     if (!appendCurrentDisplayed(&verts)) {
         verts.deinit(std.heap.c_allocator);
         return false;
@@ -1331,7 +1331,7 @@ fn renormalizePartRanges(face_part: []const u32, part_count: u32) void {
     defer std.heap.c_allocator.free(groups);
     const new_groups = std.heap.c_allocator.alloc(u32, fc) catch return;
     defer std.heap.c_allocator.free(new_groups);
-    var ranges = std.ArrayListUnmanaged(u32){};
+    var ranges: std.ArrayListUnmanaged(u32) = .empty;
     defer ranges.deinit(std.heap.c_allocator);
 
     var next: u32 = 0;
@@ -1513,7 +1513,7 @@ pub fn meshTopoLoopCut() bool {
     // Rebuild the interleaved edit mesh (appendTri recomputes normals; UVs are rewritten by
     // setPaintTarget on install), then re-apply the fresh grouping AFTER the retain (which
     // clears it).
-    var out = std.ArrayListUnmanaged(f32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
     var t: u32 = 0;
     while (t < cut.tri_count) : (t += 1) {
         const bse = @as(usize, t) * 9;
@@ -1575,13 +1575,13 @@ pub fn meshSymmetryReport(axis: u8) ?[3]f32 {
     const eps: f32 = 1e-3;
     // Unique verts via the JS's tolerance grid (bucket by eps-cell, probe neighbours).
     const Cell = struct { x: i32, y: i32, z: i32 };
-    var cells = std.AutoHashMapUnmanaged(Cell, std.ArrayListUnmanaged([3]f32)){};
+    var cells: std.AutoHashMapUnmanaged(Cell, std.ArrayListUnmanaged([3]f32)) = .empty;
     defer {
         var it = cells.valueIterator();
         while (it.next()) |l| l.deinit(std.heap.c_allocator);
         cells.deinit(std.heap.c_allocator);
     }
-    var uniq = std.ArrayListUnmanaged([3]f32){};
+    var uniq: std.ArrayListUnmanaged([3]f32) = .empty;
     defer uniq.deinit(std.heap.c_allocator);
     const gq = struct {
         fn f(x: f32) i32 {
@@ -1593,7 +1593,7 @@ pub fn meshSymmetryReport(axis: u8) ?[3]f32 {
         const p = [3]f32{ pos[i], pos[i + 1], pos[i + 2] };
         const key = Cell{ .x = gq(p[0]), .y = gq(p[1]), .z = gq(p[2]) };
         const gop = cells.getOrPut(std.heap.c_allocator, key) catch return null;
-        if (!gop.found_existing) gop.value_ptr.* = .{};
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
         var dup = false;
         for (gop.value_ptr.items) |q| {
             if (@abs(q[0] - p[0]) <= eps and @abs(q[1] - p[1]) <= eps and @abs(q[2] - p[2]) <= eps) {
@@ -1689,11 +1689,11 @@ pub fn meshTopoSymmetrize(axis: u8, keep_positive: bool) bool {
 
     // Keep + reflect: kept faces re-emit as-is; off-seam kept faces also emit their
     // reflected twin with two corners swapped (reflection flips handedness).
-    var out = std.ArrayListUnmanaged(f32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
     defer out.deinit(std.heap.c_allocator);
-    var out_groups = std.ArrayListUnmanaged(u32){};
+    var out_groups: std.ArrayListUnmanaged(u32) = .empty;
     defer out_groups.deinit(std.heap.c_allocator);
-    var out_src = std.ArrayListUnmanaged(u32){};
+    var out_src: std.ArrayListUnmanaged(u32) = .empty;
     defer out_src.deinit(std.heap.c_allocator);
     var twin_group = std.AutoHashMapUnmanaged(u32, u32){};
     defer twin_group.deinit(std.heap.c_allocator);
@@ -1896,7 +1896,7 @@ fn lcPlanes(lo: f32, hi: f32, cuts: u32, offset: f32, out: []f32) u32 {
 /// recomputes normals; UVs are rewritten on adopt. Stays in face mode.
 fn lcInstallSoup(pos: []const f32, tri_count: u32, groups: ?[]const u32, colors: []const u8) bool {
     if (colors.len != @as(usize, tri_count) * 4) return false;
-    var out = std.ArrayListUnmanaged(f32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
     var t: u32 = 0;
     while (t < tri_count) : (t += 1) {
         const b = @as(usize, t) * 9;
@@ -2419,8 +2419,8 @@ fn deleteMaskedFaces(verts: []const f32, tri_count: u32, mask: []const bool, lab
     mesh_edit.clearSelection();
 
     const has_groups = model_source.faceGroupOf(0) != model_source.NO_FACE_GROUP;
-    var out = std.ArrayListUnmanaged(f32){};
-    var groups = std.ArrayListUnmanaged(u32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
+    var groups: std.ArrayListUnmanaged(u32) = .empty;
     defer groups.deinit(std.heap.c_allocator);
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
@@ -2531,12 +2531,12 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
         }
     }
 
-    var out = std.ArrayListUnmanaged(f32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
     if (!appendFloats(&out, cur_verts[0 .. @as(usize, cur_count) * 8]) or !appendFloats(&out, new_verts[0..need])) {
         out.deinit(std.heap.c_allocator);
         return fail;
     }
-    var groups = std.ArrayListUnmanaged(u32){};
+    var groups: std.ArrayListUnmanaged(u32) = .empty;
     defer groups.deinit(std.heap.c_allocator);
     {
         var f: u32 = 0;
@@ -2557,7 +2557,7 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
         // preserved ranges with its fresh pair so __mesh_part_ranges reads back the
         // full partition without waiting for a cart push.
         if (model_source.partRanges()) |pr| {
-            var ranges = std.ArrayListUnmanaged(u32){};
+            var ranges: std.ArrayListUnmanaged(u32) = .empty;
             defer ranges.deinit(std.heap.c_allocator);
             var appended = true;
             ranges.appendSlice(std.heap.c_allocator, pr) catch {
@@ -2583,7 +2583,7 @@ fn appendGroupInner(new_verts: []const f32, new_count: u32, new_groups: []const 
 // Host-side stash of a hidden part: its exact triangles (interleaved verts) + authored groups,
 // so hide is non-destructive and unhide restores the edited geometry (no JS round-trip).
 const HiddenGroup = struct { lo: u32, hi: u32, verts: []f32, groups: []u32 };
-var g_hidden_groups: std.ArrayListUnmanaged(HiddenGroup) = .{};
+var g_hidden_groups: std.ArrayListUnmanaged(HiddenGroup) = .empty;
 
 /// Hide or show the part occupying authored-group range [lo, hi). Hiding moves its triangles
 /// out of the live mesh into a host stash (geometry never crosses the bridge); showing
@@ -2612,11 +2612,11 @@ fn hideGroup(lo: u32, hi: u32) bool {
     const cur_groups = captureFaceGroups() orelse return false;
     defer std.heap.c_allocator.free(cur_groups);
 
-    var keep = std.ArrayListUnmanaged(f32){};
-    var keep_g = std.ArrayListUnmanaged(u32){};
+    var keep: std.ArrayListUnmanaged(f32) = .empty;
+    var keep_g: std.ArrayListUnmanaged(u32) = .empty;
     defer keep_g.deinit(std.heap.c_allocator);
-    var hid = std.ArrayListUnmanaged(f32){};
-    var hid_g = std.ArrayListUnmanaged(u32){};
+    var hid: std.ArrayListUnmanaged(f32) = .empty;
+    var hid_g: std.ArrayListUnmanaged(u32) = .empty;
     var any = false;
     var f: u32 = 0;
     while (f < cur_faces) : (f += 1) {
@@ -2674,12 +2674,12 @@ fn showGroup(lo: u32, hi: u32) bool {
     const cur_groups = captureFaceGroups() orelse return false;
     defer std.heap.c_allocator.free(cur_groups);
 
-    var out = std.ArrayListUnmanaged(f32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
     if (!appendFloats(&out, cur_verts[0 .. @as(usize, cur_count) * 8]) or !appendFloats(&out, entry.verts)) {
         out.deinit(std.heap.c_allocator);
         return false;
     }
-    var groups = std.ArrayListUnmanaged(u32){};
+    var groups: std.ArrayListUnmanaged(u32) = .empty;
     defer groups.deinit(std.heap.c_allocator);
     for (cur_groups) |g| groups.append(std.heap.c_allocator, g) catch {};
     for (entry.groups) |g| groups.append(std.heap.c_allocator, g) catch {};
@@ -2752,8 +2752,8 @@ const JOURNAL_CAP = 32;
 const JOURNAL_BYTE_BUDGET: usize = 192 * 1024 * 1024;
 pub const MESH_ACTION_CAP: usize = 128;
 pub const MeshActionEvent = mesh_journal_log.ActionEvent;
-var g_journal_undo: std.ArrayListUnmanaged(JournalEntry) = .{};
-var g_journal_redo: std.ArrayListUnmanaged(JournalEntry) = .{};
+var g_journal_undo: std.ArrayListUnmanaged(JournalEntry) = .empty;
+var g_journal_redo: std.ArrayListUnmanaged(JournalEntry) = .empty;
 var g_journal_note: ?[]u8 = null; // the cart's CURRENT parts metadata (rides each snapshot)
 var g_gizmo_snap: ?JournalEntry = null; // taken at gizmo-begin; committed only if the drag moved something
 var g_mesh_action_events: [MESH_ACTION_CAP]MeshActionEvent = undefined;
@@ -2803,7 +2803,7 @@ fn enqueueMeshAction(
 }
 
 pub fn meshActionSourceSet(raw: u8) void {
-    g_mesh_action_source = std.meta.intToEnum(mesh_journal_log.ActionSource, raw) catch .native;
+    g_mesh_action_source = std.enums.fromInt(mesh_journal_log.ActionSource, raw) orelse .native;
 }
 
 pub fn meshActionDocumentSet(token: u32) void {
@@ -2872,7 +2872,7 @@ fn journalSnapshotCurrent(label: []const u8) ?JournalEntry {
     if (model_source.partRanges()) |pr| entry.part_ranges = jalloc.dupe(u32, pr) catch null;
     entry.colors = collectCurrentFaceColors();
     if (g_hidden_groups.items.len > 0) {
-        var hs = std.ArrayListUnmanaged(JournalHidden){};
+        var hs: std.ArrayListUnmanaged(JournalHidden) = .empty;
         for (g_hidden_groups.items) |h| {
             const hv = jalloc.dupe(f32, h.verts) catch continue;
             const hg = jalloc.dupe(u32, h.groups) catch {
@@ -3092,17 +3092,22 @@ pub fn modelSessionJson(alloc: std.mem.Allocator) ?[]u8 {
     const j = meshJournalCounts();
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
-    const w = out.writer(alloc);
-    w.writeAll("{\"key\":\"") catch return null;
+    out.appendSlice(alloc, "{\"key\":\"") catch return null;
     for (key) |ch| switch (ch) {
-        '"' => w.writeAll("\\\"") catch return null,
-        '\\' => w.writeAll("\\\\") catch return null,
-        0...31 => w.print("\\u{x:0>4}", .{ch}) catch return null,
-        else => w.writeByte(ch) catch return null,
+        '"' => out.appendSlice(alloc, "\\\"") catch return null,
+        '\\' => out.appendSlice(alloc, "\\\\") catch return null,
+        0...31 => {
+            var print_buf: [8]u8 = undefined;
+            const rendered = std.fmt.bufPrint(&print_buf, "\\u{x:0>4}", .{ch}) catch return null;
+            out.appendSlice(alloc, rendered) catch return null;
+        },
+        else => out.append(alloc, ch) catch return null,
     };
-    w.print("\",\"count\":{d},\"radius\":{d:.6},\"undo\":{d},\"redo\":{d},\"atlas\":{}}}", .{
+    var print_buf: [192]u8 = undefined;
+    const rendered = std.fmt.bufPrint(&print_buf, "\",\"count\":{d},\"radius\":{d:.6},\"undo\":{d},\"redo\":{d},\"atlas\":{}}}", .{
         g_edit_count, g_orbit.radius, j[0], j[1], model_paint.atlas() != null,
     }) catch return null;
+    out.appendSlice(alloc, rendered) catch return null;
     return out.toOwnedSlice(alloc) catch null;
 }
 
@@ -3227,11 +3232,11 @@ pub fn meshDuplicateGroupRange(lo: u32, hi: u32, mirror_axis: i32) AppendResult 
     if (!mesh_journal_log.hasExactPartRange(live_ranges, lo, hi)) return fail;
     const cur_faces = g_edit_count / 3;
 
-    var out = std.ArrayListUnmanaged(f32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
     defer out.deinit(jalloc);
-    var groups = std.ArrayListUnmanaged(u32){};
+    var groups: std.ArrayListUnmanaged(u32) = .empty;
     defer groups.deinit(jalloc);
-    var colors = std.ArrayListUnmanaged(u8){};
+    var colors: std.ArrayListUnmanaged(u8) = .empty;
     defer colors.deinit(jalloc);
     var remap = std.AutoHashMapUnmanaged(u32, u32){};
     defer remap.deinit(jalloc);
@@ -3429,15 +3434,15 @@ fn meshPathArrayInner(alloc: std.mem.Allocator, source_ranges: []const u32, para
         if (!path_array.validPointPath(template, points)) return fail;
     } else if (!path_array.valid(template, params)) return fail;
 
-    var verts = std.ArrayListUnmanaged(f32){};
+    var verts: std.ArrayListUnmanaged(f32) = .empty;
     defer verts.deinit(jalloc);
-    var groups = std.ArrayListUnmanaged(u32){};
+    var groups: std.ArrayListUnmanaged(u32) = .empty;
     defer groups.deinit(jalloc);
-    var colors = std.ArrayListUnmanaged(u8){};
+    var colors: std.ArrayListUnmanaged(u8) = .empty;
     defer colors.deinit(jalloc);
-    var all_ranges = std.ArrayListUnmanaged(u32){};
+    var all_ranges: std.ArrayListUnmanaged(u32) = .empty;
     defer all_ranges.deinit(jalloc);
-    var fresh_ranges = std.ArrayListUnmanaged(u32){};
+    var fresh_ranges: std.ArrayListUnmanaged(u32) = .empty;
     defer fresh_ranges.deinit(alloc);
 
     if (!appendFloats(&verts, cur_verts[0 .. @as(usize, g_edit_count) * 8])) return fail;
@@ -3564,7 +3569,7 @@ pub fn meshDetachSelection() AppendResult {
     // the weld must re-key: its faces changed part, so coincident verts along the seam
     // now belong to two parts and may no longer merge.
     if (model_source.partRanges()) |pr| {
-        var ranges = std.ArrayListUnmanaged(u32){};
+        var ranges: std.ArrayListUnmanaged(u32) = .empty;
         defer ranges.deinit(jalloc);
         if (ranges.appendSlice(jalloc, pr)) |_| {
             ranges.append(jalloc, offset) catch {};
@@ -3624,7 +3629,7 @@ pub fn meshMergeGroupRanges(a_lo: u32, a_hi: u32, b_lo: u32, b_hi: u32) AppendRe
     model_source.setFaceGroups(groups);
     // Host range truth (req_2644): the two source ranges collapse into the fused pair.
     if (model_source.partRanges()) |pr| {
-        var ranges = std.ArrayListUnmanaged(u32){};
+        var ranges: std.ArrayListUnmanaged(u32) = .empty;
         defer ranges.deinit(jalloc);
         var i: usize = 0;
         var copied = true;
@@ -3752,7 +3757,7 @@ pub fn meshMergeSelectedFaces() bool {
     const new_colors = jalloc.alloc(u8, @as(usize, new_tri_count) * 4) catch return false;
     defer jalloc.free(new_colors);
     if (!mesh_edit.inheritFaceRgba(old_colors, dissolved.src_face, new_colors)) return false;
-    var out = std.ArrayListUnmanaged(f32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
     defer out.deinit(jalloc);
     var i: u32 = 0;
     while (i < new_tri_count) : (i += 1) {
@@ -3834,11 +3839,11 @@ fn partitionGlassFaces(colors: []const u8) bool {
     const cur_groups: ?[]u32 = if (has_groups) captureFaceGroups() else null;
     defer if (cur_groups) |g| jalloc.free(g);
 
-    var out = std.ArrayListUnmanaged(f32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
     defer out.deinit(jalloc);
-    var new_groups = std.ArrayListUnmanaged(u32){};
+    var new_groups: std.ArrayListUnmanaged(u32) = .empty;
     defer new_groups.deinit(jalloc);
-    var new_colors = std.ArrayListUnmanaged(u8){};
+    var new_colors: std.ArrayListUnmanaged(u8) = .empty;
     defer new_colors.deinit(jalloc);
 
     inline for (.{ true, false }) |want_opaque| {
@@ -3943,7 +3948,7 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     // Selected render triangles are reduced to authored planes by mesh_edit's deep
     // solidify boundary. Keeping that reduction outside this host orchestration is the
     // guard against ever weighting a quad's diagonal endpoints twice again.
-    var solidify_triangles = std.ArrayListUnmanaged(mesh_edit.SolidifyTriangle){};
+    var solidify_triangles: std.ArrayListUnmanaged(mesh_edit.SolidifyTriangle) = .empty;
     defer solidify_triangles.deinit(jalloc);
     // Selection-boundary edges: welded-vert pair → incident selected-face count, plus
     // the (face, corner) that owns the edge in winding order (for the wall's winding).
@@ -3988,14 +3993,14 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
     var offsets = mesh_edit.solidifyOffsets(jalloc, solidify_triangles.items, t) catch return false;
     defer offsets.deinit();
 
-    var out = std.ArrayListUnmanaged(f32){};
+    var out: std.ArrayListUnmanaged(f32) = .empty;
     defer out.deinit(jalloc);
     if (!appendCurrentDisplayed(&out)) return false;
-    var add_groups = std.ArrayListUnmanaged(u32){};
+    var add_groups: std.ArrayListUnmanaged(u32) = .empty;
     defer add_groups.deinit(jalloc);
-    var add_colors = std.ArrayListUnmanaged(u8){};
+    var add_colors: std.ArrayListUnmanaged(u8) = .empty;
     defer add_colors.deinit(jalloc);
-    var add_part = std.ArrayListUnmanaged(u32){};
+    var add_part: std.ArrayListUnmanaged(u32) = .empty;
     defer add_part.deinit(jalloc);
     var next_group: u32 = if (has_groups) nextFreeGroupId(cur_groups.?) else 0;
     var inner_groups = std.AutoHashMapUnmanaged(u32, u32){};
@@ -4065,7 +4070,7 @@ pub fn meshSolidifySelection(thickness_raw: f32) bool {
         return false;
     }
     if (has_groups) {
-        var all_groups = std.ArrayListUnmanaged(u32){};
+        var all_groups: std.ArrayListUnmanaged(u32) = .empty;
         defer all_groups.deinit(jalloc);
         for (cur_groups.?) |g| all_groups.append(jalloc, g) catch {};
         for (add_groups.items) |g| all_groups.append(jalloc, g) catch {};
@@ -4255,7 +4260,7 @@ pub fn meshGizmoFinish() bool {
     // reflex polygon is unsafe. bad_list carries one member tri per buckled face (the
     // currency guardSplitPossible/guardSplitQuads already speak); the dialog count is
     // FACES, matching the studio's "N face(s) buckled — not convex".
-    var bad_list = std.ArrayListUnmanaged(u32){};
+    var bad_list: std.ArrayListUnmanaged(u32) = .empty;
     var bad_faces: u32 = 0;
     if (captureFaceGroups()) |groups| {
         defer std.heap.c_allocator.free(groups);
@@ -6743,7 +6748,7 @@ var g_perflog_on: ?bool = null;
 var g_perf_frame: u64 = 0;
 fn perfLogOn() bool {
     if (g_perflog_on) |v| return v;
-    const on = std.posix.getenv("RJIT_PERFLOG") != null;
+    const on = host_io.getenv("RJIT_PERFLOG") != null;
     g_perflog_on = on;
     return on;
 }
@@ -6754,7 +6759,7 @@ fn perfLogOn() bool {
 var g_census_on: ?bool = null;
 fn censusOn() bool {
     if (g_census_on) |v| return v;
-    const on = std.posix.getenv("RJIT_R3D_CENSUS") != null;
+    const on = host_io.getenv("RJIT_R3D_CENSUS") != null;
     g_census_on = on;
     return on;
 }
@@ -6775,14 +6780,14 @@ fn fpsHudOn() bool {
     // always wanted there), OFF for the V8 editor. RJIT_FPS=0 force-hides; RJIT_FPS or
     // RJIT_PERFLOG (any value) force-shows. req_1677: the user couldn't find the HUD
     // because it required an env var — make it just appear in the game.
-    const fps_env = std.posix.getenv("RJIT_FPS");
+    const fps_env = host_io.getenv("RJIT_FPS");
     if (fps_env) |v| {
         const off = std.mem.eql(u8, v, "0") or std.mem.eql(u8, v, "");
         g_fpshud_on = !off;
         return !off;
     }
     const default_on = if (@hasDecl(build_options, "use_v8")) !build_options.use_v8 else false;
-    const on = default_on or std.posix.getenv("RJIT_PERFLOG") != null;
+    const on = default_on or host_io.getenv("RJIT_PERFLOG") != null;
     g_fpshud_on = on;
     return on;
 }
@@ -8985,7 +8990,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
     // four known colours, so a headless shot shows exactly where each ray lands vs the
     // pixel it came from — ground truth for the hit-test, independent of live mouse
     // delivery. Red=centre, green=right, blue=top, yellow=left.
-    if (model_paint.hasTarget() and !g_paint_probed and std.posix.getenv("RJIT_PAINTPROBE") != null) {
+    if (model_paint.hasTarget() and !g_paint_probed and host_io.getenv("RJIT_PAINTPROBE") != null) {
         g_paint_probed = true;
         const cam = model_paint.Camera{ .eye = g_paint_eye, .target = g_paint_target, .fov_deg = g_paint_fov };
         // Small offsets that STAY on the model, so right/up/aspect terms are exercised

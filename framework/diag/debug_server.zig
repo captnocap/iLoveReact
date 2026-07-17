@@ -14,6 +14,7 @@
 const std = @import("std");
 const host_io = @import("../host_io.zig");
 const ipc = @import("../net/ipc.zig");
+const sysx = @import("../net/sysx.zig");
 const telemetry = @import("telemetry.zig");
 const app_crypto = @import("../privacy/crypto.zig");
 const json_probe = @import("json_probe.zig");
@@ -65,7 +66,7 @@ pub fn init(title: [*:0]const u8) void {
     const n = @min(name.len, 128);
     @memcpy(app_name_buf[0..n], name[0..n]);
     app_name_len = n;
-    const env = std.posix.getenv("TSZ_DEBUG") orelse return;
+    const env = host_io.getenv("TSZ_DEBUG") orelse return;
     if (env.len == 0 or env[0] != '1') return;
     startServer();
 }
@@ -91,7 +92,7 @@ pub fn poll() void {
     if (streaming_telemetry and authenticated) {
         // Throttle to ~4 pushes/sec (every 250ms matches client poll rate)
         // Prevents recv buffer overflow from 230fps frame spam
-        const now = @import("std").time.milliTimestamp();
+        const now = host_io.milliTimestamp();
         if (now - last_push_ms >= 250) {
             last_push_ms = now;
             pushTelemetryFrame(srv);
@@ -124,19 +125,19 @@ fn startServer() void {
     if (server != null) return;
     server = ipc.Server.bind(0) catch return;
     enabled = true;
-    our_keypair = X25519.KeyPair.generate();
+    our_keypair = X25519.KeyPair.generate(host_io.io());
     loadTrustedKeys();
     const port = server.?.getPort();
     writeSessionFile(port);
     var port_buf: [64]u8 = undefined;
     const msg = std.fmt.bufPrint(&port_buf, "[debug_server] port {d}\n", .{port}) catch return;
-    _ = std.posix.write(2, msg) catch {};
+    _ = sysx.write(2, msg) catch {};
 }
 
 // ── Session file ───────────────────────────────────────────────────
 
 fn writeSessionFile(port: u16) void {
-    const home = std.posix.getenv("HOME") orelse return;
+    const home = host_io.getenv("HOME") orelse return;
     const pid: c_int = getpid();
 
     // mkdir -p ~/.tsz/sessions/ (ignore errors if exists)
@@ -163,16 +164,16 @@ fn writeSessionFile(port: u16) void {
     ) catch return;
 
     // Use std.fs for file I/O (handles null-termination correctly)
-    const cwd = std.fs.cwd();
-    const file = cwd.createFile(session_path_buf[0..session_path_len], .{}) catch return;
-    defer file.close();
-    file.writeAll(json) catch {};
+    const cwd = std.Io.Dir.cwd();
+    const file = cwd.createFile(host_io.io(), session_path_buf[0..session_path_len], .{}) catch return;
+    defer file.close(host_io.io());
+    file.writeStreamingAll(host_io.io(), json) catch {};
 }
 
 fn removeSessionFile() void {
     if (session_path_len == 0) return;
-    const cwd = std.fs.cwd();
-    cwd.deleteFile(session_path_buf[0..session_path_len]) catch {};
+    const cwd = std.Io.Dir.cwd();
+    cwd.deleteFile(host_io.io(), session_path_buf[0..session_path_len]) catch {};
     session_path_len = 0;
 }
 
@@ -219,7 +220,7 @@ fn handleHandshake(srv: *ipc.Server, raw: []const u8) void {
 
     // TSZ_DEBUG_AUTOACCEPT=1 — skip visual pairing for automated testing.
     // Only compiled in dev builds (behind HAS_DEBUG_SERVER comptime gate).
-    if (std.posix.getenv("TSZ_DEBUG_AUTOACCEPT")) |aa| {
+    if (host_io.getenv("TSZ_DEBUG_AUTOACCEPT")) |aa| {
         if (aa.len > 0 and aa[0] == '1') {
             // Send challenge first (plaintext), then encrypted OK
             _ = srv.sendLine("{\"challenge\":\"auto_accepted\"}");
@@ -231,7 +232,7 @@ fn handleHandshake(srv: *ipc.Server, raw: []const u8) void {
 
     // Not trusted or pin mismatch — require visual pairing
     var rng_bytes: [4]u8 = undefined;
-    std.crypto.random.bytes(&rng_bytes);
+    host_io.io().random(&rng_bytes);
     const rng_val = std.mem.readInt(u32, &rng_bytes, .little) % 1_000_000;
     _ = std.fmt.bufPrint(&pairing_code, "{d:0>6}", .{rng_val}) catch {};
     awaiting_code = true;
@@ -277,14 +278,14 @@ fn completeDH(srv: *ipc.Server) !void {
 
 fn loadTrustedKeys() void {
     trusted_count = 0;
-    const home = std.posix.getenv("HOME") orelse return;
+    const home = host_io.getenv("HOME") orelse return;
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.tsz/paired/zigos.json", .{home}) catch return;
-    const cwd = std.fs.cwd();
-    const file = cwd.openFile(path, .{}) catch return;
-    defer file.close();
+    const cwd = std.Io.Dir.cwd();
+    const file = cwd.openFile(host_io.io(), path, .{}) catch return;
+    defer file.close(host_io.io());
     var buf: [1024]u8 = undefined;
-    const n = file.readAll(&buf) catch return;
+    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return;
     const data = buf[0..n];
 
     // Extract fingerprint hex and last_active from JSON
@@ -304,14 +305,14 @@ fn loadTrustedKeys() void {
 }
 
 fn verifyPinningHash(tools_pubkey: [32]u8) bool {
-    const home = std.posix.getenv("HOME") orelse return false;
+    const home = host_io.getenv("HOME") orelse return false;
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.tsz/paired/zigos.json", .{home}) catch return false;
-    const cwd = std.fs.cwd();
-    const file = cwd.openFile(path, .{}) catch return false;
-    defer file.close();
+    const cwd = std.Io.Dir.cwd();
+    const file = cwd.openFile(host_io.io(), path, .{}) catch return false;
+    defer file.close(host_io.io());
     var buf: [1024]u8 = undefined;
-    const n = file.readAll(&buf) catch return false;
+    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return false;
     const data = buf[0..n];
 
     const stored_hex = jsonStr(data, "pairing_hash") orelse return false;
@@ -324,7 +325,7 @@ fn verifyPinningHash(tools_pubkey: [32]u8) bool {
 }
 
 fn savePairing(tools_pubkey: [32]u8) void {
-    const home = std.posix.getenv("HOME") orelse return;
+    const home = host_io.getenv("HOME") orelse return;
 
     // Ensure ~/.tsz/paired/ exists
     var dir_buf: [256:0]u8 = [_:0]u8{0} ** 256;
@@ -350,10 +351,10 @@ fn savePairing(tools_pubkey: [32]u8) void {
 
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.tsz/paired/zigos.json", .{home}) catch return;
-    const cwd = std.fs.cwd();
-    const file = cwd.createFile(path, .{}) catch return;
-    defer file.close();
-    file.writeAll(json) catch {};
+    const cwd = std.Io.Dir.cwd();
+    const file = cwd.createFile(host_io.io(), path, .{}) catch return;
+    defer file.close(host_io.io());
+    file.writeStreamingAll(host_io.io(), json) catch {};
 
     // Update in-memory trust
     if (trusted_count < MAX_TRUSTED) {
@@ -364,14 +365,14 @@ fn savePairing(tools_pubkey: [32]u8) void {
 
 /// Update last_active timestamp on incoming debug messages.
 fn touchPairing() void {
-    const home = std.posix.getenv("HOME") orelse return;
+    const home = host_io.getenv("HOME") orelse return;
     var path_buf: [256]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/.tsz/paired/zigos.json", .{home}) catch return;
-    const cwd = std.fs.cwd();
-    const file = cwd.openFile(path, .{ .mode = .read_write }) catch return;
-    defer file.close();
+    const cwd = std.Io.Dir.cwd();
+    const file = cwd.openFile(host_io.io(), path, .{ .mode = .read_write }) catch return;
+    defer file.close(host_io.io());
     var buf: [1024]u8 = undefined;
-    const n = file.readAll(&buf) catch return;
+    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return;
     const data = buf[0..n];
 
     // Find and replace last_active value
@@ -390,13 +391,12 @@ fn touchPairing() void {
     ap(&new_buf, &pos, ts_str);
     ap(&new_buf, &pos, data[val_end_pos..n]);
 
-    file.seekTo(0) catch return;
-    file.writeAll(new_buf[0..pos]) catch {};
+    file.writePositionalAll(host_io.io(), new_buf[0..pos], 0) catch {};
 }
 
 fn dropClient(srv: *ipc.Server) void {
     if (srv.client_fd) |fd| {
-        std.posix.close(fd);
+        sysx.close(fd);
         srv.client_fd = null;
     }
     authenticated = false;
@@ -631,7 +631,7 @@ test "e2e: X25519 handshake + visual pairing + encrypted debug.select" {
     try std.testing.expect(server.?.acceptClient());
 
     // Phase 1: Client sends pubkey
-    const client_kp = X25519.KeyPair.generate();
+    const client_kp = X25519.KeyPair.generate(host_io.io());
     var pubkey_hex: [64]u8 = undefined;
     app_crypto.bytesToHex(&client_kp.public_key, &pubkey_hex);
     var msg_buf: [128]u8 = undefined;
@@ -700,7 +700,7 @@ test "wrong pairing code is rejected" {
     _ = server.?.acceptClient();
 
     // Send pubkey
-    const client_kp = X25519.KeyPair.generate();
+    const client_kp = X25519.KeyPair.generate(host_io.io());
     var pubkey_hex: [64]u8 = undefined;
     app_crypto.bytesToHex(&client_kp.public_key, &pubkey_hex);
     var msg_buf: [128]u8 = undefined;

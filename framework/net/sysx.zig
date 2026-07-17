@@ -58,6 +58,28 @@ pub const sigemptyset = posix.sigemptyset;
 pub const tcgetattr = posix.tcgetattr;
 pub const tcsetattr = posix.tcsetattr;
 
+pub const WaitPidResult = struct {
+    pid: pid_t,
+    status: u32,
+};
+
+pub fn waitpid(pid: pid_t, flags: u32) WaitPidResult {
+    var status: if (builtin.link_libc) c_int else u32 = undefined;
+    while (true) {
+        const rc = system.waitpid(pid, &status, @intCast(flags));
+        switch (errno(rc)) {
+            .SUCCESS => return .{
+                .pid = @intCast(rc),
+                .status = @bitCast(status),
+            },
+            .INTR => continue,
+            .CHILD => unreachable, // The process specified does not exist. It would be a race condition to handle this error.
+            .INVAL => unreachable, // Invalid flags.
+            else => unreachable,
+        }
+    }
+}
+
 /// 0.16 deleted std.posix.getenv; libc is always linked here.
 pub fn getenv(name: []const u8) ?[]const u8 {
     var it: usize = 0;

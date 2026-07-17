@@ -74,7 +74,7 @@ var g_paisley_debug_enabled: ?bool = null;
 
 fn paisleyDebugEnabled() bool {
     if (g_paisley_debug_enabled == null) {
-        g_paisley_debug_enabled = std.posix.getenv("ZIGOS_PAISLEY_DEBUG") != null;
+        g_paisley_debug_enabled = host_io.getenv("ZIGOS_PAISLEY_DEBUG") != null;
     }
     return g_paisley_debug_enabled.?;
 }
@@ -1675,8 +1675,8 @@ fn openUrl(url: []const u8) void {
     var cmd_buf: [2048]u8 = undefined;
     const cmd = std.fmt.bufPrint(&cmd_buf, "xdg-open '{s}' &", .{url}) catch return;
     const argv = [_][]const u8{ "sh", "-c", cmd };
-    var child = std.process.Child.init(&argv, std.heap.page_allocator);
-    _ = child.spawnAndWait() catch {};
+    var child = std.process.spawn(host_io.io(), .{ .argv = &argv }) catch return;
+    _ = child.wait(host_io.io()) catch {};
 }
 
 fn tryParseDispatchEventExpr(expr: []const u8) ?struct { id: u32, handler: []const u8 } {
@@ -1685,7 +1685,7 @@ fn tryParseDispatchEventExpr(expr: []const u8) ?struct { id: u32, handler: []con
     var rest = expr[prefix.len..];
     const comma = std.mem.indexOfScalar(u8, rest, ',') orelse return null;
     const id = std.fmt.parseInt(u32, std.mem.trim(u8, rest[0..comma], " \t\r\n"), 10) catch return null;
-    rest = std.mem.trimLeft(u8, rest[comma + 1 ..], " \t\r\n");
+    rest = std.mem.trimStart(u8, rest[comma + 1 ..], " \t\r\n");
     if (rest.len < 3 or rest[0] != '\'') return null;
     const end = std.mem.indexOfScalarPos(u8, rest, 1, '\'') orelse return null;
     const handler = rest[1..end];
@@ -1962,7 +1962,7 @@ fn nodedumpMaybeEmit(root: *Node, win_w: f32, win_h: f32) void {
     g_nodedump_tick +%= 1;
     if (g_nodedump_tick != 60) return;
     g_nodedump_done = true;
-    if (std.posix.getenv("REACTJIT_NODEDUMP") == null) return;
+    if (host_io.getenv("REACTJIT_NODEDUMP") == null) return;
     log.print("[nodedump] window={d}x{d}\n", .{
         @as(i32, @intFromFloat(win_w)),
         @as(i32, @intFromFloat(win_h)),
@@ -4030,7 +4030,7 @@ pub fn run(config_in: AppConfig) !void {
     // the console via DRM scanout (framework/render/kms.zig) and run SDL with
     // the dummy video+audio drivers — we keep SDL only for its window/event
     // bookkeeping; pixels go straight to the framebuffer, input via evdev.
-    const kms_mode = std.posix.getenv("ZIGOS_KMS") != null;
+    const kms_mode = host_io.getenv("ZIGOS_KMS") != null;
     if (kms_mode) {
         kms.init() catch |err| {
             log.print("[kms] init failed: {}\n", .{err});
@@ -4081,7 +4081,7 @@ pub fn run(config_in: AppConfig) !void {
     var init_x: c_int = c.SDL_WINDOWPOS_CENTERED;
     var init_y: c_int = c.SDL_WINDOWPOS_CENTERED;
     const explicit_size = config.width != 1280 or config.height != 800;
-    const headless_skip_geo = std.posix.getenv("ZIGOS_HEADLESS") != null;
+    const headless_skip_geo = host_io.getenv("ZIGOS_HEADLESS") != null;
     var loaded_geom: ?geometry.WindowGeometry = null;
     if (!headless_skip_geo) {
         loaded_geom = geometry.load();
@@ -4095,16 +4095,16 @@ pub fn run(config_in: AppConfig) !void {
             log.info(.geometry, "restored {d}x{d} at ({d},{d}) max={d}", .{ g.width, g.height, g.x, g.y, g.maximized });
         }
     }
-    if (std.posix.getenv("ZIGOS_WINDOW_W")) |ws| {
+    if (host_io.getenv("ZIGOS_WINDOW_W")) |ws| {
         if (std.fmt.parseInt(c_int, ws, 10) catch null) |w| init_w = w;
     }
-    if (std.posix.getenv("ZIGOS_WINDOW_H")) |hs| {
+    if (host_io.getenv("ZIGOS_WINDOW_H")) |hs| {
         if (std.fmt.parseInt(c_int, hs, 10) catch null) |h| init_h = h;
     }
-    if (std.posix.getenv("ZIGOS_WINDOW_X")) |xs| {
+    if (host_io.getenv("ZIGOS_WINDOW_X")) |xs| {
         if (std.fmt.parseInt(c_int, xs, 10) catch null) |x| init_x = x;
     }
-    if (std.posix.getenv("ZIGOS_WINDOW_Y")) |ys| {
+    if (host_io.getenv("ZIGOS_WINDOW_Y")) |ys| {
         if (std.fmt.parseInt(c_int, ys, 10) catch null) |y| init_y = y;
     }
     if (config.x) |x| init_x = x;
@@ -4120,7 +4120,7 @@ pub fn run(config_in: AppConfig) !void {
     }
 
     const builtin_os = @import("builtin").os.tag;
-    const headless = std.posix.getenv("ZIGOS_HEADLESS") != null;
+    const headless = host_io.getenv("ZIGOS_HEADLESS") != null;
     const resizable_flag: u64 = if (config.not_focusable) 0 else c.SDL_WINDOW_RESIZABLE;
     const window_flags: u64 = resizable_flag |
         (if (comptime builtin_os == .macos) c.SDL_WINDOW_METAL else @as(u64, 0)) |
@@ -6054,7 +6054,7 @@ pub fn run(config_in: AppConfig) !void {
             // isn't flooded with 3600 lines/hour. The log-file copy below is
             // unthrottled because nobody watches it live. Set ZIGOS_TELEMETRY=1
             // to print to stderr every second for perf-hunting.
-            const verbose = std.posix.getenv("ZIGOS_TELEMETRY") != null;
+            const verbose = host_io.getenv("ZIGOS_TELEMETRY") != null;
             if (verbose or (now -% telemetry_stderr_last) >= 10_000) {
                 telemetry_stderr_last = now;
                 log.print("[telemetry] FPS: {d} | layout: {d}us | paint: {d}us | gpu: {d}us | visible: {d}/{d} | gpuops: {d}/{d} | hidden: {d} | zero: {d} | bridge: {d}/s\n", .{

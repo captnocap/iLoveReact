@@ -13,6 +13,7 @@
 //! love.graphics.captureScreenshot(callback).
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const gpu = @import("gpu.zig");
@@ -68,12 +69,12 @@ var rec_height: u32 = 0;
 // ════════════════════════════════════════════════════════════════════════
 
 pub fn init() void {
-    const ss = std.posix.getenv("ZIGOS_SCREENSHOT") orelse return;
+    const ss = host_io.getenv("ZIGOS_SCREENSHOT") orelse return;
     if (!std.mem.eql(u8, ss, "1")) return;
 
     ss_enabled = true;
 
-    if (std.posix.getenv("ZIGOS_SCREENSHOT_OUTPUT")) |p| {
+    if (host_io.getenv("ZIGOS_SCREENSHOT_OUTPUT")) |p| {
         if (p.len < ss_path_buf.len) {
             @memcpy(ss_path_buf[0..p.len], p);
             ss_path_buf[p.len] = 0;
@@ -81,14 +82,14 @@ pub fn init() void {
         }
     }
 
-    if (std.posix.getenv("ZIGOS_SCREENSHOT_NODE")) |n| {
+    if (host_io.getenv("ZIGOS_SCREENSHOT_NODE")) |n| {
         if (n.len < ss_node_buf.len) {
             @memcpy(ss_node_buf[0..n.len], n);
             ss_node = ss_node_buf[0..n.len];
         }
     }
 
-    if (std.posix.getenv("ZIGOS_SCREENSHOT_REGION")) |r| {
+    if (host_io.getenv("ZIGOS_SCREENSHOT_REGION")) |r| {
         var parts: [4]u32 = .{ 0, 0, 0, 0 };
         var idx: usize = 0;
         var iter = std.mem.splitScalar(u8, r, ',');
@@ -102,11 +103,11 @@ pub fn init() void {
         }
     }
 
-    if (std.posix.getenv("ZIGOS_SCREENSHOT_PAD")) |p| {
+    if (host_io.getenv("ZIGOS_SCREENSHOT_PAD")) |p| {
         ss_padding = std.fmt.parseInt(u32, p, 10) catch 8;
     }
 
-    if (std.posix.getenv("ZIGOS_SCREENSHOT_FRAMES")) |f| {
+    if (host_io.getenv("ZIGOS_SCREENSHOT_FRAMES")) |f| {
         ss_wait_frames = std.fmt.parseInt(u32, f, 10) catch 60;
         if (ss_wait_frames == 0) ss_wait_frames = 1;
     }

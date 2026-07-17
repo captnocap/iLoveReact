@@ -6,6 +6,7 @@
 //!   - Input forwarding (mouse, keyboard → VNC/XTest/xdotool)
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const netx = @import("../net/netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
@@ -424,7 +425,7 @@ pub fn startVM(feed: *Feed, disk_path: []const u8, memory: u32, cpus: u32) bool 
     const is_iso = std.ascii.eqlIgnoreCase(ext, "iso");
 
     const has_kvm = blk: {
-        _ = std.fs.cwd().statFile("/dev/kvm") catch break :blk false;
+        std.Io.Dir.cwd().access(host_io.io(), "/dev/kvm", .{}) catch break :blk false;
         break :blk true;
     };
 
@@ -481,17 +482,17 @@ pub fn startVM(feed: *Feed, disk_path: []const u8, memory: u32, cpus: u32) bool 
     argv[argc] = "none";
     argc += 1;
 
-    var child = std.process.Child.init(argv[0..argc], page_alloc);
-    child.stdout_behavior = .Ignore;
-    // Inherit stderr so qemu's own error messages (missing /dev/kvm, bad ISO,
-    // etc.) reach the user terminal — without this the VM path fails silently.
-    child.stderr_behavior = .Inherit;
-    child.stdin_behavior = .Ignore;
-
     log.print("[render-vm] QEMU spawning: kvm={} iso={} disk={s} mem={d}MB cpus={d} vnc=:{d}\n", .{ has_kvm, is_iso, disk_path, memory, cpus, vnc_display });
     log.info(.render, "QEMU spawning: argc={d} kvm={} iso={}", .{ argc, has_kvm, is_iso });
 
-    child.spawn() catch |err| {
+    // Inherit stderr so qemu's own error messages (missing /dev/kvm, bad ISO,
+    // etc.) reach the user terminal — without this the VM path fails silently.
+    const child = std.process.spawn(host_io.io(), .{
+        .argv = argv[0..argc],
+        .stdout = .ignore,
+        .stderr = .inherit,
+        .stdin = .ignore,
+    }) catch |err| {
         log.print("[render-vm] QEMU spawn FAILED: {}\n", .{err});
         log.info(.render, "QEMU spawn failed: {}", .{err});
         return false;
@@ -618,11 +619,12 @@ fn sendKey(feed: *Feed, down: bool, keysym: u32) void {
                 var cmd_buf: [128]u8 = undefined;
                 const cmd = std.fmt.bufPrint(&cmd_buf, "DISPLAY=:{d} xdotool {s} {s}", .{ display_num, action, xkey }) catch return;
                 const argv = [_][]const u8{ "bash", "-c", cmd };
-                var child = std.process.Child.init(&argv, page_alloc);
-                child.stdout_behavior = .Ignore;
-                child.stderr_behavior = .Ignore;
-                child.stdin_behavior = .Ignore;
-                child.spawn() catch return;
+                _ = std.process.spawn(host_io.io(), .{
+                    .argv = &argv,
+                    .stdout = .ignore,
+                    .stderr = .ignore,
+                    .stdin = .ignore,
+                }) catch return;
             }
         },
         else => {},
@@ -664,11 +666,12 @@ fn sendPointer(feed: *Feed, x_pos: u16, y_pos: u16, button_mask: u8, event_type:
                     .move => std.fmt.bufPrint(&cmd_buf, "DISPLAY=:{d} xdotool mousemove {d} {d}", .{ display_num, x_pos, y_pos }) catch return,
                 };
                 const argv = [_][]const u8{ "bash", "-c", cmd };
-                var child = std.process.Child.init(&argv, page_alloc);
-                child.stdout_behavior = .Ignore;
-                child.stderr_behavior = .Ignore;
-                child.stdin_behavior = .Ignore;
-                child.spawn() catch return;
+                _ = std.process.spawn(host_io.io(), .{
+                    .argv = &argv,
+                    .stdout = .ignore,
+                    .stderr = .ignore,
+                    .stdin = .ignore,
+                }) catch return;
             }
         },
         else => {},

@@ -25,6 +25,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const host_io = @import("../host_io.zig");
 const wgpu = @import("wgpu");
 const c = @import("../c.zig").imports;
 const gpu_core = @import("../gpu/gpu.zig");
@@ -33,7 +34,7 @@ const log = @import("../diag/log.zig");
 pub const vm = @import("render_surfaces_vm.zig");
 
 const page_alloc = std.heap.page_allocator;
-const posix = std.posix;
+const posix = @import("../net/sysx.zig");
 
 // ════════════════════════════════════════════════════════════════════════
 // X11/XShm FFI declarations
@@ -317,7 +318,7 @@ pub const Feed = struct {
 
     // FFmpeg subprocess state
     ffmpeg_child: ?std.process.Child = null,
-    ffmpeg_stdout: ?std.fs.File = null,
+    ffmpeg_stdout: ?std.Io.File = null,
     ffmpeg_read_offset: usize = 0, // partial frame read progress
 
     // VNC state
@@ -426,8 +427,7 @@ pub const Feed = struct {
 
     fn closeFFmpeg(self: *Feed) void {
         if (self.ffmpeg_child) |*child| {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
+            child.kill(host_io.io());
         }
         self.ffmpeg_child = null;
         self.ffmpeg_stdout = null;
@@ -436,18 +436,15 @@ pub const Feed = struct {
 
     fn killSubprocesses(self: *Feed) void {
         if (self.qemu_child) |*child| {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
+            child.kill(host_io.io());
         }
         self.qemu_child = null;
         if (self.app_child) |*child| {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
+            child.kill(host_io.io());
         }
         self.app_child = null;
         if (self.x_server_child) |*child| {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
+            child.kill(host_io.io());
         }
         self.x_server_child = null;
     }
@@ -569,7 +566,7 @@ fn initXShm() bool {
         }
     }
 
-    const display_env = posix.getenv("DISPLAY") orelse {
+    const display_env = host_io.getenv("DISPLAY") orelse {
         log.info(.render, "no DISPLAY env", .{});
         return false;
     };
@@ -850,7 +847,7 @@ fn startFFmpeg(feed: *Feed, parsed: ParsedSource, fps: u32, w: u32, h: u32) bool
             argc += 1;
         },
         .screen => {
-            const display_env = posix.getenv("DISPLAY") orelse ":0";
+            const display_env = host_io.getenv("DISPLAY") orelse ":0";
             argv[argc] = "-f";
             argc += 1;
             argv[argc] = "x11grab";
@@ -887,12 +884,12 @@ fn startFFmpeg(feed: *Feed, parsed: ParsedSource, fps: u32, w: u32, h: u32) bool
     argv[argc] = "-";
     argc += 1;
 
-    var child = std.process.Child.init(argv[0..argc], page_alloc);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
-    child.stdin_behavior = .Ignore;
-
-    child.spawn() catch |err| {
+    const child = std.process.spawn(host_io.io(), .{
+        .argv = argv[0..argc],
+        .stdout = .pipe,
+        .stderr = .ignore,
+        .stdin = .ignore,
+    }) catch |err| {
         log.info(.render, "FFmpeg spawn failed: {}", .{err});
         return false;
     };
@@ -927,7 +924,7 @@ fn updateFFmpeg(feed: *Feed) void {
     const remaining = frame_size - feed.ffmpeg_read_offset;
     const dest = buf[feed.ffmpeg_read_offset..frame_size];
 
-    const n = stdout_file.read(dest[0..remaining]) catch |err| {
+    const n = posix.read(stdout_file.handle, dest[0..remaining]) catch |err| {
         if (err == error.WouldBlock) return; // no data yet, try next frame
         feed.status = .@"error";
         return;
@@ -961,25 +958,25 @@ fn findWindowGeometry(title: []const u8) ?struct { x: c_int, y: c_int, w: u32, h
     ) catch return null;
 
     const argv = [_][]const u8{ "bash", "-c", script };
-    var child = std.process.Child.init(&argv, page_alloc);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
-    child.stdin_behavior = .Ignore;
-
-    child.spawn() catch return null;
+    var child = std.process.spawn(host_io.io(), .{
+        .argv = &argv,
+        .stdout = .pipe,
+        .stderr = .ignore,
+        .stdin = .ignore,
+    }) catch return null;
 
     var out_buf: [128]u8 = undefined;
     const stdout = child.stdout orelse {
-        _ = child.wait() catch {};
+        _ = child.wait(host_io.io()) catch {};
         return null;
     };
-    const n = stdout.read(&out_buf) catch 0;
-    _ = child.wait() catch {};
+    const n = posix.read(stdout.handle, &out_buf) catch 0;
+    _ = child.wait(host_io.io()) catch {};
 
     if (n == 0) return null;
 
     // Parse "X Y WIDTH HEIGHT\n"
-    var iter = std.mem.splitScalar(u8, std.mem.trimRight(u8, out_buf[0..n], "\n"), ' ');
+    var iter = std.mem.splitScalar(u8, std.mem.trimEnd(u8, out_buf[0..n], "\n"), ' ');
     const x_str = iter.next() orelse return null;
     const y_str = iter.next() orelse return null;
     const w_str = iter.next() orelse return null;
@@ -1004,7 +1001,7 @@ fn findFreeDisplay() ?u32 {
         var lock_buf: [32]u8 = undefined;
         const lock_path = std.fmt.bufPrint(&lock_buf, "/tmp/.X{d}-lock", .{i}) catch continue;
         // Try to stat the lock file — if it doesn't exist, the display is free
-        const stat = std.fs.cwd().statFile(lock_path) catch {
+        const stat = std.Io.Dir.cwd().statFile(host_io.io(), lock_path, .{}) catch {
             return i; // file doesn't exist = display free
         };
         _ = stat;
@@ -1026,8 +1023,8 @@ fn hasSetpriv() bool {
     if (setpriv_checked) return setpriv_ok;
     setpriv_checked = true;
     setpriv_ok = blk: {
-        std.fs.accessAbsolute("/usr/bin/setpriv", .{}) catch {
-            std.fs.accessAbsolute("/bin/setpriv", .{}) catch break :blk false;
+        std.Io.Dir.accessAbsolute(host_io.io(), "/usr/bin/setpriv", .{}) catch {
+            std.Io.Dir.accessAbsolute(host_io.io(), "/bin/setpriv", .{}) catch break :blk false;
             break :blk true;
         };
         break :blk true;
@@ -1048,13 +1045,12 @@ fn spawnXvfb(display_num: u32, w: u32, h: u32) ?std.process.Child {
     const argv_guarded = [_][]const u8{ "setpriv", "--pdeathsig", "KILL", "--", "Xvfb", disp_str, "-screen", "0", screen_str };
     const argv_bare = [_][]const u8{ "Xvfb", disp_str, "-screen", "0", screen_str };
 
-    var child = std.process.Child.init(if (hasSetpriv()) &argv_guarded else &argv_bare, page_alloc);
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Ignore;
-    child.stdin_behavior = .Ignore;
-
-    child.spawn() catch return null;
-    return child;
+    return std.process.spawn(host_io.io(), .{
+        .argv = if (hasSetpriv()) &argv_guarded else &argv_bare,
+        .stdout = .ignore,
+        .stderr = .ignore,
+        .stdin = .ignore,
+    }) catch return null;
 }
 
 fn startVirtualDisplay(feed: *Feed, w: u32, h: u32, command: ?[]const u8) bool {
@@ -1163,12 +1159,12 @@ fn finalizeVirtualDisplay(feed: *Feed) void {
         const launch_cmd = std.fmt.bufPrint(&launch_buf, "DISPLAY=:{d} {s} & sleep 0.8; DISPLAY=:{d} xdotool search --onlyvisible --name '' windowsize --usehints {d} {d} windowmove 0 0 2>/dev/null", .{ display_num, cmd, display_num, feed.width, feed.height }) catch return;
 
         const launch_argv = [_][]const u8{ "bash", "-c", launch_cmd };
-        var app = std.process.Child.init(&launch_argv, page_alloc);
-        app.stdout_behavior = .Ignore;
-        app.stderr_behavior = .Ignore;
-        app.stdin_behavior = .Ignore;
-
-        app.spawn() catch |err| {
+        const app = std.process.spawn(host_io.io(), .{
+            .argv = &launch_argv,
+            .stdout = .ignore,
+            .stderr = .ignore,
+            .stdin = .ignore,
+        }) catch |err| {
             log.info(.render, "App spawn failed: {}", .{err});
             return;
         };
@@ -1218,10 +1214,10 @@ fn acquireFeedSlot() ?*Feed {
 //   RENDER_MEM_RESERVE_MB  — hard floor of free RAM to keep (default 2048)
 //   RENDER_MEM_PER_FEED_MB — est. cost reserved per in-flight feed (default 600)
 fn availableMemMb() u64 {
-    var f = std.fs.openFileAbsolute("/proc/meminfo", .{}) catch return 0;
-    defer f.close();
+    const f = std.Io.Dir.openFileAbsolute(host_io.io(), "/proc/meminfo", .{}) catch return 0;
+    defer f.close(host_io.io());
     var buf: [4096]u8 = undefined;
-    const n = f.read(&buf) catch return 0;
+    const n = f.readPositionalAll(host_io.io(), &buf, 0) catch return 0;
     const txt = buf[0..n];
     const key = "MemAvailable:";
     const idx = std.mem.indexOf(u8, txt, key) orelse return 0;
@@ -1232,8 +1228,8 @@ fn availableMemMb() u64 {
     return kb / 1024; // MiB
 }
 
-fn envU64(name: [*:0]const u8, default: u64) u64 {
-    const v = std.posix.getenv(std.mem.span(name)) orelse return default;
+fn envU64(name: [:0]const u8, default: u64) u64 {
+    const v = host_io.getenv(name) orelse return default;
     return std.fmt.parseInt(u64, v, 10) catch default;
 }
 
@@ -1267,7 +1263,7 @@ fn createFeed(src: []const u8, node_w: f32, node_h: f32) ?*Feed {
     // skip subprocess spawning entirely. Spawning qemu/Xvfb/kitty here
     // leaks orphans that outlive the cart binary and inherit the ship
     // script's flock fd, blocking every subsequent build until reaped.
-    if (std.posix.getenv("ZIGOS_HEADLESS")) |v| {
+    if (host_io.getenv("ZIGOS_HEADLESS")) |v| {
         if (v.len > 0 and v[0] != '0') return null;
     }
 
@@ -1528,8 +1524,10 @@ pub fn update() void {
                 // ever issuing XShmGetImage against a broken connection.
                 if (feed.backend == .display_xshm) {
                     if (feed.x_server_child) |child| {
-                        const r = std.posix.waitpid(child.id, 1); // WNOHANG
-                        if (r.pid == child.id) {
+                        const child_pid = child.id orelse 0;
+                        // WNOHANG; guard: never waitpid(0) (= whole process group)
+                        const r = if (child_pid != 0) posix.waitpid(child_pid, 1) else posix.WaitPidResult{ .pid = -1, .status = 0 };
+                        if (child_pid != 0 and r.pid == child_pid) {
                             log.info(.render, "Xvfb :{?d} exited — retiring feed", .{feed.display_num});
                             feed.x_server_child = null; // already reaped; don't double-wait
                             feed.deinit();
@@ -1711,12 +1709,13 @@ pub fn latestCpuFrame(src: []const u8) ?CpuFrame {
 pub fn setSuspended(src: []const u8, suspended: bool) void {
     const f = findFeed(src) orelse return;
     if (f.suspended == suspended) return;
-    const sig: u8 = if (suspended) std.posix.SIG.STOP else std.posix.SIG.CONT;
+    const sig: posix.SIG = if (suspended) .STOP else .CONT;
     const pids = [_]?std.process.Child{ f.qemu_child, f.x_server_child, f.app_child };
     for (pids) |maybe_child| {
         const child = maybe_child orelse continue;
-        std.posix.kill(child.id, sig) catch |err| {
-            log.print("[render] setSuspended kill pid={d} sig={d} failed: {s}\n", .{ child.id, sig, @errorName(err) });
+        const child_pid = child.id orelse continue;
+        posix.kill(child_pid, sig) catch |err| {
+            log.print("[render] setSuspended kill pid={d} sig={d} failed: {s}\n", .{ child_pid, @intFromEnum(sig), @errorName(err) });
         };
     }
     f.suspended = suspended;

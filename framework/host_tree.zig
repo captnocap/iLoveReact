@@ -88,7 +88,7 @@ pub fn init(alloc: std.mem.Allocator) void {
     g_node_by_id = std.AutoHashMap(u32, *Node).init(alloc);
     g_children_ids = std.AutoHashMap(u32, std.ArrayList(u32)).init(alloc);
     g_parent_id = std.AutoHashMap(u32, u32).init(alloc);
-    g_root_child_ids = .{};
+    g_root_child_ids = .empty;
     g_dirty = true;
     g_inited = true;
 }
@@ -291,7 +291,7 @@ pub fn ensureNode(id: u32) !*Node {
     n.id = id;
     n.scroll_persist_slot = id;
     try g_node_by_id.put(id, n);
-    try g_children_ids.put(id, .{});
+    try g_children_ids.put(id, .empty);
     return n;
 }
 

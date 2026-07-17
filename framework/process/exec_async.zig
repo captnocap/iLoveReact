@@ -4,6 +4,7 @@
 //! from blocking on popen/pclose.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -17,7 +18,7 @@ const Completed = struct {
     exit_code: i32,
 };
 
-var g_mutex: std.Thread.Mutex = .{};
+var g_mutex: host_io.Mutex = .{};
 var g_completed: std.ArrayList(Completed) = .empty;
 
 pub fn spawn(rid: []const u8, cmd: []const u8) void {

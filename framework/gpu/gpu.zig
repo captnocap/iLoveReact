@@ -1983,6 +1983,60 @@ fn createCanvasSurface(instance: *wgpu.Instance) ?*wgpu.Surface {
     return @ptrCast(wc.wgpuInstanceCreateSurface(@ptrCast(instance), &surface_desc));
 }
 
+fn requestAdapterCallback(status: wgpu.RequestAdapterStatus, adapter: ?*wgpu.Adapter, message: wgpu.StringView, userdata1: ?*anyopaque, userdata2: ?*anyopaque) callconv(.c) void {
+    const response: *wgpu.RequestAdapterResponse = @ptrCast(@alignCast(userdata1));
+    response.* = .{
+        .status = status,
+        .message = message.toSlice(),
+        .adapter = adapter,
+    };
+    const completed: *bool = @ptrCast(@alignCast(userdata2));
+    completed.* = true;
+}
+
+fn requestAdapterSync(instance: *wgpu.Instance, options: ?*const wgpu.RequestAdapterOptions, polling_interval_nanoseconds: u64) wgpu.RequestAdapterResponse {
+    var response: wgpu.RequestAdapterResponse = undefined;
+    var completed = false;
+    _ = instance.requestAdapter(options, .{
+        .callback = requestAdapterCallback,
+        .userdata1 = @ptrCast(&response),
+        .userdata2 = @ptrCast(&completed),
+    });
+    instance.processEvents();
+    while (!completed) {
+        std.Io.sleep(host_io.io(), .fromNanoseconds(@intCast(polling_interval_nanoseconds)), .awake) catch continue;
+        instance.processEvents();
+    }
+    return response;
+}
+
+fn requestDeviceCallback(status: wgpu.RequestDeviceStatus, device: ?*wgpu.Device, message: wgpu.StringView, userdata1: ?*anyopaque, userdata2: ?*anyopaque) callconv(.c) void {
+    const response: *wgpu.RequestDeviceResponse = @ptrCast(@alignCast(userdata1));
+    response.* = .{
+        .status = status,
+        .message = message.toSlice(),
+        .device = device,
+    };
+    const completed: *bool = @ptrCast(@alignCast(userdata2));
+    completed.* = true;
+}
+
+fn requestDeviceSync(adapter: *wgpu.Adapter, instance: *wgpu.Instance, descriptor: ?*const wgpu.DeviceDescriptor, polling_interval_nanoseconds: u64) wgpu.RequestDeviceResponse {
+    var response: wgpu.RequestDeviceResponse = undefined;
+    var completed = false;
+    _ = adapter.requestDevice(descriptor, .{
+        .callback = requestDeviceCallback,
+        .userdata1 = @ptrCast(&response),
+        .userdata2 = @ptrCast(&completed),
+    });
+    instance.processEvents();
+    while (!completed) {
+        std.Io.sleep(host_io.io(), .fromNanoseconds(@intCast(polling_interval_nanoseconds)), .awake) catch continue;
+        instance.processEvents();
+    }
+    return response;
+}
+
 pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     if (is_web) @compileError("Use initWeb() on wasm32 targets");
 
@@ -2010,7 +2064,7 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     }
 
     // Request adapter (no compatible surface in KMS mode)
-    const adapter_response = instance.requestAdapterSync(&.{
+    const adapter_response = requestAdapterSync(instance, &.{
         .compatible_surface = g_surface,
         .power_preference = .high_performance,
     }, 200_000_000);
@@ -2038,10 +2092,10 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     const have_adapter_limits = adapter.getLimits(&adapter_limits) == .success;
     adapter_limits.next_in_chain = null;
     const limits_desc = wgpu.DeviceDescriptor{ .required_limits = &adapter_limits };
-    var device_response = adapter.requestDeviceSync(instance, if (have_adapter_limits) &limits_desc else null, 200_000_000);
+    var device_response = requestDeviceSync(adapter, instance, if (have_adapter_limits) &limits_desc else null, 200_000_000);
     if (device_response.status != .success and have_adapter_limits) {
         log.print("[gpu] device request with adapter limits failed — retrying with WebGPU defaults\n", .{});
-        device_response = adapter.requestDeviceSync(instance, null, 200_000_000);
+        device_response = requestDeviceSync(adapter, instance, null, 200_000_000);
     }
     if (device_response.status != .success) {
         log.print("wgpu device request failed\n", .{});

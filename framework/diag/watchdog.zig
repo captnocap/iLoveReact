@@ -37,8 +37,8 @@ pub fn init() void {
     g_clean_exit_path_len = ce.len;
 
     // Clean stale files
-    std.fs.cwd().deleteFile(hb) catch {};
-    std.fs.cwd().deleteFile(ce) catch {};
+    std.Io.Dir.cwd().deleteFile(host_io.io(), hb) catch {};
+    std.Io.Dir.cwd().deleteFile(host_io.io(), ce) catch {};
 
     // Find watchdog.sh
     const script = findScript() orelse {
@@ -71,9 +71,9 @@ pub fn heartbeat() void {
 
     // Write directly (not atomic — watchdog tolerates truncated reads)
     const path = g_heartbeat_path_buf[0..g_heartbeat_path_len];
-    const file = std.fs.cwd().createFile(path, .{}) catch return;
-    defer file.close();
-    _ = file.write(ts_str) catch {};
+    const file = std.Io.Dir.cwd().createFile(host_io.io(), path, .{}) catch return;
+    defer file.close(host_io.io());
+    file.writeStreamingAll(host_io.io(), ts_str) catch {};
 }
 
 /// Write the clean exit marker so the watchdog knows we shut down normally.
@@ -81,11 +81,11 @@ pub fn markCleanExit() void {
     if (!g_initialized or g_clean_exit_path_len == 0) return;
 
     const path = g_clean_exit_path_buf[0..g_clean_exit_path_len];
-    const file = std.fs.cwd().createFile(path, .{}) catch return;
-    file.close();
+    const file = std.Io.Dir.cwd().createFile(host_io.io(), path, .{}) catch return;
+    file.close(host_io.io());
 
     // Clean up heartbeat
-    std.fs.cwd().deleteFile(g_heartbeat_path_buf[0..g_heartbeat_path_len]) catch {};
+    std.Io.Dir.cwd().deleteFile(host_io.io(), g_heartbeat_path_buf[0..g_heartbeat_path_len]) catch {};
 }
 
 fn findScript() ?[]const u8 {
@@ -94,7 +94,7 @@ fn findScript() ?[]const u8 {
         "../scripts/watchdog.sh",
     };
     for (candidates) |path| {
-        std.fs.cwd().access(path, .{}) catch continue;
+        std.Io.Dir.cwd().access(host_io.io(), path, .{}) catch continue;
         return path;
     }
     return null;

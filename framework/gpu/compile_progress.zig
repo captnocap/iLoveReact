@@ -23,10 +23,10 @@ const log = @import("../diag/log.zig");
 /// The last slow compile's `<wgsl bytes> <duration ms>`, persisted per machine
 /// so the NEXT cold compile (source changed, driver upgraded) can show a %.
 fn baselinePath(buf: []u8) ?[]const u8 {
-    if (std.posix.getenv("XDG_CACHE_HOME")) |dir| {
+    if (host_io.getenv("XDG_CACHE_HOME")) |dir| {
         return std.fmt.bufPrint(buf, "{s}/reactjit-effect-compile-baseline", .{dir}) catch null;
     }
-    if (std.posix.getenv("HOME")) |home| {
+    if (host_io.getenv("HOME")) |home| {
         return std.fmt.bufPrint(buf, "{s}/.cache/reactjit-effect-compile-baseline", .{home}) catch null;
     }
     return null;
@@ -35,10 +35,10 @@ fn baselinePath(buf: []u8) ?[]const u8 {
 fn expectedMs(wgsl_len: usize) ?u64 {
     var path_buf: [512]u8 = undefined;
     const path = baselinePath(&path_buf) orelse return null;
-    const file = std.fs.openFileAbsolute(path, .{}) catch return null;
-    defer file.close();
+    const file = std.Io.Dir.openFileAbsolute(host_io.io(), path, .{}) catch return null;
+    defer file.close(host_io.io());
     var buf: [64]u8 = undefined;
-    const n = file.read(&buf) catch return null;
+    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return null;
     var it = std.mem.tokenizeAny(u8, buf[0..n], " \n");
     const bytes = std.fmt.parseInt(u64, it.next() orelse return null, 10) catch return null;
     const ms = std.fmt.parseInt(u64, it.next() orelse return null, 10) catch return null;
@@ -54,9 +54,9 @@ fn writeBaseline(wgsl_len: usize, took_ms: i64) void {
     const path = baselinePath(&path_buf) orelse return;
     var content_buf: [64]u8 = undefined;
     const content = std.fmt.bufPrint(&content_buf, "{d} {d}\n", .{ wgsl_len, took_ms }) catch return;
-    const file = std.fs.createFileAbsolute(path, .{ .truncate = true }) catch return;
-    defer file.close();
-    file.writeAll(content) catch {};
+    const file = std.Io.Dir.createFileAbsolute(host_io.io(), path, .{ .truncate = true }) catch return;
+    defer file.close(host_io.io());
+    file.writeStreamingAll(host_io.io(), content) catch {};
 }
 
 pub const CompileProgress = struct {
@@ -107,7 +107,7 @@ pub const CompileProgress = struct {
     fn loop(self: *CompileProgress) void {
         var last_line_ms: i64 = 0;
         while (!self.done.load(.acquire)) {
-            std.Thread.sleep(200 * std.time.ns_per_ms);
+            std.Io.sleep(host_io.io(), .fromMilliseconds(200), .awake) catch return;
             const elapsed = self.elapsedMs();
             if (elapsed < SILENT_MS) continue;
             if (elapsed - last_line_ms < LINE_EVERY_MS) continue;

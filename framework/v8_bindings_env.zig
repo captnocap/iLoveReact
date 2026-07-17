@@ -1,6 +1,7 @@
 //! V8 host bindings for environment, process info, and exec.
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const process_mod = @import("process/process.zig");
@@ -63,8 +64,8 @@ fn resolveAppDir() usize {
     if (g_app_dir_resolved) return g_app_dir_len;
     g_app_dir_resolved = true;
 
-    const exe_path = std.posix.readlink("/proc/self/exe", &g_app_dir_buf) catch return 0;
-    var dir_end: usize = exe_path.len;
+    const exe_path_len = std.process.executablePath(host_io.io(), &g_app_dir_buf) catch return 0;
+    var dir_end: usize = exe_path_len;
     while (dir_end > 0 and g_app_dir_buf[dir_end - 1] != '/') dir_end -= 1;
     if (dir_end == 0) return 0;
 
@@ -77,6 +78,13 @@ fn resolveAppDir() usize {
 
     g_app_dir_len = dir_end;
     return dir_end;
+}
+
+fn getenvDynamic(name: []const u8) ?[]const u8 {
+    const alloc = std.heap.page_allocator;
+    const name_z = alloc.dupeZ(u8, name) catch return null;
+    defer alloc.free(name_z);
+    return host_io.getenv(name_z);
 }
 
 fn execCmd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -129,7 +137,7 @@ fn getEnv(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(name_buf);
-    const val = std.posix.getenv(name_buf) orelse {
+    const val = getenvDynamic(name_buf) orelse {
         setString(info, "");
         return;
     };
@@ -144,7 +152,7 @@ fn envGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(name_buf);
-    const val = std.posix.getenv(name_buf) orelse {
+    const val = getenvDynamic(name_buf) orelse {
         setNull(info);
         return;
     };

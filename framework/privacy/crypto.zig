@@ -308,9 +308,9 @@ pub fn envelopeEncrypt(plaintext: []const u8, kek: *const [key_length]u8) Envelo
 
     // Generate random DEK + nonces
     var dek: [key_length]u8 = undefined;
-    std.crypto.random.bytes(&dek);
-    std.crypto.random.bytes(&env.dek_nonce);
-    std.crypto.random.bytes(&env.data_nonce);
+    host_io.io().random(&dek);
+    host_io.io().random(&env.dek_nonce);
+    host_io.io().random(&env.data_nonce);
 
     // Encrypt DEK with KEK
     XChaCha20Poly1305.encrypt(&env.encrypted_dek, &env.dek_tag, &dek, "", env.dek_nonce, kek.*);

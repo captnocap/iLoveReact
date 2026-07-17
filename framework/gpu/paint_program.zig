@@ -42,6 +42,7 @@
 //! calls model_paint directly and suppresses recording, so it never re-records itself.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const model_paint = @import("model_paint.zig");
 const model_source = @import("model_source.zig");
 const material_tex = @import("material_tex.zig");
@@ -969,7 +970,7 @@ fn runStrokeOps(ops: []const u8, res: *const Resolver, ink: *ReplayInk, dabs: *u
 /// layer. The one composite function behind undo/redo and every layer op. Logs its cost —
 /// undo must never hitch the frame, and this line is the receipt.
 pub fn replayAll() void {
-    var timer = std.time.Timer.start() catch null;
+    var timer = host_io.Timer.start() catch null;
     if (g_baseline) |b| {
         if (!model_paint.setAtlas(b)) model_paint.clearAtlas(); // detail changed → base fallback
     } else {

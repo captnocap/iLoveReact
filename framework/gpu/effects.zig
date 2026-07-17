@@ -17,6 +17,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const host_io = @import("../host_io.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
 const gpu_core = @import("gpu.zig");
@@ -153,7 +154,7 @@ var g_paisley_debug_enabled: ?bool = null;
 
 fn paisleyDebugEnabled() bool {
     if (g_paisley_debug_enabled == null) {
-        g_paisley_debug_enabled = std.posix.getenv("ZIGOS_PAISLEY_DEBUG") != null;
+        g_paisley_debug_enabled = host_io.getenv("ZIGOS_PAISLEY_DEBUG") != null;
     }
     return g_paisley_debug_enabled.?;
 }
@@ -570,7 +571,7 @@ var g_dt: f32 = 0;
 
 fn parseBackendPref() BackendPref {
     if (builtin.cpu.arch == .wasm32) return .cpu;
-    const env = std.posix.getenv("ZIGOS_EFFECTS_BACKEND") orelse return .auto;
+    const env = host_io.getenv("ZIGOS_EFFECTS_BACKEND") orelse return .auto;
     if (std.mem.eql(u8, env, "cpu")) return .cpu;
     if (std.mem.eql(u8, env, "gpu")) return .gpu;
     return .auto;

@@ -20,6 +20,7 @@
 //! resize callbacks can't overwrite the rect we just loaded.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const c = @import("../c.zig").imports;
 
 pub const WindowGeometry = extern struct {
@@ -92,17 +93,17 @@ pub fn save(window: *c.SDL_Window) void {
     }
 
     const bytes: *const [@sizeOf(WindowGeometry)]u8 = @ptrCast(&geom);
-    const file = std.fs.createFileAbsolute(getPath(), .{}) catch return;
-    defer file.close();
-    file.writeAll(bytes) catch {};
+    const file = std.Io.Dir.createFileAbsolute(host_io.io(), getPath(), .{}) catch return;
+    defer file.close(host_io.io());
+    file.writeStreamingAll(host_io.io(), bytes) catch {};
 }
 
 pub fn load() ?WindowGeometry {
-    const file = std.fs.openFileAbsolute(getPath(), .{}) catch return null;
-    defer file.close();
+    const file = std.Io.Dir.openFileAbsolute(host_io.io(), getPath(), .{}) catch return null;
+    defer file.close(host_io.io());
 
     var bytes: [@sizeOf(WindowGeometry)]u8 = undefined;
-    const n = file.readAll(&bytes) catch return null;
+    const n = file.readPositionalAll(host_io.io(), &bytes, 0) catch return null;
     if (n < @sizeOf(WindowGeometry)) return null;
 
     const geom: *const WindowGeometry = @ptrCast(@alignCast(&bytes));
