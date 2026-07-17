@@ -1,0 +1,30 @@
+{
+  "id": "req_3106",
+  "at": "2026-07-16T00:52:31.510Z",
+  "origin": "session:52c7a5f2",
+  "text": "oh that loop cut losing it loop, should ideally actually be kept for a basic cut, ive been meaning to have that get made and forget all the time. it never even landed in the last editor. but yeah the whole loop part on a loop is wrong lol. here run the /codex skill and you can have them take care of that",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T00:52:45.403Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T01:22:13.195Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Delivered the user's ruling via the codex handoff: the accidental selected-face-only parametric cut is now the first-class BASIC CUT op (mesh-cut command, key T, Slice icon, same dir/cuts/offset popup titled 'Cut', 'cut' journal label, __mesh_lc_begin(basic) door, MESHOPS lcbegin:1), and Loop Cut (L) got its loop back — ringParametricCutsSoup walks the authored quad ring from every seeded face, cutting each crossed quad at the same fractions with bit-identical shared-edge cut points; plane fallback retained for non-quad selections. Parity harness upgraded to 12 rows (cut as a fourth op) with the contract fixes (naked-edge editable counting, analytic solidify grading honoring the req_2932 plane-solver ruling, native-analytic loopcut/cut fraction probes). Gate green 12/12 + both zig suites + editor ship, graded against pre-handoff snapshots, committed e2f54bfb6 and pushed. Spec + verify.sh preserved in session scratchpad.",
+  "shas": [
+    "e2f54bfb6"
+  ],
+  "resolvedAt": "2026-07-16T01:22:13.195Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3028",
+  "at": "2026-07-14T00:08:11.637Z",
+  "origin": "session:6e4cf495",
+  "text": "are you saying to go into the build menu and then press K, or ?erm ei see now. uh ok so the sticker is too thick, and thats from the basis that giving the mesh any '3d' amount of space is un-necessary. Stickers are flat and dont have sides, nor do they really even have a back, its more a front facing plane, this is paying 5x the face count when it doesnt need to, otherwise as it stands i see so i imported an image, and then go to this tool. uh some other things im not really sure how this occurs but i have a test image, the test image im uploading, is a larger resolution AND a smaller file size than the recommended import method for the same image",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T00:08:44.622Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T00:13:35.185Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed both reports (commit 8bd2decbf). (1) Flat stickers: a zero-thickness skin-box row now draws a 12-vert two-sided sticker quad (framework/world_loader/geometry.zig buildStickerQuad, one per thin axis, same winding/UV convention as the cube) instead of the 36-vert cube — 4 triangles per stamp instead of 12, exact size, no outset; pieceSkins sends thickness exactly 0. NEEDS A FRAMEWORK REBUILD to take effect (until then the zero dim renders as the old hair-thin box — graceful). (2) Import honesty: the pixel-texture probe downsamples to 128 on the longest side and stores JSON RLE, so a well-packed original (indexed PNG of flat art) can beat it on BOTH resolution and bytes — the dialog no longer recommends the pixel form in that case, and the card now says 'DOWNSAMPLED from WxH' and 'LARGER than the original' loudly. Also answered the tool question: Build menu > Place Sticker, or just press K in a world doc.",
+  "shas": [
+    "8bd2decbf"
+  ],
+  "resolvedAt": "2026-07-14T00:13:35.185Z"
+}

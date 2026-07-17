@@ -1,0 +1,28 @@
+{
+  "id": "req_2998",
+  "at": "2026-07-13T05:08:58.158Z",
+  "origin": "codex:019f5351",
+  "text": "and i hate to sound like i have no idea what im talking about but what exactly is the appframe persistence effect. because if its not the update of the paint material (as seen steps past it) then what exactly is being persisted",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T05:09:10.004Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T05:09:37.230Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained and verified AppFrame persistence semantics. The effect at AppFrame.tsx:476 mirrors nearly all EditorState through persistView.persistState into one Zig-owned in-process hot-state JSON string so a developer JS-context hot reload can restore the prior editor view. It is not model paint/material persistence and does not survive a cold process restart. It stores UI/view and session projections including active domain/tab/asset/document, browser history, Color Studio current/palette/overrides, search/panels, tool snapshot, histories/status, model overrides/rigs/parts (whose optional EditMesh contains verts/faces), and globals. It replaces worldPieces/objects/selected world items/undo stacks and map zones/bindings with empty values before serialization. Because its effect depends on the monolithic state object, each color-preview sample serializes and copies that broad snapshot into Zig even though only colorSpineCurrent changed; several written fields such as modelTool are reset on reload anyway. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T05:09:37.230Z"
+}

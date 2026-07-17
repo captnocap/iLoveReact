@@ -1,0 +1,30 @@
+{
+  "id": "req_3067",
+  "at": "2026-07-15T10:45:50.737Z",
+  "origin": "session:8a9444e4",
+  "text": "ok that worked pretty well. here is what i also need  just realized why can be such a pain in my ass, i need a means to store a camera position. beacuse getting back to the exact distance and angle when you start moving around is nearly impossible because one double click around moves the camera postion and then its just out the window to try and get back to it. so let me store a camera position to return to",
+  "status": "review",
+  "sessionId": "8a9444e4-b0de-499e-8a2d-cfc00e09d013",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T10:46:12.319Z",
+      "actor": "fable-camstore",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T11:00:16.088Z",
+      "actor": "fable-camstore",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Camera bookmark for the mesh studio: Store View pins the current orbit pose (yaw/pitch/dist/target) host-side in gpu/3d.zig — it survives hot reloads like the rest of the camera and resets on cold start — and Recall View / the H key jumps the camera straight back to it, so a stray double-click focus or orbit no longer loses the working angle for good. Recall respects the camera lock like every other motion. New __model_cam_store/__model_cam_recall doors; Store (BookmarkPlus, stays lit while a bookmark exists) and Recall (Bookmark) sit in the action-bar tool row and the context-menu View group. Editor command tests 13/13 green. Zig change — needs a dev-host rebuild.",
+  "shas": [
+    "a6e85b306"
+  ],
+  "resolvedAt": "2026-07-15T11:00:16.088Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2960",
+  "at": "2026-07-11T08:18:16.149Z",
+  "origin": "codex:019f4fff",
+  "text": "actually scrap all that u know what we can do better. just make some client/server setup and i can run the server on here and then a client on my mac. they can resolve discrepency between code that is up to date and we can then only need to pass back like the singular models that i end up making not the entire code",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T08:18:44.469Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T08:29:18.913Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented a desktop-authoritative client/server sync instead of Git or full-archive handoffs. The Bun server exposes SHA-256 manifests and read-only code downloads; the Mac client pulls only changed managed files and may push only editor-owned models, maps, and contentstore data. Both directions mirror deletions, retain timestamped backups, and verify exact hashes after transfer.",
+  "shas": [
+    "1866e4078"
+  ],
+  "resolvedAt": "2026-07-11T08:29:18.913Z"
+}

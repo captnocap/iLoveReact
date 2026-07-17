@@ -1,0 +1,28 @@
+{
+  "id": "req_2966",
+  "at": "2026-07-11T22:38:51.064Z",
+  "origin": "codex:019f5351",
+  "text": "hey go through the cart/editor and get me an audit of any and all things that are hard-coded to do literally nothing at all as it stands, nothing at all meaning: there is no actual user facing feature that is instrumented with the user facing interface. Strong examples of doing literally nothing at all: buttons that just update the selected state without anything else, buttons that just exist for the sake of existing, text that is hardcoded where the location of it would clearly represent a shape of data, and then also keep your eyes peeled for ai slop, strong smells of ai slop: when a feature explains itself in a text node next to the feature in any way. Last, and this one takes a bit of thinking about how the systems interact as a whole, but consider any stateful view the user might be in when using the application, when in that view, are there elements on screen that are repetitive, restating the same thing, one to many times over. Gather this all in a report for me before you change anything lets see what we find",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T22:38:57.138Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T22:54:26.386Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed a read-only source audit of cart/editor. Confirmed systemic dead or misleading UI paths including unrendered EditorState.status feedback, selection-only left and right rails, action-bar enablement and surface bypasses, placebo snap/view/preset/minimap/focus behavior, stale /play gamefile wiring, phantom WorldObject scaffolding, an eyedropper that paints instead of sampling, hardcoded data-shaped fiction in Color Library/Build Journal/content browsing/diagnostics, dormant false-affordance components, extensive inline feature-explainer copy, and repeated data across stateful views. No implementation files changed; report delivered for review before any remediation.",
+  "shas": [],
+  "resolvedAt": "2026-07-11T22:54:26.386Z"
+}

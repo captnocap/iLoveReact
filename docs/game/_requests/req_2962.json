@@ -1,0 +1,30 @@
+{
+  "id": "req_2962",
+  "at": "2026-07-11T08:31:51.948Z",
+  "origin": "codex:019f4fff",
+  "text": "hm im getting editor-sync: managed symlinks are not supported: node_modules/.bin/codex",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T08:32:09.287Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T08:33:05.377Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the Mac sync failure by excluding node_modules at every directory depth from both the Bun sync manifest and archive fallback. Verified with root and nested node_modules/.bin symlink fixtures, then rebuilt the real repository manifest successfully with 6,934 managed files and no remaining managed-symlink errors.",
+  "shas": [
+    "868c84ade"
+  ],
+  "resolvedAt": "2026-07-11T08:33:05.377Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3021",
+  "at": "2026-07-13T15:58:00.168Z",
+  "origin": "session:6e4cf495",
+  "text": "yeah ok i see them also kinda cool u can do that into an artifact so easily now they finally make the harness not a piece of shit lmao anyways so uh yeah so clearly 256 looks the best. but also, a sticker, from my PoV, will be like a 4x6 thermal label size, which like you can fit a whole lot of those on a wall. or am i misunderstanding it and maybe that doesnt matter at all.",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T15:58:25.512Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T15:58:55.534Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the 4x6-label question: it matters and it forks the design. A 10x15cm sticker baked into the wall atlas gets only 26x39 texels even at the user's chosen 256 px/m ambient density (which is now LOCKED for graffiti/freehand per his artifact verdict), so stickers must NOT be resampled into the surface — they render as their own decal quads sampling their own authored-resolution texture (e.g. 812x1218 = 203dpi thermal-label), staying crisp at any placement scale, exactly like real printed stickers. Mechanism already exists: pieceSkins skin-box quads with a pixel texture instead of WGSL; storage stays stroke-program + placement rows per the paint ruling. Two-tier density contract recorded: ambient 256 px/m facade canvas for paint, per-sticker authored density for stamps.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T15:58:55.534Z"
+}

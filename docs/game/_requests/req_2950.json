@@ -1,0 +1,28 @@
+{
+  "id": "req_2950",
+  "at": "2026-07-11T07:12:46.019Z",
+  "origin": "codex:019f4fff",
+  "text": "ok so i just want to know the specific models or assets that are getting pulled over as of right now, just give me a list of it",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T07:12:50.384Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T07:13:55.101Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Enumerated the exact current legacy payload read by cart/editor/data/hmscAssetCatalog.ts: 92 unique mesh-bearing Studio model names (94 snapshot records due duplicate names), 55 cooked asset rows, 8 stored materials, 13 texture image files, plus Desk.glb and car.obj source scans; Fire Hydrant is not loaded because its temp source path is missing. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-11T07:13:55.101Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3128",
+  "at": "2026-07-16T04:56:49.926Z",
+  "origin": "session:da1f4e92",
+  "text": "hey, so uh, we might already have most of the ability to do this but, so i made this bong [Image #9] and i was thinking to before i scale it down, export out a copy of it that is this massive size, but i want to put it like, as a business sign, where the sign, basically has a bong that is just spinning around and is on some platform above the door right. i can make everything the only part i dont know is the spinning part.",
+  "status": "review",
+  "sessionId": "da1f4e92-6930-441f-be60-478103cbcdb0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T04:56:58.597Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T05:22:10.160Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the spinning-prop capability end to end (the only missing piece of the business-sign ask — giant export + platform the user already has). A placed authored prop now takes a Spin quick verb (right-click menu / Build > Spin Piece): an undoable world.piece.spin transaction sets PlacedPiece.spinDegPerSec (45°/s toggle, persists with the map), livePush carries it on a new v2 live-mesh wire behind a presence-gated host door (__compiled_world_set_live_mesh_props2 — older host falls back to v1, no misparse), and world_loader draws the prop at yaw + rate x clock every frame. Visual-only per the ticker/traffic law: colliders, door state, and placement identity keep the authored yaw. Spins in both the iso viewport and the playtest tab off the one push. Tests green (pieceEditCommand 9/9, meshProps 4/4); docs/game/editor_spin_props.md + index record added (baked-gamefile spin flagged as the compile-lane follow-up). NEEDS A HOST REBUILD to see props turn — the running dev host predates the new door.",
+  "shas": [
+    "4e1343921"
+  ],
+  "resolvedAt": "2026-07-16T05:22:10.160Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3035",
+  "at": "2026-07-14T00:38:06.739Z",
+  "origin": "session:6e4cf495",
+  "text": "huh the true plane still has 6 sides D: lmao fuckin PoS plane is commiting identity theft.",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T00:38:27.131Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T00:41:04.325Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the still-6-sided sticker: staleness, not a code bug. The flat-quad fix landed in commit 8bd2decbf at 17:13; the reactjit-dev binary on disk finished building at 17:28 but contains ZERO 'sticker_quad' strings while known geometry keys (cylinder8, corner_miter) hit fine — that build STARTED before the commit landed (big ReleaseFast builds overlap; flock-serialized). Verified the fix itself compiles and is correct: zig run proof over buildStickerQuad — 12 verts per axis, every vert exactly on its plane, unit axis normals, winding matching buildCube. One rebuild of the dev host picks it up; until then the zero-thickness row renders as the old 8mm-outset hair-thin box, which is exactly the 6-sided slab being seen.",
+  "shas": [],
+  "resolvedAt": "2026-07-14T00:41:04.325Z"
+}

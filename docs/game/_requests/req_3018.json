@@ -1,0 +1,34 @@
+{
+  "id": "req_3018",
+  "at": "2026-07-13T15:34:23.205Z",
+  "origin": "session:6e4cf495",
+  "text": "hey buddy ole pal so i have a feature addition i want but it also comes with getting some questions answered first. uh so in the old cart, we had image importing and that could be used as a texture. it worked pretty decent, but it had some serious problems with scale and shape of what it was rendering on. so i have to believe there is a very exact formula to this like every N meters is the equivilence of 500x500 or something, the reason i want to know is because well while we dont have images yet in the refactor, it would be the next thing in the ask that also comes with, so i need a better way to like draw up a logo in here, and then reuse that logo across many assets ontop of whatever that asset may have on it, you know so like basically a sticker. and then quite literally i would like to setup a 'sticker' or graffit system where, the end shape of it hopefully would let me author buildingns all the same way we have it, i can slot in textures to the walls and all that jazz, but then i want to be able to come back and like select multiple pieces of a building and then bring them all into a painter in one shape, so i can actually treat that specific space with graffitti and i can spread it across however wide or tall i so wish. and graffiti is also like 228 sticker shit. also enjoy this i drew for you [Image #1]",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T15:34:35.015Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T15:38:56.377Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Answered the scale question: old cart had NO px/m formula — box faces carry fixed 0..1 UVs (runtime/geometries/_util.ts:69), image square-cropped at upload then double-stretched. Current model painter already has the real contract (texels-per-meter, unwrapMesh req_0973, fit 1024²). Proposed sticker/graffiti design riding stroke-program ruling + pieceSkins layer."
+    },
+    {
+      "at": "2026-07-13T15:39:09.092Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Research/answer phase of the sticker ask: traced why old-cart image textures broke scale — there was NO meters-to-pixels formula; every box face carries fixed 0..1 UVs (runtime/geometries/_util.ts:69) so one image stretches over any wall regardless of size, and upload square-crops to 1024 (faceTextureDoc.ts) so aspect is discarded twice, with zero repeat controls. Documented that the current editor already owns the correct contract: texels-per-meter paint density (unwrapMesh req_0973, 16 texels/m basis; __model_set_paint_detail; 1024² default fit), 1 tile = 1m ruled (R4), 3m storeys. Proposed the sticker/graffiti shape: sticker = library asset (stroke program or pixel spec per the paint-program ruling) with an intrinsic METER footprint; placement = data row (ref + surface + uv-meters + scale + rotation) layered over the slot material in pieceSkins (whose image/decal layer is already marked 'a later slice'); multi-piece facade painter = merge selected pieces' coplanar faces into one meter-true canvas at a single global density and bake back per face. No code changed — design + answers delivered for user greenlight.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T15:39:09.092Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2963",
+  "at": "2026-07-11T08:33:24.529Z",
+  "origin": "codex:019f4fff",
+  "text": "cool so then finally to be crystal clear: if i have code updates on mac, i just commit them as normal. and then pull on this machine",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T08:33:40.614Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T08:33:50.087Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified the final direction split: code authored on the Mac uses the normal Git add/commit/push workflow and is received on the desktop with git pull --ff-only; editor-sync push is intentionally limited to models, maps, and content data, while editor-sync pull flows desktop files to the Mac and does not transport Mac code back.",
+  "shas": [],
+  "resolvedAt": "2026-07-11T08:33:50.087Z"
+}

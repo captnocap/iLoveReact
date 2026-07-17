@@ -1,0 +1,17 @@
+{
+  "id": "req_3145",
+  "at": "2026-07-17T03:03:57.837Z",
+  "origin": "one-off",
+  "text": "oh yeah lmao well.... if im not mistaken im pretty sure jarred literally was in the set of peter thiel drop outs with some un earthly amount of money he did some years ago, so i mean idk if that wasnt like.... evident from the start, then idk what was lmao",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T03:04:06.662Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

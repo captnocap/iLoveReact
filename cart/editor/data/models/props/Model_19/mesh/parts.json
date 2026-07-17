@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Cube 1",
+      "color": "#c9b48f",
+      "visible": true,
+      "kind": "cube"
+    },
+    {
+      "name": "Detached 1",
+      "color": "#8fb6c9",
+      "visible": true
+    },
+    {
+      "name": "Detached 1 (2)",
+      "color": "#8fb6c9",
+      "visible": true
+    },
+    {
+      "name": "Detached 1 (3)",
+      "color": "#8fb6c9",
+      "visible": true
+    }
+  ]
+}

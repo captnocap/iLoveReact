@@ -1,0 +1,37 @@
+{
+  "id": "req_2965",
+  "at": "2026-07-11T22:30:39.195Z",
+  "origin": "codex:019f5349",
+  "text": "hey heres a task you can run on for as long as you need to, basically this file the world_loader.zig is, a god file for sure. and with being only incrementally done with the entire grand scheme of things here, good start would be now to take this world loader file and start to make it easier for agents to work around, as it stands no agent can read the entire file in one pass. its nearing 10k lines of code. now, a good measure of it also is code comments. \n\nso heres the plan, because this file is entirely isolated, this positions you to be able to not touch it at all, and then along side it, start to rewrite it from the ground up with the EXACT same end result, but properly distributed across related files and no longer in one big dick file. \n\nso thats the ask, its straight forward, its got a very clear end goal, and its positioned to let you run with it, and have no fear. \n\nHow to know if you are doing something wrong: you literally make any change to the existing world_loader file; thats not what is being asked of you. Parity it, in a much more managable means. When its ready, we can put it side by side to compare they are the same but different",
+  "status": "review",
+  "sessionId": "019f5349-8a7e-7a40-8bfd-9ab10724bcac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T22:30:44.711Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T23:06:30.990Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Built the untouched-legacy side-by-side replacement under framework/world_loader: 23 focused Zig modules plus a narrow framework/world_loader.zig facade. Public loader and Runtime APIs match exactly; fixture semantic parity and active 36MB editor-gamefile construction/capture comparisons are green. Final scoped commits are next."
+    },
+    {
+      "at": "2026-07-11T23:07:20.071Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rebuilt the compiled world loader alongside the untouched legacy comparator as a narrow public facade plus 23 focused Zig modules covering configuration, state, construction, geometry, physics, presentation, streaming, live editor ingress, paint, transport, foliage, simulation, and interaction. The legacy source remains byte-identical at SHA-256 dd65fb8d..., both the top-level and Runtime public declaration sets match exactly, fixture construction parity was exact, and both implementations produced identical construction facts for the active 36 MB editor gamefile. Added a same-layer geometry fingerprint target and documentation for boundaries and side-by-side builds. All targeted dependency suites passed except the already-red game-physics hollow-ramp assertion (46/47), reproduced twice without any physics-file modification.",
+  "shas": [
+    "84460c9cdb3b43e9557b87aa3c2020e66a9a32c5",
+    "1630a540ecd90e3ecfbd1a064432567362ea9606"
+  ],
+  "resolvedAt": "2026-07-11T23:07:20.071Z"
+}

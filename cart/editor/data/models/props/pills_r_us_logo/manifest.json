@@ -28,5 +28,28 @@
       "color": "#8a93a3"
     }
   ],
-  "paints": []
+  "paints": [],
+  "placeable": {
+    "as": "prop"
+  },
+  "skeleton": {
+    "id": "mdl-mqzc88se-isr",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "mdl-mqzc88se-isr"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  }
 }

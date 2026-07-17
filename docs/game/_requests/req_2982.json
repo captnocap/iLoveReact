@@ -1,0 +1,28 @@
+{
+  "id": "req_2982",
+  "at": "2026-07-12T14:41:53.547Z",
+  "origin": "codex:019f535d",
+  "text": "the one that concerns me the most here is the part where you said a command, depending on how it was called, may or may not hit the bus, meaning.... its not the same command in my eyes. its two commands, that do the same thing",
+  "status": "review",
+  "sessionId": "019f535d-d94b-7591-8c4e-4125ba85ddd3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-12T14:42:09.487Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-12T14:42:39.726Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the user's command-identity diagnosis against cart/editor: action-bar world tools mutate activeCommandId directly, while menu/hotkey invocations enter runCommand and may create history/editorbus receipts. Defined the required invariant: every invocation surface is only an adapter into one semantic command request, one validation/authority boundary, and one handler; source is metadata only. No code changes were requested or made.",
+  "shas": [],
+  "resolvedAt": "2026-07-12T14:42:39.726Z"
+}

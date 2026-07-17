@@ -1,0 +1,28 @@
+{
+  "id": "req_2979",
+  "at": "2026-07-12T00:58:37.072Z",
+  "origin": "codex:019f535d",
+  "text": "Hey let me ask you one thing before you get started, are any of the ahead changes you see needing to hit world_loader.zig? if so, then how you should proceed is to instrument it into the latest landing commits - 84460c9cd — framework loader split\n  - 1630a540e — geometry parity tests so that we arnt going to be updating old code",
+  "status": "review",
+  "sessionId": "019f535d-d94b-7591-8c4e-4125ba85ddd3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-12T00:58:44.688Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-12T01:00:06.915Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited prospective event architecture against the landed world-loader split. No code is required for the current classification pass. Future implementation has narrow split-loader touchpoints for native Map Paint and play interactions; all work must target framework/world_loader.zig plus framework/world_loader/* from 84460c9cd, preserve geometry parity from 1630a540e, and never update the legacy repository-root world_loader.zig.",
+  "shas": [],
+  "resolvedAt": "2026-07-12T01:00:06.915Z"
+}

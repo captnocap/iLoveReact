@@ -1,0 +1,30 @@
+{
+  "id": "req_3125",
+  "at": "2026-07-16T03:23:59.274Z",
+  "origin": "session:52c7a5f2",
+  "text": "it doesnt agree with me. so thats why i asked. look [Image #1] ok pre cut 4 edges on this [Image #2] and then [Image #3] doing the cut and here is the cut [Image #4] so we should have 6 edges yet look this is one big edge. [Image #5] and i actually just found that there is actually the smaller edge, but its showing up on the inside of the mesh as if there is a face in there it needed an edge for, but even if there was a face in there for an edge, it would still be the same edge as the outside because its a plane it has no depth to it",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T03:25:26.858Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T03:36:12.689Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the T-junction the user proved with slab screenshots: a selection-scoped Cut landed new vertices on the boundary, but the uncut rim face still spanned that boundary in ONE full-height edge — so the old big edge remained selectable with the strip's short segment z-fighting coincident under it ('the smaller edge on the inside'). The user's phrasing is the spec verbatim: the distance between one vertex to another is the edge. New splitSoupEdgesOnPoints pass in framework/gpu/mesh_edit.zig runs after every parametric cut (basic AND ring): each exact cut point (shared lerp3 guarantees bit-identity with strip points) is inserted into any triangle whose edge runs straight through it — neighbors keep their authored face identity and only gain triangles, so the welded edge graph reads vertex-to-vertex everywhere and the ghost full-length edge disappears. Unit test replicates the exact two-quads-shared-edge scenario; parity harness gains a global no-T-junction probe (no output edge may pass through any output vertex) on all cut/loopcut/mix rows, and the cut rows' S expectation now documents the re-fanned neighbors (3..4). Gate ALL GREEN 17/17 + both zig suites + ship. Committed 4a3298baf, pushed. Host restart picks up this + the full-slice fix (eec813ba8) + level combs (fa0d9edad) together.",
+  "shas": [
+    "4a3298baf"
+  ],
+  "resolvedAt": "2026-07-16T03:36:12.689Z"
+}

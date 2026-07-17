@@ -1,0 +1,24 @@
+{
+  "id": "req_3089",
+  "at": "2026-07-15T22:46:14.723Z",
+  "origin": "session:b576d07d",
+  "text": "ok heres a question for you, i have a wacom tablet. and in gimp, it seems to clearly know when i am using my mouse vs using my pen, because i can for example. let a brush type on my pen, and then if i start to paint with the mouse, it uses a different one, unless i set it with my mouse. how does it do that? and how can we utilize something to the same effect. uh for example, i would likely never paint with a mouse, but i also would likely never pull vertexes with a pen. like maybe its possible to toggle between one to the other based on what is controlling the mouse focus.",
+  "status": "doing",
+  "sessionId": "b576d07d-61be-455b-8ed9-6cb9767d291a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T22:46:31.115Z",
+      "actor": "fable-mesh",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T23:04:40.204Z",
+      "actor": "fable-mesh",
+      "kind": "note",
+      "text": "Built the full slice in d437a1319: SDL3 pen classification + pressure in the host, getPointerDevice/getPenPressure bindings, pointerType+pressure on pointer payloads, usePointerDevice hook, and per-device tool memory in the editor (deviceTools on EditorState). Needs a framework rebuild to go live."
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_3098",
+  "at": "2026-07-15T23:51:29.491Z",
+  "origin": "one-off",
+  "text": "oh sorry, one moment another agent is changing something. il ping u to resume when they finish it",
+  "status": "new",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T23:51:35.543Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

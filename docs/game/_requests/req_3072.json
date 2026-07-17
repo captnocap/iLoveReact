@@ -1,0 +1,28 @@
+{
+  "id": "req_3072",
+  "at": "2026-07-15T11:10:53.811Z",
+  "origin": "session:52c7a5f2",
+  "text": "ok so that being said you did say the literal word port. so what does that word mean and is that a port or what? if i port something but change the behavior of it, is it still a port or is it just something else",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T11:11:21.930Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T11:11:41.357Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the definitional question: a port means moving code to a new substrate while PRESERVING behavior — parity is the contract. The native solidify (framework/gpu/3d.zig meshSolidifySelection) ported the geometry faithfully but changed observable behavior (old studio: inner cap + each rim wall individually selectable; native: whole slab inherits one group id and picks as one face). Verdict given to the user: that makes it a port with a parity regression, not a sanctioned redesign — the one-face behavior was never ruled, so it's a bug against the reference, and the fix (mint fresh group ids for inner cap + rim walls) is owed. No code changed this req; awaiting the user's go to restore parity.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T11:11:41.357Z"
+}

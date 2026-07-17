@@ -1,0 +1,17 @@
+{
+  "id": "req_3142",
+  "at": "2026-07-17T02:55:29.044Z",
+  "origin": "one-off",
+  "text": "yeah the 1200 todos is hoenstly a bit wild tho i will say. like, i dont even know how u confidently would even start to port if u have that many. i mean it \"worked\", the zig to rust, but that is doing some insane amounts emphasis since i was seeing people also come out and say your trading 100 known bugs for 1000 unknown ones. which i have to feel is extremely true. and comptime abuse is also interesting because isnt that like a lot of zigs selling point, is the comptime capabilities. well, so how do you feel about that claude. you wrote all the code. well, u and codex. since february. which actually i was expecting it to be worse. its way better than i anticipated.",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T02:55:56.321Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

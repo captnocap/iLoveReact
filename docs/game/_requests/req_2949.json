@@ -1,0 +1,28 @@
+{
+  "id": "req_2949",
+  "at": "2026-07-11T07:11:04.556Z",
+  "origin": "codex:019f4fff",
+  "text": "sorry what does it import from hmsc-int, as we should effectively have nothing at this point but u tell me",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T07:11:10.164Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T07:12:15.198Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited every active cart/editor reference to cart/hmsc-int. Found one transitional runtime bridge in cart/editor/data/hmscAssetCatalog.ts: it reads legacy model/cooked/material snapshots, imported-prop metadata, top-level GLB/OBJ files, and texture files; the shader path is provenance only and shader code is local. Confirmed model packages are largely materialized under cart/editor/data/models, while legacy materials/textures/cooked asset rows still come directly from hmsc-int. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-11T07:12:15.198Z"
+}

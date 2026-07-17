@@ -1,0 +1,28 @@
+{
+  "id": "req_3013",
+  "at": "2026-07-13T07:40:14.206Z",
+  "origin": "session:e7f6fbce",
+  "text": "that makes more sense uh i guess the onnly question here is, well two of them, one is that the 'better case scenario' and also why dont all of them do this. like why do some but not the others do it, as i can certainly tell you it was not any persuasion of my own that said to do one versus the other, and which i guess is just kinda weird also palm trees and such were first to exist before the others like by quite a while so i would have expected to have seen more that ahve the both sides than not but thats not me saying one is technically more right than the other so dont get that confused",
+  "status": "review",
+  "sessionId": "e7f6fbce-b122-4230-ace5-0b7eb67401a6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T07:40:40.703Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T07:41:10.085Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the two questions. (1) Why the sidedness split exists: no one chose it per-plant and there is no ruling — it is two chronological generations of authoring convention. Old cards (grass blade, flower head, bush clump, palm frond) were built when foliage rendered through back-face-culling pipelines, so the era's law was emit-every-card-twice (GrassBlade.ts states it verbatim); the nine wrapped species were authored after the frond pipeline went cull-off for wind, under the 512-vertex budget, so their law became one-quad-per-card. The palm frond is the fossil: now on the no-cull pipeline, its back faces are dead weight (48 tris doing 24's job). (2) Better case: single-sided + no-cull pipeline wins in this engine — same picture, half the vertex data/work, which matters most on grass (the most instanced content in the game); double-sided only buys a truer back normal. Sketched the convergence path (flip grass pipeline to cull-off, strip back faces from the four old cards, move the Zig/TS parity goldens together) and noted the studio-viewer no-cull fix should land first so nothing looks hollow in the stage. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T07:41:10.085Z"
+}

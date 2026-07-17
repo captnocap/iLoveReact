@@ -1,0 +1,18 @@
+{
+  "id": "req_3149",
+  "at": "2026-07-17T03:22:52.897Z",
+  "origin": "session:10510dac",
+  "text": "how much of that do you consider to be 'mechanical'",
+  "status": "doing",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T03:23:30.938Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

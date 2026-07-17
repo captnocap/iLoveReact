@@ -1,0 +1,28 @@
+{
+  "id": "req_3069",
+  "at": "2026-07-15T10:50:25.287Z",
+  "origin": "session:52c7a5f2",
+  "text": "hey in the studio how is it that when you click a face, and solidify, that the solid, is still all one face?",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T10:50:36.946Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T10:52:40.232Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered why a solidified face still selects as one face: deliberate group inheritance in the native solidify. framework/gpu/3d.zig meshSolidifySelection (line 3724) gives every NEW triangle — the inner skin (line 3809) and rim-wall quads (lines 3828-3829) — the SAME authored face-group as the outer face it came from ('inner skin picks/paints with its outer face... so part ranges are untouched'). Studio face-picking selects by authored group (mesh_edit.zig setFaceGroup line 1625), so the whole slab (outer+inner+walls) is one clickable/paintable face by design. No code changed; flagged the tradeoff (rim/inner can never be individually selected, group also drives edge-boundary logic) and what a change would take (fresh group ids per new face + part-range growth).",
+  "shas": [],
+  "resolvedAt": "2026-07-15T10:52:40.232Z"
+}

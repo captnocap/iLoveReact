@@ -1,0 +1,28 @@
+{
+  "id": "req_3123",
+  "at": "2026-07-16T03:16:39.388Z",
+  "origin": "session:52c7a5f2",
+  "text": "sorry shouldnt the distance between one vertex to another be considerd the edge? right? like if i have a plane, 4 edges, cut it one way. i get out of the 4 starting vertex now its 6 and i should have 6 edges, right?",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T03:18:00.876Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T03:21:30.923Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's plane-topology question with a live probe instead of theory: cut a fresh plane once headlessly and read the welded topology — weldedVertices=6 (their expected count) and editableEdges=7: the 6 boundary segments they were counting PLUS the cut seam itself, which is also a vertex-to-vertex edge. Confirmed the editor's model matches their intuition exactly (edges never span through a vertex); invited them to report if the viewport shows otherwise since that would be a display/pick bug, not topology. No code changed for this answer.",
+  "shas": [],
+  "resolvedAt": "2026-07-16T03:21:30.923Z"
+}

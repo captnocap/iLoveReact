@@ -13,7 +13,9 @@ import { encode as encodeImage } from '../../../runtime/image';
 import { mapDocumentPaths } from '../data/mapDocuments';
 import { stickerById } from '../data/stickerStore';
 import { shaderSpec } from '../textures/shaders';
-import { facadeCanvasSize, facadeQuadMesh, FACADE_TEXELS_PER_METER, type Facade, type FacadeStamp } from './facades';
+import { facadeCanvasSize, facadeQuadMesh, FACADE_TEXELS_PER_METER, type Facade, type FacadeStamp, type FacadeStrokeSelection } from './facades';
+import type { PaintInk } from '../../../runtime/paint/model';
+import { hexToRgb01 } from '../../../runtime/paint/colors';
 import type { MeshRef, ResidentMesh } from './meshProps';
 
 const DEG = Math.PI / 180;
@@ -87,6 +89,86 @@ export function blitStampInto(canvas: Uint8Array, cw: number, ch: number, stamp:
       canvas[d + 3] = 255;
     }
   }
+}
+
+export type FacadeInkPixels = { width: number; height: number; rgba: Uint8Array };
+
+function insideSelection(x: number, y: number, selection?: FacadeStrokeSelection): boolean {
+  if (!selection || selection.points.length < 4) return true;
+  if (selection.kind === 'marquee') {
+    const ax = selection.points[0]!, ay = selection.points[1]!;
+    const bx = selection.points[selection.points.length - 2]!, by = selection.points[selection.points.length - 1]!;
+    return x >= Math.min(ax, bx) && x <= Math.max(ax, bx) && y >= Math.min(ay, by) && y <= Math.max(ay, by);
+  }
+  if (selection.points.length < 6) return true;
+  let inside = false;
+  const n = selection.points.length / 2;
+  for (let i = 0, j = n - 1; i < n; j = i, i += 1) {
+    const xi = selection.points[i * 2]!, yi = selection.points[i * 2 + 1]!;
+    const xj = selection.points[j * 2]!, yj = selection.points[j * 2 + 1]!;
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / ((yj - yi) || 1e-9) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Apply one host-generated RGBA brush mask to a layer. The host remains the
+ *  only brush-footprint engine; this CPU save-boundary pass merely supplies a
+ *  shader tile (or polygon clip) to that exact coverage. `selection` points are
+ *  texture pixels. Mutates and returns `base`. */
+export function compositeFacadeStrokeMask(
+  base: Uint8Array,
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  ink: PaintInk,
+  erase: boolean,
+  selection?: FacadeStrokeSelection,
+  shader?: FacadeInkPixels | null,
+): Uint8Array {
+  if (base.length !== width * height * 4 || mask.length !== base.length) return base;
+  const color = ink.kind === 'color' ? hexToRgb01(ink.hex) : ([1, 1, 1] as [number, number, number]);
+  const tiles = ink.kind === 'shader' && ink.tiles && ink.tiles > 0 ? ink.tiles : 1;
+  for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
+    if (!insideSelection(x + 0.5, y + 0.5, selection)) continue;
+    const i = (y * width + x) * 4;
+    const coverage = mask[i + 3]! / 255;
+    if (coverage <= 0) continue;
+    if (erase) {
+      const keep = 1 - coverage;
+      base[i] = Math.round(base[i]! * keep);
+      base[i + 1] = Math.round(base[i + 1]! * keep);
+      base[i + 2] = Math.round(base[i + 2]! * keep);
+      base[i + 3] = Math.round(base[i + 3]! * keep);
+      continue;
+    }
+    let sr = color[0], sg = color[1], sb = color[2], sa = coverage;
+    if (ink.kind === 'shader' && shader && shader.width > 0 && shader.height > 0) {
+      const sx = Math.floor((((x / width) * shader.width * tiles) % shader.width + shader.width) % shader.width);
+      const sy = Math.floor((((y / height) * shader.height * tiles) % shader.height + shader.height) % shader.height);
+      const si = (sy * shader.width + sx) * 4;
+      sr = shader.rgba[si]! / 255; sg = shader.rgba[si + 1]! / 255; sb = shader.rgba[si + 2]! / 255;
+      sa *= shader.rgba[si + 3]! / 255;
+    }
+    const da = base[i + 3]! / 255;
+    const keep = 1 - sa;
+    base[i] = Math.round(Math.max(0, Math.min(1, sr * sa + (base[i]! / 255) * keep)) * 255);
+    base[i + 1] = Math.round(Math.max(0, Math.min(1, sg * sa + (base[i + 1]! / 255) * keep)) * 255);
+    base[i + 2] = Math.round(Math.max(0, Math.min(1, sb * sa + (base[i + 2]! / 255) * keep)) * 255);
+    base[i + 3] = Math.round((sa + da * keep) * 255);
+  }
+  return base;
+}
+
+export function resizeFacadeRgba(source: Uint8Array, sw: number, sh: number, dw: number, dh: number): Uint8Array {
+  if (sw === dw && sh === dh) return source.slice();
+  const out = new Uint8Array(dw * dh * 4);
+  for (let y = 0; y < dh; y += 1) for (let x = 0; x < dw; x += 1) {
+    const sx = Math.min(sw - 1, Math.floor((x * sw) / dw));
+    const sy = Math.min(sh - 1, Math.floor((y * sh) / dh));
+    const si = (sy * sw + sx) * 4, di = (y * dw + x) * 4;
+    out[di] = source[si]!; out[di + 1] = source[si + 1]!; out[di + 2] = source[si + 2]!; out[di + 3] = source[si + 3]!;
+  }
+  return out;
 }
 
 export function facadePngPath(stem: string, facadeId: string): string {

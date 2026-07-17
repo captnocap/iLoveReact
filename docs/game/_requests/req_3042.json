@@ -1,0 +1,30 @@
+{
+  "id": "req_3042",
+  "at": "2026-07-14T01:27:48.339Z",
+  "origin": "session:6e4cf495",
+  "text": "Oh. That is a real problem. this is what is suppose to have been true, you see - 84460c9cd — framework loader split\n  - 1630a540e — geometry parity tests \n\n\nthis never came with its clean up of exactly what you just ran into,",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:28:08.522Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T01:34:56.183Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same resolution as req_3041 (this capture is the second half of the same message): the loader-split cleanup is done in 3e9ed7a69 — all consumers on the framework/world_loader.zig facade, root monolith deleted, parity tests + editor build + binary string-probe + headless shot all green.",
+  "shas": [
+    "3e9ed7a69"
+  ],
+  "resolvedAt": "2026-07-14T01:34:56.183Z"
+}

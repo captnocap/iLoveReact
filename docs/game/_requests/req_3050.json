@@ -1,0 +1,30 @@
+{
+  "id": "req_3050",
+  "at": "2026-07-14T01:56:55.835Z",
+  "origin": "session:6e4cf495",
+  "text": "nice yeah that is flat uh ok so heres a problem, they only seem to visually apply to the pre-fabricated build pieces that come from code, but any of t hem that i have made by hand, and export into the build piece pipeline, they do not render on, maybe they are placing idk",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:57:27.402Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T02:02:01.765Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed both sticker reports in commit 0135be303 (pure JS — hot reload delivers, no rebuild). (1) Authored pieces take stamps now: the stamp path had copied Paint Faces semantics which skips model: pieces (no slots) and the host catalog raycast can't see them; the JS AABB pick (pickAuthoredPlacement) now names its ray entry face — rayAabbEntry returns the entry axis+side, converted to a world hit point + outward normal — and stampStickerAt takes whichever pick is nearest, recording role 'surface' for authored stamps. A ray starting inside the box yields no stampable face. (2) The mid-turn z-thrash report: overlapping stickers all floated at the same 8mm so the depth buffer coin-flipped per camera angle; each stamp on a piece now lifts 2mm above the previous — stamp order IS stack order, the last sticker slapped sits on top like reality. stickers.test.ts grew to 12 cases including the authored yaw-90 stamp round trip and the stack-order lift.",
+  "shas": [
+    "0135be303"
+  ],
+  "resolvedAt": "2026-07-14T02:02:01.765Z"
+}

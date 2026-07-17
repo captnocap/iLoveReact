@@ -1,0 +1,17 @@
+{
+  "id": "req_3139",
+  "at": "2026-07-17T02:43:36.970Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>b5fvvavv4</task-id>\n<tool-use-id>toolu_01APmM2gEjHvjTarUx7hvuVD</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/10510dac-bb16-4ed0-b927-435e15fee440/tasks/b5fvvavv4.output</output-file>\n<status>completed</status>\n<summary>Background command \"Sparse shallow clone of the Bun repository\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T02:44:27.474Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

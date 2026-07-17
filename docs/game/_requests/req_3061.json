@@ -1,0 +1,30 @@
+{
+  "id": "req_3061",
+  "at": "2026-07-14T09:51:34.046Z",
+  "origin": "codex:019f5351",
+  "text": "Oh its a syncing problem. going back to the one i started from, its now just a blank skybox then the new one is a blank skybox. i bet me resetting the app fixes that so its a problem when the app is running.  yes and i just confirmed it also",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T09:51:50.645Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T10:05:01.374Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed and fixed as an in-process synchronization defect, not map-file corruption. Whole-map revision invalidation now makes A→B→A rebuild the mounted native projection without requiring an app restart, removes stale coordinates/colliders, and rejects late foliage work from the outgoing map. Verified native map/loader tests and ReleaseFast editor build; awaiting the user's live A→B→A and frame-time check.",
+  "shas": [
+    "475beb5d3"
+  ],
+  "resolvedAt": "2026-07-14T10:05:01.374Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3079",
+  "at": "2026-07-15T13:12:40.602Z",
+  "origin": "session:8a9444e4",
+  "text": "yeah thats awesome.  uh so one other thing before u go is the reference image. it has this little menu with 5 sliders on it to move it around and shit but those sliders are so sensitive u barely touch the thing and it goes zooming out of left field. and then if you toggle it off and then toggle it back on. this happens, watch where the image moves to in here: [Image #26] [Image #27] it also happens when like navigate to another working tab and come back, etc also weird image 26 got nuked into the void but 28 is the replacemnt for it [Image #28]",
+  "status": "review",
+  "sessionId": "8a9444e4-b0de-499e-8a2d-cfc00e09d013",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T13:13:04.721Z",
+      "actor": "fable-refimg",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T13:28:37.042Z",
+      "actor": "fable-refimg",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The hide/show teleport: the backdrop's offscreen texture bake (StaticSurface) was unmounted when a backdrop was hidden, and the re-bake on show could capture the image mid-load — the quad then sampled a placeholder or misplaced picture (the diagonal-box frame in the user's screenshot). The bakes now stay mounted for every backdrop, hidden or not; only the viewport quads filter on visible, so toggling visibility never re-bakes. The slider over-sensitivity half of this ask is superseded by req_3080 (sliders deleted, gizmo instead). Tab-away-and-back goes through the same warm-bake path; if it still misplaces after rebuild it is a separate remount bug to reopen.",
+  "shas": [
+    "1652061cc"
+  ],
+  "resolvedAt": "2026-07-15T13:28:37.042Z"
+}

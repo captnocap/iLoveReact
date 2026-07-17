@@ -1,0 +1,18 @@
+{
+  "id": "req_3153",
+  "at": "2026-07-17T04:18:38.055Z",
+  "origin": "session:10510dac",
+  "text": "hahahahah yeahg human time and model time is wild. i shit u not ive been in the same convo where the start had human time estimates, and then the tail end of it was saying shit like ive been working on this project for years. this was like around the ~45 day point also. the years one always gets me. hell nah maybe human work to ratio years but those are all but gone. anyways. i brought you a taco but it was getting cold on the way down the stairs so i decided best i take that off your hands. that known red i dont even know what that is to be honest. so we will figure it out when it affects me directly so uh yeah u can do that shit. i would, again, utilize the /codex skill and further more give them all a single branch to work on, so for whatever reason it is catastrophic no harm no foul",
+  "status": "doing",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T04:19:25.584Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

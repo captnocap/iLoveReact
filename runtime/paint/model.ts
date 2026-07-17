@@ -46,17 +46,19 @@ export function blendModeIndex(m: BlendMode): number {
 
 export type BrushTool =
   | 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse'
-  | 'fill' | 'eyedropper' | 'smudge' | 'blur' | 'text';
+  | 'fill' | 'eyedropper' | 'smudge' | 'blur' | 'text'
+  | 'marquee' | 'lasso';
 
 export const BRUSH_TOOLS: BrushTool[] = [
   'brush', 'eraser', 'line', 'rect', 'ellipse',
-  'fill', 'eyedropper', 'smudge', 'blur', 'text',
+  'fill', 'eyedropper', 'smudge', 'blur', 'text', 'marquee', 'lasso',
 ];
 
 /** Single-key hotkey for each tool (matches the in-app tooltip convention). */
 export const TOOL_HOTKEY: Record<BrushTool, string> = {
   brush: 'b', eraser: 'e', line: 'l', rect: 'r', ellipse: 'o',
   fill: 'g', eyedropper: 'i', smudge: 'u', blur: 'h', text: 't',
+  marquee: 'm', lasso: 'q',
 };
 
 // ── Analytic bristle shapes ──────────────────────────────────────────────────

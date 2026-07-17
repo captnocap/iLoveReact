@@ -1,0 +1,28 @@
+{
+  "id": "req_3005",
+  "at": "2026-07-13T06:19:38.121Z",
+  "origin": "codex:019f5351",
+  "text": "Ok and the last question here is the eventbus, if all things go through it, then is it not already in some sense retaining state? and if not is there any reason why it cant",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T06:19:45.706Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T06:20:34.404Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered whether the authoring eventbus already retains state. Verified the host bus is an authoritative seq-ordered durable outcome log with an 8,192-event hot ring, SQLite persistence at ~/.cache/reactjit/editor-events.db, and since(seq)/head replay. Distinguished retained history from materialized current state: current event definitions have validation/description but no reducers, many payloads are observational receipts, most editor mutations still bypass the bus, and dispatch explicitly records already-applied outcomes rather than applying state. Explained that it can and should become the authoritative event-sourced backbone via replay-grade applied events, per-concern projectors, snapshots at seq N plus tail replay, versioning, and removal of bypasses; durable authoring state then needs no hotstate handoff. High-frequency pointer/camera samples and transient UI state should not enter the durable authoring log. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T06:20:34.404Z"
+}

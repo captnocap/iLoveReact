@@ -1,7 +1,7 @@
 # Editor stickers (Place Sticker)
 
-Active surface: `cart/editor/` world document. Last verified: 2026-07-13.
-USER ASK req_3018 / req_3021 / req_3025 / req_3028.
+Active surface: `cart/editor/` world document. Last verified: 2026-07-14.
+USER ASK req_3018 / req_3021 / req_3025 / req_3028 / req_3062 / req_3063.
 
 ## In one sentence
 
@@ -72,28 +72,50 @@ density entirely by carrying their own texture — the far-LoD plan (bake
 stamps into the facade canvas beyond ~20m, where 256 px/m is exactly the
 across-the-street look) lands with the facade painter arc.
 
-## The facade painter (req_3057 — SHIPPED, first slice)
+## The facade painter (req_3057 / req_3062 / req_3063 — SHIPPED)
 
-Right-click a wall piece → **Paint Facade** (`WorldContextMenu`, command
-`paint-facade`): `world/facades.ts gatherFacade` BFS-collects the coplanar
-contiguous wall run (same facing mod 180°, same plane within a wall thickness,
-touching rects — multi-storey stacks join) and opens it as a `facade`
-workspace document (`stage/FacadePainterSurface.tsx`) — the whole run flat,
-meter-true, at the RULED 256 px/m. SPRAY records stroke rows (hex + radius +
-path in facade meters; host GPU dabs via the paintable doors, deterministic
-replay); STAMP drops the armed sticker as a row with degree rotation (the
-paint level has no quarter-turn limit — the blit rotates freely). SAVE bakes:
-stroke readback + CPU stamp compositing (`world/facadeBake.ts`, die-cut
-transparency) → PNG cached at `maps/<stem>/facades/<id>.png` (regenerable —
-the rows in world.json are the durable form per the paint ruling) → a
-two-sided quad floated 12mm off the wall rides the EXISTING resident-mesh
-doors (livePush). Unpainted texels keep alpha 0: the quad shows exactly the
-paint. Proven by `world/facades.test.ts` (7 cases).
+With the Select tool, click a wall piece and **shift-click** every additional
+piece that belongs in the mural. Right-click any selected piece → **Paint
+Facade** (`WorldContextMenu`, command `paint-facade`). The selected pieces are
+the authority: `world/facades.ts facadeFromSelection` requires wall-family
+faces on one plane (facing may differ by 180°), then unions exactly those face
+rects into one flat, meter-true canvas. Gaps are legal because scope is an
+authorial choice. The one-piece context action keeps `gatherFacade`'s
+contiguous coplanar-run gather as a convenience.
+
+The facade document (`stage/FacadePainterSurface.tsx`) consumes the SAME
+Studio paint action bar as model painting (`shell/PaintToolbar.tsx`): color or
+live shader ink from the material catalog, the canonical brush presets and
+dynamics, brush/eraser/line/rect/ellipse, eyedropper, marquee, lasso, and
+128/256/512 px/m preview resolution. Its layer panel is the SAME
+`PaintLayersPanel` used by the model painter: add, select, hide, rename,
+reorder, merge, and delete. Every layer is a separate RGBA `Paintable`; visible
+layers composite bottom-to-top. Marquee is a host clip rectangle; lasso is an
+exact polygon clip carried by each affected stroke.
+
+The durable form is the paint program in world.json, never pixels. Every
+stroke records its full ink recipe (color or shader spec + tuned data), brush
+recipe (stamp, meter size, hardness, flow, scatter, angle, aspect, spacing,
+blend), tool, meter-space path, and optional selection mask. Replay sends that
+recipe back through the universal host brush-footprint engine. Plain
+Paintables do not yet run the model painter's host shader-destination pass, so
+the facade surface captures the selected Studio shader into pixels and applies
+it through the host-generated coverage mask; the durable row still retains
+the shader recipe, not the capture.
+
+SAVE composites the visible layers, normalizes the result to the RULED 256
+px/m, then CPU-composites any legacy facade stamp rows
+(`world/facadeBake.ts`, die-cut transparency) → PNG cached at
+`maps/<stem>/facades/<id>.png` (regenerable) → a two-sided quad floated 12mm
+off the wall through the existing resident-mesh doors (`livePush`). Unpainted
+texels keep alpha 0, so the quad shows exactly the mural. Proven by
+`world/facades.test.ts` (10 cases, including exact selection scope, shader
+masking, lasso clipping, stroke migration, and resolution normalization) plus
+the universal paint replay tests.
 
 ## Not yet built (follow-ups)
 
-Per-stamp remove verbs (facade stamps and quad stickers both ride undo/Clear
-only); free-angle rotation UI (the data + blit support any degree, the rail
-still steps quarters); stamp-as-paint on AUTHORED-mesh atlases + the isometric
+Per-stamp remove verbs (legacy facade stamps and quad stickers both ride
+undo/Clear only); stamp-as-paint on AUTHORED-mesh atlases + the isometric
 cylinder unwrap for pole wraps (req_3052/req_3054 design, greenlit direction);
 facade far-LoD baking of quad stickers.

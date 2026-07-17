@@ -17,6 +17,42 @@ test "metadata checkpoints require a real bounded state transition" {
     try testing.expect(!journal_log.metadataCheckpointValid("before", too_large));
 }
 
+test "every journaled mesh label has one stable semantic command identity" {
+    const cases = [_]struct { []const u8, journal_log.ActionKind, []const u8 }{
+        .{ "extrude face", .extrude_face, "model.mesh.extrude-face" },
+        .{ "extrude edge", .extrude_edge, "model.mesh.extrude-edge" },
+        .{ "create face", .create_face, "model.mesh.create-face" },
+        .{ "loop cut", .loop_cut, "model.mesh.loop-cut" },
+        .{ "symmetrize", .symmetrize, "model.mesh.symmetrize" },
+        .{ "delete selection", .delete_selection, "model.mesh.delete-selection" },
+        .{ "delete part", .delete_part, "model.mesh.delete-part" },
+        .{ "add part", .add_part, "model.mesh.add-part" },
+        .{ "hide part", .hide_part, "model.mesh.hide-part" },
+        .{ "show part", .show_part, "model.mesh.show-part" },
+        .{ "duplicate part", .duplicate_part, "model.mesh.duplicate-part" },
+        .{ "mirror part", .mirror_part, "model.mesh.mirror-part" },
+        .{ "path array", .path_array, "model.mesh.path-array" },
+        .{ "detach faces", .detach_faces, "model.mesh.detach-faces" },
+        .{ "merge parts", .merge_parts, "model.mesh.merge-parts" },
+        .{ "flip faces", .flip_faces, "model.mesh.flip-faces" },
+        .{ "merge faces", .merge_faces, "model.mesh.merge-faces" },
+        .{ "glass faces", .glass_faces, "model.mesh.glass-faces" },
+        .{ "solidify faces", .solidify_faces, "model.mesh.solidify-faces" },
+        .{ "split quads", .split_quads, "model.mesh.split-quads" },
+        .{ "transform", .transform, "model.mesh.transform" },
+        .{ "nudge", .nudge, "model.mesh.nudge" },
+        .{ "scale by value", .scale_by_value, "model.mesh.scale-by" },
+    };
+    try testing.expectEqual(@typeInfo(journal_log.ActionKind).@"enum".fields.len, cases.len);
+    for (cases) |case| {
+        const kind = journal_log.actionKindForLabel(case[0]) orelse return error.MissingActionKind;
+        try testing.expectEqual(case[1], kind);
+        try testing.expectEqualStrings(case[2], journal_log.actionCommandId(kind));
+    }
+    try testing.expect(journal_log.actionKindForLabel("rename group") == null);
+    try testing.expect(journal_log.actionKindForLabel("unknown mutation") == null);
+}
+
 test "part boundary accepts a complete live range and rejects a stale subrange" {
     const ranges = [_]u32{ 0, 16, 16, 32 };
     try testing.expect(journal_log.hasExactPartRange(&ranges, 0, 16));

@@ -1,0 +1,28 @@
+{
+  "id": "req_2990",
+  "at": "2026-07-13T04:16:14.492Z",
+  "origin": "codex:019f5351",
+  "text": "Ok this is correct. Now, one more time for me go look at that paint faces tooling. And follow back the 'paint bucket' here, because genuinely the place this tool calls for the paint choice is completely different than that of any and all other painters from a bucket",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T04:16:22.545Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T04:19:24.258Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed a read-only bucket-source trace across all active editor painters. Confirmed Paint Faces owns no bucket or ink state: Section D only arms the mode, the viewport reports piece plus semantic face role, and AppFrame reads the ambient Content Browser activeAssetId at touch time. Unlike model paint's visible brush.ink swatch and Map Paint's local tile binding picker, Paint Faces has no coupled choice/readout, does not navigate Section C to Materials, accepts unvalidated non-material assets, ignores Color Studio variants/overrides, and can silently degrade to a flat arbitrary catalog color. The world quick menu already has an explicit material picker, but applying there does not dip the Paint Faces brush. Therefore a face stroke is not reproducible from its own arguments and must not be migrated as-is: a validated painter-owned MaterialRef must be visible beside the tool and travel inside one stroke command. Also found the live model-paint eyedropper is mislabeled—it enters the brush/stamp path instead of sampling—and an unmounted duplicate ModelBrushDock/ModelShaderBucket interface.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T04:19:24.258Z"
+}

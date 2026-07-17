@@ -1,0 +1,30 @@
+{
+  "id": "req_3056",
+  "at": "2026-07-14T02:29:39.794Z",
+  "origin": "session:140b94da",
+  "text": "oh, ok so im just going to re-export it then because that is what it sounds like i need to do. and uh ok so i just did the export and i didnt do anything past that is this log right [js.err] [meshdoc] SAVING cart/editor/data/models/build/Door_Wall_1 WITH 0 HOST PART RANGES while parts.json declares 2 parts (Door Frame, Door Leaf) — the host's range truth was cleared this session; this doc will reopen with merged parts (req_3049)\n[js.err] [meshdoc] SAVING cart/editor/data/models/build/Door_Wall_1 WITH 0 HOST PART RANGES while parts.json declares 2 parts (Door Frame, Door Leaf) — the host's range truth was cleared this session; this doc will reopen with merged parts (req_3049)\n[js.err] [meshdoc] SAVING cart/editor/data/models/build/Door_Wall_1 WITH 0 HOST PART RANGES while parts.json declares 2 parts (Door Frame, Door Leaf) — the host's range truth was cleared this session; this doc will reopen with merged parts (req_3049)",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T02:30:42.644Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T02:54:07.409Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The tripwire's second strike confirmed real corruption (parsed doc.blob: v2, rangeCount 0 again) and its determinism cracked the case together with req_3058's zero-[rangetrace] observation: the flow reproduces because the HOST PROCESS OUTLIVES the user's window restarts — ModelView's resume path adopts the live host session and mirrors its ranges, so a session that lost its ranges once resumes degraded forever and every save persists the damage; no load path ever pushes (which is exactly why the tracer printed nothing). Restored Door_Wall_1 from git (second and third time) and fixed the resume path (c4acb58b6): resume now re-seeds the doc's saved ranges whenever the resumed host answers with fewer parts than the doc declares, logging the heal. The original one-time clearer is likely historical within the long-lived process; the req_3049 host-side tripwires will name any future clear after the pending rebuild.",
+  "shas": [
+    "c4acb58b6"
+  ],
+  "resolvedAt": "2026-07-14T02:54:07.409Z"
+}

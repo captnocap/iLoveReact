@@ -1,0 +1,30 @@
+{
+  "id": "req_2981",
+  "at": "2026-07-12T14:39:21.810Z",
+  "origin": "session:007fe7d0",
+  "text": "here is a bug; inside of the @cart/editor/ when: File -> New Mesh -> Cube -> Paint -> Confirm Atlas -> Remove Outliner; this retains the outliner in the stage but removes it from the outliners list",
+  "status": "review",
+  "sessionId": "007fe7d0-7649-4a3b-9cc3-9899d4ec49e6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-12T14:39:29.979Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-12T14:50:08.363Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the ghost cube: the outliner's part delete was composed from the interactive selection doors (__mesh_edit_select_group_range then __mesh_delete_selection), and the paint session makes those doors inert (req_2662) — so after Confirm Atlas the host op silently no-opped while AppFrame removed the row from modelParts regardless of the result. Fixed Zig-first: new structural host op meshDeleteGroupRange(lo,hi) in framework/gpu/3d.zig (masks faces by authored group id, reuses the same rebuild/journal path as delete-selection, exposed as __mesh_delete_group_range), ModelView.deletePartRange now calls it and only drops the range-mirror pair on a host-confirmed delete, and AppFrame.deletePart only removes rows whose geometry actually left the host (failed ops keep the row with the loud status). Needs a Zig rebuild to take effect; TSX + Zig verified by esbuild/ast-check, build left to the user per their loop.",
+  "shas": [
+    "ec0cd1f2e"
+  ],
+  "resolvedAt": "2026-07-12T14:50:08.363Z"
+}

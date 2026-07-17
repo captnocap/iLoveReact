@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "id": "primitive:cube:20",
+  "name": "huuuuge_rail",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "cube",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": [],
+  "placeable": {
+    "as": "prop"
+  },
+  "skeleton": {
+    "id": "primitive:cube:20",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "primitive:cube:20"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  }
+}

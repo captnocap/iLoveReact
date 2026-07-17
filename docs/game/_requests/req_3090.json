@@ -1,0 +1,28 @@
+{
+  "id": "req_3090",
+  "at": "2026-07-15T23:26:59.266Z",
+  "origin": "session:52c7a5f2",
+  "text": "yyour saying like the modifier is just never connected right not that a modifier never works, or that a modifier never works",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T23:27:24.662Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T23:28:22.670Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified the modifier finding: modifiers WORK in the app — keyboard events pack SDL mod state into the payload ((mod<<32)|sym, decoded to shiftKey/ctrlKey/altKey/metaKey in runtime/hooks/useIFTTT.ts decodeKey:357, which is why Ctrl/Shift keyboard chords work cart-wide), and native Zig paths read SDL_GetModState directly (mesh-editor marquee, loop-cut snap). The gap is ONE junction: mouse/pointer events delivered to JS (runtime/index.tsx getPointerPayload:385) never had modifier fields added and no host getter exposes mod state for clicks — so shift+CLICK specifically is dead while shift+key works. It is a never-connected wire, not a broken modifier system; fix = one host getter + one payload field + rebuild. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T23:28:22.670Z"
+}

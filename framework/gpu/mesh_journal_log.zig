@@ -11,6 +11,123 @@ const std = @import("std");
 pub const NO_FACE_GROUP: u32 = std.math.maxInt(u32);
 pub const MAX_METADATA_NOTE_BYTES: usize = 1024 * 1024;
 
+/// Semantic vocabulary for every geometry mutation admitted by the resident
+/// mesh journal. Ordinals are a bridge contract with
+/// cart/editor/model/nativeMeshEvents.ts; append new values, never reorder.
+pub const ActionKind = enum(u8) {
+    extrude_face,
+    extrude_edge,
+    create_face,
+    loop_cut,
+    symmetrize,
+    delete_selection,
+    delete_part,
+    add_part,
+    hide_part,
+    show_part,
+    duplicate_part,
+    mirror_part,
+    path_array,
+    detach_faces,
+    merge_parts,
+    flip_faces,
+    merge_faces,
+    glass_faces,
+    solidify_faces,
+    split_quads,
+    transform,
+    nudge,
+    scale_by_value,
+};
+
+pub const ActionPhase = enum(u8) { applied, undone, redone };
+
+/// Invocation-source ordinals mirror runtime/commands CommandSource. Native is
+/// the safe default for engine-owned gizmo/input commits.
+pub const ActionSource = enum(u8) {
+    native,
+    menu,
+    hotkey,
+    toolbar,
+    dock,
+    context_menu,
+    palette,
+    viewport,
+    remote,
+    automation,
+};
+
+pub const ActionEvent = struct {
+    id: u32,
+    document_token: u32,
+    kind: ActionKind,
+    phase: ActionPhase,
+    source: ActionSource,
+    before_vertices: u32,
+    after_vertices: u32,
+    before_parts: u32,
+    after_parts: u32,
+    dropped_before: u32 = 0,
+};
+
+pub fn actionKindForLabel(label: []const u8) ?ActionKind {
+    const labels = [_]struct { []const u8, ActionKind }{
+        .{ "extrude face", .extrude_face },
+        .{ "extrude edge", .extrude_edge },
+        .{ "create face", .create_face },
+        .{ "loop cut", .loop_cut },
+        .{ "symmetrize", .symmetrize },
+        .{ "delete selection", .delete_selection },
+        .{ "delete part", .delete_part },
+        .{ "add part", .add_part },
+        .{ "hide part", .hide_part },
+        .{ "show part", .show_part },
+        .{ "duplicate part", .duplicate_part },
+        .{ "mirror part", .mirror_part },
+        .{ "path array", .path_array },
+        .{ "detach faces", .detach_faces },
+        .{ "merge parts", .merge_parts },
+        .{ "flip faces", .flip_faces },
+        .{ "merge faces", .merge_faces },
+        .{ "glass faces", .glass_faces },
+        .{ "solidify faces", .solidify_faces },
+        .{ "split quads", .split_quads },
+        .{ "transform", .transform },
+        .{ "nudge", .nudge },
+        .{ "scale by value", .scale_by_value },
+    };
+    for (labels) |row| if (std.mem.eql(u8, label, row[0])) return row[1];
+    return null;
+}
+
+pub fn actionCommandId(kind: ActionKind) []const u8 {
+    return switch (kind) {
+        .extrude_face => "model.mesh.extrude-face",
+        .extrude_edge => "model.mesh.extrude-edge",
+        .create_face => "model.mesh.create-face",
+        .loop_cut => "model.mesh.loop-cut",
+        .symmetrize => "model.mesh.symmetrize",
+        .delete_selection => "model.mesh.delete-selection",
+        .delete_part => "model.mesh.delete-part",
+        .add_part => "model.mesh.add-part",
+        .hide_part => "model.mesh.hide-part",
+        .show_part => "model.mesh.show-part",
+        .duplicate_part => "model.mesh.duplicate-part",
+        .mirror_part => "model.mesh.mirror-part",
+        .path_array => "model.mesh.path-array",
+        .detach_faces => "model.mesh.detach-faces",
+        .merge_parts => "model.mesh.merge-parts",
+        .flip_faces => "model.mesh.flip-faces",
+        .merge_faces => "model.mesh.merge-faces",
+        .glass_faces => "model.mesh.glass-faces",
+        .solidify_faces => "model.mesh.solidify-faces",
+        .split_quads => "model.mesh.split-quads",
+        .transform => "model.mesh.transform",
+        .nudge => "model.mesh.nudge",
+        .scale_by_value => "model.mesh.scale-by",
+    };
+}
+
 /// Metadata-only model actions share the resident mesh journal so Ctrl-Z keeps
 /// one chronological document history. Reject inert or unbounded checkpoints
 /// before the journal allocates a full mesh snapshot.

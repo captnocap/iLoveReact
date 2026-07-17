@@ -1,0 +1,51 @@
+{
+  "id": "req_3083",
+  "at": "2026-07-15T13:53:11.667Z",
+  "origin": "session:52c7a5f2",
+  "text": "the code doesnt have both behaviors because i can only click on one piece at a time shift click doesnt work. i was under the impression that it didnt exist at all but you say it does, if thats so then it just simply doesnt do anything because i can only select one piece i just checked also to make sure and sure enough",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T13:53:22.942Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T13:55:45.392Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-15T23:50:05.438Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "review",
+      "to": "new",
+      "text": "Implementation authorized: reopening the prior diagnosis to add the SDL modifier bridge and verify it."
+    },
+    {
+      "at": "2026-07-15T23:50:05.447Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T23:53:02.297Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review",
+      "text": "Added the native getMouseMods bridge backed by SDL_GetModState and registered it with the core V8 binding surface. Pointer payload construction now decodes the shared SDL3 modifier masks into shiftKey, ctrlKey, altKey, and metaKey; the runtime consolidation landed in the adjacent shared commit while staging, and this request's native/generated binding delta is f5cc536d5. Rebuilt the editor successfully and confirmed generated binding metadata is clean. Visual interaction verification remains for the user."
+    }
+  ],
+  "resolution": "Confirmed the user's test result and found the root cause: shift-click multi-select is DEAD ON ARRIVAL. The chain is fully wired JS-side (WorldViewport.tsx:606 additive: !!e?.shiftKey → selectPiece additive → selectedPieceIds → facadeFromSelection), but the pointer event payload the runtime builds (runtime/index.tsx getPointerPayload:385) contains NO shiftKey field — only targetId/x/y/button/pressure/buttons — and no host getter exposes SDL modifier state to JS pointer events at all (engine.zig reads SDL_GetModState natively for its own gizmo paths only). So !!e?.shiftKey is always false, additive select can never fire, and the only reachable facade scope is the single-piece gatherFacade branch — exactly what the user has been experiencing while the req_3062/3063 index record claims shift-click works. The gesture was never once driven end-to-end before being reported shipped. Fix (awaiting go, needs Zig rebuild so not done during the live session): expose modifier state (host getter reading SDL_GetModState), add shiftKey/ctrlKey/altKey to getPointerPayload, verify by actually shift-clicking two pieces into a facade. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T13:55:45.392Z"
+}

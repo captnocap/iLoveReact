@@ -1,0 +1,30 @@
+{
+  "id": "req_3081",
+  "at": "2026-07-15T13:28:50.725Z",
+  "origin": "codex:019f5351",
+  "text": "yep, that seems correct. pretty basic one here. so we can do the next now",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T13:29:04.928Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T13:38:57.145Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed the next authority slice for model Outliner organization. Rename part, group selected parts, ungroup selected parts, rename group, and dissolve group now enter the framework command authority, validate into exact metadata-only before/after transactions, commit through one privileged adapter, and emit typed model.structure eventbus reports. Added __mesh_journal_checkpoint so metadata-only actions share the resident native mesh journal chronologically with geometry instead of creating a second undo stack. Rejected/no-op requests do not mutate or checkpoint. Verification: 5/5 outliner planner, 22/22 application commands, 9/9 editor events, 4/4 existing model outliner, 8/8 runtime commands, Zig test-mesh-edit + test-mesh-journal-log, and ReleaseFast editor ship.",
+  "shas": [
+    "866b65603"
+  ],
+  "resolvedAt": "2026-07-15T13:38:57.145Z"
+}

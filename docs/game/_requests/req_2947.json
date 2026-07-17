@@ -1,0 +1,17 @@
+{
+  "id": "req_2947",
+  "at": "2026-07-11T06:07:03.082Z",
+  "origin": "one-off",
+  "text": "erm sorry its like tkinter had anyone just kept up with modern app standards. i mean effectively the entire native ui scene is hot dogshit so the options are like 2 things that both kinda blow because they still arnt flexbox, or u can rebuild flexbox basically. so what does a native file look like exactly? kinda skipped over that when u said it but it kinda is jsx or not really",
+  "status": "new",
+  "sessionId": "c40fbd82-74ab-4155-9300-ccab3dd575f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T06:07:11.452Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

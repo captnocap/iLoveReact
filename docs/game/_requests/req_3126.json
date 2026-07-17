@@ -1,0 +1,17 @@
+{
+  "id": "req_3126",
+  "at": "2026-07-16T03:35:05.408Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>bv0axz2vh</task-id>\n<tool-use-id>toolu_01XVhHSwkCxjgJXF3GoW93Y5</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/e094b214-66b4-4cda-8f2c-e32ae01a30fe/tasks/bv0axz2vh.output</output-file>\n<status>completed</status>\n<summary>Background command \"Gate the de-T-junction fix\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T03:36:12.698Z",
+      "actor": "52c7",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

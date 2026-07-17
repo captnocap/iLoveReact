@@ -1,0 +1,30 @@
+{
+  "id": "req_3024",
+  "at": "2026-07-13T16:08:42.760Z",
+  "origin": "codex:019f5351",
+  "text": "here is a thing i found to be true but i cant really tell you why its doing it, i never even made the selection myself to begin with, but [Image #1] these 'select Selected material' is coming from me pressing escape key",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T16:08:50.443Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T16:11:55.908Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced Escape to the world keymap's select-tool command falling through the legacy generic edit recorder, which borrowed the boot placeholder world object's name ('Selected material') as a fabricated target. Migrated Select into the application CommandAuthority as a report-only, non-undoable command shared by hotkey, Section D, and remote callers. A real transition now emits command.outcome targeting world-tool/select-tool; repeated Escape while already neutral commits and emits nothing. Added headless proofs that no material target/action ID can appear and that repeated Escape is idempotent. ReleaseFast editor build passes.",
+  "shas": [
+    "78db7765d"
+  ],
+  "resolvedAt": "2026-07-13T16:11:55.908Z"
+}

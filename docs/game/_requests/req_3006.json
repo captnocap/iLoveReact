@@ -1,0 +1,28 @@
+{
+  "id": "req_3006",
+  "at": "2026-07-13T06:29:37.829Z",
+  "origin": "codex:019f5351",
+  "text": "ok and then the 'snapshot', this is one thing that from the lens it so seems that it is literally retaining everything, forever. right, like it literally says 2406 events. but why does it retain any of that at all on restart? like, just heres an example that speaks itself, [Image #1] what on earth does this do for me past you know like a 5 minute retention nof it like at the very most.",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T06:29:52.533Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T06:30:25.940Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited the Eventbus Review retention shown by the user's screenshot. Verified the 2,406 label is the bus head sequence presented as a count; the DB currently has exactly 2,406 undeleted rows spanning July 1-12. The global unscoped ~/.cache/reactjit/editor-events.db contains 1,169 generic editor.edit receipts, 548 map.paint, 342 globals.set, 313 piece.place, and 34 command.outcome rows; all 34 command outcomes are world.floor.step marked report-only. Confirmed permanent authoring retention is being applied indiscriminately: active-floor steps have no replay/undo value and belong in a short session ring or coalesced current-view handoff, not the durable authoring log. Distinguished durable replay-grade authored actions from session/report/diagnostic retention, noted the schema lacks project/cart scope, and observed snapshotToFile merely dumps the full log and has no callers. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T06:30:25.940Z"
+}

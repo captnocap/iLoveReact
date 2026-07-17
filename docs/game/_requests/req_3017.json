@@ -1,0 +1,32 @@
+{
+  "id": "req_3017",
+  "at": "2026-07-13T15:18:08.820Z",
+  "origin": "codex:019f5351",
+  "text": "good so lets lock it in now we are all on the same page",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T15:18:18.717Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T15:50:16.511Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented the agreed editor lifecycle contract. Added schema-backed native Preferences for autosave enable/delay and hot-update Automatic/Ask/Off; unified explicit Save for active world/model documents; retained unsaved model work through in-process hot reload while never materializing it on disk; gated paint atlas creation behind a successful first model Save; autosaved only materialized models; added real Save/Discard/Cancel boundaries with proven working-copy rollback; split/debounced hot-state checkpoints; and made the authoring Eventbus a bounded process-session stream that is empty on cold start and retained only across V8 reload. ReleaseFast editor ship, focused TS suites, and all relevant Zig targets pass.",
+  "shas": [
+    "d6f9a4fa2",
+    "62ee56f6b",
+    "369498b11"
+  ],
+  "resolvedAt": "2026-07-13T15:50:16.511Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3014",
+  "at": "2026-07-13T07:47:14.344Z",
+  "origin": "session:e7f6fbce",
+  "text": "ok and uh culling, i have a strong understanding of the word but that doesnt really mean its entirely correct but effectively whatever isnt in the players PoV or immediate range* these 'cull' (from the characteristic that i am not looking at them so they arnt needed) and if this is true then this in npart would be related to what came in 4-5 days ago, where i was just stress testing painting flora and got to 154m triangles before it started to choke, and then i said 'hey shouldnt i like have better fps when im looking at nothing at all versus the full scene' which is an obvious yes but i wasnt, and then that commit following after made it happen. so i guess im kinda trying to figure out in my head if this other culling on the actual mesh is doing anything at all anyways (obviously it is, its half*) but how much of that really matters because i dont see how we even come realisitcally close to even 50m triangles for what could realisitically fit into the player pov.",
+  "status": "review",
+  "sessionId": "e7f6fbce-b122-4230-ace5-0b7eb67401a6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T07:47:45.971Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T07:48:21.741Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Terminology + relevance question answered. Clarified the culling family: frustum culling (his definition — commit 040223366 per-chunk foliage frustum cull is the one he remembered from the 154M-triangle stress test) fires before the GPU and saves all downstream work; distance culling (flora at half stream radius, req_1665); back-face culling fires per-triangle AFTER the vertex stage on already-in-view geometry, saving only pixel work. Confirmed his suspicion: for flat foliage cards back-face culling buys nothing (both sides are the visible thing) — the grass pipeline pays double vertex-shader work per in-view blade to defeat it, while it genuinely earns its keep on closed solid meshes (buildings/trunks) by skipping the far side's pixels. Agreed with his scale realism: post-frustum in-POV triangle counts never approach stress numbers, and the 154M choke was instance-buffer re-upload traffic, not rasterization — so single-siding the old cards is a fold-in-later minor win, not an fps lever; streaming/upload/LOD remain the real levers. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T07:48:21.741Z"
+}

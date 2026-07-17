@@ -3,7 +3,7 @@
   "at": "2026-07-10T21:18:41.503Z",
   "origin": "codex:019f4d0a",
   "text": "haha yeah.. as i was typing that message out i realized how insane it is when its all just an algorithm, so do anything more sane than that",
-  "status": "doing",
+  "status": "review",
   "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
   "captureMode": "hook",
   "events": [
@@ -13,6 +13,19 @@
       "kind": "state",
       "from": "new",
       "to": "doing"
+    },
+    {
+      "at": "2026-07-10T21:42:27.696Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
     }
-  ]
+  ],
+  "resolution": "Built a host-authoritative Path Array for selected model parts or complete outliner groups. It generates constant-radius arc/eased-grade bays or explicit XYZ boundary-point runs, preserves independent part ranges and face paint, groups/focuses the results, and journals the complete operation as one exact undo rather than requiring cumulative edge-ring nudges.",
+  "shas": [
+    "60307057f",
+    "3e7e0ccbf"
+  ],
+  "resolvedAt": "2026-07-10T21:42:27.696Z"
 }

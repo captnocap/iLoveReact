@@ -1,0 +1,28 @@
+{
+  "id": "req_3073",
+  "at": "2026-07-15T11:12:42.789Z",
+  "origin": "session:52c7a5f2",
+  "text": "is this the same reason why when i also just select a few faces and merge them, its still all segments of edges and not one edge",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T11:12:51.668Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T11:14:01.869Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed it is the same root cause family: the native port re-expressed merge-faces as pure GROUPING. framework/gpu/3d.zig meshMergeSelectedFaces (line 3538) changes zero geometry — it just stamps all selected triangles with one group id ('the old studio's merge faces expressed as pure grouping', its own comment). Internal edges stop drawing, but the perimeter still threads every original seam vertex, so each straight side stays N edge segments and the seam midpoints stay pickable verts. The old studio's mergeFaces (cart/hmsc-int/editors/model/editMesh.ts:2392, req_1282) was a real topology op: boundary walk + dropCollinearLoop removes collinear seam midpoints ('a 2x2 grid of quads comes back as ONE clean quad, not an 8-gon') + unreferenced vert compaction — straight runs genuinely became one edge. Second parity regression under the port label, same pattern as solidify (req_3072). No code changed; answer only.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T11:14:01.869Z"
+}

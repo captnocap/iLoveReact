@@ -1,0 +1,28 @@
+{
+  "id": "req_2997",
+  "at": "2026-07-13T05:07:00.692Z",
+  "origin": "codex:019f5351",
+  "text": "and just to clarify that drag approach isnt just some shitstorm of useEffect or it is",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T05:07:07.134Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T05:07:16.871Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified direct drag work versus effect cascade. ColorLibraryPanel itself does not use an effect for dragging: each onMouseMove directly calls the supplied onSetCurrent, which immediately schedules top-level AppFrame state. That global update then wakes AppFrame's persistState effect and color-to-brush reconciliation effect; setBrush updates ModelView, whose brush-material effect and full onToolState snapshot effect run, with the latter writing modelTool back into AppFrame and waking persistence again. Therefore the root error is global application state used as per-pointer preview state, amplified by several effects and uncoalesced native motion. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T05:07:16.871Z"
+}

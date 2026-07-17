@@ -1,0 +1,30 @@
+{
+  "id": "req_3048",
+  "at": "2026-07-14T01:44:34.295Z",
+  "origin": "session:140b94da",
+  "text": "hm. ok idk that doesnt really make any sense because i can only see the knob through it and nothing else through the solid part of the door. like if i put this down, and then on one side of it i put down idk a rock, and then look at it from the same pov again, id still see the knob on both sides and not the rock unless looking through the window.  but il try it by just resaving it. and lol ok so i just did what you said. and now its just invisible. like the whole build piece is invisible [Image #21] also thats special -_- so follow along this chain of events \n\n\ni asked you about the loop cut problem -> while that was in flight i also brought up the door knob thing, just incase it could have been related to the changes made to outliners the turns before -> resolve resolve resolve -> you told me to resave it -> i opened the model in the studio, both outliners present. i just double verified here that everything was right before doing anying -> looks_good.jpg -> export -> build piece -> Door Wall -> go to world to place / see update -> blank -> let me just restart the app one more time to see if its a cached problem -> restart the app -> still blank -> go to open the model -> all the outliners have merged into one",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:45:32.147Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T01:58:40.920Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The invisible piece + merged outliner after the advised re-save: parsed the re-saved doc.blob against the git version — the export-implied save wrote RJMD v2 with ZERO part ranges (old doc: 2 clean ranges), so the reopened doc merges every part (the reader synthesizes one all-covering range) and the placed door piece resolves no leaf and renders nothing. Host range truth was null at write time while parts.json (cart rows) still declared both parts — groups survived, only ranges vanished. Ruled out by reading: glass-trailing reorder, replaceActiveEditMesh carry, GPU patch, the open path (applyMesh pushes doc ranges), unmount cleanup. RECOVERED the user's asset: backed up the broken re-save to session scratchpad, restored Door_Wall_1 from git — the user's third restart picked it up (the 'anomaly' was this repair landing mid-restart). Culprit-naming tripwires committed under req_3049 (74c646e70).",
+  "shas": [
+    "74c646e70"
+  ],
+  "resolvedAt": "2026-07-14T01:58:40.919Z"
+}

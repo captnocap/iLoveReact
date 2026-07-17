@@ -1,0 +1,28 @@
+{
+  "id": "req_3071",
+  "at": "2026-07-15T11:06:39.057Z",
+  "origin": "session:52c7a5f2",
+  "text": "is that what happened with soldify inside of the last studio also? @cart/hmsc-int/",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T11:06:47.170Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T11:07:30.531Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered whether the old hmsc-int studio's solidify also produced an all-one-face solid: NO. The old studio (cart/hmsc-int/editors/model/editMesh.ts solidifyFaces, line 1556; invoked from studiokit/StudioViewport.tsx opSolidify line 1016) pushed the inner cap and every rim wall as its OWN EditMeshFace entry, and selection there operates on EditMesh face indices — so each wall/cap was individually clickable after solidify. The geometry algorithm is the same (cart/editor's TS solidifyFaces is a verbatim clone), but the one-face behavior arrived with the NATIVE resident-mesh port (framework/gpu/3d.zig meshSolidifySelection), where new triangles inherit the source face's authored group id and group-based picking selects the whole slab. No code changed — comparison answer only.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T11:07:30.531Z"
+}

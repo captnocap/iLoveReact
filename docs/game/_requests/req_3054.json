@@ -1,0 +1,28 @@
+{
+  "id": "req_3054",
+  "at": "2026-07-14T02:24:54.030Z",
+  "origin": "session:6e4cf495",
+  "text": "well i dont know that the geodistance walk matters when it becomes at the paint level because we are no longer being taxed on the geometry its being shifted all to the paint right or no",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T02:25:21.901Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T02:25:49.873Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the follow-up on whether the geodesic walk survives at paint level. User is right on cost — stamps-as-paint have zero geometry/runtime tax; the walk was only ever bake-time CPU work. But the walk is the MAPPING (which atlas texel gets which sticker pixel), not a tax — skipping it entirely means planar projection = the pole smear. The vindicating nuance: the walk collapses to a plain 2D atlas blit whenever the unwrap is ISOMETRIC, and cylinders/cones are developable (unroll flat with zero distortion), so if the pole's atlas island is its unrolled lateral surface the wrap is physically exact for free. Engineering therefore shrinks to: (1) isometric unwraps for curved primitives (current box-projection unwrap shards a cylinder into per-face islands — that is the real blocker), (2) seam-continuing blits when a stamp crosses island edges. Full geodesic walk demoted to a later refinement for non-developable surfaces (spheres/sculpts) only. Design refinement recorded in the sticker memory; revised sequence: facade painter → isometric unwrap + seam blit → (optional) geodesic walk.",
+  "shas": [],
+  "resolvedAt": "2026-07-14T02:25:49.873Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_2952",
+  "at": "2026-07-11T07:17:14.060Z",
+  "origin": "codex:019f4fff",
+  "text": "ya all of that is trash anyways. and for what its worth if they are being imported from cross app then they arnt anyways so its a dead end, u should remove the code that causes anyone to think that we rely on any cross cart imports because we shouldnt at this point",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T07:17:22.531Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T07:33:14.922Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Removed the active editor's retired cross-cart catalog bridge. Replaced hmscAssetCatalog with a package-only assetCatalog that loads cart/editor/data/models manifests plus local shader recipes; deleted all legacy snapshot/material/texture/cooked readers and migration merge fallbacks; switched model viewing, thumbnails, authored placement, part reuse, live push, and player push to package mesh documents; added tested per-range package geometry extraction; renamed misleading HMSC catalog/shader/tile symbols and removed cross-cart lineage comments/provenance. Verified 21/21 editor test files, live catalog probe (151 packages, 1643 local assets, zero errors), bundle graph (154 cart inputs, all cart/editor), ReleaseFast ship build, and git diff checks. Preserved unrelated in-flight model/request changes.",
+  "shas": [
+    "de99b14a1",
+    "eaeb78e7b"
+  ],
+  "resolvedAt": "2026-07-11T07:33:14.922Z"
+}

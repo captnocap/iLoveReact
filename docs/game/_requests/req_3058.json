@@ -1,0 +1,30 @@
+{
+  "id": "req_3058",
+  "at": "2026-07-14T02:50:38.576Z",
+  "origin": "session:140b94da",
+  "text": "no its the same log. i restarted to make sure the update would land also just incase but yeah same log [js.err] [meshdoc] SAVING cart/editor/data/models/build/Door_Wall_1 WITH 0 HOST PART RANGES while parts.json declares 2 parts (Door Frame, Door Leaf) — the host's range truth was cleared this session; this doc will reopen with merged parts (req_3049)",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T02:54:18.357Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T02:54:18.365Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Same-log report answered and root-caused: zero [rangetrace] lines with a working viewer proved NO range push ever happens in the user's flow — the window 'restart' does not kill the host process, so ModelView resumes the live (damaged) host session every time and resume only MIRRORS host ranges. Fixed in c4acb58b6: the resume path now heals — when the resumed host carries fewer part ranges than the doc declares, it re-seeds the doc's saved ranges (with a [rangetrace] heal log) instead of inheriting the damage into every save. Door_Wall_1 restored from git again. User instruction: restart the window once more (resume reads the restored doc, heal pushes both ranges), then export — expect the heal log and NO [meshdoc] scream; the door then saves as v2 with ranges + glass boundary and the world piece stops showing the knob through the panel.",
+  "shas": [
+    "c4acb58b6"
+  ],
+  "resolvedAt": "2026-07-14T02:54:18.364Z"
+}

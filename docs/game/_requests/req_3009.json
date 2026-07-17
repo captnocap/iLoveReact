@@ -1,0 +1,28 @@
+{
+  "id": "req_3009",
+  "at": "2026-07-13T07:17:14.194Z",
+  "origin": "session:e7f6fbce",
+  "text": "oh wow it really is just literally flat planes. well kinda how come some of them are front and back faced planes while others just have the front with a face and empty backm uh like the flora_pine is no 'back face' erm actually i guess there is more that dont have a backface than those that do. like uh blade grass is double sided and so is the palm tree fronds but then pine and others are all one sided planes",
+  "status": "review",
+  "sessionId": "e7f6fbce-b122-4230-ace5-0b7eb67401a6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T07:17:38.575Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T07:18:24.186Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Question about why some flora meshes are double-sided and others single-sided. Answered from the render code: flora draws through two GPU pipelines — the grass pipeline (blades/bushes/flowers) back-face culls, so those meshes physically carry both windings; the frond pipeline (palm fronds + all nine wrapped species) has cull_mode=.none, so a single quad reads from both sides for free and the wrapped species deliberately never duplicate back triangles to spend their fixed 512-vertex budget on plant instead of redundant backs (flora_geometry.zig header states this). The palm frond is double-sided only because it is the older authoring generation. The studio mesh viewer back-face culls like the standard pipeline, which is why single-sided cards look hollow from behind there while never showing a hole in game. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T07:18:24.185Z"
+}

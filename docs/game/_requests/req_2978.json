@@ -1,0 +1,28 @@
+{
+  "id": "req_2978",
+  "at": "2026-07-12T00:55:27.895Z",
+  "origin": "codex:019f535d",
+  "text": "Great, use the house model as your guiding light in how to answer any question about what does what or lives where. And then verify at the end of the journey that the logic makes sense. If i can ctrl z my color choice for example thats a failure. If i can add a layer of paint, brush stroke, change color, decide i dont like it and ctrl z twice the intended behavior would be to: undo the stroke, undo the new layer. See once you come to an end hit me with a bulleted list of actions by name (like, 'pick a color') and which side of the bus they reside in",
+  "status": "review",
+  "sessionId": "019f535d-d94b-7591-8c4e-4125ba85ddd3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-12T00:55:54.740Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-12T01:07:10.551Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed the exhaustive cart/editor house-model trace. Classified active user operations by authored action, report-only choice/view/session state, or undo/redo control; recorded whether each currently reaches editorbus, only leaves an after-the-fact receipt, or stays entirely outside. Verified the model-paint layer/stroke/color undo sequence and identified the Map Paint texture-binding counterexample.",
+  "shas": [],
+  "resolvedAt": "2026-07-12T01:07:10.551Z"
+}

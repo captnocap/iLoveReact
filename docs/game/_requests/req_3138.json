@@ -1,0 +1,17 @@
+{
+  "id": "req_3138",
+  "at": "2026-07-17T02:42:48.948Z",
+  "origin": "one-off",
+  "text": "hey here is something internesting. so you know bun run, well they just had claude rewrite all of bun from zig to rust in it was something like 11 days, 165k in api cost, blah blah. the interesting part is, after jarred made a post about it, andrew kelley followed up and what he had to say put the internet in a fucking frezny lmao. basically saying at the ZSF they literally treated bun as 'the way to NOT do zig' and i thought that was rather... interesting. So pull up the old bun in zig code. compare it to ours in any way you can. what exactly does andrew  mean by that im wondering",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T02:43:03.504Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

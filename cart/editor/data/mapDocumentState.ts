@@ -14,6 +14,7 @@ export type MapAuthoringSlices = Pick<EditorState,
   | 'objects'
   | 'selectedObjectId'
   | 'selectedPieceId'
+  | 'selectedPieceIds'
   | 'armedStamp'
   | 'worldUndo'
   | 'worldRedo'
@@ -43,6 +44,7 @@ export function mapAuthoringSlicesFor(
     objects: save.objects.slice(),
     selectedObjectId: save.objects.find((object) => !object.hidden)?.id ?? 'obj-tile',
     selectedPieceId: null,
+    selectedPieceIds: [],
     armedStamp: null,
     worldUndo: [],
     worldRedo: [],

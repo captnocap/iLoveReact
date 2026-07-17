@@ -1,0 +1,17 @@
+{
+  "id": "req_3026",
+  "at": "2026-07-13T23:42:58.776Z",
+  "origin": "one-off",
+  "text": "dragging the color map picker is still all the churn, also i noticed that, so i thought we had said something along the lines of an atlas cant exist without the model to existg. and",
+  "status": "new",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T23:44:38.687Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "id": "req_3129",
+  "at": "2026-07-16T05:56:37.881Z",
+  "origin": "supervisor-relay",
+  "text": "hey so 2 things, both related i think but maybe not. first is this, just spams my terminal, when painting or something in the studio [js.err] Warning: Encountered two children with the same key ... at ContentTreeNode ... annoying, but the other is, uh, ok so, i made a keyboard earlier, and i hand painted every keys letter, well thats a fuck load of strokes right. and for whatever reason, the layer visibility toggle, causes a reapplication of this and removal both ways, so when pressing the visibility on the layer that was just for the letters on keys, shit took nearly 10 seconds both ways to toggle and thats something like 1000x too slow, maybe even upwards of 10,000x to slow. lets figure that one out. the only way to properly test for it is to do a shit load of strokes on a layer and then come back and hide it.",
+  "status": "review",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-07-16T05:56:54.882Z",
+      "actor": "fable-codex-lane",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T06:02:37.816Z",
+      "actor": "fable-codex-lane",
+      "kind": "note",
+      "text": "Root causes found. (1) Key spam: primitiveModelPackage/playerModelPackage/buildStarterModelPackage seed a SHARED folderId ('props'/'models-characters'/'models-build') so every unsaved fresh model in a session renders the same content-tree key; also an empty-name save slugs to '' and claimed the props CATEGORY ROOT (stray props/manifest.json id-colliding with Model_27). (2) 10s layer toggle: paintLayerSetVisible -> replayAll re-rasterizes the whole stroke program; the keyboard blob holds 69,618 OP_FILLs (fill tool records one fill per pointer-move per face, no dedupe) of which only 3,664 are last-writer-effective (fills are hard overwrites). Fix in flight via codex: replay-side last-fill-wins skip + lazy material-ink bake + record-side dedupe + unique folderIds + empty-slug guard."
+    },
+    {
+      "at": "2026-07-16T06:08:51.989Z",
+      "actor": "fable-codex-lane",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Both bugs root-caused and fixed in dd12f296c (planned by Claude, executed by codex sol against a pinned spec, graded against snapshots + fresh unit gate). Key spam: fresh primitive/player/build-starter packages all seeded a SHARED per-kind folderId so two unsaved models in one session rendered duplicate content-tree keys; they now derive modelFolderIdFor(id) like disk packages, and nameDirFor falls back to the id-slug home so an empty-name save can never claim the category root again (that bug already left a stray props/manifest.json colliding with Model_27 — cleanup pending user approval). 10s layer toggle: replayAll re-rasterizes the whole stroke program and the keyboard blob carries 69,618 OP_FILLs (fill tool records per pointer-move per face); fills are hard overwrites so only the last per face shows — new paint_ops.redundantFillOffsets skips 94.7% of them byte-exactly, ink now applies lazily (no GPU material bakes for skipped ops), and recordFill dedupes at record time. Gate: zig build test-paint-ops (8 tests) + zig build app compile + esbuild transform checks, all green. Zig change needs the user's next rebuild to land in the running editor.",
+  "shas": [
+    "dd12f296c"
+  ],
+  "resolvedAt": "2026-07-16T06:08:51.989Z"
+}

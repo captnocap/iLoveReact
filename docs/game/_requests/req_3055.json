@@ -1,0 +1,28 @@
+{
+  "id": "req_3055",
+  "at": "2026-07-14T02:26:51.969Z",
+  "origin": "session:140b94da",
+  "text": " sorry im clearly retarded but i thought i said it did restore itself when it became visible again [Image #22] so uh is this not what you are talking about or ?",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T02:27:12.123Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T02:27:35.827Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Cleared up the restore-itself confusion with the exact timeline: the user's re-save broke the door file on disk at 18:37, restarts 1-2 loaded the broken file (blank piece, merged outliner), this session then git-restored Door_Wall_1 between their restarts, and restart 3 loaded the restored file — so 'it became visible again' IS the git restore, not self-healing. Verified the user's screenshot matches the restored doc byte-for-byte: SHAPE shows 101 faces = the restored doc's 101 authored groups, and the two outliner rows = its two saved ranges (Door Frame, Door Leaf). Reiterated the standing state: disk still holds the v1 doc so the knob-through-panel persists in world until a successful re-save; the req_3049 tripwire (already hot-reloaded live) will scream at the exact save moment if the range loss recurs.",
+  "shas": [],
+  "resolvedAt": "2026-07-14T02:27:35.827Z"
+}

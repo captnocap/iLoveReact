@@ -1,0 +1,28 @@
+{
+  "id": "req_3007",
+  "at": "2026-07-13T06:33:45.549Z",
+  "origin": "codex:019f5351",
+  "text": "ok, so then lets work this out because for one all of it is literally useless the moment i restart the app from my pov. and the reason i say that is, because undo / redo does not carry over and it shouldnt anyways. \n\n\nstart app -> empty bus \n\nstart app -> empty bus -> do some things -> exit -> start -> empty bus\n\nstart app -> empty bus -> do some things -> code update -> carry over working state -> do some more things -> exit -> start -> empty bus \n\n\nnotice how every time the app closes the bus resets, there is no reason to keep it. maybe im wront based on how the code actually is but the concept is spot on",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T06:34:10.240Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T06:34:44.605Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Worked through the user's revised eventbus lifecycle and reconciled it with the implementation. Confirmed this is a deliberate supersession of the older V20 cross-session-undo ruling: saved/materialized documents persist, but event history and undo/redo are scoped to one running application session. The desired lifecycle maps naturally to the host boundary: editor_bus.init is idempotent and its Zig ring survives V8 context hot reloads, while a full process restart naturally clears it; SQLite setup/loadMaxSeq/sinceFromDb is the sole cross-restart violation. Defined the target behavior: cold start/new app session begins seq 1 empty; same-app code reload retains ring/undo and one-shot working-state handoff; full exit/restart begins empty and loads only durable documents. Also noted the persistent multi-cart dev host requires app/session scoping so switching carts cannot leak one cart's bus into another. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T06:34:44.605Z"
+}

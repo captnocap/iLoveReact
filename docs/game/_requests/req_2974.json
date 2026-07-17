@@ -1,0 +1,28 @@
+{
+  "id": "req_2974",
+  "at": "2026-07-11T23:38:49.618Z",
+  "origin": "codex:019f5351",
+  "text": "Now, maybe those controls all are there and are just condtional and NEVER render, maybe thats very true, IDK. im just trying to get us on the same page",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T23:39:06.863Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T23:39:13.533Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Established shared audit terminology: registry-defined, statically render-reachable, and observed-visible are separate claims. The disputed Add Chunk/Trigger/Spawn/Compile controls are registry-defined and statically reachable through ToolOptions' active-menu branch, but are not observed in the user's Section D screenshot; therefore they must not be described as currently visible Section D controls without a named/reproduced state. The screenshot's Build-state inventory is the visual authority. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-11T23:39:13.533Z"
+}

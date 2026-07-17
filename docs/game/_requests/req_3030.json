@@ -1,0 +1,28 @@
+{
+  "id": "req_3030",
+  "at": "2026-07-14T00:25:47.977Z",
+  "origin": "codex:019f5351",
+  "text": "ok the color drag churn is gone now. alright so back at the major underlying goal here. which to remind you was to get the entire system under the same coherent roofing. The most important rung in the entire depenency chain, stems all back up to the eventbus, so looking at it from the current lens, what is currently passing into the eventbus and what is left on our list to instrument in",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T00:25:55.726Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T00:31:30.001Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Re-audited the active cart/editor eventbus and command authority against the current tree after the recent fixes. Confirmed the Zig authoring bus is a bounded 8,192-event process-session stream and identified exactly five authority-backed commands, five active cart event types, the receipt-only map/globals/generic paths, the still-duplicated cart menu/keymap projections, and the remaining migration backlog across world build, map paint, mesh/model painting, project lifecycle, settings, journal/text/navigation, and system reports. No source files changed. Verified the native editor-bus test plus application-command (8/8) and editor-event (3/3) suites.",
+  "shas": [],
+  "resolvedAt": "2026-07-14T00:31:30.001Z"
+}

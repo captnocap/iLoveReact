@@ -1,0 +1,17 @@
+{
+  "id": "req_3132",
+  "at": "2026-07-16T06:10:48.700Z",
+  "origin": "one-off",
+  "text": "hjaha yooo thats whats up man nice good shit that comes in handy for a lot of shit. i assume it always spins the same axis?",
+  "status": "new",
+  "sessionId": "da1f4e92-6930-441f-be60-478103cbcdb0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T06:11:02.423Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

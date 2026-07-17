@@ -1,0 +1,30 @@
+{
+  "id": "req_3135",
+  "at": "2026-07-16T10:38:18.081Z",
+  "origin": "session:0c5d8108",
+  "text": "[Image #12] here is the art and here is the current [Image #13]",
+  "status": "review",
+  "sessionId": "0c5d8108-d94d-4bc2-835c-a2ca17df78ab",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T10:39:17.198Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T10:56:59.608Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Round 1 of the concept-art matching loop for the section C content browser. Rebuilt LibraryPanel as the asset dock: tucked 350px state matches concept 4 (Assets header with expand toggle, boxed search with magnifier, Favorites/Recent quick rows wired to the existing materials-favorites/materials-recent pseudo-folders, taller rounded tree rows with solid-accent selected fill, count footer, and the selected-material detail card with thumbnail, meta, variant chips, and the focus verb). The expand toggle widens the region to a second fixed constant (680) and attaches concept 1's grid column right of the tree: breadcrumb trail from the live content tree, pager, and flexing material/model/asset grids with bigger page sizes. Tucked-mode model tree rows open the model document directly since the gallery is tucked away. libraryExpanded persists across hot reloads via the view hotstate atom. Docs updated (editor_sections.md + regions.ts SECTIONS.C). Bundle-verified; awaiting the user's next screenshot round.",
+  "shas": [
+    "7b81266a5"
+  ],
+  "resolvedAt": "2026-07-16T10:56:59.608Z"
+}

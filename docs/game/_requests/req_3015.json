@@ -1,0 +1,17 @@
+{
+  "id": "req_3015",
+  "at": "2026-07-13T14:43:09.826Z",
+  "origin": "one-off",
+  "text": "hey basically do a quick scan of commits in the last 5 days and tell me how many of them were via codex. the way you will know is just by filtering out those that have co author with claude since the CC harness seems to always sign him on those but codexs commits just go up as me and i dont commit the code at all so its genuinely all the model",
+  "status": "new",
+  "sessionId": "019f5be9-c8af-7523-ab5f-6e7e80061224",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T14:43:13.244Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

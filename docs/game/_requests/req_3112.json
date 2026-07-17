@@ -1,0 +1,28 @@
+{
+  "id": "req_3112",
+  "at": "2026-07-16T02:41:30.342Z",
+  "origin": "session:52c7a5f2",
+  "text": "huh.... if its not 4 sided. so anything larger or smaller t han 4 sides on a face is instant skip ?",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T02:41:51.532Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T02:41:51.540Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified the loop-stop rule for the user: any authored face with corner count != 4 ENDS the loop (a stop, not a skip — the non-quad isn't cut and nothing beyond it is reached); triangles, 5+-siders, and merged mega-faces all stop it, counted on the authored face not render triangles. Also named the two other stoppers with identical behavior: open borders (edge with no face on the other side) and junctions (edge shared by 3+ faces, no unambiguous continue). One-line rule given: the loop continues only while each step is one edge -> one quad -> one opposite edge. Reiterated that the proposed even-sided crossing + 'through' toggle converts these hard stops into passable when desired. Q&A only.",
+  "shas": [],
+  "resolvedAt": "2026-07-16T02:41:51.540Z"
+}

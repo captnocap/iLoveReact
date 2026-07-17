@@ -1,0 +1,30 @@
+{
+  "id": "req_3062",
+  "at": "2026-07-14T09:55:45.749Z",
+  "origin": "session:6e4cf495",
+  "text": "ah i see haha you took the literal word graphitti to the actual conceptual degree. where i was hoping for the exact same painting capability found inside of the studio already. so shaders, layers. laze blah also we need multi-peice selection otherwise this is just literally t hat same thing redundantly, where the idea here overall was to be able to do a mural on the entire side of a building, not piece by piece.",
+  "status": "doing",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T09:56:35.955Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T09:57:24.608Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Correction captured to memory (feedback_facade_painter_is_the_studio_painter): the painter must be the STUDIO paint vocabulary (shader inks, layers, lasso, full BrushKit dock) on the facade canvas — the req_3057 mini spray toolbar was a parallel re-implementation; and scope must be EXPLICIT shift-click multi-piece selection, not right-click auto-gather. Rework plan: (1) world selection becomes a set, Paint Facade acts on it, gatherFacade math validates/merges the selection into one plane; (2) FacadePainterSurface drops its toolbar and mounts the same paint dock the model painter uses, stroke rows carry the FULL brush recipe per the paint-program ruling; (3) bake path / 256 px/m / resident quad unchanged."
+    },
+    {
+      "at": "2026-07-14T14:32:23.027Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Rework in progress: explicit shift-click world selection now preserves a primary piece plus an additive set; Paint Facade builds from exactly the selected coplanar faces. The facade document now mounts the shared Studio PaintToolbar and shared paint-layer panel with full brush recipes and lasso/marquee masks."
+    }
+  ]
+}

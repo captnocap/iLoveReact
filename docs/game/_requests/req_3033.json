@@ -1,0 +1,30 @@
+{
+  "id": "req_3033",
+  "at": "2026-07-14T00:34:16.751Z",
+  "origin": "codex:019f5351",
+  "text": "Great lets do the prune, since there is no harm in removing something that does nothing",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T00:34:39.704Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T00:46:25.920Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Pruned the dead editor command surfaces as one coherent removal: fake Compile, 2D/3D switching, legacy Paint Material, Sample Material, unavailable Trigger/Spawn/Mission/Sequence/Pipeline commands, their keymap/menu/dispatcher branches, empty Story and Help menus, fake mission card, and pipeline/mission/routes selectors. Removed the unused availability schema and stale UI state, added hot-reload normalization for selections removed mid-update, and retained real Paint Faces, Map Paint, linked minimap, and future compile/marker concepts. Verified editor type-check, command suite 12/12, diff check, and full ReleaseFast editor ship.",
+  "shas": [
+    "d12043122"
+  ],
+  "resolvedAt": "2026-07-14T00:46:25.920Z"
+}

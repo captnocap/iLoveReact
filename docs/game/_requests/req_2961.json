@@ -1,0 +1,30 @@
+{
+  "id": "req_2961",
+  "at": "2026-07-11T08:20:35.092Z",
+  "origin": "codex:019f4fff",
+  "text": "and u can even do a simple bun app for this since it is literally just for the sake of getting shit up and atom already the fact its this much overhead of thinking to just have in sync been a pain in the ass but this approach is the least pain in the ass long term",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T08:23:12.141Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T08:29:18.955Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Delivered the low-overhead Bun workflow as one executable tool: tools/editor-sync serve on the desktop, one curl bootstrap on the Mac, then tools/editor-sync pull before work and push afterward. Real 6,996-file comparison and isolated two-machine integration tests passed, including code authority, model-only uploads, deletes, backups, private-LAN/path guards, and SHA-256 verification.",
+  "shas": [
+    "1866e4078"
+  ],
+  "resolvedAt": "2026-07-11T08:29:18.955Z"
+}

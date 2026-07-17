@@ -1,0 +1,30 @@
+{
+  "id": "req_3137",
+  "at": "2026-07-16T11:28:48.156Z",
+  "origin": "session:0c5d8108",
+  "text": "ok cool. [Image #16] [Image #17] [Image #18] [Image #19] notice how ours has a ton of dead space even when it could list more content. also, it has areas where the asset when not the group in focus, is showing a TON of dead space. [Image #20] vs [Image #21] we seem to have no preview in ours here when closed either",
+  "status": "review",
+  "sessionId": "0c5d8108-d94d-4bc2-835c-a2ca17df78ab",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T11:30:02.520Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T11:37:24.839Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Round 2 of the concept-art loop, targeting the dead-space and missing-preview feedback. The expanded dock's grid area now measures its own laid-out rect via useMeasure/onLayout and computes page sizes from real capacity (cols x rows per cell footprint), so material/asset/model pages fill whatever height the window gives instead of stranding a fixed 36/20 items above empty space; AppFrame's page clamp now takes the ceiling from the dock since the dock owns paging geometry. Selecting a single model no longer shows a one-thumbnail grid: the gallery stays on the parent folder with the selected model's cell highlighted, and the model gallery's private pager merged into the dock's one shared page bar. Added ModelDetailCard so the bottom preview card now resolves models as well as materials in BOTH dock states (tucked previously showed no preview at all when browsing models) — product-shot Scene3D thumb, name + favorite star, kind/path, tris/paints/atlases/stage meta, and the open-model verb. Bundle-verified; awaiting next screenshot round.",
+  "shas": [
+    "77864c067"
+  ],
+  "resolvedAt": "2026-07-16T11:37:24.839Z"
+}

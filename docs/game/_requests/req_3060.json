@@ -1,0 +1,30 @@
+{
+  "id": "req_3060",
+  "at": "2026-07-14T09:50:12.233Z",
+  "origin": "codex:019f5351",
+  "text": "ok good. whats next this all landed. one thing i noticed and idk if u covered in ur list but i just went to create a clean map and it carried over multiple things placed from the map that was loaded previously",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T09:50:26.987Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T10:05:01.364Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the live map replacement boundary. The map engine now publishes a whole-document revision on New/Open/snapshot replacement; each mounted WorldLoader releases outgoing terrain, water, reserved colliders, and foliage slot claims before rebuilding the incoming map, even when both maps reuse the same chunk coordinates. Async foliage results carry the revision and cannot publish after their map is left. Disk isolation was already intact; the defect was retained native projection state. Verified test-world-loader, test-game-map, focused heightfield-unregister coverage, mapDocuments tests, and a ReleaseFast editor ship.",
+  "shas": [
+    "475beb5d3"
+  ],
+  "resolvedAt": "2026-07-14T10:05:01.364Z"
+}

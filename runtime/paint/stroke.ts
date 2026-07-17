@@ -17,6 +17,8 @@ export interface StrokeTuning {
   pressure: { base: number; gain: number; fallback: number };
   /** mirrored dabs closer than this to the original are skipped. */
   mirrorMinSeparationPx: number;
+  /** Shape-tool outline segmentation. */
+  outline: { ellipseMinSegments: number; ellipseSegmentScale: number };
 }
 
 export const STROKE_TUNING: StrokeTuning = {
@@ -24,6 +26,7 @@ export const STROKE_TUNING: StrokeTuning = {
   spacingFrac: 0.32,
   pressure: { base: 0.35, gain: 1.3, fallback: 0.5 },
   mirrorMinSeparationPx: 2,
+  outline: { ellipseMinSegments: 16, ellipseSegmentScale: 0.5 },
 };
 
 // ── Size-track mapping ───────────────────────────────────────────────────────
@@ -180,5 +183,51 @@ export function dabsAlongSegment(
     const f = i / steps;
     out.push({ x: ax + dx * f, y: ay + dy * f, radius, pressure: tuning.pressure.fallback });
   }
+  return out;
+}
+
+export type RecordedStrokeTool = 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse';
+
+/** Replay a committed pointer path through the same interpolation used live.
+ *  This is the durable paint-program boundary: carts store paths + recipes,
+ *  never private dab math or raster pixels. */
+export function dabsForStrokePath(
+  tool: RecordedStrokeTool,
+  points: readonly number[],
+  sizePx: number,
+  spacingFrac = STROKE_TUNING.spacingFrac,
+): Dab[] {
+  if (points.length < 2) return [];
+  const ax = points[0]!, ay = points[1]!;
+  const bx = points[points.length - 2]!, by = points[points.length - 1]!;
+  if (tool === 'line') return dabsAlongSegment(ax, ay, bx, by, sizePx, spacingFrac);
+  if (tool === 'rect') {
+    return [
+      ...dabsAlongSegment(ax, ay, bx, ay, sizePx, spacingFrac),
+      ...dabsAlongSegment(bx, ay, bx, by, sizePx, spacingFrac),
+      ...dabsAlongSegment(bx, by, ax, by, sizePx, spacingFrac),
+      ...dabsAlongSegment(ax, by, ax, ay, sizePx, spacingFrac),
+    ];
+  }
+  if (tool === 'ellipse') {
+    const cx = (ax + bx) / 2, cy = (ay + by) / 2;
+    const rx = Math.abs(bx - ax) / 2, ry = Math.abs(by - ay) / 2;
+    const steps = Math.max(STROKE_TUNING.outline.ellipseMinSegments, Math.round((rx + ry) * STROKE_TUNING.outline.ellipseSegmentScale));
+    const out: Dab[] = [];
+    let px = cx + rx, py = cy;
+    for (let i = 1; i <= steps; i += 1) {
+      const angle = (i / steps) * Math.PI * 2;
+      const nx = cx + Math.cos(angle) * rx;
+      const ny = cy + Math.sin(angle) * ry;
+      out.push(...dabsAlongSegment(px, py, nx, ny, sizePx, spacingFrac));
+      px = nx; py = ny;
+    }
+    return out;
+  }
+  const engine = createStrokeEngine({ sizePx, spacingFrac });
+  const out: Dab[] = [];
+  engine.begin();
+  for (let i = 0; i + 1 < points.length; i += 2) out.push(...engine.move(points[i]!, points[i + 1]!));
+  engine.end();
   return out;
 }

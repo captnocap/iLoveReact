@@ -1,0 +1,30 @@
+{
+  "id": "req_3065",
+  "at": "2026-07-15T05:25:50.985Z",
+  "origin": "session:8a9444e4",
+  "text": "hm i dont know that its correct, i am getting two different color reads on the baseline plane without changing a thing to it yet",
+  "status": "review",
+  "sessionId": "8a9444e4-b0de-499e-8a2d-cfc00e09d013",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T05:26:32.835Z",
+      "actor": "fable-vertexdepth",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T05:31:21.799Z",
+      "actor": "fable-vertexdepth",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the two-tone baseline plane: dot colours measured depth along the RAW camera direction, so any view a few degrees off axis (including the compass top view, which stops at the ~86° pitch clamp) spread a genuinely flat plane across a hue ramp. Fixed with req_3066: the depth axis now snaps to the camera forward's dominant world axis.",
+  "shas": [
+    "da2bed5d0"
+  ],
+  "resolvedAt": "2026-07-15T05:31:21.799Z"
+}

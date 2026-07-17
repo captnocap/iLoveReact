@@ -1,0 +1,30 @@
+{
+  "id": "req_3038",
+  "at": "2026-07-14T01:12:33.669Z",
+  "origin": "session:140b94da",
+  "text": "oh yeah so if u want to see some more of that zig-zag pattern that happens in places where i think its the same problem in another face is this check it out notice how this face on a brand new cylinder is doing some insane work. and how i know its doing some insane work is this is what a 'fill face' does when paintingn [Image #16] doesnt even fill the entire face oh shit i didnt put up the first ss here [Image #17]",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:13:11.940Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T01:27:28.629Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The 'insane work' cap fan is normal n-gon triangulation (the cap IS one authored face; the fan from a rim vertex is just its render triangulation), but the fill-face truncation was real: model_paint.groupFaces collected group members into a fixed MAX_GROUP_FACES=16 stack buffer while a 48-side cylinder cap fans into 46 triangles — 'fill face' painted the first 16 slivers and silently stopped, the pink wedge in the screenshot. Raised the buffer to 128 and made any residual truncation LOUD on stderr ([mesh] line naming the group and the cap) per the truncation-is-loud rule. Committed 4bcb18737; needs host rebuild. Related loop-cut zigzag diagnosed and fixed separately under req_3037.",
+  "shas": [
+    "4bcb18737"
+  ],
+  "resolvedAt": "2026-07-14T01:27:28.629Z"
+}

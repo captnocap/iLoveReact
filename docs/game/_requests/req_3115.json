@@ -1,0 +1,28 @@
+{
+  "id": "req_3115",
+  "at": "2026-07-16T02:47:10.772Z",
+  "origin": "session:52c7a5f2",
+  "text": "its not that it doesnt refuse it its that its still wrong. make the cut, then look at where the verts land, its a lopsided cut",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T02:55:30.158Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T02:55:30.166Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the user's lopsided pyramid cut with numbers (proper repro on a SIDE triangle, sel:2 — earlier repros had accidentally hit the base): left slant edges cut level at exactly 1/3 and 2/3, right side cut at 0.3685, two verts dumped onto the base plane, and dir 0/1 produced byte-identical cuts (dead toggle). Root cause: the plane-comb fallback (the only path non-quad faces take) still aimed its planes with the req_2794 neighbor-normal average, which tilts on irregular neighborhoods; it survived the codex gate because the harness had no non-quad fixture (my spec's miss). Fix implemented directly: lcDeriveDirs reduced to the old studio's world-axis contract (axes flanking the selection normal's dominant axis — straight by construction; lcCanonSign + neighbor machinery deleted, ~115 lines), safe now because leaned/sheared quads ride the parametric ring and never touch the comb. Harness grew a pyramid fixture (16 rows): side-triangle loop cut asserts S=4, groups=13, and every new vert at a span-third fraction of a slant edge — the anti-lopsided contract. Gate (zig suites + 16-row parity + ship) running in background; commit follows its green.",
+  "shas": [],
+  "resolvedAt": "2026-07-16T02:55:30.166Z"
+}

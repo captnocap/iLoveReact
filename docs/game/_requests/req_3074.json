@@ -1,0 +1,30 @@
+{
+  "id": "req_3074",
+  "at": "2026-07-15T11:38:06.433Z",
+  "origin": "session:8a9444e4",
+  "text": "ok sweet that works awesome. uh other than like i guess it only lets me store view once and then it seems to be set forever, no changing it, kinda eh. maybe what we can do since we have the space for it. in the G section mentioned in @cart/editor/shell/regions.ts  where you see it says atlas/scope on the component here in the studio, below it put a list of bookmarks made. then the button can just add a new book mark. clicking the bookmark itself can go to it, and then add a remove button for the book mark.",
+  "status": "review",
+  "sessionId": "8a9444e4-b0de-499e-8a2d-cfc00e09d013",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T11:39:08.777Z",
+      "actor": "fable-camstore",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T11:48:02.309Z",
+      "actor": "fable-camstore",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "View bookmarks are now a LIST in the focus panel, directly below the UV/atlas card: a VIEWS section where the + verb (or the action-bar Store View button) pins the current camera as 'View N', clicking a row jumps the camera to that pose, and each row's trash verb removes it. The active bookmark (last stored or clicked — what the H key returns to) carries the accent. Host keeps the pose verbs (__model_cam_pose / __model_cam_set_pose, lock-gated; the old one-slot doors deleted); the list itself is authored data in ModelView state + the tool hot twig, so names/order survive hot reloads and reset on cold start. Command tests 13/13. Zig doors changed — needs a dev-host rebuild.",
+  "shas": [
+    "794928b22"
+  ],
+  "resolvedAt": "2026-07-15T11:48:02.309Z"
+}

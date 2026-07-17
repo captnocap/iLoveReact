@@ -1,0 +1,28 @@
+{
+  "id": "req_2995",
+  "at": "2026-07-13T05:02:38.796Z",
+  "origin": "codex:019f5351",
+  "text": "yeah and well more importantly, the actual component that renders when i am picking the paint when painting, fucking sucks. flat out. if i dont hit exact on the arrow button for the paging on the shaders the menu just closes, if i dont hit anything perfectly it just closes. but then it doesnt [Image #1] lets unveil this slimey little bastard for a second here because i dont know if the code makes it obvious or not how fucked this is. so what the fuck is going on with the 9 catecorigically different ways to just pick a color. and then the actual war crime in here is whatever this color map is doing for drag events needs to be banned from the face of the earth because it literally causes the app to lock up for 2 or more seconds. uh yeah. and now me ranting about 'why is there 9 categorically different ways to pick a color' is not me saying that go nuke it and just ship a simple color wheel because that aint it chief. im saying what the hell is this layout of shit and honestly yeah some of these are just dead ends.\nmost high value parts here:\nraw hex - but shit still is aids because its rendering on top of other ui text\ncolor map - but its commiting war crimes for rendering updates \ncolor ramp - this is genuinely one of the most used features of painting at all so you have to keep it\n\nshit that super sucks ass: \nsets - hardcoded nightmare\nsaved - hardcoded gaslighting\ncolor map - literally reports color names when white or black\nscene - literally just here to piss me off it seems \n\n\n\nand then step into the shader side. this is also just booty. idont know if thats obvious from the code or not but holy shit man i cant tell you how many times ive been making my way downtown walking fast and i somehow slip a minutia of pixel space when still trying to get to the last sets of pages and bom closes the component, reset to page 1. 2ndly, lets say i make it all the way down to the page i want. nice. now i pick one, and the next color /shader pick is back at page one baby, even if the one 28 pages down is highlighted as the active in state choice. \n\nalso, the component visually is a warcrime for that every single page i navigate through here is giving me different content delivery height, and then the audacity it has to not even fill in a page in full is gonna make me roll over in my grave really. what its doing something like 15 per page, so you would think ah yeah thats 3 rows of 5 or 5 of 3, nope its 2 of 5 1 of 1 and 1 of 4, then the next page is 3 of 5 then the next is 1 of 2 2 of 5 1 of 3 and buddy we are only 3 pages in and we cant make up our minds makes me goi insane. and one of the main reasons is that it fucking just blows. then the dead space / empty space shit and the variant badges or pills or buttons or whatever they are versus idk maybe something that is more sane like just showing me the 3 varients so i dont have to go navigating through each one and ultimately missing by a fucking iota of a pixel and have the menu close",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T05:02:45.243Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T05:04:40.395Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed a read-only code trace of the active Color/Shader Ink popover after the user's interaction report. Confirmed the close-on-miss behavior: a full-screen close Pressable sits beneath a visible panel whose root Box does not block pointer hits, so blank pixels and gaps inside the panel fall through to close; shader page arrows are only 24x22 hit islands. Confirmed the color map sends every uncoalesced native pointer-motion event into top-level AppFrame state, triggering a whole editor render and whole-state hot-state JSON serialization; color-to-brush reconciliation then updates ModelView, whose tool snapshot writes back to AppFrame for another render/persist cycle. Confirmed nine color-choice paths are composed at once: hex, transient hard-coded Saved defaults, map, chroma strip, Fits, Ramp, hard-coded Pigments, fake hard-coded Scene colors, and hard-coded Sets. Saved is not cold-persistent user data; Scene does not inspect the scene; extreme neutral colors are mislabeled because oklchName ignores chroma and has no white/black cases. The OKLCH map hard-clamps out-of-gamut RGB channels, producing the visible geometric clipping. Confirmed shader pagination always initializes page 0, never locates the active shader, slices 15 flat entries then re-groups them into category shelves, causing ragged rows, shifting heights, and dead space; active variants are text pills rather than visible variant choices. No focused tests cover this UI. No source files changed. Recommended consolidation keeps hex, a performant settled/live-preview color field, and the ramp as core; treats Fits/Pigments as unproven; removes fake Saved/Scene/Sets until backed by real user/project/scene data; and replaces the shader shelf pager with a fixed-size, persistent, active-aware grid using cached thumbnails and visible variants inside the one canonical paint bucket.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T05:04:40.395Z"
+}

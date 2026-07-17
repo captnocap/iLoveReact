@@ -1,0 +1,28 @@
+{
+  "id": "req_2999",
+  "at": "2026-07-13T05:11:51.381Z",
+  "origin": "codex:019f5351",
+  "text": "ok and so what the fuck is persist state? that doesnt sound to me like its what i think it should be, it sounds to me like its an entirely spitballed interpretation of the file i showed directly to an agent for what i was talking about. framework/state/hotstate.zig ; is this persist state hitting that file or what",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T05:12:01.598Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T05:12:29.778Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced persistState to framework/state/hotstate.zig and audited its origin. Exact chain: AppFrame's [state] effect -> cart/editor/data/persistView.persistState -> runtime/hooks/useHotState.setHotState -> callHost('__hot_set', JSON.stringify(value)) -> framework/v8_bindings_telemetry.hotSetCb -> framework/state/hotstate.set, which frees the previous JSON and duplicates the replacement into its StringHashMap. Confirmed hotstate.zig's original contract is a generic key-to-JSON in-process atom store for small useHotState atoms across JS teardown. Confirmed the editor-specific persistView wrapper was introduced in bc6213f5ab for req_2250: the user's request said to keep 'my active thing im viewing' across hot reload, while the implementation and commit explicitly chose to 'mirror the whole editor state into one atom.' Thus the broad monolithic mirror is an implementation overreach, not the framework file's required architecture. Later redactions reduced authored-map corruption risk but retained the per-any-state-change whole-editor serialization. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T05:12:29.778Z"
+}

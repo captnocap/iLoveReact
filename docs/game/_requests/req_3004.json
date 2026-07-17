@@ -1,0 +1,28 @@
+{
+  "id": "req_3004",
+  "at": "2026-07-13T05:38:04.588Z",
+  "origin": "codex:019f5351",
+  "text": "um and then the last questionn i have here, and it might seem a bit un-necessary 'as long as its setup correctly' but if there were any means of rather than just immediately pushing through the update, the dev server could have a flag that can hold the update and push a notification or what have you into the app and then rather than some massive song and dance with hot state, its a very clear 'carry this over for me' and that carry this over interface could potentially have a dialog that lets you pick what drops off and what carries over, because the only reason i say that is while i know that when it is working, that it for the most part works but ive also already delt with numerous amounts of 'its added' -> trust.jpg -> start doing anything while other workers are working -> hey its working -> hahanope.jpg; and so id rather get noped by my own volition but also if im scared i can before doing anyt of it just save whatever im working on",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T05:38:11.029Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T05:39:17.916Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Evaluated the proposed opt-in transactional reload gate against the actual ReactJIT dev pipeline. Confirmed it is feasible at the correct boundary: watcher/esbuild already produces and sends a candidate bundle; dev_ipc owns the bytes and queues them before teardown; v8_app currently destroys the live context only because processIncomingPushes immediately upserts and switchToTab/evalActiveTab. The host also already supports NOTICE → system:notification. Proposed --reload=ask/manual modes that stage the candidate while the old app remains live, show a generated carry/save dialog, export selected narrow handoff values once, require Save All success for durable work, then teardown/eval/import/clear; clean reload and Later remain explicit choices. Noted this avoids continuous hotstate mirroring and the previously documented auto-hotstate schema crash-loop. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T05:39:17.915Z"
+}

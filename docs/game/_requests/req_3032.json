@@ -1,0 +1,30 @@
+{
+  "id": "req_3032",
+  "at": "2026-07-14T00:31:39.925Z",
+  "origin": "session:140b94da",
+  "text": "yeah im just atleast trying to figure out how to keep this from happening because its not the first and likely will not be the last and the moment it exports out of here it doesnt matter anymore, its a built piece, and it can all merge together. but for the sake of the same error prone problem where im N edits into something and now the whole index is fucked its very annoying",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T00:33:25.299Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T00:38:25.982Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Hardened the part-ownership invariant so this class of corruption can't silently survive: added ensureDisjointPartRanges() in framework/gpu/3d.zig — a tripwire that runs after EVERY path installing part ranges (add part incl. duplicate/mirror, detach, merge, path array, undo/redo restore, and the cart range push used by load/resume). If any current or FUTURE op produces overlapping spans, it logs a loud [mesh] line and self-heals on the spot: contested group ids go to the latest containing part (the one whose op minted them) and the partition renormalizes to clean contiguous spans, instead of the user discovering it N edits later. Because the restore and load paths are covered, the user's existing corrupted doc and its journal snapshots heal on open/undo rather than resurrecting the overlap. Complements 282301d3d (the minting fix). ast-checked; needs the host rebuild to take effect.",
+  "shas": [
+    "582f05eda"
+  ],
+  "resolvedAt": "2026-07-14T00:38:25.982Z"
+}

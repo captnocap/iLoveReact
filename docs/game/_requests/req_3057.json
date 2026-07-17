@@ -1,0 +1,32 @@
+{
+  "id": "req_3057",
+  "at": "2026-07-14T02:40:36.350Z",
+  "origin": "session:6e4cf495",
+  "text": "alright well lets do the final slice of the task list",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T02:41:50.158Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T02:58:34.407Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Shipped the facade painter's full first slice (commits ed14b345c foundation / dec06c576 painter / e370d9f09 docs — hot-reloads, the running dev host already carries the paintable doors). Right-click a wall piece > Paint Facade: gatherFacade BFS-collects the coplanar contiguous run (same facing mod 180, same plane within a wall thickness, touching rects, multi-storey joins) into ONE meter-true canvas at the RULED 256 px/m, opened as a facade workspace document. SPRAY drags host GPU dabs and records stroke rows (hex+radius+path in meters, deterministic replay); STAMP drops the armed sticker as a row with degree rotation (blit supports any angle; the rail steps quarters for now), previewed as an overlay. SAVE bakes: readback + CPU stamp compositing with die-cut transparency > PNG cached beside the map doc (rows in world.json are the durable form per the paint ruling) > a two-sided quad 12mm off the wall through the EXISTING resident-mesh doors — unpainted texels stay alpha 0 so only the paint shows, flush by construction (no z stacking at all, the req_3051 collage limit retired at this level). Facades persist + follow map switches. 7 new tests (gather/canvas/quad/blit/rotation); stickers 14 + pieces 6 + mapDocuments 8 all green. Follow-ups flagged in docs: per-stamp remove, free-angle UI, authored-atlas stamps + cylinder unwrap.",
+  "shas": [
+    "ed14b345c",
+    "dec06c576",
+    "e370d9f09"
+  ],
+  "resolvedAt": "2026-07-14T02:58:34.407Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3044",
+  "at": "2026-07-14T01:33:13.832Z",
+  "origin": "session:140b94da",
+  "text": "do u see any of these at all ? [Image #20] its weird u cant find it by name instantly and thats a real problem",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:36:20.937Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T01:36:20.945Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered: yes, every Build model is visible to me — the door was findable only as its DISK folder Door_Wall_1; the user's rename to Door_with_knob_window lives solely in manifest.json's name field, because model folders are minted from the starter/doc id at creation and rename never touches them. The content browser resolves names from manifests so the user sees the right name, but any disk-level search (agents, file managers, grep by name) comes up empty — the findability gap the user flagged. Recommended fix (not yet built, awaiting the user's word on direction): sync the on-disk folder to a slug of the display name at save/rename time when nothing references the path, or keep folders id-stable by design (container-not-identity convention) and instead give the library a name-to-folder locator so disk consumers can resolve display names. The hollow-door diagnosis this message interleaved with is resolved under req_3043.",
+  "shas": [],
+  "resolvedAt": "2026-07-14T01:36:20.945Z"
+}

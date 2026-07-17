@@ -1,0 +1,28 @@
+{
+  "id": "req_2969",
+  "at": "2026-07-11T22:53:16.744Z",
+  "origin": "codex:019f535d",
+  "text": "yeah that clears that up for me, now, the next thing i need you to trace and get an itemized list for me just like this is, anything in the app that instruments via undo/redo history of any sort at all, but ISNT in the eventbus, what are they",
+  "status": "review",
+  "sessionId": "019f535d-d94b-7591-8c4e-4125ba85ddd3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T22:53:49.885Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T22:58:14.344Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced every active undo/redo, journal, snapshot-stack, and reversible history used by cart/editor and its host/runtime dependencies, then compared each mutation and replay path against the four actual editorbus publishers. Identified world-stack actions missing forward events, the entirely unbus'd mesh and model-paint journals, silent undo/redo restores for world/map/mesh/paint, the transport draft-point rollback, focused TextInput undo rings, and router back/forward history; separately excluded non-reversible recent/build/telemetry feeds and unused generic workspace history. Read-only audit; no source changes.",
+  "shas": [],
+  "resolvedAt": "2026-07-11T22:58:14.344Z"
+}

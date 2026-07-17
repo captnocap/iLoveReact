@@ -1,0 +1,28 @@
+{
+  "id": "req_3091",
+  "at": "2026-07-15T23:29:40.756Z",
+  "origin": "session:52c7a5f2",
+  "text": "huh ok so just verify then what is the difference between that approach and the in-studio key modifiers like shift, that do work",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T23:29:54.171Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T23:30:35.246Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified the difference between the working in-studio shift and the dead world-viewport shift-click. Studio: mesh-editor input is NATIVE — engine.zig intercepts the raw SDL mouse event in the frame loop (4438), and when the click is viewport (not chrome) it reads SDL_GetModState() in place (4500) and passes shift directly to r3d.meshEditPick / meshEditBox (4502/4976); the modifier never crosses a boundary. World viewport: a React component whose clicks go through the JS event bridge — the runtime reconstructs the event from host getters (runtime/index.tsx getPointerPayload) and modifier state was never packed into that reconstruction, so it drops at the border. Same SDL event, two delivery paths; keyboard events pack mods, mouse events never did. Matches the repo doctrine that native-input surfaces work by construction while JS-picked surfaces inherit bridge gaps. Q&A only, no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T23:30:35.246Z"
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_3144",
+  "at": "2026-07-17T03:01:32.250Z",
+  "origin": "one-off",
+  "text": "yeah also tho the reason why i dont front on it at all is this entire repo was made from: making shitty typescript game -> came to a head and wanted to put IT inside of the monitor in cs_office -> how_do_we_do_it.jpg -> love2d ? sure, -> day 16 we rendered game in a game -> day 30 'so claude how do we REALLY jit react? -> write a react to zig transpiler -> eat dicks on .map() content transpiling for weeks ->  and then yeah it just kept going. Lmao. and now were back at the whole game arc. and about to bring together everything as one game. maybe it will be a shitty game. it will be a game though",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T03:01:49.323Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

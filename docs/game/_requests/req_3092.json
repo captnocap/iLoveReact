@@ -1,0 +1,28 @@
+{
+  "id": "req_3092",
+  "at": "2026-07-15T23:31:55.217Z",
+  "origin": "session:52c7a5f2",
+  "text": "ok. so, uh, whats the rap sheet here overall on the bill",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T23:32:18.938Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T23:32:51.521Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compiled the session rap sheet the user asked for: 9 confirmed defects across two surfaces plus the systemic root cause. Mesh studio port parity (solidify group-inheritance one-face, merge pure-regroup leaving seam verts/edges, face-mode loop cut neighbor-normal heuristic slant, edge-mode midpoint-walk slant, and their compounding — bad groups force the bad fallback). Facade painter (yaw-front side selection with no picker, missing alpha handling occluding wall textures, single-select auto-gather violating the req_3062 explicit-selection ruling, and shift-click multi-select dead on arrival — modifier state never packed into the JS pointer payload). Root cause ruled and saved to memory: substrate-cheap re-expression shipped under 'port' with no parity enforcement. Delivered the itemized fix bill A-H (modifier bridge, facade scope/alpha/side, solidify identities, merge dissolve, parametric loop cut, parity harness) with size estimates; awaiting the user's go on all or a subset. Summary only, no code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T23:32:51.521Z"
+}

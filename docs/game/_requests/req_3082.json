@@ -1,0 +1,28 @@
+{
+  "id": "req_3082",
+  "at": "2026-07-15T13:41:07.270Z",
+  "origin": "session:52c7a5f2",
+  "text": "ok next question is there is a paint facade button and now that it has been made and then remade, still looks and feels like a liability lmao uh but ok so when i paint on it , how does it decide which side of the wall its going to paint on and then further where is it saving to at all. i just tried it, and it removes the texture that gets set on the wall piece, but it also like idk how this part of a request can be misinterpretted. i had asked for the capability to be able to select multiple build pieces that are on the map, and then from here i would click on the facade button and those selected pieces would be what is being painted on but two times now this is interpreted first as we wont do anything but single pieces, and so i restated it the same way, that i need to select multiple pieces, and it still landed as select one piece but now anyuthing attached to that piece goes with it. which means on any normal building its going to take anywhere from 8-12 upwards of hundreds which never will work for both just me in general but thats impossible to display in a view to paint on at all its a massive surface",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T13:41:36.961Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T13:45:51.832Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the three facade-painter questions from code. (1) Side: wallFace (cart/editor/world/facades.ts:114) anchors the canvas to the piece's FRONT face — local +z under its yaw — regardless of click/camera; the baked quad is two-sided so paint mirrors through the back. (2) Save: stroke+stamp program rides the Facade row in the map's world state (worldFacades, paint-program ruling); bake caches a PNG at <map>/facades/<id>.png; renders as ONE quad lifted 12mm off the wall (facadeBake.ts). Nothing writes the piece's texture slots — if the wall texture visually vanishes it's the facade quad OCCLUDING it: unpainted texels are meant to be alpha-0, but I found no alpha handling in the resident-mesh push path, so opaque-drawn quads are the prime suspect (rendering bug, texture data intact). (3) Scope: user's report matches code exactly (AppFrame.tsx:2285) — >1 selected uses facadeFromSelection (exact set), but exactly-1 selected runs gatherFacade over the WHOLE coplanar run — the 'convenience' that violates req_3062's explicit-selection ruling and explodes to a building face. Verdict: 1 selected must = 1 piece; delete the gather. No code changed; awaiting go.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T13:45:51.831Z"
+}

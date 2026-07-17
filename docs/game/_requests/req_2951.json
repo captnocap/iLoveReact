@@ -1,0 +1,28 @@
+{
+  "id": "req_2951",
+  "at": "2026-07-11T07:14:45.303Z",
+  "origin": "codex:019f4fff",
+  "text": "arnt all of those inside of here tho? /home/siah/creative/reactjit/cart/editor/data/models",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T07:14:54.530Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T07:15:53.460Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Compared every legacy Studio/cooked display name and exact source id against cart/editor/data/models manifests and package blobs. All 92 unique Studio names and all 55 cooked display names have package counterparts; all 92 Studio packages contain mesh plus editable document data. Two duplicate legacy Studio identities were intentionally collapsed by name. Only 13/55 exact cooked identities are packaged, none of the 13 standalone legacy texture files are copied, and the 8 material definitions remain snapshot-only. Desk.glb is copied exactly; car.obj is not, though a self-contained car Studio model exists. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-11T07:15:53.460Z"
+}

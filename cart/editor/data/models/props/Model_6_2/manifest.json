@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "primitive:plane:6",
+  "name": "bridge_me_up_buttercup",
+  "kind": "prop",
+  "stage": "wip",
+  "folderId": "props",
+  "semanticKind": "plane",
+  "sourceKind": "primitive",
+  "color": "#5a86c0",
+  "rig": "-",
+  "data": "-",
+  "triangles": 0,
+  "lods": 1,
+  "mesh": {},
+  "decompositions": [],
+  "atlases": [],
+  "paints": []
+}

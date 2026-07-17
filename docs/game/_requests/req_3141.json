@@ -1,0 +1,17 @@
+{
+  "id": "req_3141",
+  "at": "2026-07-17T02:49:32.158Z",
+  "origin": "one-off",
+  "text": "catch unreachable is that the equvilant of unsafe in rust",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T02:49:43.344Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

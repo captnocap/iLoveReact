@@ -1,0 +1,30 @@
+{
+  "id": "req_2993",
+  "at": "2026-07-13T04:30:08.652Z",
+  "origin": "session:e7f6fbce",
+  "text": "hm. interesting so uh well before we just end up doing much of anything at all, is it possible you can like export all the flora shapes into the content browsers sources so i can just look at what they are physically and not mentally and make any assessment of how to go forward. and so that covers all the flora is its just plannes? trains and automobiles right",
+  "status": "review",
+  "sessionId": "e7f6fbce-b122-4230-ace5-0b7eb67401a6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T04:30:25.127Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T04:35:43.668Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built framework/tools/flora_dump.zig + a 'zig build flora-dump' step that materializes all 14 flora meshes straight from the engine's own generators (world_loader/geometry.zig cards + flora_geometry.zig wrapped species) as standard model packages (manifest.json + mesh/base.blob, the same 8-f32/vert interleaved layout studio saves use) under cart/editor/data/models/props/flora_*. Ran it and verified every blob's byte size matches its manifest triangle count and the vertex floats decode sane (grass-blade root at y=0, half-width 0.07). Packages appear in the content browser on next catalog load since loadMaterializedPackages scans the props dir. Rerunnable/overwrite-in-place, so future recipe tweaks re-export with one command.",
+  "shas": [
+    "4fa2948f1"
+  ],
+  "resolvedAt": "2026-07-13T04:35:43.668Z"
+}

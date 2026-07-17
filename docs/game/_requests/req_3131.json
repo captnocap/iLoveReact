@@ -1,0 +1,17 @@
+{
+  "id": "req_3131",
+  "at": "2026-07-16T06:08:03.809Z",
+  "origin": "one-off",
+  "text": " uh so what do i do exactly just place the piece or what is the name of the thing it sits on ?",
+  "status": "new",
+  "sessionId": "da1f4e92-6930-441f-be60-478103cbcdb0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T06:08:25.916Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

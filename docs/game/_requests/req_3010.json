@@ -1,0 +1,28 @@
+{
+  "id": "req_3010",
+  "at": "2026-07-13T07:23:47.491Z",
+  "origin": "codex:019f5351",
+  "text": "you know ur right those new_mesh is my own lazy ass fault from the last app so then as it stands the 'autosaves' are all legit, i dont see any reason why any of those shouldnt be autosaved, but your poinnt about the atlas is exactly the type of thing that needs real logical instrumenting, and you would think maybe something like this is a bit inherent but its not for some reason. From the lens of allowing a paint atlast to land, while a model may never hit the save button, gets you a bunch of just uncessaary 'why does this exist but no model?' future cases right everything has what i want to say is common sense for order of opperations and its the same  concept to painting where to paint, you have to create an atlas, well you cant create an atlas for something that doesnt exist* and existence is measured in disk space not ephemeral memory",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T07:23:57.814Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T07:24:03.606Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed and formalized the model/atlas lifetime invariant against the active editor and package rulings. An unsaved model may hold an ephemeral mesh and atlas during authoring, but neither may claim a filesystem package identity independently. Durable existence begins only at the model package commit point (manifest written last), and first Save must atomically materialize mesh, editable mesh document, atlas if present, and manifest. The current atlas path violates this by calling writeModelArtifacts before first Save, creating orphan-capable package artifacts and weakening the materialization gate. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T07:24:03.606Z"
+}

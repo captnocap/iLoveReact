@@ -1,0 +1,28 @@
+{
+  "id": "req_3003",
+  "at": "2026-07-13T05:31:40.680Z",
+  "origin": "codex:019f5351",
+  "text": "ok and so this is what il say before we just end up reworking it but i have expressed the problem with the app locking up is a thing inside of this color dragging map, but you also say its inside of a camera postion in places in the app, and thats where it becomes a bit confusing because all the cameras, as far as im concerend, are perfectly fine, they dont cause this. or am i missing something",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T05:31:53.769Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T05:32:26.889Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified the reported color-drag lockup versus smooth camera behavior with a side-by-side source trace. The camera path is not an AppFrame/root-state path: it mutates a small IsoPose, sends eight numeric camera values to the host, and hot-writes only that tiny pose, so smooth observed behavior is consistent. The color map calls root setState on every mouse move, causing whole AppFrame re-render/persist; in model paint that color then reconciles into ModelView brush state, whose onToolState echoes a second root update/persist and whose own ToolTwig also writes. ColorLibraryPanel also recomputes all derived color collections per sample. Corrected the classification: camera persistence is a low-cost cadence/architecture smell, not the demonstrated lockup and not part of the color performance fix. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T05:32:26.889Z"
+}

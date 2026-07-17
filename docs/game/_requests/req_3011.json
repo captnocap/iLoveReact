@@ -1,0 +1,28 @@
+{
+  "id": "req_3011",
+  "at": "2026-07-13T07:31:09.531Z",
+  "origin": "codex:019f5351",
+  "text": "ok great so then before we go at it, tell me the outcome of these which should be true after the changes land, and make sure we are on the same page\n\n\nstart app -> new mesh -> several edits -> code update -> ??\ndoes it \nA: retain the mesh edits over the update\nb: dump the updates\nc: neither\n\nstart app -> new mesh -> some edits -> exit\ndoes it\nA: retain the edits for next start up\nb: dump the edits\nc: neither\n\nstart app -> new mesh -> save -> edit -> exit \ndoes it\nA: retain a most relevant autosave file that has all updates\nb: dump updates, original file preserved \nc: neither",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T07:31:20.270Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T07:31:34.174Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Locked the expected lifecycle matrix before implementation: an unsaved mesh survives an in-process code update through hot handoff without becoming a disk package; an unsaved mesh is discarded across a full app exit/restart; after explicit first Save establishes a valid model package, subsequent edits autosave into that package and a normal exit flushes pending writes so the latest edits survive restart. Distinguished graceful exit from an unflushable hard process kill. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T07:31:34.174Z"
+}

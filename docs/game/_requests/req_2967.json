@@ -1,0 +1,28 @@
+{
+  "id": "req_2967",
+  "at": "2026-07-11T22:48:33.789Z",
+  "origin": "codex:019f535d",
+  "text": "hey in cart/editor there is an eventbus, i want you to get me an itemized list (bulleted) of what hits this eventbus",
+  "status": "review",
+  "sessionId": "019f535d-d94b-7591-8c4e-4125ba85ddd3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T22:48:40.262Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T22:51:22.518Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Audited cart/editor's authoring eventbus producers from the runtime/editorbus imports through every dispatch wrapper and AppFrame call site. Identified the four actively emitted event types, itemized their concrete UI/native action sources, and separated local-history fallback rows plus notable editor actions that currently do not publish. Read-only investigation; no source changes.",
+  "shas": [],
+  "resolvedAt": "2026-07-11T22:51:22.518Z"
+}

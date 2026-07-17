@@ -1,0 +1,30 @@
+{
+  "id": "req_2958",
+  "at": "2026-07-11T08:10:23.424Z",
+  "origin": "codex:019f4fff",
+  "text": "oh also, i should ask since git usually is the thing to be a pain in my ass but lets say we land some edits here and then i pack it up, go to mac, and that unpack is hitting a git whatever that is old, or what is happening? or, i guess maybe a better approach is where the pipeline packs it up with a sweeping commit of what will go up without being a problem for github push size, and everything else goes in the pack, unpack, then gets the repo into shape on the machine, and then unpacks. yes, this comes with the explicit caveat that there could be work done in one machine that never makes it but that wont happen. i am already pretty anal about not starting work on another machine without it being up to date anyways but yeah",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T08:11:12.351Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T08:29:18.837Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Superseded at the user's direction before the proposed Git checkpoint pipeline was implemented. The resulting solution is the direct Bun LAN sync service in req_2960/req_2961, so destination code no longer depends on Git alignment.",
+  "shas": [
+    "1866e4078"
+  ],
+  "resolvedAt": "2026-07-11T08:29:18.836Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_2948",
+  "at": "2026-07-11T07:09:14.992Z",
+  "origin": "codex:019f4fff",
+  "text": "hello. i need you to write me up a one liner to be able to transfer all the on disk code / models / game data / anything that would be necessary to load something in cart/editor for between here and my macbook. here is the address of where it is on my mac, ideally i want to be able to quickly when on my network, transfer between my desktop or my macbook and not need to worry about anything that github wants to make a fuss about; so what do u think we can do to just have it oneshot and transfer over the network;  here is the address smb://mbp.local/josiahprice/reactjit",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T07:09:21.462Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T07:35:48.462Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Finished the one-shot local-network transfer design after removing the false hmsc-int dependency. The rsync payload mirrors the working source tree plus cart/editor's ignored reference cache and the real authored state under zig-out/game/editor + contentstore, while protecting Mac-native deps/tools and excluding Git, caches, build outputs, retired carts, archives, backups, and unrelated stacks. The filter set was dry-run validated at 8,202 files / 350,117,764 bytes. Uses the supplied SMB share through gio/GVFS, with timestamped destination backups so overwritten/deleted files remain recoverable. Package-only editor ownership shipped in the cited commits.",
+  "shas": [
+    "de99b14a1",
+    "eaeb78e7b"
+  ],
+  "resolvedAt": "2026-07-11T07:35:48.462Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_2994",
+  "at": "2026-07-13T04:37:57.394Z",
+  "origin": "session:21495fae",
+  "text": "hey so i had a thought the other day well more a question, basically so we started making this game where you were literally writing code to generate models. they worked but they were just aass, and had a hard ceiling for fidelity so it seemed, so we ditched that shit, as deserved, but a part of me wonders that, if like i end up just making a fucking shit storm of models, and lets say there is capability to annotate basically all things as precise as necessary to perhaps... take the bulk of models, and derive some type of algorithm helper system that could maybe later down the line be exactly what is needed to then come into a claude chat and just be like 'hey claude, make a da da da da....' and then rather than you constructing some shitstorm of how to even nconceptualize 3d at all, there is like a thing that might say 'generate a...' and then chair, or car, or clothing, and each annotation typing and whatever else is how any of that algorithm exists to help guide the process. its not a guaranteed solution but it atleast, in some sense, inherits the style i make first hand, and trys to extend it onto claude as knowledge. and the outcome would generate the file, cache parameters and then i can either further hand edit it or tell you to make a change to it",
+  "status": "review",
+  "sessionId": "21495fae-0c84-49e9-b2aa-930af3dac229",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T04:38:30.897Z",
+      "actor": "fable-2149",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T04:38:59.075Z",
+      "actor": "fable-2149",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Discussion ask, no code. Assessed the idea of deriving a parametric generation helper from an annotated model corpus so Claude can later 'generate a chair' in the user's style. Verdict: sound — it converts generation from blind vertex authoring into parameter-filling over a user-derived vocabulary. Repo already aligns: skeleton object model, manifest-driven packages, stroke-program paint, mesh journal, geometry registry generate(params). Caveats given: per-category generators are distilled once with exemplars as defaults/validation (not auto-ML), style-bounded output, annotation consistency beats corpus size. Recommended keeping annotation capture cheap in the editor now while models are mass-produced.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T04:38:59.075Z"
+}

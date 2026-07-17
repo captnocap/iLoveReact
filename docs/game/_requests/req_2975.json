@@ -1,0 +1,28 @@
+{
+  "id": "req_2975",
+  "at": "2026-07-11T23:41:00.485Z",
+  "origin": "codex:019f5351",
+  "text": "Ok this is more clear, so effectively if im understanding correctly, even though i do not see that compile button or etc in this section now or probably have never seen it, doesnt change the fact that it lies dormant there, and could be rendered",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T23:41:10.650Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T23:41:15.501Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the user's understanding with precise terminology: Compile/Trigger/Spawn are not hidden mounted controls in the observed Build-state Section D; they are dormant command records plus a conditional ToolOptions branch that is statically capable of instantiating them when a non-model document and matching active menu state coincide. Actual runtime visibility remains unobserved, but their dormant render path exists and bypasses availability filtering. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-11T23:41:15.501Z"
+}

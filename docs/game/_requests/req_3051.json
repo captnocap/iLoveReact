@@ -1,0 +1,30 @@
+{
+  "id": "req_3051",
+  "at": "2026-07-14T02:14:04.706Z",
+  "origin": "session:6e4cf495",
+  "text": "ok the one 'edge' id be curious of here is the 2mm increase, that likely is based on if ther eis even 1 px of intersect the whole thing lifts which would also break reality, and i guess the reason it matters is if you in theory start at one side of a wall, and are applying stickers in a collage style, by the time u get to the other side of the wall, if they are all still touching in some sense as you made the journey across, its going to visually be displaced against the wall or no",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T02:14:56.020Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T02:16:22.868Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed in 0aa-commit (see shas): the req_3050 stacking was cruder than the user's theory — it lifted every stamp unconditionally, displacing whole collages. Now a stamp's face-plane footprint (AABB in face coords, quarter-turn aware, per face plane) is tested against every earlier stamp on the piece, and it lifts one 2mm step above the highest sticker it ACTUALLY overlaps: isolated stickers sit flush at the base 8mm no matter how many share the wall, a pair stacks 2mm, and a touching chain climbs only along the chain (the rigid-quad limit — real stickers bend, quads can't; break the chain anywhere and the next sticker resets to flush). Full-wall dense collage is flagged as the facade-painter use case where the collage bakes INTO the canvas and stacking vanishes entirely. 14 tests.",
+  "shas": [
+    "0b68a61f3"
+  ],
+  "resolvedAt": "2026-07-14T02:16:22.868Z"
+}

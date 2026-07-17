@@ -1,0 +1,17 @@
+{
+  "id": "req_2943",
+  "at": "2026-07-11T05:43:16.860Z",
+  "origin": "one-off",
+  "text": "hey so i saw this posted few minutes ago, and well uh tell me about it haha. https://github.com/vercel-labs/native",
+  "status": "new",
+  "sessionId": "c40fbd82-74ab-4155-9300-ccab3dd575f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T05:43:29.980Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

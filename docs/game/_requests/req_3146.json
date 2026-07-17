@@ -1,0 +1,17 @@
+{
+  "id": "req_3146",
+  "at": "2026-07-17T03:05:28.636Z",
+  "origin": "one-off",
+  "text": "well the internet is basically a shitshow of javascript soyboys losing their mind. i saw theo put out a video of an hour of him trash talking back at andrew. and it odesnt even make sense to me. andrews post seems very hoenst and professional, like his mannerism seem to be anyways.",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T03:05:50.833Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

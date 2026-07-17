@@ -1,0 +1,17 @@
+{
+  "id": "req_3045",
+  "at": "2026-07-14T01:33:35.753Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>b8oxc6vx7</task-id>\n<tool-use-id>toolu_011vjXP1uBUPTyRe422aeoby</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/54e620c2-839a-4d1b-89bb-d585b2326ecf/tasks/b8oxc6vx7.output</output-file>\n<status>completed</status>\n<summary>Background command \"Rebuild editor after import fix\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:33:47.299Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_2956",
+  "at": "2026-07-11T07:56:14.707Z",
+  "origin": "codex:019f4fff",
+  "text": "is it possible to, and idk, maybe not maybe so but effectively pack everything into one archive that then can just be unpacked over there and that way if for whatever reason i need to do it over usb its just a packed zip",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T07:56:20.782Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T08:01:37.045Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Implemented a single portable tar.gz archive workflow in tools/editor-transfer. The pack command can write directly to the Mac SMB share, the default sibling path, or any USB path; unpack validates the archive, mirrors its managed contents, preserves machine-local Git/dependencies/platform tooling, and keeps timestamped backups of replaced or deleted files. A real 129 MB pack and 351 MB restore round trip passed, including SMB-alias, deletion, rollback, and executable-mode checks.",
+  "shas": [
+    "10af11cbd"
+  ],
+  "resolvedAt": "2026-07-11T08:01:37.045Z"
+}

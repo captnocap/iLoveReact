@@ -1,0 +1,10 @@
+{
+  "id": "req_3120",
+  "at": "2026-07-16T03:00:14.693Z",
+  "origin": "session:52c7a5f2",
+  "text": "I gave it a try, interestingly still wrong and idk why, if you do horizontal cuts (i did 5 of them) they cut fine, then do one vertical cut and it somehow cant hit the top most face, yet if you start from a vertical cut it will gladly cut the entire pyramid vertically, so it has nothing to do with the fact that there is a tip, its simply just deciding to not go the last face for some reason",
+  "status": "new",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": []
+}

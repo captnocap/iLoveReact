@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Cylinder 2",
+      "color": "#c98f9b",
+      "visible": true,
+      "kind": "cylinder"
+    }
+  ]
+}

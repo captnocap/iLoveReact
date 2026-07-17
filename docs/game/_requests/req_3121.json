@@ -1,0 +1,10 @@
+{
+  "id": "req_3121",
+  "at": "2026-07-16T03:01:31.787Z",
+  "origin": "session:52c7a5f2",
+  "text": "also going vertical cut -> horizontal does exactly what it needs to, so yeah the inverse of it is broken for whatever reason",
+  "status": "new",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": []
+}

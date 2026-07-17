@@ -1,0 +1,30 @@
+{
+  "id": "req_3085",
+  "at": "2026-07-15T22:00:46.432Z",
+  "origin": "session:d343a38a",
+  "text": "hey so i have this 5 slider deej homemade thing and im wondering how, if at all, could we map it to something like brush sizes inside of the @cart/editor/ if thats even possible; because it is not a digital dial and is physical, i would have to behave in a way where it can fall back to not being enforced through the interface obviously but idk if the part where u enforce it thru the interface is possible. i assume its gotta be a like to the midi controller we have",
+  "status": "review",
+  "sessionId": "d343a38a-08cf-41da-9057-f221ff0845ff",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T22:00:55.093Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T22:22:22.555Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Built the full deej vertical: framework/deej.zig reads the homemade 5-fader board as plain POSIX serial (no MIDI/ALSA needed — deej boards print |-separated 10-bit values over /dev/ttyACM*), with a movement-only contract so the physical faders never fight the UI: events fire only when a fader physically moves past the jitter threshold, the first line after connect is a silent baseline, and no board = zero events with the interface exactly as before (the fallback you asked about IS the design). __deej_* bindings + has-deej ingredient flip source-driven from the new runtime/hooks/useDeej.ts door; in cart/editor, fader 1 drives brush size (1..128, same range as the toolbar slider) and fader 2 drives flow while a paint surface is up. Verified with 6 parser unit tests, a live pty fake-board harness, and headless shots with and without a board. Faders 3-5 left unmapped pending your pick. NOTE: user is not in the dialout group — needs 'sudo usermod -aG dialout $USER' + relogin before the real board is readable, and the deej desktop volume app must not hold the port at the same time (serial is single-consumer).",
+  "shas": [
+    "7983847a8"
+  ],
+  "resolvedAt": "2026-07-15T22:22:22.555Z"
+}

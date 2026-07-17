@@ -1,0 +1,17 @@
+{
+  "id": "req_2944",
+  "at": "2026-07-11T05:50:37.652Z",
+  "origin": "one-off",
+  "text": "huh here is one thing though im confused with the whole no js, is why do they have these prs at all then for like 'add angular frontend example' [Image #1] ? or solidjs example",
+  "status": "new",
+  "sessionId": "c40fbd82-74ab-4155-9300-ccab3dd575f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T05:50:53.486Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

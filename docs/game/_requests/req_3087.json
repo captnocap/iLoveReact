@@ -1,0 +1,24 @@
+{
+  "id": "req_3087",
+  "at": "2026-07-15T22:24:57.875Z",
+  "origin": "one-off",
+  "text": "hey how does this happen :? logically dont make much sense to me, the vertex (that green dot) is pulled in and this is a plane, so there is no other side of it [Image #1]",
+  "status": "doing",
+  "sessionId": "b576d07d-61be-455b-8ed9-6cb9767d291a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T22:25:23.981Z",
+      "actor": "fable-mesh",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T22:27:46.117Z",
+      "actor": "fable-mesh",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

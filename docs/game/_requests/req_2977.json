@@ -1,0 +1,28 @@
+{
+  "id": "req_2977",
+  "at": "2026-07-11T23:44:26.526Z",
+  "origin": "codex:019f5351",
+  "text": "ah ha. that is it. the ] button has brought this into view. I have literally never seen this before lol.",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T23:44:35.511Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T23:44:35.811Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Recorded the user's visual confirmation that pressing ] on the world surface changes the floor and reveals Section D's conditional Map command group, including the previously unseen Trigger/Spawn controls. This promotes the finding from statically reachable/unverified to observed conditional UI. It also establishes a separate UX defect: Section D silently changes command families based on prior command/menu state, with no visible mode selector or explanation, so an unrelated floor-cycle hotkey exposes a toolbar the user had never discovered. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-11T23:44:35.810Z"
+}

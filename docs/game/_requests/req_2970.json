@@ -1,0 +1,18 @@
+{
+  "id": "req_2970",
+  "at": "2026-07-11T23:03:55.971Z",
+  "origin": "session:2b395d6a",
+  "text": "Hey heres what i need you to do, basically, inside of @cart/editor/ i want you to logically think about the ui in blocks, blocks meaning a horizontal slice (that may have varying vertical height) of the ui, here is some examples. the 'Shitty Games' + File Menu + Compile/Editor/Play buttons, is one horizontal slice. then the vertical stack of buttons that have the eye, the grid cube, player icon on them etc, is another horizontal slice. the slice has nothing to do with its width in pixels and has to do with how the ui flows. from a rough guesstimation from just looking, there are what look to be like 8 of these areas. why does any of this matter: i am sick and tired of trying to point out a specific area of the ui that i want something to land in, or what have you, so we are going to recategorize everything by a section number so prompting can turn into 'add that to section C' and not 'add that to the tool bar that sits above this part....'",
+  "status": "doing",
+  "sessionId": "2b395d6a-e693-48f5-a812-7f6c22a79a84",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T23:04:06.865Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

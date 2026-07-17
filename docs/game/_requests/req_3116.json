@@ -1,0 +1,17 @@
+{
+  "id": "req_3116",
+  "at": "2026-07-16T02:50:21.343Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>beekqf4cc</task-id>\n<tool-use-id>toolu_01WDshf86sLoSbFKS3RWPxLj</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/310b58c9-c7e9-4356-bf8b-7511be2e77d8/tasks/beekqf4cc.output</output-file>\n<status>completed</status>\n<summary>Background command \"Launch codex (terra) on the extrude-focus spec\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "310b58c9-c7e9-4356-bf8b-7511be2e77d8",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T02:50:33.374Z",
+      "actor": "session-310b",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

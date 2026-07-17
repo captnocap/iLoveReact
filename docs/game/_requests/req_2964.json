@@ -1,0 +1,30 @@
+{
+  "id": "req_2964",
+  "at": "2026-07-11T13:56:40.928Z",
+  "origin": "codex:019f5176",
+  "text": "in the cart/editor in the color tool it doesnt have any way for me to type a hex in anywhere i just realized lol rip ;_;",
+  "status": "review",
+  "sessionId": "019f5176-c756-7951-870b-33df700573eb",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T13:56:46.240Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T14:03:48.913Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added direct hex editing to both Color Studio contexts: Library CURRENT updates the shared OKLCH color live, while Material Palette ACTIVE SLOT commits one undoable slot override on Enter or blur. Extracted the existing canonical paint hex behavior into a reusable validated HexColorInput, preserved ColorField behavior, and added shorthand/full-hex plus exact OKLCH round-trip coverage. Verified 23/23 paint tests and a ReleaseFast editor ship build.",
+  "shas": [
+    "c7dd2826f"
+  ],
+  "resolvedAt": "2026-07-11T14:03:48.913Z"
+}

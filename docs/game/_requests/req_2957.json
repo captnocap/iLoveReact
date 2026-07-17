@@ -1,0 +1,30 @@
+{
+  "id": "req_2957",
+  "at": "2026-07-11T08:06:21.702Z",
+  "origin": "codex:019f4fff",
+  "text": "cool looks like it worked i think, maybe u could setup some post unpack process that does a hash check to verify it all lands",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T08:06:35.064Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T08:29:18.794Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added automatic SHA-256 integrity verification to archive pack/unpack, including a per-file manifest, safe-path validation, layout verification, and explicit failure on any missing or changed restored file.",
+  "shas": [
+    "24ac04218"
+  ],
+  "resolvedAt": "2026-07-11T08:29:18.794Z"
+}

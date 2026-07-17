@@ -100,8 +100,8 @@ export interface PaintableOps {
   polygon(verts: Float32Array, value: number): void;
   /** Replace every pixel with `value`. */
   clear(value: number): void;
-  /** Replace texture contents with raw R8 bytes (length === w * h).
-   *  Used to ingest backend results (SAM, flood-fill). */
+  /** Replace texture contents with raw bytes: R8 targets take w*h, RGBA targets
+   *  take w*h*4. Used for masks and save-boundary CPU composites. */
   upload(bytes: Uint8Array): void;
   /** Block-and-readback to a CPU Uint8Array. Use at save / export
    *  boundaries only — not per frame. Returns null on failure. */

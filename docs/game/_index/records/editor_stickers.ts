@@ -41,6 +41,17 @@ export const editor_stickers: DocIndex = {
       consumers: ['cart/editor/shell/AppFrame.tsx'],
       status: 'live',
     },
+    {
+      name: 'multi-piece facade painter (Studio paint target)',
+      purpose: ['ui', 'building', 'texture_bake', 'interaction'],
+      kind: 'component',
+      sourceFile: 'cart/editor/stage/FacadePainterSurface.tsx',
+      description:
+        'req_3062/3063: shift-click establishes an explicit set of coplanar wall-family pieces; facadeFromSelection unions exactly those faces into one meter-true mural canvas (single-piece context keeps gatherFacade as a convenience). The facade document consumes the same PaintToolbar shader/color catalog, brush recipes, dynamics, resolution control, and the same PaintLayersPanel as model painting, plus durable marquee/lasso masks. Strokes persist full ink + brush + tool + meter-path recipes per layer; PNG at 256 px/m is only the regenerable world cache. Facade shader ink is sampled from a rendered Studio shader surface and applied through the universal host-generated brush coverage because plain Paintables do not own the model destination-sampling pass.',
+      dependsOn: ['runtime/paint stroke + stamp engine', 'runtime Paintable RGBA ops', 'world/facadeBake.ts'],
+      consumers: ['cart/editor/shell/AppFrame.tsx', 'cart/editor/world/livePush.ts'],
+      status: 'live',
+    },
   ],
   patterns: [
     {
@@ -54,10 +65,10 @@ export const editor_stickers: DocIndex = {
   ],
   hazards: [
     {
-      name: 'no per-stamp remove verb; facade painter unbuilt',
+      name: 'sticker paint-program follow-ups remain',
       purpose: ['ui', 'building'],
       description:
-        'Per-stamp remove verbs missing (facade stamps + quad stickers ride undo/Clear only); the facade painter SHIPPED its first slice (req_3057 — gatherFacade coplanar run, 256 px/m canvas, spray rows + free-rotation stamp rows, PNG bake cache, resident-mesh quad) but stamp-as-paint on authored-mesh atlases and the isometric cylinder unwrap (req_3052/3054 direction) remain.',
+        'Per-stamp remove verbs remain missing (legacy facade stamps + quad stickers ride undo/Clear only). The facade painter is now the shared Studio painter over an explicit multi-piece selection (req_3062/3063), but stamp-as-paint on authored-mesh atlases, the isometric cylinder unwrap (req_3052/3054 direction), and far-LoD facade baking of quad stickers remain.',
       evidence: ['docs/game/editor_stickers.md "Not yet built (follow-ups)"'],
       severity: 'medium',
     },

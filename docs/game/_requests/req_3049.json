@@ -1,0 +1,30 @@
+{
+  "id": "req_3049",
+  "at": "2026-07-14T01:53:39.767Z",
+  "origin": "session:140b94da",
+  "text": "hm. ok i dont know what to tell you with this one honestly. i restarted -> blank -> restarted -> blank -> restarted -> now it renders, and the knob is still showing through, as for the outliner being merged together, that also, is now back to normal. so i REALLY dont know what to tell you but the anomoly is a bit terrifying",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:54:36.292Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T01:58:40.929Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The terrifying anomaly explained and instrumented: the door came back because this session restored Door_Wall_1 from git between the user's second and third restart — not self-healing. The knob-through-panel returning is the v1-doc legacy glass routing (req_3043), unchanged. The actual bug — host part ranges silently cleared mid-session so the next save persists a merged-parts doc — is heisenbug-shaped, so three tripwires now name the culprit at runtime: writeMeshDoc screams when saving fewer host ranges than parts metadata declares (cart-side, hot-reloaded LIVE into the running dev host); meshEditSetPartRanges logs an empty push clearing existing ranges; journalInstall logs a rangeless snapshot restore over a parted mesh (both host-side, ride the next rebuild). Commit 74c646e70. Next: the user can retry the export while watching the terminal — either it saves correctly (door heals to v2, window-only glass) or the scream names the exact path; the broken-resave backup is in the session scratchpad for comparison.",
+  "shas": [
+    "74c646e70"
+  ],
+  "resolvedAt": "2026-07-14T01:58:40.929Z"
+}

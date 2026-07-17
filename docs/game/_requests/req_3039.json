@@ -1,0 +1,30 @@
+{
+  "id": "req_3039",
+  "at": "2026-07-14T01:14:21.475Z",
+  "origin": "codex:019f5351",
+  "text": "alright good, that is straightforward, looks good. Lets pick up the next slice",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:14:36.975Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T01:25:14.698Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed the next command-authority slice for Section D world tool arming. Select, Place Piece, Move, Focus, Paint Faces, and Place Sticker now share one framework CommandAuthority entrance across toolbar, menu, hotkey, context, automation, and remote sources; Section D's direct setState/onTool bypass and the duplicate AppFrame handlers were removed. Tool choices are report-only, idempotent, release Map Paint through the shared door, create no action ID or undo row, and append one correlated command.outcome report only on a real transition. Corrected the missing live K binding for Sticker and stopped Open Color Studio from masquerading as an armed tool. Verified editor type-check, authority tests 9/9, command/key projection tests 13/13, event tests 4/4, diff check, and full ReleaseFast editor ship.",
+  "shas": [
+    "2aaea7100"
+  ],
+  "resolvedAt": "2026-07-14T01:25:14.698Z"
+}

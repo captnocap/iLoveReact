@@ -1,0 +1,30 @@
+{
+  "id": "req_3103",
+  "at": "2026-07-15T23:53:09.090Z",
+  "origin": "codex:019f6830",
+  "text": "if another commited under ur work its fine,\n  we will figure it out, there are several\n  agents running",
+  "status": "review",
+  "sessionId": "019f6830-851f-73c1-a65c-71236542cc82",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T23:53:14.652Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T00:03:02.564Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Acknowledged shared-worktree concurrency and committed only the isolated parity-harness paths; no unrelated changes were staged.",
+  "shas": [
+    "4f2903aaa"
+  ],
+  "resolvedAt": "2026-07-16T00:03:02.564Z"
+}

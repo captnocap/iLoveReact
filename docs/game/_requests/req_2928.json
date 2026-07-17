@@ -1,0 +1,30 @@
+{
+  "id": "req_2928",
+  "at": "2026-07-10T23:04:27.218Z",
+  "origin": "session:5c62fed2",
+  "text": "in the @cart/editor/ in the mesh studio one thing im not a big fan of is this: i go to merge some faces, i turn it into glass, and then i go and turn on paint mode, the face gets a uv, and then the glass effect pretty much seems all gone, maybe it is there, its hard to really tell tho once its aquired a uv that isnt glass",
+  "status": "review",
+  "sessionId": "5c62fed2-14e8-4b4e-8a3a-c8bb59d20f99",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T23:04:44.822Z",
+      "actor": "fable-mesh-glass",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T23:25:32.807Z",
+      "actor": "fable-mesh-glass",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused why glass faces lose their translucency when paint mode turns on: glass lives ONLY in the paint-atlas alpha channel (the transparent-pass split derives from centroid texel alpha), and every paint-side writer stomped alpha to 255 — clearAtlas (fired by Create Paint Atlas), the template/solid base fills, blendTexel (every brush dab), the flat face fills, and model_source.writeColor. Fixed by making paint own RGB and glass own alpha: user paint never touches the alpha channel, so painting a glass face now yields stained glass instead of un-glassing it; the glass toggle/colour-table apply stay the only alpha writers, and loading a saved painting re-asserts glass from the source colour table after the blit. Added a 'glass' op to the RJIT_MESHOPS harness; headless proof (glass -> detail:16 -> grouppaint -> stamp) shows the painted glass island at rgba(200,60,60,87) and opaque faces at 255. zig tests 17/17, editor builds.",
+  "shas": [
+    "57b43ac64"
+  ],
+  "resolvedAt": "2026-07-10T23:25:32.806Z"
+}

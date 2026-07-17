@@ -1,0 +1,28 @@
+{
+  "id": "req_3008",
+  "at": "2026-07-13T06:58:14.102Z",
+  "origin": "codex:019f5351",
+  "text": "yeah ok we are starting to cook so before we jump in here the one last thing is you say 'document autosave is a seperate concern' and im just curious as to what that means exactly, what in the app autosave? the world ? that would make sense but that is the only one i can think of since the others have explicit save buttons. though, even when i say they have explicit save buttons, one thing is clearly true and could be in part this exact document autosave poop but  ive clearly noticed that new_mesh_* just keeps rising and rising and i literally never save anything as new_mesh_* so thats not me doing it at all i can tell you that for sure",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T06:58:20.101Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T07:00:46.185Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Traced current cart/editor durable autosave boundaries and the new_mesh_* provenance. World placements/objects/zones and world globals debounce-write automatically; native map painting atomically autosaves every mutating gesture; already-materialized models autosave only on document switch/close. Found an additional first-save boundary leak: paint-atlas creation calls writeModelArtifacts, which claims/creates a package directory before Save and can make isMaterialized treat it as saved for later switch autosave. Established that existing new_mesh_* packages are legacy hmsc-int Studio records, not names minted by the current editor: old Studio persisted a model on first part-add with a default new_mesh_NNN name, and the editor's now-removed boot migration materialized missing snapshot models. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T07:00:46.185Z"
+}

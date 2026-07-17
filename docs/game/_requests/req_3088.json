@@ -1,0 +1,17 @@
+{
+  "id": "req_3088",
+  "at": "2026-07-15T22:27:21.066Z",
+  "origin": "one-off",
+  "text": "oh lmao dude im an idiot lmao its all good, forgot i duplicated that part before i merged one of them, and the thing showing up is the part that is the exact duplicate of the thing i pulled in, sitting behind it without the pull in xD we good",
+  "status": "new",
+  "sessionId": "b576d07d-61be-455b-8ed9-6cb9767d291a",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T22:27:46.124Z",
+      "actor": "fable-mesh",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

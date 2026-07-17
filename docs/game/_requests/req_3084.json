@@ -1,0 +1,28 @@
+{
+  "id": "req_3084",
+  "at": "2026-07-15T14:19:29.643Z",
+  "origin": "codex:019f6623",
+  "text": "Hey do a investigation on the framework code, i want to know what the current gap is to do this: inside of cart/editor in the studio: make a tv -> select a face -> declare it as a screen -> export as prop -> place the prop -> render some react on it, real time, without affecting the gameplay loop. \n\nis that even possible? give me your expert opinions",
+  "status": "review",
+  "sessionId": "019f6623-acc8-7083-ac69-29c8234da278",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T14:19:37.172Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T14:26:15.240Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Investigated the active cart/editor Studio and framework end to end without changing code. Confirmed the keyed StaticSurface-to-Scene3D GPU path already supports same-frame live screen sampling, while current native face selection, RJMD v2/model manifests, prop cook/placement records, and world-loader bindings do not preserve a semantic screen slot. Also traced V8 timers, host-tree rebuilds, and wall-clock gameplay stepping, establishing that strict zero-impact 60 Hz React screens are not possible today. Prepared a Zig-native surface-slot, channel registry, dirty/budgeted scheduling, and ship-path recommendation.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T14:26:15.240Z"
+}

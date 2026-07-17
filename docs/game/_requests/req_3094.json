@@ -1,0 +1,28 @@
+{
+  "id": "req_3094",
+  "at": "2026-07-15T23:37:15.062Z",
+  "origin": "codex:019f5351",
+  "text": "ok uh, is there another slice after this one to match it or  am i misunderstanding something. i was expecting this to have brought like i make an edit -> it shows the edit in the event bus, but it seems to be still seperate, i could be ahead of myself though",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T23:37:21.116Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T23:37:33.349Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Clarified the delivered boundary against the live code: req_3081 instruments only five metadata-only Outliner actions (part rename, group, ungroup, group rename, dissolve). Those must emit model.structure immediately. Geometry/native mesh edits—including gizmo moves, topology, add/import, duplicate/mirror, visibility, delete, detach, merge, and paint—remain outside the authority/eventbus until the following native mesh slice. No code changed for this clarification.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T23:37:33.349Z"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "req_3151",
+  "at": "2026-07-17T03:29:34.261Z",
+  "origin": "session:10510dac",
+  "text": "cool well im actually gonna go eat some dinner so u can prep right now actually while i do that and we can relink after the matter",
+  "status": "doing",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T03:30:17.843Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

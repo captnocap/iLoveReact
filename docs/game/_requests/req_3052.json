@@ -1,0 +1,28 @@
+{
+  "id": "req_3052",
+  "at": "2026-07-14T02:20:26.652Z",
+  "origin": "session:6e4cf495",
+  "text": "hm. ok so i guess let me ask how do we make this like absurdly realisitc in the sense of, like an end goal would hopefully let me be able to place sticks at any rotation, on any curvature of a surface, so i could you know put on a phone pole and it wraps it and doesnt just flat face it. i mean it might just be its not even a plane at all, its just a graffiti layer that basically is a stamp. i think we can only solve this at the paint level but i also know the one thing regardless that is real engineering here is to be able to correctly bend the image when it hits a curve like a pole",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T02:21:08.644Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T02:21:43.384Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the absurdly-realistic-stickers design question. Confirmed the user's instinct: the end state is that a sticker stops being geometry — it becomes a STAMP stroke-kind in the paint program, rasterized into the target's paint atlas (authored models already have meter-proportional atlases; facades get the ruled 256 px/m canvas), stored as one row {stickerRef, anchor, rotation, scale} per the paint-program ruling and replayed at load. This dissolves the z-index problem (paint has no z; program order = stack order), unlocks free rotation (rasterizer sample transform vs the quad path's quarter turns), and makes LoD free (atlas mips). The named real engineering: curvature handling via SURFACE WALKING (geodesic roll-on from the contact point — arc length across the sticker = arc length along the surface, so a sticker wraps a pole like reality; planar decal projection rejected as the smear-on-poles wrong answer). Lands Zig-first as a stamp op in model_paint/paintable next to dab/fill. Sequencing: facade painter (flat stamp-as-paint) then the surface walk for curvature; today's quad placements convert one-for-one to stamp rows, quads remain as the live drag preview. No code — design for greenlight.",
+  "shas": [],
+  "resolvedAt": "2026-07-14T02:21:43.384Z"
+}

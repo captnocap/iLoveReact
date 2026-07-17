@@ -1,0 +1,28 @@
+{
+  "id": "req_2988",
+  "at": "2026-07-13T03:17:16.282Z",
+  "origin": "codex:019f5351",
+  "text": "That looks right, problem though is 2d/3d buttons are literally dead / its always just 3d. also; and this is where a number of the first auditing starts to fold in, and there is no reason to go all in on one side of it just to come back and gut the problems. So we start with section D; \n\ninstant call outs here: 2d/3d buttons are dead, do nothing, and have never had any plan nto anyway, its always been 3d. 2d is ai hallucination \nsample material, does literally fuck all, and also doesnt really make any sense for the state that is loaded, and then even in a state where it might be appropriate it has no reason to be decoupled apart from color/shader painting control. \nSpeaking of painting control, have you noticed that yes this Section D literaly has 3 buttons that have the word paint in them. So one thing to clarify here is i clearly am aware of what map paint is, but what is the difference here between paint faces and paint material",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T03:18:02.797Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T03:59:52.325Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed a read-only Section D trace before migration. Confirmed 2D/3D is dead state theater: both controls only change viewMode while Section E always mounts the same 3D world surface. Confirmed Sample Material and Paint Material are dead/miswired legacy-object operations: Section D only changes selected tool state, their viewport behavior falls through to Select, and their menu/hotkey handlers read or mutate the retired objects array rather than visible worldPieces. Paint Faces is the one real placed-piece material tool: it raycasts a touched face, resolves a semantic slot, writes the active material into worldPieces, updates live rendering, and records undo. Map Paint is independently real map/terrain authoring. Recommended removing 2D/3D, Sample Material, and Paint Material before authority migration; retain Paint Faces but migrate it as one stroke transaction because it currently creates one undo entry per touched face and emits no authoring outcome.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T03:59:52.325Z"
+}

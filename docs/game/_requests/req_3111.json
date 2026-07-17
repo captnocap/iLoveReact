@@ -1,0 +1,28 @@
+{
+  "id": "req_3111",
+  "at": "2026-07-16T02:40:06.417Z",
+  "origin": "session:52c7a5f2",
+  "text": "hm. curious why that matters because wouldnt like if i just end up making some arbitrary model, that is far more 'complex' than a cylinder, is that to say if im expecting my loop to go through end to end i might hit one of these 'end caps' ?",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T02:40:48.840Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T02:40:48.849Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's conceptual question about loop cuts on arbitrary models: yes — ANY non-quad face ends a topological loop (opposite-edge exit only exists on quads), so complex models will hit dead ends, and the editor's own ops manufacture them (merge-faces creates big n-gons; imported/genmesh meshes are raw triangles where no loops exist). Noted this is the same limitation in Blender/Maya and why quad topology is a modeling discipline there. Recommended the design that removes the burden from the user: (1) even-sided n-gon crossing as the default walk (covers caps and merged rectangular regions), plus (2) a 'through' toggle on the loop-cut popup that switches to a geometric slice along the previewed cut line through everything in the path — the old studio's always-through semantics as an explicit per-use choice, guaranteeing end-to-end cuts on any topology. Q&A only; awaiting the user's word on building it.",
+  "shas": [],
+  "resolvedAt": "2026-07-16T02:40:48.849Z"
+}

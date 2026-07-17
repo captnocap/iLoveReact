@@ -1,0 +1,30 @@
+{
+  "id": "req_3064",
+  "at": "2026-07-15T05:15:03.538Z",
+  "origin": "session:8a9444e4",
+  "text": "hey uh so here is some mesh [Image #23] and some of its vertex [Image #24] at this angle. and well, so the vertex dots, look to all be on the same axis, but if u then turn it [Image #25] u can see it has some problems of staying on the same plane. which is my own fault, but its hard to interpret the depth from the one side, so i was wondering how we could fix that. and i think the answer is inside of just using the vertex dots in tandem with coloring them, based on depth. being, anything that is on the same depth all has the same color of vertex. that way i can immediately see when its not.",
+  "status": "review",
+  "sessionId": "8a9444e4-b0de-499e-8a2d-cfc00e09d013",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T05:15:14.663Z",
+      "actor": "fable-vertexdepth",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T05:20:32.773Z",
+      "actor": "fable-vertexdepth",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Depth-coded vertex dots in the mesh studio (framework/gpu/3d.zig drawEditorOverlay). Unselected vertex dots now take their fill colour from camera-space depth: verts at the exact same view depth share the exact same colour, so a vert off the plane reads immediately as the odd colour out from the flat-on view — no orbiting needed to spot it. Hue cycles once per 0.25m of depth so ~1cm of drift is a visible hue step; anchored at the orbit target so zooming doesn't reshuffle colours. Selected dots stay orange+bigger. Zig change — needs a dev-host rebuild to show.",
+  "shas": [
+    "8f0348425"
+  ],
+  "resolvedAt": "2026-07-15T05:20:32.773Z"
+}

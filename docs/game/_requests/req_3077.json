@@ -1,0 +1,28 @@
+{
+  "id": "req_3077",
+  "at": "2026-07-15T12:34:39.966Z",
+  "origin": "session:52c7a5f2",
+  "text": "yeah i know actually the thing that is annoying is this isnt the first or second or third or even fourth time there has been enough of a mismatch in the 'port' that its significant and it shows up every time. the thing is that i have a hard time understanding is either what is being written in zig is more of a normal or something approach, the models weights pull towards doing it that way, that or its a matter of incapability to follow directions. IDK what it is exactly but its frustrating lol",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T12:35:09.851Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T12:37:51.491Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the user's meta-question about why the 'port' keeps mismatching: diagnosed it as substrate gravity, not Zig idiom or failure to understand — the native resident-mesh model (triangle soup + group ids) makes shortcut re-expressions one line (regroup) while reference behavior (real topology work) is expensive, and with no enforced parity contract the same model lands the same tradeoff in every parallel session (Zig comments prove awareness: 'the old studio's merge faces expressed as pure grouping'). Each prior symptom report (req_2794/2837/3037) got a local patch instead of a return to reference semantics. Proposed the structural fix: a parity harness diffing the pure headless TS reference (editMesh.ts) against native ops on irregular meshes — observable contract (selectable faces, pickable edges, cut placement), to land with the solidify/merge/loopcut parity pass on the user's go. Saved the ruling as memory feedback_port_means_parity_contract.md + MEMORY.md index line (also compacted the index 19.7KB→under limit per hook).",
+  "shas": [],
+  "resolvedAt": "2026-07-15T12:37:51.490Z"
+}

@@ -1,0 +1,31 @@
+{
+  "id": "req_3041",
+  "at": "2026-07-14T01:26:59.076Z",
+  "origin": "session:6e4cf495",
+  "text": "<task-notification>\n<task-id>bmdbvud2h</task-id>\n<tool-use-id>toolu_01ELb8KTDx4XSpe2A5Bes3jz</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/54e620c2-839a-4d1b-89bb-d585b2326ecf/tasks/bmdbvud2h.output</output-file>\n<status>completed</status>\n<summary>Background command \"Rebuild editor and verify sticker_quad lands in binary\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:28:08.513Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T01:34:56.175Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed the loader split's missing cleanup (commit 3e9ed7a69, -9806 lines). The Jul 11 split (84460c9cd + parity tests 1630a540e) left every consumer importing the root monolith, so framework/world_loader/ edits compiled silently into nothing — my req_3028 sticker fix AND d6880d1ba's live_inputs change were both dead on arrival. Cut over all four import sites (v8_app.zig, v8_bindings_compiled_world.zig, engine.zig, gpu/world_window.zig) to the framework/world_loader.zig facade, retargeted rjit game's LOADER_SOURCE, dropped the deleted root from the dev-build fingerprint list, rebundled tools/rjit.js, and DELETED world_loader.zig (git history keeps the comparator; README records the retirement + baseline sha). Verification chain: test-world-loader parity green, full editor ship compiles against the facade, binary string-probe shows sticker_quad(2)+grass-blade(1), and rjit shot editor boots and renders the world headless PASS — the flat sticker quad is visibly live in the shot. One dev-host restart picks all of this up.",
+  "shas": [
+    "3e9ed7a69",
+    "291d8f8fd"
+  ],
+  "resolvedAt": "2026-07-14T01:34:56.175Z"
+}

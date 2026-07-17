@@ -1,0 +1,28 @@
+{
+  "id": "req_3002",
+  "at": "2026-07-13T05:25:18.825Z",
+  "origin": "codex:019f5351",
+  "text": "hm. so this is something i know nothing about at all, but this so called thing as state, it behaves in blobs generally or is that just someones choice to do in such a manner or what? the only reason is that, its kinda like the whole same fundamental problem that people seem to think is like some black magic of layout and then they bend over to paying all the tax, recalculate every node on every frame and pray that their static logo wont somehow change. like, uh ok so what im trying to get at here is 217 call sites reads to me that there is a blob of 217 keys, but what the fuck is even in the 217 because like how much of any of that is relevant for what i can actually literally have loaded in the app at one time",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T05:25:24.018Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T05:26:33.101Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Explained and verified the editor's state granularity. The 217 figure is mutation call sites, not keys; EditorState has 75 top-level fields, several nested stores. Confirmed the blob is an application choice inherited from the old design-mock MockState, not an inherent React/state behavior. The active Stage mounts exactly one of world/model/playtest/animation/material, while all mutually exclusive domains remain coupled in one root object passed wholesale into Sections A/C/E/G/H. Clarified the actual cost boundary: root spread is shallow, but AppFrame and un-memoized children re-execute and the persistence effect JSON-stringifies/traverses the broad reachable object after every update; host/layout need not necessarily rebuild every node. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T05:26:33.101Z"
+}

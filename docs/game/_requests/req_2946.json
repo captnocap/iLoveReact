@@ -1,0 +1,17 @@
+{
+  "id": "req_2946",
+  "at": "2026-07-11T06:04:00.180Z",
+  "origin": "one-off",
+  "text": "yeah idk man the webview part of it kinda got me fucked up man not gonna lie maybe its all the work done here to literally avoid old browser code but idk man so what they released basically a tkinter for zig and a tauri wrapper effectively",
+  "status": "new",
+  "sessionId": "c40fbd82-74ab-4155-9300-ccab3dd575f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T06:04:19.702Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

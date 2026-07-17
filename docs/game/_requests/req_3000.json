@@ -1,0 +1,28 @@
+{
+  "id": "req_3000",
+  "at": "2026-07-13T05:14:34.048Z",
+  "origin": "codex:019f5351",
+  "text": "right yeah ok so the reason why it just is very 'alarming' to me is, uh that the hot_state code has been around for quite a while, like way before this cart was ever started, and has been applied correctly in every other case its been asked for so when we now hit this unexpected problem it just makes me ask how did anyone get it wrong. From my understanding and your totally fine to say im wrong but anywhere there is a useState all it had to be is a useHotState, thats it",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T05:14:45.458Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T05:15:19.220Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Verified the user's understanding against runtime/hooks/useHotState and established repo usage. useHotState is intentionally a useState-shaped replacement for a specific JSON-serializable atom that should survive a JS hot reload, with a stable key; prior editor usage follows this directly for selMode, texView, brush, tool, active layer, paint recents, etc. The caveat is that transient/high-frequency preview state, non-serializable host state, and durable authored project truth should not all become hot atoms. cart/editor departed because AppFrame already held a monolithic EditorState useState; the req_2250 worker avoided splitting it into named view atoms and instead added a [state] effect that mirrored the whole object. Simply changing that monolithic useState to useHotState would retain the same whole-object rewrite problem. Correct repair is to split the state: small navigation/tool-holding leaves useHotState; drag previews use local state/ref and publish the settled choice; authored content stays behind its durable authority/store. Also noted active ModelView still manually mirrors a small ToolTwig via an effect, which is narrower but color drag currently wakes it too. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T05:15:19.220Z"
+}

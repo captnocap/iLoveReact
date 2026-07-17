@@ -98,6 +98,14 @@ export default function ToolOptions(props: {
     );
   }
 
+  if (activeDoc.kind === 'facade') {
+    return (
+      <C.HW_ToolOptions>
+        {props.paintBar}
+      </C.HW_ToolOptions>
+    );
+  }
+
   // Map Paint is a tool toggle segment, not a replacement toolbar. Keep the
   // world action bar visible while the viewport dock owns paint options.
   const mapPaint = props.state.mapPaint;

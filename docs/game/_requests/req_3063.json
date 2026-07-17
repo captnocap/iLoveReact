@@ -1,0 +1,30 @@
+{
+  "id": "req_3063",
+  "at": "2026-07-14T10:08:52.205Z",
+  "origin": "session:6e4cf495",
+  "text": "alright well i wont beat the dead horse if you arnt just going to go and do it then pass it over in a /hand-over because memories are not good for anything when the code isnt right, there isnt anything for me to do with it because its not in any workable state",
+  "status": "doing",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T10:09:22.809Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T10:11:25.100Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Handoff produced per the user's word: /tmp/handoff-20260714-100937-facade-painter-rework-studio-paint-dock-multi-piece-selectio.md — the full rework brief (studio paint dock + shader inks + layers + lasso on the facade canvas, shift-click multi-piece selection, full-recipe stroke rows) with every seam, file, ruling, and gotcha the next session needs to execute without re-prompting. req_3062/req_3063 stay doing for the executing session to move to review."
+    },
+    {
+      "at": "2026-07-14T14:32:23.027Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Rework in progress: facade strokes now carry Studio ink + brush recipes inside durable layers; shader inks use captured shader pixels composited through the host-generated Paintable brush mask, preserving the one brush-footprint engine."
+    }
+  ]
+}

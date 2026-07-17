@@ -1,0 +1,37 @@
+{
+  "id": "req_2968",
+  "at": "2026-07-11T22:51:34.469Z",
+  "origin": "codex:019f5349",
+  "text": "oh and, as you find the time for it, make that world_loader directory you are constructing, exist inside of the framework/ directory, so it can stop behaving like it isnt apart of the entire framework here, because it is just as much as anything else",
+  "status": "review",
+  "sessionId": "019f5349-8a7e-7a40-8bfd-9ab10724bcac",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T22:51:40.349Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T23:06:30.997Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Moved the complete replacement implementation into framework/world_loader/ with framework/world_loader.zig as its public entrypoint; no replacement implementation remains at repository root, and the legacy top-level world_loader.zig is byte-identical to baseline."
+    },
+    {
+      "at": "2026-07-11T23:07:20.080Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Placed the complete replacement at framework/world_loader.zig and framework/world_loader/, making it an explicit part of the framework tier. The framework facade owns the same 37 public loader declarations while the implementation directory owns the focused subsystems; no replacement implementation remains at repository root, and the original root world_loader.zig was not edited.",
+  "shas": [
+    "84460c9cdb3b43e9557b87aa3c2020e66a9a32c5",
+    "1630a540ecd90e3ecfbd1a064432567362ea9606"
+  ],
+  "resolvedAt": "2026-07-11T23:07:20.080Z"
+}

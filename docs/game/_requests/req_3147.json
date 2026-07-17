@@ -1,0 +1,18 @@
+{
+  "id": "req_3147",
+  "at": "2026-07-17T03:14:05.335Z",
+  "origin": "session:10510dac",
+  "text": "yeah thats actually true. it quite litearlly said hack in the note. huh well anyways uh anything worth persuing from any of that.  oh also, how about while u answer that one answer me this one: when do we, if ever (?) do the migration from 15.2 to 16 in zig,  because, uh, ok i literally remember the day where we started the zig code. i downloaded the 0.16 release, for whatever reason claude couldnt seem to get ito to hit path or something. but then just had told me to install from linuxbrew. so it is probably the most not by any real decision other than the split second 'try from here' but uh i mean it works. but also how forward thinking is that? when WOULD it be come a problem if it will become one at all. odds are, il likely keep using the same project even past the game, for other projects, because i hate browsers on god lol so yeah whats ur thoughts",
+  "status": "doing",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-17T03:14:47.402Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3023",
+  "at": "2026-07-13T16:06:53.262Z",
+  "origin": "session:6e4cf495",
+  "text": "any areas we can save on memory before we do any of it at all upfront without sacrificing the output. I mean, the design fidelity is basically that of mspaint when it comes to my capability, but i dont know. Just wanto to be sure, that the overall total memory will not shit the bed on the scale in which we are looking to build this thing at. though maybe it doesnt matter, we arent loading every single one of them into memory unless the world is literally only 1 chunk, right? or does that not matter for this at all oh and so stickers are one thing that we can also instrument LoD with and rather 'aggresively' since no one can see a exactly what a sticker is from even across a street IRL so like maybe the plan is to just give it that low threshold to fall back and memory is less of a problem anyways ?",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T16:07:28.755Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T16:08:16.438Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Answered the memory-scaling question for the sticker/graffiti system before any build. Chunks already stream by radius+LOD+frustum (V31 cache units) so resident cost is bounded by radius, never world size; baked paint textures are cache replayed from stroke programs on stream-in per the paint ruling. Upfront zero-fidelity-loss savings identified, aligned with V29's ruled win hierarchy: palette-indexed textures (user's flat-color art quantizes losslessly to 1 byte or 4 bits/px — 4-8x cut; pixel-texture ShaderSpec + __imageops_quantize already exist), reference-not-embed (memory scales with unique designs near you, not placements), sparse canvases (unpainted walls allocate nothing, painted facades only their touched tiles). Confirmed the user's aggressive sticker LoD instinct with a free implementation: sticker placements bake into the 256px/m facade canvas (26 texels for a 10cm sticker = exactly the across-the-street look), crisp own-texture quads spawn only within ~20m — the far LoD is pixels in a texture already paid for. Design-phase answer only, no code.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T16:08:16.438Z"
+}

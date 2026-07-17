@@ -1,0 +1,30 @@
+{
+  "id": "req_3059",
+  "at": "2026-07-14T02:53:46.920Z",
+  "origin": "codex:019f5351",
+  "text": "yep that all landed great nice one lets hit the next slice",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T02:54:01.228Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T03:12:51.692Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed the next command-authority slice. World piece material assign/clear now use stable commands and one exact transaction across Section D Paint Faces, the Inspector, context menu, and headless/remote invocation. A whole face-paint pointer gesture batches into one authored action, one undo entry, and one typed piece.material report. Removed the per-instance override controls because the loader never consumed their stored values. Sticker stamping remains intentionally separate because first use also materializes a project asset. Verification: 58 focused command/transaction/event tests passed; SHIP_RUN_PACKAGE=0 ./tools/rjit ship editor passed in ReleaseFast.",
+  "shas": [
+    "486d74e83"
+  ],
+  "resolvedAt": "2026-07-14T03:12:51.692Z"
+}

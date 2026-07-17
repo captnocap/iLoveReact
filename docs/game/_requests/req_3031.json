@@ -1,0 +1,28 @@
+{
+  "id": "req_3031",
+  "at": "2026-07-14T00:28:53.304Z",
+  "origin": "session:140b94da",
+  "text": "i see so the entirety of the model when on the stage here is just a linear array and not keyed to the outliner? just seems to be the most fragile approach if so, why wouldit it be \"0\":[],\"1\":[].......",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T00:29:32.099Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T00:30:09.781Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Design question, answered with an assessment (no code change): explained that the stage model is one flat triangle-soup buffer + per-face authored group ids (n-gon identity) with outliner parts as [lo,hi) SPANS over that id space — ownership is an arithmetic convention, which is the fragility req_3029 exposed. Explained why the flat buffer is load-bearing (GPU/paint/weld/cross-part ops) and why keyed face lists would be worse (face indices are positional and shift every topo op). Recommended the robust rework if this bites again: an explicit group→part table replacing spans, making overlap unrepresentable; partIndexOf/renormalize already centralize the lookup so it is localized in concept but touches every grouping op, journal, meshdoc serialization, and the __mesh_part_ranges cart mirror. Deferred pending the user's word.",
+  "shas": [],
+  "resolvedAt": "2026-07-14T00:30:09.781Z"
+}

@@ -1,0 +1,43 @@
+{
+  "id": "req_3025",
+  "at": "2026-07-13T19:11:00.780Z",
+  "origin": "session:6e4cf495",
+  "text": "cool. well uh lets do it. oh, one thing and this is key, so the last app  said a imported image as a texture could just live whilly nilly anywhere it wanted to on disk, and that is just bad. the flow should be a formal approach of importing images, those imports become a duplication of the original, and then is stored with the rest of the assets appropriately",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T19:11:37.501Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T19:34:58.264Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "Sticker system v1 shipped in three commits: foundation (stickerStore + StickerPlacement + skin-box quads + rotatePackedTexture, 9 tests), the Place Sticker tool (K, sticker rail in the action bar, undoable stamps), and the game-docs pair. Formal import flow verified already-honored by texturePackage.ts (bytes copied at import, original path never referenced again). Facade painter is the next arc."
+    },
+    {
+      "at": "2026-07-13T19:35:18.854Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    },
+    {
+      "at": "2026-07-13T19:35:32.585Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "sha correction: the three req_3025 commits are 7b9875f39,c6899bd2f,c8700b6cd (docs, tool, foundation) — the earlier --shas listed 4fa2948f1 in error (that is the prior HEAD)."
+    }
+  ],
+  "resolution": "Shipped sticker system v1 (three commits: 4bd5a-foundation/c6899-tool/docs — see git log, all citing req_3025). The KEY constraint was already honored: the formal import flow exists in texturePackage.ts — imported images are copied into cart/editor/data/textures/<slug>/ self-contained packages at import, the original path never referenced again; verified end-to-end through ImportImageDialog. Built on top: sticker assets (data/stickers/<slug>/manifest.json = texture ref + meter footprint, 4x6 thermal-label default, materialized on first stamp of any imported texture), StickerPlacement rows on PlacedPiece (piece-local anchor+normal, ride move/delete/undo, persist with the map), rendering as thin skin-box quads through the existing live-skin door with rotation baked into the packed pixel data (zero new Zig, hot-reloads), and the Place Sticker world tool (K) with an action-bar sticker rail (swatches/rotate/scale). 9 unit tests prove the stamp-render round-trip; game docs + index record added. NOT yet built: the multi-piece facade painter at 256 px/m (graffiti strokes) — flagged as the next arc; sticker removal currently rides undo only.",
+  "shas": [
+    "4fa2948f1",
+    "c6899bd2f"
+  ],
+  "resolvedAt": "2026-07-13T19:35:18.853Z"
+}

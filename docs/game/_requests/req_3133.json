@@ -1,0 +1,30 @@
+{
+  "id": "req_3133",
+  "at": "2026-07-16T06:18:01.901Z",
+  "origin": "session:da1f4e92",
+  "text": "ok hey uh i just noticed when i did the same to a nug model i have, the model was generated from code, it has something like 25k faces, so i decimated it to hell so i could paint it reasonably. and that worked well, but when i exported it into the game, it is coming back at full tris, not the decimation. does the decimated mesh when exported even carry it? [Image #11]",
+  "status": "review",
+  "sessionId": "da1f4e92-6930-441f-be60-478103cbcdb0",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T06:18:26.446Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T06:28:07.473Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused why the decimated nug placed at full tris: the quality slider is a DISPLAY projection (model_source.zig retains the full-res source; doc.blob saves full-res by design so quality stays reversible), and the placement resolver renders the doc with the painting's UVs rebound onto it — a painted.blob saved at decimated quality can't bind (vertex count mismatch), so the placement dropped the painting AND drew all 25k source faces (the white unpainted nug in the screenshot). Fix: save now stamps mesh/painted.json with the doc revision it was written beside; at placement, a count-mismatched painted form with a CURRENT stamp is recognized as the displayed decimated look and becomes the render geometry (ground-rebased), while the full-res doc keeps owning collision bands. Stale/absent stamp keeps the req_2832 stale-paint rule — no regression. Pure JS (hot-reloads, no host rebuild). The nug needs ONE re-save in the model editor to gain its stamp, then re-place/reload. Doc + index record added (editor_painted_placements); skins/doors still full-quality-gated, flagged as hazard.",
+  "shas": [
+    "bc9ccdd09"
+  ],
+  "resolvedAt": "2026-07-16T06:28:07.473Z"
+}

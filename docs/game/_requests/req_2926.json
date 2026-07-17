@@ -1,0 +1,31 @@
+{
+  "id": "req_2926",
+  "at": "2026-07-10T21:28:35.426Z",
+  "origin": "codex:019f4d0a",
+  "text": "well and so, let me give you my logic here because i did some math, i have been making my pieces in the 1/16th tile scale, knowing that a car lane is ~3 tiles, and so that means if i author the bridge pieces and such at this scale, i know how many nudges it takes to properly scale it to size, being, the entire model would then take 48 to regain its width and depth; the main reason for this was just that the camera would be a real pain in the ass to try and handle a bridge at scale up front",
+  "status": "review",
+  "sessionId": "019f4d0a-cfab-7890-bae5-c97ef7029c98",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-10T21:28:42.242Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-10T21:42:27.713Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Made bridge path sizing respect the miniature authoring workflow. Rise and XYZ points use the editor's ruled u scale (16 u per tile), the source X/Z spans are measured from the live edited mesh, and the dialog includes a non-mutating x1/x16/x48 world-size readout so a bridge can stay camera-friendly until its final uniform scale.",
+  "shas": [
+    "60307057f",
+    "3e7e0ccbf"
+  ],
+  "resolvedAt": "2026-07-10T21:42:27.713Z"
+}

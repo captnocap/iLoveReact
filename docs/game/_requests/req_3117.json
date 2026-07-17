@@ -1,0 +1,28 @@
+{
+  "id": "req_3117",
+  "at": "2026-07-16T02:54:11.732Z",
+  "origin": "session:52c7a5f2",
+  "text": "oh whoops didnt mean to stop u thought i had focus in another chat",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T02:55:19.947Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T02:55:19.955Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Accidental interruption acknowledged by the user (focus in another chat); resumed the in-flight step verbatim — bumped the verify gate to 16 parity rows and launched the full gate run in background. No behavior change beyond the req_3115 work already in flight.",
+  "shas": [],
+  "resolvedAt": "2026-07-16T02:55:19.954Z"
+}

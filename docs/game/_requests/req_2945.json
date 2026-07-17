@@ -1,0 +1,17 @@
+{
+  "id": "req_2945",
+  "at": "2026-07-11T06:00:03.873Z",
+  "origin": "one-off",
+  "text": "lmao a sick thought in my mind said just go pr all of reactjit into a 'readme update' xD",
+  "status": "new",
+  "sessionId": "c40fbd82-74ab-4155-9300-ccab3dd575f3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T06:00:13.506Z",
+      "actor": "fable-main",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

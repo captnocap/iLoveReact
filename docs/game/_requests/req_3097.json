@@ -1,0 +1,30 @@
+{
+  "id": "req_3097",
+  "at": "2026-07-15T23:46:39.608Z",
+  "origin": "session:0fb168bf",
+  "text": "here is a image of gimps color picker [Image #2] here is an image of ours [Image #3] ours is a royal pain in my ass. but the ramp feature for color is nice. past that, ours also has shaders. [Image #4] which gimp clearly doesnt put in here in theirs. alright so what can we do to make this stop being a real pain in the ass. \n\nwhy is it a pain in the ass\n\nthe html hex is literally overlapping other text, the saved key is literally fake. the scene colors have nothing to do with the scene, there is no just raw history of color so if u use one, never save it, get fucked. color picking does absolutely nothing. and then the shaders page, lmao. no search so its impossible to find anything, every page has 20 on it but grouping makes it split between sometimes 4 rows sometimes 6-7-8 rows. if u click one to use it, close the menu, and then re open it, you start back at the front of the choices. its basically the most un-friendly user-fracing color picking component ive ever used tbf. it is effectively doing whatever it can to make the flow complete asshole on god no cap fr fr 100",
+  "status": "review",
+  "sessionId": "0fb168bf-faba-4dae-8894-076ef2494e51",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T23:47:01.234Z",
+      "actor": "fable-0fb1",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T00:13:48.351Z",
+      "actor": "fable-0fb1",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Rebuilt the ink popover around real mechanisms, every named defect addressed. (1) The hex field no longer overlaps the color name — the CURRENT header is two rows. (2) SAVED is real: the three fake seed colors are deleted and SAVED plus a new RECENT raw use-history persist to zig-out/game/editor/color-library.json (new colorLibraryStore, globalsStore pattern, loaded at boot, debounced micro-save). (3) RECENT records every committed color select (map, hex, tray, fits/ramp/sets, scene, eyedropper) newest-first, deduped, cap 14 — use a color and it is never lost. (4) SCENE is the actual scene now: new __model_atlas_palette host door histograms the live paint atlas for its dominant colors; the section hides when nothing is adopted for paint. (5) The eyedropper works: new __model_paint_sample host door (raycast + atlas texel read, tint-lifted); ModelView click/drag-samples and the facade painter routes through the same announce global into the spine. (6) Shader browser: search over all 400+ specs, fixed 5-wide grid so pages stop running 4-8 ragged rows, group names as one caption line + tooltips, and tab/page/search survive close/reopen — opening with a shader dipped lands on its page. Zig doors need a rebuild; JS side hot-reloads. editorEvents (10) + paint kit (24) suites green, editor bundle clean. Docs: docs/game/editor_color_library.md + _index record.",
+  "shas": [
+    "6bea12f00"
+  ],
+  "resolvedAt": "2026-07-16T00:13:48.351Z"
+}

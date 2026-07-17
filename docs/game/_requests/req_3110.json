@@ -1,0 +1,28 @@
+{
+  "id": "req_3110",
+  "at": "2026-07-16T02:35:50.034Z",
+  "origin": "session:52c7a5f2",
+  "text": "hm. wouldnt a 16 sided cylinder do vertical cuts on the other side also? its doing the horizontal cross cuts but not the verticals",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T02:37:04.276Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T02:37:35.539Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the cylinder loop-cut report: 16-sided cylinder = 16 side quads + two caps, each cap ONE authored 16-corner face (cylinder(), editMesh.ts). The ring walk propagates only through 4-corner faces, so the horizontal belt closes (16 quads) but the vertical walk dies at the cap after one column — matching the user's observation. Blender behaves the same at n-gons; the OLD studio's plane cut sliced through (caps included), which is the root of the user's expectation. Proposed fix: rings cross EVEN-sided n-gons via the opposite-edge chord (split the cap from entry cut point to the matching point on the edge N/2 across, continue down the far column, close the belt); odd n-gons/triangles still stop. Also found while verifying: the popup's dir 0/1 labels are geometric (lcDeriveDirs spans) but the ring cutter picks its edge pair from the chained loop's arbitrary start corner, so which toggle is horizontal vs vertical is luck per shape — same-pass fix is orienting the seed loop against the session's advertised axes. Awaiting the user's word on codex-again vs direct.",
+  "shas": [],
+  "resolvedAt": "2026-07-16T02:37:35.539Z"
+}

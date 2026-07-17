@@ -10,7 +10,7 @@
 
 import {
   createStrokeEngine, pressureRadius, sizeTrackToPx, sizePxToTrack,
-  stepSizeLadder, constrainLine, constrainSquare, dabsAlongSegment, STROKE_TUNING,
+  stepSizeLadder, constrainLine, constrainSquare, dabsAlongSegment, dabsForStrokePath, STROKE_TUNING,
 } from './stroke';
 import {
   normalizeBrush, blendModeIndex, brushFromPreset, BRUSH_PRESETS,
@@ -200,6 +200,15 @@ test('newlines stack lines a glyph-height apart', () => {
 test('hasGlyph covers the painted ASCII set and rejects the rest', () => {
   assert(hasGlyph('Z') && hasGlyph('9') && hasGlyph('_') && hasGlyph('?'), 'ASCII covered');
   assert(!hasGlyph('☃'), 'non-ASCII rejected');
+});
+
+test('durable stroke paths replay through the universal dab engine', () => {
+  const free = dabsForStrokePath('brush', [0, 0, 20, 0], 8, 0.32);
+  const rect = dabsForStrokePath('rect', [0, 0, 20, 10], 8, 0.32);
+  const oval = dabsForStrokePath('ellipse', [0, 0, 20, 10], 8, 0.32);
+  assert(free.length > 1, 'freehand path interpolates');
+  assert(rect.length > free.length, 'rectangle replays all four sides');
+  assert(oval.length > 8, 'ellipse replays a closed outline');
 });
 
 log(`\npaint kit: ${passed} passed, ${failed} failed`);

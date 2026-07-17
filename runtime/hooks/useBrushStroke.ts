@@ -17,7 +17,7 @@ import {
   type Brush, type BrushTool, TOOL_HOTKEY,
 } from '../paint/model';
 import {
-  createStrokeEngine, dabsAlongSegment, constrainLine, constrainSquare,
+  createStrokeEngine, dabsAlongSegment, dabsForStrokePath, constrainLine, constrainSquare,
   stepSizeLadder, type Dab, type StrokeEngine,
 } from '../paint/stroke';
 import { rgb01ToHex } from '../paint/colors';
@@ -28,6 +28,12 @@ export type ShapePreview =
   | { tool: 'rect' | 'ellipse'; ax: number; ay: number; bx: number; by: number };
 
 export type { ClipRect };
+
+export type CommittedBrushStroke = {
+  tool: 'brush' | 'eraser' | 'line' | 'rect' | 'ellipse';
+  /** Interleaved texture-pixel pointer path. */
+  points: number[];
+};
 
 /** A pointer mapped onto the paint texture. For 3D surfaces, `mapPoint`
  *  raycasts the mesh and returns the hit's texture-pixel coords PLUS the hit
@@ -58,8 +64,9 @@ export interface BrushStrokeOpts {
    *  alongside it. Applies to EVERY dab (freehand-interpolated and shape tools), so
    *  symmetric 3D painting is gap-free on both sides. Same colour/brush as the dab. */
   mirror?: (dab: Dab) => Array<{ x: number; y: number; clip: ClipRect | null }>;
-  /** fired once when any stroke commits (undo checkpoints, dirty flags). */
-  onStrokeEnd?: () => void;
+  /** Fired once when a stroke commits. The optional record is the durable
+   *  pointer path; existing checkpoint-only consumers may ignore it. */
+  onStrokeEnd?: (stroke?: CommittedBrushStroke) => void;
 }
 
 export interface BrushStrokeHandlers {
@@ -84,6 +91,7 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
   const engineRef = useRef<StrokeEngine | null>(null);
   const anchorRef = useRef<{ x: number; y: number } | null>(null);
   const lastEndRef = useRef<{ x: number; y: number } | null>(null);
+  const pathRef = useRef<number[] | null>(null);
   // The clip of the most-recently-hit point — dabs (incl. interpolated ones)
   // scissor to it, so a 3D stroke that lands on a face stays on that face's
   // UV island. Updated by `map()` on every successful mapPoint.
@@ -116,38 +124,6 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
 
   const stampMany = (dabs: Dab[]) => { for (const d of dabs) stampDab(d); };
 
-  const ellipseOutlineDabs = (ax: number, ay: number, bx: number, by: number): Dab[] => {
-    const cx = (ax + bx) / 2;
-    const cy = (ay + by) / 2;
-    const rx = Math.abs(bx - ax) / 2;
-    const ry = Math.abs(by - ay) / 2;
-    const o = ref.current;
-    const out: Dab[] = [];
-    const steps = Math.max(16, Math.round((rx + ry) * 0.5));
-    let px = cx + rx;
-    let py = cy;
-    for (let i = 1; i <= steps; i++) {
-      const t = (i / steps) * Math.PI * 2;
-      const nx = cx + Math.cos(t) * rx;
-      const ny = cy + Math.sin(t) * ry;
-      out.push(...dabsAlongSegment(px, py, nx, ny, o.brush.size, o.brush.spacing));
-      px = nx; py = ny;
-    }
-    return out;
-  };
-
-  const rectOutlineDabs = (ax: number, ay: number, bx: number, by: number): Dab[] => {
-    const o = ref.current;
-    const sz = o.brush.size;
-    const sp = o.brush.spacing;
-    return [
-      ...dabsAlongSegment(ax, ay, bx, ay, sz, sp),
-      ...dabsAlongSegment(bx, ay, bx, by, sz, sp),
-      ...dabsAlongSegment(bx, by, ax, by, sz, sp),
-      ...dabsAlongSegment(ax, by, ax, ay, sz, sp),
-    ];
-  };
-
   const pickColorAt = (x: number, y: number) => {
     const o = ref.current;
     if (!o.onPickColor) return;
@@ -169,7 +145,7 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
       const tool = o.tool;
 
       if (tool === 'eyedropper') { pickColorAt(p.x, p.y); return; }
-      if (tool === 'fill' || tool === 'smudge' || tool === 'blur') return; // Phase B/C host
+      if (tool === 'fill' || tool === 'smudge' || tool === 'blur' || tool === 'text' || tool === 'marquee' || tool === 'lasso') return; // separate host/selection paths
 
       if (tool === 'brush' || tool === 'eraser') {
         const eng = createStrokeEngine({ sizePx: o.brush.size, spacingFrac: o.brush.spacing });
@@ -178,6 +154,7 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
         // Shift on press → straight line from the previous stroke's end (the
         // classic "shift to connect" brush chord), then continue freehand.
         const last = lastEndRef.current;
+        pathRef.current = mods.shift && last ? [last.x, last.y, p.x, p.y] : [p.x, p.y];
         if (mods.shift && last) {
           stampMany(dabsAlongSegment(last.x, last.y, p.x, p.y, o.brush.size, o.brush.spacing));
         }
@@ -187,6 +164,7 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
 
       // shape tools: record the anchor, preview rubber-bands on move.
       anchorRef.current = { x: p.x, y: p.y };
+      pathRef.current = [p.x, p.y];
       setPreview(
         tool === 'line'
           ? { tool: 'line', ax: p.x, ay: p.y, bx: p.x, by: p.y }
@@ -199,7 +177,11 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
       const eng = engineRef.current;
       if (eng && eng.drawing()) {
         const p = map(e);
-        if (p) stampMany(eng.move(p.x, p.y, e.pressure));
+        if (p) {
+          stampMany(eng.move(p.x, p.y, e.pressure));
+          const path = pathRef.current;
+          if (path && (path[path.length - 2] !== p.x || path[path.length - 1] !== p.y)) path.push(p.x, p.y);
+        }
         return;
       }
       const anchor = anchorRef.current;
@@ -222,10 +204,16 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
       const eng = engineRef.current;
       if (eng && eng.drawing()) {
         const p = map(e);
-        if (p) { stampMany(eng.move(p.x, p.y, e.pressure)); lastEndRef.current = { x: p.x, y: p.y }; }
+        if (p) {
+          stampMany(eng.move(p.x, p.y, e.pressure)); lastEndRef.current = { x: p.x, y: p.y };
+          const path = pathRef.current;
+          if (path && (path[path.length - 2] !== p.x || path[path.length - 1] !== p.y)) path.push(p.x, p.y);
+        }
         eng.end();
         engineRef.current = null;
-        o.onStrokeEnd?.();
+        const points = pathRef.current;
+        pathRef.current = null;
+        o.onStrokeEnd?.(points ? { tool: o.tool as 'brush' | 'eraser', points } : undefined);
         return;
       }
       const anchor = anchorRef.current;
@@ -235,24 +223,32 @@ export function useBrushStroke(opts: BrushStrokeOpts): BrushStrokeController {
       if (o.tool === 'line') {
         const c = constrainLine(anchor.x, anchor.y, p.x, p.y, mods.shift);
         bx = c.x; by = c.y;
-        stampMany(dabsAlongSegment(anchor.x, anchor.y, bx, by, o.brush.size, o.brush.spacing));
+        stampMany(dabsForStrokePath('line', [anchor.x, anchor.y, bx, by], o.brush.size, o.brush.spacing));
         lastEndRef.current = { x: bx, y: by };
       } else if (o.tool === 'rect') {
         if (mods.shift) { const c = constrainSquare(anchor.x, anchor.y, p.x, p.y); bx = c.x; by = c.y; }
-        stampMany(rectOutlineDabs(anchor.x, anchor.y, bx, by));
+        stampMany(dabsForStrokePath('rect', [anchor.x, anchor.y, bx, by], o.brush.size, o.brush.spacing));
       } else if (o.tool === 'ellipse') {
         if (mods.shift) { const c = constrainSquare(anchor.x, anchor.y, p.x, p.y); bx = c.x; by = c.y; }
-        stampMany(ellipseOutlineDabs(anchor.x, anchor.y, bx, by));
+        stampMany(dabsForStrokePath('ellipse', [anchor.x, anchor.y, bx, by], o.brush.size, o.brush.spacing));
       }
       anchorRef.current = null;
       setPreview(null);
-      o.onStrokeEnd?.();
+      const points = [anchor.x, anchor.y, bx, by];
+      pathRef.current = null;
+      o.onStrokeEnd?.({ tool: o.tool as 'line' | 'rect' | 'ellipse', points });
     },
 
     onMouseLeave: () => {
       const eng = engineRef.current;
-      if (eng && eng.drawing()) { eng.end(); engineRef.current = null; ref.current.onStrokeEnd?.(); }
+      if (eng && eng.drawing()) {
+        eng.end(); engineRef.current = null;
+        const points = pathRef.current;
+        pathRef.current = null;
+        ref.current.onStrokeEnd?.(points ? { tool: ref.current.tool as 'brush' | 'eraser', points } : undefined);
+      }
       anchorRef.current = null;
+      pathRef.current = null;
       setPreview(null);
     },
   };

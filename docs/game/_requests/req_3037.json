@@ -1,0 +1,30 @@
+{
+  "id": "req_3037",
+  "at": "2026-07-14T01:07:58.188Z",
+  "origin": "session:140b94da",
+  "text": "ah. well, this isnt the first time ive complained about loop cuts doing a lopsided cut and i thought it had all gone away but guess it has many shapes and sizes it can arrive, though honestly youll have to help me understand why it can happen at all, because the way it reads is like it literally thinks the model is at an angle when the cut should just be an exact horizontal or vertical slice but yeah so bottom index of this was pre-existing vertices and then the row up is the cut [Image #15]",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:09:36.468Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T01:27:24.297Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Root-caused the lopsided loop cut: the edge-mode cut is a world-axis plane whose normal snaps to the selected edge's dominant axis, so an edge leaning past 45 degrees (any flared/tapered section — exactly the user's screenshot) silently flips the axis and the cut becomes an angled vertical slice; the zigzag row is that slice crossing the low-poly quads. Fixed by building the Blender semantics: mesh_edit.ringCutSoup walks the quad ring from the selected edge via boundary-loop adjacency over authored groups and splits every crossed quad at the parametric midpoint of its entry/exit edges — level relative to the shape through flares, tapers, and prior transforms by construction; stops at boundaries, non-quads, out-of-scope parts, ring closure. meshTopoLoopCut tries the ring first, keeps the plane as fallback for ungrouped soups/diagonal picks. Unit-tested (zig test -lc, 45/45): flared tube lands every minted vertex at exact midpoint height. Needs host rebuild.",
+  "shas": [
+    "45c6d36b4"
+  ],
+  "resolvedAt": "2026-07-14T01:27:24.297Z"
+}

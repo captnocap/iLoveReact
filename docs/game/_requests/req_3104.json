@@ -1,0 +1,17 @@
+{
+  "id": "req_3104",
+  "at": "2026-07-15T23:55:56.868Z",
+  "origin": "one-off",
+  "text": "testing non-interactive with codex does this work :eyes:",
+  "status": "new",
+  "sessionId": "019f6835-5e47-75a2-90a6-f9ad9b73d4cc",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T23:55:59.228Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

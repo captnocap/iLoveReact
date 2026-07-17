@@ -1,0 +1,28 @@
+{
+  "id": "req_2992",
+  "at": "2026-07-13T04:27:44.757Z",
+  "origin": "codex:019f5351",
+  "text": "Ok thats good data, hold onto that thought and now do a quick look at the other 'paint bucket' component/system because, it doesnt shit roses either, infact this thing is a real pain in my ass a lot of the time and your gonna see exactly why, and then we will not do this same dance a 3rd time and make it absurdly clear that we have one paint bucketing tool and one only. there is literally 0 reason why i should have different buckets (components) when all of them are all doing the same thing, just at different parts of the pipeline",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T04:27:56.105Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T04:29:26.838Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed the read-only trace of the active model-paint bucket and its duplicate implementations. Confirmed the live Section D InkPanel is a reduced fork of the now-unmounted ModelBrushDock/ModelShaderBucket: both browse the same shader catalog and write Brush.ink, but the live fork omits the full shader parameter and tiling controls. The live popover hard-codes its position, restarts shader browsing on page 1 whenever reopened, preserves stale open state across leaving/re-entering paint mode, and renders color from colorSpineCurrent while actual deposited color lives in Brush.ink, requiring a reconciliation effect because the two previously diverged. Color Studio overrides are folded into shader data only when a bucket is picked; later Studio edits do not update the already-dipped brush snapshot. Confirmed the advertised model-paint eyedropper does not sample: every non-fill tool enters the same stroke/stamp path, so it paints. Also catalogued additional bucket projections/formats in standalone ModelView, MapTexturePicker, WorldContextMenu, and Paint Faces. No source files changed. Architecture conclusion: one canonical paint-choice bucket and one UI component, with consumer adapters for model raster, world faces, and map bindings; tool geometry/stroke behavior remains consumer-specific. Bucket selection is report-only and each authored stroke/action carries the chosen paint snapshot.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T04:29:26.838Z"
+}

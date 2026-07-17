@@ -1,0 +1,28 @@
+{
+  "id": "req_3020",
+  "at": "2026-07-13T15:48:59.674Z",
+  "origin": "session:6e4cf495",
+  "text": "uh yeah so the only thing is that all sounds good but to tell you the truth i honestly cant say that it is or isnt what should be done because i honestly can only really validate the pipeline for something like that after seeing what it actually looks like (and this is mainly in regard to the stickers  and a problem that was brought to us before is, is that enough space? the reason i ask is there was a point where we had some serious issues to where basically a size 2-3 brush was like 1/3rd of the  painting space and i couldnt even write out the word test in anything that was legible so thats my main concern",
+  "status": "review",
+  "sessionId": "6e4cf495-7a42-4e55-a46d-402fd74adf24",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T15:49:40.702Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T15:52:33.639Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Validated the density concern with hard numbers + a visual proof the user can judge by eye. Reproduced the remembered incident: at the model painter's 16 texels/m base, a size-3 brush is 18.8cm of wall and a 40cm letter gets 6px — 'test' is unwritable (the req_2465 jagged-TesT era; AA was fixed then, density was not). Rendered the same 3m×2m wall (40cm letters, 15cm tag line, size-3 brush squiggle, brush dots) at 16/32/64/128/256 px/m with a supersampled AA brush at true texel resolution, published as an artifact for review: https://claude.ai/code/artifact/824786a4-0921-480b-9b51-d4df16d47fcb. Verdict offered: 128 px/m is the sticker/graffiti density (2.3cm brush line, 51px letters, 12×6m facade = 4.7MB GPU at rest, disk stays strokes per the paint-program ruling); 256 is 4× memory for nose-to-wall crispness only. No code changed — awaiting the user's eye on the mockups.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T15:52:33.638Z"
+}

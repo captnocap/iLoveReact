@@ -1,0 +1,28 @@
+{
+  "id": "req_3113",
+  "at": "2026-07-16T02:43:12.367Z",
+  "origin": "session:52c7a5f2",
+  "text": "thats uh well then thats still not what the previous code did. so again, port is not a faithful port. i just tried to cut a pyramid and yep it told me to eat a bag of dicks effectively. but then i load up the hold studio and it works literally just fine",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T02:43:52.895Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T02:46:25.650Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Reproduced the user's pyramid loop-cut refusal headlessly against the CURRENT binary and could not reproduce it: base-quad selection cuts via the ring path (5 faces to 7 groups) and side-TRIANGLE selection correctly falls through to the plane fallback and cuts (6 tris to 10, 5 faces to 7 groups, 'loop cut' journal commit) — RJIT_MODELDOC=pyramid RJIT_MESHOPS repro, artifacts in session scratchpad. The plane fallback IS the old studio's any-topology behavior and is wired for exactly this case. Diagnosis: the user's live refusal is almost certainly a STALE DEV HOST — e2f54bfb6's loop-cut rework is Zig, which requires a binary rebuild+relaunch; the running host hot-reloads only TSX, so their session is a new-JS/old-native mismatch from mid-rework state. Asked the user to restart the dev host and retry, and to capture the exact refusal string if it persists (it will pin the failing branch). Acknowledged the standing gap: pyramid-via-fallback is the floor, not parity — even-sided crossing + through toggle remains the real contract closure, specced and awaiting go.",
+  "shas": [],
+  "resolvedAt": "2026-07-16T02:46:25.650Z"
+}

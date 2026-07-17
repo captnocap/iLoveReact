@@ -1,0 +1,28 @@
+{
+  "id": "req_3016",
+  "at": "2026-07-13T15:15:44.210Z",
+  "origin": "codex:019f5351",
+  "text": "Yes now one step further, any of this should just automatically be tossed down ninto a settings interface where i can turn on autosave, turn it off, do whatever, and not have to go dig through code to do so",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T15:16:10.087Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T15:16:34.241Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Established the settings contract for the upcoming persistence work. Autosave becomes a framework/application setting projected into Preferences and persisted as app configuration, with one shared policy consumed by world, map, globals, and materialized-model writers rather than per-feature booleans. Default is on; off requires dirty state plus Save/Discard/Cancel on document switch, close, and exit, and a real Save command for document types currently relying exclusively on autosave. Hot-update carryover remains a separate reload-policy setting because it preserves ephemeral working state without writing project documents. First-save/atlas ownership remains invariant under every setting. No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T15:16:34.241Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3107",
+  "at": "2026-07-16T01:00:48.240Z",
+  "origin": "session:52c7a5f2",
+  "text": "sorry i forgot to put in that skill to not open worktrees or branch, has historically just been a nightmare. context gets closed, shit never merges, im not aware, you see where it goes",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T01:01:45.853Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T01:04:54.616Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected course per the user's interruption: removed the git worktree I had created for the codex run (git worktree remove + prune, verified clean), confirmed the no-worktrees rule now present in ~/.claude/skills/codex/SKILL.md, and saved it as durable memory (feedback_no_worktrees_ever.md + MEMORY.md index): never isolate via worktrees/branches for ANY delegation — work the live tree, snapshot files sideways for diff-audit, promote by cp never merge. Then executed the codex handoff in place: snapshotted all 13 target files to scratchpad/loopcut-snapshots (all git-clean, no overlap with the other session), wrote the pinned SPEC.md (R1 ringParametricCutsSoup with bit-identical shared-edge continuity, R2 loop session ring propagation, R3 basic:bool session mode + __mesh_lc_begin arg, R4 mesh-cut command/keybind T/popup title/MESHOPS lcbegin:1, R5 harness fixes: naked-edge editable formula, solidify analytic contract, native-analytic loopcut/cut rows + 4th op, R6 KEEP fences) and verify.sh gate (zig test suites + 12/12 parity rows + editor ship), launched codex gpt-5.6-sol in background (task b1g19j4jn). Review of its output happens on completion against snapshots + private probes.",
+  "shas": [],
+  "resolvedAt": "2026-07-16T01:04:54.616Z"
+}

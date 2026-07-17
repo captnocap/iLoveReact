@@ -1,0 +1,28 @@
+{
+  "id": "req_3043",
+  "at": "2026-07-14T01:31:12.231Z",
+  "origin": "session:140b94da",
+  "text": "weird. how does that happen. it was made the same day as the commit that is in the last ~7 days regarding glass and the terrain when looking through a window would be invisible. its not like its a model from the previous editor carried over you dont see Door_with_knob_window ? i see it right here [Image #19]",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T01:31:32.221Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T01:36:01.470Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Diagnosed the hollow Door_with_knob_window: NOT caused by this session's editor fixes (those run only in the edit session, never in world rendering). The door's doc.blob is RJMD v1 — saved Jul 10 11:29, 22 minutes BEFORE the v2 glassFirstVertex format landed (71afa1683 11:51). Its atlas carries exactly 4 alpha-87 texels (the window). The legacy-door compromise in 4c0635874 (render legacy door glass before ground, same day 14:40) routes a v1 door's ENTIRE mixed leaf slot through the transparent depth-write-off pass whenever the atlas has any translucency — so the terrain shows through the window (the fix's goal) but the leaf no longer depth-blocks anything: both knobs visible through the panel. Cure: reopen the door in the editor and re-save — the writer emits v2 with the glass boundary, the compile splits opaque leaf from trailing glass, only the window routes transparent. No code change needed; verified by parsing doc.blob (ranges clean+disjoint, no glass boundary) and the atlas PNG.",
+  "shas": [],
+  "resolvedAt": "2026-07-14T01:36:01.470Z"
+}

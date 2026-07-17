@@ -1,0 +1,28 @@
+{
+  "id": "req_3001",
+  "at": "2026-07-13T05:16:18.380Z",
+  "origin": "codex:019f5351",
+  "text": "aye aye aye that one was not on my bingo card my friend. alright well before we dick around with any of the colors and shit, what else has this same shit infested pants on",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T05:16:41.481Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T05:19:08.563Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Completed a read-only active cart/editor audit of the hot-state persistence blast radius before color changes. Confirmed the AppFrame whole-state effect is the root infestation: all 217 AppFrame setState sites trigger persistState, including searches, rename-as-you-type fields, model-tool mirroring, status/UI toggles, and each distinct face touched by Paint Faces. Identified two narrower sibling mirrors: ModelView writes its ToolTwig on every tool/brush change while also mirroring the same snapshot through AppFrame, and WorldViewport writes camera pose on every 16ms pan/orbit/pointer sample. Distinguished properly bounded paths: debounced world/globals saves, MapPaintDock local slider drafts with commit, and outliner/map dialog rename drafts. No source files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T05:19:08.563Z"
+}

@@ -1,0 +1,28 @@
+{
+  "id": "req_3012",
+  "at": "2026-07-13T07:36:03.032Z",
+  "origin": "session:e7f6fbce",
+  "text": "uh well is that it? the only reason its just a bit confusing to me, is for example im looking at this flora_pine, andn when i turn the model upside down in the stage it has no back faces. but those back faces are effectively the faces a player would see first, since uh\n\nthis is the top face\n------                 < the actual leaf\nthis is the bottom face\n\n\nthis is the place\n\n\n\nso just logically as so it seems or im reading this entirely wrong here, but im technically rotating my camera in the editor here so i can get the 'players pov' but there is nothing to be seen. which is confusing because its there in the actual loaded world lol",
+  "status": "review",
+  "sessionId": "e7f6fbce-b122-4230-ace5-0b7eb67401a6",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T07:36:24.711Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T07:36:58.204Z",
+      "actor": "fable-main",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the user's reading of the pine inspection confusion: each conifer branch is ONE near-horizontal quad wound to face up (verified in flora_geometry.zig addConifer -> addUnculledQuad); the game's frond pipeline draws it from both sides (cull off) so the player under a tree sees it, while the studio stage renders through the back-face-culling mesh pipeline and deletes exactly those from-below pixels. The mesh on disk is identical to the in-world mesh; the studio viewer is the misleading party. Proposed fix (not yet built, awaiting the user's word): render foliage-style packages with culling off in the stage, keyed off the manifests' semanticKind 'flora' or via a general double-sided viewer toggle; recommended AGAINST baking fake back faces into the exported packages since that would falsify the very meshes the export exists to show.",
+  "shas": [],
+  "resolvedAt": "2026-07-13T07:36:58.204Z"
+}

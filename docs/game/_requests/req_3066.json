@@ -1,0 +1,30 @@
+{
+  "id": "req_3066",
+  "at": "2026-07-15T05:29:42.432Z",
+  "origin": "session:8a9444e4",
+  "text": "ok i see. so i am just then clicking the compass, when im at \n\nyaw 90 pitch 0 fov 50 its all the same color\nyaw 0 pitch 0 fov 50 all the same \nyaw 0 pitch 86(? idk why its not 90 from the compass) fov 50 its 2 tone colors\nyaw -90 pitch -86 fov 50 2 tone\n\ni assume its coming from the fact that its hitting 86 and not 90 then\nthats a compass problem. im not moving the camera freely, im clicking the dial and letting it set from there.",
+  "status": "review",
+  "sessionId": "8a9444e4-b0de-499e-8a2d-cfc00e09d013",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T05:30:05.831Z",
+      "actor": "fable-vertexdepth",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T05:31:21.810Z",
+      "actor": "fable-vertexdepth",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Depth-coded vertex dots now colour by the view's dominant WORLD axis (anchored at world origin) instead of raw camera-space depth. The compass top view deliberately clamps at ~86° pitch (Y-up pole is degenerate), so even dial-snapped views sit off axis — the snap makes same-world-coordinate = same-colour exactly, from any near-axis or free-orbit view, and the palette no longer swims with the camera. Compass clamp itself untouched (by design). Zig change — needs a dev-host rebuild to show.",
+  "shas": [
+    "da2bed5d0"
+  ],
+  "resolvedAt": "2026-07-15T05:31:21.809Z"
+}

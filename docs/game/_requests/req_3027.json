@@ -1,0 +1,30 @@
+{
+  "id": "req_3027",
+  "at": "2026-07-13T23:44:28.970Z",
+  "origin": "codex:019f5351",
+  "text": "yeah the color map picker still problematic and massive churn. esc key problem is fixed",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T23:44:38.695Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T23:52:47.110Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the remaining OKLCH color-map churn in cart/editor. Drag samples now stay inside a frame-coalesced local preview subtree; the GPU map nodes, AppFrame state, ModelView brush sync, hot state, persistence, and derived color library remain untouched until pointer-up commits one settled color. Hex entry now commits on finish rather than pushing intermediate valid text. ReleaseFast editor ship and tsc-check pass. User visual/perf verification requested: drag map and chroma continuously with spikewatch armed for 60s; marker/readout must stay live, brush color must update once on release, and no rhythmic spike/lockup may appear.",
+  "shas": [
+    "d9c50aab9"
+  ],
+  "resolvedAt": "2026-07-13T23:52:47.110Z"
+}

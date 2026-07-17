@@ -1,0 +1,17 @@
+{
+  "id": "req_3109",
+  "at": "2026-07-16T01:31:07.814Z",
+  "origin": "one-off",
+  "text": "oh thats good to know i bet that codex exec cant do a context compact in its oneshot prompting. which is a good thing to note in the skill actually, because it has something like 256k context. anyways il go and check it all out now",
+  "status": "new",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T01:31:28.108Z",
+      "actor": "52c7",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

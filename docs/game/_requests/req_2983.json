@@ -1,0 +1,28 @@
+{
+  "id": "req_2983",
+  "at": "2026-07-12T14:59:35.201Z",
+  "origin": "codex:019f535d",
+  "text": "I see. Thats, not great by any means. Well a day has passed since i started this entire thread here, and i thought on as to what might be the actual underlying problem here and what an actual long term solution looks like. Its a bit multifaceted, my idea il propose, but i think it would make it nearly impossible or entirely impossible for any of this to occur, and further more it, like i said a few messages ago about the event bus and multiplayer, is what makes this unambigious from if it is true or not. \n\n\nok so let me just give you the overview without drowning you out with too much context here, but lets just start at the app runtime itself. What is it. It is, zig + react, for a desktop application. Now, what is pretty much unanimous about native software in the last 30 years. One thing, across windows, mac, and even linux, being native isnt just a matter of 'you render on the desktop and not a browser'; it is quite literally that but its much more. File menu controls, settings, keybindings, configuration files and not a database. etc. And by that short list we can look at the first one and just forget about all the rest, they actually all happen to tag along with it. \n\nso file menus, why are they special, or atleast why are they my focal point. Because in a native application, when a feature / command is made, it is effectively inherent knowledge  that new command 99% of the time means i need a place to where the user can call it from. And if that place wasnt inside of a file menu, then native desktop apps would have css flex already but they dont. So that must mean, the file menu is doing a lot more lifting than just a 30 some year programming default, as it often may seem.\n\nNow with that in mind step back and look at react apps. React, >99% of these apps are web apps, web apps, by common stance, efffectively never ship a file menu. Now that is not to say that because no file menu, functions then live in a crapshoot, because they do and they dont. Thing about react is that it doesnt care, at all, because its conforming to whatever system its built into. Thats why when it comes down to things like, key bindings, the approach is radically different in react-dom to what we have here in reactjit\n\nAnd, even as time has passed with how long react has been around, React's ecosystem never grew it either — and an app built from React's vocabulary gets web amnesia by default: keybinds exist in a keymap.ts nobody renders, menus are hand-rolled divs, right-click is whatever each surface improvised, settings are scattered state. Twenty years of native convention (the Alt-key underlines, the shortcut column, Tools→Options) is a discoverability system, and web idiom simply never needed it.\n\nAnd the settings half deserves equal billing with the keybindings half, because it's the same missing organ at a different layer: native apps have settings as a system — schema'd, persisted per-app in the platform's config dir, versioned, with the dialog generated from the schema. Web apps have localStorage vibes. A framework-tier settings primitive (declare schema → get persistence, migration, and a rendered preferences pane) is the second twenty-years-of-textbook organ, and it's what the editor's scattered surface presets and physics-globals panels are already groping toward ad hoc.\nThe strategic note that makes this more than QoL: this is the moment ReactJIT's pitch changes. \"React without the browser\" is a performance story — impressive, niche. \"React semantics with native-app organs the web never had\" is a category story: the framework where a React developer gets a real menu bar, real keybindings, real settings, real context menus by declaring data, not by fighting divs. Nothing in the Electron/Tauri world actually offers that — they all inherit web amnesia through the DOM.",
+  "status": "review",
+  "sessionId": "019f535d-d94b-7591-8c4e-4125ba85ddd3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-12T14:59:44.754Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-12T15:01:22.008Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Evaluated the proposed ReactJIT native-application architecture against the framework and active editor. Confirmed the missing organ is a compulsory application command/settings model, not merely better menus. Found an existing but unused runtime/commands seed that already enforces menu/hotkey identity and event emission, while cart/editor maintains a parallel local command/keymap/runCommand system. Identified the necessary long-term boundary: generated menu/keybinding/context/palette/preferences projections, read-only authoritative state, one invoke gateway, config-file-backed schema/migrations, and native semantic command ingress. No code changes were requested or made.",
+  "shas": [],
+  "resolvedAt": "2026-07-12T15:01:22.008Z"
+}

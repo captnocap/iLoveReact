@@ -1,0 +1,30 @@
+{
+  "id": "req_2986",
+  "at": "2026-07-13T02:11:10.130Z",
+  "origin": "codex:019f5351",
+  "text": "uh pressing ']' is making the camera step in a vertical direction, annd also sending me a log everytime i press it. when i would have expected it that ot doesnt move the camera around at all or have anny reason to send this log [live] colliders folded: 0 base + 183 live rects, 0 base + 10 live oriented, 0 live door(s)\n[js.warn] [place] live push: 66 pieces (decomposed) + 0 materials -> loader node 5186\n[live] colliders folded: 0 base + 183 live rects, 0 base + 10 live oriented, 0 live door(s)\n[js.warn] [place] live push: 66 pieces (decomposed) + 0 materials -> loader node 5186\n[live] colliders folded: 0 base + 183 live rects, 0 base + 10 live oriented, 0 live door(s)\n[js.warn] [place] live push: 66 pieces (decomposed) + 0 materials -> loader node 5186\n[live] colliders folded: 0 base + 183 live rects, 0 base + 10 live oriented, 0 live door(s)\n[js.warn] [place] live push: 66 pieces (decomposed) + 0 materials -> loader node 5186\n[live] colliders folded: 0 base + 183 live rects, 0 base + 10 live oriented, 0 live door(s)\n[js.warn] [place] live push: 66 pieces (decomposed) + 0 materials -> loader node 5186\n[live] colliders folded: 0 base + 183 live rects, 0 base + 10 live oriented, 0 live door(s)\n[js.warn] [place] live push: 66 pieces (decomposed) + 0 materials -> loader node 5186\n[live] colliders folded: 0 base + 183 live rects, 0 base + 10 live oriented, 0 live door(s)\n[js.warn] [place] live push: 66 pieces (decomposed) + 0 materials -> loader node 5186\n[live] colliders folded: 0 base + 183 live rects, 0 base + 10 live oriented, 0 live doo",
+  "status": "review",
+  "sessionId": "019f5351-16a6-7290-a6e5-766e2aab94d3",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-13T02:11:18.369Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-13T02:16:36.877Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Fixed the reachable floor hotkey regression at its two actual couplings. Active-floor selection now moves only the semantic placement and pick plane; the isometric camera owns an independent target height and the floor effect no longer calls the camera host door. Storey cutaway projections retain array identity when their visible membership is unchanged, preventing redundant full-world live pushes and native collider rebuilds. Routine successful live-push and collider-fold messages are no longer unconditional warnings; native detail remains available with RJIT_LIVELOG, while failures and clipping stay loud. Added camera-invariance and projection-identity tests. Focused V8 tests, the ReleaseFast world-loader Zig target, and the ReleaseFast editor ship all pass.",
+  "shas": [
+    "d6880d1ba"
+  ],
+  "resolvedAt": "2026-07-13T02:16:36.877Z"
+}

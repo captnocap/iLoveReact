@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "parts": [
+    {
+      "name": "Cube 4 (2)",
+      "color": "#9cc98f",
+      "visible": true,
+      "kind": "cube"
+    }
+  ]
+}

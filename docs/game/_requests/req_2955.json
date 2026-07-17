@@ -1,0 +1,30 @@
+{
+  "id": "req_2955",
+  "at": "2026-07-11T07:54:10.668Z",
+  "origin": "codex:019f4fff",
+  "text": "ok so uh whats the command? or can u make it a one liner that command u just ran looks like an absolute fucking nightmare",
+  "status": "review",
+  "sessionId": "019f4fff-6c03-7293-b9b6-c1472bd4611b",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-11T07:54:21.157Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-11T08:01:37.003Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Added tools/editor-transfer so the transfer workflow is now short commands instead of an exposed rsync filter wall. It packages only portable repository source plus cart/editor models/assets and the editor-owned authored data stores, preserving each machine's Git metadata, dependencies, caches, and platform binaries during restore.",
+  "shas": [
+    "10af11cbd"
+  ],
+  "resolvedAt": "2026-07-11T08:01:37.003Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_3080",
+  "at": "2026-07-15T13:14:42.219Z",
+  "origin": "session:8a9444e4",
+  "text": "yeah well i dont know why but i asked for the sliders to not exist and just put the move gizmo / resize / rotate on the image layer and call it good i can move it around that way so much easier i dont have to think about xyz because its on the gizmo etc.",
+  "status": "review",
+  "sessionId": "8a9444e4-b0de-499e-8a2d-cfc00e09d013",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T13:16:07.954Z",
+      "actor": "fable-refimg",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T13:28:37.033Z",
+      "actor": "fable-refimg",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The reference image's position is now placed with the move gizmo, not sliders: expanding a backdrop's row in the Reference Images panel puts the mesh editor's move gizmo (same arms/chevrons/stepped grid — whole units, Shift fine, Ctrl free) at the image's center in the viewport; drag the arms to place it. The pos x/y/z sliders are deleted; size + opacity sliders and the plane badges stay per the user's refinement. Host-native session (gpu/3d.zig bdGizmo* + engine.zig input branches + __model_bd_gizmo_set/clear/pos doors); the cart polls the pose while the row is expanded and persists it to the twig. Zig change — needs a dev-host rebuild.",
+  "shas": [
+    "1652061cc"
+  ],
+  "resolvedAt": "2026-07-15T13:28:37.033Z"
+}

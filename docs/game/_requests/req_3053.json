@@ -1,0 +1,28 @@
+{
+  "id": "req_3053",
+  "at": "2026-07-14T02:22:34.900Z",
+  "origin": "session:140b94da",
+  "text": "what does that mean exactly so the host ranges are the thing that basically materialize the mesh and in this regard its the door missing it?",
+  "status": "review",
+  "sessionId": "140b94da-7ddb-4f98-99b9-952c2ac352d9",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-14T02:23:00.702Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-14T02:23:23.976Z",
+      "actor": "fable-140b",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Comprehension question on req_3048/3049, answered: host part ranges do NOT produce the mesh — the triangles are saved independently and were never missing. Ranges are the ownership table mapping authored-face spans to outliner parts (Door Frame [0,36), Door Leaf [333,398)). Losing the table merges every part into one anonymous row on reopen (reader synthesizes one all-covering range) and specifically kills the DOOR export because compiling a door requires locating the Door Leaf part's range to split swinging leaf from static frame — no ranges, no leaf, no cooked piece, hence the invisible placement (a plain wall piece would have survived rangeless). No code changed; the who-cleared-the-table hunt continues via the req_3049 tripwires.",
+  "shas": [],
+  "resolvedAt": "2026-07-14T02:23:23.975Z"
+}

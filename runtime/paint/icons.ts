@@ -102,5 +102,11 @@ export function toolIconLayers(tool: BrushTool): IconLayer[] {
       return [{ d: circle(0, 0, 8), fill: false }, { d: circle(0, 0, 4), fill: false }];
     case 'text': // a capital T: top bar + stem
       return [{ d: 'M -8,-7 L 8,-7', fill: false }, { d: 'M 0,-7 L 0,8', fill: false }];
+    case 'marquee': // dashed rectangular selection
+      return [
+        { d: 'M -9,-7 L -3,-7 M 2,-7 L 8,-7 M 9,-6 L 9,-1 M 9,3 L 9,7 M 8,8 L 2,8 M -3,8 L -9,8 M -10,7 L -10,2 M -10,-2 L -10,-7', fill: false },
+      ];
+    case 'lasso': // freehand loop + tail
+      return [{ d: 'M 7,4 C 5,9 -7,9 -9,2 C -11,-6 0,-10 7,-6 C 12,-3 10,3 4,4 C -1,5 -3,2 -1,0 M 4,4 L 9,9', fill: false }];
   }
 }

@@ -4,7 +4,7 @@
   "name": "Nug b24275a1",
   "kind": "prop",
   "stage": "ready",
-  "folderId": "props",
+  "folderId": "model-nug_b24275a1",
   "semanticKind": "prop",
   "sourceKind": "generated",
   "color": "#7da878",
@@ -22,5 +22,29 @@
     "seed:b24275a1"
   ],
   "atlases": [],
-  "paints": []
+  "paints": [],
+  "placeable": {
+    "as": "prop",
+    "role": "scenery"
+  },
+  "skeleton": {
+    "id": "nug:b24275a1",
+    "bones": [
+      {
+        "id": "root"
+      }
+    ],
+    "static": true,
+    "meshes": {
+      "kind": "perBone",
+      "items": [
+        {
+          "boneId": "root",
+          "geometryKey": "nug:b24275a1"
+        }
+      ]
+    },
+    "contacts": [],
+    "behaviors": []
+  }
 }

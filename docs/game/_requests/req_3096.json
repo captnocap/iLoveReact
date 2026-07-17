@@ -1,0 +1,28 @@
+{
+  "id": "req_3096",
+  "at": "2026-07-15T23:39:39.978Z",
+  "origin": "session:52c7a5f2",
+  "text": "hm. i cant really see what u said, do this: just write me a md file of the prompts to send to each agent. il come back to you after they are done, you will review the work",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T23:39:50.066Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T23:41:25.694Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Wrote FIXPASS_PROMPTS.md at the repo root: six paste-ready worker prompts covering the session's fix bill — T1 pointer modifier bridge (v8_bindings_core.zig + getPointerPayload), T2 facade scope + clicked-side picking (AppFrame/facades.ts, req_3062 ruling enforced), T3 facade quad alpha in the native resident-mesh draw, T4 solidify fresh face identities + merge seam dissolve (3d.zig, reference-read required), T5 parametric loop cut both modes (shared cutting core, cuts/offset UX preserved), T6 port-parity harness (TS reference vs native ops on irregular meshes). Each prompt carries verified file:line pointers, the behavior contract, a concrete VERIFY gesture with citable numbers, commit/req-id instructions, and file-ownership fences (T4/T5 share 3d.zig — commit-early rules stated). Header documents parallelism (1/2/3/6 disjoint, fire together) and the post-completion review flow back through session 52c7.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T23:41:25.693Z"
+}

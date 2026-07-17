@@ -1,0 +1,23 @@
+{
+  "id": "req_3114",
+  "at": "2026-07-16T02:43:16.894Z",
+  "origin": "session-310b-codex-relay",
+  "text": "get one of the dudes to fix the thing where when i extrude an edge, it doesnt automatically put the extruded edge into focus, and so im doing extra work to just click it to move it when im already obviously going to want to move it if i just extruded it",
+  "status": "doing",
+  "captureMode": "manual",
+  "events": [
+    {
+      "at": "2026-07-16T02:43:27.979Z",
+      "actor": "session-310b",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-16T02:47:15.662Z",
+      "actor": "session-310b",
+      "kind": "note",
+      "text": "Root cause: framework/gpu/3d.zig meshTopoExtrudeEdge replaces the mesh but never re-selects — post-op host selection is empty (harness-proven: report sel:0 after extrudeedge). Fix in flight via codex handoff: select the welded edge at the new endpoints (c,d) after adoptAppendedFaces, mirroring extrudeFace's cap re-select. Gate: verify-extrude-focus.sh (build + headless cube harness; del-discriminator proves the NEW edge is selected)."
+    }
+  ]
+}

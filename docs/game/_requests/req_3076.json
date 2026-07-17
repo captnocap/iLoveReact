@@ -1,0 +1,28 @@
+{
+  "id": "req_3076",
+  "at": "2026-07-15T12:28:27.179Z",
+  "origin": "session:52c7a5f2",
+  "text": "wait but is that from doing loop cut on edge mode or on face mode because i know there is the loop cut capability on both, but i only ever use face. ?",
+  "status": "review",
+  "sessionId": "52c7a5f2-4308-4ea6-a7fa-1d7e88f91f11",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-15T12:28:38.047Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-15T12:30:31.302Z",
+      "actor": "52c7",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Corrected the loop-cut diagnosis for the mode the user actually uses. FACE mode goes through a different native path than the edge-mode ring walk described in req_3075: the host session meshLoopCutFaceBegin/lcPlanes (framework/gpu/3d.zig:2017,1961). The comb math (cuts+offset, equal slabs) IS a faithful port of the old studio's loopCutPositions, but the plane DIRECTIONS were changed: the old studio always cut with explicit WORLD-AXIS planes (loopCutRange axis 0|1|2 — straight by construction); the native session derives directions via the req_2794 heuristic — longest boundary edge of the selection as U, plus sign-aligned AVERAGED NEIGHBOR-FACE normals as the plane normals. On axis-aligned boxes that reproduces world axes; on the user's shapes (transformed cubes bridged with create-face, neighbors facing every which way) the averaged neighbor normal tilts, tilting every plane in the comb → all cuts slanted the same way. The heuristic has already been iterated twice inside req_2794 and still guesses. Told the user: group fixes from solidify/merge do NOT cure this path; the durable fix is topological/parametric cuts (lines parallel to the face's own edge pairs) rather than a third plane-normal heuristic. No code changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-15T12:30:31.302Z"
+}

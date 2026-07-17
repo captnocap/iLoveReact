@@ -1,0 +1,17 @@
+{
+  "id": "req_3130",
+  "at": "2026-07-16T06:04:27.809Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>bstmt7lrd</task-id>\n<tool-use-id>toolu_016RhizRnJrjJTSbJfyoH1R3</tool-use-id>\n<output-file>/tmp/claude-1000/-home-siah-creative-reactjit/88984442-1e34-44d8-9fca-500d77660152/tasks/bstmt7lrd.output</output-file>\n<status>completed</status>\n<summary>Background command \"Launch codex sol on the handoff spec\" completed (exit code 0)</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "88984442-1e34-44d8-9fca-500d77660152",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-16T06:04:50.672Z",
+      "actor": "fable-codex-lane",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}
