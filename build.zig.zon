@@ -2,6 +2,7 @@
     .fingerprint = 0xda9e7520e2295a4,
     .name = .reactjit,
     .version = "0.0.0",
+    .minimum_zig_version = "0.15.2",
     .dependencies = .{
         .tls_zig = .{
             .path = "deps/tls.zig",

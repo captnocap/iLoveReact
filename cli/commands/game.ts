@@ -24,6 +24,13 @@ const ORACLE_INDEX_DIR = 'docs/game/_index';
 const ORACLE_RECORDS_DIR = `${ORACLE_INDEX_DIR}/records`;
 const ORACLE_SELF_CHECK_ENTRY = `${OUT_DIR}/oracle-self-check.ts`;
 const ORACLE_SELF_CHECK_BUNDLE = `${OUT_DIR}/oracle-self-check.js`;
+
+/** Same zig resolution as ship/dev/tui: REACTJIT_ZIG override, bundled SDK zig, then PATH. */
+function resolveZig(root: string): string {
+  const bundled = __env('REACTJIT_ZIG') || `${root}/tools/zig/zig`;
+  if (fsExists(bundled)) return bundled;
+  return 'zig';
+}
 // Platform cross-language round-trips (PLATMOD spine): the TS writer emits a
 // tape with the production workspace codec, the Zig reader decodes the SAME tape
 // and asserts byte/value identity. Step 1 froze the RLE/lump wire format; step 2
@@ -458,7 +465,7 @@ function runRoundTrip(root: string, rt: RoundTrip): boolean {
     return false;
   }
   fsWrite(`${root}/${rt.fixture}`, tape);
-  const zig = spawnSync('zig', ['build', rt.zigStep]);
+  const zig = spawnSync(resolveZig(root), ['build', rt.zigStep]);
   if (zig.stdout.trim()) out(zig.stdout.trim());
   if (zig.stderr.trim()) err(zig.stderr.trim());
   if (zig.code !== 0) {
@@ -720,7 +727,7 @@ function parity(root: string, argv: string[]): number {
     return 1;
   }
 
-  const zigBuild = spawnSync('zig', ['build', 'hmsc-parity-compiler', '-Doptimize=ReleaseFast']);
+  const zigBuild = spawnSync(resolveZig(root), ['build', 'hmsc-parity-compiler', '-Doptimize=ReleaseFast']);
   if (zigBuild.stdout.trim()) out(zigBuild.stdout.trim());
   if (zigBuild.stderr.trim()) err(zigBuild.stderr.trim());
   if (zigBuild.code !== 0) {
@@ -812,7 +819,7 @@ function resolveGameFile(root: string, choice: GameFileChoice = {}): string | nu
  *  own frame to a PNG. The keystone: data -> stateless engine -> rendered frame,
  *  zero V8/JS in the construct+render path. */
 function runLoaderRenderProof(root: string, outPath: string, gameFile: string): boolean {
-  const build = spawnSync('zig', LOADER_BUILD_ARGS);
+  const build = spawnSync(resolveZig(root), LOADER_BUILD_ARGS);
   if (build.stderr.trim()) err(build.stderr.trim());
   if (build.code !== 0) {
     err('[game] render proof FAILED: no-V8 loader does not build');
@@ -888,7 +895,7 @@ function play(root: string, argv: string[]): number {
     err('[game] play FAILED: no game-file (the bake failed)');
     return 1;
   }
-  const build = spawnSync('zig', LOADER_BUILD_ARGS);
+  const build = spawnSync(resolveZig(root), LOADER_BUILD_ARGS);
   if (build.stderr.trim()) err(build.stderr.trim());
   if (build.code !== 0) {
     err('[game] play FAILED: no-V8 loader does not build');

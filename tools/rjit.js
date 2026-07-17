@@ -5927,6 +5927,11 @@ done
   var ORACLE_RECORDS_DIR = `${ORACLE_INDEX_DIR}/records`;
   var ORACLE_SELF_CHECK_ENTRY = `${OUT_DIR}/oracle-self-check.ts`;
   var ORACLE_SELF_CHECK_BUNDLE = `${OUT_DIR}/oracle-self-check.js`;
+  function resolveZig2(root) {
+    const bundled = __env("REACTJIT_ZIG") || `${root}/tools/zig/zig`;
+    if (fsExists(bundled)) return bundled;
+    return "zig";
+  }
   var ROUND_TRIPS = [
     {
       label: "mapfile",
@@ -6304,7 +6309,7 @@ if (failures.length > 0) {
       return false;
     }
     fsWrite(`${root}/${rt.fixture}`, tape);
-    const zig = spawnSync("zig", ["build", rt.zigStep]);
+    const zig = spawnSync(resolveZig2(root), ["build", rt.zigStep]);
     if (zig.stdout.trim()) out(zig.stdout.trim());
     if (zig.stderr.trim()) err(zig.stderr.trim());
     if (zig.code !== 0) {
@@ -6521,7 +6526,7 @@ if (failures.length > 0) {
       err("[game] parity FAILED: TypeScript parity compiler does not bundle");
       return 1;
     }
-    const zigBuild = spawnSync("zig", ["build", "hmsc-parity-compiler", "-Doptimize=ReleaseFast"]);
+    const zigBuild = spawnSync(resolveZig2(root), ["build", "hmsc-parity-compiler", "-Doptimize=ReleaseFast"]);
     if (zigBuild.stdout.trim()) out(zigBuild.stdout.trim());
     if (zigBuild.stderr.trim()) err(zigBuild.stderr.trim());
     if (zigBuild.code !== 0) {
@@ -6596,7 +6601,7 @@ if (failures.length > 0) {
     return null;
   }
   function runLoaderRenderProof(root, outPath, gameFile) {
-    const build = spawnSync("zig", LOADER_BUILD_ARGS);
+    const build = spawnSync(resolveZig2(root), LOADER_BUILD_ARGS);
     if (build.stderr.trim()) err(build.stderr.trim());
     if (build.code !== 0) {
       err("[game] render proof FAILED: no-V8 loader does not build");
@@ -6669,7 +6674,7 @@ if (failures.length > 0) {
       err("[game] play FAILED: no game-file (the bake failed)");
       return 1;
     }
-    const build = spawnSync("zig", LOADER_BUILD_ARGS);
+    const build = spawnSync(resolveZig2(root), LOADER_BUILD_ARGS);
     if (build.stderr.trim()) err(build.stderr.trim());
     if (build.code !== 0) {
       err("[game] play FAILED: no-V8 loader does not build");
@@ -6886,7 +6891,7 @@ ${digest.stderr || digest.stdout}`);
   function buildGdevHost(rjitHome, cartRoot, binName, substrate, bundlePath, socket, zigFlags, fingerprint) {
     out(`[gdev] compiling game dev binary (${rjitHome}/zig-out/bin/${binName}, ${substrate}, ReleaseFast)...`);
     out(`[gdev] native flags: ${zigFlags.join(" ") || "(base only)"}`);
-    const zig = resolveZig2(rjitHome);
+    const zig = resolveZig3(rjitHome);
     const args = [
       "build",
       "app",
@@ -6954,7 +6959,7 @@ ${digest.stderr || digest.stdout}`);
       return { cols: 80, rows: 24 };
     }
   }
-  function resolveZig2(rjitHome) {
+  function resolveZig3(rjitHome) {
     const bundled = __env("REACTJIT_ZIG") || `${rjitHome}/tools/zig/zig`;
     if (fsExists(bundled)) return bundled;
     return "zig";
@@ -8451,7 +8456,7 @@ ${IMPORTS_MARKER}`).replace(
     const root = __cwd();
     const rjitHome = __env("RJIT_HOME") || root;
     const cartRoot = root;
-    const zig = resolveZig3(rjitHome);
+    const zig = resolveZig4(rjitHome);
     const cart = resolveCart4(cartRoot, parsed.name);
     if (!cart) return fail8(`not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
     const substrate = resolveSubstrate3(parsed.substrateFlag, cart.manifest);
@@ -8559,7 +8564,7 @@ ${IMPORTS_MARKER}`).replace(
     if (fsExists(fileEntry)) return { entry: fileEntry, dir: dirname6(fileEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
     return null;
   }
-  function resolveZig3(rjitHome) {
+  function resolveZig4(rjitHome) {
     const bundled = __env("REACTJIT_ZIG") || `${rjitHome}/tools/zig/zig`;
     if (fsExists(bundled)) return bundled;
     return "zig";
@@ -9209,7 +9214,7 @@ __ARCHIVE__
     return { name: sanitizeName2(name), entry, dir };
   }
   function buildTuiBinary(rjitHome, cartRoot, name, bundlePath, bin) {
-    const zig = resolveZig4(rjitHome);
+    const zig = resolveZig5(rjitHome);
     const args = [
       "build",
       "app",
@@ -9273,7 +9278,7 @@ __ARCHIVE__
       return { cols: 80, rows: 24 };
     }
   }
-  function resolveZig4(rjitHome) {
+  function resolveZig5(rjitHome) {
     const bundled = __env("REACTJIT_ZIG") || `${rjitHome}/tools/zig/zig`;
     if (fsExists(bundled)) return bundled;
     return "zig";
