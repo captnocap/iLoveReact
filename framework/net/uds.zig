@@ -26,6 +26,9 @@
 //!   srv.closeConn(conn_id);
 
 const std = @import("std");
+// ZIG_016_MIGRATION §6 exemption (door b): readiness-loop layer, raw
+// posix-shaped syscalls via sysx. Do NOT migrate to std.Io.net.
+const sysx = @import("sysx.zig");
 const workspace = @import("../sync/workspace.zig");
 
 const READ_BUF = 65536;
@@ -41,7 +44,7 @@ pub const Event = union(EventTag) {
 };
 
 const Conn = struct {
-    fd: std.posix.socket_t,
+    fd: sysx.socket_t,
     active: bool = false,
     read_buf: [READ_BUF]u8 = undefined,
     err_buf: [128]u8 = undefined,
@@ -52,7 +55,7 @@ const Conn = struct {
 };
 
 pub const UdsServer = struct {
-    listener: std.posix.socket_t,
+    listener: sysx.socket_t,
     path_buf: [108]u8 = undefined,  // sun_path max is 108 on Linux
     path_len: usize = 0,
     conns: [MAX_CONNS]Conn = [_]Conn{.{ .fd = -1 }} ** MAX_CONNS,
@@ -69,22 +72,22 @@ pub const UdsServer = struct {
         if (path.len >= 108) return error.PathTooLong;
 
         // Clean up any stale UDS file at this path. ENOENT is fine.
-        std.posix.unlink(path) catch |e| switch (e) {
+        sysx.unlink(path) catch |e| switch (e) {
             error.FileNotFound => {},
             else => return e,
         };
 
-        const fd = try std.posix.socket(
-            std.posix.AF.UNIX,
-            std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
+        const fd = try sysx.socket(
+            sysx.AF.UNIX,
+            sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK | sysx.SOCK.CLOEXEC,
             0,
         );
-        errdefer std.posix.close(fd);
+        errdefer sysx.close(fd);
 
         // sun_path is [108]u8 on Linux but [104]u8 on macOS — zero the field
         // by its actual length instead of hardcoding 108 so both platforms build.
-        var sa = std.posix.sockaddr.un{
-            .family = std.posix.AF.UNIX,
+        var sa = sysx.sockaddr.un{
+            .family = sysx.AF.UNIX,
             .path = undefined,
         };
         @memset(&sa.path, 0);
@@ -92,18 +95,18 @@ pub const UdsServer = struct {
 
         // sockaddr_un size: family (2 bytes) + path (variable). We pass
         // the exact byte count so the kernel doesn't read past our path.
-        const sa_len: std.posix.socklen_t = @intCast(
+        const sa_len: sysx.socklen_t = @intCast(
             @sizeOf(@TypeOf(sa.family)) + path.len + 1,
         );
-        const sa_bytes: *const std.posix.sockaddr = @ptrCast(&sa);
-        try std.posix.bind(fd, sa_bytes, sa_len);
+        const sa_bytes: *const sysx.sockaddr = @ptrCast(&sa);
+        try sysx.bind(fd, sa_bytes, sa_len);
 
         // Tighten perms so only this user can dial. fchmodat takes a
         // path slice (not toPosixPath) in this Zig version; null-byte
         // termination is handled internally.
-        std.posix.fchmodat(std.posix.AT.FDCWD, path, 0o600, 0) catch {};
+        sysx.fchmodat(sysx.AT.FDCWD, path, 0o600, 0) catch {};
 
-        try std.posix.listen(fd, 8);
+        try sysx.listen(fd, 8);
 
         var self = UdsServer{ .listener = fd };
         @memcpy(self.path_buf[0..path.len], path);
@@ -114,7 +117,7 @@ pub const UdsServer = struct {
     pub fn deinit(self: *UdsServer) void {
         for (&self.conns) |*c| {
             if (c.active) {
-                std.posix.close(c.fd);
+                sysx.close(c.fd);
                 c.active = false;
                 c.fd = -1;
             }
@@ -123,9 +126,9 @@ pub const UdsServer = struct {
                 c.parser = null;
             }
         }
-        std.posix.close(self.listener);
+        sysx.close(self.listener);
         if (self.path_len > 0) {
-            std.posix.unlink(self.path_buf[0..self.path_len]) catch {};
+            sysx.unlink(self.path_buf[0..self.path_len]) catch {};
         }
         if (self.workspace_root) |root| {
             self.workspace_allocator.free(root);
@@ -164,13 +167,13 @@ pub const UdsServer = struct {
         if (!conn.active) return;
         var pos: usize = 0;
         while (pos < data.len) {
-            const n = std.posix.write(conn.fd, data[pos..]) catch |err| {
+            const n = sysx.write(conn.fd, data[pos..]) catch |err| {
                 if (err == error.WouldBlock) {
                     // Wait for writability — short-blocking poll. We
                     // accept up to ~5s of wall stall for huge writes
                     // (the initial workspace tar can be 200MB+).
-                    var pfd = [_]std.posix.pollfd{.{ .fd = conn.fd, .events = std.posix.POLL.OUT, .revents = 0 }};
-                    _ = std.posix.poll(&pfd, 5000) catch break;
+                    var pfd = [_]sysx.pollfd{.{ .fd = conn.fd, .events = sysx.POLL.OUT, .revents = 0 }};
+                    _ = sysx.poll(&pfd, 5000) catch break;
                     continue;
                 }
                 self.closeInternal(conn);
@@ -198,7 +201,7 @@ pub const UdsServer = struct {
         // 1. Try accepting one new connection per call. More than one
         // per call is fine but we keep slices simple.
         if (n_out < out.len) {
-            const accepted = std.posix.accept(self.listener, null, null, std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC) catch null;
+            const accepted = sysx.accept(self.listener, null, null, sysx.SOCK.NONBLOCK | sysx.SOCK.CLOEXEC) catch null;
             if (accepted) |fd| {
                 if (self.allocConnId(fd)) |id| {
                     // If workspace mode is on, attach a parser to the
@@ -211,7 +214,7 @@ pub const UdsServer = struct {
                     out[n_out] = .{ .accepted = id };
                     n_out += 1;
                 } else {
-                    std.posix.close(fd);
+                    sysx.close(fd);
                 }
             }
         }
@@ -226,7 +229,7 @@ pub const UdsServer = struct {
             if (!conn.active) continue;
             var iters: u32 = 0;
             while (iters < 32 and n_out < out.len) : (iters += 1) {
-                const r = std.posix.read(conn.fd, &conn.read_buf) catch |err| {
+                const r = sysx.read(conn.fd, &conn.read_buf) catch |err| {
                     if (err == error.WouldBlock) break;
                     const msg = std.fmt.bufPrint(&conn.err_buf, "read: {s}", .{@errorName(err)}) catch "read err";
                     out[n_out] = .{ .err = .{ .conn_id = i, .msg = msg } };
@@ -263,7 +266,7 @@ pub const UdsServer = struct {
         return &self.conns[conn_id];
     }
 
-    fn allocConnId(self: *UdsServer, fd: std.posix.socket_t) ?u32 {
+    fn allocConnId(self: *UdsServer, fd: sysx.socket_t) ?u32 {
         for (&self.conns, 0..) |*c, i| {
             if (!c.active) {
                 c.fd = fd;
@@ -277,7 +280,7 @@ pub const UdsServer = struct {
     fn closeInternal(self: *UdsServer, conn: *Conn) void {
         _ = self;
         if (!conn.active) return;
-        std.posix.close(conn.fd);
+        sysx.close(conn.fd);
         conn.active = false;
         conn.fd = -1;
         if (conn.parser) |*p| {
@@ -302,10 +305,10 @@ pub const ConnWriter = struct {
         if (!conn.active) return error.ConnClosed;
         var pos: usize = 0;
         while (pos < bytes.len) {
-            const n = std.posix.write(conn.fd, bytes[pos..]) catch |err| {
+            const n = sysx.write(conn.fd, bytes[pos..]) catch |err| {
                 if (err == error.WouldBlock) {
-                    var pfd = [_]std.posix.pollfd{.{ .fd = conn.fd, .events = std.posix.POLL.OUT, .revents = 0 }};
-                    _ = std.posix.poll(&pfd, 5000) catch return error.WouldBlock;
+                    var pfd = [_]sysx.pollfd{.{ .fd = conn.fd, .events = sysx.POLL.OUT, .revents = 0 }};
+                    _ = sysx.poll(&pfd, 5000) catch return error.WouldBlock;
                     continue;
                 }
                 return err;

@@ -13,6 +13,9 @@
 //!   tor.stop();
 
 const std = @import("std");
+// ZIG_016_MIGRATION §6 exemption (door b): readiness-loop layer, raw
+// posix-shaped syscalls via sysx. Do NOT migrate to std.Io.net.
+const sysx = @import("sysx.zig");
 
 // ── Configuration ────────────────────────────────────────────────────────
 
@@ -53,7 +56,7 @@ pub fn start(opts: TorOpts) !void {
     hs_port = findOpenPort(BASE_HS_PORT);
 
     // Create config directory: ~/.cache/reactjit-tor/<identity>/
-    const home = std.posix.getenv("HOME") orelse "/tmp";
+    const home = sysx.getenv("HOME") orelse "/tmp";
     const identity = opts.identity;
     const dir = try std.fmt.bufPrint(&config_dir, "{s}/.cache/reactjit-tor/{s}", .{ home, identity });
     config_dir_len = dir.len;
@@ -170,9 +173,9 @@ fn findOpenPort(base: u16) u16 {
     var port = base;
     while (port < 65535) : (port += 1) {
         const addr = std.net.Address.parseIp4("127.0.0.1", port) catch continue;
-        const fd = std.posix.socket(addr.any.family, std.posix.SOCK.STREAM, 0) catch continue;
-        defer std.posix.close(fd);
-        std.posix.bind(fd, &addr.any, addr.getOsSockLen()) catch continue;
+        const fd = sysx.socket(addr.any.family, sysx.SOCK.STREAM, 0) catch continue;
+        defer sysx.close(fd);
+        sysx.bind(fd, &addr.any, addr.getOsSockLen()) catch continue;
         // Port is available
         return port;
     }

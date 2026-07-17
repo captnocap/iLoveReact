@@ -17,6 +17,10 @@
 //!   }
 
 const std = @import("std");
+// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
+// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
+// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
+const sysx = @import("sysx.zig");
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -371,6 +375,6 @@ pub const WebSocket = struct {
 
 fn setNonBlocking(stream: std.net.Stream) void {
     const fd = stream.handle;
-    const flags = std.posix.fcntl(fd, std.posix.F.GETFL, 0) catch return;
-    _ = std.posix.fcntl(fd, std.posix.F.SETFL, flags | std.posix.SOCK.NONBLOCK) catch {};
+    const flags = sysx.fcntl(fd, sysx.F.GETFL, 0) catch return;
+    _ = sysx.fcntl(fd, sysx.F.SETFL, flags | sysx.SOCK.NONBLOCK) catch {};
 }

@@ -27,10 +27,13 @@
 //!   ← {"ok":true,"alive":true}
 
 const std = @import("std");
+// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
+// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
+// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
 const log = @import("../diag/log.zig");
 const vterm_mod = @import("vterm.zig");
 const classifier = @import("classifier.zig");
-const posix = std.posix;
+const posix = @import("../net/sysx.zig");
 
 const MAX_CLIENTS = 4;
 const READ_BUF_SIZE = 4096;

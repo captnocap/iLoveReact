@@ -21,6 +21,10 @@
 //! Pushes are queued for the application layer to handle between frames.
 
 const std = @import("std");
+// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
+// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
+// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
+const sysx = @import("../net/sysx.zig");
 const event_bus = @import("event_bus.zig");
 // Frame telemetry counters — were housed in qjs_runtime.zig, now in
 // framework/frame_telemetry.zig (archive/qjs-stack/README.md). Aliased
@@ -49,7 +53,7 @@ pub const Message = union(enum) {
     notice: NoticeMessage,
 };
 
-var listen_fd: ?std.posix.socket_t = null;
+var listen_fd: ?sysx.socket_t = null;
 var queued: std.ArrayList(Message) = .{};
 var alloc: std.mem.Allocator = std.heap.page_allocator;
 var build_id: []const u8 = "unknown";
@@ -72,33 +76,33 @@ pub fn start() void {
     if (listen_fd != null) return;
 
     // Unlink stale socket file if present
-    std.posix.unlink(SOCKET_PATH) catch {};
+    sysx.unlink(SOCKET_PATH) catch {};
 
-    const fd = std.posix.socket(std.posix.AF.UNIX, std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK, 0) catch |e| {
+    const fd = sysx.socket(sysx.AF.UNIX, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0) catch |e| {
         log.warn("socket create failed: {}", .{e});
         return;
     };
 
     // sun_path is [108]u8 on Linux, [104]u8 on macOS — undefined + memset zeroes
     // the field by its real length so this builds on both.
-    var addr: std.posix.sockaddr.un = .{ .family = std.posix.AF.UNIX, .path = undefined };
+    var addr: sysx.sockaddr.un = .{ .family = sysx.AF.UNIX, .path = undefined };
     @memset(&addr.path, 0);
     const path = SOCKET_PATH;
     if (path.len >= addr.path.len) {
         log.warn("socket path too long", .{});
-        std.posix.close(fd);
+        sysx.close(fd);
         return;
     }
     @memcpy(addr.path[0..path.len], path);
 
-    std.posix.bind(fd, @ptrCast(&addr), @sizeOf(std.posix.sockaddr.un)) catch |e| {
+    sysx.bind(fd, @ptrCast(&addr), @sizeOf(sysx.sockaddr.un)) catch |e| {
         log.warn("bind {s} failed: {}", .{ path, e });
-        std.posix.close(fd);
+        sysx.close(fd);
         return;
     };
-    std.posix.listen(fd, 4) catch |e| {
+    sysx.listen(fd, 4) catch |e| {
         log.warn("listen failed: {}", .{e});
-        std.posix.close(fd);
+        sysx.close(fd);
         return;
     };
 
@@ -108,8 +112,8 @@ pub fn start() void {
 
 pub fn stop() void {
     if (listen_fd) |fd| {
-        std.posix.close(fd);
-        std.posix.unlink(SOCKET_PATH) catch {};
+        sysx.close(fd);
+        sysx.unlink(SOCKET_PATH) catch {};
         listen_fd = null;
     }
     drainQueue();
@@ -121,12 +125,12 @@ pub fn pollOnce() void {
     const fd = listen_fd orelse return;
 
     // Accept one connection per poll (if more are pending, they'll come next frame)
-    const client_fd = std.posix.accept(fd, null, null, std.posix.SOCK.NONBLOCK) catch |e| {
+    const client_fd = sysx.accept(fd, null, null, sysx.SOCK.NONBLOCK) catch |e| {
         if (e == error.WouldBlock) return;
         log.warn("accept failed: {}", .{e});
         return;
     };
-    defer std.posix.close(client_fd);
+    defer sysx.close(client_fd);
 
     handleClient(client_fd) catch |e| {
         // BrokenPipe / ConnectionResetByPeer = client gave up before our
@@ -139,17 +143,17 @@ pub fn pollOnce() void {
     };
 }
 
-fn handleClient(client_fd: std.posix.socket_t) !void {
+fn handleClient(client_fd: sysx.socket_t) !void {
     // Client is set to non-blocking by accept; make blocking for the parse.
-    const flags = try std.posix.fcntl(client_fd, std.posix.F.GETFL, 0);
-    _ = try std.posix.fcntl(client_fd, std.posix.F.SETFL, flags & ~@as(usize, std.posix.SOCK.NONBLOCK));
+    const flags = try sysx.fcntl(client_fd, sysx.F.GETFL, 0);
+    _ = try sysx.fcntl(client_fd, sysx.F.SETFL, flags & ~@as(usize, sysx.SOCK.NONBLOCK));
 
     // Read the header line up to '\n' into a small stack buffer
     var header_buf: [256]u8 = undefined;
     var header_len: usize = 0;
     while (header_len < header_buf.len) {
         var byte: [1]u8 = undefined;
-        const n = try std.posix.read(client_fd, &byte);
+        const n = try sysx.read(client_fd, &byte);
         if (n == 0) return error.EarlyEof;
         header_buf[header_len] = byte[0];
         header_len += 1;
@@ -243,7 +247,7 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
         errdefer alloc.free(json);
         var read_total: usize = 0;
         while (read_total < json_len) {
-            const n = try std.posix.read(client_fd, json[read_total..]);
+            const n = try sysx.read(client_fd, json[read_total..]);
             if (n == 0) return error.EarlyEof;
             read_total += n;
         }
@@ -273,7 +277,7 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
 
     var read_total: usize = 0;
     while (read_total < bundle_len) {
-        const n = try std.posix.read(client_fd, bundle[read_total..]);
+        const n = try sysx.read(client_fd, bundle[read_total..]);
         if (n == 0) return error.EarlyEof;
         read_total += n;
     }
@@ -305,7 +309,7 @@ const SOL_SOCKET: c_int = 1;
 const SO_PEERCRED: c_int = 17;
 extern fn getsockopt(s: c_int, level: c_int, optname: c_int, optval: ?*anyopaque, optlen: ?*u32) c_int;
 
-fn peerPidOrZero(fd: std.posix.socket_t) i32 {
+fn peerPidOrZero(fd: sysx.socket_t) i32 {
     var cred: Ucred = .{ .pid = 0, .uid = 0, .gid = 0 };
     var len: u32 = @sizeOf(Ucred);
     if (getsockopt(@as(c_int, @intCast(fd)), SOL_SOCKET, SO_PEERCRED, &cred, &len) != 0) return 0;

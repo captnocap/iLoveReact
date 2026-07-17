@@ -18,6 +18,10 @@
 //!   server.close();
 
 const std = @import("std");
+// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
+// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
+// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
+const sysx = @import("sysx.zig");
 
 // ── Configuration ────────────────────────────────────────────────────────
 
@@ -44,7 +48,7 @@ var g_dbg: bool = false;
 fn dbg(comptime fmt: []const u8, args: anytype) void {
     if (!g_dbg_checked) {
         g_dbg_checked = true;
-        g_dbg = std.posix.getenv("REACTJIT_HTTPSRV_DEBUG") != null;
+        g_dbg = sysx.getenv("REACTJIT_HTTPSRV_DEBUG") != null;
     }
     if (g_dbg) std.debug.print("[httpsrv] " ++ fmt ++ "\n", args);
 }
@@ -93,7 +97,7 @@ const HttpClient = struct {
 // ── Server ───────────────────────────────────────────────────────────────
 
 pub const HttpServer = struct {
-    listener: std.posix.socket_t,
+    listener: sysx.socket_t,
     clients: [MAX_CLIENTS]HttpClient = [_]HttpClient{.{}} ** MAX_CLIENTS,
     next_id: u32 = 1,
     routes: [MAX_ROUTES]Route = undefined,
@@ -111,13 +115,13 @@ pub const HttpServer = struct {
     /// so the struct must NOT be moved/copied after this returns.
     pub fn listen(self: *HttpServer, port: u16, routes: []const Route) !void {
         const addr = try std.net.Address.parseIp4("0.0.0.0", port);
-        const fd = try std.posix.socket(addr.any.family, std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK, 0);
-        errdefer std.posix.close(fd);
+        const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
+        errdefer sysx.close(fd);
 
         const optval: c_int = 1;
-        try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, std.mem.asBytes(&optval));
-        try std.posix.bind(fd, &addr.any, addr.getOsSockLen());
-        try std.posix.listen(fd, 16);
+        try sysx.setsockopt(fd, sysx.SOL.SOCKET, sysx.SO.REUSEADDR, std.mem.asBytes(&optval));
+        try sysx.bind(fd, &addr.any, addr.getOsSockLen());
+        try sysx.listen(fd, 16);
 
         self.* = HttpServer{ .listener = fd };
         const rcount = @min(routes.len, MAX_ROUTES);
@@ -146,13 +150,13 @@ pub const HttpServer = struct {
 
         // Accept new connections
         while (true) {
-            const accepted = std.posix.accept(self.listener, null, null, std.posix.SOCK.NONBLOCK) catch |err| {
+            const accepted = sysx.accept(self.listener, null, null, sysx.SOCK.NONBLOCK) catch |err| {
                 if (err != error.WouldBlock) dbg("accept ERR={s}", .{@errorName(err)});
                 break;
             };
             const slot = self.findSlot() orelse {
                 dbg("accept fd={d} NO FREE SLOT (closing)", .{accepted});
-                std.posix.close(accepted);
+                sysx.close(accepted);
                 break;
             };
             self.clients[slot] = .{
@@ -206,7 +210,7 @@ pub const HttpServer = struct {
                 client.active = false;
             }
         }
-        std.posix.close(self.listener);
+        sysx.close(self.listener);
     }
 
     // ── Internal ─────────────────────────────────────────────────────

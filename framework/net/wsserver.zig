@@ -12,6 +12,10 @@
 //!   server.close();
 
 const std = @import("std");
+// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
+// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
+// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
+const sysx = @import("sysx.zig");
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -71,7 +75,7 @@ const Client = struct {
 // ── Server ───────────────────────────────────────────────────────────────
 
 pub const WsServer = struct {
-    listener: std.posix.socket_t = undefined,
+    listener: sysx.socket_t = undefined,
     clients: [MAX_CLIENTS]Client = [_]Client{.{}} ** MAX_CLIENTS,
     next_client_id: u32 = 1,
     event_count: usize = 0,
@@ -79,14 +83,14 @@ pub const WsServer = struct {
     /// Start listening on a port. Initializes self in-place (no large return by value).
     pub fn listen(port: u16) !WsServer {
         const addr = try std.net.Address.parseIp4("0.0.0.0", port);
-        const fd = try std.posix.socket(addr.any.family, std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK, 0);
-        errdefer std.posix.close(fd);
+        const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
+        errdefer sysx.close(fd);
 
         const optval: c_int = 1;
-        try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, std.mem.asBytes(&optval));
+        try sysx.setsockopt(fd, sysx.SOL.SOCKET, sysx.SO.REUSEADDR, std.mem.asBytes(&optval));
 
-        try std.posix.bind(fd, &addr.any, addr.getOsSockLen());
-        try std.posix.listen(fd, 16);
+        try sysx.bind(fd, &addr.any, addr.getOsSockLen());
+        try sysx.listen(fd, 16);
 
         return WsServer{ .listener = fd };
     }
@@ -94,14 +98,14 @@ pub const WsServer = struct {
     /// Initialize an existing WsServer in-place (avoids 8MB return-by-value).
     pub fn listenInPlace(self: *WsServer, port: u16) !void {
         const addr = try std.net.Address.parseIp4("0.0.0.0", port);
-        const fd = try std.posix.socket(addr.any.family, std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK, 0);
-        errdefer std.posix.close(fd);
+        const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
+        errdefer sysx.close(fd);
 
         const optval: c_int = 1;
-        try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, std.mem.asBytes(&optval));
+        try sysx.setsockopt(fd, sysx.SOL.SOCKET, sysx.SO.REUSEADDR, std.mem.asBytes(&optval));
 
-        try std.posix.bind(fd, &addr.any, addr.getOsSockLen());
-        try std.posix.listen(fd, 16);
+        try sysx.bind(fd, &addr.any, addr.getOsSockLen());
+        try sysx.listen(fd, 16);
 
         // Set fields individually — avoid constructing a full 8MB struct literal
         self.listener = fd;
@@ -178,7 +182,7 @@ pub const WsServer = struct {
                 client.active = false;
             }
         }
-        std.posix.close(self.listener);
+        sysx.close(self.listener);
     }
 
     // ── Internal ─────────────────────────────────────────────────────
@@ -186,9 +190,9 @@ pub const WsServer = struct {
     fn acceptClients(self: *WsServer, out: []ServerEvent) void {
         _ = out;
         while (true) {
-            const accepted = std.posix.accept(self.listener, null, null, std.posix.SOCK.NONBLOCK) catch break;
+            const accepted = sysx.accept(self.listener, null, null, sysx.SOCK.NONBLOCK) catch break;
             const slot = self.findClientSlot() orelse {
-                std.posix.close(accepted);
+                sysx.close(accepted);
                 break;
             };
             self.clients[slot] = .{

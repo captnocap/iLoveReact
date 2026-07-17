@@ -8,6 +8,10 @@
 //! don't try to mimic node's fs/process/child_process shapes.
 
 const std = @import("std");
+// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
+// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
+// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
+const sysx = @import("net/sysx.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const hotstate = @import("state/hotstate.zig");
@@ -162,7 +166,7 @@ fn envGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(name);
-    const val = std.posix.getenv(name) orelse {
+    const val = sysx.getenv(name) orelse {
         setNull(info);
         return;
     };
@@ -208,7 +212,7 @@ fn sleepMs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 // from the controlling terminal without blocking, and wait on multiple
 // fds at once so a TUI can service stdin + unix sockets in the same loop.
 
-var g_termios_saved: ?std.posix.termios = null;
+var g_termios_saved: ?sysx.termios = null;
 
 /// __setStdinRaw(enable) → bool. Saves the original termios on first
 /// enable, restores it on disable. Keeps ISIG so ctrl-c still kills.
@@ -217,7 +221,7 @@ fn setStdinRaw(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const enable = argI32(info, 0, 1) != 0;
 
     if (enable) {
-        const current = std.posix.tcgetattr(0) catch {
+        const current = sysx.tcgetattr(0) catch {
             setBool(info, false);
             return;
         };
@@ -233,16 +237,16 @@ fn setStdinRaw(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         t.iflag.INPCK = false;
         t.iflag.ISTRIP = false;
         t.oflag.OPOST = false;
-        t.cc[@intFromEnum(std.posix.V.MIN)] = 0;
-        t.cc[@intFromEnum(std.posix.V.TIME)] = 0;
-        std.posix.tcsetattr(0, .NOW, t) catch {
+        t.cc[@intFromEnum(sysx.V.MIN)] = 0;
+        t.cc[@intFromEnum(sysx.V.TIME)] = 0;
+        sysx.tcsetattr(0, .NOW, t) catch {
             setBool(info, false);
             return;
         };
         setBool(info, true);
     } else {
         if (g_termios_saved) |saved| {
-            std.posix.tcsetattr(0, .NOW, saved) catch {};
+            sysx.tcsetattr(0, .NOW, saved) catch {};
         }
         setBool(info, true);
     }
@@ -252,14 +256,14 @@ fn setStdinRaw(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 /// then read only if data is ready. Works with or without raw mode.
 fn readStdin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    var pfd = [_]std.posix.pollfd{.{ .fd = 0, .events = std.posix.POLL.IN, .revents = 0 }};
-    const ready = std.posix.poll(&pfd, 0) catch 0;
-    if (ready == 0 or (pfd[0].revents & std.posix.POLL.IN) == 0) {
+    var pfd = [_]sysx.pollfd{.{ .fd = 0, .events = sysx.POLL.IN, .revents = 0 }};
+    const ready = sysx.poll(&pfd, 0) catch 0;
+    if (ready == 0 or (pfd[0].revents & sysx.POLL.IN) == 0) {
         setString(info, "");
         return;
     }
     var buf: [4096]u8 = undefined;
-    const n = std.posix.read(0, &buf) catch 0;
+    const n = sysx.read(0, &buf) catch 0;
     setString(info, buf[0..n]);
 }
 
@@ -300,7 +304,7 @@ fn pollFds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     defer alloc.free(fds_json);
     const timeout_ms = argI32(info, 1, 0);
 
-    var pfds: [32]std.posix.pollfd = undefined;
+    var pfds: [32]sysx.pollfd = undefined;
     var n_fds: usize = 0;
     var i: usize = 0;
     while (i < fds_json.len and n_fds < pfds.len) {
@@ -311,7 +315,7 @@ fn pollFds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
                 v = v * 10 + @as(i32, @intCast(fds_json[i] - '0'));
                 i += 1;
             }
-            pfds[n_fds] = .{ .fd = v, .events = std.posix.POLL.IN, .revents = 0 };
+            pfds[n_fds] = .{ .fd = v, .events = sysx.POLL.IN, .revents = 0 };
             n_fds += 1;
         } else {
             i += 1;
@@ -323,7 +327,7 @@ fn pollFds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     }
 
-    _ = std.posix.poll(pfds[0..n_fds], timeout_ms) catch {
+    _ = sysx.poll(pfds[0..n_fds], timeout_ms) catch {
         setString(info, "[]");
         return;
     };
@@ -336,7 +340,7 @@ fn pollFds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     var first = true;
     for (pfds[0..n_fds], 0..) |pfd, idx| {
-        if ((pfd.revents & std.posix.POLL.IN) != 0) {
+        if ((pfd.revents & sysx.POLL.IN) != 0) {
             if (!first) out.append(alloc, ',') catch break;
             first = false;
             var nbuf: [16]u8 = undefined;
@@ -361,7 +365,7 @@ fn writeStdout(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(s);
-    _ = std.posix.write(1, s) catch {};
+    _ = sysx.write(1, s) catch {};
     setUndefined(info);
 }
 
@@ -373,7 +377,7 @@ fn writeStderr(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(s);
-    _ = std.posix.write(2, s) catch {};
+    _ = sysx.write(2, s) catch {};
     setUndefined(info);
 }
 
@@ -504,9 +508,9 @@ var g_children_ready: bool = false;
 // async-signal-safe; a fixed-size array is. Lookups from JS (__childKill etc.)
 // still use g_children; this table is only read inside the signal handler.
 const MAX_TRACKED_PIDS: usize = 64;
-var g_pid_table: [MAX_TRACKED_PIDS]std.posix.pid_t = [_]std.posix.pid_t{0} ** MAX_TRACKED_PIDS;
+var g_pid_table: [MAX_TRACKED_PIDS]sysx.pid_t = [_]sysx.pid_t{0} ** MAX_TRACKED_PIDS;
 
-fn recordPid(pid: std.posix.pid_t) void {
+fn recordPid(pid: sysx.pid_t) void {
     for (&g_pid_table) |*slot| {
         if (slot.* == 0) {
             slot.* = pid;
@@ -517,7 +521,7 @@ fn recordPid(pid: std.posix.pid_t) void {
     // signal handler just won't know about this one.
 }
 
-fn forgetPid(pid: std.posix.pid_t) void {
+fn forgetPid(pid: sysx.pid_t) void {
     for (&g_pid_table) |*slot| {
         if (slot.* == pid) {
             slot.* = 0;
@@ -535,14 +539,14 @@ fn forgetPid(pid: std.posix.pid_t) void {
 /// corner. Both atexit (normal __exit) and the signal handler call this.
 fn restoreTty() callconv(.c) void {
     if (g_termios_saved) |saved| {
-        std.posix.tcsetattr(0, .NOW, saved) catch {};
+        sysx.tcsetattr(0, .NOW, saved) catch {};
         // Order matters: disable mouse reporting BEFORE leaving the alt
         // screen so mouse-mode bytes don't end up at the user's shell
         // prompt if the shell happens to repaint immediately after.
         // 1000l = press/release off, 1002l = drag tracking off,
         // 1006l = SGR extended off, 1049l = alt screen off, 25h = cursor
         // on, 0m = SGR reset.
-        _ = std.posix.write(1, "\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[0m") catch {};
+        _ = sysx.write(1, "\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[0m") catch {};
     }
 }
 
@@ -556,30 +560,30 @@ fn signalHandler(sig: c_int) callconv(.c) void {
     // disposition so our own exit status reflects the signal that killed us.
     for (g_pid_table) |pid| {
         if (pid != 0) {
-            _ = std.posix.kill(pid, std.posix.SIG.TERM) catch {};
+            _ = sysx.kill(pid, sysx.SIG.TERM) catch {};
         }
     }
-    const dfl = std.posix.Sigaction{
-        .handler = .{ .handler = std.posix.SIG.DFL },
-        .mask = std.posix.sigemptyset(),
+    const dfl = sysx.Sigaction{
+        .handler = .{ .handler = sysx.SIG.DFL },
+        .mask = sysx.sigemptyset(),
         .flags = 0,
     };
-    std.posix.sigaction(@intCast(sig), &dfl, null);
-    _ = std.posix.raise(@intCast(sig)) catch {};
+    sysx.sigaction(@intCast(sig), &dfl, null);
+    _ = sysx.raise(@intCast(sig)) catch {};
 }
 
 /// Install SIGINT/SIGTERM/SIGHUP handlers that kill tracked child processes,
 /// plus an atexit hook for terminal restore. Call once from main before
 /// spawning anything.
 pub fn installSignalHandlers() void {
-    const act = std.posix.Sigaction{
+    const act = sysx.Sigaction{
         .handler = .{ .handler = signalHandler },
-        .mask = std.posix.sigemptyset(),
+        .mask = sysx.sigemptyset(),
         .flags = 0,
     };
-    std.posix.sigaction(std.posix.SIG.INT, &act, null);
-    std.posix.sigaction(std.posix.SIG.TERM, &act, null);
-    std.posix.sigaction(std.posix.SIG.HUP, &act, null);
+    sysx.sigaction(sysx.SIG.INT, &act, null);
+    sysx.sigaction(sysx.SIG.TERM, &act, null);
+    sysx.sigaction(sysx.SIG.HUP, &act, null);
     _ = atexit(restoreTty);
 }
 
@@ -695,7 +699,7 @@ fn childReadLine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     }
 
     const fd = blk: {
-        const pipe = handle.child.stdout orelse break :blk @as(std.posix.fd_t, -1);
+        const pipe = handle.child.stdout orelse break :blk @as(sysx.fd_t, -1);
         break :blk pipe.handle;
     };
     if (fd < 0) {
@@ -704,8 +708,8 @@ fn childReadLine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     }
 
-    var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
-    const n = std.posix.poll(&pfd, timeout_ms) catch {
+    var pfd = [_]sysx.pollfd{.{ .fd = fd, .events = sysx.POLL.IN, .revents = 0 }};
+    const n = sysx.poll(&pfd, timeout_ms) catch {
         setNull(info);
         return;
     };
@@ -715,7 +719,7 @@ fn childReadLine(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     }
 
     var buf: [4096]u8 = undefined;
-    const got = std.posix.read(fd, &buf) catch 0;
+    const got = sysx.read(fd, &buf) catch 0;
     if (got == 0) {
         // EOF: child stdout closed. Return whatever residual is as a final line
         // (if any), else empty.
@@ -814,7 +818,7 @@ fn unixWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(content);
-    const n = std.posix.write(@intCast(fd), content) catch {
+    const n = sysx.write(@intCast(fd), content) catch {
         setNumber(info, -1);
         return;
     };
@@ -833,8 +837,8 @@ fn unixReadAll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     }
     const max_bytes: usize = if (max_bytes_arg <= 0) 65536 else @intCast(max_bytes_arg);
 
-    var pfd = [_]std.posix.pollfd{.{ .fd = @intCast(fd), .events = std.posix.POLL.IN, .revents = 0 }};
-    const n = std.posix.poll(&pfd, timeout_ms) catch {
+    var pfd = [_]sysx.pollfd{.{ .fd = @intCast(fd), .events = sysx.POLL.IN, .revents = 0 }};
+    const n = sysx.poll(&pfd, timeout_ms) catch {
         setNull(info);
         return;
     };
@@ -849,7 +853,7 @@ fn unixReadAll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(buf);
-    const got = std.posix.read(@intCast(fd), buf) catch {
+    const got = sysx.read(@intCast(fd), buf) catch {
         setNull(info);
         return;
     };
@@ -860,7 +864,7 @@ fn unixReadAll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn unixClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const fd = argI32(info, 0, -1);
-    if (fd >= 0) std.posix.close(@intCast(fd));
+    if (fd >= 0) sysx.close(@intCast(fd));
     setUndefined(info);
 }
 

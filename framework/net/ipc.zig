@@ -34,6 +34,10 @@
 //!   client.close();
 
 const std = @import("std");
+// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
+// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
+// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
+const sysx = @import("sysx.zig");
 const log = @import("../diag/log.zig");
 const event_bus = @import("../diag/event_bus.zig");
 
@@ -170,8 +174,8 @@ const RecvBuffer = struct {
 // ════════════════════════════════════════════════════════════════════════
 
 pub const Server = struct {
-    listener: std.posix.socket_t,
-    client_fd: ?std.posix.socket_t = null,
+    listener: sysx.socket_t,
+    client_fd: ?sysx.socket_t = null,
     recv_buf: RecvBuffer = .{},
     msg_out: [MAX_MESSAGES_PER_POLL]Message = undefined,
     port: u16 = 0,
@@ -180,22 +184,22 @@ pub const Server = struct {
     /// Bind a TCP server on localhost. Pass port=0 to let the OS pick a free port.
     pub fn bind(port: u16) !Server {
         const addr = try std.net.Address.parseIp4("127.0.0.1", port);
-        const fd = try std.posix.socket(addr.any.family, std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK, 0);
-        errdefer std.posix.close(fd);
+        const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
+        errdefer sysx.close(fd);
 
         // SO_REUSEADDR
         const optval: c_int = 1;
-        try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, std.mem.asBytes(&optval));
+        try sysx.setsockopt(fd, sysx.SOL.SOCKET, sysx.SO.REUSEADDR, std.mem.asBytes(&optval));
 
-        try std.posix.bind(fd, &addr.any, addr.getOsSockLen());
-        try std.posix.listen(fd, 1); // single client expected
+        try sysx.bind(fd, &addr.any, addr.getOsSockLen());
+        try sysx.listen(fd, 1); // single client expected
 
         // Read back the assigned port
-        var bound_addr: std.posix.sockaddr = undefined;
-        var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
-        try std.posix.getsockname(fd, &bound_addr, &addr_len);
+        var bound_addr: sysx.sockaddr = undefined;
+        var addr_len: sysx.socklen_t = @sizeOf(sysx.sockaddr);
+        try sysx.getsockname(fd, &bound_addr, &addr_len);
         // Extract port from the sockaddr_in
-        const sa_in: *const std.posix.sockaddr.in = @ptrCast(@alignCast(&bound_addr));
+        const sa_in: *const sysx.sockaddr.in = @ptrCast(@alignCast(&bound_addr));
         const assigned_port = std.mem.bigToNative(u16, sa_in.port);
 
         return Server{
@@ -212,10 +216,10 @@ pub const Server = struct {
     /// Non-blocking accept. Call once per frame. Returns true if a client connected.
     pub fn acceptClient(self: *Server) bool {
         if (self.client_fd != null) return true; // already connected
-        const accepted = std.posix.accept(self.listener, null, null, std.posix.SOCK.NONBLOCK) catch return false;
+        const accepted = sysx.accept(self.listener, null, null, sysx.SOCK.NONBLOCK) catch return false;
         // TCP_NODELAY
         const optval: c_int = 1;
-        std.posix.setsockopt(accepted, std.posix.IPPROTO.TCP, std.posix.TCP.NODELAY, std.mem.asBytes(&optval)) catch {};
+        sysx.setsockopt(accepted, sysx.IPPROTO.TCP, sysx.TCP.NODELAY, std.mem.asBytes(&optval)) catch {};
         self.client_fd = accepted;
         return true;
     }
@@ -247,10 +251,10 @@ pub const Server = struct {
     /// Close the server and any connected client.
     pub fn close(self: *Server) void {
         if (self.client_fd) |fd| {
-            std.posix.close(fd);
+            sysx.close(fd);
             self.client_fd = null;
         }
-        std.posix.close(self.listener);
+        sysx.close(self.listener);
         self.dead = true;
     }
 };
@@ -260,7 +264,7 @@ pub const Server = struct {
 // ════════════════════════════════════════════════════════════════════════
 
 pub const Client = struct {
-    fd: std.posix.socket_t,
+    fd: sysx.socket_t,
     recv_buf: RecvBuffer = .{},
     msg_out: [MAX_MESSAGES_PER_POLL]Message = undefined,
     dead: bool = false,
@@ -268,21 +272,21 @@ pub const Client = struct {
     /// Connect to a server on localhost:port. Blocking connect, then sets non-blocking.
     pub fn connect(port: u16) !Client {
         const addr = try std.net.Address.parseIp4("127.0.0.1", port);
-        const fd = try std.posix.socket(addr.any.family, std.posix.SOCK.STREAM, 0);
-        errdefer std.posix.close(fd);
+        const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM, 0);
+        errdefer sysx.close(fd);
 
-        try std.posix.connect(fd, &addr.any, addr.getOsSockLen());
+        try sysx.connect(fd, &addr.any, addr.getOsSockLen());
 
         // Set non-blocking after connect (raw POSIX constants for Zig 0.15)
         const F_GETFL: i32 = 3;
         const F_SETFL: i32 = 4;
         const O_NONBLOCK: usize = 0x800;
-        const cur_flags = std.posix.fcntl(fd, F_GETFL, @as(usize, 0)) catch 0;
-        _ = std.posix.fcntl(fd, F_SETFL, cur_flags | O_NONBLOCK) catch {};
+        const cur_flags = sysx.fcntl(fd, F_GETFL, @as(usize, 0)) catch 0;
+        _ = sysx.fcntl(fd, F_SETFL, cur_flags | O_NONBLOCK) catch {};
 
         // TCP_NODELAY
         const optval: c_int = 1;
-        std.posix.setsockopt(fd, std.posix.IPPROTO.TCP, std.posix.TCP.NODELAY, std.mem.asBytes(&optval)) catch {};
+        sysx.setsockopt(fd, sysx.IPPROTO.TCP, sysx.TCP.NODELAY, std.mem.asBytes(&optval)) catch {};
 
         return Client{ .fd = fd };
     }
@@ -305,7 +309,7 @@ pub const Client = struct {
 
     /// Close the connection.
     pub fn close(self: *Client) void {
-        std.posix.close(self.fd);
+        sysx.close(self.fd);
         self.dead = true;
     }
 };
@@ -316,7 +320,7 @@ pub const Client = struct {
 
 /// Non-blocking read + line extraction on a socket fd.
 fn pollFd(
-    fd: std.posix.socket_t,
+    fd: sysx.socket_t,
     recv_buf: *RecvBuffer,
     msg_out: []Message,
     dead: *bool,
@@ -324,7 +328,7 @@ fn pollFd(
     // Read all available data
     var tmp: [READ_BUF_SIZE]u8 = undefined;
     while (true) {
-        const n = std.posix.read(fd, &tmp) catch |err| switch (err) {
+        const n = sysx.read(fd, &tmp) catch |err| switch (err) {
             error.WouldBlock => break,
             else => {
                 dead.* = true;
@@ -344,10 +348,10 @@ fn pollFd(
 }
 
 /// Blocking write-all on a socket fd. Returns false on error.
-fn sendAll(fd: std.posix.socket_t, data: []const u8) bool {
+fn sendAll(fd: sysx.socket_t, data: []const u8) bool {
     var written: usize = 0;
     while (written < data.len) {
-        const n = std.posix.write(fd, data[written..]) catch return false;
+        const n = sysx.write(fd, data[written..]) catch return false;
         if (n == 0) return false;
         written += n;
     }

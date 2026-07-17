@@ -6,7 +6,10 @@
 //!   - Input forwarding (mouse, keyboard → VNC/XTest/xdotool)
 
 const std = @import("std");
-const posix = std.posix;
+// ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
+// nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
+// (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
+const posix = @import("../net/sysx.zig");
 const log = @import("../diag/log.zig");
 const c = @import("../c.zig").imports;
 

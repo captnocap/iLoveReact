@@ -17,6 +17,9 @@
 //!   net.destroy();
 
 const std = @import("std");
+// ZIG_016_MIGRATION §6 exemption (door b): readiness-loop layer, raw
+// posix-shaped syscalls via sysx. Do NOT migrate to std.Io.net.
+const sysx = @import("sysx.zig");
 const websocket = @import("websocket.zig");
 const socks5 = @import("socks5.zig");
 
@@ -445,7 +448,7 @@ fn getTicks() u32 {
     const ns = std.time.Instant.now() catch return 0;
     _ = ns;
     // Fallback: use a simple timestamp
-    var ts: std.posix.timespec = undefined;
-    std.posix.clock_gettime(.MONOTONIC, &ts);
+    var ts: sysx.timespec = undefined;
+    sysx.clock_gettime(.MONOTONIC, &ts);
     return @intCast(@as(u64, @intCast(ts.sec)) * 1000 + @as(u64, @intCast(ts.nsec)) / 1_000_000);
 }
