@@ -18,6 +18,7 @@
 //!   };
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const Process = @import("../process.zig").Process;
 const PTY = @import("../terminal/pty.zig");
@@ -514,8 +515,8 @@ pub const BuiltInTools = struct {
         var output_buffer = std.ArrayList(u8).init(ctx.allocator);
         defer output_buffer.deinit();
 
-        const start_time = std.time.milliTimestamp();
-        while (std.time.milliTimestamp() - start_time < timeout) {
+        const start_time = host_io.milliTimestamp();
+        while (host_io.milliTimestamp() - start_time < timeout) {
             if (ctx.checkAbort()) {
                 pty.closePty();
                 return ToolResult{

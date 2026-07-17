@@ -18,7 +18,7 @@ const Completed = struct {
 };
 
 var g_mutex: std.Thread.Mutex = .{};
-var g_completed: std.ArrayList(Completed) = .{};
+var g_completed: std.ArrayList(Completed) = .empty;
 
 pub fn spawn(rid: []const u8, cmd: []const u8) void {
     const rid_copy = alloc.dupe(u8, rid) catch return;
@@ -41,7 +41,7 @@ fn threadBody(rid: []u8, cmd: [:0]u8) void {
         pushCompleted(rid, &.{}, -1);
         return;
     }
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     var read_buf: [4096]u8 = undefined;
     while (true) {

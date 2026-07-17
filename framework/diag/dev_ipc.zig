@@ -54,7 +54,7 @@ pub const Message = union(enum) {
 };
 
 var listen_fd: ?sysx.socket_t = null;
-var queued: std.ArrayList(Message) = .{};
+var queued: std.ArrayList(Message) = .empty;
 var alloc: std.mem.Allocator = std.heap.page_allocator;
 var build_id: []const u8 = "unknown";
 

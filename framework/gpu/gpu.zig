@@ -2417,9 +2417,9 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     const view: *wgpu.TextureView = blk: {
         if (g_kms) break :blk g_offscreen_view orelse return;
         const surface = g_surface orelse return;
-        const acquire_t0 = std.time.microTimestamp();
+        const acquire_t0 = host_io.microTimestamp();
         surface.getCurrentTexture(&surface_texture);
-        g_present_wait_us += @intCast(@max(0, std.time.microTimestamp() - acquire_t0));
+        g_present_wait_us += @intCast(@max(0, host_io.microTimestamp() - acquire_t0));
         if (surface_texture.status != .success_optimal and surface_texture.status != .success_suboptimal) {
             if (surface_texture.texture) |t| t.release();
             if (g_width > 0 and g_height > 0) configureSurface(g_width, g_height);
@@ -2568,9 +2568,9 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         presentKms();
     } else if (!is_web) {
         if (g_surface) |s| {
-            const present_t0 = std.time.microTimestamp();
+            const present_t0 = host_io.microTimestamp();
             _ = s.present();
-            g_present_wait_us += @intCast(@max(0, std.time.microTimestamp() - present_t0));
+            g_present_wait_us += @intCast(@max(0, host_io.microTimestamp() - present_t0));
         }
     }
 

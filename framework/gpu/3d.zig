@@ -5,6 +5,7 @@
 //! Reads camera/light/mesh props from the 3D.View node's children.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
@@ -3089,7 +3090,7 @@ pub fn meshJournalLogJson(allocator: std.mem.Allocator) ?[]u8 {
 pub fn modelSessionJson(alloc: std.mem.Allocator) ?[]u8 {
     const key = g_edit_key orelse return null;
     const j = meshJournalCounts();
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
     const w = out.writer(alloc);
     w.writeAll("{\"key\":\"") catch return null;
@@ -6788,7 +6789,7 @@ fn fpsHudOn() bool {
 
 pub fn drawFpsHud() void {
     if (!fpsHudOn()) return;
-    const now = std.time.microTimestamp();
+    const now = host_io.microTimestamp();
     if (g_last_flush_us != 0) {
         const dt_us = now - g_last_flush_us;
         if (dt_us > 0) {
@@ -8285,7 +8286,7 @@ fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]co
     const animated = hfWaveActive(wave);
     if (animated or s.version_hash != loc.ver_hash or s.count == 0) {
         const hs = heights orelse return existingDyn(s);
-        const t: f32 = if (animated) @as(f32, @floatFromInt(@mod(std.time.milliTimestamp(), 1_000_000))) / 1000.0 else 0;
+        const t: f32 = if (animated) @as(f32, @floatFromInt(@mod(host_io.milliTimestamp(), 1_000_000))) / 1000.0 else 0;
         const cnt = hfGen(hs, @intCast(cols), @intCast(rows), width, depth, base, wave, t, depths);
         if (cnt == 0) return existingDyn(s);
         const buf = g_retained_vbuf orelse return null;
@@ -8353,9 +8354,9 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
 // textureKey-sampled surfaces are already populated for this frame.
 pub fn flushPending() void {
     g_telemetry = .{ .scene_count = @intCast(g_pending_count) };
-    const started = std.time.microTimestamp();
+    const started = host_io.microTimestamp();
     for (g_pending[0..g_pending_count]) |p| drawScene(p.node, p.slot, p.x, p.y, p.w, p.h);
-    const ended = std.time.microTimestamp();
+    const ended = host_io.microTimestamp();
     g_telemetry.draw_us = @intCast(@max(0, ended - started));
     if (perfLogOn()) {
         g_perf_frame += 1;
@@ -8412,7 +8413,7 @@ fn drawSky(pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_po
 
     // Wrap the clock so float32 keeps cloud-noise precision (a raw epoch in
     // seconds is ~1.7e9 and quantises the drift to a stutter).
-    const t: f32 = @as(f32, @floatFromInt(@mod(std.time.milliTimestamp(), 1_000_000))) / 1000.0;
+    const t: f32 = @as(f32, @floatFromInt(@mod(host_io.milliTimestamp(), 1_000_000))) / 1000.0;
 
     const u = SkyUniforms{
         .inv_vp = inv_vp,
@@ -9204,7 +9205,7 @@ fn drawScene(scene_node: *Node, slot: *Rt, vp_x: f32, vp_y: f32, w: f32, h: f32)
     //    model matrix + color moved into per-instance vertex attributes below. ──
     // Wrapped wall-clock (mod 1e6 s) so float32 keeps precision — the grass
     // pipeline's wind reads S.time. Same wrap drawSky uses for cloud drift.
-    const scene_time: f32 = @as(f32, @floatFromInt(@mod(std.time.milliTimestamp(), 1_000_000))) / 1000.0;
+    const scene_time: f32 = @as(f32, @floatFromInt(@mod(host_io.milliTimestamp(), 1_000_000))) / 1000.0;
     // Upload the placed lights collected above. The shader loops light_count of
     // them; an empty frame writes nothing and the loop runs zero times.
     if (n_placed > 0) {

@@ -3,6 +3,7 @@
 //! This module owns no mounted loader globals and performs no scene construction.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const c = @import("../c.zig").imports;
 const constructor = @import("../world/constructor.zig");
 const game_physics = @import("../game/physics.zig");
@@ -432,7 +433,7 @@ pub fn sampleRoute(route: []const f32, s_in: f32) RoutePose {
 }
 
 pub fn nowNs() i64 {
-    return @as(i64, @truncate(std.time.nanoTimestamp()));
+    return @as(i64, @truncate(host_io.nanoTimestamp()));
 }
 
 pub fn keyDown(scancode: usize) bool {

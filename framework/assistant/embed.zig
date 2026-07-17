@@ -27,6 +27,7 @@
 //! the executable so it's self-contained.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const pg = @import("pg");
 const fpg = @import("../storage/pg.zig");
@@ -2611,9 +2612,9 @@ fn processCode(
 
     for (chunk_bodies.items, 0..) |body, ci| {
         if (session.cancel_flag.load(.monotonic)) return;
-        const t0 = std.time.nanoTimestamp();
+        const t0 = host_io.nanoTimestamp();
         const vec = ctx.embedText(allocator, body) catch continue;
-        const t1 = std.time.nanoTimestamp();
+        const t1 = host_io.nanoTimestamp();
         _ = session.counters.embed_ns.fetchAdd(@intCast(t1 - t0), .monotonic);
 
         const id_input = try std.fmt.allocPrint(allocator, "{s}#{d}#{s}", .{ source_id, ci, session.model_id });
@@ -2751,9 +2752,9 @@ fn processConversationMapped(
         const cap: usize = 32 * 1024;
         const body = if (cleaned.len > cap) cleaned[0..cap] else cleaned;
 
-        const t0 = std.time.nanoTimestamp();
+        const t0 = host_io.nanoTimestamp();
         const vec = ctx.embedText(allocator, body) catch continue;
-        _ = session.counters.embed_ns.fetchAdd(@intCast(std.time.nanoTimestamp() - t0), .monotonic);
+        _ = session.counters.embed_ns.fetchAdd(@intCast(host_io.nanoTimestamp() - t0), .monotonic);
 
         const id_input = try std.fmt.allocPrint(allocator, "{s}#{d}#{s}", .{ session_id, ch.chunk_index, session.model_id });
         defer allocator.free(id_input);
@@ -2918,9 +2919,9 @@ fn embedKnowledgeRecord(
     );
     defer allocator.free(meta);
 
-    const t0 = std.time.nanoTimestamp();
+    const t0 = host_io.nanoTimestamp();
     const vec = ctx.embedText(allocator, body) catch return;
-    _ = session.counters.embed_ns.fetchAdd(@intCast(std.time.nanoTimestamp() - t0), .monotonic);
+    _ = session.counters.embed_ns.fetchAdd(@intCast(host_io.nanoTimestamp() - t0), .monotonic);
 
     try store.upsert(
         id,

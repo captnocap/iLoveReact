@@ -11,10 +11,10 @@
 const std = @import("std");
 
 pub const ReadBuffer = struct {
-    buffer: std.ArrayList(u8) = .{},
+    buffer: std.ArrayList(u8) = .empty,
     // Stable storage for the most recently drained line. Reused across
     // drain() calls; owned by ReadBuffer and freed in deinit().
-    last_line: std.ArrayList(u8) = .{},
+    last_line: std.ArrayList(u8) = .empty,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) ReadBuffer {

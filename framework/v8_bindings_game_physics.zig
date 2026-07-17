@@ -37,6 +37,7 @@
 //! v8_ingredients.zig). A 2D cart pays zero bytes and zero host fns.
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const game_physics = @import("game/physics.zig");
@@ -115,7 +116,7 @@ fn setReturnF32Buffer(info: v8.FunctionCallbackInfo, floats: []f32) void {
 }
 
 inline fn nowNs() i64 {
-    return @as(i64, @truncate(std.time.nanoTimestamp()));
+    return @as(i64, @truncate(host_io.nanoTimestamp()));
 }
 
 // __hmsc_physics_step(inputFloat32Array) — one sim frame across the bridge.

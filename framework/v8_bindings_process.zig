@@ -16,6 +16,7 @@
 //!   __ffiEmit('proc:exit:<pid>', '{"code":N,"signal":null}')
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const builtin = @import("builtin");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
@@ -42,7 +43,7 @@ const Entry = struct {
     err_len: usize = 0,
 };
 
-var g_entries: std.ArrayList(*Entry) = .{};
+var g_entries: std.ArrayList(*Entry) = .empty;
 
 fn findEntry(pid: c_int) ?*Entry {
     for (g_entries.items) |e| {
@@ -88,13 +89,13 @@ fn argToI32(info: v8.FunctionCallbackInfo, idx: u32) ?i32 {
 }
 
 fn emitEvent(channel: []const u8, payload: []const u8) void {
-    var chan_buf: std.ArrayList(u8) = .{};
+    var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
     chan_buf.appendSlice(alloc, channel) catch return;
     chan_buf.append(alloc, 0) catch return;
     const chan_z = chan_buf.items[0 .. chan_buf.items.len - 1 :0];
 
-    var payload_buf: std.ArrayList(u8) = .{};
+    var payload_buf: std.ArrayList(u8) = .empty;
     defer payload_buf.deinit(alloc);
     payload_buf.appendSlice(alloc, payload) catch return;
     payload_buf.append(alloc, 0) catch return;
@@ -135,7 +136,7 @@ fn parseArgsArray(json: []const u8) ?[][:0]u8 {
     if (p >= json.len or json[p] != '[') return null;
     p += 1;
 
-    var list: std.ArrayList([:0]u8) = .{};
+    var list: std.ArrayList([:0]u8) = .empty;
     defer list.deinit(alloc);
 
     while (p < json.len) {
@@ -417,7 +418,7 @@ const Watch = struct {
     initialized: bool = false,
 };
 
-var g_watches: std.ArrayList(*Watch) = .{};
+var g_watches: std.ArrayList(*Watch) = .empty;
 var g_mem_total: u64 = 0;
 var g_last_tick_ms: i64 = 0;
 
@@ -532,7 +533,7 @@ fn emitCpuSample(pid: c_int, utime: u64, stime: u64, delta: u64, interval_ms: u3
 }
 
 fn currentDtMs() u32 {
-    const now = std.time.milliTimestamp();
+    const now = host_io.milliTimestamp();
     if (g_last_tick_ms == 0) {
         g_last_tick_ms = now;
         return 0;

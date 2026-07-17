@@ -20,6 +20,7 @@
 //! CSV is retained as a compatibility/debug fallback.
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const c = @import("engine.zig").c;
@@ -149,7 +150,7 @@ fn makePlayer() Player {
 }
 
 inline fn nowNs() i64 {
-    return @as(i64, @truncate(std.time.nanoTimestamp()));
+    return @as(i64, @truncate(host_io.nanoTimestamp()));
 }
 
 fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
@@ -698,7 +699,7 @@ fn hostStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const yaw: f32 = @floatCast(argToF64(info, 0) orelse 0);
     const paused = argToBool(info, 1) orelse false;
     const elapsed_us = advanceWorld(yaw, paused, t0);
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     out.ensureTotalCapacity(alloc, 256 + g_ball_count * 72) catch {
         setReturnString(info, "");

@@ -23,6 +23,7 @@
 //!   4. zig-out/bin/rjit-llm-worker — repo dev fallback
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const RingBuffer = @import("../net/ring_buffer.zig").RingBuffer;
 
@@ -297,7 +298,7 @@ pub const Session = struct {
 // ── worker binary path resolution ────────────────────────────────────
 
 fn resolveWorkerPathAlloc(allocator: std.mem.Allocator) ![]u8 {
-    if (std.process.getEnvVarOwned(allocator, "RJIT_LLM_WORKER")) |p| {
+    if (host_io.getEnvVarOwned(allocator, "RJIT_LLM_WORKER")) |p| {
         return p;
     } else |_| {}
 
@@ -399,7 +400,7 @@ const LineReader = struct {
 
 /// Reverse the worker's escape: \n → LF, \\ → \, otherwise pass through.
 fn unescapePieceAlloc(allocator: std.mem.Allocator, piece: []const u8) ![]u8 {
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
     var i: usize = 0;
     while (i < piece.len) : (i += 1) {
@@ -458,7 +459,7 @@ fn workerMainInner(session: *Session) !void {
     var env_map = std.process.getEnvMap(session.allocator) catch std.process.EnvMap.init(session.allocator);
     defer env_map.deinit();
 
-    var ld_paths = std.ArrayList(u8){};
+    var ld_paths: std.ArrayList(u8) = .empty;
     defer ld_paths.deinit(session.allocator);
 
     const worker_dir = std.fs.path.dirname(worker_path) orelse worker_path;
@@ -564,7 +565,7 @@ fn workerMainInner(session: *Session) !void {
             // Stream tokens until DONE or ERR. TOOL_CALL lines pause the
             // stream — we wait for a matching TOOL_RESULT from JS, write
             // it to the worker subprocess, then keep reading.
-            var assistant_buf = std.ArrayList(u8){};
+            var assistant_buf: std.ArrayList(u8) = .empty;
             defer assistant_buf.deinit(session.allocator);
 
             while (true) {
@@ -612,7 +613,7 @@ fn workerMainInner(session: *Session) !void {
                     const name = try session.allocator.dupe(u8, name_line);
                     defer session.allocator.free(name);
 
-                    var args_buf = std.ArrayList(u8){};
+                    var args_buf: std.ArrayList(u8) = .empty;
                     defer args_buf.deinit(session.allocator);
                     while (true) {
                         const al = reader.next() orelse {

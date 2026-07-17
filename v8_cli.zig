@@ -39,7 +39,7 @@ pub fn main(init: std.process.Init) !void {
     // (process.argv[0] = runtime, [1] = script, [2..] = args); we drop [0]
     // entirely since scripts don't need the cli binary path.
     const script_argv = alloc.alloc([]const u8, raw_argv.len - 1) catch {
-        _ = std.posix.write(2, "v8cli: oom\n") catch {};
+        _ = sysx.write(2, "v8cli: oom\n") catch {};
         std.process.exit(1);
     };
     defer alloc.free(script_argv);
@@ -48,7 +48,7 @@ pub fn main(init: std.process.Init) !void {
     // Read the script. No module/import resolution; scripts must be
     // self-contained. (The three scripts we're porting are ~100 lines each
     // and don't import anything internal.)
-    const source = std.fs.cwd().readFileAlloc(alloc, script_path, 32 * 1024 * 1024) catch |e| {
+    const source = std.Io.Dir.cwd().readFileAlloc(host_io.io(), script_path, alloc, .limited(32 * 1024 * 1024)) catch |e| {
         var buf: [512]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "v8cli: cannot read {s}: {s}\n", .{ script_path, @errorName(e) }) catch "v8cli: read error\n";
         _ = sysx.write(2, msg) catch {};

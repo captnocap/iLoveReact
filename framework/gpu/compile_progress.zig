@@ -17,6 +17,7 @@
 //!   progress.finishOk();            // stops, prints "compiled in Xs", saves baseline
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 
 /// The last slow compile's `<wgsl bytes> <duration ms>`, persisted per machine
@@ -71,7 +72,7 @@ pub const CompileProgress = struct {
     const LINE_EVERY_MS: i64 = 2000;
 
     pub fn start(self: *CompileProgress, wgsl_len: usize) void {
-        self.start_ms = std.time.milliTimestamp();
+        self.start_ms = host_io.milliTimestamp();
         self.wgsl_len = wgsl_len;
         self.wgsl_kb = @max(1, wgsl_len / 1024);
         self.expected_ms = expectedMs(wgsl_len);
@@ -89,7 +90,7 @@ pub const CompileProgress = struct {
     }
 
     pub fn elapsedMs(self: *const CompileProgress) i64 {
-        return std.time.milliTimestamp() - self.start_ms;
+        return host_io.milliTimestamp() - self.start_ms;
     }
 
     /// Stop and close the story: slow compiles get a "compiled in Xs" line and

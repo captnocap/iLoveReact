@@ -293,7 +293,7 @@ fn privVerifyManifest(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     const entries_v = root.object.get("entries") orelse return returnEmpty(info);
     if (entries_v != .array) return returnEmpty(info);
 
-    var manifest_entries: std.ArrayList(privacy.ManifestEntry) = .{};
+    var manifest_entries: std.ArrayList(privacy.ManifestEntry) = .empty;
     defer {
         for (manifest_entries.items) |e| alloc.free(e.path);
         manifest_entries.deinit(alloc);
@@ -317,7 +317,7 @@ fn privVerifyManifest(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     var result = privacy.verifyManifest(alloc, &manifest) catch return returnEmpty(info);
     defer result.deinit();
 
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     buf.appendSlice(alloc, "{\"ok\":") catch return returnEmpty(info);
     buf.appendSlice(alloc, if (result.ok) "true" else "false") catch return returnEmpty(info);
@@ -884,7 +884,7 @@ fn privKeyringList(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     const id = argI64(info, 0) orelse return returnEmpty(info);
     const entry = findKeyring(@intCast(id)) orelse return returnEmpty(info);
 
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     buf.append(alloc, '[') catch return returnEmpty(info);
     for (entry.ring.entries.items, 0..) |*e, i| {
@@ -908,7 +908,7 @@ fn privKeyringGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
     const e = keyring.getKey(&entry.ring, key_id) orelse return returnEmpty(info);
 
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     keyEntryToJson(&buf, e) catch return returnEmpty(info);
     returnString(info, buf.items);
@@ -976,7 +976,7 @@ fn privPiiDetect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     var matches: [64]crmod.PiiMatch = undefined;
     const n = crmod.detectPii(text, &matches);
 
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     buf.append(alloc, '[') catch return returnEmpty(info);
     for (matches[0..n], 0..) |m, i| {
@@ -1036,7 +1036,7 @@ fn privShamirSplit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         alloc.free(shares);
     }
 
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     buf.append(alloc, '[') catch return returnEmpty(info);
     for (shares, 0..) |sh, i| {
@@ -1128,7 +1128,7 @@ fn privEnvelopeEncrypt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     const dan = b64Encode(&env.data_nonce) catch return returnEmpty(info);
     defer alloc.free(dan);
 
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     std.fmt.format(buf.writer(alloc),
         \\{{"encryptedDEK":"{s}","dekNonce":"{s}","ciphertext":"{s}","dataNonce":"{s}","algorithm":"xchacha20-poly1305"}}
@@ -1237,12 +1237,12 @@ fn privAuditAppend(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     const data_json = argStr(info, 1) orelse return returnEmpty(info);
     defer alloc.free(data_json);
     const e = privacy.auditAppend(event, data_json) catch return returnEmpty(info);
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     std.fmt.format(buf.writer(alloc),
         "{{\"index\":{d},\"timestamp\":{d},\"event\":", .{ e.index, e.timestamp }) catch return returnEmpty(info);
     // event re-quoted from the dup'd copy
-    var qbuf: std.ArrayList(u8) = .{};
+    var qbuf: std.ArrayList(u8) = .empty;
     defer qbuf.deinit(alloc);
     qbuf.append(alloc, '"') catch return returnEmpty(info);
     for (e.event) |c| {
@@ -1270,7 +1270,7 @@ fn privAuditAppend(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
 fn privAuditVerify(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const r = privacy.auditVerify();
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     std.fmt.format(buf.writer(alloc),
         \\{{"valid":{s},"entries":{d},"brokenAt":{d}}}
@@ -1336,7 +1336,7 @@ fn privPolicyErasure(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     const user_id = argStr(info, 0) orelse return returnEmpty(info);
     defer alloc.free(user_id);
     const r = privacy.policyRightToErasure(user_id);
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     std.fmt.format(buf.writer(alloc),
         \\{{"recordsFound":{d},"recordsDeleted":{d}}}
@@ -1353,7 +1353,7 @@ fn privCheckAlgo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const algo = argStr(info, 0) orelse return returnEmpty(info);
     defer alloc.free(algo);
     const r = privacy.checkAlgorithmStrength(algo);
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
     std.fmt.format(buf.writer(alloc),
         \\{{"strength":"{s}","deprecated":{s},"recommendation":"{s}"}}

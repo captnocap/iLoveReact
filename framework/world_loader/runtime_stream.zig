@@ -82,7 +82,7 @@ const updateDynamicPropNodes = runtime_dynamics.updateDynamicPropNodes;
 const stepInteract = runtime_interaction.stepInteract;
 
 pub fn setupStreaming(self: anytype) !void {
-    var fams: std.ArrayList(streaming.FamilyRows) = .{};
+    var fams: std.ArrayList(streaming.FamilyRows) = .empty;
     defer fams.deinit(self.allocator);
     errdefer self.stream_protos.clearAndFree(self.allocator);
 

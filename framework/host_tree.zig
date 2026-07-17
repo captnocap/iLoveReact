@@ -62,7 +62,7 @@ var g_parent_id: std.AutoHashMap(u32, u32) = undefined;
 /// Ordered list of top-level child ids (children of the React root).
 /// APPEND_TO_ROOT pushes, INSERT_BEFORE_ROOT inserts, REMOVE_FROM_ROOT
 /// removes. Nodes here have no entry in `g_parent_id`.
-var g_root_child_ids: std.ArrayList(u32) = .{};
+var g_root_child_ids: std.ArrayList(u32) = .empty;
 
 /// Set when any mutation runs. The consumer (paint loop, ANSI walker)
 /// reads + clears this per frame to decide whether to relayout.

@@ -52,7 +52,7 @@ fn parseSystem(arena: std.mem.Allocator, obj: std.json.ObjectMap) !types.SystemM
     else
         null;
 
-    var tools: std.ArrayList([]const u8) = .{};
+    var tools: std.ArrayList([]const u8) = .empty;
     if (obj.get("tools")) |tv| {
         if (getArray(tv)) |arr| {
             for (arr.items) |item| {
@@ -171,7 +171,7 @@ fn parseResult(arena: std.mem.Allocator, obj: std.json.ObjectMap) !types.ResultM
 }
 
 fn parseContentBlocks(arena: std.mem.Allocator, content_val: ?std.json.Value) ![]const types.ContentBlock {
-    var blocks: std.ArrayList(types.ContentBlock) = .{};
+    var blocks: std.ArrayList(types.ContentBlock) = .empty;
     const arr = if (content_val) |v| getArray(v) else null;
     if (arr == null) return blocks.toOwnedSlice(arena);
 

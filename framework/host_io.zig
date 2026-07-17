@@ -20,11 +20,31 @@ pub fn getenv(name: [:0]const u8) ?[]const u8 {
     return if (std.c.getenv(name.ptr)) |p| std.mem.span(p) else null;
 }
 
+/// 0.15-shaped getEnvVarOwned (deleted in 0.16): owned copy or
+/// error.EnvironmentVariableNotFound, iterating the libc environ.
+pub fn getEnvVarOwned(alloc: std.mem.Allocator, name: []const u8) error{ OutOfMemory, EnvironmentVariableNotFound }![]u8 {
+    var it: usize = 0;
+    while (std.c.environ[it]) |entry_ptr| : (it += 1) {
+        const entry = std.mem.span(entry_ptr);
+        const eq = std.mem.indexOfScalar(u8, entry, '=') orelse continue;
+        if (std.mem.eql(u8, entry[0..eq], name)) return alloc.dupe(u8, entry[eq + 1 ..]);
+    }
+    return error.EnvironmentVariableNotFound;
+}
+
 /// Real process environment as a 0.16 Environ (for process spawns — the
 /// default Threaded environ is .empty, which would spawn children with an
 /// empty environment).
 pub fn environ() std.process.Environ {
     return .{ .block = .{ .slice = @ptrCast(std.mem.span(std.c.environ)) } };
+}
+
+/// One-call main wiring: stash args and hand the real environment to the
+/// process-wide Threaded instance (spawned children inherit it; the default
+/// is .empty). Every binary's `main(init: std.process.Init)` calls this first.
+pub fn setup(init: std.process.Init) void {
+    args = init.minimal.args;
+    std.Io.Threaded.global_single_threaded.environ = .{ .process_environ = init.minimal.environ };
 }
 
 /// Command-line args, stashed by each binary's `main(init: std.process.Init)`

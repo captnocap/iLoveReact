@@ -192,7 +192,7 @@ pub fn meshPropIslands(allocator: std.mem.Allocator, mesh: constructor.MeshPropM
     // Accumulate each component's local AABB.
     var roots = std.AutoHashMap(u32, usize).init(allocator);
     defer roots.deinit();
-    var islands = std.ArrayList(MeshIsland){};
+    var islands: std.ArrayList(MeshIsland) = .empty;
     defer islands.deinit(allocator);
     vi = 0;
     while (vi < vc) : (vi += 1) {
@@ -324,9 +324,9 @@ pub fn heightfieldContentHash(field: constructor.HeightfieldMesh) u64 {
 
 pub fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene, insts: []const f32, inst_count: u32, stride: usize, entity_capacity: usize, mesh_islands: []const []MeshIsland) !PhysicsColliders {
     const entity_floats = entity_capacity * game_physics.ENTITY_FLOATS;
-    var rects: std.ArrayList(f32) = .{};
+    var rects: std.ArrayList(f32) = .empty;
     errdefer rects.deinit(allocator);
-    var oriented: std.ArrayList(f32) = .{};
+    var oriented: std.ArrayList(f32) = .empty;
     errdefer oriented.deinit(allocator);
     var rect_count: usize = 0;
     var oriented_count: usize = 0;

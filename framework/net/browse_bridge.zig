@@ -126,7 +126,7 @@ fn executeRequest(id: u32, body: []const u8) Response {
     stream.writeAll(body) catch |err| return makeErr(id, @errorName(err));
     stream.writeAll("\n") catch |err| return makeErr(id, @errorName(err));
 
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
 
     var buf: [8192]u8 = undefined;

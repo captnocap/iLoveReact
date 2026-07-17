@@ -62,7 +62,7 @@ fn hostTest(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 }
 
 fn jsonEscape(alloc: std.mem.Allocator, s: []const u8) ![]u8 {
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     for (s) |ch| switch (ch) {
         '"', '\\' => {
@@ -124,7 +124,7 @@ fn hostSegmentClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 /// Skips whitespace, doesn't validate strictly — assumes well-formed input
 /// from useSegment.ts (which we control). Returns a freshly-allocated slice.
 fn parseClicks(alloc: std.mem.Allocator, json: []const u8) ?[]segment.ClickIn {
-    var out = std.ArrayList(segment.ClickIn){};
+    var out: std.ArrayList(segment.ClickIn) = .empty;
     defer out.deinit(alloc);
     var i: usize = 0;
     while (i < json.len) {
@@ -279,7 +279,7 @@ fn poseReply(info: v8.FunctionCallbackInfo, alloc: std.mem.Allocator, kps: ?[pos
         setReturnString(info, payload);
         return;
     };
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     out.appendSlice(alloc, "{\"ok\":true,\"kp\":[") catch return;
     for (points, 0..) |kp, i| {
@@ -360,7 +360,7 @@ fn hostPoseCameraDevices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     };
     defer devices.deinit();
 
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     out.appendSlice(alloc, "{\"ok\":true,\"devices\":[") catch return;
     var emitted: usize = 0;
     for (devices.items) |device| {
@@ -404,7 +404,7 @@ fn emitPoseResult(result: *const pose.AsyncResult) void {
             .{ escaped, result.elapsed_ms },
         ) catch return;
     } else blk: {
-        var out = std.ArrayList(u8){};
+        var out: std.ArrayList(u8) = .empty;
         out.appendSlice(alloc, "{\"ok\":true,\"kp\":[") catch return;
         for (result.keypoints, 0..) |kp, i| {
             const chunk = std.fmt.allocPrint(

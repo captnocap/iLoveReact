@@ -1,4 +1,5 @@
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 
 pub const default_capacity: usize = 4096;
 
@@ -33,7 +34,7 @@ pub const ClickLatencyRing = struct {
     next_seq: u64 = 1,
 
     pub fn nowNs() u64 {
-        return @intCast(std.time.nanoTimestamp());
+        return @intCast(host_io.nanoTimestamp());
     }
 
     fn slotForSeq(self: *ClickLatencyRing, seq: u64) ?*ClickLatencySample {

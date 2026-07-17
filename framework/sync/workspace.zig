@@ -153,7 +153,7 @@ fn buildTarBytes(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
     defer allocator.free(ls);
 
     // Step 2: filter — drop denied + missing files. Reuse buffer.
-    var kept = std.ArrayList(u8){};
+    var kept: std.ArrayList(u8) = .empty;
     defer kept.deinit(allocator);
 
     var start: usize = 0;
@@ -204,7 +204,7 @@ fn runCapture(
         child.stdin = null;
     }
 
-    var stdout_buf = std.ArrayList(u8){};
+    var stdout_buf: std.ArrayList(u8) = .empty;
     errdefer stdout_buf.deinit(allocator);
 
     var read_buf: [64 * 1024]u8 = undefined;

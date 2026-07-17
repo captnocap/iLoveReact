@@ -88,7 +88,7 @@ pub const Session = struct {
         if (self.closed) return error.SessionClosed;
         const stdin = self.child.stdin orelse return error.SessionClosed;
 
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator,

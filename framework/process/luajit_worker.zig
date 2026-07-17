@@ -13,6 +13,7 @@
 //! Message mode: ring-buffered string queues.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 
 extern fn dlopen(filename: ?[*:0]const u8, flags: c_int) ?*anyopaque;
@@ -222,7 +223,7 @@ fn hostAck(L: ?*lua_State) callconv(.c) c_int {
     const lib = loadLib() orelse return 0;
     const count: i64 = @intCast(lib.to_integer(L, 1));
     _ = g_outbox.fetchAdd(count, .release);
-    g_recv_time_ns.store(@as(i64, @truncate(std.time.nanoTimestamp())), .monotonic);
+    g_recv_time_ns.store(@as(i64, @truncate(host_io.nanoTimestamp())), .monotonic);
     return 0;
 }
 
@@ -313,7 +314,7 @@ export fn lua_worker_stop() callconv(.c) c_long {
 export fn lua_worker_send(count: c_long) callconv(.c) c_long {
     const n = if (count > 0) count else g_bridge_n.load(.monotonic);
     const total = g_inbox.fetchAdd(n, .release) + n;
-    g_send_time_ns.store(@as(i64, @truncate(std.time.nanoTimestamp())), .monotonic);
+    g_send_time_ns.store(@as(i64, @truncate(host_io.nanoTimestamp())), .monotonic);
     return @intCast(total);
 }
 

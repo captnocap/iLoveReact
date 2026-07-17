@@ -104,8 +104,8 @@ pub const Runtime = struct {
     // run into textures lazily by ensureMaterials at first render, once gpu is up).
     material_batches: []MaterialBatch = &.{},
     materials_ready: bool = false,
-    player_geom_keys: std.ArrayList([]u8) = .{},
-    mesh_prop_vertex_buffers: std.ArrayList([]f32) = .{},
+    player_geom_keys: std.ArrayList([]u8) = .empty,
+    mesh_prop_vertex_buffers: std.ArrayList([]f32) = .empty,
     // LIVESKIN per-slot (req_2025): the live mesh-ref draw runs EVERY frame, so its per-slot
     // geom keys ("{meshKey}:base" / ":slot-N", the SAME keys the baked slotted draw interns)
     // are built ONCE and cached here, keyed by (meshHash<<32 | slotCode), never re-allocPrinted
@@ -114,13 +114,13 @@ pub const Runtime = struct {
     // Per cooked/imported mesh: its connected-component collision islands (req_1624),
     // computed once and shared by the static + windowed collider builds.
     mesh_prop_islands: []const []MeshIsland = &.{},
-    kid_list: std.ArrayList(Node) = .{},
+    kid_list: std.ArrayList(Node) = .empty,
     root: Node = .{},
     player_first_child: usize = 0,
     /// Live NPC figures (req_0935) — built from scene.npc_spawns, rendered with
     /// the player figure's machinery. Their node child-strings are owned by
     /// player_geom_keys (the shared owned-key bag, freed at teardown).
-    npcs: std.ArrayList(NpcRuntime) = .{},
+    npcs: std.ArrayList(NpcRuntime) = .empty,
     player: PlayerState = undefined,
     camera: CameraState = undefined,
     /// Prop interaction (PROPUSE req_0624) — driven by scene.interactables.
@@ -272,7 +272,7 @@ pub const Runtime = struct {
     // Content streaming (engaged when the world outgrows the detail radius):
     // per-frame draw-node tail rebuilt from the streaming world's ranges.
     stream: ?streaming.World = null,
-    stream_protos: std.ArrayList(StreamProto) = .{},
+    stream_protos: std.ArrayList(StreamProto) = .empty,
     stream_radius: f32 = STREAM_DETAIL_RADIUS_METERS,
     stream_tail_start: usize = 0,
     stream_draw_count: usize = 0,

@@ -100,9 +100,9 @@ const Message = struct {
 /// first delta with that index, arguments stream as fragments.
 const PartialToolCall = struct {
     index: u32,
-    id: std.ArrayList(u8) = .{},
-    name: std.ArrayList(u8) = .{},
-    arguments: std.ArrayList(u8) = .{},
+    id: std.ArrayList(u8) = .empty,
+    name: std.ArrayList(u8) = .empty,
+    arguments: std.ArrayList(u8) = .empty,
 
     fn deinit(self: *PartialToolCall, allocator: std.mem.Allocator) void {
         self.id.deinit(allocator);
@@ -124,19 +124,19 @@ pub const Session = struct {
     /// the completion event so the host learns claude's sid.
     external_session_id_owned: ?[]u8 = null,
 
-    messages: std.ArrayList(Message) = .{},
+    messages: std.ArrayList(Message) = .empty,
 
     /// Pending user texts queued behind in-flight or awaiting-tools turns.
-    pending: std.ArrayList([]u8) = .{},
+    pending: std.ArrayList([]u8) = .empty,
     /// True between request kickoff and the terminal complete/err event.
     in_flight: bool = false,
     /// SSE line-accumulating buffer used by the chunk callback.
-    sse_buffer: std.ArrayList(u8) = .{},
+    sse_buffer: std.ArrayList(u8) = .empty,
     sse_offset: usize = 0,
     /// Accumulated assistant text for the current turn.
-    pending_assistant: std.ArrayList(u8) = .{},
+    pending_assistant: std.ArrayList(u8) = .empty,
     /// Tool calls being assembled from streaming deltas (one per index).
-    partial_tool_calls: std.ArrayList(PartialToolCall) = .{},
+    partial_tool_calls: std.ArrayList(PartialToolCall) = .empty,
     /// Outstanding tool calls awaiting submitToolResult — id → null
     /// before result arrives, id → owned content after.
     awaiting_tool_results: std.StringHashMapUnmanaged(?[]u8) = .{},
@@ -147,7 +147,7 @@ pub const Session = struct {
     staged_assistant_content: ?[]u8 = null,
     staged_assistant_tool_calls: ?[]u8 = null,
     /// Outbound event queue drained by the host after each tick.
-    inbox: std.ArrayList(Event) = .{},
+    inbox: std.ArrayList(Event) = .empty,
     /// Body buffer for the in-flight request — must outlive the request.
     body_owned: ?[]u8 = null,
 
@@ -450,7 +450,7 @@ pub const Session = struct {
 
     fn beginToolCallTurn(self: *Session) !void {
         // Build the tool_calls JSON array from partials.
-        var tcs_buf: std.ArrayList(u8) = .{};
+        var tcs_buf: std.ArrayList(u8) = .empty;
         defer tcs_buf.deinit(self.allocator);
         try tcs_buf.append(self.allocator, '[');
         for (self.partial_tool_calls.items, 0..) |p, i| {
@@ -587,7 +587,7 @@ fn buildRequestBodyJson(
     tools_json: ?[]const u8,
     user: ?[]const u8,
 ) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
     try buf.appendSlice(allocator, "{\"model\":");
     try jsonEscape(allocator, &buf, model);

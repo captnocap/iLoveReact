@@ -173,7 +173,7 @@ fn httpSyncViaClient(req: HttpReq) ![]u8 {
     var client: std.http.Client = .{ .allocator = alloc };
     defer client.deinit();
 
-    var extra_headers = std.ArrayList(std.http.Header){};
+    var extra_headers: std.ArrayList(std.http.Header) = .empty;
     defer extra_headers.deinit(alloc);
     if (req.headers) |hdrs| {
         var it = hdrs.iterator();
@@ -209,7 +209,7 @@ fn httpSyncViaClient(req: HttpReq) ![]u8 {
     const status = @intFromEnum(response.head.status);
 
     // Read body
-    var body_list = std.ArrayList(u8){};
+    var body_list: std.ArrayList(u8) = .empty;
     defer body_list.deinit(alloc);
 
     var transfer_buf: [4096]u8 = undefined;
@@ -222,7 +222,7 @@ fn httpSyncViaClient(req: HttpReq) ![]u8 {
     }
 
     // Build JSON with status, headers, body
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
     try out.writer(alloc).print("{{\"status\":{d},\"headers\":{{", .{status});
     var first_hdr = true;
@@ -269,7 +269,7 @@ fn parsePageReq(parsed: *const std.json.Parsed(std.json.Value)) ?[]const u8 {
 }
 
 fn buildPageRespJson(resp: *const net_http.Response, alloc: std.mem.Allocator) ![]u8 {
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
     try out.writer(alloc).print("{{\"status\":{d},\"finalUrl\":", .{resp.status});
     try jsonEscape(&out, alloc, resp.finalUrlSlice());
@@ -287,7 +287,7 @@ fn buildPageRespJson(resp: *const net_http.Response, alloc: std.mem.Allocator) !
 }
 
 fn buildHttpRespJson(resp: *const net_http.Response, alloc: std.mem.Allocator) ![]u8 {
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
     try out.writer(alloc).print("{{\"status\":{d},\"headers\":{{}},\"body\":", .{resp.status});
     try jsonEscape(&out, alloc, resp.bodySlice());
@@ -1057,13 +1057,13 @@ fn hostSemBuildGraph(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 
 fn emitChannelPayload(channel: []const u8, payload: []const u8) void {
     const alloc = std.heap.page_allocator;
-    var chan_buf = std.ArrayList(u8){};
+    var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
     chan_buf.appendSlice(alloc, channel) catch return;
     chan_buf.append(alloc, 0) catch return;
     const chan_z = chan_buf.items[0 .. chan_buf.items.len - 1 :0];
 
-    var payload_buf = std.ArrayList(u8){};
+    var payload_buf: std.ArrayList(u8) = .empty;
     defer payload_buf.deinit(alloc);
     payload_buf.appendSlice(alloc, payload) catch return;
     payload_buf.append(alloc, 0) catch return;
@@ -1153,7 +1153,7 @@ pub fn tickDrain() void {
                             if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
                         },
                         .err => {
-                            var out = std.ArrayList(u8){};
+                            var out: std.ArrayList(u8) = .empty;
                             defer out.deinit(alloc);
                             out.appendSlice(alloc, "{\"error\":") catch continue;
                             jsonEscape(&out, alloc, resp.errorSlice()) catch continue;
@@ -1193,7 +1193,7 @@ pub fn tickDrain() void {
                         if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
                     },
                     .err => {
-                        var out = std.ArrayList(u8){};
+                        var out: std.ArrayList(u8) = .empty;
                         defer out.deinit(alloc);
                         out.appendSlice(alloc, "{\"error\":") catch continue;
                         jsonEscape(&out, alloc, resp.errorSlice()) catch continue;

@@ -35,8 +35,8 @@ const alloc = std.heap.c_allocator;
 const RconEntry = struct { id: u32, client: *rcon_mod.RconClient };
 const A2sEntry = struct { id: u32, client: *a2s_mod.A2sClient };
 
-var g_rcon: std.ArrayList(RconEntry) = .{};
-var g_a2s: std.ArrayList(A2sEntry) = .{};
+var g_rcon: std.ArrayList(RconEntry) = .empty;
+var g_a2s: std.ArrayList(A2sEntry) = .empty;
 
 fn findRcon(id: u32) ?*RconEntry {
     for (g_rcon.items) |*e| if (e.id == id) return e;
@@ -95,13 +95,13 @@ fn argU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
 }
 
 fn emitEvent(channel: []const u8, payload: []const u8) void {
-    var chan_buf: std.ArrayList(u8) = .{};
+    var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
     chan_buf.appendSlice(alloc, channel) catch return;
     chan_buf.append(alloc, 0) catch return;
     const chan_z = chan_buf.items[0 .. chan_buf.items.len - 1 :0];
 
-    var payload_buf: std.ArrayList(u8) = .{};
+    var payload_buf: std.ArrayList(u8) = .empty;
     defer payload_buf.deinit(alloc);
     payload_buf.appendSlice(alloc, payload) catch return;
     payload_buf.append(alloc, 0) catch return;
@@ -260,7 +260,7 @@ pub fn tickDrain() void {
                     emitEvent(chan, "{\"ok\":false}");
                 },
                 .response => |r| {
-                    var payload: std.ArrayList(u8) = .{};
+                    var payload: std.ArrayList(u8) = .empty;
                     defer payload.deinit(alloc);
                     payload.writer(alloc).print("{{\"requestId\":{d},\"body\":", .{r.request_id}) catch {
                         alloc.free(r.body);

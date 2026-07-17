@@ -2319,7 +2319,7 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     // decodes them at materialize time. installAndValidate already proved
     // presence; a payload that still fails to read degrades to a skipped
     // image node (the rasterizer warns by key), never a failed construct.
-    var decal_asset_list: std.ArrayList(DecalAsset) = .{};
+    var decal_asset_list: std.ArrayList(DecalAsset) = .empty;
     errdefer {
         for (decal_asset_list.items) |asset| asset.deinit(allocator);
         decal_asset_list.deinit(allocator);

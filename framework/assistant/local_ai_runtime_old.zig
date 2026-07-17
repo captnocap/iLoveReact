@@ -14,6 +14,7 @@
 //!     can reuse the same queue/session infrastructure
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const RingBuffer = @import("../net/ring_buffer.zig").RingBuffer;
 
 // Authoritative llama.cpp types via @cImport — struct layouts come straight
@@ -476,9 +477,9 @@ const WorkerState = struct {
         api.sampler_chain_add(sampler, api.sampler_init_min_p(0.05, 1) orelse return error.SamplerInitFailed);
         api.sampler_chain_add(sampler, api.sampler_init_temp(0.7) orelse return error.SamplerInitFailed);
         api.sampler_chain_add(sampler, api.sampler_init_penalties(64, 1.1, 0, 0) orelse return error.SamplerInitFailed);
-        api.sampler_chain_add(sampler, api.sampler_init_dist(@intCast(@mod(std.time.milliTimestamp(), std.math.maxInt(u32)))) orelse return error.SamplerInitFailed);
+        api.sampler_chain_add(sampler, api.sampler_init_dist(@intCast(@mod(host_io.milliTimestamp(), std.math.maxInt(u32)))) orelse return error.SamplerInitFailed);
 
-        var out: std.ArrayList(u8) = .{};
+        var out: std.ArrayList(u8) = .empty;
         defer out.deinit(self.allocator);
 
         var generated: u32 = 0;
@@ -545,7 +546,7 @@ const WorkerState = struct {
             return buf[0..@intCast(written)];
         }
 
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         for (self.history.items) |msg| {

@@ -362,7 +362,7 @@ fn executeRequestOnClient(client: *std.http.Client, req: *const Request, resp: *
     }
 
     // Read body
-    var body_list = std.ArrayList(u8){};
+    var body_list: std.ArrayList(u8) = .empty;
     defer body_list.deinit(alloc);
 
     var transfer_buf: [4096]u8 = undefined;

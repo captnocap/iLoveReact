@@ -4,6 +4,7 @@
 //! Adding new framework modules (geometry, watchdog, etc.) happens here — no codegen changes needed.
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 pub const c = @import("c.zig").imports;
 const layout = @import("layout.zig");
 const text_mod = @import("primitive/text.zig");
@@ -2031,7 +2032,7 @@ fn stampClickLatency() void {
 
 fn stampInputLatency(kind: []const u8) void {
     if (g_input_latency_ts_us == 0) {
-        g_input_latency_ts_us = std.time.microTimestamp();
+        g_input_latency_ts_us = host_io.microTimestamp();
         g_input_latency_kind = kind;
     }
     g_input_latency_event_count += 1;
@@ -3982,7 +3983,7 @@ pub fn run(config_in: AppConfig) !void {
     var config = config_in;
     g_dispatch_js_event = config.dispatch_js_event;
     defer g_dispatch_js_event = null;
-    const startup_t0 = std.time.microTimestamp();
+    const startup_t0 = host_io.microTimestamp();
     // Crash log + signal handling for file-explorer launches (no stderr).
     // Logs to /run/user/<uid>/claude-sessions/supervisor-crash.log
     crashlog.init();
@@ -4182,7 +4183,7 @@ pub fn run(config_in: AppConfig) !void {
     };
     defer gpu.deinit();
     {
-        const dt = @divTrunc(std.time.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
         log.print("[startup] gpu: {d}ms\n", .{dt});
     }
 
@@ -4207,7 +4208,7 @@ pub fn run(config_in: AppConfig) !void {
     layout.setEmitLayoutFn(emitLayoutCallback);
     input.setMeasureWidthFn(measureWidthOnly);
     {
-        const dt = @divTrunc(std.time.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
         log.print("[startup] text: {d}ms\n", .{dt});
     }
 
@@ -4242,7 +4243,7 @@ pub fn run(config_in: AppConfig) !void {
         if (config.shutdown) |shutdown| shutdown();
     }
     {
-        const dt = @divTrunc(std.time.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
         log.print("[startup] vms: {d}ms\n", .{dt});
     }
 
@@ -4256,7 +4257,7 @@ pub fn run(config_in: AppConfig) !void {
     // App init (FFI registration, state slots, initial conditionals/maps)
     if (config.init) |initFn| initFn();
     {
-        const dt = @divTrunc(std.time.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
         log.print("[startup] app_init: {d}ms\n", .{dt});
     }
 
@@ -4266,7 +4267,7 @@ pub fn run(config_in: AppConfig) !void {
     if (config.js_logic.len > 0) js_vm.evalExpr("__luaReady = true;");
     if (config.js_logic.len > 0 or config.lua_logic.len > 0) state_mod.markDirty();
     {
-        const dt = @divTrunc(std.time.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
         log.print("[startup] scripts: {d}ms\n", .{dt});
     }
 
@@ -4276,7 +4277,7 @@ pub fn run(config_in: AppConfig) !void {
     // Initial tick — set up dynamic texts after JS/Lua is evaluated
     if (config.tick) |tickFn| tickFn(@truncate(c.SDL_GetTicks()));
     {
-        const dt = @divTrunc(std.time.microTimestamp() - startup_t0, 1000);
+        const dt = @divTrunc(host_io.microTimestamp() - startup_t0, 1000);
         log.print("[startup] first_tick: {d}ms → ready\n", .{dt});
     }
 
@@ -4335,7 +4336,7 @@ pub fn run(config_in: AppConfig) !void {
         // [drag-trace] per-iteration counters for chrome-drag freeze diagnosis.
         // Counters and timestamps are unconditional (cheap); the print at the
         // end of the iteration is gated on g_chrome_dragging.
-        const dt_iter_start = std.time.microTimestamp();
+        const dt_iter_start = host_io.microTimestamp();
         const dt_evt_start = dt_iter_start;
         var dt_evt_count: u32 = 0;
         var dt_motion_count: u32 = 0;
@@ -4745,9 +4746,9 @@ pub fn run(config_in: AppConfig) !void {
                                 stampInputLatency("click");
                                 const expr = std.mem.span(js_expr);
                                 log.print("[js_on_press] eval: '{s}'\n", .{expr});
-                                const jt0 = std.time.microTimestamp();
+                                const jt0 = host_io.microTimestamp();
                                 runJsHandlerExpr(expr);
-                                const jt1 = std.time.microTimestamp();
+                                const jt1 = host_io.microTimestamp();
                                 log.print("[js_on_press] done ({d}us)\n", .{jt1 - jt0});
                             } else if (h.href) |url| {
                                 stampClickLatency();
@@ -5600,7 +5601,7 @@ pub fn run(config_in: AppConfig) !void {
             }
         }
 
-        const dt_evt_end = std.time.microTimestamp();
+        const dt_evt_end = host_io.microTimestamp();
 
         // The `app` phase begins exactly where event processing ended — phases
         // are a contiguous partition of the frame, so the next boundary is the
@@ -5633,7 +5634,7 @@ pub fn run(config_in: AppConfig) !void {
             hovered_node = null;
             tickFn(@truncate(c.SDL_GetTicks()));
         }
-        const phase_t1 = std.time.microTimestamp();
+        const phase_t1 = host_io.microTimestamp();
 
         // Transition tick — interpolate active transitions AFTER style updates, BEFORE layout
         {
@@ -5735,10 +5736,10 @@ pub fn run(config_in: AppConfig) !void {
         }
 
         // Layout (main window) — skip full flex pass when nothing invalidated geometry
-        const t2 = std.time.microTimestamp();
+        const t2 = host_io.microTimestamp();
         const app_h = win_h;
         layout.layout(config.root, 0, 0, win_w, app_h);
-        const t3 = std.time.microTimestamp();
+        const t3 = host_io.microTimestamp();
         frame_telemetry.telemetry_layout_us = @intCast(@max(0, t3 - t2));
 
         // Re-resolve hovered_node after layout (computed rects are now valid).
@@ -5813,7 +5814,7 @@ pub fn run(config_in: AppConfig) !void {
         g_paint_count = 0;
         g_budget_exceeded = false;
         g_hidden_count = 0;
-        const t4 = std.time.microTimestamp();
+        const t4 = host_io.microTimestamp();
         paintNode(config.root);
         system_signals.tickPostPaint(dt_sec);
 
@@ -5872,12 +5873,12 @@ pub fn run(config_in: AppConfig) !void {
         // at the evdev position on top of everything else this frame.
         if (kms_mode) drawSoftwareCursor(evdev.mouseX(), evdev.mouseY());
 
-        const t5 = std.time.microTimestamp();
+        const t5 = host_io.microTimestamp();
         frame_telemetry.telemetry_paint_us = @intCast(@max(0, t5 - t4));
 
-        const phase_t_preframe = std.time.microTimestamp();
+        const phase_t_preframe = host_io.microTimestamp();
         gpu.frame(0.051, 0.067, 0.090);
-        const phase_t_postframe = std.time.microTimestamp();
+        const phase_t_postframe = host_io.microTimestamp();
         frame_telemetry.telemetry_gpu_us = @intCast(@max(0, phase_t_postframe - phase_t_preframe));
 
         // WORLDWIN-0611: the compiled-world pop-out presents its own surface
@@ -5905,7 +5906,7 @@ pub fn run(config_in: AppConfig) !void {
         // frame's cycle to post-present. Prints every time so a live typing
         // or drag session produces a running latency trace in stderr.
         if (g_input_latency_ts_us != 0) {
-            const latency_us = std.time.microTimestamp() - g_input_latency_ts_us;
+            const latency_us = host_io.microTimestamp() - g_input_latency_ts_us;
             log.print("[input-latency] {s}: {d}ms (batched {d} event{s})\n", .{
                 g_input_latency_kind,
                 @divTrunc(latency_us, 1000),
@@ -5961,7 +5962,7 @@ pub fn run(config_in: AppConfig) !void {
         //   t_postframe  → t6         : post_frame (world_window.frame, capture/test/witness)
         // bridge_us / present_us / gc_ns are CROSS-CUTTING overlays (they nest
         // inside the phases above), not partition members — kept as annotations.
-        const t6 = std.time.microTimestamp();
+        const t6 = host_io.microTimestamp();
         telemetry.collect(.{
             .layout_us = @intCast(@max(0, t3 - t2)),
             .paint_us = @intCast(@max(0, t5 - t4)),
@@ -6083,7 +6084,7 @@ pub fn run(config_in: AppConfig) !void {
         // the bottleneck we're trying to measure. Set ZIGOS_LOG_FILE=/tmp/drag.log
         // before launching the dev host to capture.
         if (g_chrome_dragging) {
-            const dt_iter_end = std.time.microTimestamp();
+            const dt_iter_end = host_io.microTimestamp();
             log.writeLine(
                 "[drag-trace] iter={d}us evt={d}us(n={d},mot={d}) apptick={d}us preLayout={d}us layout={d}us paint={d}us gpufrm={d}us",
                 .{

@@ -176,7 +176,7 @@ pub const Session = struct {
     child: std.process.Child,
     line_buf: ReadBuffer,
     chunk: [8192]u8 = undefined,
-    pending_inbound: std.ArrayList(OwnedInbound) = .{},
+    pending_inbound: std.ArrayList(OwnedInbound) = .empty,
     next_request_seq: u64 = 1,
     last_rpc_error: ?[]u8 = null,
     closed: bool = false,
@@ -350,7 +350,7 @@ pub const Session = struct {
         if (!std.mem.eql(u8, request.request_type, "ApprovalRequest")) return error.InvalidRequestType;
         const inner_id = request.payloadId() orelse return error.InvalidRequest;
 
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, "{\"request_id\":");
@@ -370,7 +370,7 @@ pub const Session = struct {
         if (!std.mem.eql(u8, request.request_type, "ToolCallRequest")) return error.InvalidRequestType;
         const inner_id = request.payloadId() orelse return error.InvalidRequest;
 
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, "{\"tool_call_id\":");
@@ -386,7 +386,7 @@ pub const Session = struct {
         if (!std.mem.eql(u8, request.request_type, "QuestionRequest")) return error.InvalidRequestType;
         const inner_id = request.payloadId() orelse return error.InvalidRequest;
 
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, "{\"request_id\":");
@@ -402,7 +402,7 @@ pub const Session = struct {
         if (!std.mem.eql(u8, request.request_type, "HookRequest")) return error.InvalidRequestType;
         const inner_id = request.payloadId() orelse return error.InvalidRequest;
 
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, "{\"request_id\":");
@@ -425,7 +425,7 @@ pub const Session = struct {
         errdefer self.allocator.free(request_id);
         self.next_request_seq += 1;
 
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, "{\"jsonrpc\":\"2.0\",\"method\":");
@@ -444,7 +444,7 @@ pub const Session = struct {
     }
 
     fn sendResultResponse(self: *Session, request_id: []const u8, result_json: []const u8) !void {
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, "{\"jsonrpc\":\"2.0\",\"id\":");
@@ -531,7 +531,7 @@ pub fn parseInboundJson(allocator: std.mem.Allocator, text: []const u8) !OwnedIn
 }
 
 fn buildArgv(allocator: std.mem.Allocator, options: SessionOptions) !std.ArrayList([]const u8) {
-    var argv: std.ArrayList([]const u8) = .{};
+    var argv: std.ArrayList([]const u8) = .empty;
     errdefer argv.deinit(allocator);
 
     if (options.launch_args_override) |override| {
@@ -574,7 +574,7 @@ fn buildArgv(allocator: std.mem.Allocator, options: SessionOptions) !std.ArrayLi
 }
 
 fn buildInitializeParamsJson(allocator: std.mem.Allocator, options: InitializeOptions) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
 
     try buf.appendSlice(allocator, "{\"protocol_version\":");
@@ -604,7 +604,7 @@ fn buildInitializeParamsJson(allocator: std.mem.Allocator, options: InitializeOp
 }
 
 fn buildUserInputParamsJson(allocator: std.mem.Allocator, input: UserInput) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
 
     try buf.appendSlice(allocator, "{\"user_input\":");

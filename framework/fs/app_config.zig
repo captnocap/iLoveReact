@@ -5,6 +5,7 @@
 //! Application Support conventions independently.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 
 pub const ResolveError = error{
     AppNameRequired,
@@ -64,11 +65,11 @@ pub fn resolveFrom(
 
 /// Resolve from the current process environment.
 pub fn resolve(alloc: std.mem.Allocator, app_name: []const u8) (ResolveError || std.mem.Allocator.Error)![]u8 {
-    const xdg = std.process.getEnvVarOwned(alloc, "XDG_CONFIG_HOME") catch null;
+    const xdg = host_io.getEnvVarOwned(alloc, "XDG_CONFIG_HOME") catch null;
     defer if (xdg) |value| alloc.free(value);
-    const app_data = std.process.getEnvVarOwned(alloc, "APPDATA") catch null;
+    const app_data = host_io.getEnvVarOwned(alloc, "APPDATA") catch null;
     defer if (app_data) |value| alloc.free(value);
-    const home = std.process.getEnvVarOwned(alloc, "HOME") catch null;
+    const home = host_io.getEnvVarOwned(alloc, "HOME") catch null;
     defer if (home) |value| alloc.free(value);
     return resolveFrom(
         alloc,

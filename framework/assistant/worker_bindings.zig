@@ -46,11 +46,11 @@ const CodexSession = struct {
     codex: codex_sdk.Codex,
     thread: codex_sdk.Thread,
 
-    pending: std.ArrayList([]u8) = .{},
+    pending: std.ArrayList([]u8) = .empty,
     pending_mutex: std.Thread.Mutex = .{},
     pending_signal: std.Thread.ResetEvent = .{},
 
-    inbox: std.ArrayList(codex_sdk.Notification) = .{},
+    inbox: std.ArrayList(codex_sdk.Notification) = .empty,
     inbox_mutex: std.Thread.Mutex = .{},
 
     worker: ?std.Thread = null,
@@ -149,10 +149,10 @@ const ClaudeSession = struct {
     allocator: std.mem.Allocator,
     inner: claude_sdk.Session,
 
-    pending: std.ArrayList([]u8) = .{},
+    pending: std.ArrayList([]u8) = .empty,
     pending_mutex: std.Thread.Mutex = .{},
 
-    inbox: std.ArrayList(claude_sdk.OwnedMessage) = .{},
+    inbox: std.ArrayList(claude_sdk.OwnedMessage) = .empty,
     inbox_mutex: std.Thread.Mutex = .{},
 
     worker: ?std.Thread = null,
@@ -228,10 +228,10 @@ const KimiSession = struct {
     allocator: std.mem.Allocator,
     inner: kimi_wire_sdk.Session,
 
-    pending: std.ArrayList([]u8) = .{},
+    pending: std.ArrayList([]u8) = .empty,
     pending_mutex: std.Thread.Mutex = .{},
 
-    inbox: std.ArrayList(kimi_wire_sdk.OwnedInbound) = .{},
+    inbox: std.ArrayList(kimi_wire_sdk.OwnedInbound) = .empty,
     inbox_mutex: std.Thread.Mutex = .{},
 
     worker: ?std.Thread = null,
@@ -314,10 +314,10 @@ const LocalAiSession = struct {
     allocator: std.mem.Allocator,
     inner: *local_ai_runtime.Session,
 
-    pending: std.ArrayList([]u8) = .{},
+    pending: std.ArrayList([]u8) = .empty,
     pending_mutex: std.Thread.Mutex = .{},
 
-    inbox: std.ArrayList(local_ai_runtime.OwnedEvent) = .{},
+    inbox: std.ArrayList(local_ai_runtime.OwnedEvent) = .empty,
     inbox_mutex: std.Thread.Mutex = .{},
 
     worker: ?std.Thread = null,

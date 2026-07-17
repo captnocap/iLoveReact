@@ -1,6 +1,7 @@
 //! V8 host bindings for filesystem operations.
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const mapfile = @import("world/mapfile.zig");
@@ -271,7 +272,7 @@ fn fsMediaScanJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         .max_depth = argU32Default(info, 2, 10),
     };
 
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     var stats = MediaStatsAcc{};
     defer stats.deinit(alloc);
@@ -328,7 +329,7 @@ fn fsMediaStatsJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     var first_dummy = true;
     scanMediaDirRecursive(alloc, dir_path, 0, opts, null, &first_dummy, &stats);
 
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
 
     out.appendSlice(alloc, "{\"total\":") catch {
@@ -552,7 +553,7 @@ fn fsWriteBase64Atomic(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         std.fs.cwd().makePath(path_buf[0..idx]) catch {};
     }
     var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path_buf, std.time.nanoTimestamp() }) catch {
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path_buf, host_io.nanoTimestamp() }) catch {
         setBool(info, false);
         return;
     };
@@ -604,7 +605,7 @@ fn fsWriteBytesAtomic(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         std.fs.cwd().makePath(path_buf[0..idx]) catch {};
     }
     var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path_buf, std.time.nanoTimestamp() }) catch {
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path_buf, host_io.nanoTimestamp() }) catch {
         setBool(info, false);
         return;
     };
@@ -685,7 +686,7 @@ fn fsListJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(path_buf);
 
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     out.append(alloc, '[') catch {
         setString(info, "[]");

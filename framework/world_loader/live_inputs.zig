@@ -726,13 +726,13 @@ pub fn applyLiveColliders(runtime: anytype, comptime live_scene: type) void {
     live_scene.ensureMeshHashMap(runtime);
     const alloc = runtime.allocator;
 
-    var live_rects: std.ArrayList(f32) = .{};
+    var live_rects: std.ArrayList(f32) = .empty;
     defer live_rects.deinit(alloc);
-    var live_oriented: std.ArrayList(f32) = .{};
+    var live_oriented: std.ArrayList(f32) = .empty;
     defer live_oriented.deinit(alloc);
-    var next_live_doors: std.ArrayList(CookedDoor) = .{};
+    var next_live_doors: std.ArrayList(CookedDoor) = .empty;
     defer next_live_doors.deinit(alloc);
-    var next_live_door_states: std.ArrayList(live_mesh_doors.State) = .{};
+    var next_live_door_states: std.ArrayList(live_mesh_doors.State) = .empty;
     defer next_live_door_states.deinit(alloc);
     var live_rect_count: usize = 0;
     var live_oriented_count: usize = 0;

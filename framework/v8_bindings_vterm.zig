@@ -13,6 +13,7 @@
 //! under the __rec_*, __play_*, __sem_* prefixes.
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const vterm = @import("terminal/vterm.zig");
@@ -99,7 +100,7 @@ fn resolveShell(arg: ?[]const u8) [*:0]const u8 {
         }
     }
     // Fall back to $SHELL.
-    if (std.process.getEnvVarOwned(std.heap.c_allocator, "SHELL")) |env| {
+    if (host_io.getEnvVarOwned(std.heap.c_allocator, "SHELL")) |env| {
         defer std.heap.c_allocator.free(env);
         if (env.len > 0 and env.len < g_shell_buf.len) {
             @memcpy(g_shell_buf[0..env.len], env);

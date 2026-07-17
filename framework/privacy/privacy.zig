@@ -15,6 +15,7 @@
 //!   - Metadata stripping (shell out to exiftool CLI)
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const crypto = std.crypto;
 const Sha256 = crypto.hash.sha2.Sha256;
 const X25519 = crypto.dh.X25519;
@@ -711,7 +712,7 @@ pub fn hashDirectory(
     dir_path: []const u8,
     recursive: bool,
 ) !Manifest {
-    var entries: std.ArrayList(ManifestEntry) = .{};
+    var entries: std.ArrayList(ManifestEntry) = .empty;
     errdefer {
         for (entries.items) |e| alloc.free(e.path);
         entries.deinit(alloc);
@@ -749,7 +750,7 @@ pub fn hashDirectory(
 
 /// Serialize a manifest to JSON: `{"version":1,"entries":[{"path":...,"hash":...},...]}`.
 pub fn manifestToJson(alloc: std.mem.Allocator, manifest: *const Manifest) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(alloc);
     try buf.appendSlice(alloc, "{\"version\":1,\"entries\":[");
     for (manifest.entries.items, 0..) |entry, i| {
@@ -802,12 +803,12 @@ pub const ManifestVerifyResult = struct {
 
 /// Compare each manifest entry against the current filesystem state.
 pub fn verifyManifest(alloc: std.mem.Allocator, manifest: *const Manifest) !ManifestVerifyResult {
-    var mismatched: std.ArrayList([]const u8) = .{};
+    var mismatched: std.ArrayList([]const u8) = .empty;
     errdefer {
         for (mismatched.items) |s| alloc.free(s);
         mismatched.deinit(alloc);
     }
-    var missing: std.ArrayList([]const u8) = .{};
+    var missing: std.ArrayList([]const u8) = .empty;
     errdefer {
         for (missing.items) |s| alloc.free(s);
         missing.deinit(alloc);
@@ -1290,7 +1291,7 @@ pub const AuditEntry = struct {
 const AuditState = struct {
     chain_key: [32]u8 = undefined,
     initialized: bool = false,
-    entries: std.ArrayList(AuditEntry) = .{},
+    entries: std.ArrayList(AuditEntry) = .empty,
 };
 
 var g_audit: AuditState = .{};
@@ -1326,9 +1327,9 @@ pub fn auditAppend(event: []const u8, data_json: []const u8) !AuditEntry {
     const idx: u32 = @intCast(g_audit.entries.items.len);
     var prev_hex: [64]u8 = ZERO_HASH;
     if (idx > 0) prev_hex = g_audit.entries.items[idx - 1].hash_hex;
-    const ts = std.time.milliTimestamp();
+    const ts = host_io.milliTimestamp();
 
-    var msg: std.ArrayList(u8) = .{};
+    var msg: std.ArrayList(u8) = .empty;
     defer msg.deinit(audit_alloc);
     try buildAuditMsg(&msg, prev_hex, idx, ts, event, data_json);
 
@@ -1360,7 +1361,7 @@ pub fn auditVerify() AuditVerifyResult {
         if (!std.mem.eql(u8, &e.prev_hash_hex, &expected)) {
             return .{ .valid = false, .entries = n, .broken_at = @intCast(i) };
         }
-        var msg: std.ArrayList(u8) = .{};
+        var msg: std.ArrayList(u8) = .empty;
         defer msg.deinit(audit_alloc);
         buildAuditMsg(&msg, e.prev_hash_hex, e.index, e.timestamp, e.event, e.data_json) catch
             return .{ .valid = false, .entries = n, .broken_at = @intCast(i) };
@@ -1376,7 +1377,7 @@ pub fn auditVerify() AuditVerifyResult {
 }
 
 pub fn auditEntriesJson(a: std.mem.Allocator, from: u32, to_inclusive: u32) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(a);
     try buf.append(a, '[');
     const total: u32 = @intCast(g_audit.entries.items.len);
@@ -1420,8 +1421,8 @@ pub const RetentionPolicy = struct {
 };
 
 const PolicyState = struct {
-    consents: std.ArrayList(ConsentRecord) = .{},
-    retentions: std.ArrayList(RetentionPolicy) = .{},
+    consents: std.ArrayList(ConsentRecord) = .empty,
+    retentions: std.ArrayList(RetentionPolicy) = .empty,
 };
 
 var g_policy: PolicyState = .{};
@@ -1446,7 +1447,7 @@ pub fn policyRecordConsent(user_id: []const u8, purpose: []const u8, granted: bo
         .user_id = try policy_alloc.dupe(u8, user_id),
         .purpose = try policy_alloc.dupe(u8, purpose),
         .granted = granted,
-        .timestamp = std.time.milliTimestamp(),
+        .timestamp = host_io.milliTimestamp(),
     });
 }
 
@@ -1463,7 +1464,7 @@ pub fn policyCheckConsent(user_id: []const u8, purpose: []const u8) bool {
 }
 
 pub fn policyRevokeConsent(user_id: []const u8, purpose: ?[]const u8) !void {
-    const now = std.time.milliTimestamp();
+    const now = host_io.milliTimestamp();
     if (purpose) |p| {
         try g_policy.consents.append(policy_alloc, .{
             .user_id = try policy_alloc.dupe(u8, user_id),

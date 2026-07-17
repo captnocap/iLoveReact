@@ -79,7 +79,7 @@ pub const WindowSlot = struct {
     // Independent-specific (TCP/NDJSON)
     server: ?ipc.Server = null,
     child: ?std.process.Child = null,
-    pending: std.ArrayList(u8) = .{},
+    pending: std.ArrayList(u8) = .empty,
 };
 
 var slots: [MAX_WINDOWS]WindowSlot = [_]WindowSlot{.{}} ** MAX_WINDOWS;

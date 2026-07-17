@@ -6,6 +6,7 @@
 //! shader quad).
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const builtin = @import("builtin");
 
 // ── doomgeneric public surface ───────────────────────────────────────────
@@ -67,7 +68,7 @@ fn popKey() ?KeyEvent {
 var start_ns: i128 = 0;
 
 fn nowMs() u32 {
-    const delta_ns: i128 = std.time.nanoTimestamp() - start_ns;
+    const delta_ns: i128 = host_io.nanoTimestamp() - start_ns;
     if (delta_ns < 0) return 0;
     return @as(u32, @intCast(@divTrunc(delta_ns, std.time.ns_per_ms) & 0xFFFF_FFFF));
 }
@@ -83,7 +84,7 @@ var argv_ptrs: [5][*c]u8 = undefined;
 /// twice is a no-op so the cart can rehydrate without restarting the host.
 pub fn init(allocator: std.mem.Allocator, wad_path: []const u8) !bool {
     if (initialised) return false;
-    start_ns = std.time.nanoTimestamp();
+    start_ns = host_io.nanoTimestamp();
 
     // Build argv: ["doom", "-iwad", "<path>", "-nomusic"] — sound is stubbed
     // out by linking i_sound.c against null DG_*sound modules, but -nomusic
@@ -121,7 +122,7 @@ export fn DG_Init() void {
     // We allocate the screen buffer in doomgeneric.c (it does malloc on
     // create). All we do here is reset our timer baseline in case it
     // wasn't set yet (e.g. somebody calls doomgeneric_Create directly).
-    if (start_ns == 0) start_ns = std.time.nanoTimestamp();
+    if (start_ns == 0) start_ns = host_io.nanoTimestamp();
 }
 
 export fn DG_DrawFrame() void {

@@ -9,6 +9,7 @@
 //!     one session timeline, and one event stream.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const claude_types = @import("claude_sdk/types.zig");
 const codex_sdk = @import("codex_sdk.zig");
 const kimi_wire_sdk = @import("kimi_wire_sdk.zig");
@@ -202,11 +203,11 @@ pub const WorkerStore = struct {
     next_session_seq: u32 = 1,
     next_event_id: u64 = 1,
     active_session_index: ?usize = null,
-    sessions: std.ArrayList(SessionEpisode) = .{},
-    events: std.ArrayList(WorkerEvent) = .{},
+    sessions: std.ArrayList(SessionEpisode) = .empty,
+    events: std.ArrayList(WorkerEvent) = .empty,
 
     pub fn init(allocator: std.mem.Allocator, config: StoreConfig) !WorkerStore {
-        const now = std.time.milliTimestamp();
+        const now = host_io.milliTimestamp();
         return .{
             .allocator = allocator,
             .worker_id = try allocator.dupe(u8, config.worker_id),
@@ -265,7 +266,7 @@ pub const WorkerStore = struct {
     pub fn beginSession(self: *WorkerStore, opts: StartSessionOptions) !*SessionEpisode {
         if (self.activeSessionMut()) |existing| {
             existing.status = .ended;
-            existing.ended_at_ms = std.time.milliTimestamp();
+            existing.ended_at_ms = host_io.milliTimestamp();
             if (existing.reason_ended == null) {
                 existing.reason_ended = try dupOpt(self.allocator, "superseded");
             }
@@ -287,7 +288,7 @@ pub const WorkerStore = struct {
             .thread_id = try dupOpt(self.allocator, opts.thread_id),
             .status = .active,
             .reason_started = try dupOpt(self.allocator, opts.reason_started),
-            .started_at_ms = std.time.milliTimestamp(),
+            .started_at_ms = host_io.milliTimestamp(),
             .switch_index = self.switch_count,
         });
 
@@ -295,7 +296,7 @@ pub const WorkerStore = struct {
         self.status = .active;
         self.current_backend = opts.backend;
         try self.setCurrentModel(opts.model);
-        self.last_active_at_ms = std.time.milliTimestamp();
+        self.last_active_at_ms = host_io.milliTimestamp();
 
         const session = &self.sessions.items[self.active_session_index.?];
         try self.appendEvent(.{
@@ -334,7 +335,7 @@ pub const WorkerStore = struct {
         if (session.reason_ended) |value| self.allocator.free(value);
         session.reason_ended = try dupOpt(self.allocator, reason);
         session.status = status;
-        session.ended_at_ms = std.time.milliTimestamp();
+        session.ended_at_ms = host_io.milliTimestamp();
         self.active_session_index = null;
         self.current_backend = null;
         if (self.current_model) |value| {
@@ -971,7 +972,7 @@ pub const WorkerStore = struct {
     pub fn recentTranscript(self: *const WorkerStore, allocator: std.mem.Allocator, limit: usize) ![]TranscriptEntry {
         const event_count = self.events.items.len;
         const start = if (event_count > limit) event_count - limit else 0;
-        var out: std.ArrayList(TranscriptEntry) = .{};
+        var out: std.ArrayList(TranscriptEntry) = .empty;
         defer out.deinit(allocator);
 
         for (self.events.items[start..]) |event| {
@@ -1030,7 +1031,7 @@ pub const WorkerStore = struct {
     }
 
     fn appendEvent(self: *WorkerStore, spec: EventSpec) !void {
-        const now = std.time.milliTimestamp();
+        const now = host_io.milliTimestamp();
         try self.events.append(self.allocator, .{
             .id = self.next_event_id,
             .worker_id = try self.allocator.dupe(u8, self.worker_id),
@@ -1179,7 +1180,7 @@ fn joinCodexMessageText(allocator: std.mem.Allocator, maybe_content: ?std.json.V
     const content = maybe_content orelse return null;
     const array = asArray(content) orelse return null;
 
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(allocator);
 
     for (array.items) |entry| {
@@ -1218,7 +1219,7 @@ fn usageFromClaude(usage: claude_types.Usage) UsageTotals {
 }
 
 fn stringifyClaudeTools(allocator: std.mem.Allocator, tools: []const []const u8) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
 
     try buf.append(allocator, '[');
@@ -1255,7 +1256,7 @@ fn extractKimiContentText(allocator: std.mem.Allocator, maybe_value: ?std.json.V
     if (asString(value)) |text| return try allocator.dupe(u8, text);
 
     const array = asArray(value) orelse return null;
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(allocator);
 
     for (array.items) |entry| {

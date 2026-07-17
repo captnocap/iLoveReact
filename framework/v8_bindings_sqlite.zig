@@ -268,7 +268,7 @@ fn sqlQueryJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         col_names[i] = stmt.columnName(@intCast(i)) orelse "";
     }
 
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     out.append(alloc, '[') catch {
         setStringReturn(info, "[]");

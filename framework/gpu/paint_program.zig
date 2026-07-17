@@ -72,15 +72,15 @@ const MatRecipe = struct { key: []u8, wgsl: []u8, data: []f32, tiles: f32 };
 const Layer = struct { id: u32, name: []u8, visible: bool };
 const Stroke = struct { layer: u32, ops: []u8 };
 
-var g_layers: std.ArrayList(Layer) = .{}; // bottom→top: the replay/composite order
+var g_layers: std.ArrayList(Layer) = .empty; // bottom→top: the replay/composite order
 var g_active_layer: u32 = 0; // the layer id new strokes land on
 var g_next_layer_id: u32 = 1;
-var g_strokes: std.ArrayList(Stroke) = .{}; // committed strokes, chronological
-var g_mats: std.ArrayList(MatRecipe) = .{};
+var g_strokes: std.ArrayList(Stroke) = .empty; // committed strokes, chronological
+var g_mats: std.ArrayList(MatRecipe) = .empty;
 
 // The OPEN stroke unit (between pointer-down and the stroke-end door). Ops accumulate
 // here and commit as ONE stroke; a unit auto-opens on the first recorded op.
-var g_open: std.ArrayList(u8) = .{};
+var g_open: std.ArrayList(u8) = .empty;
 var g_open_live: bool = false;
 var g_open_label: []const u8 = "stroke";
 
@@ -313,8 +313,8 @@ const Snapshot = struct {
 const JOURNAL_CAP = 64;
 const JOURNAL_BYTE_BUDGET: usize = 32 * 1024 * 1024;
 
-var g_undo_snaps: std.ArrayList(Snapshot) = .{};
-var g_redo_snaps: std.ArrayList(Snapshot) = .{};
+var g_undo_snaps: std.ArrayList(Snapshot) = .empty;
+var g_redo_snaps: std.ArrayList(Snapshot) = .empty;
 
 fn snapshotBytes(s: *const Snapshot) usize {
     var total: usize = @sizeOf(Snapshot);
@@ -782,9 +782,9 @@ pub fn layerMergeDown(id: u32) bool {
     const below = g_layers.items[idx - 1].id;
     // Rebuild the stroke list so the merged layer's composite order survives inside ONE
     // layer id: others (chronological) + below's strokes + the merged layer's strokes.
-    var rebuilt: std.ArrayList(Stroke) = .{};
-    var below_strokes: std.ArrayList(Stroke) = .{};
-    var top_strokes: std.ArrayList(Stroke) = .{};
+    var rebuilt: std.ArrayList(Stroke) = .empty;
+    var below_strokes: std.ArrayList(Stroke) = .empty;
+    var top_strokes: std.ArrayList(Stroke) = .empty;
     defer rebuilt.deinit(alloc);
     defer below_strokes.deinit(alloc);
     defer top_strokes.deinit(alloc);
@@ -1053,7 +1053,7 @@ fn writeBlob(buf: *std.ArrayList(u8)) !void {
 pub fn serialize() ?[]u8 {
     _ = endStrokeUnit();
     if (g_strokes.items.len == 0) return null;
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     writeBlob(&buf) catch {
         buf.deinit(alloc);
         return null;
@@ -1163,7 +1163,7 @@ fn convertV1OpsInner(ops: []const u8, out: *std.ArrayList(u8)) !void {
 }
 
 fn convertV1Ops(ops: []const u8) ?[]u8 {
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     convertV1OpsInner(ops, &out) catch {
         out.deinit(alloc);
         return null;

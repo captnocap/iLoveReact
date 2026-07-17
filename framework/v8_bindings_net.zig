@@ -45,10 +45,10 @@ const Socks5Spec = struct {
     pass: ?[]u8 = null,
 };
 
-var g_tcp: std.ArrayList(TcpEntry) = .{};
-var g_udp: std.ArrayList(UdpEntry) = .{};
-var g_uds: std.ArrayList(UdsEntry) = .{};
-var g_socks5: std.ArrayList(Socks5Spec) = .{};
+var g_tcp: std.ArrayList(TcpEntry) = .empty;
+var g_udp: std.ArrayList(UdpEntry) = .empty;
+var g_uds: std.ArrayList(UdsEntry) = .empty;
+var g_socks5: std.ArrayList(Socks5Spec) = .empty;
 
 fn findSocks5(id: u32) ?*Socks5Spec {
     for (g_socks5.items) |*e| if (e.id == id) return e;
@@ -143,13 +143,13 @@ fn argToU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
 }
 
 fn emitEvent(channel: []const u8, payload: []const u8) void {
-    var chan_buf: std.ArrayList(u8) = .{};
+    var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
     chan_buf.appendSlice(alloc, channel) catch return;
     chan_buf.append(alloc, 0) catch return;
     const chan_z = chan_buf.items[0 .. chan_buf.items.len - 1 :0];
 
-    var payload_buf: std.ArrayList(u8) = .{};
+    var payload_buf: std.ArrayList(u8) = .empty;
     defer payload_buf.deinit(alloc);
     payload_buf.appendSlice(alloc, payload) catch return;
     payload_buf.append(alloc, 0) catch return;

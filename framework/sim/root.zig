@@ -428,13 +428,13 @@ fn scheduleNextEvent(t: *Token, now_ms: u32) void {
 // ── Init emits (one-shot JSON payloads for cart-side string maps) ──────
 
 fn emit(channel: []const u8, payload: []const u8) void {
-    var chan_arr: std.ArrayList(u8) = .{};
+    var chan_arr: std.ArrayList(u8) = .empty;
     defer chan_arr.deinit(std.heap.c_allocator);
     chan_arr.appendSlice(std.heap.c_allocator, channel) catch return;
     chan_arr.append(std.heap.c_allocator, 0) catch return;
     const chan_z = chan_arr.items[0 .. chan_arr.items.len - 1 :0];
 
-    var payload_arr: std.ArrayList(u8) = .{};
+    var payload_arr: std.ArrayList(u8) = .empty;
     defer payload_arr.deinit(std.heap.c_allocator);
     payload_arr.appendSlice(std.heap.c_allocator, payload) catch return;
     payload_arr.append(std.heap.c_allocator, 0) catch return;

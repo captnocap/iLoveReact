@@ -3,6 +3,7 @@
 //! Shared utilities for spawning teammates across different backends.
 
 const std = @import("std");
+const host_io = @import("../../host_io.zig");
 const constants = @import("constants.zig");
 
 /// Environment variables to forward to spawned teammates
@@ -44,12 +45,12 @@ pub const CliFlagOptions = struct {
 /// Checks TEAMMATE_COMMAND_ENV_VAR first, then falls back to default
 pub fn getTeammateCommand() ?[]const u8 {
     // Check environment variable first
-    if (std.process.getEnvVarOwned(std.heap.page_allocator, constants.TEAMMATE_COMMAND_ENV_VAR)) |cmd| {
+    if (host_io.getEnvVarOwned(std.heap.page_allocator, constants.TEAMMATE_COMMAND_ENV_VAR)) |cmd| {
         return cmd;
     } else |_| {}
 
     // Try legacy env var
-    if (std.process.getEnvVarOwned(std.heap.page_allocator, constants.LEGACY_TEAMMATE_COMMAND_ENV_VAR)) |cmd| {
+    if (host_io.getEnvVarOwned(std.heap.page_allocator, constants.LEGACY_TEAMMATE_COMMAND_ENV_VAR)) |cmd| {
         return cmd;
     } else |_| {}
 
@@ -108,7 +109,7 @@ pub fn buildInheritedEnvVars(allocator: std.mem.Allocator) error{OutOfMemory}![]
 
     // Forward configured env vars
     for (TEAMMATE_ENV_VARS) |key| {
-        if (std.process.getEnvVarOwned(allocator, key)) |value| {
+        if (host_io.getEnvVarOwned(allocator, key)) |value| {
             defer allocator.free(value);
             try env_vars.append(try std.fmt.allocPrint(allocator, "{s}={s}", .{ key, value }));
         } else |_| {

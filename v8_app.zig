@@ -265,7 +265,7 @@ var g_root: Node = .{};
 // pointer-aliasing rationale on g_node_by_id above.
 var g_dirty: *bool = undefined;
 var g_scroll_prop_slots: std.AutoHashMap(u32, void) = undefined;
-var g_press_expr_pool: std.ArrayList([:0]u8) = .{};
+var g_press_expr_pool: std.ArrayList([:0]u8) = .empty;
 var g_input_slot_by_node_id: std.AutoHashMap(u32, u8) = undefined;
 var g_node_id_by_input_slot: [input.MAX_INPUTS]u32 = [_]u32{0} ** input.MAX_INPUTS;
 
@@ -324,7 +324,7 @@ const Tab = struct {
     last_good: ?[]u8 = null,
 };
 
-var g_tabs: std.ArrayList(Tab) = .{};
+var g_tabs: std.ArrayList(Tab) = .empty;
 var g_active_tab: usize = 0;
 
 const MAX_TABS = 16;
@@ -1712,7 +1712,7 @@ fn routeCommandToHostWindow(cmd: std.json.Value) void {
     // verbatim on the child — the Window node itself was never CREATE'd
     // there (we filter it above). Translate into the *_ROOT / *_FROM_ROOT
     // variants so the child anchors the subtree on its own root list.
-    var line: std.ArrayList(u8) = .{};
+    var line: std.ArrayList(u8) = .empty;
     defer line.deinit(g_alloc);
     line.appendSlice(g_alloc, "{\"type\":\"mutations\",\"commands\":[") catch return;
 
@@ -2819,11 +2819,11 @@ fn installHostTreeHooks() void {
 /// detached-node sweep. Called by the reconciler binding via
 /// v8_bindings_reconciler.drainPending().
 fn applyCommandBatch(json_bytes: []const u8) void {
-    const t0 = std.time.microTimestamp();
+    const t0 = host_io.microTimestamp();
     host_tree.applyCommandBatch(json_bytes);
-    const t1 = std.time.microTimestamp();
+    const t1 = host_io.microTimestamp();
     cleanupDetachedNodes();
-    const t2 = std.time.microTimestamp();
+    const t2 = host_io.microTimestamp();
 
     const trace_ops = blk: {
         const env = std.posix.getenv("ZIGOS_TRACE_BATCH_OPS") orelse break :blk false;
@@ -2845,7 +2845,7 @@ fn applyCommandBatch(json_bytes: []const u8) void {
         var n_append: u32 = 0;
         var n_remove: u32 = 0;
         var n_other: u32 = 0;
-        var update_summary: std.ArrayList(u8) = .{};
+        var update_summary: std.ArrayList(u8) = .empty;
         defer update_summary.deinit(g_alloc);
         var first_other_op: []const u8 = "";
         var update_seen: u32 = 0;
@@ -3138,7 +3138,7 @@ fn cleanupDetachedNodes() void {
         markReachable(&reachable, child_id);
     }
 
-    var stale: std.ArrayList(u32) = .{};
+    var stale: std.ArrayList(u32) = .empty;
     defer stale.deinit(g_alloc);
 
     var it = g_node_by_id.iterator();
@@ -3155,7 +3155,7 @@ fn cleanupDetachedNodes() void {
 }
 
 fn cleanupClosedHostWindows() void {
-    var stale: std.ArrayList(u32) = .{};
+    var stale: std.ArrayList(u32) = .empty;
     defer stale.deinit(g_alloc);
 
     var it = g_window_by_node_id.iterator();
@@ -3199,7 +3199,7 @@ fn onWinClose() void {
 
 fn buildChromeNode(arena: std.mem.Allocator) ?Node {
     // Filter out the "main" bootstrap tab (a duplicate of whatever was first pushed)
-    var visible: std.ArrayList(usize) = .{};
+    var visible: std.ArrayList(usize) = .empty;
     defer visible.deinit(arena);
     for (g_tabs.items, 0..) |t, i| {
         if (std.mem.eql(u8, t.name, "main")) continue;
@@ -3855,7 +3855,7 @@ fn appTick(now: u32) void {
     // ~260ms place cost; appTick is opaque, so split it. __jsTick fires JS timers
     // AND drains the V8 microtask queue (where React's deferred render + passive
     // effects run) — bridge time lands here. Name which sub-step burns the frame.
-    const _at0 = std.time.microTimestamp();
+    const _at0 = host_io.microTimestamp();
     _ = v8_runtime.gcTakeNs(); // GCPROBE (req_1995): reset, then read after __jsTick to get GC ns during the drain
     // Fire any JS timers whose due-time has arrived. setTimeout/setInterval
     // in the bundle are implemented against this — see runtime/index.tsx.
@@ -3864,7 +3864,7 @@ fn appTick(now: u32) void {
     v8_runtime.callGlobalInt("__jsTick", @intCast(now));
     const _gc_ns_jstick = v8_runtime.gcTakeNs();
     const _gc_count_jstick = v8_runtime.gcTakeCount();
-    const _at1 = std.time.microTimestamp();
+    const _at1 = host_io.microTimestamp();
 
     // Per-tick drains for every binding domain that defines tickDrain().
     // Required bindings (core, websocket) and opt-in bindings (httpsrv,
@@ -3877,12 +3877,12 @@ fn appTick(now: u32) void {
     // without polling latency; engine.run owns its own repaint cadence,
     // so the GPU shell discards it.
     _ = ingredients.tickDrain();
-    const _at2 = std.time.microTimestamp();
+    const _at2 = host_io.microTimestamp();
 
     // Apply any CMD batches that accumulated during press events since last tick.
     // Must happen BEFORE rebuildTree so the tree reflects the new g_node_by_id.
     drainPendingFlushes();
-    const _at3 = std.time.microTimestamp();
+    const _at3 = host_io.microTimestamp();
     // V23 native game camera: when a cart opts a Scene3D.Camera node into
     // native ownership, the host solves/smooths that node's camera before
     // layout/paint. Carts that never opt in stay on the declarative JS-props
@@ -3901,7 +3901,7 @@ fn appTick(now: u32) void {
     // current values into latches; syncLatchesToNodes then propagates
     // those into node.style. Cart-side `useHostAnimation` registers
     // animations via __anim_register / __anim_unregister.
-    const _now_ms_for_anim: i64 = @as(i64, @truncate(@divFloor(std.time.nanoTimestamp(), 1_000_000)));
+    const _now_ms_for_anim: i64 = @as(i64, @truncate(@divFloor(host_io.nanoTimestamp(), 1_000_000)));
     animations.tickAll(_now_ms_for_anim);
     syncLatchesToNodes();
     windows.tickIndependent();
@@ -3910,11 +3910,11 @@ fn appTick(now: u32) void {
     var _snap_us: i64 = 0;
     var _rebuild_us: i64 = 0;
     if (g_dirty.*) {
-        const t0 = std.time.microTimestamp();
+        const t0 = host_io.microTimestamp();
         snapshotRuntimeState();
-        const t1 = std.time.microTimestamp();
+        const t1 = host_io.microTimestamp();
         rebuildTree();
-        const t2 = std.time.microTimestamp();
+        const t2 = host_io.microTimestamp();
         layout.markLayoutDirty();
         g_dirty.* = false;
         g_scroll_prop_slots.clearRetainingCapacity();
@@ -3934,7 +3934,7 @@ fn appTick(now: u32) void {
     // an opaque "appTick". jsTick includes the V8 microtask drain (React render +
     // passive effects). dirty = snapshotRuntimeState + rebuildTree (the host tree
     // rebuild). Units: ms.
-    const _at4 = std.time.microTimestamp();
+    const _at4 = host_io.microTimestamp();
     const _jstick_ms = @as(f64, @floatFromInt(_at1 - _at0)) / 1000.0;
     const _drain_ms = @as(f64, @floatFromInt(_at2 - _at1)) / 1000.0;
     const _flush_ms = @as(f64, @floatFromInt(_at3 - _at2)) / 1000.0;
@@ -3995,12 +3995,12 @@ fn childInit() void {
     if (std.posix.getenv("ZIGOS_WINDOW_AUTO_DISMISS_MS")) |dismiss_s| {
         g_child_auto_dismiss_ms = std.fmt.parseInt(u32, dismiss_s, 10) catch 0;
     }
-    g_child_started_ms = @truncate(std.time.milliTimestamp());
+    g_child_started_ms = @truncate(host_io.milliTimestamp());
 }
 
 fn childDispatchEvent(id: u32, handler: []const u8) void {
     var client = &(g_child_client orelse return);
-    var line: std.ArrayList(u8) = .{};
+    var line: std.ArrayList(u8) = .empty;
     defer line.deinit(g_alloc);
     line.writer(g_alloc).print("{{\"type\":\"event\",\"targetId\":{d},\"handler\":", .{id}) catch return;
     writeJsonString(&line, handler) catch return;
@@ -4046,7 +4046,7 @@ fn childTick(_: u32) void {
         for (messages) |msg| childApplyMessage(msg.data);
     }
     if (g_child_auto_dismiss_ms > 0 and g_child_started_ms > 0) {
-        const now_ms = std.time.milliTimestamp();
+        const now_ms = host_io.milliTimestamp();
         if (now_ms - g_child_started_ms >= @as(i64, @intCast(g_child_auto_dismiss_ms))) {
             std.process.exit(0);
         }
@@ -4068,7 +4068,7 @@ fn childTick(_: u32) void {
 
 fn childShutdown() void {
     if (g_child_client) |*client| {
-        var line: std.ArrayList(u8) = .{};
+        var line: std.ArrayList(u8) = .empty;
         defer line.deinit(g_alloc);
         line.writer(g_alloc).print("{{\"type\":\"windowEvent\",\"targetId\":{d},\"handler\":\"onClose\"}}", .{g_child_window_id}) catch {};
         if (line.items.len > 0) _ = client.sendLine(line.items);

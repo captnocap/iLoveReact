@@ -768,7 +768,7 @@ fn getProcessesJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     const iso = info.getIsolate();
     const c2 = iso.getCurrentContext();
     const alloc = std.heap.page_allocator;
-    var list: std.ArrayList(u8) = .{};
+    var list: std.ArrayList(u8) = .empty;
     defer list.deinit(alloc);
     list.append(alloc, '[') catch {
         setStringReturn(info, "[]");
@@ -854,7 +854,7 @@ fn getThreadsJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     }
     const pid_f = argF64(info, 0, 0);
     const pid: u32 = @intFromFloat(pid_f);
-    var list: std.ArrayList(u8) = .{};
+    var list: std.ArrayList(u8) = .empty;
     defer list.deinit(alloc);
     list.append(alloc, '[') catch {
         setStringReturn(info, "[]");
@@ -1191,7 +1191,7 @@ fn storeKeysJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         setStringReturn(info, "[]");
         return;
     };
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     out.append(alloc, '[') catch {
         setStringReturn(info, "[]");

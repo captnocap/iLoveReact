@@ -20,6 +20,7 @@
 //! whose decoded layout is `salt(16) || nonce(24) || ciphertext+tag`.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const sodium = @import("sodium.zig");
 
 const file_magic = "KRG1".*;
@@ -208,7 +209,7 @@ fn jsonAppendBase64(alloc: std.mem.Allocator, out: *std.ArrayList(u8), bytes: []
 }
 
 fn serializeEntries(alloc: std.mem.Allocator, entries: []const KeyEntry) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(alloc);
     try buf.appendSlice(alloc, "{\"version\":1,\"keys\":[");
     for (entries, 0..) |e, i| {
@@ -257,7 +258,7 @@ fn parseEntries(alloc: std.mem.Allocator, json_blob: []const u8) !std.ArrayList(
     const keys_v = root.object.get("keys") orelse return error.InvalidJson;
     if (keys_v != .array) return error.InvalidJson;
 
-    var out: std.ArrayList(KeyEntry) = .{};
+    var out: std.ArrayList(KeyEntry) = .empty;
     errdefer {
         for (out.items) |*e| e.deinit(alloc);
         out.deinit(alloc);
@@ -385,8 +386,8 @@ pub fn generateKey(ring: *Keyring, opts: GenerateOpts) ![16]u8 {
         .label = if (opts.label) |l| try ring.alloc.dupe(u8, l) else null,
         .public_key = undefined,
         .encrypted_private = &.{},
-        .created = std.time.timestamp(),
-        .expires = if (opts.expires_in) |e| std.time.timestamp() + e else null,
+        .created = host_io.timestamp(),
+        .expires = if (opts.expires_in) |e| host_io.timestamp() + e else null,
     };
     sodium.randomBytes(&entry.id);
 
@@ -442,7 +443,7 @@ pub fn rotateKey(ring: *Keyring, id: [16]u8) ![16]u8 {
 pub fn revokeKey(ring: *Keyring, id: [16]u8, reason: []const u8) !void {
     for (ring.entries.items) |*e| {
         if (std.mem.eql(u8, &e.id, &id)) {
-            e.revoked = std.time.timestamp();
+            e.revoked = host_io.timestamp();
             if (e.revoke_reason) |r| ring.alloc.free(r);
             e.revoke_reason = try ring.alloc.dupe(u8, reason);
             try save(ring);

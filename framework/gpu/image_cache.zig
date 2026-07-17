@@ -79,7 +79,7 @@ fn decodeDataUrl(src: []const u8, alloc: std.mem.Allocator) ?[]u8 {
     if (std.mem.indexOf(u8, head, ";base64") != null) {
         // Strip whitespace before decoding — some carts embed newlines for
         // readability and std.base64 rejects them outright.
-        var trimmed: std.ArrayList(u8) = .{};
+        var trimmed: std.ArrayList(u8) = .empty;
         defer trimmed.deinit(alloc);
         trimmed.ensureTotalCapacity(alloc, payload.len) catch return null;
         for (payload) |ch| {

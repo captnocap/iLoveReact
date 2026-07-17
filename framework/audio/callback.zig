@@ -1,6 +1,7 @@
 //! Audio subsystem — SDL3 audio callback (interrupt thread entry point).
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const sdl = @import("sdl.zig").c; // was: @cImport({
 const types = @import("types.zig");
 const state = @import("state.zig");
@@ -64,7 +65,7 @@ pub fn audioCallback(userdata: ?*anyopaque, stream: ?*sdl.SDL_AudioStream, addit
     _ = userdata;
     if (additional_amount <= 0) return;
 
-    const t0 = std.time.microTimestamp();
+    const t0 = host_io.microTimestamp();
 
     // Process pending commands from QuickJS
     api.processCommands();
@@ -163,6 +164,6 @@ pub fn audioCallback(userdata: ?*anyopaque, stream: ?*sdl.SDL_AudioStream, addit
         const seconds = @as(f64, @floatFromInt(num_samples)) / @as(f64, @floatFromInt(SAMPLE_RATE));
         state.g_engine.transport_measure += (state.g_engine.current_tempo / 60.0) * seconds / BEATS_PER_MEASURE;
     }
-    const t1 = std.time.microTimestamp();
+    const t1 = host_io.microTimestamp();
     state.g_engine.callback_us.store(@intCast(@max(0, t1 - t0)), .monotonic);
 }

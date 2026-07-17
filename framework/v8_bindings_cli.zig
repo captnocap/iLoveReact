@@ -8,6 +8,7 @@
 //! don't try to mimic node's fs/process/child_process shapes.
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
 // (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
@@ -95,7 +96,10 @@ fn appendJsonEscaped(out: *std.ArrayList(u8), alloc: std.mem.Allocator, s: []con
             '\n' => try out.appendSlice(alloc, "\\n"),
             '\r' => try out.appendSlice(alloc, "\\r"),
             '\t' => try out.appendSlice(alloc, "\\t"),
-            0...8, 11, 12, 14...31 => try out.writer(alloc).print("\\u{x:0>4}", .{ch}),
+            0...8, 11, 12, 14...31 => {
+                var hex_buf: [8]u8 = undefined;
+                try out.appendSlice(alloc, try std.fmt.bufPrint(&hex_buf, "\\u{x:0>4}", .{ch}));
+            },
             else => try out.append(alloc, ch),
         }
     }
@@ -139,7 +143,7 @@ fn freeStringArray(alloc: std.mem.Allocator, arr: [][]u8) void {
 fn argv(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const alloc = std.heap.page_allocator;
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     out.append(alloc, '[') catch {
         setString(info, "[]");
@@ -182,16 +186,16 @@ fn exitProc(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn cwd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const p = std.process.getCwd(&buf) catch {
+    const n = std.process.currentPath(host_io.io(), &buf) catch {
         setString(info, "");
         return;
     };
-    setString(info, p);
+    setString(info, buf[0..n]);
 }
 
 fn nowMs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const ms = std.time.milliTimestamp();
+    const ms = host_io.milliTimestamp();
     setNumber(info, @as(f64, @floatFromInt(ms)));
 }
 
@@ -332,7 +336,7 @@ fn pollFds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
 
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     out.append(alloc, '[') catch {
         setString(info, "[]");
@@ -437,12 +441,13 @@ fn spawnSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     argv_arr[0] = cmd;
     for (extra_args, 0..) |a, i| argv_arr[i + 1] = a;
 
-    var child = std.process.Child.init(argv_arr, alloc);
-    child.stdin_behavior = if (stdin_in.len > 0) .Pipe else .Ignore;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-
-    child.spawn() catch |e| {
+    const io = host_io.io();
+    var child = std.process.spawn(io, .{
+        .argv = argv_arr,
+        .stdin = if (stdin_in.len > 0) .pipe else .ignore,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    }) catch |e| {
         var buf: [256]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "{{\"code\":-1,\"stdout\":\"\",\"stderr\":\"spawn failed: {s}\"}}", .{@errorName(e)}) catch "{\"code\":-1,\"stdout\":\"\",\"stderr\":\"spawn failed\"}";
         setString(info, msg);
@@ -451,39 +456,54 @@ fn spawnSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
     if (stdin_in.len > 0) {
         if (child.stdin) |stdin_pipe| {
-            stdin_pipe.writeAll(stdin_in) catch {};
-            stdin_pipe.close();
+            stdin_pipe.writeStreamingAll(io, stdin_in) catch {};
+            stdin_pipe.close(io);
             child.stdin = null;
         }
     }
 
-    // collectOutput drains stdout+stderr then waits.
-    var stdout_buf: std.ArrayList(u8) = .{};
-    defer stdout_buf.deinit(alloc);
-    var stderr_buf: std.ArrayList(u8) = .{};
-    defer stderr_buf.deinit(alloc);
+    // Drain stdout+stderr then wait — the same MultiReader shape
+    // std.process.run uses internally (collectOutput is gone in 0.16).
+    var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
+    var multi_reader: std.Io.File.MultiReader = undefined;
+    multi_reader.init(alloc, io, multi_reader_buffer.toStreams(), &.{ child.stdout.?, child.stderr.? });
+    defer multi_reader.deinit();
+    const stdout_reader = multi_reader.reader(0);
+    const stderr_reader = multi_reader.reader(1);
+    while (multi_reader.fill(64, .none)) |_| {
+        if (stdout_reader.buffered().len > 64 * 1024 * 1024) break;
+    } else |err| switch (err) {
+        error.EndOfStream => {},
+        else => {},
+    }
+    const stdout_items = stdout_reader.buffered();
+    const stderr_items = stderr_reader.buffered();
 
-    child.collectOutput(alloc, &stdout_buf, &stderr_buf, 64 * 1024 * 1024) catch {};
-    const term = child.wait() catch {
+    const term = child.wait(io) catch {
         setString(info, "{\"code\":-1,\"stdout\":\"\",\"stderr\":\"wait failed\"}");
         return;
     };
     const code: i32 = switch (term) {
-        .Exited => |c| @intCast(c),
-        .Signal => |s| -@as(i32, @intCast(s)),
+        .exited => |c| @intCast(c),
+        .signal => |sg| -@as(i32, @intCast(@intFromEnum(sg))),
         else => -1,
     };
 
     // Emit JSON { code, stdout, stderr }
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
-    out.writer(alloc).print("{{\"code\":{d},\"stdout\":", .{code}) catch {
+    var head_buf: [64]u8 = undefined;
+    const head = std.fmt.bufPrint(&head_buf, "{{\"code\":{d},\"stdout\":", .{code}) catch {
         setString(info, "{\"code\":-1,\"stdout\":\"\",\"stderr\":\"oom\"}");
         return;
     };
-    appendJsonEscaped(&out, alloc, stdout_buf.items) catch {};
+    out.appendSlice(alloc, head) catch {
+        setString(info, "{\"code\":-1,\"stdout\":\"\",\"stderr\":\"oom\"}");
+        return;
+    };
+    appendJsonEscaped(&out, alloc, stdout_items) catch {};
     out.appendSlice(alloc, ",\"stderr\":") catch {};
-    appendJsonEscaped(&out, alloc, stderr_buf.items) catch {};
+    appendJsonEscaped(&out, alloc, stderr_items) catch {};
     out.append(alloc, '}') catch {};
     setString(info, out.items);
 }
@@ -552,7 +572,7 @@ fn restoreTty() callconv(.c) void {
 
 extern fn atexit(func: *const fn () callconv(.c) void) c_int;
 
-fn signalHandler(sig: c_int) callconv(.c) void {
+fn signalHandler(sig: sysx.SIG) callconv(.c) void {
     // Restore terminal first so the user's shell isn't left in raw mode
     // / alt-screen if a TUI cart got SIGINT'd.
     restoreTty();
@@ -568,8 +588,8 @@ fn signalHandler(sig: c_int) callconv(.c) void {
         .mask = sysx.sigemptyset(),
         .flags = 0,
     };
-    sysx.sigaction(@intCast(sig), &dfl, null);
-    _ = sysx.raise(@intCast(sig)) catch {};
+    sysx.sigaction(sig, &dfl, null);
+    _ = sysx.raise(sig) catch {};
 }
 
 /// Install SIGINT/SIGTERM/SIGHUP handlers that kill tracked child processes,
@@ -651,31 +671,32 @@ fn spawn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     alloc.free(cmd);
     freeStringArray(alloc, extra_args);
 
-    handle.* = .{
-        .child = std.process.Child.init(argv_arr, arena),
-        .residual = .{},
-        .done = false,
-        .exit_code = 0,
-    };
-    handle.child.stdout_behavior = .Pipe;
-    handle.child.stderr_behavior = .Inherit;
-    handle.child.stdin_behavior = .Ignore;
-
-    handle.child.spawn() catch {
+    const spawned = std.process.spawn(host_io.io(), .{
+        .argv = argv_arr,
+        .stdout = .pipe,
+        .stderr = .inherit,
+        .stdin = .ignore,
+    }) catch {
         arena.destroy(handle);
         setNumber(info, -1);
         return;
+    };
+    handle.* = .{
+        .child = spawned,
+        .residual = .empty,
+        .done = false,
+        .exit_code = 0,
     };
 
     const id = g_children_next_id;
     g_children_next_id += 1;
     g_children.put(id, handle) catch {
-        _ = handle.child.kill() catch {};
+        handle.child.kill(host_io.io());
         arena.destroy(handle);
         setNumber(info, -1);
         return;
     };
-    recordPid(handle.child.id);
+    recordPid(handle.child.id orelse 0);
     setNumber(info, id);
 }
 
@@ -777,8 +798,8 @@ fn childKill(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setBool(info, false);
         return;
     };
-    forgetPid(handle.child.id);
-    _ = handle.child.kill() catch {};
+    forgetPid(handle.child.id orelse 0);
+    handle.child.kill(host_io.io());
     handle.residual.deinit(std.heap.c_allocator);
     std.heap.c_allocator.destroy(handle);
     _ = g_children.remove(id);
@@ -797,11 +818,25 @@ fn unixConnect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(path);
 
-    const stream = std.net.connectUnixSocket(path) catch {
+    // std.net is gone in 0.16; blocking unix connect via sysx (raw fd, the
+    // same pattern pty_remote uses — downstream reads/writes are sysx too).
+    if (path.len >= 108) {
+        setNumber(info, -1);
+        return;
+    }
+    const fd = sysx.socket(sysx.AF.UNIX, sysx.SOCK.STREAM, 0) catch {
         setNumber(info, -1);
         return;
     };
-    setNumber(info, @as(i32, @intCast(stream.handle)));
+    var addr: sysx.sockaddr.un = .{ .family = sysx.AF.UNIX, .path = undefined };
+    @memset(&addr.path, 0);
+    @memcpy(addr.path[0..path.len], path);
+    sysx.connect(fd, @ptrCast(&addr), @sizeOf(sysx.sockaddr.un)) catch {
+        sysx.close(fd);
+        setNumber(info, -1);
+        return;
+    };
+    setNumber(info, @as(i32, @intCast(fd)));
 }
 
 /// __unixWrite(fd, content) → bytes written or -1.

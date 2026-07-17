@@ -43,8 +43,8 @@ const Timer = struct {
     alive: bool,
 };
 
-var wires: std.ArrayList(WireRow) = .{};
-var timers: std.ArrayList(Timer) = .{};
+var wires: std.ArrayList(WireRow) = .empty;
+var timers: std.ArrayList(Timer) = .empty;
 var next_wire_id: u32 = 1;
 var next_timer_id: u32 = 1;
 var clock_ms: u64 = 0;
@@ -147,7 +147,7 @@ const KeyMatch = struct {
     alive: bool,
 };
 
-var key_matches: std.ArrayList(KeyMatch) = .{};
+var key_matches: std.ArrayList(KeyMatch) = .empty;
 var next_key_id: u32 = 1;
 var last_dispatched_key: i64 = 0;
 

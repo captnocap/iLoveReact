@@ -73,7 +73,7 @@ pub fn clear() void {
 /// Return a JSON array of all keys. Caller owns the returned slice.
 pub fn keysJson(alloc: std.mem.Allocator) ![]u8 {
     const map = ensureInit();
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
     try out.append(alloc, '[');
     var first = true;

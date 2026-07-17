@@ -1,4 +1,5 @@
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const build_options = @import("build_options");
 
@@ -327,7 +328,7 @@ fn hostMeshLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     state.markDirty();
 
     // Build {"key":"<escaped path>","count":N,"radius":R} for the cart to mount.
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(std.heap.c_allocator);
     const w = buf.writer(std.heap.c_allocator);
     w.writeAll("{\"key\":\"") catch {
@@ -385,7 +386,7 @@ fn hostMeshPreviewFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     scene3d.orbitFrame(mesh.center, mesh.radius);
     state.markDirty();
 
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(std.heap.c_allocator);
     const w = buf.writer(std.heap.c_allocator);
     w.writeAll("{\"key\":\"") catch {
@@ -453,7 +454,7 @@ fn hostMeshLoadVertices(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     scene3d.orbitFrame(mesh.center, mesh.radius);
     state.markDirty();
 
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(std.heap.c_allocator);
     const w = buf.writer(std.heap.c_allocator);
     w.writeAll("{\"key\":\"") catch {
@@ -1474,7 +1475,7 @@ fn writePaintLayersJson(info: v8.FunctionCallbackInfo) void {
         setReturnString(info, "{\"ok\":0}");
         return;
     }
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc_);
     const build = struct {
         fn run(o: *std.ArrayList(u8), a: std.mem.Allocator) !void {
@@ -2043,7 +2044,7 @@ fn hostModelAtlasRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     defer alloc.free(b64);
     _ = enc.encode(b64, pa.rgba);
 
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     const w = out.writer(alloc);
     w.print("{{\"w\":{d},\"h\":{d},\"detail\":{d}", .{ pa.w, pa.h, pa.detail }) catch {
@@ -2104,7 +2105,7 @@ fn hostModelAtlasPalette(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     scene3d.paintTintSuspend();
     defer scene3d.paintTintResume();
     const wrote = scene3d.paintAtlasPalette(colors[0..n]);
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(alloc);
     const w = out.writer(alloc);
     w.writeAll("[") catch return setReturnString(info, "[]");
@@ -2275,7 +2276,7 @@ fn hostModelSetQuality(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     model_source.setFaceMap(dec.face_to_source);
     state.markDirty();
 
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(std.heap.c_allocator);
     const w = buf.writer(std.heap.c_allocator);
     w.writeAll("{\"key\":\"") catch {
@@ -2409,7 +2410,7 @@ fn hostAnimRegister(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         if (std.mem.eql(u8, loop_name, "pingpong")) break :blk .pingpong;
         break :blk .cycle;
     };
-    const now_ms: i64 = @as(i64, @truncate(@divFloor(std.time.nanoTimestamp(), 1_000_000)));
+    const now_ms: i64 = @as(i64, @truncate(@divFloor(host_io.nanoTimestamp(), 1_000_000)));
     const id = animations.register(
         key,
         curve,
@@ -2641,7 +2642,7 @@ fn hostExecAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn emitExecResult(rid: []const u8, stdout: []const u8, code: i32) void {
     // Build JSON payload. Only escape the couple of chars we need for stdout;
     // stdout can be arbitrary text with quotes/newlines/backslashes.
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(std.heap.c_allocator);
     const w = buf.writer(std.heap.c_allocator);
     w.print("{{\"code\":{d},\"stdout\":\"", .{code}) catch return;
@@ -2660,14 +2661,14 @@ fn emitExecResult(rid: []const u8, stdout: []const u8, code: i32) void {
     const payload = buf.items;
 
     // Build channel string "exec:<rid>" nul-terminated for callGlobal2Str.
-    var chan: std.ArrayList(u8) = .{};
+    var chan: std.ArrayList(u8) = .empty;
     defer chan.deinit(std.heap.c_allocator);
     chan.appendSlice(std.heap.c_allocator, "exec:") catch return;
     chan.appendSlice(std.heap.c_allocator, rid) catch return;
     chan.append(std.heap.c_allocator, 0) catch return;
     const chan_z = chan.items[0 .. chan.items.len - 1 :0];
 
-    var payload_arr: std.ArrayList(u8) = .{};
+    var payload_arr: std.ArrayList(u8) = .empty;
     defer payload_arr.deinit(std.heap.c_allocator);
     payload_arr.appendSlice(std.heap.c_allocator, payload) catch return;
     payload_arr.append(std.heap.c_allocator, 0) catch return;

@@ -28,6 +28,7 @@
 //! v8_ingredients.zig). A cart that never places a build piece pays zero bytes.
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const build = @import("game/build.zig");
@@ -90,7 +91,7 @@ fn setReturnF32Buffer(info: v8.FunctionCallbackInfo, floats: []f32) void {
 }
 
 inline fn nowNs() i64 {
-    return @as(i64, @truncate(std.time.nanoTimestamp()));
+    return @as(i64, @truncate(host_io.nanoTimestamp()));
 }
 
 // ── marshaling ────────────────────────────────────────────────────────────────

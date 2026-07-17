@@ -226,7 +226,7 @@ pub const AppServerClient = struct {
     config: AppServerConfig,
     child: ?std.process.Child = null,
     next_request_id: u64 = 1,
-    pending_notifications: std.ArrayList(Notification) = .{},
+    pending_notifications: std.ArrayList(Notification) = .empty,
     active_turn_id: ?[]const u8 = null,
     last_rpc_error: ?[]u8 = null,
 
@@ -248,7 +248,7 @@ pub const AppServerClient = struct {
     pub fn start(self: *AppServerClient) !void {
         if (self.child != null) return;
 
-        var argv_list: std.ArrayList([]const u8) = .{};
+        var argv_list: std.ArrayList([]const u8) = .empty;
         defer argv_list.deinit(self.allocator);
 
         if (self.config.launch_args_override) |override| {
@@ -411,7 +411,7 @@ pub const AppServerClient = struct {
         const child = self.child orelse return error.TransportClosed;
         const stdin = child.stdin orelse return error.TransportClosed;
 
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.append(self.allocator, '{');
@@ -464,7 +464,7 @@ pub const AppServerClient = struct {
         const child = self.child orelse return error.TransportClosed;
         const stdin = child.stdin orelse return error.TransportClosed;
 
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(self.allocator);
 
         try buf.appendSlice(self.allocator, "{\"id\":");
@@ -687,7 +687,7 @@ pub const TurnHandle = struct {
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         errdefer arena.deinit();
 
-        var items: std.ArrayList(ThreadItem) = .{};
+        var items: std.ArrayList(ThreadItem) = .empty;
         defer items.deinit(arena.allocator());
 
         var status: ?[]const u8 = null;
@@ -844,7 +844,7 @@ fn assistantTextFromItem(allocator: std.mem.Allocator, item_value: std.json.Valu
             const content_value = getPath(item_value, &.{"content"}) orelse return null;
             const content = asArray(content_value) orelse return null;
 
-            var buf: std.ArrayList(u8) = .{};
+            var buf: std.ArrayList(u8) = .empty;
             defer buf.deinit(allocator);
 
             for (content.items) |entry| {
@@ -1050,7 +1050,7 @@ fn buildModelListParamsJson(allocator: std.mem.Allocator, include_hidden: bool) 
 }
 
 fn buildInputJson(allocator: std.mem.Allocator, input: Input) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
 
     try buf.append(allocator, '[');
@@ -1165,7 +1165,7 @@ const JsonObjectBuilder = struct {
     finished: bool = false,
 
     pub fn init(allocator: std.mem.Allocator) !JsonObjectBuilder {
-        var buf: std.ArrayList(u8) = .{};
+        var buf: std.ArrayList(u8) = .empty;
         try buf.append(allocator, '{');
         return .{
             .allocator = allocator,

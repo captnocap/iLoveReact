@@ -23,6 +23,7 @@
 //! implementations.
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const host_tree = @import("host_tree.zig");
@@ -90,9 +91,9 @@ fn hostFlush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     switch (g_mode) {
         .sync => {
             defer std.heap.c_allocator.free(payload);
-            const t0 = std.time.microTimestamp();
+            const t0 = host_io.microTimestamp();
             host_tree.applyCommandBatch(payload);
-            const t1 = std.time.microTimestamp();
+            const t1 = host_io.microTimestamp();
             g_last_drain_batches = 1;
             g_last_drain_bytes = @intCast(payload.len);
             g_last_drain_us = @intCast(@max(0, t1 - t0));
@@ -131,13 +132,13 @@ pub fn drainPending(apply: ApplyFn) void {
     const byte_count = g_pending_bytes;
     const batches = g_pending.toOwnedSlice(std.heap.c_allocator) catch return;
     g_pending_bytes = 0;
-    const t0 = std.time.microTimestamp();
+    const t0 = host_io.microTimestamp();
     defer {
         for (batches) |b| std.heap.c_allocator.free(b);
         std.heap.c_allocator.free(batches);
     }
     for (batches) |b| apply(b);
-    const t1 = std.time.microTimestamp();
+    const t1 = host_io.microTimestamp();
     g_last_drain_batches = batch_count;
     g_last_drain_bytes = byte_count;
     g_last_drain_us = @intCast(@max(0, t1 - t0));

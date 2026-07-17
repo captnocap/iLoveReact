@@ -202,7 +202,7 @@ fn jsonStr(out: *std.ArrayList(u8), alloc: std.mem.Allocator, s: []const u8) !vo
 }
 
 fn buildInfoJson(bytes: []const u8, alloc: std.mem.Allocator) ![]u8 {
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
     var cur = Cursor{ .data = bytes, .pos = 5 }; // skip 4 header + 1 type
     const t = bytes[4];
@@ -264,7 +264,7 @@ fn buildInfoJson(bytes: []const u8, alloc: std.mem.Allocator) ![]u8 {
 }
 
 fn buildPlayersJson(bytes: []const u8, alloc: std.mem.Allocator) ![]u8 {
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
     var cur = Cursor{ .data = bytes, .pos = 5 };
     const count = cur.byte();
@@ -285,7 +285,7 @@ fn buildPlayersJson(bytes: []const u8, alloc: std.mem.Allocator) ![]u8 {
 }
 
 fn buildRulesJson(bytes: []const u8, alloc: std.mem.Allocator) ![]u8 {
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
     var cur = Cursor{ .data = bytes, .pos = 5 };
     const count = cur.short();

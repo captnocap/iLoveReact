@@ -48,7 +48,7 @@ const PendingCmd = struct {
     request_id: u32,
     cmd_id: i32,
     marker_id: i32,
-    accumulated: std.ArrayList(u8) = .{},
+    accumulated: std.ArrayList(u8) = .empty,
 };
 
 pub const RconClient = struct {
@@ -60,8 +60,8 @@ pub const RconClient = struct {
     auth_id: i32 = 0,
     next_request_id: u32 = 1,
 
-    pending: std.ArrayList(PendingCmd) = .{},
-    recv_buf: std.ArrayList(u8) = .{},
+    pending: std.ArrayList(PendingCmd) = .empty,
+    recv_buf: std.ArrayList(u8) = .empty,
     err_buf: [128]u8 = undefined,
 
     /// Connect, send the AUTH packet, return the half-initialized client.

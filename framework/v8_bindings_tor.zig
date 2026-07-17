@@ -22,7 +22,7 @@ const alloc = std.heap.c_allocator;
 // ── Registry — handles waiting for bootstrap ───────────────────────
 
 const TorEntry = struct { id: u32, opened: bool };
-var g_tor: std.ArrayList(TorEntry) = .{};
+var g_tor: std.ArrayList(TorEntry) = .empty;
 
 fn findTor(id: u32) ?*TorEntry {
     for (g_tor.items) |*e| if (e.id == id) return e;
@@ -61,13 +61,13 @@ fn argToU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
 }
 
 fn emitEvent(channel: []const u8, payload: []const u8) void {
-    var chan_buf: std.ArrayList(u8) = .{};
+    var chan_buf: std.ArrayList(u8) = .empty;
     defer chan_buf.deinit(alloc);
     chan_buf.appendSlice(alloc, channel) catch return;
     chan_buf.append(alloc, 0) catch return;
     const chan_z = chan_buf.items[0 .. chan_buf.items.len - 1 :0];
 
-    var payload_buf: std.ArrayList(u8) = .{};
+    var payload_buf: std.ArrayList(u8) = .empty;
     defer payload_buf.deinit(alloc);
     payload_buf.appendSlice(alloc, payload) catch return;
     payload_buf.append(alloc, 0) catch return;

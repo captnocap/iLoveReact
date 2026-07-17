@@ -4,6 +4,7 @@
 //! Supports pane-based (tmux, iTerm2) and in-process teammate execution.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 
 // Sub-modules
 pub const constants = @import("swarm/constants.zig");
@@ -72,7 +73,7 @@ pub const TeamManager = struct {
         lead_agent_id: []const u8,
         description: ?[]const u8,
     ) error{OutOfMemory}!TeamFile {
-        const now = std.time.timestamp();
+        const now = host_io.timestamp();
 
         return TeamFile{
             .name = try self.allocator.dupe(u8, team_name),

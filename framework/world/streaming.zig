@@ -596,7 +596,7 @@ fn buildLodShell(
     const min_height = LOD_HEIGHT_LADDER[rung];
     stats.lod_min_height = min_height;
 
-    var rows_list: std.ArrayList(f32) = .{};
+    var rows_list: std.ArrayList(f32) = .empty;
     errdefer rows_list.deinit(allocator);
     const ranges = try allocator.alloc(Range, chunk_count);
     errdefer allocator.free(ranges);

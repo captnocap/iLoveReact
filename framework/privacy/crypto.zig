@@ -12,6 +12,7 @@
 //!   - Envelope encryption (XChaCha20-Poly1305)
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const crypto = std.crypto;
 const HmacSha256 = crypto.auth.hmac.sha2.HmacSha256;
@@ -224,7 +225,7 @@ pub fn shamirSplit(
     const secret_len = try hexToBytes(secret_hex, &secret_buf);
 
     // For each byte of the secret, generate random polynomial of degree k-1
-    var rng = std.Random.DefaultPrng.init(@bitCast(std.time.nanoTimestamp()));
+    var rng = std.Random.DefaultPrng.init(@bitCast(host_io.nanoTimestamp()));
     const random = rng.random();
 
     for (0..secret_len) |bi| {

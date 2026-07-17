@@ -6,6 +6,7 @@
 //! Also detects frozen processes via heartbeat file staleness.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("log.zig");
 const builtin = @import("builtin");
 
@@ -64,7 +65,7 @@ pub fn init() void {
 pub fn heartbeat() void {
     if (!g_initialized or g_heartbeat_path_len == 0) return;
 
-    const ts = std.time.timestamp();
+    const ts = host_io.timestamp();
     var buf: [20]u8 = undefined;
     const ts_str = std.fmt.bufPrint(&buf, "{d}", .{ts}) catch return;
 

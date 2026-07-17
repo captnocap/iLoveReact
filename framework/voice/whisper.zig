@@ -12,6 +12,7 @@
 // to whisper.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const v8_runtime = @import("../v8_runtime.zig");
 const voice = @import("voice.zig");
 
@@ -184,7 +185,7 @@ fn workerLoop() void {
 fn runJob(job: Job) void {
     defer S.allocator.free(job.model_path);
 
-    const t_start = std.time.milliTimestamp();
+    const t_start = host_io.milliTimestamp();
 
     // Load model if it isn't already this one.
     const need_load = blk: {
@@ -264,13 +265,13 @@ fn runJob(job: Job) void {
         return;
     };
 
-    const elapsed: u32 = @intCast(@as(i64, std.time.milliTimestamp() - t_start));
+    const elapsed: u32 = @intCast(@as(i64, host_io.milliTimestamp() - t_start));
     postResult(job.buf_id, job.model_path, text_owned, elapsed, true);
 }
 
 fn postFailure(buf_id: u32, model_path: []const u8, reason: []const u8, t_start: i64) void {
     const text = S.allocator.dupe(u8, reason) catch return;
-    const elapsed: u32 = @intCast(@as(i64, std.time.milliTimestamp() - t_start));
+    const elapsed: u32 = @intCast(@as(i64, host_io.milliTimestamp() - t_start));
     postResult(buf_id, model_path, text, elapsed, false);
 }
 

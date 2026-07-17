@@ -677,7 +677,7 @@ pub const PendingLayoutEvent = struct {
     w: f32,
     h: f32,
 };
-var pending_layout_events: std.ArrayList(PendingLayoutEvent) = .{};
+var pending_layout_events: std.ArrayList(PendingLayoutEvent) = .empty;
 
 /// Drain the queue accumulated by `setRect` since the last drain. Caller owns
 /// the returned slice — do not free it; the next `clearPendingLayoutEvents`

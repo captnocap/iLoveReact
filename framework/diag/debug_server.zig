@@ -12,6 +12,7 @@
 //! Spec: tsz/docs/TSZ_TOOLS_SPEC.md
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const ipc = @import("../net/ipc.zig");
 const telemetry = @import("telemetry.zig");
 const app_crypto = @import("../privacy/crypto.zig");
@@ -292,7 +293,7 @@ fn loadTrustedKeys() void {
     const last_active = std.fmt.parseInt(i64, ts_str, 10) catch return;
 
     // Check 15 minute freshness
-    const now = std.time.timestamp();
+    const now = host_io.timestamp();
     if (now - last_active > 15 * 60) return; // stale — require fresh pairing
 
     if (fp_hex.len != 64) return;
@@ -339,7 +340,7 @@ fn savePairing(tools_pubkey: [32]u8) void {
     var fp_hex: [64]u8 = undefined;
     app_crypto.bytesToHex(&fp, &fp_hex);
 
-    const now = std.time.timestamp();
+    const now = host_io.timestamp();
 
     var json_buf: [512]u8 = undefined;
     const json = std.fmt.bufPrint(&json_buf,
@@ -380,7 +381,7 @@ fn touchPairing() void {
     const val_end_pos = std.mem.indexOfPos(u8, data, val_start, "\"") orelse return;
 
     // Rebuild with new timestamp
-    const now = std.time.timestamp();
+    const now = host_io.timestamp();
     var new_buf: [1024]u8 = undefined;
     var pos: usize = 0;
     ap(&new_buf, &pos, data[0..val_start]);

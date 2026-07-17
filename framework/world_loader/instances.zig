@@ -38,7 +38,7 @@ const PLAYER_SURFACE_RESTITUTION = config.PLAYER_SURFACE_RESTITUTION;
 /// non-null tile into one box instance (stride 9: pos3/scale3/color3). Heap-
 /// owned; the caller frees it after the frame loop.
 pub fn extrudeTiles(allocator: std.mem.Allocator, scene: constructor.Scene) ![]f32 {
-    var list: std.ArrayList(f32) = .{};
+    var list: std.ArrayList(f32) = .empty;
     errdefer list.deinit(allocator);
     var y: u32 = 0;
     while (y < scene.height) : (y += 1) {
@@ -152,37 +152,37 @@ pub fn appendInstanceRow(list: *std.ArrayList(f32), allocator: std.mem.Allocator
 // wall row gets the WALL_SENTINEL stamp via appendInstanceRow so the editor's
 // build pane can hide it. Empty → no row is a wall.
 pub fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize, material_refs: []const u32, wall_flags: []const u8, flora: ?constructor.FloraCells) !ShapeBatches {
-    var boxes: std.ArrayList(f32) = .{};
+    var boxes: std.ArrayList(f32) = .empty;
     errdefer boxes.deinit(allocator);
-    var boxes_open_run_min: std.ArrayList(f32) = .{};
+    var boxes_open_run_min: std.ArrayList(f32) = .empty;
     errdefer boxes_open_run_min.deinit(allocator);
-    var boxes_open_run_max: std.ArrayList(f32) = .{};
+    var boxes_open_run_max: std.ArrayList(f32) = .empty;
     errdefer boxes_open_run_max.deinit(allocator);
-    var boxes_open_run_both: std.ArrayList(f32) = .{};
+    var boxes_open_run_both: std.ArrayList(f32) = .empty;
     errdefer boxes_open_run_both.deinit(allocator);
-    var ramps: std.ArrayList(f32) = .{};
+    var ramps: std.ArrayList(f32) = .empty;
     errdefer ramps.deinit(allocator);
-    var cylinder8s: std.ArrayList(f32) = .{};
+    var cylinder8s: std.ArrayList(f32) = .empty;
     errdefer cylinder8s.deinit(allocator);
-    var cylinder16s: std.ArrayList(f32) = .{};
+    var cylinder16s: std.ArrayList(f32) = .empty;
     errdefer cylinder16s.deinit(allocator);
-    var spheres: std.ArrayList(f32) = .{};
+    var spheres: std.ArrayList(f32) = .empty;
     errdefer spheres.deinit(allocator);
-    var gables: std.ArrayList(f32) = .{};
+    var gables: std.ArrayList(f32) = .empty;
     errdefer gables.deinit(allocator);
-    var corner_miters: std.ArrayList(f32) = .{};
+    var corner_miters: std.ArrayList(f32) = .empty;
     errdefer corner_miters.deinit(allocator);
-    var corner_miter_mirrors: std.ArrayList(f32) = .{};
+    var corner_miter_mirrors: std.ArrayList(f32) = .empty;
     errdefer corner_miter_mirrors.deinit(allocator);
-    var grass: std.ArrayList(f32) = .{};
+    var grass: std.ArrayList(f32) = .empty;
     errdefer grass.deinit(allocator);
-    var flowers: std.ArrayList(f32) = .{};
+    var flowers: std.ArrayList(f32) = .empty;
     errdefer flowers.deinit(allocator);
-    var bush: std.ArrayList(f32) = .{};
+    var bush: std.ArrayList(f32) = .empty;
     errdefer bush.deinit(allocator);
-    var frond: std.ArrayList(f32) = .{};
+    var frond: std.ArrayList(f32) = .empty;
     errdefer frond.deinit(allocator);
-    var palmtrunks: std.ArrayList(f32) = .{};
+    var palmtrunks: std.ArrayList(f32) = .empty;
     errdefer palmtrunks.deinit(allocator);
     var wrapped: [foliage.WRAPPED_SPECIES_COUNT]std.ArrayList(f32) = @splat(.{});
     errdefer for (&wrapped) |*rows| rows.deinit(allocator);

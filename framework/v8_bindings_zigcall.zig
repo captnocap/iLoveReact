@@ -257,7 +257,7 @@ fn listCallable(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     @setEvalBranchQuota(200000);
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const iso = info.getIsolate();
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(std.heap.c_allocator);
     buf.append(std.heap.c_allocator, '{') catch return;
     var first_mod = true;

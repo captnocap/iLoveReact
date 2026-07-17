@@ -8,6 +8,7 @@
 //! Header: magic "TREC", version u8, rows u16, cols u16.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 
 pub const MAGIC = "TREC";
 pub const VERSION: u8 = 1;
@@ -124,5 +125,5 @@ pub const Recording = struct {
 };
 
 fn getMicroseconds() u64 {
-    return @intCast(@max(0, std.time.microTimestamp()));
+    return @intCast(@max(0, host_io.microTimestamp()));
 }

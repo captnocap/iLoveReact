@@ -292,7 +292,7 @@ pub fn resize(alloc: std.mem.Allocator, src: Image, out_w: u32, out_h: u32) !Ima
 // ── Encode ───────────────────────────────────────────────────────────────
 
 const Sink = struct {
-    list: std.ArrayList(u8) = .{},
+    list: std.ArrayList(u8) = .empty,
     alloc: std.mem.Allocator,
     failed: bool = false,
 };

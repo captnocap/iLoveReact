@@ -663,7 +663,7 @@ fn drawNeonPath(
     glow_a: f32,
     d: []const u8,
 ) void {
-    var segs: std.ArrayList(Seg) = .{};
+    var segs: std.ArrayList(Seg) = .empty;
     defer segs.deinit(allocator);
     parsePath(&segs, allocator, d, s);
     if (segs.items.len == 0) return;

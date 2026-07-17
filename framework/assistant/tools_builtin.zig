@@ -7,6 +7,7 @@
 //!   - ripgrep for search
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const Tool = @import("tool_framework.zig").Tool;
 const ToolResult = @import("tool_framework.zig").ToolResult;
@@ -97,10 +98,10 @@ fn bashExecute(input_json: []const u8, ctx: *const ToolContext) !ToolResult {
     var output = std.ArrayList(u8).init(allocator);
     defer output.deinit();
 
-    const start_time = std.time.milliTimestamp();
+    const start_time = host_io.milliTimestamp();
     var last_progress = start_time;
     
-    while (std.time.milliTimestamp() - start_time < timeout) {
+    while (host_io.milliTimestamp() - start_time < timeout) {
         // Check for abort
         if (ctx.checkAbort()) {
             pty.closePty();
@@ -116,7 +117,7 @@ fn bashExecute(input_json: []const u8, ctx: *const ToolContext) !ToolResult {
         }
 
         // Report progress periodically
-        const now = std.time.milliTimestamp();
+        const now = host_io.milliTimestamp();
         if (now - last_progress > 1000) {
             const elapsed = now - start_time;
             const percent = @min(95, @as(u8, @intCast((elapsed * 100) / timeout)));

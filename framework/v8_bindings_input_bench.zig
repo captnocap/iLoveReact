@@ -24,6 +24,7 @@
 //! number even on the pure-Zig backend).
 
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const c = @import("engine.zig").c;
@@ -94,7 +95,7 @@ fn hostReset(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 // past epoch). Match the luajit_worker.zig pattern: truncate at the
 // boundary so the arithmetic everywhere else stays in i64.
 inline fn nowNs() i64 {
-    return @as(i64, @truncate(std.time.nanoTimestamp()));
+    return @as(i64, @truncate(host_io.nanoTimestamp()));
 }
 
 fn hostSetYaw(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
