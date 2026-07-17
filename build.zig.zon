@@ -2,7 +2,7 @@
     .fingerprint = 0xda9e7520e2295a4,
     .name = .reactjit,
     .version = "0.0.0",
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     .dependencies = .{
         .tls_zig = .{
             .path = "deps/tls.zig",
@@ -14,16 +14,15 @@
             .path = "deps/zig-v8",
         },
         .zluajit = .{
-            .url = "git+https://github.com/negrel/zluajit#86ee726416810b60e101cf19703bc2325cb19a42",
-            .hash = "zluajit-0.0.0-uJQ3fjmRAgBvG9HlxU_5HiDNMvT3FQVgOB6DDfXKsgoK",
+            .path = "deps/zluajit",
         },
         .zuckdb = .{
-            .url = "git+https://github.com/karlseguin/zuckdb.zig?ref=zig-0.15#f98bb3868d56d695b6662ea5e6d4ee5fdd5aec30",
-            .hash = "zuckdb-0.0.0-DpSXVFzzBQC8T51_97zt_zJUF_I--HXmafV8tjFcxIax",
+            .url = "git+https://github.com/karlseguin/zuckdb.zig#479fc9dd1bbad1a2a17e8c91d22cf73d7fe53ecb",
+            .hash = "zuckdb-0.0.0-DpSXVNgZBgB9aaP2tQgJiZ9akeq7Z9DdveI9JvdQ04fj",
         },
         .pg = .{
-            .url = "git+https://github.com/karlseguin/pg.zig?ref=zig-0.15#a4351154a00488d26740b4378872be03bd562d27",
-            .hash = "pg-0.0.0-Wp_7gdNpBgBWiq6RQguwbekGA0sbYvjgZd4sNG_CyT0f",
+            .url = "git+https://github.com/karlseguin/pg.zig#c9213c2a0f9942e76ad856efbd2e5847f153b55e",
+            .hash = "pg-0.0.0-Wp_7gdaoBgCY54xf40F0CA3J3C28EbeYadws6t0ej6EE",
         },
     },
     .paths = .{"."},

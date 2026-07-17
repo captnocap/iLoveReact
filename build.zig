@@ -228,7 +228,7 @@ pub fn build(b: *std.Build) void {
     exe.stack_size = 64 * 1024 * 1024;
 
     // ── Always linked ──────────────────────────────────────────
-    exe.linkLibC();
+    exe.root_module.link_libc = true;
     // SDL3 + freetype carry the GPU substrate (windowing, GPU paint,
     // text rasterization). Linked when either:
     //   - has_gpu_cli: full GPU shell (engine.run + SDL event pump)
@@ -238,8 +238,8 @@ pub fn build(b: *std.Build) void {
     // ~12MB of DT_NEEDED entries and don't need the SDL3/freetype
     // headers at compile time.
     if (has_gpu_cli or has_window) {
-        exe.linkSystemLibrary("SDL3");
-        exe.linkSystemLibrary("freetype");
+        exe.root_module.linkSystemLibrary("SDL3", .{});
+        exe.root_module.linkSystemLibrary("freetype", .{});
     }
 
     const os_tag = target.result.os.tag;
@@ -250,11 +250,11 @@ pub fn build(b: *std.Build) void {
         // luajit + freetype headers ride alongside SDL when GPU or
         // <Window>-on-TUI is on.
         if (has_gpu_cli or has_window) {
-            exe.linkSystemLibrary("X11");
-            exe.linkSystemLibrary("m");
+            exe.root_module.linkSystemLibrary("X11", .{});
+            exe.root_module.linkSystemLibrary("m", .{});
         }
-        exe.linkSystemLibrary("pthread");
-        exe.linkSystemLibrary("dl");
+        exe.root_module.linkSystemLibrary("pthread", .{});
+        exe.root_module.linkSystemLibrary("dl", .{});
         // libasound is required by framework/audio/midi.zig, which calls
         // ALSA's snd_seq_* API for MIDI sequencer input on Linux. SDL3's
         // audio backends are dlopen'd at runtime (so SDL3 doesn't pull
@@ -264,7 +264,7 @@ pub fn build(b: *std.Build) void {
         // selects audio/midi.zig only when has_midi is on; without midi
         // doesn't reference any ALSA symbols, so non-MIDI carts skip
         // both the link and the ~600KB DT_NEEDED entry.
-        if (has_midi) exe.linkSystemLibrary("asound");
+        if (has_midi) exe.root_module.linkSystemLibrary("asound", .{});
         if (has_gpu_cli or has_window) {
             if (sysroot) |sr| {
                 root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/luajit-2.1", .{sr}) });
@@ -289,12 +289,12 @@ pub fn build(b: *std.Build) void {
             root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/freetype2" });
             root_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/opt/libarchive/lib" });
             root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/opt/libarchive/include" });
-            exe.linkFramework("Foundation");
-            exe.linkFramework("QuartzCore");
-            exe.linkFramework("Metal");
-            exe.linkFramework("Cocoa");
-            exe.linkFramework("IOKit");
-            exe.linkFramework("CoreVideo");
+            exe.root_module.linkFramework("Foundation", .{});
+            exe.root_module.linkFramework("QuartzCore", .{});
+            exe.root_module.linkFramework("Metal", .{});
+            exe.root_module.linkFramework("Cocoa", .{});
+            exe.root_module.linkFramework("IOKit", .{});
+            exe.root_module.linkFramework("CoreVideo", .{});
             // wgpu is dynamic on macOS (see wgpu_link_mode): the dep doesn't
             // addObjectFile the .a in dynamic mode, it exposes the prebuilt
             // dylib through its named write-files "lib" (the real .dylib lives
@@ -303,11 +303,11 @@ pub fn build(b: *std.Build) void {
             // zig-out/lib next to the binary, and rpath @loader_path/../lib so
             // the @rpath/libwgpu_native.dylib install_name resolves at runtime.
             const wgpu_lib_dir = wgpu_dep.namedWriteFiles("lib").getDirectory();
-            exe.addLibraryPath(wgpu_lib_dir);
+            exe.root_module.addLibraryPath(wgpu_lib_dir);
             root_mod.linkSystemLibrary("wgpu_native", .{ .preferred_link_mode = .dynamic });
             const wgpu_dylib_install = b.addInstallLibFile(wgpu_lib_dir.path(b, "libwgpu_native.dylib"), "libwgpu_native.dylib");
             exe.step.dependOn(&wgpu_dylib_install.step);
-            exe.addRPath(.{ .cwd_relative = "@loader_path/../lib" });
+            exe.root_module.addRPath(.{ .cwd_relative = "@loader_path/../lib" });
         }
     }
 
@@ -471,8 +471,8 @@ pub fn build(b: *std.Build) void {
         // packaged by scripts/ship (which already bundles all .so deps).
         root_mod.addIncludePath(whisper_root.path(b, "include"));
         root_mod.addIncludePath(whisper_root.path(b, "ggml/include"));
-        exe.linkLibrary(whisper_lib);
-        exe.addRPath(.{ .cwd_relative = "$ORIGIN" });
+        exe.root_module.linkLibrary(whisper_lib);
+        exe.root_module.addRPath(.{ .cwd_relative = "$ORIGIN" });
     }
 
     // ── ONNX Runtime (has_onnx) ────────────────────────────────
@@ -487,11 +487,11 @@ pub fn build(b: *std.Build) void {
     if (has_onnx) {
         root_mod.addIncludePath(b.path("deps/onnxruntime/include"));
         root_mod.addLibraryPath(b.path("deps/onnxruntime/lib"));
-        exe.linkSystemLibrary("onnxruntime");
+        exe.root_module.linkSystemLibrary("onnxruntime", .{});
         // $ORIGIN so the packaged binary finds libonnxruntime.so.1 sitting
         // next to it. scripts/ship's source-driven walker bundles the .so
         // when this feature is gated on via the dependency-registry.
-        exe.addRPath(.{ .cwd_relative = "$ORIGIN" });
+        exe.root_module.addRPath(.{ .cwd_relative = "$ORIGIN" });
     }
 
     // ── llama.cpp via libllama_ffi.so (has_embed) ──────────────
@@ -507,15 +507,15 @@ pub fn build(b: *std.Build) void {
         // Prefer root zig-out/lib (a recent libllama_ffi.so dropped here wins
         // over the frozen tsz copy — needed for newer arches like gemma4).
         // Falls through to tsz/zig-out/lib if root has no .so.
-        const root_lib = std.fs.cwd().access("zig-out/lib/libllama_ffi.so", .{}) catch null;
+        const root_lib = std.Io.Dir.cwd().access(b.graph.io, "zig-out/lib/libllama_ffi.so", .{}) catch null;
         if (root_lib != null) {
             root_mod.addLibraryPath(b.path("zig-out/lib"));
         } else {
             root_mod.addLibraryPath(b.path("tsz/zig-out/lib"));
         }
-        exe.linkSystemLibrary("llama_ffi");
-        exe.addRPath(.{ .cwd_relative = "$ORIGIN" });
-        exe.addRPath(.{ .cwd_relative = "$ORIGIN/../lib" });
+        exe.root_module.linkSystemLibrary("llama_ffi", .{});
+        exe.root_module.addRPath(.{ .cwd_relative = "$ORIGIN" });
+        exe.root_module.addRPath(.{ .cwd_relative = "$ORIGIN/../lib" });
     }
 
     // ── Framework FFI shims ────────────────────────────────────
@@ -524,8 +524,8 @@ pub fn build(b: *std.Build) void {
     }
 
     // ── System libraries ──────────────────────────────────────
-    if (has_physics) exe.linkSystemLibrary("box2d");
-    if (has_terminal) exe.linkSystemLibrary("vterm");
+    if (has_physics) exe.root_module.linkSystemLibrary("box2d", .{});
+    if (has_terminal) exe.root_module.linkSystemLibrary("vterm", .{});
 
     // ── Privacy / libsodium (opt-in per cart) ─────────────────
     // Source-driven: cart bundle that imports usePrivacy gets libsodium
@@ -536,10 +536,10 @@ pub fn build(b: *std.Build) void {
     const has_privacy = (b.option(bool, "has-privacy", "Link libsodium + privacy bindings") orelse false) and os_tag == .linux;
     options.addOption(bool, "has_privacy", has_privacy);
     if (has_privacy) {
-        exe.linkSystemLibrary("sodium");
+        exe.root_module.linkSystemLibrary("sodium", .{});
         if (os_tag == .linux) {
             const brew_sodium = "/home/linuxbrew/.linuxbrew/Cellar/libsodium/1.0.20/include";
-            if (std.fs.cwd().access(brew_sodium, .{})) |_| {
+            if (std.Io.Dir.cwd().access(b.graph.io, brew_sodium, .{})) |_| {
                 root_mod.addIncludePath(.{ .cwd_relative = brew_sodium });
                 root_mod.addLibraryPath(.{ .cwd_relative = "/home/linuxbrew/.linuxbrew/Cellar/libsodium/1.0.20/lib" });
             } else |_| {}
@@ -699,7 +699,7 @@ pub fn build(b: *std.Build) void {
 
     // ── C++ runtime ────────────────────────────────────────────
     // physics_shim.cpp still requires the C++ runtime even with Blend2D gone.
-    exe.linkLibCpp();
+    exe.root_module.link_libcpp = true;
 
     if (os_tag == .linux) {
         if (sysroot) |sr| {
@@ -750,8 +750,8 @@ pub fn build(b: *std.Build) void {
         .name = "v8-hello",
         .root_module = v8_hello_mod,
     });
-    v8_hello_exe.linkLibC();
-    v8_hello_exe.linkLibCpp();
+    v8_hello_exe.root_module.link_libc = true;
+    v8_hello_exe.root_module.link_libcpp = true;
 
     const v8_hello_step = b.step("v8-hello", "Build v8_hello smoke test");
     v8_hello_step.dependOn(&b.addInstallArtifact(v8_hello_exe, .{}).step);
@@ -795,8 +795,8 @@ pub fn build(b: *std.Build) void {
     // stack budget via SetStackLimit, so the OS stack must comfortably
     // exceed that with native frame headroom on top.
     v8_cli_exe.stack_size = 64 * 1024 * 1024;
-    v8_cli_exe.linkLibC();
-    v8_cli_exe.linkLibCpp();
+    v8_cli_exe.root_module.link_libc = true;
+    v8_cli_exe.root_module.link_libcpp = true;
 
     const v8_cli_step = b.step("v8-cli", "Build standalone V8 script host (zig-out/bin/v8cli)");
     v8_cli_step.dependOn(&b.addInstallArtifact(v8_cli_exe, .{}).step);
@@ -822,7 +822,7 @@ pub fn build(b: *std.Build) void {
         .name = "hmsc_parity_compile",
         .root_module = hmsc_parity_mod,
     });
-    hmsc_parity_exe.linkLibC();
+    hmsc_parity_exe.root_module.link_libc = true;
     const hmsc_parity_step = b.step("hmsc-parity-compiler", "Build the hmsc Zig game-file parity compiler");
     hmsc_parity_step.dependOn(&b.addInstallArtifact(hmsc_parity_exe, .{}).step);
 
@@ -931,27 +931,27 @@ pub fn build(b: *std.Build) void {
         .name = "luajit-runtime-test",
         .root_module = test_mod,
     });
-    luajit_runtime_test.linkLibrary(luajit_runtime_bridge);
-    luajit_runtime_test.linkLibC();
-    luajit_runtime_test.linkSystemLibrary("SDL3");
-    luajit_runtime_test.linkSystemLibrary("freetype");
-    luajit_runtime_test.linkSystemLibrary("luajit-5.1");
+    luajit_runtime_test.root_module.linkLibrary(luajit_runtime_bridge);
+    luajit_runtime_test.root_module.link_libc = true;
+    luajit_runtime_test.root_module.linkSystemLibrary("SDL3", .{});
+    luajit_runtime_test.root_module.linkSystemLibrary("freetype", .{});
+    luajit_runtime_test.root_module.linkSystemLibrary("luajit-5.1", .{});
     if (os_tag == .linux) {
-        luajit_runtime_test.linkSystemLibrary("X11");
-        luajit_runtime_test.linkSystemLibrary("m");
-        luajit_runtime_test.linkSystemLibrary("pthread");
-        luajit_runtime_test.linkSystemLibrary("dl");
+        luajit_runtime_test.root_module.linkSystemLibrary("X11", .{});
+        luajit_runtime_test.root_module.linkSystemLibrary("m", .{});
+        luajit_runtime_test.root_module.linkSystemLibrary("pthread", .{});
+        luajit_runtime_test.root_module.linkSystemLibrary("dl", .{});
     } else if (os_tag == .macos) {
-        luajit_runtime_test.linkFramework("Foundation");
-        luajit_runtime_test.linkFramework("QuartzCore");
-        luajit_runtime_test.linkFramework("Metal");
-        luajit_runtime_test.linkFramework("Cocoa");
-        luajit_runtime_test.linkFramework("IOKit");
-        luajit_runtime_test.linkFramework("CoreVideo");
+        luajit_runtime_test.root_module.linkFramework("Foundation", .{});
+        luajit_runtime_test.root_module.linkFramework("QuartzCore", .{});
+        luajit_runtime_test.root_module.linkFramework("Metal", .{});
+        luajit_runtime_test.root_module.linkFramework("Cocoa", .{});
+        luajit_runtime_test.root_module.linkFramework("IOKit", .{});
+        luajit_runtime_test.root_module.linkFramework("CoreVideo", .{});
     }
-    if (has_physics) luajit_runtime_test.linkSystemLibrary("box2d");
-    if (has_terminal) luajit_runtime_test.linkSystemLibrary("vterm");
-    luajit_runtime_test.linkLibCpp();
+    if (has_physics) luajit_runtime_test.root_module.linkSystemLibrary("box2d", .{});
+    if (has_terminal) luajit_runtime_test.root_module.linkSystemLibrary("vterm", .{});
+    luajit_runtime_test.root_module.link_libcpp = true;
 
     const run_luajit_runtime_test = b.addRunArtifact(luajit_runtime_test);
     const luajit_runtime_test_step = b.step("test-luajit-runtime", "Run the LuaJIT runtime integration test");
@@ -1111,9 +1111,9 @@ pub fn build(b: *std.Build) void {
             .name = "pose-async-test",
             .root_module = pose_async_test_mod,
         });
-        pose_async_test.addLibraryPath(b.path("deps/onnxruntime/lib"));
-        pose_async_test.linkSystemLibrary("onnxruntime");
-        pose_async_test.addRPath(b.path("deps/onnxruntime/lib"));
+        pose_async_test.root_module.addLibraryPath(b.path("deps/onnxruntime/lib"));
+        pose_async_test.root_module.linkSystemLibrary("onnxruntime", .{});
+        pose_async_test.root_module.addRPath(b.path("deps/onnxruntime/lib"));
         const run_pose_async_test = b.addRunArtifact(pose_async_test);
         run_pose_async_test.setEnvironmentVariable("LD_LIBRARY_PATH", b.pathFromRoot("deps/onnxruntime/lib"));
         const pose_async_test_step = b.step("test-pose-async", "Run ONNX-backed live pose worker integration test");
@@ -1288,7 +1288,7 @@ pub fn build(b: *std.Build) void {
         .name = "gpu-attribution-test",
         .root_module = gpu_attribution_test_mod,
     });
-    gpu_attribution_test.linkSystemLibrary("freetype");
+    gpu_attribution_test.root_module.linkSystemLibrary("freetype", .{});
     const run_gpu_attribution_test = b.addRunArtifact(gpu_attribution_test);
     const gpu_attribution_test_step = b.step("test-gpu-attribution", "Run GPU attribution unit tests");
     gpu_attribution_test_step.dependOn(&run_gpu_attribution_test.step);
