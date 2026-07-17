@@ -27,6 +27,29 @@ pub fn environ() std.process.Environ {
     return .{ .block = .{ .slice = @ptrCast(std.mem.span(std.c.environ)) } };
 }
 
+/// Command-line args, stashed by each binary's `main(init: std.process.Init)`
+/// first thing (0.16 removed std.process.argsAlloc; argv only arrives via the
+/// Init main parameter now). Helpers deep in the call graph read it through
+/// argsAlloc below.
+pub var args: ?std.process.Args = null;
+
+/// 0.15-shaped argsAlloc over the stashed args. Panics if no main stashed
+/// them — that binary's main needs the Init signature, a build-time wiring
+/// bug, not a runtime condition.
+pub fn argsAlloc(alloc: std.mem.Allocator) ![][:0]u8 {
+    const a = args orelse @panic("host_io.args not stashed: main() must take std.process.Init and set host_io.args");
+    var list: std.ArrayList([:0]u8) = .empty;
+    errdefer argsFree(alloc, list.items);
+    var it = std.process.Args.Iterator.init(a);
+    while (it.next()) |arg| try list.append(alloc, try alloc.dupeZ(u8, arg));
+    return try list.toOwnedSlice(alloc);
+}
+
+pub fn argsFree(alloc: std.mem.Allocator, slice: []const [:0]u8) void {
+    for (slice) |arg| alloc.free(arg);
+    alloc.free(@as([]const [:0]const u8, slice));
+}
+
 // ---- 0.15-shaped shims over the 0.16 Io clock ----
 // Wall-clock timestamps, signatures identical to the deleted std.time fns so
 // call sites are a pure rename. If one of these ever shows up hot in the

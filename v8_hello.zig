@@ -16,7 +16,7 @@ fn hostLog(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     hs.init(iso);
     defer hs.deinit();
     const ctx = iso.getCurrentContext();
-    var out = std.ArrayList(u8){};
+    var out: std.ArrayList(u8) = .empty;
     defer out.deinit(std.heap.c_allocator);
     var i: u32 = 0;
     while (i < info.length()) : (i += 1) {

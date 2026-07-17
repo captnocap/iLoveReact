@@ -27,6 +27,7 @@ const HAS_GPU = if (@hasDecl(build_options, "has_gpu")) build_options.has_gpu el
 const HEADLESS = IS_LIB or !HAS_GPU;
 
 const layout = @import("framework/layout.zig");
+const host_io = @import("framework/host_io.zig");
 const Node = layout.Node;
 const Style = layout.Style;
 const Color = layout.Color;
@@ -4117,13 +4118,13 @@ fn hostPanelWindowStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
 }
 
 fn runHeadless() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
     // process.argv[0] = bundle name; argv[1..] = the user's args.
-    const raw_argv = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, raw_argv);
+    const raw_argv = try host_io.argsAlloc(alloc);
+    defer host_io.argsFree(alloc, raw_argv);
     const script_argv = try alloc.alloc([]const u8, raw_argv.len);
     defer alloc.free(script_argv);
     script_argv[0] = if (@hasDecl(build_options, "app_name")) build_options.app_name else "v8_app";
@@ -4203,7 +4204,8 @@ fn runHeadless() !void {
 
 // ── main ────────────────────────────────────────────────────────
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    host_io.args = init.minimal.args;
     if (IS_LIB) return;
 
     // Bring up the observability bus before anything else so that boot-time
@@ -4221,7 +4223,7 @@ pub fn main() !void {
         return;
     }
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     g_alloc = gpa.allocator();
     g_arena = std.heap.ArenaAllocator.init(g_alloc);
 
@@ -4262,7 +4264,7 @@ pub fn main() !void {
     // process.argv for GPU-host carts. The headless/TUI path already installs
     // this before eval; the GUI shell needs the same argv contract so shipped
     // carts can receive package paths and other runtime arguments.
-    const raw_argv = try std.process.argsAlloc(g_alloc);
+    const raw_argv = try host_io.argsAlloc(g_alloc);
     const script_argv = try g_alloc.alloc([]const u8, raw_argv.len);
     script_argv[0] = if (@hasDecl(build_options, "app_name")) build_options.app_name else "v8_app";
     for (raw_argv[1..], 1..) |a, i| script_argv[i] = a;

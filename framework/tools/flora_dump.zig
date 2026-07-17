@@ -13,6 +13,10 @@
 //!   zig build flora-dump && ./zig-out/bin/flora_dump
 
 const std = @import("std");
+// standalone module root: cannot import framework/host_io.zig; same process-wide instance
+fn hio() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
 const flora_geometry = @import("flora_geometry");
 const geometry = @import("loader_geometry");
 
@@ -31,11 +35,11 @@ const Shape = struct {
 
 fn writePackage(shape: Shape) !void {
     var path_buf: [256]u8 = undefined;
-    const cwd = std.fs.cwd();
+    const cwd = std.Io.Dir.cwd();
 
     for (SUBDIRS) |sub| {
         const dir_path = try std.fmt.bufPrint(&path_buf, "{s}/{s}/{s}", .{ PROPS_HOME, shape.name, sub });
-        try cwd.makePath(dir_path);
+        try cwd.createDirPath(hio(), dir_path);
     }
 
     const blob_path = try std.fmt.bufPrint(&path_buf, "{s}/{s}/mesh/base.blob", .{ PROPS_HOME, shape.name });

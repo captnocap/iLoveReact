@@ -292,11 +292,14 @@ pub fn statusAlloc(allocator: std.mem.Allocator, node_id: u32) ![]u8 {
     return runtime.statusAlloc(allocator);
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const allocator = std.heap.c_allocator;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    var args_list: std.ArrayList([:0]const u8) = .empty;
+    defer args_list.deinit(allocator);
+    var args_it = std.process.Args.Iterator.init(init.minimal.args);
+    while (args_it.next()) |a| try args_list.append(allocator, a);
+    const args = args_list.items;
     var path: []const u8 = DEFAULT_FIXTURE;
     for (args[1..]) |a| {
         if (!std.mem.startsWith(u8, a, "--")) path = a;

@@ -167,13 +167,20 @@ fn compile(allocator: std.mem.Allocator, spec: Spec) ![]u8 {
     });
 }
 
-pub fn main() !void {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+fn nanoNow() i128 {
+    return std.Io.Clock.now(.awake, std.Io.Threaded.global_single_threaded.io()).toNanoseconds();
+}
+
+pub fn main(init: std.process.Init) !void {
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    var args_list: std.ArrayList([:0]const u8) = .empty;
+    defer args_list.deinit(allocator);
+    var args_it = std.process.Args.Iterator.init(init.minimal.args);
+    while (args_it.next()) |a| try args_list.append(allocator, a);
+    const args = args_list.items;
     const source_path = argValue(args, "--source") orelse {
         usage();
         return error.MissingSource;
@@ -183,7 +190,7 @@ pub fn main() !void {
         return error.MissingOut;
     };
 
-    const t0 = std.time.nanoTimestamp();
+    const t0 = nanoNow();
     const source = try std.fs.cwd().readFileAlloc(allocator, source_path, 1024 * 1024);
     defer allocator.free(source);
     const spec = try parseSource(source);
@@ -195,7 +202,7 @@ pub fn main() !void {
     try file.sync();
     file.close();
 
-    const elapsed_ns = std.time.nanoTimestamp() - t0;
+    const elapsed_ns = nanoNow() - t0;
     const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
     const stdout = std.fs.File.stdout().deprecatedWriter();
     try stdout.print(

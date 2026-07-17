@@ -11,22 +11,25 @@
 
 const std = @import("std");
 const v8rt = @import("framework/v8_runtime.zig");
+const host_io = @import("framework/host_io.zig");
+const sysx = @import("framework/net/sysx.zig");
 const cli_bindings = @import("framework/v8_bindings_cli.zig");
 const fs_bindings = @import("framework/v8_bindings_fs.zig");
 const sqlite_bindings = @import("framework/v8_bindings_sqlite.zig");
 const localstore_bindings = @import("framework/v8_bindings_localstore.zig");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub fn main(init: std.process.Init) !void {
+    host_io.args = init.minimal.args;
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 
-    const raw_argv = try std.process.argsAlloc(alloc);
-    defer std.process.argsFree(alloc, raw_argv);
+    const raw_argv = try host_io.argsAlloc(alloc);
+    defer host_io.argsFree(alloc, raw_argv);
 
     if (raw_argv.len < 2) {
         const msg = "usage: v8cli <script.js> [args...]\n";
-        _ = std.posix.write(2, msg) catch {};
+        _ = sysx.write(2, msg) catch {};
         std.process.exit(2);
     }
 
@@ -48,7 +51,7 @@ pub fn main() !void {
     const source = std.fs.cwd().readFileAlloc(alloc, script_path, 32 * 1024 * 1024) catch |e| {
         var buf: [512]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "v8cli: cannot read {s}: {s}\n", .{ script_path, @errorName(e) }) catch "v8cli: read error\n";
-        _ = std.posix.write(2, msg) catch {};
+        _ = sysx.write(2, msg) catch {};
         std.process.exit(1);
     };
     defer alloc.free(source);
