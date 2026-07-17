@@ -43,6 +43,7 @@ pub const FD_CLOEXEC = posix.FD_CLOEXEC;
 pub const O = posix.O;
 pub const AT = posix.AT;
 pub const pid_t = posix.pid_t;
+pub const mode_t = posix.mode_t;
 pub const termios = posix.termios;
 pub const Sigaction = posix.Sigaction;
 pub const SIG = posix.SIG;
@@ -80,6 +81,130 @@ pub fn waitpid(pid: pid_t, flags: u32) WaitPidResult {
     }
 }
 
+pub const OpenError = error{
+    /// In WASI, this error may occur when the file descriptor does
+    /// not hold the required rights to open a new resource relative to it.
+    AccessDenied,
+    PermissionDenied,
+    SymLinkLoop,
+    ProcessFdQuotaExceeded,
+    SystemFdQuotaExceeded,
+    NoDevice,
+    /// Either:
+    /// * One of the path components does not exist.
+    /// * Cwd was used, but cwd has been deleted.
+    /// * The path associated with the open directory handle has been deleted.
+    /// * On macOS, multiple processes or threads raced to create the same file
+    ///   with `O.EXCL` set to `false`.
+    FileNotFound,
+
+    /// The path exceeded `max_path_bytes` bytes.
+    NameTooLong,
+
+    /// Insufficient kernel memory was available, or
+    /// the named file is a FIFO and per-user hard limit on
+    /// memory allocation for pipes has been reached.
+    SystemResources,
+
+    /// The file is too large to be opened. This error is unreachable
+    /// for 64-bit targets, as well as when opening directories.
+    FileTooBig,
+
+    /// The path refers to directory but the `DIRECTORY` flag was not provided.
+    IsDir,
+
+    /// A new path cannot be created because the device has no room for the new file.
+    /// This error is only reachable when the `CREAT` flag is provided.
+    NoSpaceLeft,
+
+    /// A component used as a directory in the path was not, in fact, a directory, or
+    /// `DIRECTORY` was specified and the path was not a directory.
+    NotDir,
+
+    /// The path already exists and the `CREAT` and `EXCL` flags were provided.
+    PathAlreadyExists,
+    DeviceBusy,
+
+    /// The underlying filesystem does not support file locks
+    FileLocksNotSupported,
+
+    /// Path contains characters that are disallowed by the underlying filesystem.
+    BadPathName,
+
+    /// WASI-only; file paths must be valid UTF-8.
+    InvalidUtf8,
+
+    /// Windows-only; file paths provided by the user must be valid WTF-8.
+    /// https://simonsapin.github.io/wtf-8/
+    InvalidWtf8,
+
+    /// On Windows, `\\server` or `\\server\share` was not found.
+    NetworkNotFound,
+
+    /// This error occurs in Linux if the process to be open was not found.
+    ProcessNotFound,
+
+    /// One of these three things:
+    /// * pathname  refers to an executable image which is currently being
+    ///   executed and write access was requested.
+    /// * pathname refers to a file that is currently in  use  as  a  swap
+    ///   file, and the O_TRUNC flag was specified.
+    /// * pathname  refers  to  a file that is currently being read by the
+    ///   kernel (e.g., for module/firmware loading), and write access was
+    ///   requested.
+    FileBusy,
+
+    WouldBlock,
+} || UnexpectedError;
+
+pub fn open(file_path: []const u8, flags: O, perm: mode_t) OpenError!fd_t {
+    if (native_os == .windows) {
+        @compileError("Windows does not support POSIX; use Windows-specific API or cross-platform std.fs API");
+    }
+    const file_path_c = try toPosixPath(file_path);
+    return openZ(&file_path_c, flags, perm);
+}
+
+pub fn openZ(file_path: [*:0]const u8, flags: O, perm: mode_t) OpenError!fd_t {
+    if (native_os == .windows) {
+        @compileError("Windows does not support POSIX; use Windows-specific API or cross-platform std.fs API");
+    }
+    const open_sym = if (lfs64_abi) system.open64 else system.open;
+    while (true) {
+        const rc = open_sym(file_path, flags, perm);
+        switch (errno(rc)) {
+            .SUCCESS => return @intCast(rc),
+            .INTR => continue,
+
+            .FAULT => unreachable,
+            .INVAL => return error.BadPathName,
+            .ACCES => return error.AccessDenied,
+            .FBIG => return error.FileTooBig,
+            .OVERFLOW => return error.FileTooBig,
+            .ISDIR => return error.IsDir,
+            .LOOP => return error.SymLinkLoop,
+            .MFILE => return error.ProcessFdQuotaExceeded,
+            .NAMETOOLONG => return error.NameTooLong,
+            .NFILE => return error.SystemFdQuotaExceeded,
+            .NODEV => return error.NoDevice,
+            .NOENT => return error.FileNotFound,
+            .SRCH => return error.ProcessNotFound,
+            .NOMEM => return error.SystemResources,
+            .NOSPC => return error.NoSpaceLeft,
+            .NOTDIR => return error.NotDir,
+            .PERM => return error.PermissionDenied,
+            .EXIST => return error.PathAlreadyExists,
+            .BUSY => return error.DeviceBusy,
+            .ILSEQ => |err| if (native_os == .wasi)
+                return error.InvalidUtf8
+            else
+                return unexpectedErrno(err),
+            else => |err| return unexpectedErrno(err),
+        }
+    }
+}
+
+
 /// 0.16 deleted std.posix.getenv; libc is always linked here.
 pub fn getenv(name: []const u8) ?[]const u8 {
     var it: usize = 0;
@@ -90,6 +215,7 @@ pub fn getenv(name: []const u8) ?[]const u8 {
     }
     return null;
 }
+const lfs64_abi = native_os == .linux and builtin.link_libc and (builtin.abi.isGnu() or builtin.abi.isAndroid());
 const use_libc = builtin.link_libc or switch (native_os) {
     .windows, .wasi => true,
     else => false,
