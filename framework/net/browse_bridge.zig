@@ -12,6 +12,7 @@
 //! _set_port and runtime/hooks/useBrowse.ts on the JS side.
 
 const std = @import("std");
+const netx = @import("netx.zig");
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
 pub const DEFAULT_PORT: u16 = 7331;
@@ -118,7 +119,7 @@ fn workerMain() void {
 fn executeRequest(id: u32, body: []const u8) Response {
     const alloc = std.heap.page_allocator;
 
-    const stream = std.net.tcpConnectToHost(alloc, HOST, port) catch |err| {
+    const stream = netx.tcpConnectToHost(alloc, HOST, port) catch |err| {
         return makeErr(id, @errorName(err));
     };
     defer stream.close();

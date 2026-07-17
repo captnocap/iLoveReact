@@ -88,7 +88,10 @@ pub fn keysJson(alloc: std.mem.Allocator) ![]u8 {
             '\n' => try out.appendSlice(alloc, "\\n"),
             '\r' => try out.appendSlice(alloc, "\\r"),
             '\t' => try out.appendSlice(alloc, "\\t"),
-            0...8, 11, 12, 14...31 => try out.writer(alloc).print("\\u{x:0>4}", .{ch}),
+            0...8, 11, 12, 14...31 => {
+                var hex_buf: [8]u8 = undefined;
+                try out.appendSlice(alloc, try std.fmt.bufPrint(&hex_buf, "\\u{x:0>4}", .{ch}));
+            },
             else => try out.append(alloc, ch),
         };
         try out.append(alloc, '"');

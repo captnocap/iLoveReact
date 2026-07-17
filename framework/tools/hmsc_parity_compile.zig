@@ -172,6 +172,7 @@ fn nanoNow() i128 {
 }
 
 pub fn main(init: std.process.Init) !void {
+    const io = std.Io.Threaded.global_single_threaded.io();
     var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -191,22 +192,25 @@ pub fn main(init: std.process.Init) !void {
     };
 
     const t0 = nanoNow();
-    const source = try std.fs.cwd().readFileAlloc(allocator, source_path, 1024 * 1024);
+    const source = try std.Io.Dir.cwd().readFileAlloc(io, source_path, allocator, .limited(1024 * 1024));
     defer allocator.free(source);
     const spec = try parseSource(source);
     const file_bytes = try compile(allocator, spec);
     defer allocator.free(file_bytes);
 
-    var file = try std.fs.cwd().createFile(out_path, .{ .truncate = true });
-    try file.writeAll(file_bytes);
-    try file.sync();
-    file.close();
+    var file = try std.Io.Dir.cwd().createFile(io, out_path, .{ .truncate = true });
+    try file.writeStreamingAll(io, file_bytes);
+    try file.sync(io);
+    file.close(io);
 
     const elapsed_ns = nanoNow() - t0;
     const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
-    const stdout = std.fs.File.stdout().deprecatedWriter();
+    var stdout_buffer: [256]u8 = undefined;
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
+    const stdout = &stdout_writer.interface;
     try stdout.print(
         "{{\"compiler\":\"zig\",\"width\":{d},\"height\":{d},\"cells\":{d},\"bytes\":{d},\"compileMs\":{d:.3}}}\n",
         .{ spec.width, spec.height, @as(u64, spec.width) * @as(u64, spec.height), file_bytes.len, elapsed_ms },
     );
+    try stdout.flush();
 }

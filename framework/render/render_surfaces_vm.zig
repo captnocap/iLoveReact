@@ -6,6 +6,7 @@
 //!   - Input forwarding (mouse, keyboard → VNC/XTest/xdotool)
 
 const std = @import("std");
+const netx = @import("../net/netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
 // (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
@@ -98,7 +99,7 @@ pub fn vncWrite(sock: posix.socket_t, data: []const u8) bool {
 }
 
 pub fn connectVnc(host_str: []const u8, port: u16) ?posix.socket_t {
-    const addr = std.net.Address.parseIp4(host_str, port) catch return null;
+    const addr = netx.Address.parseIp4(host_str, port) catch return null;
 
     const sock = posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0) catch return null;
     errdefer posix.close(sock);
@@ -395,7 +396,7 @@ pub fn findFreeVncPort() ?u16 {
         // Try to bind — if it works, port is free
         const sock = posix.socket(posix.AF.INET, posix.SOCK.STREAM, 0) catch continue;
         defer posix.close(sock);
-        const addr = std.net.Address.parseIp4("127.0.0.1", port) catch continue;
+        const addr = netx.Address.parseIp4("127.0.0.1", port) catch continue;
         posix.connect(sock, &addr.any, addr.getOsSockLen()) catch {
             return port; // connect failed = port is free
         };

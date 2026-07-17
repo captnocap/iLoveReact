@@ -18,6 +18,7 @@
 //!   server.close();
 
 const std = @import("std");
+const netx = @import("netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
 // (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
@@ -88,7 +89,7 @@ const ClientState = enum { reading, done, closed };
 const HttpClient = struct {
     active: bool = false,
     id: u32 = 0,
-    stream: ?std.net.Stream = null,
+    stream: ?netx.Stream = null,
     state: ClientState = .closed,
     req_buf: [MAX_REQ]u8 = undefined,
     req_len: usize = 0,
@@ -114,7 +115,7 @@ pub const HttpServer = struct {
     /// `self`; routes[].path slices in this struct point at self.route_path_storage,
     /// so the struct must NOT be moved/copied after this returns.
     pub fn listen(self: *HttpServer, port: u16, routes: []const Route) !void {
-        const addr = try std.net.Address.parseIp4("0.0.0.0", port);
+        const addr = try netx.Address.parseIp4("0.0.0.0", port);
         const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
         errdefer sysx.close(fd);
 

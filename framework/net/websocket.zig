@@ -17,6 +17,7 @@
 //!   }
 
 const std = @import("std");
+const netx = @import("netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
 // (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
@@ -58,7 +59,7 @@ const MAX_FRAME_HDR = 14; // 2 + 8 + 4 (max header + mask)
 // ── WebSocket ────────────────────────────────────────────────────────────
 
 pub const WebSocket = struct {
-    stream: std.net.Stream,
+    stream: netx.Stream,
     status: Status,
     read_buf: [MAX_MSG]u8 = undefined,
     read_len: usize = 0,
@@ -71,7 +72,7 @@ pub const WebSocket = struct {
 
     /// Connect to a WebSocket server. Sends the HTTP upgrade request.
     /// Call update() each frame to complete the handshake and receive messages.
-    pub fn init(stream: std.net.Stream, host: []const u8, port: u16, path: []const u8) !WebSocket {
+    pub fn init(stream: netx.Stream, host: []const u8, port: u16, path: []const u8) !WebSocket {
         const ws = WebSocket{
             .stream = stream,
             .status = .connecting,
@@ -103,13 +104,13 @@ pub const WebSocket = struct {
 
     /// Connect to a WebSocket server via TCP.
     pub fn connectTcp(host: []const u8, port: u16, path: []const u8) !WebSocket {
-        const stream = try std.net.tcpConnectToHost(std.heap.page_allocator, host, port);
+        const stream = try netx.tcpConnectToHost(std.heap.page_allocator, host, port);
         errdefer stream.close(); // don't leak on init failure
         return try init(stream, host, port, path);
     }
 
     /// Connect via an already-established stream (e.g., SOCKS5 tunnel).
-    pub fn connectViaStream(stream: std.net.Stream, host: []const u8, port: u16, path: []const u8) !WebSocket {
+    pub fn connectViaStream(stream: netx.Stream, host: []const u8, port: u16, path: []const u8) !WebSocket {
         return try init(stream, host, port, path);
     }
 
@@ -373,7 +374,7 @@ pub const WebSocket = struct {
 
 // ── Helper: set socket non-blocking ──────────────────────────────────────
 
-fn setNonBlocking(stream: std.net.Stream) void {
+fn setNonBlocking(stream: netx.Stream) void {
     const fd = stream.handle;
     const flags = sysx.fcntl(fd, sysx.F.GETFL, 0) catch return;
     _ = sysx.fcntl(fd, sysx.F.SETFL, flags | sysx.SOCK.NONBLOCK) catch {};

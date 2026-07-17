@@ -34,6 +34,7 @@
 //!   client.close();
 
 const std = @import("std");
+const netx = @import("netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
 // (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
@@ -183,7 +184,7 @@ pub const Server = struct {
 
     /// Bind a TCP server on localhost. Pass port=0 to let the OS pick a free port.
     pub fn bind(port: u16) !Server {
-        const addr = try std.net.Address.parseIp4("127.0.0.1", port);
+        const addr = try netx.Address.parseIp4("127.0.0.1", port);
         const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
         errdefer sysx.close(fd);
 
@@ -271,7 +272,7 @@ pub const Client = struct {
 
     /// Connect to a server on localhost:port. Blocking connect, then sets non-blocking.
     pub fn connect(port: u16) !Client {
-        const addr = try std.net.Address.parseIp4("127.0.0.1", port);
+        const addr = try netx.Address.parseIp4("127.0.0.1", port);
         const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM, 0);
         errdefer sysx.close(fd);
 

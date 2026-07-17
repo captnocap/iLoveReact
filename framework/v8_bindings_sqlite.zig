@@ -63,6 +63,11 @@ fn argOwnedUtf8(alloc: std.mem.Allocator, info: v8.FunctionCallbackInfo, idx: u3
     return buf;
 }
 
+fn appendFormatted(out: *std.ArrayList(u8), alloc: std.mem.Allocator, comptime fmt: []const u8, args: anytype) !void {
+    var buf: [256]u8 = undefined;
+    try out.appendSlice(alloc, try std.fmt.bufPrint(&buf, fmt, args));
+}
+
 fn appendJsonEscaped(out: *std.ArrayList(u8), alloc: std.mem.Allocator, s: []const u8) !void {
     try out.append(alloc, '"');
     for (s) |ch| switch (ch) {
@@ -71,7 +76,7 @@ fn appendJsonEscaped(out: *std.ArrayList(u8), alloc: std.mem.Allocator, s: []con
         '\n' => try out.appendSlice(alloc, "\\n"),
         '\r' => try out.appendSlice(alloc, "\\r"),
         '\t' => try out.appendSlice(alloc, "\\t"),
-        0...8, 11, 12, 14...31 => try out.writer(alloc).print("\\u{x:0>4}", .{ch}),
+        0...8, 11, 12, 14...31 => try appendFormatted(out, alloc, "\\u{x:0>4}", .{ch}),
         else => try out.append(alloc, ch),
     };
     try out.append(alloc, '"');
@@ -287,8 +292,8 @@ fn sqlQueryJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
             const t = stmt.columnType(@intCast(i));
             switch (t) {
                 .null_val => out.appendSlice(alloc, "null") catch break,
-                .integer => out.writer(alloc).print("{d}", .{stmt.columnInt(@intCast(i))}) catch break,
-                .float => out.writer(alloc).print("{d}", .{stmt.columnFloat(@intCast(i))}) catch break,
+                .integer => appendFormatted(&out, alloc, "{d}", .{stmt.columnInt(@intCast(i))}) catch break,
+                .float => appendFormatted(&out, alloc, "{d}", .{stmt.columnFloat(@intCast(i))}) catch break,
                 .text => {
                     const s = stmt.columnText(@intCast(i)) orelse "";
                     appendJsonEscaped(&out, alloc, s) catch break;

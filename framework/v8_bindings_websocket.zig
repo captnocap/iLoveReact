@@ -13,6 +13,7 @@
 //!   __ffiEmit('ws:error:<id>', message)
 
 const std = @import("std");
+const netx = @import("net/netx.zig");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const websocket = @import("net/websocket.zig");
@@ -151,7 +152,7 @@ fn hostWsOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
 
-    const stream = std.net.tcpConnectToHost(alloc, parsed.host, parsed.port) catch |e| {
+    const stream = netx.tcpConnectToHost(alloc, parsed.host, parsed.port) catch |e| {
         var chan_buf: [64]u8 = undefined;
         const chan = std.fmt.bufPrint(&chan_buf, "ws:error:{d}", .{@as(u32, @intCast(id))}) catch return;
         var msg_buf: [256]u8 = undefined;

@@ -17,6 +17,7 @@
 //!   c.close();
 
 const std = @import("std");
+const netx = @import("netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
 // (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
@@ -33,13 +34,13 @@ pub const Event = union(EventTag) {
 };
 
 pub const TcpClient = struct {
-    stream: std.net.Stream,
+    stream: netx.Stream,
     closed: bool = false,
     read_buf: [READ_BUF]u8 = undefined,
     err_buf: [128]u8 = undefined,
 
     pub fn connect(host: []const u8, port: u16) !TcpClient {
-        const stream = try std.net.tcpConnectToHost(std.heap.c_allocator, host, port);
+        const stream = try netx.tcpConnectToHost(std.heap.c_allocator, host, port);
         // Non-blocking so update() can be called every frame without stalling.
         _ = sysx.fcntl(stream.handle, sysx.F.SETFL, sysx.SOCK.NONBLOCK) catch 0;
         return .{ .stream = stream };
@@ -48,7 +49,7 @@ pub const TcpClient = struct {
     /// Wrap an already-connected stream (e.g. one returned by socks5.connect).
     /// Used by the `via:` dispatch path so a tunneled connection is a TcpClient
     /// just like a plain one — same drain loop, same events.
-    pub fn fromStream(stream: std.net.Stream) TcpClient {
+    pub fn fromStream(stream: netx.Stream) TcpClient {
         _ = sysx.fcntl(stream.handle, sysx.F.SETFL, sysx.SOCK.NONBLOCK) catch 0;
         return .{ .stream = stream };
     }

@@ -16,6 +16,7 @@
 //!   u.close();
 
 const std = @import("std");
+const netx = @import("netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
 // (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
@@ -38,7 +39,7 @@ pub const UdpSocket = struct {
 
     /// Open + connect a UDP socket so subsequent send/recv go to/from this peer.
     pub fn openConnected(host: []const u8, port: u16) !UdpSocket {
-        const list = try std.net.getAddressList(std.heap.c_allocator, host, port);
+        const list = try netx.getAddressList(std.heap.c_allocator, host, port);
         defer list.deinit();
         if (list.addrs.len == 0) return error.UnknownHost;
         const addr = list.addrs[0];

@@ -43,9 +43,9 @@ fn writePackage(shape: Shape) !void {
     }
 
     const blob_path = try std.fmt.bufPrint(&path_buf, "{s}/{s}/mesh/base.blob", .{ PROPS_HOME, shape.name });
-    const blob = try cwd.createFile(blob_path, .{});
-    defer blob.close();
-    try blob.writeAll(std.mem.sliceAsBytes(shape.verts));
+    const blob = try cwd.createFile(hio(), blob_path, .{});
+    defer blob.close(hio());
+    try blob.writeStreamingAll(hio(), std.mem.sliceAsBytes(shape.verts));
 
     // The manifest is the commit point (same order the editor store uses):
     // blob first, manifest last, so an interrupted run never advertises a
@@ -76,9 +76,9 @@ fn writePackage(shape: Shape) !void {
         \\
     , .{ shape.id, shape.name, shape.color, triangles });
     const manifest_path = try std.fmt.bufPrint(&path_buf, "{s}/{s}/manifest.json", .{ PROPS_HOME, shape.name });
-    const file = try cwd.createFile(manifest_path, .{});
-    defer file.close();
-    try file.writeAll(manifest);
+    const file = try cwd.createFile(hio(), manifest_path, .{});
+    defer file.close(hio());
+    try file.writeStreamingAll(hio(), manifest);
 
     std.debug.print("  {s}: {d} verts ({d} tris) -> {s}/{s}\n", .{ shape.name, shape.verts.len / 8, triangles, PROPS_HOME, shape.name });
 }

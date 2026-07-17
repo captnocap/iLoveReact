@@ -8,6 +8,7 @@
 //!   // stream is now tunneled to target through proxy
 
 const std = @import("std");
+const netx = @import("netx.zig");
 
 // ── Error codes (RFC 1928 §6) ────────────────────────────────────────────
 
@@ -44,8 +45,8 @@ fn replyError(code: u8) Socks5Error {
 // Reference: love2d/lua/socks5.lua:29-90
 
 /// Read exactly `out.len` bytes from a stream, looping over short reads.
-/// std.net.Stream.read returns 0 on EOF, which we treat as an error.
-fn streamReadAll(stream: std.net.Stream, out: []u8) !void {
+/// netx.Stream.read returns 0 on EOF, which we treat as an error.
+fn streamReadAll(stream: netx.Stream, out: []u8) !void {
     var got: usize = 0;
     while (got < out.len) {
         const n = try stream.read(out[got..]);
@@ -63,9 +64,9 @@ pub fn connect(
     target_port: u16,
     user: ?[]const u8,
     pass: ?[]const u8,
-) !std.net.Stream {
+) !netx.Stream {
     // Connect to proxy
-    const stream = try std.net.tcpConnectToHost(std.heap.page_allocator, proxy_host, proxy_port);
+    const stream = try netx.tcpConnectToHost(std.heap.page_allocator, proxy_host, proxy_port);
     errdefer stream.close();
 
     // Send greeting

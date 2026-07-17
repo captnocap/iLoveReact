@@ -53,6 +53,11 @@ fn setString(info: v8.FunctionCallbackInfo, value: []const u8) void {
     setValue(info, v8.String.initUtf8(iso, value));
 }
 
+fn appendFormatted(out: *std.ArrayList(u8), alloc: std.mem.Allocator, comptime fmt: []const u8, args: anytype) !void {
+    var buf: [256]u8 = undefined;
+    try out.appendSlice(alloc, try std.fmt.bufPrint(&buf, fmt, args));
+}
+
 fn appendJsonEscaped(out: *std.ArrayList(u8), alloc: std.mem.Allocator, s: []const u8) !void {
     try out.append(alloc, '"');
     for (s) |ch| {
@@ -62,7 +67,7 @@ fn appendJsonEscaped(out: *std.ArrayList(u8), alloc: std.mem.Allocator, s: []con
             '\n' => try out.appendSlice(alloc, "\\n"),
             '\r' => try out.appendSlice(alloc, "\\r"),
             '\t' => try out.appendSlice(alloc, "\\t"),
-            0...8, 11, 12, 14...31 => try out.writer(alloc).print("\\u{x:0>4}", .{ch}),
+            0...8, 11, 12, 14...31 => try appendFormatted(out, alloc, "\\u{x:0>4}", .{ch}),
             else => try out.append(alloc, ch),
         }
     }
@@ -175,7 +180,7 @@ fn appendMediaFileJson(
     try appendJsonEscaped(out, alloc, full_path);
     try out.appendSlice(alloc, ",\"name\":");
     try appendJsonEscaped(out, alloc, name);
-    try out.writer(alloc).print(",\"size\":{d},\"mtime\":{d},\"type\":\"{s}\",\"source\":\"filesystem\"}}", .{
+    try appendFormatted(out, alloc, ",\"size\":{d},\"mtime\":{d},\"type\":\"{s}\",\"source\":\"filesystem\"}}", .{
         size,
         mtime_sec,
         mediaTypeLabel(t),
@@ -191,11 +196,11 @@ fn scanMediaDirRecursive(
     first: *bool,
     stats: *MediaStatsAcc,
 ) void {
-    var dir = std.fs.cwd().openDir(base_path, .{ .iterate = true }) catch return;
-    defer dir.close();
+    var dir = std.Io.Dir.cwd().openDir(host_io.io(), base_path, .{ .iterate = true }) catch return;
+    defer dir.close(host_io.io());
 
     var iter = dir.iterate();
-    while (iter.next() catch null) |entry| {
+    while (iter.next(host_io.io()) catch null) |entry| {
         const child_path = std.fmt.allocPrint(alloc, "{s}/{s}", .{ base_path, entry.name }) catch continue;
         defer alloc.free(child_path);
 
@@ -206,9 +211,9 @@ fn scanMediaDirRecursive(
                 }
             },
             .file => {
-                const st = std.fs.cwd().statFile(child_path) catch continue;
+                const st = std.Io.Dir.cwd().statFile(host_io.io(), child_path, .{}) catch continue;
                 const t = mediaTypeFromFilename(entry.name);
-                const mtime_sec: i64 = @intCast(@divTrunc(st.mtime, std.time.ns_per_s));
+                const mtime_sec: i64 = st.mtime.toSeconds();
                 const size_u64: u64 = st.size;
 
                 stats.total += 1;
@@ -306,7 +311,7 @@ fn appendByTypeCounts(out: *std.ArrayList(u8), alloc: std.mem.Allocator, stats: 
         if (e.value == 0) continue;
         if (!first) try out.append(alloc, ',');
         first = false;
-        try out.writer(alloc).print("\"{s}\":{d}", .{ e.key, e.value });
+        try appendFormatted(out, alloc, "\"{s}\":{d}", .{ e.key, e.value });
     }
 }
 
@@ -336,12 +341,12 @@ fn fsMediaStatsJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         setString(info, "{\"total\":0,\"byType\":{},\"totalSize\":0,\"largestFile\":null}");
         return;
     };
-    out.writer(alloc).print("{d},\"byType\":{{", .{stats.total}) catch {
+    appendFormatted(&out, alloc, "{d},\"byType\":{{", .{stats.total}) catch {
         setString(info, "{\"total\":0,\"byType\":{},\"totalSize\":0,\"largestFile\":null}");
         return;
     };
     appendByTypeCounts(&out, alloc, stats) catch {};
-    out.writer(alloc).print("}},\"totalSize\":{d},\"largestFile\":", .{stats.total_size}) catch {
+    appendFormatted(&out, alloc, "}},\"totalSize\":{d},\"largestFile\":", .{stats.total_size}) catch {
         setString(info, "{\"total\":0,\"byType\":{},\"totalSize\":0,\"largestFile\":null}");
         return;
     };
@@ -351,7 +356,7 @@ fn fsMediaStatsJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         appendJsonEscaped(&out, alloc, largest.path) catch {};
         out.appendSlice(alloc, ",\"name\":") catch {};
         appendJsonEscaped(&out, alloc, largest.name) catch {};
-        out.writer(alloc).print(",\"size\":{d},\"mtime\":{d},\"type\":\"{s}\",\"source\":\"filesystem\"}}", .{
+        appendFormatted(&out, alloc, ",\"size\":{d},\"mtime\":{d},\"type\":\"{s}\",\"source\":\"filesystem\"}}", .{
             largest.size,
             largest.mtime_sec,
             mediaTypeLabel(largest.media_type),
@@ -383,7 +388,7 @@ fn fsRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     // door, and a snapshot with many painted models legitimately exceeds 16MB — the
     // old cap returned null, the store saw "no snapshot", FULL-REPLAYED the event log
     // and OOM'd, degrading the model roster to one entry (req_2089). Sanity cap only.
-    const data = std.fs.cwd().readFileAlloc(path_alloc, path_buf, 256 * 1024 * 1024) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path_buf, path_alloc, .limited(256 * 1024 * 1024)) catch {
         setNull(info);
         return;
     };
@@ -400,7 +405,7 @@ fn fsReadBase64(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(path_buf);
 
-    const data = std.fs.cwd().readFileAlloc(alloc, path_buf, 64 * 1024 * 1024) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path_buf, alloc, .limited(64 * 1024 * 1024)) catch {
         setNull(info);
         return;
     };
@@ -432,14 +437,14 @@ fn fsWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     defer alloc.free(content_buf);
 
     if (std.mem.lastIndexOfScalar(u8, path_buf, '/')) |idx| {
-        std.fs.cwd().makePath(path_buf[0..idx]) catch {};
+        std.Io.Dir.cwd().createDirPath(host_io.io(), path_buf[0..idx]) catch {};
     }
-    const file = std.fs.cwd().createFile(path_buf, .{ .truncate = true }) catch {
+    const file = std.Io.Dir.cwd().createFile(host_io.io(), path_buf, .{ .truncate = true }) catch {
         setBool(info, false);
         return;
     };
-    defer file.close();
-    file.writeAll(content_buf) catch {
+    defer file.close(host_io.io());
+    file.writeStreamingAll(host_io.io(), content_buf) catch {
         setBool(info, false);
         return;
     };
@@ -462,7 +467,7 @@ fn fsConfigDir(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(path);
-    std.fs.cwd().makePath(path) catch {
+    std.Io.Dir.cwd().createDirPath(host_io.io(), path) catch {
         setNull(info);
         return;
     };
@@ -506,14 +511,14 @@ fn fsWriteBytes(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
 
     if (std.mem.lastIndexOfScalar(u8, path_buf, '/')) |idx| {
-        std.fs.cwd().makePath(path_buf[0..idx]) catch {};
+        std.Io.Dir.cwd().createDirPath(host_io.io(), path_buf[0..idx]) catch {};
     }
-    const file = std.fs.cwd().createFile(path_buf, .{ .truncate = true }) catch {
+    const file = std.Io.Dir.cwd().createFile(host_io.io(), path_buf, .{ .truncate = true }) catch {
         setBool(info, false);
         return;
     };
-    defer file.close();
-    file.writeAll(bytes) catch {
+    defer file.close(host_io.io());
+    file.writeStreamingAll(host_io.io(), bytes) catch {
         setBool(info, false);
         return;
     };
@@ -550,32 +555,32 @@ fn fsWriteBase64Atomic(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     };
 
     if (std.mem.lastIndexOfScalar(u8, path_buf, '/')) |idx| {
-        std.fs.cwd().makePath(path_buf[0..idx]) catch {};
+        std.Io.Dir.cwd().createDirPath(host_io.io(), path_buf[0..idx]) catch {};
     }
     var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path_buf, host_io.nanoTimestamp() }) catch {
         setBool(info, false);
         return;
     };
-    var file = std.fs.cwd().createFile(tmp_path, .{ .truncate = true }) catch {
+    var file = std.Io.Dir.cwd().createFile(host_io.io(), tmp_path, .{ .truncate = true }) catch {
         setBool(info, false);
         return;
     };
-    file.writeAll(decoded) catch {
-        file.close();
-        std.fs.cwd().deleteFile(tmp_path) catch {};
+    file.writeStreamingAll(host_io.io(), decoded) catch {
+        file.close(host_io.io());
+        std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
         setBool(info, false);
         return;
     };
-    file.sync() catch {
-        file.close();
-        std.fs.cwd().deleteFile(tmp_path) catch {};
+    file.sync(host_io.io()) catch {
+        file.close(host_io.io());
+        std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
         setBool(info, false);
         return;
     };
-    file.close();
-    std.fs.cwd().rename(tmp_path, path_buf) catch {
-        std.fs.cwd().deleteFile(tmp_path) catch {};
+    file.close(host_io.io());
+    std.Io.Dir.rename(std.Io.Dir.cwd(), tmp_path, std.Io.Dir.cwd(), path_buf, host_io.io()) catch {
+        std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
         setBool(info, false);
         return;
     };
@@ -602,32 +607,32 @@ fn fsWriteBytesAtomic(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     };
 
     if (std.mem.lastIndexOfScalar(u8, path_buf, '/')) |idx| {
-        std.fs.cwd().makePath(path_buf[0..idx]) catch {};
+        std.Io.Dir.cwd().createDirPath(host_io.io(), path_buf[0..idx]) catch {};
     }
     var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
     const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path_buf, host_io.nanoTimestamp() }) catch {
         setBool(info, false);
         return;
     };
-    var file = std.fs.cwd().createFile(tmp_path, .{ .truncate = true }) catch {
+    var file = std.Io.Dir.cwd().createFile(host_io.io(), tmp_path, .{ .truncate = true }) catch {
         setBool(info, false);
         return;
     };
-    file.writeAll(bytes) catch {
-        file.close();
-        std.fs.cwd().deleteFile(tmp_path) catch {};
+    file.writeStreamingAll(host_io.io(), bytes) catch {
+        file.close(host_io.io());
+        std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
         setBool(info, false);
         return;
     };
-    file.sync() catch {
-        file.close();
-        std.fs.cwd().deleteFile(tmp_path) catch {};
+    file.sync(host_io.io()) catch {
+        file.close(host_io.io());
+        std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
         setBool(info, false);
         return;
     };
-    file.close();
-    std.fs.cwd().rename(tmp_path, path_buf) catch {
-        std.fs.cwd().deleteFile(tmp_path) catch {};
+    file.close(host_io.io());
+    std.Io.Dir.rename(std.Io.Dir.cwd(), tmp_path, std.Io.Dir.cwd(), path_buf, host_io.io()) catch {
+        std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
         setBool(info, false);
         return;
     };
@@ -643,7 +648,7 @@ fn fsReadRjmpEntities(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     };
     defer alloc.free(path_buf);
 
-    const data = std.fs.cwd().readFileAlloc(alloc, path_buf, 64 * 1024 * 1024) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path_buf, alloc, .limited(64 * 1024 * 1024)) catch {
         setNull(info);
         return;
     };
@@ -670,7 +675,7 @@ fn fsExists(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(path_buf);
-    _ = std.fs.cwd().statFile(path_buf) catch {
+    _ = std.Io.Dir.cwd().statFile(host_io.io(), path_buf, .{}) catch {
         setBool(info, false);
         return;
     };
@@ -693,16 +698,16 @@ fn fsListJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
 
-    var dir = std.fs.cwd().openDir(path_buf, .{ .iterate = true }) catch {
+    var dir = std.Io.Dir.cwd().openDir(host_io.io(), path_buf, .{ .iterate = true }) catch {
         out.append(alloc, ']') catch {};
         setString(info, out.items);
         return;
     };
-    defer dir.close();
+    defer dir.close(host_io.io());
 
     var first = true;
     var iter = dir.iterate();
-    while (iter.next() catch null) |entry| {
+    while (iter.next(host_io.io()) catch null) |entry| {
         if (!first) out.append(alloc, ',') catch break;
         first = false;
         appendJsonEscaped(&out, alloc, entry.name) catch break;
@@ -722,7 +727,7 @@ fn fsMkdir(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(path_buf);
-    std.fs.cwd().makePath(path_buf) catch {
+    std.Io.Dir.cwd().createDirPath(host_io.io(), path_buf) catch {
         setBool(info, false);
         return;
     };
@@ -738,7 +743,7 @@ fn fsRemove(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(path_buf);
 
-    const stat = std.fs.cwd().statFile(path_buf) catch {
+    const stat = std.Io.Dir.cwd().statFile(host_io.io(), path_buf, .{}) catch {
         setBool(info, false);
         return;
     };
@@ -746,11 +751,11 @@ fn fsRemove(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         // Recursive: cli's __remove used deleteTree, callers rely on that
         // (e.g., scripts wiping cache dirs). deleteDir would fail on
         // non-empty directories.
-        .directory => std.fs.cwd().deleteTree(path_buf) catch {
+        .directory => std.Io.Dir.cwd().deleteTree(host_io.io(), path_buf) catch {
             setBool(info, false);
             return;
         },
-        else => std.fs.cwd().deleteFile(path_buf) catch {
+        else => std.Io.Dir.cwd().deleteFile(host_io.io(), path_buf) catch {
             setBool(info, false);
             return;
         },
@@ -767,11 +772,11 @@ fn fsStatJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(path_buf);
 
-    const st = std.fs.cwd().statFile(path_buf) catch {
+    const st = std.Io.Dir.cwd().statFile(host_io.io(), path_buf, .{}) catch {
         setNull(info);
         return;
     };
-    const mtime_ms: i64 = @intCast(@divTrunc(st.mtime, std.time.ns_per_ms));
+    const mtime_ms: i64 = st.mtime.toMilliseconds();
     const is_dir = st.kind == .directory;
 
     var buf: [256]u8 = undefined;
@@ -795,7 +800,7 @@ fn fsReadfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(path_buf);
 
-    const data = std.fs.cwd().readFileAlloc(alloc, path_buf, 256 * 1024 * 1024) catch {
+    const data = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path_buf, alloc, .limited(256 * 1024 * 1024)) catch {
         setString(info, "");
         return;
     };
@@ -818,14 +823,14 @@ fn fsWritefile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     defer alloc.free(content_buf);
 
     if (std.mem.lastIndexOfScalar(u8, path_buf, '/')) |idx| {
-        std.fs.cwd().makePath(path_buf[0..idx]) catch {};
+        std.Io.Dir.cwd().createDirPath(host_io.io(), path_buf[0..idx]) catch {};
     }
-    const file = std.fs.cwd().createFile(path_buf, .{}) catch {
+    const file = std.Io.Dir.cwd().createFile(host_io.io(), path_buf, .{}) catch {
         setNumber(info, -1);
         return;
     };
-    defer file.close();
-    file.writeAll(content_buf) catch {
+    defer file.close(host_io.io());
+    file.writeStreamingAll(host_io.io(), content_buf) catch {
         setNumber(info, -1);
         return;
     };
@@ -840,7 +845,7 @@ fn fsDeletefile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(path_buf);
-    std.fs.cwd().deleteFile(path_buf) catch {
+    std.Io.Dir.cwd().deleteFile(host_io.io(), path_buf) catch {
         setNumber(info, -1);
         return;
     };
@@ -859,18 +864,18 @@ fn fsScandir(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer alloc.free(path_buf);
 
-    var dir = std.fs.cwd().openDir(path_buf, .{ .iterate = true }) catch {
+    var dir = std.Io.Dir.cwd().openDir(host_io.io(), path_buf, .{ .iterate = true }) catch {
         const arr = v8.Array.init(iso, 0);
         setValue(info, arr.castTo(v8.Object).toValue());
         return;
     };
-    defer dir.close();
+    defer dir.close(host_io.io());
 
     const arr = v8.Array.init(iso, 0);
     const obj = arr.castTo(v8.Object);
     var iter = dir.iterate();
     var i: u32 = 0;
-    while (iter.next() catch null) |entry| {
+    while (iter.next(host_io.io()) catch null) |entry| {
         const name = v8.String.initUtf8(iso, entry.name);
         _ = obj.setValueAtIndex(ctx, i, name.toValue());
         i += 1;

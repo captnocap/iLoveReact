@@ -12,6 +12,7 @@
 //!   server.close();
 
 const std = @import("std");
+const netx = @import("netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
 // (0.15-faithful wrappers). Do NOT migrate to std.Io.net.
@@ -59,7 +60,7 @@ const ClientStatus = enum { handshake, open, closed };
 const Client = struct {
     active: bool = false,
     id: u32 = 0,
-    stream: ?std.net.Stream = null,
+    stream: ?netx.Stream = null,
     status: ClientStatus = .closed,
     handshake_buf: [MAX_HDR]u8 = undefined,
     handshake_len: usize = 0,
@@ -82,7 +83,7 @@ pub const WsServer = struct {
 
     /// Start listening on a port. Initializes self in-place (no large return by value).
     pub fn listen(port: u16) !WsServer {
-        const addr = try std.net.Address.parseIp4("0.0.0.0", port);
+        const addr = try netx.Address.parseIp4("0.0.0.0", port);
         const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
         errdefer sysx.close(fd);
 
@@ -97,7 +98,7 @@ pub const WsServer = struct {
 
     /// Initialize an existing WsServer in-place (avoids 8MB return-by-value).
     pub fn listenInPlace(self: *WsServer, port: u16) !void {
-        const addr = try std.net.Address.parseIp4("0.0.0.0", port);
+        const addr = try netx.Address.parseIp4("0.0.0.0", port);
         const fd = try sysx.socket(addr.any.family, sysx.SOCK.STREAM | sysx.SOCK.NONBLOCK, 0);
         errdefer sysx.close(fd);
 
@@ -534,7 +535,7 @@ fn extractHeader(headers: []const u8, name: []const u8) ?[]const u8 {
 
 /// Write an unmasked server→client frame. first_byte = FIN+opcode.
 /// Handles WouldBlock on non-blocking sockets by spinning with backoff.
-fn writeFrame(stream: std.net.Stream, first_byte: u8, payload: []const u8) !void {
+fn writeFrame(stream: netx.Stream, first_byte: u8, payload: []const u8) !void {
     var hdr: [10]u8 = undefined;
     var hdr_len: usize = 2;
     hdr[0] = first_byte;
@@ -554,7 +555,7 @@ fn writeFrame(stream: std.net.Stream, first_byte: u8, payload: []const u8) !void
 }
 
 /// writeAll that handles WouldBlock on non-blocking sockets.
-fn writeAllNonBlocking(stream: std.net.Stream, data: []const u8) !void {
+fn writeAllNonBlocking(stream: netx.Stream, data: []const u8) !void {
     var offset: usize = 0;
     var retries: u32 = 0;
     while (offset < data.len) {

@@ -13,6 +13,7 @@
 //!   tor.stop();
 
 const std = @import("std");
+const netx = @import("netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): readiness-loop layer, raw
 // posix-shaped syscalls via sysx. Do NOT migrate to std.Io.net.
 const sysx = @import("sysx.zig");
@@ -172,7 +173,7 @@ pub fn stop() void {
 fn findOpenPort(base: u16) u16 {
     var port = base;
     while (port < 65535) : (port += 1) {
-        const addr = std.net.Address.parseIp4("127.0.0.1", port) catch continue;
+        const addr = netx.Address.parseIp4("127.0.0.1", port) catch continue;
         const fd = sysx.socket(addr.any.family, sysx.SOCK.STREAM, 0) catch continue;
         defer sysx.close(fd);
         sysx.bind(fd, &addr.any, addr.getOsSockLen()) catch continue;
