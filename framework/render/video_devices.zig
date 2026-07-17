@@ -8,6 +8,10 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+fn io() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
+
 const c = if (builtin.os.tag == .linux) @cImport({
     @cInclude("fcntl.h");
     @cInclude("linux/videodev2.h");
@@ -90,18 +94,18 @@ fn queryLinuxDevice(allocator: std.mem.Allocator, index: u32) !VideoDevice {
 
 pub fn list(allocator: std.mem.Allocator) !DeviceList {
     if (builtin.os.tag != .linux) return .{ .items = try allocator.alloc(VideoDevice, 0), .allocator = allocator };
-    var devices: std.ArrayList(VideoDevice) = .{};
+    var devices: std.ArrayList(VideoDevice) = .empty;
     errdefer {
         for (devices.items) |*device| device.deinit(allocator);
         devices.deinit(allocator);
     }
 
-    var dev_dir = std.fs.openDirAbsolute("/dev", .{ .iterate = true }) catch {
+    var dev_dir = std.Io.Dir.openDirAbsolute(io(), "/dev", .{ .iterate = true }) catch {
         return .{ .items = try allocator.alloc(VideoDevice, 0), .allocator = allocator };
     };
-    defer dev_dir.close();
+    defer dev_dir.close(io());
     var iterator = dev_dir.iterate();
-    while (try iterator.next()) |entry| {
+    while (try iterator.next(io())) |entry| {
         const index = parseVideoIndex(entry.name) orelse continue;
         var device = queryLinuxDevice(allocator, index) catch continue;
         devices.append(allocator, device) catch |err| {

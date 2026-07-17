@@ -125,7 +125,7 @@ pub fn append(envelope_json: []const u8) i64 {
 
     const seq = g_next_seq;
     // Overwrite the client's SEQ_PENDING (-1) with the authoritative order.
-    parsed.value.object.put("seq", .{ .integer = seq }) catch return -1;
+    parsed.value.object.put(alloc, "seq", .{ .integer = seq }) catch return -1;
 
     const confirmed = std.json.Stringify.valueAlloc(alloc, parsed.value, .{}) catch return -1;
     // `confirmed` ownership transfers to the ring (ringPush). It stays valid for
@@ -169,7 +169,7 @@ pub fn since(allocator: std.mem.Allocator, after_seq: i64) ![]u8 {
 }
 
 fn sinceFromRing(allocator: std.mem.Allocator, after_seq: i64) ![]u8 {
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     try out.append(allocator, '[');
     if (g_ring_inited and g_ring_count > 0) {

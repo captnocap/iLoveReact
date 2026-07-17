@@ -10,6 +10,7 @@
 const std = @import("std");
 const fs = @import("../fs/fs.zig");
 const sqlite = @import("sqlite.zig");
+const host_io = @import("../host_io.zig");
 
 pub const MAX_KEY = 256;
 // Values are heap-backed end to end — the v8 binding allocs the exact UTF-8 length,
@@ -36,7 +37,7 @@ pub const KeyEntry = struct {
 // -- Module state --
 
 var db: ?sqlite.Database = null;
-var db_mutex: std.Thread.Mutex = .{};
+var db_mutex: host_io.Mutex = .{};
 var db_path_buf: [fs.MAX_PATH]u8 = undefined;
 var db_path_len: usize = 0;
 
@@ -64,8 +65,8 @@ const WriteJob = struct {
     }
 };
 
-var write_mutex: std.Thread.Mutex = .{};
-var write_cond: std.Thread.Condition = .{};
+var write_mutex: host_io.Mutex = .{};
+var write_cond: std.Io.Condition = .init;
 var write_queue: [WRITE_QUEUE_CAP]WriteJob = undefined;
 var write_queue_len: usize = 0;
 var write_cache: [WRITE_QUEUE_CAP]WriteJob = undefined;
@@ -93,7 +94,7 @@ fn setWithDb(database: *sqlite.Database, namespace: []const u8, key: []const u8,
     try stmt.bindText(1, namespace);
     try stmt.bindText(2, key);
     try stmt.bindText(3, value);
-    try stmt.bindInt(4, std.time.timestamp());
+    try stmt.bindInt(4, host_io.timestamp());
 
     _ = try stmt.step();
 }
@@ -218,7 +219,7 @@ fn enqueueSet(namespace: []const u8, key: []const u8, value: []const u8) !void {
             const next = try value_alloc.dupe(u8, value);
             value_alloc.free(write_queue[i].value);
             write_queue[i].value = next;
-            write_cond.signal();
+            write_cond.signal(host_io.io());
             return;
         }
     }
@@ -235,7 +236,7 @@ fn enqueueSet(namespace: []const u8, key: []const u8, value: []const u8) !void {
 
     write_queue[write_queue_len] = try writeJobFrom(namespace, key, value);
     write_queue_len += 1;
-    write_cond.signal();
+    write_cond.signal(host_io.io());
 }
 
 fn popWriteJob() ?WriteJob {
@@ -243,7 +244,7 @@ fn popWriteJob() ?WriteJob {
     defer write_mutex.unlock();
 
     while (write_queue_len == 0 and !write_stop) {
-        write_cond.wait(&write_mutex);
+        write_cond.waitUncancelable(host_io.io(), &write_mutex.inner);
     }
 
     if (write_queue_len == 0 and write_stop) return null;
@@ -302,7 +303,7 @@ pub fn init() !void {
 pub fn deinit() void {
     write_mutex.lock();
     write_stop = true;
-    write_cond.signal();
+    write_cond.signal(host_io.io());
     write_mutex.unlock();
     if (write_thread) |t| t.join();
     write_thread = null;

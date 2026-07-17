@@ -18,10 +18,10 @@ const gamefile = @import("world_gamefile");
 const mapfile = gamefile.mapfile;
 
 fn loadFixtureBytes(allocator: std.mem.Allocator) ![]u8 {
-    const path = std.process.getEnvVarOwned(allocator, "GAMEFILE_FIXTURE") catch
+    const path = std.testing.environ.getAlloc(allocator, "GAMEFILE_FIXTURE") catch
         try allocator.dupe(u8, "framework/testing/fixtures/gamefile_roundtrip.b64");
     defer allocator.free(path);
-    const raw = try std.fs.cwd().readFileAlloc(allocator, path, 1 << 20);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, allocator, .limited(1 << 20));
     defer allocator.free(raw);
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");
     const dec = std.base64.standard.Decoder;
@@ -36,13 +36,13 @@ fn offsetOf(buffer: []const u8, slice: []const u8) usize {
     return @intFromPtr(slice.ptr) - @intFromPtr(buffer.ptr);
 }
 
-fn writeInstalledAsset(dir: std.fs.Dir, payload: []const u8) !void {
+fn writeInstalledAsset(dir: std.Io.Dir, payload: []const u8) !void {
     var hash: [gamefile.HASH_BYTES]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(payload, &hash, .{});
     const hex = std.fmt.bytesToHex(hash, .lower);
-    var file = try dir.createFile(hex[0..], .{ .truncate = true });
-    defer file.close();
-    try file.writeAll(payload);
+    var file = try dir.createFile(std.testing.io, hex[0..], .{ .truncate = true });
+    defer file.close(std.testing.io);
+    try file.writeStreamingAll(std.testing.io, payload);
 }
 
 test "TS-written game file: three streams round-trip byte/value identical" {
@@ -102,7 +102,7 @@ test "asset vocabulary installs into the content store and references resolve" {
         var actual: [gamefile.HASH_BYTES]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(blob.payload, &actual, .{});
         const hex = std.fmt.bytesToHex(actual, .lower);
-        const stored = try tmp.dir.readFileAlloc(testing.allocator, hex[0..], 1 << 20);
+        const stored = try tmp.dir.readFileAlloc(std.testing.io, hex[0..], testing.allocator, .limited(1 << 20));
         defer testing.allocator.free(stored);
         try testing.expectEqualSlices(u8, blob.payload, stored);
     }
@@ -111,7 +111,7 @@ test "asset vocabulary installs into the content store and references resolve" {
     for ([_]u32{ 100, 101, 102 }) |key| {
         const hash = file.assetHashForKey(key) orelse return error.TestUnexpectedResult;
         const hex = std.fmt.bytesToHex(hash, .lower);
-        try tmp.dir.access(hex[0..], .{});
+        try tmp.dir.access(std.testing.io, hex[0..], .{});
     }
 }
 

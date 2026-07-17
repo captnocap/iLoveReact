@@ -19,6 +19,10 @@ const std = @import("std");
 /// reader without mapfile.zig having to be its own wired module.
 pub const mapfile = @import("mapfile.zig");
 
+fn io() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
+
 pub const HASH_BYTES: usize = 32;
 pub const MANIFEST_ENTRY_BYTES: usize = 44; // key(4) kind(2) rsv(2) length(4) hash(32)
 
@@ -92,8 +96,8 @@ pub const GameFile = struct {
     /// confirm every manifest asset is either embedded or already installed in
     /// the content store, and confirm every stream reference resolves. `dir` is
     /// the content store. Fails loudly on the first violation.
-    pub fn installAndValidate(self: GameFile, allocator: std.mem.Allocator, dir: std.fs.Dir) Error!void {
-        var installed: std.ArrayList([HASH_BYTES]u8) = .{};
+    pub fn installAndValidate(self: GameFile, allocator: std.mem.Allocator, dir: std.Io.Dir) Error!void {
+        var installed: std.ArrayList([HASH_BYTES]u8) = .empty;
         defer installed.deinit(allocator);
 
         for (self.blobs) |blob| {
@@ -176,7 +180,7 @@ pub fn readGameFile(allocator: std.mem.Allocator, bytes: []const u8) Error!GameF
     const manifest = try parseManifest(allocator, manifest_lump.data);
     errdefer allocator.free(manifest);
 
-    var blob_list: std.ArrayList(Blob) = .{};
+    var blob_list: std.ArrayList(Blob) = .empty;
     errdefer blob_list.deinit(allocator);
     for (lumps) |lump| {
         if (lump.type_id != LumpId.asset_blob) continue;
@@ -199,24 +203,24 @@ fn sha256(payload: []const u8) [HASH_BYTES]u8 {
 /// Atomic content-store install: write to a temp file, fsync, rename into place
 /// keyed by hex(hash). The hash IS the corruption check (already verified by
 /// the caller); the rename makes the install all-or-nothing.
-fn atomicInstall(dir: std.fs.Dir, hash: [HASH_BYTES]u8, bytes: []const u8) Error!void {
+fn atomicInstall(dir: std.Io.Dir, hash: [HASH_BYTES]u8, bytes: []const u8) Error!void {
     const hex = std.fmt.bytesToHex(hash, .lower);
     var tmp_buf: [HASH_BYTES * 2 + 8]u8 = undefined;
     const tmp = std.fmt.bufPrint(&tmp_buf, ".tmp.{s}", .{hex}) catch return Error.InstallFailed;
-    var file = dir.createFile(tmp, .{ .truncate = true }) catch return Error.InstallFailed;
-    file.writeAll(bytes) catch {
-        file.close();
-        dir.deleteFile(tmp) catch {};
+    var file = dir.createFile(io(), tmp, .{ .truncate = true }) catch return Error.InstallFailed;
+    file.writeStreamingAll(io(), bytes) catch {
+        file.close(io());
+        dir.deleteFile(io(), tmp) catch {};
         return Error.InstallFailed;
     };
-    file.sync() catch {
-        file.close();
-        dir.deleteFile(tmp) catch {};
+    file.sync(io()) catch {
+        file.close(io());
+        dir.deleteFile(io(), tmp) catch {};
         return Error.InstallFailed;
     };
-    file.close();
-    dir.rename(tmp, hex[0..]) catch {
-        dir.deleteFile(tmp) catch {};
+    file.close(io());
+    std.Io.Dir.rename(dir, tmp, dir, hex[0..], io()) catch {
+        dir.deleteFile(io(), tmp) catch {};
         return Error.InstallFailed;
     };
 }
@@ -228,9 +232,9 @@ fn containsHash(haystack: []const [HASH_BYTES]u8, needle: [HASH_BYTES]u8) bool {
     return false;
 }
 
-fn installedAssetMatches(allocator: std.mem.Allocator, dir: std.fs.Dir, entry: ManifestEntry) Error!bool {
+fn installedAssetMatches(allocator: std.mem.Allocator, dir: std.Io.Dir, entry: ManifestEntry) Error!bool {
     const hex = std.fmt.bytesToHex(entry.hash, .lower);
-    const bytes = dir.readFileAlloc(allocator, hex[0..], @as(usize, entry.length) + 1) catch return false;
+    const bytes = dir.readFileAlloc(io(), hex[0..], allocator, .limited(@as(usize, entry.length) + 1)) catch return false;
     defer allocator.free(bytes);
     if (bytes.len != entry.length) return false;
     const actual = sha256(bytes);

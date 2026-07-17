@@ -26,6 +26,7 @@ pub const sdf_icons = @import("sdf_icons.zig");
 const scene3d = @import("3d.zig");
 pub const filters = @import("filters.zig");
 const log = @import("../diag/log.zig");
+const host_io = @import("../host_io.zig");
 
 // ════════════════════════════════════════════════════════════════════════
 // Re-exports — callers use gpu.drawRect(), gpu.RectInstance, etc.
@@ -1632,9 +1633,9 @@ pub fn testingFormatStaticCaptureTrace(buffer: []u8, key: []const u8, width: u32
     var sample: [64]u8 = [_]u8{0} ** 64;
     const sample_len = @min(key.len, sample.len);
     if (sample_len > 0) @memcpy(sample[0..sample_len], key[0..sample_len]);
-    var stream = std.io.fixedBufferStream(buffer);
-    writeStaticCaptureTraceLine(stream.writer(), 0, sample[0..sample_len], width, height, start, end) catch {};
-    return buffer[0..stream.pos];
+    var writer: std.Io.Writer = .fixed(buffer);
+    writeStaticCaptureTraceLine(&writer, 0, sample[0..sample_len], width, height, start, end) catch {};
+    return writer.buffered();
 }
 
 pub fn testingResetTextAttributionState() void {
@@ -1663,8 +1664,7 @@ pub fn testingLastTextTraceSummary() []const u8 {
 
 fn renderStaticSurfaceCaptures(device: *wgpu.Device, queue: *wgpu.Queue) void {
     g_last_static_capture_count = g_static_capture_count;
-    var stream = std.io.fixedBufferStream(&g_last_static_capture_trace);
-    var writer = stream.writer();
+    var writer: std.Io.Writer = .fixed(&g_last_static_capture_trace);
     var wrote_any = false;
     for (g_static_captures[0..g_static_capture_count]) |cap| {
         const entry = if (cap.entry_index < MAX_STATIC_SURFACES) &g_static_entries[cap.entry_index] else null;
@@ -1672,10 +1672,10 @@ fn renderStaticSurfaceCaptures(device: *wgpu.Device, queue: *wgpu.Queue) void {
         const start = cap.start;
         const end = cap.end;
         if (wrote_any) writer.writeAll(" | ") catch break;
-        writeStaticCaptureTraceLine(writer, cap.entry_index, key_sample, cap.width, cap.height, start, end) catch break;
+        writeStaticCaptureTraceLine(&writer, cap.entry_index, key_sample, cap.width, cap.height, start, end) catch break;
         wrote_any = true;
     }
-    g_last_static_capture_trace_len = stream.pos;
+    g_last_static_capture_trace_len = writer.buffered().len;
     if (g_static_capture_count == 0) return;
 
     // A <Filter> nested inside a <StaticSurface> shows up as a filter capture
@@ -2710,7 +2710,7 @@ fn configureSurface(width: u32, height: u32) void {
         }
     }
 
-    const vsync_off = if (is_web) false else if (std.posix.getenv("ZIGOS_VSYNC")) |v| std.mem.eql(u8, v, "0") else false;
+    const vsync_off = if (is_web) false else if (host_io.getenv("ZIGOS_VSYNC")) |v| std.mem.eql(u8, v, "0") else false;
     const config = wgpu.SurfaceConfiguration{
         .device = device,
         .format = g_format,

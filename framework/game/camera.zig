@@ -392,7 +392,7 @@ fn distance3(a: Vec3, b: Vec3) f32 {
 }
 
 fn wallMs() i64 {
-    return std.time.milliTimestamp();
+    return std.Io.Clock.now(.real, std.Io.Threaded.global_single_threaded.io()).toMilliseconds();
 }
 
 fn probeRecordParams(slot: *ControllerSlot) void {

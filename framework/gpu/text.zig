@@ -13,6 +13,7 @@ const c = @import("../c.zig").imports;
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 const rects = @import("rects.zig");
+const host_io = @import("../host_io.zig");
 
 // ════════════════════════════════════════════════════════════════════════
 // Types
@@ -1152,8 +1153,7 @@ pub fn lastAtlasMissCount() usize {
 pub fn reset() void {
     g_last_glyph_count = g_glyph_count;
     g_last_atlas_miss_count = g_atlas_miss_count;
-    var stream = std.io.fixedBufferStream(&g_last_text_trace_summary);
-    var writer = stream.writer();
+    var writer: std.Io.Writer = .fixed(&g_last_text_trace_summary);
     var wrote_any = false;
     for (g_text_trace[0..g_text_trace_count]) |line| {
         if (wrote_any) writer.writeAll(" | ") catch break;
@@ -1177,7 +1177,7 @@ pub fn reset() void {
         }
         wrote_any = true;
     }
-    g_last_text_trace_summary_len = stream.pos;
+    g_last_text_trace_summary_len = writer.buffered().len;
     g_glyph_count = 0;
     g_atlas_miss_count = 0;
     g_text_trace_count = 0;
@@ -1372,7 +1372,7 @@ fn cacheGlyph(codepoint: u32, size_px: u16) ?*const AtlasGlyphInfo {
     // (codepoint, size_px, font) never seen before. After warmup this should be
     // ~0 per frame; a steady stream means some text is re-rendering at changing
     // sizes, which is the CPU paint spike. Logs the char + size to find it.
-    if (std.posix.getenv("HMSC_GLYPH_TRACE") != null) {
+    if (host_io.getenv("HMSC_GLYPH_TRACE") != null) {
         std.debug.print("[glyph-raster] cp={d} '{c}' size={d} font={d} atlas_total={d}\n", .{
             codepoint,
             if (codepoint >= 32 and codepoint < 127) @as(u8, @intCast(codepoint)) else @as(u8, '?'),

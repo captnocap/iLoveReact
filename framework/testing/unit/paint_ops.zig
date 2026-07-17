@@ -2,7 +2,7 @@ const std = @import("std");
 const paint_ops = @import("paint_ops");
 
 const Stream = struct {
-    bytes: std.ArrayList(u8) = .{},
+    bytes: std.ArrayList(u8) = .empty,
 
     fn deinit(stream: *Stream) void {
         stream.bytes.deinit(std.testing.allocator);

@@ -4,6 +4,7 @@ const std = @import("std");
 const engine = @import("../../game/map/engine.zig");
 const chunks = @import("../../game/map/chunks.zig");
 const roads = @import("../../game/map/roads.zig");
+const host_io = @import("../../host_io.zig");
 
 test "reset unbinds the outgoing document and clears map-scoped bindings" {
     engine.reset();
@@ -11,8 +12,8 @@ test "reset unbinds the outgoing document and clears map-scoped bindings" {
     try std.testing.expectEqual(@as(usize, 2), engine.tileBindings().len);
 
     const path = "/tmp/reactjit-map-reset-boundary.rmap";
-    std.fs.cwd().deleteFile(path) catch {};
-    defer std.fs.cwd().deleteFile(path) catch {};
+    std.Io.Dir.cwd().deleteFile(host_io.io(), path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), path) catch {};
 
     _ = chunks.growChunk(0, 0).?;
     engine.setAutosaveFile(path);

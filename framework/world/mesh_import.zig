@@ -125,7 +125,7 @@ fn hasExtIgnoreCase(path: []const u8, ext: []const u8) bool {
 
 // ── shared: an accumulating, self-bbox-tracking interleaved vertex sink ──────────
 const Builder = struct {
-    out: std.ArrayList(f32) = .{},
+    out: std.ArrayList(f32) = .empty,
     lo: [3]f32 = .{ std.math.floatMax(f32), std.math.floatMax(f32), std.math.floatMax(f32) },
     hi: [3]f32 = .{ -std.math.floatMax(f32), -std.math.floatMax(f32), -std.math.floatMax(f32) },
     count: u32 = 0,
@@ -558,11 +558,11 @@ fn emitPrimitive(alloc: std.mem.Allocator, root: std.json.Value, bin: []const u8
 pub fn parseObj(alloc: std.mem.Allocator, bytes: []const u8) Error!ParsedMesh {
     // Positions, texcoords, normals accumulate as the file lists them; faces reference
     // them by (1-based or negative) index. Two list types kept flat.
-    var pos: std.ArrayList(f32) = .{};
+    var pos: std.ArrayList(f32) = .empty;
     defer pos.deinit(alloc);
-    var tex: std.ArrayList(f32) = .{};
+    var tex: std.ArrayList(f32) = .empty;
     defer tex.deinit(alloc);
-    var nrm: std.ArrayList(f32) = .{};
+    var nrm: std.ArrayList(f32) = .empty;
     defer nrm.deinit(alloc);
 
     var b = Builder{};
@@ -708,9 +708,9 @@ pub fn decimateExpanded(alloc: std.mem.Allocator, verts: []const f32, vert_count
     // Cluster: cell key → centroid accumulator. remap[v] = the input vert's cell index.
     var cell_map = std.AutoHashMap(u64, u32).init(alloc);
     defer cell_map.deinit();
-    var sum = std.ArrayList([3]f64){};
+    var sum = std.ArrayList([3]f64).empty;
     defer sum.deinit(alloc);
-    var cnt = std.ArrayList(u32){};
+    var cnt = std.ArrayList(u32).empty;
     defer cnt.deinit(alloc);
     const remap = try alloc.alloc(u32, vert_count);
     defer alloc.free(remap);
@@ -759,7 +759,7 @@ pub fn decimateExpanded(alloc: std.mem.Allocator, verts: []const f32, vert_count
     // the source face each one came from (emit order == map order).
     var b = Builder{};
     errdefer b.out.deinit(alloc);
-    var map = std.ArrayList(u32){};
+    var map = std.ArrayList(u32).empty;
     errdefer map.deinit(alloc);
     var f: u32 = 0;
     while (f < fc) : (f += 1) {
@@ -818,9 +818,11 @@ test "obj: quad fan-triangulates to two triangles" {
 test "decimate: a fine grid of triangles collapses at low resolution" {
     const alloc = std.testing.allocator;
     // A 10×10 grid of vertices → 9×9×2 = 162 triangles spanning a unit square in z=0.
-    var obj = std.ArrayList(u8){};
+    var obj = std.ArrayList(u8).empty;
     defer obj.deinit(alloc);
-    const w = obj.writer(alloc);
+    var aw: std.Io.Writer.Allocating = .fromArrayList(alloc, &obj);
+    defer obj = aw.toArrayList();
+    const w = &aw.writer;
     var r: u32 = 0;
     while (r < 10) : (r += 1) {
         var c: u32 = 0;
@@ -840,7 +842,7 @@ test "decimate: a fine grid of triangles collapses at low resolution" {
             try w.print("f {d} {d} {d}\n", .{ b, e, d });
         }
     }
-    var full = try parseObj(alloc, obj.items);
+    var full = try parseObj(alloc, aw.written());
     defer full.deinit(alloc);
     try std.testing.expectEqual(@as(u32, 162 * 3), full.vert_count);
 

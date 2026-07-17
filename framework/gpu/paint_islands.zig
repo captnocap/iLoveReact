@@ -147,9 +147,9 @@ fn buildImpl(
     if (fc == 0) return null;
 
     // ── Group triangles into islands (order of first appearance = stable ids) ────
-    var island_of_group = std.AutoHashMapUnmanaged(u32, u32){};
+    var island_of_group = std.AutoHashMapUnmanaged(u32, u32).empty;
     defer island_of_group.deinit(alloc);
-    var raws = std.ArrayListUnmanaged(RawIsland){};
+    var raws = std.ArrayListUnmanaged(RawIsland).empty;
     defer raws.deinit(alloc);
     var tri_island = alloc.alloc(u32, fc) catch return null;
     errdefer alloc.free(tri_island);

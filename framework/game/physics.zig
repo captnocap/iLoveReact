@@ -39,6 +39,10 @@
 //! framework/testing/unit/game_physics.zig.
 
 const std = @import("std");
+
+fn getenv(name: [:0]const u8) ?[]const u8 {
+    return if (std.c.getenv(name.ptr)) |value| std.mem.span(value) else null;
+}
 pub const movement = @import("movement.zig");
 
 pub const MAX_ENTITIES: usize = 128;
@@ -178,7 +182,7 @@ var g_stairlog_frame: u64 = 0;
 
 fn stairlogOn() bool {
     if (g_stairlog_state < 0) {
-        const v = std.posix.getenv("RJIT_STAIRLOG") orelse "";
+        const v = getenv("RJIT_STAIRLOG") orelse "";
         g_stairlog_state = if (v.len > 0 and v[0] != '0') 1 else 0;
     }
     return g_stairlog_state == 1;
@@ -197,7 +201,7 @@ var g_colliderlog_tick: u64 = 0;
 
 fn colliderlogOn() bool {
     if (g_colliderlog_state < 0) {
-        const v = std.posix.getenv("RJIT_COLLIDERLOG") orelse "";
+        const v = getenv("RJIT_COLLIDERLOG") orelse "";
         g_colliderlog_state = if (v.len > 0 and v[0] != '0') 1 else 0;
     }
     return g_colliderlog_state == 1;

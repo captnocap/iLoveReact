@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const event_bus = @import("event_bus.zig");
+const host_io = @import("../host_io.zig");
 
 pub const Category = enum {
     engine,
@@ -31,22 +32,22 @@ const NUM_CATEGORIES = @typeInfo(Category).@"enum".fields.len;
 
 var enabled: [NUM_CATEGORIES]bool = [_]bool{false} ** NUM_CATEGORIES;
 var initialized: bool = false;
-var log_file: ?std.fs.File = null;
+var log_file: ?std.Io.File = null;
 
 fn ensureInit() void {
     if (initialized) return;
     initialized = true;
     std.debug.print("[log] ensureInit called\n", .{});
 
-    if (std.posix.getenv("ZIGOS_LOG_FILE")) |path| {
-        log_file = std.fs.createFileAbsolute(path, .{ .truncate = true }) catch |e| blk: {
+    if (host_io.getenv("ZIGOS_LOG_FILE")) |path| {
+        log_file = std.Io.Dir.createFileAbsolute(host_io.io(), path, .{ .truncate = true }) catch |e| blk: {
             std.debug.print("ZIGOS_LOG_FILE open failed: {}\n", .{e});
             break :blk null;
         };
         if (log_file != null) std.debug.print("ZIGOS_LOG_FILE: {s}\n", .{path});
     }
 
-    const env = std.posix.getenv("ZIGOS_LOG") orelse return;
+    const env = host_io.getenv("ZIGOS_LOG") orelse return;
 
     if (std.mem.eql(u8, env, "all")) {
         for (&enabled) |*e| e.* = true;
@@ -74,7 +75,7 @@ fn ensureInit() void {
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     var buf: [4096]u8 = undefined;
     const formatted: []const u8 = std.fmt.bufPrint(&buf, fmt, args) catch buf[0..];
-    const trimmed = std.mem.trimRight(u8, formatted, " \t\r\n");
+    const trimmed = std.mem.trimEnd(u8, formatted, " \t\r\n");
     _ = event_bus.emitFromLog(.info, "debug", trimmed);
 }
 
@@ -85,7 +86,7 @@ pub fn writeLine(comptime fmt: []const u8, args: anytype) void {
     const f = log_file orelse return;
     var buf: [512]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, fmt ++ "\n", args) catch return;
-    _ = f.write(s) catch {};
+    _ = f.writeStreamingAll(host_io.io(), s) catch {};
 }
 
 pub fn isEnabled(cat: Category) bool {
@@ -94,7 +95,7 @@ pub fn isEnabled(cat: Category) bool {
 }
 
 fn fileWrite(s: []const u8) void {
-    if (log_file) |f| _ = f.write(s) catch {};
+    if (log_file) |f| _ = f.writeStreamingAll(host_io.io(), s) catch {};
 }
 
 /// Per-frame / per-tick noise that the user only wants to see when

@@ -27,6 +27,18 @@ const stb = @cImport({
 
 const log = std.log.scoped(.pose);
 
+fn io() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
+
+fn milliTimestamp() i64 {
+    return std.Io.Clock.now(.real, io()).toMilliseconds();
+}
+
+fn getenv(name: [:0]const u8) ?[]const u8 {
+    return if (std.c.getenv(name.ptr)) |value| std.mem.span(value) else null;
+}
+
 pub const INPUT_SIZE: usize = 192;
 pub const KEYPOINTS: usize = pose_mailbox.KEYPOINTS;
 pub const Keypoint = pose_mailbox.Keypoint;
@@ -39,7 +51,7 @@ var g_mem_info: ?*c.OrtMemoryInfo = null;
 var g_init_done: bool = false;
 var g_init_failed: bool = false;
 var g_init_error: ?[]u8 = null;
-var g_inference_mutex: std.Thread.Mutex = .{};
+var g_inference_mutex: std.Io.Mutex = .init;
 
 var g_async_initialized: bool = false;
 var g_async_queue: pose_mailbox.Queue = undefined;
@@ -72,9 +84,9 @@ fn recordOrtErr(api: *const c.OrtApi, status: ?*c.OrtStatus, where: []const u8) 
 }
 
 fn modelPath(alloc: std.mem.Allocator) ?[]u8 {
-    const home = std.posix.getenv("HOME") orelse return null;
+    const home = getenv("HOME") orelse return null;
     const path = std.fmt.allocPrint(alloc, "{s}/.reactjit/models/movenet_lightning.onnx", .{home}) catch return null;
-    std.fs.cwd().access(path, .{}) catch {
+    std.Io.Dir.cwd().access(io(), path, .{}) catch {
         alloc.free(path);
         return null;
     };
@@ -186,9 +198,9 @@ fn asyncWorkerLoop() void {
     while (g_async_queue.waitTake()) |owned_frame_value| {
         var owned_frame = owned_frame_value;
         defer owned_frame.deinit();
-        const started_ms = std.time.milliTimestamp();
+        const started_ms = milliTimestamp();
         const estimate = estimateRgba(owned_frame.rgba, owned_frame.width, owned_frame.height);
-        const elapsed_i64 = @max(0, std.time.milliTimestamp() - started_ms);
+        const elapsed_i64 = @max(0, milliTimestamp() - started_ms);
         const elapsed_ms: u32 = @intCast(@min(elapsed_i64, @as(i64, std.math.maxInt(u32))));
         const result = if (estimate) |keypoints|
             AsyncResult.success(owned_frame.request_id, keypoints, elapsed_ms)
@@ -216,8 +228,8 @@ fn releaseOrt() void {
 /// Estimate the pose in an RGBA frame (top-down, stride w*4). Returns the 17
 /// COCO keypoints in model order, or null when the model/init is unavailable.
 pub fn estimateRgba(rgba: []const u8, width: u32, height: u32) ?[KEYPOINTS]Keypoint {
-    g_inference_mutex.lock();
-    defer g_inference_mutex.unlock();
+    g_inference_mutex.lockUncancelable(io());
+    defer g_inference_mutex.unlock(io());
     if (!ensureInit()) return null;
     if (width == 0 or height == 0) return null;
     const api = onnx.api() orelse return null;

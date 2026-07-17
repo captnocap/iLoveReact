@@ -151,7 +151,7 @@ var g_sel_face: ?[]bool = null;
 // Faces currently tinted as selected, each holding the EXACT saved patch bytes to
 // restore on deselect. Storing the whole patch (not one base colour) preserves sub-face
 // free-form paint when detail>1 — a flat base restore would wipe it (req_2281).
-var g_face_base: std.AutoHashMapUnmanaged(u32, []u8) = .{};
+var g_face_base: std.AutoHashMapUnmanaged(u32, []u8) = .empty;
 const SELECT_TINT: [4]u8 = .{ 255, 138, 61, 255 };
 // Tint suspension depth (suspendFaceTint/resumeFaceTint). While > 0 the atlas holds TRUE
 // paint only — applyFaceHighlight defers until the outermost resume re-applies the tint.
@@ -228,7 +228,7 @@ pub const SolidifyTriangle = struct {
 /// weighting.
 pub const SolidifyOffsets = struct {
     allocator: std.mem.Allocator,
-    by_vertex: std.AutoHashMapUnmanaged(u32, [3]f32) = .{},
+    by_vertex: std.AutoHashMapUnmanaged(u32, [3]f32) = .empty,
 
     pub fn deinit(self: *SolidifyOffsets) void {
         self.by_vertex.deinit(self.allocator);
@@ -313,11 +313,11 @@ pub fn solidifyOffsets(
     errdefer result.deinit();
     if (triangles.len == 0 or thickness <= 0) return result;
 
-    var planes = std.AutoHashMapUnmanaged(u64, SolidifyPlane){};
+    var planes = std.AutoHashMapUnmanaged(u64, SolidifyPlane).empty;
     defer planes.deinit(allocator);
     // Packed (welded vertex, sequential plane index), unique even when a vertex is
     // present in both render triangles of the same authored quad.
-    var vertex_plane_uses = std.AutoHashMapUnmanaged(u64, void){};
+    var vertex_plane_uses = std.AutoHashMapUnmanaged(u64, void).empty;
     defer vertex_plane_uses.deinit(allocator);
 
     for (triangles) |triangle| {
@@ -364,7 +364,7 @@ pub fn solidifyOffsets(
         };
     }
 
-    var systems = std.AutoHashMapUnmanaged(u32, SolidifyPlaneSystem){};
+    var systems = std.AutoHashMapUnmanaged(u32, SolidifyPlaneSystem).empty;
     defer systems.deinit(allocator);
     var use_it = vertex_plane_uses.keyIterator();
     while (use_it.next()) |use_key| {
@@ -497,7 +497,7 @@ fn countTrue(maybe: ?[]bool) u32 {
 /// grouped triangles count once per group; ungrouped triangles count individually.
 fn countSelectedAuthoredFaces() u32 {
     const s = g_sel_face orelse return 0;
-    var groups = std.AutoHashMapUnmanaged(u32, void){};
+    var groups = std.AutoHashMapUnmanaged(u32, void).empty;
     defer groups.deinit(alloc);
     var n: u32 = 0;
     for (s, 0..) |b, f| {
@@ -905,7 +905,7 @@ pub fn buildDeleteMask(out: []bool) u32 {
             const sel = g_sel_edge orelse return 0;
             const edges = g_edges orelse return 0;
             const corners = g_corner_vert orelse return 0;
-            var eset = std.AutoHashMapUnmanaged(u64, void){};
+            var eset = std.AutoHashMapUnmanaged(u64, void).empty;
             defer eset.deinit(alloc);
             var e: u32 = 0;
             while (e < g_edge_count) : (e += 1) {
@@ -1001,10 +1001,10 @@ fn ensureTopology() bool {
     const pos = model_paint.positions() orelse return false;
     if (pos.len < @as(usize, fc) * 9) return false;
 
-    var weld = std.AutoHashMapUnmanaged(WeldKey, u32){};
+    var weld = std.AutoHashMapUnmanaged(WeldKey, u32).empty;
     defer weld.deinit(alloc);
-    var verts = std.ArrayListUnmanaged(f32){};
-    var vert_parts = std.ArrayListUnmanaged(u32){};
+    var verts = std.ArrayListUnmanaged(f32).empty;
+    var vert_parts = std.ArrayListUnmanaged(u32).empty;
     var corner_vert = alloc.alloc(u32, @as(usize, fc) * 3) catch return false;
 
     var f: u32 = 0;
@@ -1030,9 +1030,9 @@ fn ensureTopology() bool {
     // Unique undirected edges from the three corners of every face. emap maps an edge
     // key → its index in `edges`, so the boundary pass below can find an edge from a
     // face's corner pair.
-    var emap = std.AutoHashMapUnmanaged(u64, u32){};
+    var emap = std.AutoHashMapUnmanaged(u64, u32).empty;
     defer emap.deinit(alloc);
-    var edges = std.ArrayListUnmanaged(u32){};
+    var edges = std.ArrayListUnmanaged(u32).empty;
     f = 0;
     while (f < fc) : (f += 1) {
         const a = corner_vert[f * 3 + 0];
@@ -1371,7 +1371,7 @@ fn buildMirrorCentersPerVert() ?[]f32 {
     const parts = g_vert_part orelse return null;
     if (parts.len < g_vert_count) return null;
     const centers = alloc.alloc(f32, @as(usize, g_vert_count) * 3) catch return null;
-    var by_part = std.AutoHashMapUnmanaged(u32, PartBounds){};
+    var by_part = std.AutoHashMapUnmanaged(u32, PartBounds).empty;
     defer by_part.deinit(alloc);
 
     var i: u32 = 0;
@@ -1426,7 +1426,7 @@ fn ensureMirrorTwins() ?[]u32 {
     const total: usize = @as(usize, g_vert_count) * 7;
     const twins = alloc.alloc(u32, total) catch return null;
     @memset(twins, MIRROR_NONE);
-    var by_pos = std.AutoHashMapUnmanaged(MirrorKey, u32){};
+    var by_pos = std.AutoHashMapUnmanaged(MirrorKey, u32).empty;
     defer by_pos.deinit(alloc);
     by_pos.ensureTotalCapacity(alloc, g_vert_count) catch {
         alloc.free(twins);
@@ -1684,7 +1684,7 @@ pub fn boxSelect(cam: model_paint.Camera, vp_w: f32, vp_h: f32, x0: f32, y0: f32
             // click path applies via setFaceGroup. Without this a marquee grabs
             // whichever triangle CENTROIDS land in the rect (half a quad), and a
             // delete then punches a triangular hole (req_2559).
-            var groups_hit = std.AutoHashMapUnmanaged(u32, void){};
+            var groups_hit = std.AutoHashMapUnmanaged(u32, void).empty;
             defer groups_hit.deinit(alloc);
             f = 0;
             while (f < n) : (f += 1) {
@@ -1983,9 +1983,9 @@ fn cutPosKey(p: [3]f32) u64 {
 /// clean closed loop (holes, pinches, gaps) — the caller falls back to per-tri cutting.
 fn chainGroupLoop(pos: []const f32, tris: []const u32, out: *CutLoop) bool {
     const Dir = struct { from_key: u64, to_key: u64, ukey: u128, from: [3]f32 };
-    var undirected = std.AutoHashMapUnmanaged(u128, u32){};
+    var undirected = std.AutoHashMapUnmanaged(u128, u32).empty;
     defer undirected.deinit(alloc);
-    var dirs = std.ArrayListUnmanaged(Dir){};
+    var dirs = std.ArrayListUnmanaged(Dir).empty;
     defer dirs.deinit(alloc);
     for (tris) |f| {
         var k: u32 = 0;
@@ -2006,7 +2006,7 @@ fn chainGroupLoop(pos: []const f32, tris: []const u32, out: *CutLoop) bool {
         }
     }
     const Next = struct { to_key: u64, from: [3]f32 };
-    var adj = std.AutoHashMapUnmanaged(u64, Next){};
+    var adj = std.AutoHashMapUnmanaged(u64, Next).empty;
     defer adj.deinit(alloc);
     var boundary_n: u32 = 0;
     var start_key: u64 = 0;
@@ -2086,11 +2086,11 @@ pub const DissolveResult = struct {
 /// its seams behind one shared group id.
 pub fn dissolveSelectedGroups(pos: []const f32, tri_count: u32, groups: []const u32, selected: []const bool) ?DissolveResult {
     if (pos.len < @as(usize, tri_count) * 9 or groups.len < tri_count or selected.len < tri_count) return null;
-    var selected_tris = std.ArrayListUnmanaged(u32){};
+    var selected_tris = std.ArrayListUnmanaged(u32).empty;
     defer selected_tris.deinit(alloc);
     var target: ?u32 = null;
     var distinct: u32 = 0;
-    var seen = std.AutoHashMapUnmanaged(u32, void){};
+    var seen = std.AutoHashMapUnmanaged(u32, void).empty;
     defer seen.deinit(alloc);
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
@@ -2104,17 +2104,17 @@ pub fn dissolveSelectedGroups(pos: []const f32, tri_count: u32, groups: []const 
 
     const n0 = triNormal(pos, selected_tris.items[0]);
     for (selected_tris.items) |face| if (vecDot(triNormal(pos, face), n0) < 0.5) return null;
-    var loop = CutLoop{};
+    var loop = CutLoop.empty;
     defer loop.deinit(alloc);
     if (!chainGroupLoop(pos, selected_tris.items, &loop)) return null;
     dropCollinearLoop(&loop);
     if (loop.items.len < 3) return null;
 
-    var out = std.ArrayListUnmanaged(f32){};
+    var out = std.ArrayListUnmanaged(f32).empty;
     errdefer out.deinit(alloc);
-    var out_groups = std.ArrayListUnmanaged(u32){};
+    var out_groups = std.ArrayListUnmanaged(u32).empty;
     errdefer out_groups.deinit(alloc);
-    var src = std.ArrayListUnmanaged(u32){};
+    var src = std.ArrayListUnmanaged(u32).empty;
     errdefer src.deinit(alloc);
     f = 0;
     while (f < tri_count) : (f += 1) {
@@ -2183,7 +2183,7 @@ pub fn loopIsConcave(loop: []const [3]f32) bool {
 /// boundary won't chain into one clean loop can't be judged — treated as convex, the
 /// same fallback shrug the polygon cut path uses.
 fn groupIsConcave(pos: []const f32, tris: []const u32) bool {
-    var loop = CutLoop{};
+    var loop = CutLoop.empty;
     defer loop.deinit(alloc);
     if (!chainGroupLoop(pos, tris, &loop)) return false;
     return loopIsConcave(loop.items);
@@ -2196,7 +2196,7 @@ fn groupIsConcave(pos: []const f32, tris: []const u32) bool {
 /// returns the offending FACE count. `groups` is one id per tri; ungrouped tris are
 /// plain triangles — always convex, never flagged.
 pub fn newlyConcaveGroups(before: []const f32, after: []const f32, tri_count: u32, groups: []const u32, out: *std.ArrayListUnmanaged(u32)) u32 {
-    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)){};
+    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)).empty;
     defer {
         var vals = buckets.valueIterator();
         while (vals.next()) |lst| lst.deinit(alloc);
@@ -2207,7 +2207,7 @@ pub fn newlyConcaveGroups(before: []const f32, after: []const f32, tri_count: u3
         const g = groups[f];
         if (g == model_source.NO_FACE_GROUP) continue;
         const gop = buckets.getOrPut(alloc, g) catch return 0;
-        if (!gop.found_existing) gop.value_ptr.* = .{};
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
         gop.value_ptr.append(alloc, f) catch return 0;
     }
     var bad: u32 = 0;
@@ -2289,13 +2289,13 @@ pub fn planeCutSoupMasked(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, g
     if (cut_mask_in) |mask| {
         if (mask.len < tri_count) return null;
     }
-    var out_pos = std.ArrayListUnmanaged(f32){};
-    var out_grp = std.ArrayListUnmanaged(u32){};
-    var out_src = std.ArrayListUnmanaged(u32){};
+    var out_pos = std.ArrayListUnmanaged(f32).empty;
+    var out_grp = std.ArrayListUnmanaged(u32).empty;
+    var out_src = std.ArrayListUnmanaged(u32).empty;
     errdefer out_src.deinit(alloc);
     const want_groups = groups_in != null;
 
-    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    var remap = std.AutoHashMapUnmanaged(u32, u32).empty;
     defer remap.deinit(alloc);
     var next_id: u32 = 0;
     if (groups_in) |g| {
@@ -2312,9 +2312,9 @@ pub fn planeCutSoupMasked(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, g
     defer alloc.free(consumed);
     @memset(consumed, false);
     if (groups_in) |gsrc| {
-        var order = std.ArrayListUnmanaged(u32){};
+        var order = std.ArrayListUnmanaged(u32).empty;
         defer order.deinit(alloc);
-        var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)){};
+        var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)).empty;
         defer {
             var bit = buckets.valueIterator();
             while (bit.next()) |b| b.deinit(alloc);
@@ -2326,7 +2326,7 @@ pub fn planeCutSoupMasked(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, g
             if (og == model_source.NO_FACE_GROUP) continue;
             const gop = buckets.getOrPut(alloc, og) catch return null;
             if (!gop.found_existing) {
-                gop.value_ptr.* = .{};
+                gop.value_ptr.* = .empty;
                 order.append(alloc, og) catch return null;
             }
             gop.value_ptr.append(alloc, bf) catch return null;
@@ -2356,12 +2356,12 @@ pub fn planeCutSoupMasked(pos: []const f32, tri_count: u32, n: [3]f32, d: f32, g
                 }
             }
             if (!(any_neg and any_pos)) continue; // whole group one side → per-tri passthrough
-            var loop = CutLoop{};
+            var loop = CutLoop.empty;
             defer loop.deinit(alloc);
             if (!chainGroupLoop(pos, tris, &loop)) continue; // messy group → per-tri fallback
-            var negl = CutLoop{};
+            var negl = CutLoop.empty;
             defer negl.deinit(alloc);
-            var posl = CutLoop{};
+            var posl = CutLoop.empty;
             defer posl.deinit(alloc);
             if (!splitLoopByPlane(loop.items, n, d, &negl, &posl)) return null;
             if (negl.items.len < 3 or posl.items.len < 3) continue; // grazed → passthrough
@@ -2458,9 +2458,9 @@ pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f3
         if (m.len < tri_count) return null;
     }
 
-    var order = std.ArrayListUnmanaged(u32){};
+    var order = std.ArrayListUnmanaged(u32).empty;
     defer order.deinit(alloc);
-    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)){};
+    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)).empty;
     defer {
         var bit = buckets.valueIterator();
         while (bit.next()) |b| b.deinit(alloc);
@@ -2473,7 +2473,7 @@ pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f3
             if (og == model_source.NO_FACE_GROUP) continue;
             const gop = buckets.getOrPut(alloc, og) catch return null;
             if (!gop.found_existing) {
-                gop.value_ptr.* = .{};
+                gop.value_ptr.* = .empty;
                 order.append(alloc, og) catch return null;
             }
             gop.value_ptr.append(alloc, f) catch return null;
@@ -2484,17 +2484,17 @@ pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f3
     // Chain every group's boundary loop once and index each boundary edge by the (≤2)
     // groups that carry it — the ring walk's adjacency. Groups that won't chain are
     // simply not walkable; a ring reaching one ends there.
-    var loops = std.AutoHashMapUnmanaged(u32, CutLoop){};
+    var loops = std.AutoHashMapUnmanaged(u32, CutLoop).empty;
     defer {
         var lit = loops.valueIterator();
         while (lit.next()) |l| l.deinit(alloc);
         loops.deinit(alloc);
     }
     const EdgeGroups = struct { g: [2]u32, n: u32 };
-    var edge_groups = std.AutoHashMapUnmanaged(u128, EdgeGroups){};
+    var edge_groups = std.AutoHashMapUnmanaged(u128, EdgeGroups).empty;
     defer edge_groups.deinit(alloc);
     for (order.items) |og| {
-        var loop = CutLoop{};
+        var loop = CutLoop.empty;
         if (!chainGroupLoop(pos, buckets.getPtr(og).?.items, &loop)) {
             loop.deinit(alloc);
             continue;
@@ -2530,9 +2530,9 @@ pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f3
     // The walk. Each crossed quad is captured rotated so its entry edge is (q0,q1);
     // the exit edge is then (q2,q3) and the next quad is its other owner.
     const Crossed = struct { og: u32, q: [4][3]f32 };
-    var crossed = std.ArrayListUnmanaged(Crossed){};
+    var crossed = std.ArrayListUnmanaged(Crossed).empty;
     defer crossed.deinit(alloc);
-    var visited = std.AutoHashMapUnmanaged(u32, void){};
+    var visited = std.AutoHashMapUnmanaged(u32, void).empty;
     defer visited.deinit(alloc);
     var dir_i: u32 = 0;
     var ring_closed = false;
@@ -2581,7 +2581,7 @@ pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f3
     }
     if (crossed.items.len == 0) return null;
 
-    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    var remap = std.AutoHashMapUnmanaged(u32, u32).empty;
     defer remap.deinit(alloc);
     var next_id: u32 = 0;
     {
@@ -2592,11 +2592,11 @@ pub fn ringCutSoup(pos: []const f32, tri_count: u32, sel_a: [3]f32, sel_b: [3]f3
         next_id = mx + 1;
     }
 
-    var out_pos = std.ArrayListUnmanaged(f32){};
+    var out_pos = std.ArrayListUnmanaged(f32).empty;
     defer out_pos.deinit(alloc);
-    var out_grp = std.ArrayListUnmanaged(u32){};
+    var out_grp = std.ArrayListUnmanaged(u32).empty;
     defer out_grp.deinit(alloc);
-    var out_src = std.ArrayListUnmanaged(u32){};
+    var out_src = std.ArrayListUnmanaged(u32).empty;
     defer out_src.deinit(alloc);
     const consumed = alloc.alloc(bool, tri_count) catch return null;
     defer alloc.free(consumed);
@@ -2737,7 +2737,7 @@ fn emitParametricQuadCuts(
 pub fn parametricQuadCutsSoup(pos: []const f32, tri_count: u32, groups_in: []const u32, face_mask: []const bool, direction: u32, fractions: []const f32) ?CutResult {
     if (tri_count == 0 or groups_in.len < tri_count or face_mask.len < tri_count) return null;
     for (fractions) |t| if (!(t > 0 and t < 1)) return null;
-    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)){};
+    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)).empty;
     defer {
         var bit = buckets.valueIterator();
         while (bit.next()) |b| b.deinit(alloc);
@@ -2748,20 +2748,20 @@ pub fn parametricQuadCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
         const gid = groups_in[f];
         if (gid == model_source.NO_FACE_GROUP) continue;
         const gop = buckets.getOrPut(alloc, gid) catch return null;
-        if (!gop.found_existing) gop.value_ptr.* = .{};
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
         gop.value_ptr.append(alloc, f) catch return null;
     }
-    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    var remap = std.AutoHashMapUnmanaged(u32, u32).empty;
     defer remap.deinit(alloc);
     var next_id: u32 = 0;
     for (groups_in[0..tri_count]) |gid| {
         if (gid != model_source.NO_FACE_GROUP and gid >= next_id) next_id = gid + 1;
     }
-    var out_pos = std.ArrayListUnmanaged(f32){};
+    var out_pos = std.ArrayListUnmanaged(f32).empty;
     defer out_pos.deinit(alloc);
-    var out_grp = std.ArrayListUnmanaged(u32){};
+    var out_grp = std.ArrayListUnmanaged(u32).empty;
     defer out_grp.deinit(alloc);
-    var out_src = std.ArrayListUnmanaged(u32){};
+    var out_src = std.ArrayListUnmanaged(u32).empty;
     defer out_src.deinit(alloc);
     var handled = alloc.alloc(bool, tri_count) catch return null;
     defer alloc.free(handled);
@@ -2769,7 +2769,7 @@ pub fn parametricQuadCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
     var any = false;
     // The exact interpolated cut points (same lerp as emitParametricQuadCuts), so
     // UNCUT neighbors sharing a cut edge can absorb them (de-T-junction below).
-    var cut_points = std.ArrayListUnmanaged([3]f32){};
+    var cut_points = std.ArrayListUnmanaged([3]f32).empty;
     defer cut_points.deinit(alloc);
     var it = buckets.iterator();
     while (it.next()) |entry| {
@@ -2777,7 +2777,7 @@ pub fn parametricQuadCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
         var selected = true;
         for (tris) |tf| selected = selected and face_mask[tf];
         if (!selected) continue;
-        var loop = CutLoop{};
+        var loop = CutLoop.empty;
         defer loop.deinit(alloc);
         if (!chainGroupLoop(pos, tris, &loop) or loop.items.len != 4) return null;
         const q = [4][3]f32{ loop.items[0], loop.items[1], loop.items[2], loop.items[3] };
@@ -2835,9 +2835,9 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
         previous = t;
     }
 
-    var order = std.ArrayListUnmanaged(u32){};
+    var order = std.ArrayListUnmanaged(u32).empty;
     defer order.deinit(alloc);
-    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)){};
+    var buckets = std.AutoHashMapUnmanaged(u32, std.ArrayListUnmanaged(u32)).empty;
     defer {
         var bit = buckets.valueIterator();
         while (bit.next()) |b| b.deinit(alloc);
@@ -2846,7 +2846,7 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
     // Raw undirected edge-use counts over the WHOLE soup: the walk uses these to
     // tell a true open border (1 use — a clean parametric stop) from an edge that
     // has a neighbor the ring simply cannot pass through (2+ uses).
-    var tri_edge_uses = std.AutoHashMapUnmanaged(u128, u32){};
+    var tri_edge_uses = std.AutoHashMapUnmanaged(u128, u32).empty;
     defer tri_edge_uses.deinit(alloc);
     var f: u32 = 0;
     while (f < tri_count) : (f += 1) {
@@ -2854,7 +2854,7 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
         if (gid == model_source.NO_FACE_GROUP) continue;
         const gop = buckets.getOrPut(alloc, gid) catch return null;
         if (!gop.found_existing) {
-            gop.value_ptr.* = .{};
+            gop.value_ptr.* = .empty;
             order.append(alloc, gid) catch return null;
         }
         gop.value_ptr.append(alloc, f) catch return null;
@@ -2873,17 +2873,17 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
     }
     if (order.items.len == 0) return null;
 
-    var loops = std.AutoHashMapUnmanaged(u32, CutLoop){};
+    var loops = std.AutoHashMapUnmanaged(u32, CutLoop).empty;
     defer {
         var lit = loops.valueIterator();
         while (lit.next()) |loop| loop.deinit(alloc);
         loops.deinit(alloc);
     }
     const EdgeGroups = struct { g: [2]u32, n: u32 };
-    var edge_groups = std.AutoHashMapUnmanaged(u128, EdgeGroups){};
+    var edge_groups = std.AutoHashMapUnmanaged(u128, EdgeGroups).empty;
     defer edge_groups.deinit(alloc);
     for (order.items) |gid| {
-        var loop = CutLoop{};
+        var loop = CutLoop.empty;
         if (!chainGroupLoop(pos, buckets.getPtr(gid).?.items, &loop)) {
             loop.deinit(alloc);
             continue;
@@ -2909,9 +2909,9 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
     }
 
     const Crossed = struct { gid: u32, q: [4][3]f32 };
-    var crossed = std.ArrayListUnmanaged(Crossed){};
+    var crossed = std.ArrayListUnmanaged(Crossed).empty;
     defer crossed.deinit(alloc);
-    var visited = std.AutoHashMapUnmanaged(u32, void){};
+    var visited = std.AutoHashMapUnmanaged(u32, void).empty;
     defer visited.deinit(alloc);
     var seed_count: u32 = 0;
     var blocked = false;
@@ -3012,23 +3012,23 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
     if (seed_count == 0 or crossed.items.len == 0) return null;
     if (blocked) return null; // an arm couldn't finish — the plane comb completes the cut
 
-    var edge_points = std.AutoHashMapUnmanaged(u128, [][3]f32){};
+    var edge_points = std.AutoHashMapUnmanaged(u128, [][3]f32).empty;
     defer {
         var pit = edge_points.valueIterator();
         while (pit.next()) |points| alloc.free(points.*);
         edge_points.deinit(alloc);
     }
-    var remap = std.AutoHashMapUnmanaged(u32, u32){};
+    var remap = std.AutoHashMapUnmanaged(u32, u32).empty;
     defer remap.deinit(alloc);
     var next_id: u32 = 0;
     for (groups_in[0..tri_count]) |gid| {
         if (gid != model_source.NO_FACE_GROUP and gid >= next_id) next_id = gid + 1;
     }
-    var out_pos = std.ArrayListUnmanaged(f32){};
+    var out_pos = std.ArrayListUnmanaged(f32).empty;
     defer out_pos.deinit(alloc);
-    var out_grp = std.ArrayListUnmanaged(u32){};
+    var out_grp = std.ArrayListUnmanaged(u32).empty;
     defer out_grp.deinit(alloc);
-    var out_src = std.ArrayListUnmanaged(u32){};
+    var out_src = std.ArrayListUnmanaged(u32).empty;
     defer out_src.deinit(alloc);
     const handled = alloc.alloc(bool, tri_count) catch return null;
     defer alloc.free(handled);
@@ -3088,7 +3088,7 @@ pub fn ringParametricCutsSoup(pos: []const f32, tri_count: u32, groups_in: []con
     // ring quad also cuts, but a face outside the ring can share a crossed edge
     // (a flap rooted on it, a border-adjacent face) and would keep spanning the
     // point in one piece. Split such triangles so vertex-to-vertex holds.
-    var all_points = std.ArrayListUnmanaged([3]f32){};
+    var all_points = std.ArrayListUnmanaged([3]f32).empty;
     defer all_points.deinit(alloc);
     var pit = edge_points.valueIterator();
     while (pit.next()) |pts| all_points.appendSlice(alloc, pts.*) catch return null;
@@ -3729,7 +3729,7 @@ test "concave guard: rigid 120-degree rotation of a grouped quad fires nothing (
         after[i + 2] = before[i + 1] * s + before[i + 2] * c;
     }
     const groups = [_]u32{ 7, 7 };
-    var out = std.ArrayListUnmanaged(u32){};
+    var out = std.ArrayListUnmanaged(u32).empty;
     defer out.deinit(alloc);
     try testing.expectEqual(@as(u32, 0), newlyConcaveGroups(before[0..], after[0..], 2, groups[0..], &out));
 }
@@ -3746,7 +3746,7 @@ test "concave guard: dragging a corner into the quad interior buckles it — 1 f
         0, 0, 0, 2, 2, 0, 1.5, 0.5, 0,
     };
     const groups = [_]u32{ 7, 7 };
-    var out = std.ArrayListUnmanaged(u32){};
+    var out = std.ArrayListUnmanaged(u32).empty;
     defer out.deinit(alloc);
     try testing.expectEqual(@as(u32, 1), newlyConcaveGroups(before[0..], after[0..], 2, groups[0..], &out));
     try testing.expectEqual(@as(usize, 1), out.items.len);
@@ -3766,7 +3766,7 @@ test "concave guard: a face that was ALREADY concave stays quiet (newConcaveFace
         0, 0, 0, 2, 2, 0, 1.4, 0.6, 0,
     };
     const groups = [_]u32{ 7, 7 };
-    var out = std.ArrayListUnmanaged(u32){};
+    var out = std.ArrayListUnmanaged(u32).empty;
     defer out.deinit(alloc);
     try testing.expectEqual(@as(u32, 0), newlyConcaveGroups(before[0..], after[0..], 2, groups[0..], &out));
 }
@@ -3775,7 +3775,7 @@ test "concave guard: ungrouped triangle soup can never fire — tris are always 
     const before = [_]f32{ 0, 0, 0, 2, 0, 0, 2, 2, 0 };
     const after = [_]f32{ 0, 0, 0, 2, 0, 0, 0.001, 0.001, 0 }; // near-collapsed tri
     const groups = [_]u32{model_source.NO_FACE_GROUP};
-    var out = std.ArrayListUnmanaged(u32){};
+    var out = std.ArrayListUnmanaged(u32).empty;
     defer out.deinit(alloc);
     try testing.expectEqual(@as(u32, 0), newlyConcaveGroups(before[0..], after[0..], 1, groups[0..], &out));
 }
@@ -3829,7 +3829,7 @@ test "ring cut: flared tube splits every quad at edge midpoints — level relati
         try testing.expectEqual(@as(f32, 1), y);
     }
     // The ring closed: both halves of each quad carry a group, 4 kept + 4 minted.
-    var distinct = std.AutoHashMapUnmanaged(u32, void){};
+    var distinct = std.AutoHashMapUnmanaged(u32, void).empty;
     defer distinct.deinit(alloc);
     for (cut.groups.?) |g| distinct.put(alloc, g, {}) catch unreachable;
     try testing.expectEqual(@as(usize, 8), distinct.count());
@@ -3930,7 +3930,7 @@ test "ring parametric cuts subdivide four faces of a closed cube ring" {
     defer alloc.free(r.positions);
     defer alloc.free(r.src_face);
     defer if (r.groups) |g| alloc.free(g);
-    var distinct = std.AutoHashMapUnmanaged(u32, void){};
+    var distinct = std.AutoHashMapUnmanaged(u32, void).empty;
     defer distinct.deinit(alloc);
     for (r.groups.?) |gid| try distinct.put(alloc, gid, {});
     try testing.expectEqual(@as(u32, 14), distinct.count());
@@ -3965,7 +3965,7 @@ test "ring parametric shared-edge cut points are bit-identical" {
     defer if (r.groups) |g| alloc.free(g);
     const Bits = [3]u32;
     const Seen = struct { source_group: u32, shared: bool };
-    var points = std.AutoHashMapUnmanaged(Bits, Seen){};
+    var points = std.AutoHashMapUnmanaged(Bits, Seen).empty;
     defer points.deinit(alloc);
     v = 0;
     while (v < r.tri_count * 3) : (v += 1) {
@@ -3995,7 +3995,7 @@ test "ring parametric cuts stop at an open two-quad strip boundary" {
     defer alloc.free(r.src_face);
     defer if (r.groups) |g| alloc.free(g);
     try testing.expectEqual(@as(u32, 8), r.tri_count);
-    var distinct = std.AutoHashMapUnmanaged(u32, void){};
+    var distinct = std.AutoHashMapUnmanaged(u32, void).empty;
     defer distinct.deinit(alloc);
     for (r.groups.?) |gid| try distinct.put(alloc, gid, {});
     try testing.expectEqual(@as(u32, 4), distinct.count());

@@ -11,6 +11,10 @@
 
 const std = @import("std");
 
+fn io() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
+
 pub const KEYPOINTS: usize = 17;
 pub const MAX_ERROR_BYTES: usize = 256;
 
@@ -78,8 +82,8 @@ pub const SubmitStatus = enum(i32) {
 
 pub const Queue = struct {
     allocator: std.mem.Allocator,
-    mutex: std.Thread.Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    mutex: std.Io.Mutex = .init,
+    cond: std.Io.Condition = .init,
     pending: ?Frame = null,
     result: ?Result = null,
     working: bool = false,
@@ -105,15 +109,15 @@ pub const Queue = struct {
         if (width == 0 or height == 0 or rgba.len < byte_count) return .invalid_frame;
 
         {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+            self.mutex.lockUncancelable(io());
+            defer self.mutex.unlock(io());
             if (self.shutdown) return .stopped;
             if (self.pending != null or self.working or self.result != null) return .busy;
         }
 
         const owned = self.allocator.dupe(u8, rgba[0..byte_count]) catch return .out_of_memory;
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(io());
+        defer self.mutex.unlock(io());
         if (self.shutdown) {
             self.allocator.free(owned);
             return .stopped;
@@ -131,15 +135,15 @@ pub const Queue = struct {
             .height = height,
             .allocator = self.allocator,
         };
-        self.cond.signal();
+        self.cond.signal(io());
         return .queued;
     }
 
     /// Worker-only blocking take. `null` means shutdown.
     pub fn waitTake(self: *Queue) ?Frame {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        while (self.pending == null and !self.shutdown) self.cond.wait(&self.mutex);
+        self.mutex.lockUncancelable(io());
+        defer self.mutex.unlock(io());
+        while (self.pending == null and !self.shutdown) self.cond.waitUncancelable(io(), &self.mutex);
         if (self.shutdown) return null;
         const frame = self.pending.?;
         self.pending = null;
@@ -149,8 +153,8 @@ pub const Queue = struct {
 
     /// Non-blocking twin used by focused unit tests.
     pub fn tryTake(self: *Queue) ?Frame {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(io());
+        defer self.mutex.unlock(io());
         if (self.shutdown or self.pending == null) return null;
         const frame = self.pending.?;
         self.pending = null;
@@ -160,8 +164,8 @@ pub const Queue = struct {
 
     /// Worker publishes at most one result. False means shutdown discarded it.
     pub fn publish(self: *Queue, result: Result) bool {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(io());
+        defer self.mutex.unlock(io());
         self.working = false;
         if (self.shutdown) return false;
         if (self.result != null) return false;
@@ -171,17 +175,17 @@ pub const Queue = struct {
 
     /// Engine-tick non-blocking result take.
     pub fn poll(self: *Queue) ?Result {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(io());
+        defer self.mutex.unlock(io());
         const out = self.result;
         self.result = null;
         return out;
     }
 
     pub fn stop(self: *Queue) void {
-        self.mutex.lock();
+        self.mutex.lockUncancelable(io());
         self.shutdown = true;
-        self.cond.signal();
-        self.mutex.unlock();
+        self.cond.signal(io());
+        self.mutex.unlock(io());
     }
 };

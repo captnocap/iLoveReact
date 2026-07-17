@@ -260,7 +260,7 @@ pub fn emit(channel_id: []const u8, severity: Severity, msg: []const u8, fields_
     const slot: usize = @intCast(g_ring_count % RING_SIZE);
     var e = &g_ring[slot];
     e.seq = seq;
-    e.ts_ms = std.time.milliTimestamp();
+    e.ts_ms = std.Io.Clock.now(.real, std.Io.Threaded.global_single_threaded.io()).toMilliseconds();
     e.severity = severity;
     e.ch_idx = @intCast(idx);
 
@@ -280,11 +280,11 @@ pub fn emit(channel_id: []const u8, severity: Severity, msg: []const u8, fields_
     // Fan out one serialized line to the sink (console live feed + event_bus).
     if (g_sink) |sink| {
         var buf: [LINE_JSON_CAP]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        writeEntryJson(fbs.writer(), e, ch.idSlice()) catch {
+        var writer: std.Io.Writer = .fixed(&buf);
+        writeEntryJson(&writer, e, ch.idSlice()) catch {
             return seq; // sink skipped on overflow; ring already has the line
         };
-        sink(buf[0..fbs.pos]);
+        sink(writer.buffered());
     }
 
     return seq;
@@ -342,7 +342,7 @@ fn writeEntryJson(writer: anytype, e: *const Entry, ch_id: []const u8) !void {
 /// Used by the console's `__diag_recent` catch-up door on mount. Caller owns
 /// the returned slice.
 pub fn recentJson(allocator: std.mem.Allocator, max_n: usize) ![]u8 {
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     try out.append(allocator, '[');
 
@@ -358,7 +358,9 @@ pub fn recentJson(allocator: std.mem.Allocator, max_n: usize) ![]u8 {
             const ch = &g_channels[e.ch_idx];
             if (!first) try out.append(allocator, ',');
             first = false;
-            try writeEntryJson(out.writer(allocator), e, ch.idSlice());
+            var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &out);
+            defer out = aw.toArrayList();
+            try writeEntryJson(&aw.writer, e, ch.idSlice());
         }
     }
 
@@ -370,14 +372,16 @@ pub fn recentJson(allocator: std.mem.Allocator, max_n: usize) ![]u8 {
 /// channels the host knows about and how many lines a sampled channel dropped.
 ///   [{"id":"editor.place","enabled":true,"sampleDiv":4,"emitted":12,"dropped":36}]
 pub fn channelsJson(allocator: std.mem.Allocator) ![]u8 {
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     try out.append(allocator, '[');
     var i: usize = 0;
     while (i < g_channel_count) : (i += 1) {
         const ch = &g_channels[i];
         if (i > 0) try out.append(allocator, ',');
-        const w = out.writer(allocator);
+        var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &out);
+        defer out = aw.toArrayList();
+        const w = &aw.writer;
         try w.writeAll("{\"id\":");
         try writeJsonString(w, ch.idSlice());
         try w.print(

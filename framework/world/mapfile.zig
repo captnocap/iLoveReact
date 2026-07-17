@@ -168,7 +168,7 @@ pub fn readLumps(allocator: std.mem.Allocator, bytes: []const u8, known_types: ?
     const dir_end = @as(usize, dir_offset) + @as(usize, count) * DIRECTORY_ENTRY_BYTES;
     if (dir_end > bytes.len) return Error.DirectoryOutOfBounds;
 
-    var out: std.ArrayList(Lump) = .{};
+    var out: std.ArrayList(Lump) = .empty;
     errdefer out.deinit(allocator);
     var i: usize = 0;
     while (i < count) : (i += 1) {

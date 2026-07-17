@@ -77,7 +77,7 @@ const IdSet = std.StringHashMapUnmanaged(void);
 /// occupied-chunks list IS the object→chunk resolver (read on observe, no scan).
 const ObjectEntry = struct {
     kind: []u8,
-    chunks: std.ArrayListUnmanaged(u64) = .{},
+    chunks: std.ArrayListUnmanaged(u64) = .empty,
 
     fn occupies(self: *const ObjectEntry, packed_coord: u64) bool {
         for (self.chunks.items) |c| if (c == packed_coord) return true;
@@ -89,18 +89,18 @@ pub const HotIndex = struct {
     allocator: std.mem.Allocator,
 
     /// id -> entry. Owns the id key strings and each entry's kind string.
-    by_id: std.StringHashMapUnmanaged(ObjectEntry) = .{},
+    by_id: std.StringHashMapUnmanaged(ObjectEntry) = .empty,
     /// chunk -> set of object ids occupying it.
-    by_chunk: std.AutoHashMapUnmanaged(u64, IdSet) = .{},
+    by_chunk: std.AutoHashMapUnmanaged(u64, IdSet) = .empty,
     /// Currently-selected object ids.
     selected: IdSet = .{},
     /// Objects whose compiled output may have changed since the last bake.
     dirty_ids: IdSet = .{},
     /// Chunks the recompiler must revisit.
-    dirty_chunks: std.AutoHashMapUnmanaged(u64, void) = .{},
+    dirty_chunks: std.AutoHashMapUnmanaged(u64, void) = .empty,
     /// chunk -> last baked content hash (set by markBaked, which also clears the
     /// chunk's dirty flag).
-    baked: std.AutoHashMapUnmanaged(u64, Hash) = .{},
+    baked: std.AutoHashMapUnmanaged(u64, Hash) = .empty,
     /// Highest event seq folded so far (0 = none). Metadata for the summary.
     last_seq: i64 = 0,
 
@@ -148,7 +148,7 @@ pub const HotIndex = struct {
 
         // Pass 1: gather the event's explicit chunk refs (its declared dirty
         // region) and union them into dirty-chunks directly.
-        var event_chunks: std.ArrayListUnmanaged(u64) = .{};
+        var event_chunks: std.ArrayListUnmanaged(u64) = .empty;
         defer event_chunks.deinit(self.allocator);
         for (targets) |t| {
             if (!isKind(t, CHUNK_KIND)) continue;

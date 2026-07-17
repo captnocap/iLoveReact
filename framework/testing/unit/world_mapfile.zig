@@ -142,10 +142,10 @@ test "rle8 payload decodes 3-byte count/value pairs with null sentinel" {
 // is honored across both languages — not Zig agreeing with Zig-authored bytes.
 
 fn loadFixtureBytes(allocator: std.mem.Allocator) ![]u8 {
-    const path = std.process.getEnvVarOwned(allocator, "MAPFILE_FIXTURE") catch
+    const path = std.testing.environ.getAlloc(allocator, "MAPFILE_FIXTURE") catch
         try allocator.dupe(u8, "framework/testing/fixtures/mapfile_roundtrip.b64");
     defer allocator.free(path);
-    const raw = try std.fs.cwd().readFileAlloc(allocator, path, 1 << 20);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, path, allocator, .limited(1 << 20));
     defer allocator.free(raw);
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");
     const dec = std.base64.standard.Decoder;

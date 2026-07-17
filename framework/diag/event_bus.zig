@@ -41,6 +41,7 @@
 const std = @import("std");
 const sqlite = @import("../storage/sqlite.zig");
 const json_probe = @import("json_probe.zig");
+const host_io = @import("../host_io.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -132,7 +133,7 @@ pub fn init() void {
 
     // Session id: random u64 from monotonic-ns seed. Stable for the
     // process; rolls on every boot.
-    const seed_i128 = std.time.nanoTimestamp();
+    const seed_i128 = host_io.nanoTimestamp();
     const seed: u64 = @truncate(@as(u128, @bitCast(seed_i128)));
     var prng = std.Random.DefaultPrng.init(seed);
     const sid = prng.random().int(u64);
@@ -151,10 +152,10 @@ pub fn init() void {
 }
 
 fn setupDb() void {
-    const home = std.posix.getenv("HOME") orelse return;
+    const home = host_io.getenv("HOME") orelse return;
     var dir_buf: [384]u8 = undefined;
     const dir_path = std.fmt.bufPrint(&dir_buf, "{s}/.cache/reactjit", .{home}) catch return;
-    std.fs.makeDirAbsolute(dir_path) catch |e| switch (e) {
+    std.Io.Dir.createDirAbsolute(host_io.io(), dir_path, .default_dir) catch |e| switch (e) {
         error.PathAlreadyExists => {},
         else => return,
     };
@@ -260,7 +261,7 @@ pub fn emitWithImportance(
     // string dup, JSON validation, SQL bind, or ring-slot eviction.
     if (importance < g_min_importance) return 0;
 
-    const ts = std.time.milliTimestamp();
+    const ts = host_io.milliTimestamp();
     const safe_payload = if (payload_json.len == 0) "{}" else payload_json;
 
     // SQLite insert (when persistence is wired). The autoincrement column
@@ -310,7 +311,7 @@ pub fn emitWithImportance(
 /// JSON-escape them. payload is already a JSON document; it's emitted
 /// as-is.
 pub fn recentEventsJson(out_alloc: std.mem.Allocator, max_n: usize) ![]u8 {
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(out_alloc);
     try out.append(out_alloc, '[');
     if (g_ring_inited and g_ring_count > 0) {
@@ -416,10 +417,10 @@ pub fn emitFromLog(level: std.log.Level, scope: []const u8, msg: []const u8) u64
     // state, so pre-bus boot failures and post-deinit shutdown errors stay
     // visible. Lower levels are bus-only.
     if (level == .err or level == .warn) {
-        const stderr = std.fs.File.stderr();
+        const stderr = std.Io.File.stderr();
         var line_buf: [4200]u8 = undefined;
         const line = std.fmt.bufPrint(&line_buf, "[{s}/{s}] {s}\n", .{ lvl_str, scope, msg }) catch msg;
-        stderr.writeAll(line) catch {};
+        stderr.writeStreamingAll(host_io.io(), line) catch {};
     }
 
     if (!g_inited) return 0;
@@ -431,9 +432,11 @@ pub fn emitFromLog(level: std.log.Level, scope: []const u8, msg: []const u8) u64
         .debug => 0.15,
     };
 
-    var pbuf: std.ArrayList(u8) = .{};
+    var pbuf: std.ArrayList(u8) = .empty;
     defer pbuf.deinit(alloc);
-    const w = pbuf.writer(alloc);
+    var aw: std.Io.Writer.Allocating = .fromArrayList(alloc, &pbuf);
+    defer pbuf = aw.toArrayList();
+    const w = &aw.writer;
     w.writeAll("{\"msg\":") catch return 0;
     writeJsonString(w, msg) catch return 0;
     w.writeAll(",\"scope\":") catch return 0;
@@ -452,7 +455,7 @@ pub fn emitFromLog(level: std.log.Level, scope: []const u8, msg: []const u8) u64
         .debug => "log.debug",
     };
 
-    return emitWithImportance(event_type, src, importance, null, pbuf.items);
+    return emitWithImportance(event_type, src, importance, null, aw.written());
 }
 
 pub fn fromStdLog(
@@ -480,11 +483,11 @@ pub fn fromStdLog(
 /// remain visible during pre-bus boot or post-deinit shutdown.
 pub fn emitJsLog(severity: i32, msg: []const u8) u64 {
     if (severity >= 1) {
-        const stderr = std.fs.File.stderr();
+        const stderr = std.Io.File.stderr();
         var line_buf: [4200]u8 = undefined;
         const tag: []const u8 = if (severity >= 2) "[js.err]" else "[js.warn]";
         const line = std.fmt.bufPrint(&line_buf, "{s} {s}\n", .{ tag, msg }) catch msg;
-        stderr.writeAll(line) catch {};
+        stderr.writeStreamingAll(host_io.io(), line) catch {};
     }
     if (!g_inited) return 0;
 
@@ -499,21 +502,23 @@ pub fn emitJsLog(severity: i32, msg: []const u8) u64 {
         else => "js.log",
     };
 
-    var pbuf: std.ArrayList(u8) = .{};
+    var pbuf: std.ArrayList(u8) = .empty;
     defer pbuf.deinit(alloc);
-    const w = pbuf.writer(alloc);
+    var aw: std.Io.Writer.Allocating = .fromArrayList(alloc, &pbuf);
+    defer pbuf = aw.toArrayList();
+    const w = &aw.writer;
     w.writeAll("{\"msg\":") catch return 0;
     writeJsonString(w, msg) catch return 0;
     w.writeAll("}") catch return 0;
 
-    return emitWithImportance(event_type, "js", importance, null, pbuf.items);
+    return emitWithImportance(event_type, "js", importance, null, aw.written());
 }
 
 /// Build a JSON array of recent events with importance >= min_importance,
 /// newest first, capped at max_count. Caller owns the returned slice.
 /// Returns "[]" when uninitialized or when the ring is empty.
 pub fn recentJson(allocator: std.mem.Allocator, max_count: usize, min_importance: f32) ![]u8 {
-    var buf: std.ArrayList(u8) = .{};
+    var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(allocator);
     try buf.append(allocator, '[');
 
@@ -526,7 +531,9 @@ pub fn recentJson(allocator: std.mem.Allocator, max_count: usize, min_importance
             const e = &g_ring[idx];
             if (e.importance < min_importance) continue;
             if (emitted > 0) try buf.append(allocator, ',');
-            const w = buf.writer(allocator);
+            var aw: std.Io.Writer.Allocating = .fromArrayList(allocator, &buf);
+            defer buf = aw.toArrayList();
+            const w = &aw.writer;
             const payload_str = if (e.payload.len > 0) e.payload else "{}";
             if (e.parent_id) |pid| {
                 try w.print(

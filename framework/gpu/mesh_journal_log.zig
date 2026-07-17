@@ -260,7 +260,7 @@ pub fn analyze(allocator: std.mem.Allocator, view: StateView) !StateSummary {
         };
     }
 
-    var distinct = std.AutoHashMapUnmanaged(u32, void){};
+    var distinct = std.AutoHashMapUnmanaged(u32, void).empty;
     defer distinct.deinit(allocator);
     if (view.groups) |groups| {
         for (groups) |group| {
@@ -377,9 +377,9 @@ fn writeEntries(writer: anytype, allocator: std.mem.Allocator, entries: []const 
 /// Encode the complete bounded journal. Undo is oldest-to-newest; redo is the
 /// order it would be replayed (next redo first), with current between them.
 pub fn encode(allocator: std.mem.Allocator, log: LogView) ![]u8 {
-    var out = std.ArrayList(u8){};
-    errdefer out.deinit(allocator);
-    const writer = out.writer(allocator);
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    errdefer out.deinit();
+    const writer = &out.writer;
     try writer.print(
         "{{\"version\":1,\"capacity\":{d},\"byteBudget\":{d},\"journalBytes\":{d},\"pending\":{{\"gizmo\":{s},\"loopCut\":{s}}},\"scope\":{{\"ranges\":[",
         .{
@@ -409,5 +409,5 @@ pub fn encode(allocator: std.mem.Allocator, log: LogView) ![]u8 {
     try writer.writeAll(",\"redo\":");
     try writeEntries(writer, allocator, log.redo);
     try writer.writeByte('}');
-    return out.toOwnedSlice(allocator);
+    return out.toOwnedSlice();
 }

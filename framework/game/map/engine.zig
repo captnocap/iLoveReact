@@ -24,6 +24,7 @@ const std = @import("std");
 const chunks = @import("chunks.zig");
 const stamps = @import("stamps.zig");
 const foliage = @import("../../world/foliage.zig");
+const host_io = @import("../../host_io.zig");
 pub const transport = @import("transport.zig");
 pub const roads = @import("roads.zig");
 
@@ -166,7 +167,7 @@ fn claimStamp(key: u64) bool {
 }
 
 fn nowMs() i64 {
-    return std.time.milliTimestamp();
+    return host_io.milliTimestamp();
 }
 
 fn pushAuthoringEvent(event: AuthoringEvent) void {
@@ -1749,11 +1750,11 @@ pub fn autosaveNow() bool {
     defer alloc.free(buf);
     const n = saveMap(buf);
     if (n == 0) return false;
-    if (std.fs.path.dirname(path)) |dir| std.fs.cwd().makePath(dir) catch {};
+    if (std.fs.path.dirname(path)) |dir| std.Io.Dir.cwd().createDirPath(host_io.io(), dir) catch {};
     var tmp_buf: [g_autosave_path_buf.len + 4]u8 = undefined;
     const tmp = std.fmt.bufPrint(&tmp_buf, "{s}.tmp", .{path}) catch return false;
-    std.fs.cwd().writeFile(.{ .sub_path = tmp, .data = buf[0..n] }) catch return false;
-    std.fs.cwd().rename(tmp, path) catch return false;
+    std.Io.Dir.cwd().writeFile(host_io.io(), .{ .sub_path = tmp, .data = buf[0..n] }) catch return false;
+    std.Io.Dir.rename(.cwd(), tmp, .cwd(), path, host_io.io()) catch return false;
     return true;
 }
 

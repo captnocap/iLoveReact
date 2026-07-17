@@ -160,7 +160,7 @@ pub fn encodeRle16Grid(
     context: anytype,
     comptime valueAt: anytype,
 ) Error![]u8 {
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     out.appendNTimes(allocator, 0, 12) catch return Error.OutOfMemory;
 
@@ -190,7 +190,7 @@ pub fn encodeRle16Grid(
 }
 
 pub fn encodeStream(allocator: std.mem.Allocator, stream: StreamInput) Error![]u8 {
-    var out: std.ArrayList(u8) = .{};
+    var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(allocator);
     try appendU32(&out, allocator, try u32FromUsize(stream.refs.len));
     for (stream.refs) |ref| try appendU32(&out, allocator, ref);
@@ -235,13 +235,13 @@ pub fn writeGameFile(allocator: std.mem.Allocator, input: GameFileInput) Error![
     const manifest = try encodeManifest(allocator, input.assets);
     defer allocator.free(manifest);
 
-    var blob_payloads: std.ArrayList([]u8) = .{};
+    var blob_payloads: std.ArrayList([]u8) = .empty;
     defer {
         for (blob_payloads.items) |payload| allocator.free(payload);
         blob_payloads.deinit(allocator);
     }
 
-    var lumps: std.ArrayList(LumpInput) = .{};
+    var lumps: std.ArrayList(LumpInput) = .empty;
     defer lumps.deinit(allocator);
     lumps.append(allocator, .{ .type_id = GameLump.stream_logic, .encoding = .raw, .data = logic }) catch return Error.OutOfMemory;
     lumps.append(allocator, .{ .type_id = GameLump.stream_map, .encoding = .raw, .data = map }) catch return Error.OutOfMemory;

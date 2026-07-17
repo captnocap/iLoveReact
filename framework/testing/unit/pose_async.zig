@@ -16,11 +16,27 @@ const RESULT_TIMEOUT_NS: i128 = 10 * std.time.ns_per_s;
 const REQUEST_INTERVAL_NS: u64 = 90 * std.time.ns_per_ms;
 const FRAME_BUDGET_US: i64 = 16_000;
 
+fn io() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
+
+fn nanoTimestamp() i128 {
+    return @intCast(std.Io.Clock.now(.real, io()).toNanoseconds());
+}
+
+fn microTimestamp() i64 {
+    return std.Io.Clock.now(.real, io()).toMicroseconds();
+}
+
+fn getenv(name: [:0]const u8) ?[]const u8 {
+    return if (std.c.getenv(name.ptr)) |value| std.mem.span(value) else null;
+}
+
 fn waitForResult() !pose.AsyncResult {
-    const wait_started = std.time.nanoTimestamp();
-    while (std.time.nanoTimestamp() - wait_started < RESULT_TIMEOUT_NS) {
+    const wait_started = nanoTimestamp();
+    while (nanoTimestamp() - wait_started < RESULT_TIMEOUT_NS) {
         if (pose.pollAsync()) |result| return result;
-        std.Thread.sleep(std.time.ns_per_ms);
+        try std.Io.sleep(io(), .fromNanoseconds(std.time.ns_per_ms), .awake);
     }
     return error.PoseWorkerTimedOut;
 }
@@ -33,9 +49,9 @@ test "live pose request runs outside the submitting thread" {
     defer std.testing.allocator.free(rgba);
     @memset(rgba, 0);
 
-    const submit_started = std.time.microTimestamp();
+    const submit_started = microTimestamp();
     try std.testing.expectEqual(pose.SubmitStatus.queued, pose.enqueueRgba(2845, rgba, CAMERA_WIDTH, CAMERA_HEIGHT));
-    const submit_us = std.time.microTimestamp() - submit_started;
+    const submit_us = microTimestamp() - submit_started;
     try std.testing.expect(submit_us < MAX_SUBMIT_US);
 
     const result = try waitForResult();
@@ -44,7 +60,7 @@ test "live pose request runs outside the submitting thread" {
 }
 
 test "optional sustained pose spikewatch" {
-    const raw_seconds = std.posix.getenv("RJIT_POSE_STRESS_SECONDS") orelse return error.SkipZigTest;
+    const raw_seconds = getenv("RJIT_POSE_STRESS_SECONDS") orelse return error.SkipZigTest;
     const seconds = std.fmt.parseInt(u64, raw_seconds, 10) catch return error.SkipZigTest;
     if (seconds == 0) return error.SkipZigTest;
 
@@ -54,18 +70,18 @@ test "optional sustained pose spikewatch" {
     defer std.testing.allocator.free(rgba);
     @memset(rgba, 0);
 
-    const gate_started = std.time.nanoTimestamp();
+    const gate_started = nanoTimestamp();
     const gate_duration_ns: i128 = @as(i128, seconds) * std.time.ns_per_s;
     var request_id: u32 = 1;
     var requests: u32 = 0;
     var submit_total_us: i64 = 0;
     var submit_max_us: i64 = 0;
     var frame_budget_spikes: u32 = 0;
-    while (std.time.nanoTimestamp() - gate_started < gate_duration_ns) {
-        const cycle_started = std.time.nanoTimestamp();
-        const submit_started = std.time.microTimestamp();
+    while (nanoTimestamp() - gate_started < gate_duration_ns) {
+        const cycle_started = nanoTimestamp();
+        const submit_started = microTimestamp();
         try std.testing.expectEqual(pose.SubmitStatus.queued, pose.enqueueRgba(request_id, rgba, CAMERA_WIDTH, CAMERA_HEIGHT));
-        const submit_us = std.time.microTimestamp() - submit_started;
+        const submit_us = microTimestamp() - submit_started;
         submit_total_us += submit_us;
         submit_max_us = @max(submit_max_us, submit_us);
         if (submit_us >= FRAME_BUDGET_US) frame_budget_spikes += 1;
@@ -76,9 +92,9 @@ test "optional sustained pose spikewatch" {
         requests += 1;
         request_id +%= 1;
 
-        const cycle_ns = std.time.nanoTimestamp() - cycle_started;
+        const cycle_ns = nanoTimestamp() - cycle_started;
         if (cycle_ns < @as(i128, REQUEST_INTERVAL_NS)) {
-            std.Thread.sleep(@intCast(@as(i128, REQUEST_INTERVAL_NS) - cycle_ns));
+            try std.Io.sleep(io(), .fromNanoseconds(@intCast(@as(i128, REQUEST_INTERVAL_NS) - cycle_ns)), .awake);
         }
     }
 

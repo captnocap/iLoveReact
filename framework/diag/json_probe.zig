@@ -85,7 +85,7 @@ test "int parses numbers" {
 
 test "writeString escapes control chars" {
     var buf: [128]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try writeString(fbs.writer(), "a\"b\nc\x01d");
-    try std.testing.expectEqualStrings("\"a\\\"b\\nc\\u0001d\"", fbs.getWritten());
+    var writer: std.Io.Writer = .fixed(&buf);
+    try writeString(&writer, "a\"b\nc\x01d");
+    try std.testing.expectEqualStrings("\"a\\\"b\\nc\\u0001d\"", writer.buffered());
 }

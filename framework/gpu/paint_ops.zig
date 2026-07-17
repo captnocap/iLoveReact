@@ -29,9 +29,9 @@ const Fill = struct {
 /// ascending, caller owns the slice (may be empty). Scanning STOPS at the first
 /// unknown tag or truncated operand — exactly where replay execution also stops.
 pub fn redundantFillOffsets(gpa: std.mem.Allocator, ops: []const u8) std.mem.Allocator.Error![]usize {
-    var fills: std.ArrayList(Fill) = .{};
+    var fills: std.ArrayList(Fill) = .empty;
     defer fills.deinit(gpa);
-    var last_by_key: std.AutoHashMapUnmanaged(u64, usize) = .{};
+    var last_by_key: std.AutoHashMapUnmanaged(u64, usize) = .empty;
     defer last_by_key.deinit(gpa);
 
     var p: usize = 0;
@@ -51,7 +51,7 @@ pub fn redundantFillOffsets(gpa: std.mem.Allocator, ops: []const u8) std.mem.All
         p += operand_size;
     }
 
-    var redundant: std.ArrayList(usize) = .{};
+    var redundant: std.ArrayList(usize) = .empty;
     errdefer redundant.deinit(gpa);
     for (fills.items) |fill| {
         if (fill.offset != last_by_key.get(fill.key).?) try redundant.append(gpa, fill.offset);

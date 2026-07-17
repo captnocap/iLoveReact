@@ -1,17 +1,17 @@
 //! Ambient host Io for Zig 0.16's std.Io interface.
 //!
 //! This codebase's idiom is ambient capability access (std.heap.c_allocator at
-//! call sites), not context threading — host_io mirrors that for I/O: one
-//! blocking Threaded instance per process, comptime-initialized so every
-//! binary and test root gets it with zero entry-point wiring. std.Io.Threaded
-//! is documented thread-safe; blocking calls never touch its gpa (only
-//! async/concurrent would, and nothing here uses those).
+//! call sites), not context threading — host_io mirrors that for I/O, riding
+//! std's own process-wide instance (std.Io.Threaded.global_single_threaded) so
+//! every binary and test root gets it with zero entry-point wiring, and files
+//! compiled as standalone module roots (which can't import this hub) reach the
+//! SAME instance via the std name. std.Io.Threaded is documented thread-safe;
+//! blocking calls never touch its gpa (only async/concurrent would, and
+//! nothing here uses those).
 const std = @import("std");
 
-pub var threaded: std.Io.Threaded = .init_single_threaded;
-
 pub fn io() std.Io {
-    return threaded.io();
+    return std.Io.Threaded.global_single_threaded.io();
 }
 
 /// 0.16 removed std.posix.getenv. We link libc in every binary, so route

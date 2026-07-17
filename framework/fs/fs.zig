@@ -11,7 +11,7 @@
 // - Operations take a Dir handle so callers can scope to different roots
 
 const std = @import("std");
-const posix = std.posix;
+const host_io = @import("../host_io.zig");
 
 pub const MAX_PATH = std.fs.max_path_bytes;
 pub const MAX_NAME = 255;
@@ -21,8 +21,8 @@ pub const MAX_NAME = 255;
 pub const FileStat = struct {
     size: u64,
     mtime_ns: i128, // nanoseconds since Unix epoch
-    kind: std.fs.File.Kind,
-    mode: std.fs.File.Mode,
+    kind: std.Io.File.Kind,
+    mode: std.Io.File.Permissions,
 
     /// Convert mtime to seconds (for comparison with Lua os.time() style timestamps)
     pub fn mtimeSec(self: FileStat) i64 {
@@ -33,7 +33,7 @@ pub const FileStat = struct {
 pub const DirEntry = struct {
     name_buf: [MAX_NAME]u8 = undefined,
     name_len: u8 = 0,
-    kind: std.fs.File.Kind = .file,
+    kind: std.Io.File.Kind = .file,
 
     pub fn name(self: *const DirEntry) []const u8 {
         return self.name_buf[0..self.name_len];
@@ -42,7 +42,7 @@ pub const DirEntry = struct {
 
 // -- Module state --
 
-var data_dir: ?std.fs.Dir = null;
+var data_dir: ?std.Io.Dir = null;
 var data_path: [MAX_PATH]u8 = undefined;
 var data_path_len: usize = 0;
 
@@ -56,7 +56,7 @@ pub fn init(app_name: []const u8) !void {
 
     // Resolve XDG data home
     data_path_len = 0;
-    if (posix.getenv("XDG_DATA_HOME")) |xdg| {
+    if (host_io.getenv("XDG_DATA_HOME")) |xdg| {
         if (xdg.len > 0) {
             const s = std.fmt.bufPrint(&data_path, "{s}/{s}", .{ xdg, app_name }) catch
                 return error.NameTooLong;
@@ -64,7 +64,7 @@ pub fn init(app_name: []const u8) !void {
         }
     }
     if (data_path_len == 0) {
-        const home = posix.getenv("HOME") orelse return error.AppDataDirUnavailable;
+        const home = host_io.getenv("HOME") orelse return error.AppDataDirUnavailable;
         const s = std.fmt.bufPrint(&data_path, "{s}/.local/share/{s}", .{ home, app_name }) catch
             return error.NameTooLong;
         data_path_len = s.len;
@@ -72,18 +72,18 @@ pub fn init(app_name: []const u8) !void {
 
     // Create directory tree and open handle
     const path_slice = data_path[0..data_path_len];
-    try std.fs.cwd().makePath(path_slice);
-    data_dir = try std.fs.cwd().openDir(path_slice, .{ .iterate = true });
+    try std.Io.Dir.cwd().createDirPath(host_io.io(), path_slice);
+    data_dir = try std.Io.Dir.cwd().openDir(host_io.io(), path_slice, .{ .iterate = true });
 }
 
 pub fn deinit() void {
-    if (data_dir) |*d| d.close();
+    if (data_dir) |d| d.close(host_io.io());
     data_dir = null;
     data_path_len = 0;
 }
 
 /// Get the app data directory handle. Returns error if not initialized.
-pub fn dataDir() error{NotInitialized}!std.fs.Dir {
+pub fn dataDir() error{NotInitialized}!std.Io.Dir {
     return data_dir orelse error.NotInitialized;
 }
 
@@ -133,24 +133,24 @@ fn checkPath(path: []const u8) error{PathNotConfined}!void {
 
 /// Read a file's contents into the provided buffer. Returns bytes read.
 /// If the file is larger than the buffer, only buf.len bytes are read.
-pub fn readText(dir: std.fs.Dir, path: []const u8, buf: []u8) !usize {
+pub fn readText(dir: std.Io.Dir, path: []const u8, buf: []u8) !usize {
     try checkPath(path);
-    const file = try dir.openFile(path, .{});
-    defer file.close();
-    return file.readAll(buf);
+    const file = try dir.openFile(host_io.io(), path, .{});
+    defer file.close(host_io.io());
+    return file.readPositionalAll(host_io.io(), buf, 0);
 }
 
 /// Write content to a file, creating or truncating as needed.
-pub fn writeText(dir: std.fs.Dir, path: []const u8, content: []const u8) !void {
+pub fn writeText(dir: std.Io.Dir, path: []const u8, content: []const u8) !void {
     try checkPath(path);
-    const file = try dir.createFile(path, .{ .truncate = true });
-    defer file.close();
-    try file.writeAll(content);
+    const file = try dir.createFile(host_io.io(), path, .{ .truncate = true });
+    defer file.close(host_io.io());
+    try file.writeStreamingAll(host_io.io(), content);
 }
 
 /// Write content atomically: write to a temp file, then rename over the target.
 /// If the process crashes mid-write, the original file is untouched.
-pub fn writeAtomic(dir: std.fs.Dir, path: []const u8, content: []const u8) !void {
+pub fn writeAtomic(dir: std.Io.Dir, path: []const u8, content: []const u8) !void {
     try checkPath(path);
 
     // Build temp path
@@ -159,69 +159,69 @@ pub fn writeAtomic(dir: std.fs.Dir, path: []const u8, content: []const u8) !void
         return error.NameTooLong;
 
     // Write to temp file
-    const file = try dir.createFile(tmp_path, .{ .truncate = true });
-    file.writeAll(content) catch |err| {
-        file.close();
-        dir.deleteFile(tmp_path) catch {};
+    const file = try dir.createFile(host_io.io(), tmp_path, .{ .truncate = true });
+    file.writeStreamingAll(host_io.io(), content) catch |err| {
+        file.close(host_io.io());
+        dir.deleteFile(host_io.io(), tmp_path) catch {};
         return err;
     };
-    file.close();
+    file.close(host_io.io());
 
     // Atomic rename (single syscall on POSIX)
-    dir.rename(tmp_path, path) catch |err| {
-        dir.deleteFile(tmp_path) catch {};
+    std.Io.Dir.rename(dir, tmp_path, dir, path, host_io.io()) catch |err| {
+        dir.deleteFile(host_io.io(), tmp_path) catch {};
         return err;
     };
 }
 
 /// Delete a file.
-pub fn deleteFile(dir: std.fs.Dir, path: []const u8) !void {
+pub fn deleteFile(dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
-    try dir.deleteFile(path);
+    try dir.deleteFile(host_io.io(), path);
 }
 
 /// Check if a path exists (file or directory).
-pub fn pathExists(dir: std.fs.Dir, path: []const u8) bool {
+pub fn pathExists(dir: std.Io.Dir, path: []const u8) bool {
     if (!isConfined(path)) return false;
-    _ = dir.statFile(path) catch return false;
+    _ = dir.statFile(host_io.io(), path, .{}) catch return false;
     return true;
 }
 
 // -- Directory operations --
 
 /// Create a single directory. Parent must exist.
-pub fn makeDir(dir: std.fs.Dir, path: []const u8) !void {
+pub fn makeDir(dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
-    try dir.makeDir(path);
+    try dir.createDir(host_io.io(), path, .default_dir);
 }
 
 /// Create a directory and all missing parents.
-pub fn makePath(dir: std.fs.Dir, path: []const u8) !void {
+pub fn makePath(dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
-    try dir.makePath(path);
+    try dir.createDirPath(host_io.io(), path);
 }
 
 /// List the contents of a directory. Returns the number of entries written to `out`.
 /// If there are more entries than out.len, only the first out.len are returned.
-pub fn listDir(dir: std.fs.Dir, path: []const u8, out: []DirEntry) !usize {
+pub fn listDir(dir: std.Io.Dir, path: []const u8, out: []DirEntry) !usize {
     try checkPath(path);
-    var sub = try dir.openDir(path, .{ .iterate = true });
-    defer sub.close();
+    var sub = try dir.openDir(host_io.io(), path, .{ .iterate = true });
+    defer sub.close(host_io.io());
     return iterateDir(sub, out);
 }
 
 /// List the contents of an already-open directory handle.
-pub fn listOpenDir(dir: std.fs.Dir, out: []DirEntry) !usize {
+pub fn listOpenDir(dir: std.Io.Dir, out: []DirEntry) !usize {
     // Re-open to get a fresh iterator without consuming the caller's handle
-    var copy = try std.fs.Dir.openDir(dir, ".", .{ .iterate = true });
-    defer copy.close();
+    var copy = try std.Io.Dir.openDir(dir, host_io.io(), ".", .{ .iterate = true });
+    defer copy.close(host_io.io());
     return iterateDir(copy, out);
 }
 
-fn iterateDir(dir: std.fs.Dir, out: []DirEntry) !usize {
+fn iterateDir(dir: std.Io.Dir, out: []DirEntry) !usize {
     var iter = dir.iterate();
     var count: usize = 0;
-    while (try iter.next()) |entry| {
+    while (try iter.next(host_io.io())) |entry| {
         if (count >= out.len) break;
         const len: u8 = @intCast(@min(entry.name.len, MAX_NAME));
         @memcpy(out[count].name_buf[0..len], entry.name[0..len]);
@@ -233,28 +233,28 @@ fn iterateDir(dir: std.fs.Dir, out: []DirEntry) !usize {
 }
 
 /// Delete an empty directory.
-pub fn deleteDir(dir: std.fs.Dir, path: []const u8) !void {
+pub fn deleteDir(dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
-    try dir.deleteDir(path);
+    try dir.deleteDir(host_io.io(), path);
 }
 
 /// Recursively delete a directory and all its contents.
-pub fn deleteTree(dir: std.fs.Dir, path: []const u8) !void {
+pub fn deleteTree(dir: std.Io.Dir, path: []const u8) !void {
     try checkPath(path);
-    try dir.deleteTree(path);
+    try dir.deleteTree(host_io.io(), path);
 }
 
 // -- Stat --
 
 /// Get metadata for a file or directory.
-pub fn statPath(dir: std.fs.Dir, path: []const u8) !FileStat {
+pub fn statPath(dir: std.Io.Dir, path: []const u8) !FileStat {
     try checkPath(path);
-    const s = try dir.statFile(path);
+    const s = try dir.statFile(host_io.io(), path, .{});
     return FileStat{
         .size = s.size,
-        .mtime_ns = s.mtime,
+        .mtime_ns = @intCast(s.mtime.toNanoseconds()),
         .kind = s.kind,
-        .mode = s.mode,
+        .mode = s.permissions,
     };
 }
 
@@ -301,7 +301,7 @@ test "file round-trip in tmp dir" {
     // Stat
     const s = try statPath(tmp.dir, "test.txt");
     try std.testing.expectEqual(@as(u64, content.len), s.size);
-    try std.testing.expectEqual(std.fs.File.Kind.file, s.kind);
+    try std.testing.expectEqual(std.Io.File.Kind.file, s.kind);
 
     // Delete
     try deleteFile(tmp.dir, "test.txt");
