@@ -47,11 +47,13 @@ export default function MapDocumentsDialog(props: {
   measureCurrentTriangles: boolean;
   onOpen: (stem: string, currentTriangles: number | null) => void;
   onNew: (name: string, currentTriangles: number | null) => void;
+  onGenerateCoastal: (name: string, seed: number, currentTriangles: number | null) => void;
   onRename: (stem: string, name: string, currentTriangles: number | null) => boolean;
   onDelete: (stem: string) => boolean;
   onClose: (currentTriangles: number | null) => void;
 }) {
   const [name, setName] = useState('untitled');
+  const [coastalSeed, setCoastalSeed] = useState('18473');
   const [renamingStem, setRenamingStem] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [deleteStem, setDeleteStem] = useState<string | null>(null);
@@ -62,6 +64,12 @@ export default function MapDocumentsDialog(props: {
     && gpu.scene3d_triangles > 0
       ? Math.trunc(gpu.scene3d_triangles)
       : null;
+  const parsedCoastalSeed = /^\d+$/.test(coastalSeed.trim())
+    ? Number(coastalSeed.trim())
+    : Number.NaN;
+  const coastalSeedValid = Number.isSafeInteger(parsedCoastalSeed)
+    && parsedCoastalSeed >= 0
+    && parsedCoastalSeed <= 0xffff_ffff;
 
   const beginRename = (document: MapDocumentSummary) => {
     setDeleteStem(null);
@@ -76,7 +84,7 @@ export default function MapDocumentsDialog(props: {
 
   return (
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: 'rgba(4,5,7,0.68)', alignItems: 'center', justifyContent: 'center' }}>
-      <Col style={{ width: 660, height: 590, backgroundColor: PANEL, borderWidth: 1, borderColor: BORDER, borderRadius: 14, overflow: 'hidden' }}>
+      <Col style={{ width: 660, height: 650, backgroundColor: PANEL, borderWidth: 1, borderColor: BORDER, borderRadius: 14, overflow: 'hidden' }}>
         <Row style={{ height: 46, alignItems: 'center', gap: 9, paddingLeft: 14, paddingRight: 12, borderBottomWidth: 1, borderBottomColor: BORDER }}>
           <Icon name="Map" size={16} color={ACCENT} />
           <Text style={{ color: TEXT, fontSize: 14, fontWeight: '700' }}>Map Workspaces</Text>
@@ -97,6 +105,23 @@ export default function MapDocumentsDialog(props: {
               />
               <Pressable onPress={() => props.onNew(name, measuredTriangles)} style={{ height: 32, paddingLeft: 14, paddingRight: 14, borderRadius: 7, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ color: '#0b1018', fontSize: 11, fontWeight: '800' }}>Create clean map</Text>
+              </Pressable>
+            </Row>
+            <Row style={{ gap: 8, alignItems: 'center' }}>
+              <TextInput
+                value={coastalSeed}
+                onChange={setCoastalSeed}
+                placeholder="uint32 seed"
+                style={{ width: 116, height: 32, color: coastalSeedValid ? TEXT : DANGER, backgroundColor: '#101114', borderWidth: 1, borderColor: coastalSeedValid ? BORDER : DANGER, borderRadius: 7, paddingLeft: 10, paddingRight: 10, fontSize: 12, fontFamily: MONO }}
+              />
+              <Text style={{ color: FAINT, fontSize: 10, flexGrow: 1 }}>
+                9×9 coastal baseline · terrain, water, roads, rail, and one floor anchor per building site
+              </Text>
+              <Pressable
+                onPress={() => { if (coastalSeedValid) props.onGenerateCoastal(name, parsedCoastalSeed, measuredTriangles); }}
+                style={{ height: 32, paddingLeft: 12, paddingRight: 12, borderRadius: 7, backgroundColor: '#70b58a', opacity: coastalSeedValid ? 1 : 0.4, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Text style={{ color: '#09130d', fontSize: 11, fontWeight: '800' }}>Generate coastal baseline</Text>
               </Pressable>
             </Row>
           </Col>

@@ -48,6 +48,8 @@ import { setAuthoredPieces, authoredIdFor, preferredAuthoredPaletteId, type Auth
 import { cacheAuthoredMesh, authoredMeshData, authoredMeshBounds } from '../world/authoredMesh';
 import { loadPersistedState, persistState } from '../data/persistView';
 import { cancelWorldSave, emptyWorldSave, flushWorldSave, readWorldSave, saveWorldNow, scheduleWorldSave, type WorldSave } from '../data/worldStore';
+import { generateCoastalCity } from '../data/coastalCity';
+import { coastalCityWorldSave } from '../data/coastalCityDocument';
 import {
   createMapDocument,
   deleteMapDocument,
@@ -60,7 +62,16 @@ import {
 import { mapAuthoringSlicesFor } from '../data/mapDocumentState';
 import { saveAuthoredPieces, authoredModelIdForPackage } from '../data/initialState';
 import { propRigToSkeleton, skeletonToPropRig, describePropRig, partsToCharacterSkeleton, matchCharacterBones, type PropRig, type CharacterPartRow } from '../../../runtime/skeleton';
-import { activateMapDocumentPainting, applyMapPaintEffects, flushMapDocumentPainting, defaultMapPaint, setMapDocumentAutosave } from '../stage/mapPaint';
+import {
+  activateMapDocumentPainting,
+  applyMapPaintEffects,
+  flushMapDocumentPainting,
+  defaultMapPaint,
+  installGeneratedMapDocumentPainting,
+  setMapDocumentAutosave,
+  type GeneratedMapPaintingInstallation,
+} from '../stage/mapPaint';
+import { compileCoastalCityPainting } from '../stage/coastalCity';
 import MapTexturePicker from '../stage/MapTexturePicker';
 import { dispatchColorStudioActionOutcome, dispatchCommandOutcome, dispatchEdit, dispatchGlobalsSet, dispatchMapPaint, dispatchModelOutlinerActionOutcome, dispatchNativeMeshAction, dispatchPieceEditOutcome, dispatchPieceMaterialOutcome, dispatchPiecePlacementOutcome, type MapPaintPayload } from '../data/editorEvents';
 import { commandById, isMeshToolCommand, PRIMITIVE_MESHES, blockingOverlay, publishColorStudioUndoDepths, publishUndoDepths, undoDepths, type BlockingOverlay } from '../data/commands';
@@ -1449,6 +1460,7 @@ export default function AppFrame() {
     outgoingTriangles: number | null = null,
     bypassUnsavedPrompt = false,
     discardOutgoing = false,
+    initializePainting: (() => GeneratedMapPaintingInstallation) | null = null,
   ) => {
     if (outgoingTriangles !== null) recordMapDocumentRenderStats(state.activeMapStem, outgoingTriangles);
     if (stem === state.activeMapStem) {
@@ -1463,8 +1475,8 @@ export default function AppFrame() {
     if (!bypassUnsavedPrompt && !persistenceSettings.autosave && manualWorldDirty) {
       requestUnsavedDecision(
         state.activeMapName,
-        () => { if (saveWorldNowAll()) switchMapDocument(stem, target, verb, name, outgoingTriangles, true, false); },
-        () => switchMapDocument(stem, target, verb, name, outgoingTriangles, true, true),
+        () => { if (saveWorldNowAll()) switchMapDocument(stem, target, verb, name, outgoingTriangles, true, false, initializePainting); },
+        () => switchMapDocument(stem, target, verb, name, outgoingTriangles, true, true, initializePainting),
         verb === 'created' ? () => { deleteMapDocument(stem, state.activeMapStem); } : undefined,
       );
       return;
@@ -1487,29 +1499,48 @@ export default function AppFrame() {
     const activation = activateMapDocumentPainting(stem, target.zones);
     if (!activation.ok) {
       const rollback = activateMapDocumentPainting(outgoingStem, outgoingZones);
+      const cleanup = verb === 'created' && rollback.ok ? deleteMapDocument(stem, outgoingStem) : null;
       setState((prev) => ({
         ...prev,
-        status: `map switch refused — ${activation.error}${rollback.ok ? '; current map restored' : `; WARNING: current map reload also failed (${rollback.error})`}`,
+        status: `map switch refused — ${activation.error}${rollback.ok ? '; current map restored' : `; WARNING: current map reload also failed (${rollback.error})`}${cleanup && !cleanup.ok ? `; incomplete map cleanup failed (${cleanup.error})` : ''}`,
+      }));
+      return;
+    }
+
+    const initialized = initializePainting?.() ?? null;
+    if (initialized && !initialized.ok) {
+      const rollback = activateMapDocumentPainting(outgoingStem, outgoingZones);
+      const cleanup = verb === 'created' && rollback.ok ? deleteMapDocument(stem, outgoingStem) : null;
+      setState((prev) => ({
+        ...prev,
+        status: `map generation stopped — ${initialized.error}${rollback.ok ? '; current map restored' : `; WARNING: current map reload also failed (${rollback.error})`}${cleanup && !cleanup.ok ? `; incomplete map cleanup failed (${cleanup.error})` : ''}`,
       }));
       return;
     }
 
     if (!saveWorldNow(target) || !setActiveMapDocumentStem(stem)) {
       const rollback = activateMapDocumentPainting(outgoingStem, outgoingZones);
+      const cleanup = verb === 'created' && rollback.ok ? deleteMapDocument(stem, outgoingStem) : null;
       setState((prev) => ({
         ...prev,
-        status: `map switch stopped — could not commit ${stem}'s world save/pointer${rollback.ok ? '; current map restored' : `; WARNING: current map reload failed (${rollback.error})`}`,
+        status: `map switch stopped — could not commit ${stem}'s world save/pointer${rollback.ok ? '; current map restored' : `; WARNING: current map reload failed (${rollback.error})`}${cleanup && !cleanup.ok ? `; incomplete map cleanup failed (${cleanup.error})` : ''}`,
       }));
       return;
     }
 
+    const bindings = initialized?.bindings ?? activation.bindings;
+    const contentSummary = initialized
+      ? `${initialized.chunks} chunks, ${initialized.roads} roads, ${initialized.rails} rail lines, ${target.pieces.length} floor anchors`
+      : activation.seeded
+        ? 'clean seed chunk'
+        : `${target.pieces.length} placed piece${target.pieces.length === 1 ? '' : 's'}`;
     skipNextWorldDirtyRef.current = true;
     setState((prev) => ({
       ...prev,
-      ...mapAuthoringSlicesFor(prev, stem, target, activation.bindings, name),
+      ...mapAuthoringSlicesFor(prev, stem, target, bindings, name),
       openMenu: null,
       actionMenu: 'File',
-      status: `${verb} map ${name} — ${activation.seeded ? 'clean seed chunk' : `${target.pieces.length} placed piece${target.pieces.length === 1 ? '' : 's'}`}; all map authoring switched together`,
+      status: `${verb} map ${name} — ${contentSummary}; all map authoring switched together`,
     }));
     setManualWorldDirty(false);
   };
@@ -1533,6 +1564,53 @@ export default function AppFrame() {
       return;
     }
     switchMapDocument(stem, emptyWorldSave(stem, state.seq), 'created', mapDocumentName(stem), currentTriangles);
+  };
+
+  const createCoastalMap = (rawName: string, seed: number, currentTriangles: number | null = null) => {
+    if (!mapHostLive()) {
+      setState((prev) => ({ ...prev, status: 'coastal generation unavailable — rebuild/run the editor with the game-map host enabled' }));
+      return;
+    }
+    let plan: ReturnType<typeof generateCoastalCity>;
+    let painting: ReturnType<typeof compileCoastalCityPainting>;
+    try {
+      plan = generateCoastalCity(seed);
+      painting = compileCoastalCityPainting(plan);
+    } catch (error) {
+      setState((prev) => ({ ...prev, status: `coastal generation failed — ${(error as Error).message}; current map left untouched` }));
+      return;
+    }
+
+    let stem: string;
+    try {
+      stem = createMapDocument(rawName);
+    } catch (error) {
+      setState((prev) => ({ ...prev, status: `could not create coastal map — ${(error as Error).message}; current map left untouched` }));
+      return;
+    }
+
+    let target: WorldSave;
+    try {
+      target = coastalCityWorldSave(stem, state.seq, plan);
+    } catch (error) {
+      const cleanup = deleteMapDocument(stem, state.activeMapStem);
+      setState((prev) => ({
+        ...prev,
+        status: `coastal document compile failed — ${(error as Error).message}; current map left untouched${cleanup.ok ? '' : `; incomplete map cleanup failed (${cleanup.error})`}`,
+      }));
+      return;
+    }
+
+    switchMapDocument(
+      stem,
+      target,
+      'created',
+      mapDocumentName(stem),
+      currentTriangles,
+      false,
+      false,
+      () => installGeneratedMapDocumentPainting(stem, target.zones, painting.chunks, painting.paths),
+    );
   };
 
   const renameExistingMap = (stem: string, rawName: string, currentTriangles: number | null): boolean => {
@@ -5010,6 +5088,7 @@ export default function AppFrame() {
             measureCurrentTriangles={state.workspaceDocuments.find((doc) => doc.id === state.activeWorkspaceDocumentId)?.kind === 'world'}
             onOpen={openMapDocument}
             onNew={createNewMap}
+            onGenerateCoastal={createCoastalMap}
             onRename={renameExistingMap}
             onDelete={deleteExistingMap}
             onClose={closeMapDocuments}

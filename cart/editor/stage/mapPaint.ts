@@ -6,7 +6,7 @@
 // AppFrame owns the state and calls applyMapPaintEffects on every patch so the
 // host tool tracks chrome.
 import {
-  mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapLoadFile, mapReset, mapSaveFile, mapSetAutosaveFile,
+  mapChunkCount, mapGetTileBindings, mapGrowChunk, mapHostLive, mapInstallGenerated, mapLoadFile, mapReset, mapSaveFile, mapSetAutosaveFile,
   mapSetGroundLook, mapSetTileBindings, mapSetTool, mapSetZonePalette, mapSetFloraSpecs, mapRoadSetKinds,
   mapPathSetProfile, mapSetBrushGizmo,
   mapPathSetLevel, mapPathSetTool,
@@ -146,6 +146,10 @@ export type MapPaintingActivation =
   | { ok: true; bindings: TileMaterialBinding[]; seeded: boolean }
   | { ok: false; error: string };
 
+export type GeneratedMapPaintingInstallation =
+  | { ok: true; bindings: TileMaterialBinding[]; chunks: number; paths: number; roads: number; rails: number }
+  | { ok: false; error: string };
+
 function configureMapContent(zones: readonly MapZoneDef[]): void {
   mapSetGroundLook(EDITOR_GROUND_FORMULA, TILE_KIND_PALETTE, FLORA_KIND_PALETTE, zonePaletteOf(zones));
   mapRoadSetKinds(ROAD_KIND_INDICES);
@@ -185,6 +189,44 @@ export function activateMapDocumentPainting(stem: string, zones: readonly MapZon
   finishLegacyMapImport(paths.stem);
   liveMapStem = paths.stem;
   return { ok: true, bindings: floatsToBindings(mapGetTileBindings()), seeded };
+}
+
+/** Replace the already-activated target document with a complete generated
+ * painting. The bulk host door validates both wires before mutation; this
+ * boundary then restores the cart-owned palettes, durably saves the canonical
+ * RMAP, and only after that re-enables autosave for the named target. */
+export function installGeneratedMapDocumentPainting(
+  stem: string,
+  zones: readonly MapZoneDef[],
+  chunkRows: Float32Array,
+  pathRows: Float32Array,
+): GeneratedMapPaintingInstallation {
+  const targetStem = mapDocumentPaths(stem).stem;
+  if (!mapHostLive()) return { ok: false, error: 'map host is not live in this binary' };
+  if (liveMapStem !== targetStem) {
+    return { ok: false, error: `generated painting target ${targetStem} is not the active native map` };
+  }
+  if (!mapSetAutosaveFile('')) {
+    return { ok: false, error: 'map autosave door is unavailable; rebuild the editor host' };
+  }
+
+  const installed = mapInstallGenerated(chunkRows, pathRows);
+  if (!installed.ok) return { ok: false, error: `generated map rejected (${installed.error})` };
+
+  configureMapContent(zones);
+  const path = editorMapFile(targetStem);
+  if (!mapSaveFile(path)) return { ok: false, error: `could not save generated painting to ${path}` };
+  if (!mapSetAutosaveFile(mapAutosaveEnabled ? path : '')) {
+    return { ok: false, error: 'map autosave door is unavailable; rebuild the editor host' };
+  }
+  return {
+    ok: true,
+    bindings: floatsToBindings(mapGetTileBindings()),
+    chunks: installed.chunks,
+    paths: installed.paths,
+    roads: installed.roads,
+    rails: installed.rails,
+  };
 }
 
 /** Durably flush the current host painting to the named outgoing document. */
