@@ -1,0 +1,17 @@
+{
+  "id": "req_3177",
+  "at": "2026-07-18T08:20:18.631Z",
+  "origin": "one-off",
+  "text": "shit sorry i closed the terminal on naccidennt lmao im back tho did u have background tasks running or were those stale. i just nuked them if they were running",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T08:20:38.507Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

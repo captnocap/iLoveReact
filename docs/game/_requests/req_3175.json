@@ -1,0 +1,18 @@
+{
+  "id": "req_3175",
+  "at": "2026-07-18T08:12:08.161Z",
+  "origin": "session:10510dac",
+  "text": "hey it runs :D or atleast nothing broke yet however u want to think about it. nice well uh do u need to leave some new api pointers as a note or something for future goes to know to use the 0.16 updates since its not in anyone of ur training data anyways, also curious what versions of react and typescript do we run and what is the current",
+  "status": "doing",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T08:12:19.146Z",
+      "actor": "fable",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

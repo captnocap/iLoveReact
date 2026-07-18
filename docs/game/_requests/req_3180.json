@@ -1,0 +1,17 @@
+{
+  "id": "req_3180",
+  "at": "2026-07-18T08:25:09.822Z",
+  "origin": "one-off",
+  "text": "oh yeah lmao dude i dont even know how to switch them man too much hassle when no one uses it but me so its just one heaping pile of shit :) thanks so basically you would agree then the next best thing to do might be start to hit the global and cut down the list and get every function to not just pump through a firehose yeah",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T08:25:49.288Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

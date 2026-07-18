@@ -1,0 +1,18 @@
+{
+  "id": "req_3184",
+  "at": "2026-07-18T08:42:17.166Z",
+  "origin": "codex:019f744e",
+  "text": "great use this to have some agents seek out all of them for us, and were going to compile an enshitification list from it. all the code updates come from the branch that merged on git so they can scope searching specific to there",
+  "status": "doing",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T08:42:27.067Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    }
+  ]
+}

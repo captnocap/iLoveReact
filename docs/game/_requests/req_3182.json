@@ -1,0 +1,28 @@
+{
+  "id": "req_3182",
+  "at": "2026-07-18T08:34:45.380Z",
+  "origin": "codex:019f744e",
+  "text": "this was also what another pointed out in that same document The 0.15-shaped shim table — that's the enshittification vector, and it's sneakier. host_io.milliTimestamp(), host_io.Mutex, wrappers that recreate deleted APIs under the old names: your codebase now speaks a house dialect that is neither 0.15 nor 0.16. Every future agent arrives knowing 0.15 from training, gets told \"no, we're on 0.16,\" and then finds code shaped like 0.15 anyway. That's a permanent tax on exactly your workforce — the doc itself is the tell, since its whole opening move is \"when a call looks wrong to you, it isn't.\" A migration that requires a standing letter explaining why the code looks wrong to every reader is carrying idiom debt, and unlike the global, shims don't have a natural payoff trigger; they just accrete callers forever.",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T08:34:57.218Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T08:35:32.754Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Assessed the additional Zig 0.16 migration concern without changing code or delegating work. Confirmed no oracle ruling protects the 0.15-shaped host_io facade; concluded that the documented instruction to prefer those shims creates a permanent house dialect and hides policy/capability semantics. Refined the proposed boundary: any root initialization helper must expose no 0.15-style API, and framework subsystems should receive explicit std.Io or narrow dependencies.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T08:35:32.754Z"
+}

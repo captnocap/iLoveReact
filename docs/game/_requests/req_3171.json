@@ -1,0 +1,17 @@
+{
+  "id": "req_3171",
+  "at": "2026-07-18T07:09:32.515Z",
+  "origin": "one-off",
+  "text": "no its running now, i was just sharing that between the last message and that one, codex has been up for 1 minute. i assume they are doing what the prompt said to do i was just verifying it is the same remaining errors",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T07:09:51.740Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

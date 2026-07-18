@@ -1,0 +1,17 @@
+{
+  "id": "req_3168",
+  "at": "2026-07-18T06:55:24.306Z",
+  "origin": "one-off",
+  "text": "alright well uh its all mechanical right. i mean yeah it is because a machine writes it all anyways lmao uh dude literally all the codex agents u used was only 3% of my weekly that resets in 3 more days  so feel free to gas them up or something man idk how these guys arnt broke giving out so many tokens. i have 5 resets to somehow use in the next 3 weeks or they expire",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T06:55:49.939Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

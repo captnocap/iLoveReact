@@ -1,0 +1,17 @@
+{
+  "id": "req_3164",
+  "at": "2026-07-18T06:21:50.396Z",
+  "origin": "one-off",
+  "text": "yeah nno problem so..... come here often? hey i guess Kimi k3 just dropped. 3 for 3 trillion parameters lmao  dude i wonder how much memory you need to load that thing holy smokes",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T06:22:00.279Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "req_3169",
+  "at": "2026-07-18T07:04:12.386Z",
+  "origin": "session:10510dac",
+  "text": "you have a shell that is open that looks like its just a git command that ate shit or something im not sure",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": []
+}

@@ -1,0 +1,17 @@
+{
+  "id": "req_3165",
+  "at": "2026-07-18T06:23:23.513Z",
+  "origin": "one-off",
+  "text": "how big is 3 trillion parameters. if you were to guesstimate it on the amount of normal printing paper. how many pages is your guess",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T06:23:40.447Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

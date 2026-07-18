@@ -1,0 +1,17 @@
+{
+  "id": "req_3176",
+  "at": "2026-07-18T08:19:07.802Z",
+  "origin": "one-off",
+  "text": "<task-notification>\n<task-id>bsmnbz657</task-id>\n<task-id>b65wdfc2s</task-id>\n<task-id>__orphan_summary__:shell</task-id>\n<status>stopped</status>\n<summary>2 background shell command task(s) from the previous session have no completion record. They may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or they may have been running when the previous Claude Code process exited. They have been marked stopped. Task ids: bsmnbz657, b65wdfc2s. Task ids in this notification beginning with \"__orphan_summary\" are internal scan markers, not tasks.</summary>\n</task-notification>",
+  "status": "new",
+  "sessionId": "10510dac-bb16-4ed0-b927-435e15fee440",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T08:20:38.500Z",
+      "actor": "fable",
+      "kind": "note",
+      "text": "dropped off the board as a one-off — unrelated to the editor/game building (REQSCOPE-0705 scope gate)"
+    }
+  ]
+}

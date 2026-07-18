@@ -1,0 +1,28 @@
+{
+  "id": "req_3183",
+  "at": "2026-07-18T08:36:52.058Z",
+  "origin": "codex:019f744e",
+  "text": "so pull up one of these functions in full and show me what it looks like and what it should look like when following the zig 0.16 api",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T08:37:00.942Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T08:38:43.676Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Performed a single-agent read-only comparison using framework/gpu/paint_program.zig and the bundled Zig 0.16 std source. Selected replayAll as a real caller of host_io.Timer. Verified that the shim fabricates the deleted 0.15 Timer error-returning shape even though std.Io.Clock.Timestamp.now is non-erroring, and prepared the exact explicit-std.Io rewrite using an injected std.Io, Clock.Timestamp.now(io, .awake), and untilNow(io). No files changed.",
+  "shas": [],
+  "resolvedAt": "2026-07-18T08:38:43.676Z"
+}
