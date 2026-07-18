@@ -34,6 +34,7 @@ const log = @import("../diag/log.zig");
 const vterm_mod = @import("vterm.zig");
 const classifier = @import("classifier.zig");
 const posix = @import("../net/sysx.zig");
+const host_io = @import("../host_io.zig");
 
 const MAX_CLIENTS = 4;
 const READ_BUF_SIZE = 4096;
@@ -60,7 +61,7 @@ pub fn init() void {
     const path_z: [*:0]const u8 = @ptrCast(g_sock_path_buf[0..g_sock_path_len]);
 
     // Remove stale socket
-    _ = std.Io.Dir.cwd().deleteFile(g_sock_path_buf[0..g_sock_path_len]) catch {};
+    _ = std.Io.Dir.cwd().deleteFile(host_io.io(), g_sock_path_buf[0..g_sock_path_len]) catch {};
 
     // Create unix socket
     const fd = posix.socket(posix.AF.UNIX, posix.SOCK.STREAM | posix.SOCK.NONBLOCK | posix.SOCK.CLOEXEC, 0) catch |err| {
@@ -103,7 +104,7 @@ pub fn deinit() void {
         g_server_fd = null;
     }
     if (g_sock_path_len > 0) {
-        _ = std.Io.Dir.cwd().deleteFile(g_sock_path_buf[0..g_sock_path_len]) catch {};
+        _ = std.Io.Dir.cwd().deleteFile(host_io.io(), g_sock_path_buf[0..g_sock_path_len]) catch {};
     }
     g_initialized = false;
 }

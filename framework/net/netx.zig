@@ -1026,7 +1026,7 @@ pub const Stream = struct {
     }
 
     /// Deprecated in favor of `Writer`.
-    pub fn writeAll(self: Stream, bytes: []const u8) WriteError!void {
+    pub fn writeAll(self: Stream, bytes: []const u8) (WriteError || posix.WriteError)!void {
         var index: usize = 0;
         while (index < bytes.len) {
             index += try self.write(bytes[index..]);

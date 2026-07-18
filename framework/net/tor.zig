@@ -69,7 +69,7 @@ pub fn start(opts: TorOpts) !void {
             // Try creating parent first
             var parent_buf: [MAX_PATH]u8 = undefined;
             const parent = try std.fmt.bufPrint(&parent_buf, "{s}/.cache/reactjit-tor", .{home});
-            std.Io.Dir.makeDirAbsolute(host_io.io(), parent) catch {};
+            std.Io.Dir.createDirAbsolute(host_io.io(), parent, .default_dir) catch {};
             std.Io.Dir.createDirAbsolute(host_io.io(), dir, .default_dir) catch {};
         }
     };
@@ -77,14 +77,14 @@ pub fn start(opts: TorOpts) !void {
     // Create hidden service directory
     var hs_dir_buf: [MAX_PATH]u8 = undefined;
     const hs_dir = try std.fmt.bufPrint(&hs_dir_buf, "{s}/hidden_service", .{dir});
-    std.Io.Dir.makeDirAbsolute(host_io.io(), hs_dir) catch {};
+    std.Io.Dir.createDirAbsolute(host_io.io(), hs_dir, .default_dir) catch {};
 
     // Generate torrc
     var torrc_path_buf: [MAX_PATH]u8 = undefined;
     const torrc_path = try std.fmt.bufPrint(&torrc_path_buf, "{s}/torrc", .{dir});
 
-    const torrc_file = try std.fs.createFileAbsolute(torrc_path, .{});
-    defer torrc_file.close();
+    const torrc_file = try std.Io.Dir.createFileAbsolute(host_io.io(), torrc_path, .{});
+    defer torrc_file.close(host_io.io());
     var torrc_buf: [2048]u8 = undefined;
     const torrc = try std.fmt.bufPrint(
         &torrc_buf,
@@ -95,19 +95,20 @@ pub fn start(opts: TorOpts) !void {
             "Log notice file {s}/tor.log\n",
         .{ socks_port, hs_dir, opts.hidden_service_port, hs_port, dir, dir },
     );
-    try torrc_file.writeAll(torrc);
+    try torrc_file.writeStreamingAll(host_io.io(), torrc);
 
     // Create data directory
     var data_dir_buf: [MAX_PATH]u8 = undefined;
     const data_dir = try std.fmt.bufPrint(&data_dir_buf, "{s}/data", .{dir});
-    std.Io.Dir.makeDirAbsolute(host_io.io(), data_dir) catch {};
+    std.Io.Dir.createDirAbsolute(host_io.io(), data_dir, .default_dir) catch {};
 
     // Spawn Tor process
-    var child = std.process.Child.init(&[_][]const u8{ "tor", "-f", torrc_path }, std.heap.page_allocator);
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Ignore;
-    try child.spawn();
+    const child = try std.process.spawn(host_io.io(), .{
+        .argv = &[_][]const u8{ "tor", "-f", torrc_path },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
 
     pid = child;
     running = true;
