@@ -33,6 +33,70 @@ const TERRAIN_TOOLS: readonly MapTerrainTool[] = ['brush', 'ramp', 'slope', 'smo
 const SHAPES: readonly MapBrushShape[] = ['circle', 'square', 'diamond'];
 const PROFILES: readonly MapBrushProfile[] = ['cone', 'flat', 'dome'];
 
+const GENERATED_SAMPLE_COUNT = 241 * 241;
+const GENERATED_TILE_COUNT = 120 * 120;
+
+/** Versioned Float32 bulk-install layout. The generator compiles source data
+ * into these two numeric wires; path triples use centered editor-world x/z.
+ * Native code validates and installs them into the canonical chunk and
+ * semantic-path owners without a JSON/RMAP detour. */
+export const MAP_GENERATED_WIRE = {
+  version: 1,
+  chunkHeaderFloats: 5,
+  sampleCount: GENERATED_SAMPLE_COUNT,
+  tileCount: GENERATED_TILE_COUNT,
+  chunkStride: 2 + GENERATED_SAMPLE_COUNT * 2 + GENERATED_TILE_COUNT * 5,
+  pathHeaderFloats: 2,
+  pathRecordHeaderFloats: 8,
+} as const;
+
+const NATIVE_GENERATED_INSTALL_ERRORS = [
+  'none',
+  'chunkHeader',
+  'chunkVersion',
+  'chunkCount',
+  'chunkStride',
+  'chunkSampleCount',
+  'chunkTileCount',
+  'chunkShape',
+  'chunkNonFinite',
+  'chunkCoordinate',
+  'chunkBounds',
+  'chunkDuplicate',
+  'heightRange',
+  'waterDepth',
+  'cellIndex',
+  'pathHeader',
+  'pathVersion',
+  'pathCount',
+  'pathShape',
+  'pathNonFinite',
+  'pathKind',
+  'pathProfile',
+  'pathPointCount',
+  'pathBounds',
+  'pathSegmentTooShort',
+  'pathCurveTooTight',
+  'pathGradeTooSteep',
+  'chunkAllocation',
+  'pathCommit',
+  'roadPlanTruncated',
+] as const;
+
+export type MapGeneratedInstallError =
+  | typeof NATIVE_GENERATED_INSTALL_ERRORS[number]
+  | 'hostUnavailable'
+  | 'hostFailure';
+
+export type MapGeneratedInstallResult = {
+  ok: boolean;
+  error: MapGeneratedInstallError;
+  chunks: number;
+  paths: number;
+  roads: number;
+  rails: number;
+};
+
 export interface MapTool {
   channel: MapChannel;
   mode?: MapMode;
@@ -106,6 +170,35 @@ export function mapHostLive(): boolean {
  * caller must explicitly bind a new target after loading/seeding a document. */
 export function mapReset(): void {
   callHost('__map_reset', undefined);
+}
+
+/** Replace the native painting from one fully compiled generated-map payload.
+ * Invalid input leaves the current map untouched. A failure after replacement
+ * starts leaves an empty, unbound map; on success the caller explicitly saves
+ * and binds the named map document. */
+export function mapInstallGenerated(
+  chunkRows: Float32Array,
+  pathRows: Float32Array,
+): MapGeneratedInstallResult {
+  const empty = { chunks: 0, paths: 0, roads: 0, rails: 0 };
+  if (!hasHost('__map_install_generated')) {
+    return { ok: false, error: 'hostUnavailable', ...empty };
+  }
+  const buffer = callHost<ArrayBuffer | null>('__map_install_generated', null, chunkRows, pathRows);
+  if (!buffer) return { ok: false, error: 'hostFailure', ...empty };
+  const out = new Float32Array(buffer);
+  if (out.length < 6) return { ok: false, error: 'hostFailure', ...empty };
+  const errorCode = Math.trunc(out[1] ?? -1);
+  const error = NATIVE_GENERATED_INSTALL_ERRORS[errorCode] ?? 'hostFailure';
+  const ok = (out[0] ?? 0) >= 0.5 && error === 'none';
+  return {
+    ok,
+    error: ok ? 'none' : error,
+    chunks: Math.trunc(out[2] ?? 0),
+    paths: Math.trunc(out[3] ?? 0),
+    roads: Math.trunc(out[4] ?? 0),
+    rails: Math.trunc(out[5] ?? 0),
+  };
 }
 
 /** Allocate the chunk at (cx,cz). Returns false out-of-window. */

@@ -24,6 +24,7 @@ const std = @import("std");
 const chunks = @import("chunks.zig");
 const stamps = @import("stamps.zig");
 const foliage = @import("../../world/foliage.zig");
+pub const generated = @import("generated.zig");
 pub const transport = @import("transport.zig");
 pub const roads = @import("roads.zig");
 
@@ -1315,8 +1316,17 @@ pub fn encodeGroundData(chunk: *const chunks.Chunk, dst: []f32) usize {
 // junctions depend on every stroke, and road footprints are tiny next to the
 // chunk grids.
 
-const MAX_PLAN_CELLS: usize = 65536;
-var g_plan_cells: [MAX_PLAN_CELLS]roads.PlanCell = undefined;
+pub const MapTuning = struct {
+    /// Complete global road-plan budget. A generated city must fail as a whole
+    /// instead of accepting a plausible-looking truncated road grid.
+    max_road_plan_cells: usize,
+};
+
+pub const MAP_TUNING = MapTuning{
+    .max_road_plan_cells = 262_144,
+};
+
+var g_plan_cells: [MAP_TUNING.max_road_plan_cells]roads.PlanCell = undefined;
 /// cell → the (tile, material) pair beneath the road stamp.
 var g_road_under: std.AutoHashMapUnmanaged(u64, [2]i16) = .empty;
 /// cell → render-only lane paint flags, re-derived on every global restamp.
@@ -1367,13 +1377,42 @@ pub fn roadsRestamp() void {
     // (hand-painted materials never bleed into the grammar's lanes).
     for (g_plan_cells[0..plan.count]) |pc| {
         const cell = cellAtGlobal(pc.gx, pc.gz) orelse continue;
-        g_road_under.put(seen_alloc, roadCellKey(pc.gx, pc.gz), .{ cell.tile.*, cell.material.* }) catch continue;
+        g_road_under.put(seen_alloc, roadCellKey(pc.gx, pc.gz), .{ cell.tile.*, cell.material.* }) catch {
+            road_plan_truncated = true;
+            continue;
+        };
         cell.tile.* = roads.kindIndex(pc.kind);
         cell.material.* = chunks.EMPTY_CELL;
         if (pc.markings != 0) {
-            g_road_markings.put(seen_alloc, roadCellKey(pc.gx, pc.gz), pc.markings) catch {};
+            g_road_markings.put(seen_alloc, roadCellKey(pc.gx, pc.gz), pc.markings) catch {
+                road_plan_truncated = true;
+            };
         }
     }
+}
+
+/// Atomically replace the native map owners from the generated-map wire.
+/// Validation runs against the complete payload before reset. Once replacement
+/// begins, any allocation/commit/truncation failure leaves one empty, unbound
+/// map; callers explicitly save and bind the successful document afterwards.
+pub fn installGeneratedMap(chunk_rows: []const f32, path_rows: []const f32) generated.Result {
+    const checked = generated.validate(chunk_rows, path_rows);
+    if (!checked.ok) return checked;
+
+    reset();
+    const installed = generated.installValidated(chunk_rows, path_rows, checked.stats);
+    if (!installed.ok) {
+        reset();
+        return installed;
+    }
+    roadsRestamp();
+    if (road_plan_truncated) {
+        reset();
+        return generated.failed(.road_plan_truncated, installed.stats);
+    }
+    clearMapHistory();
+    bumpMapRevision();
+    return installed;
 }
 
 /// Commit the live-previewed transport draft. Roads recompile the lane grid;
@@ -1779,6 +1818,11 @@ pub fn clearDirty() void {
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
+
+test "road planner budget is an explicit generated-city tuning value" {
+    try std.testing.expectEqual(@as(usize, 262_144), MAP_TUNING.max_road_plan_cells);
+    try std.testing.expect(MAP_TUNING.max_road_plan_cells > 65_536);
+}
 
 test "heightAt bilinear-samples painted terrain, 0 off-chunk" {
     reset();

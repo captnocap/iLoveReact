@@ -12,6 +12,8 @@
 //!   __map_chunk_count() -> f64
 //!   __map_chunk_list() -> Float32 ArrayBuffer [maxCol, maxRow, count, cx0,cz0, …]
 //!   __map_open_neighbors(cx, cz) -> Float32 ArrayBuffer [count, x0,z0, …]
+//!   __map_install_generated(chunksF32, pathsF32)
+//!       -> Float32 ArrayBuffer [ok, error, chunks, paths, roads, rails]
 //!   __map_set_tool(f32[18])                    — arm channel/tool/brush params
 //!   __map_set_brush_gizmo(index)               — in-world brush gizmo + dab style
 //!   __map_set_tile_bindings(f32 count×4 rows)  — the painted-material table (req_2693)
@@ -35,6 +37,14 @@
 //!   [7] rampMin  [8] rampMax  [9] rampWide  [10] rampLong  [11] rampAngleDeg
 //!   [12] smoothStrength  [13] kindIdx  [14] floraKindIdx  [15] floraLane
 //!   [16] zoneIdx  [17] bindIdx (armed material binding; -1 = kind default)
+//!
+//! __map_install_generated packing (version 1):
+//!   chunks [version, count, stride, 58081, 14400], then fixed records
+//!     [cx, cz, height×58081, water×58081, tiles×14400, zones×14400,
+//!      floraGrass×14400, floraTree×14400, floraBush×14400]
+//!   paths [version, count], then variable records
+//!     [kind, lanesF, lanesB, sidewalks01, tracks, curveRadiusM, speedKph,
+//!      pointCount, centeredWorldX, centeredWorldZ, elevationM, ...]
 //!
 //! Gated ingredient (V18): registered only when the metafile gate flips
 //! -Dhas-game-map (see sdk/dependency-registry.json `game-map` and
@@ -193,6 +203,25 @@ fn hostOpenNeighbors(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     setReturnF32Buffer(info, neighbors_out[0 .. 1 + n * 2]);
 }
 
+// __map_install_generated(chunkRows, pathRows) — one strict bulk replacement
+// door for procedural authoring. generated.zig validates both complete f32
+// wires before engine.reset, copies canonical chunk channels, commits semantic
+// transport paths, and rejects any incomplete road plan. The caller saves and
+// rebinds the new named document explicitly after success.
+var generated_install_out: [6]f32 = undefined;
+
+fn hostInstallGenerated(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const result = engine.installGeneratedMap(argF32Slice(info, 0), argF32Slice(info, 1));
+    generated_install_out[0] = if (result.ok) 1 else 0;
+    generated_install_out[1] = @intFromEnum(result.failure);
+    generated_install_out[2] = @floatFromInt(result.stats.chunks);
+    generated_install_out[3] = @floatFromInt(result.stats.paths);
+    generated_install_out[4] = @floatFromInt(result.stats.roads);
+    generated_install_out[5] = @floatFromInt(result.stats.rails);
+    setReturnF32Buffer(info, generated_install_out[0..]);
+}
+
 // ── tool + stroke doors ───────────────────────────────────────────────────────
 
 // 18 floats since req_2693 ([17] = armed material binding); a 17-float pack
@@ -250,7 +279,8 @@ fn hostSetBrushGizmo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 // UI rate; the engine copies both.
 fn argF32Slice(info: v8.FunctionCallbackInfo, idx: u32) []const f32 {
     const bytes = argBytes(info, idx) orelse return &[_]f32{};
-    if (bytes.len < @sizeOf(f32)) return &[_]f32{};
+    if (bytes.len < @sizeOf(f32) or bytes.len % @sizeOf(f32) != 0) return &[_]f32{};
+    if (@intFromPtr(bytes.ptr) % @alignOf(f32) != 0) return &[_]f32{};
     const ptr: [*]const f32 = @ptrCast(@alignCast(bytes.ptr));
     return ptr[0 .. bytes.len / @sizeOf(f32)];
 }
@@ -774,6 +804,7 @@ pub fn registerGameMap(_: anytype) void {
     v8_runtime.registerHostFn("__map_chunk_count", hostChunkCount);
     v8_runtime.registerHostFn("__map_chunk_list", hostChunkList);
     v8_runtime.registerHostFn("__map_open_neighbors", hostOpenNeighbors);
+    v8_runtime.registerHostFn("__map_install_generated", hostInstallGenerated);
     v8_runtime.registerHostFn("__map_set_tool", hostSetTool);
     v8_runtime.registerHostFn("__map_set_brush_gizmo", hostSetBrushGizmo);
     v8_runtime.registerHostFn("__map_set_ground_look", hostSetGroundLook);

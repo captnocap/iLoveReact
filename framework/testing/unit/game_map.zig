@@ -5,6 +5,20 @@ const engine = @import("../../game/map/engine.zig");
 const chunks = @import("../../game/map/chunks.zig");
 const roads = @import("../../game/map/roads.zig");
 
+fn oneChunkGeneratedWire(allocator: std.mem.Allocator) ![]f32 {
+    const wire = engine.generated;
+    const rows = try allocator.alloc(f32, wire.CHUNK_HEADER_FLOATS + wire.CHUNK_STRIDE);
+    @memset(rows, 0);
+    rows[0] = @floatFromInt(wire.WIRE_VERSION);
+    rows[1] = 1;
+    rows[2] = @floatFromInt(wire.CHUNK_STRIDE);
+    rows[3] = @floatFromInt(chunks.SAMPLE_CELLS);
+    rows[4] = @floatFromInt(chunks.TILE_CELLS);
+    const cells_start = wire.CHUNK_HEADER_FLOATS + 2 + chunks.SAMPLE_CELLS * 2;
+    @memset(rows[cells_start..], @as(f32, @floatFromInt(chunks.EMPTY_CELL)));
+    return rows;
+}
+
 test "reset unbinds the outgoing document and clears map-scoped bindings" {
     engine.reset();
     engine.setTileBindings(std.testing.io, &.{ 11, 12, 13, 14, 21, 22, 23, 24 });
@@ -24,6 +38,52 @@ test "reset unbinds the outgoing document and clears map-scoped bindings" {
     // was unbound, rather than merely hitting autosave's empty-world guard.
     _ = chunks.growChunk(0, 0).?;
     try std.testing.expect(!engine.autosaveNow(std.testing.io));
+}
+
+test "generated replacement aligns world paths with chunks and clears transactional state" {
+    engine.reset();
+    defer engine.reset();
+    var kinds: [roads.ROAD_CELL_KIND_COUNT]i16 = undefined;
+    for (&kinds, 0..) |*kind, i| kind.* = @intCast(i);
+    roads.setKindIndices(kinds);
+    defer roads.setKindIndices(@splat(chunks.EMPTY_CELL));
+
+    const chunk_rows = try oneChunkGeneratedWire(std.testing.allocator);
+    defer std.testing.allocator.free(chunk_rows);
+    const path_rows = [_]f32{
+        1, 1,
+        0, 1, 1, 0, 0, 8, 40, 2,
+        0, 0, 0,
+        20, 0, 0,
+    };
+
+    // The outgoing binding must not survive the replacement transaction.
+    _ = chunks.growChunk(0, 0).?;
+    engine.setAutosaveFile("/tmp/reactjit-generated-map-must-stay-unbound.rmap");
+    const result = engine.installGeneratedMap(chunk_rows, &path_rows);
+    try std.testing.expect(result.ok);
+    try std.testing.expectEqual(@as(usize, 1), result.stats.chunks);
+    try std.testing.expectEqual(@as(usize, 1), result.stats.paths);
+    try std.testing.expectEqual(@as(usize, 1), result.stats.roads);
+    try std.testing.expect(!engine.autosaveNow(std.testing.io));
+    try std.testing.expectEqual(@as(usize, 0), engine.mapHistoryStats().undo);
+    try std.testing.expectEqual(@as(usize, 0), engine.mapHistoryStats().redo);
+
+    const installed_path = engine.transport.pathForId(1).?;
+    // Generated wire points are world metres. Transport's author grid starts
+    // at chunk (0,0)'s -60m corner, so world (0,0) is author cell (60,60).
+    try std.testing.expectApproxEqAbs(@as(f32, 60), installed_path.points[0].gx, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 60), installed_path.points[0].gz, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 80), installed_path.points[1].gx, 0.001);
+    const road_cell = chunks.cellIndex(70, 60).?;
+    try std.testing.expect(chunks.chunkAt(0, 0).?.tiles[road_cell] != chunks.EMPTY_CELL);
+
+    // Whole-wire validation happens before reset: a bad retry cannot erase the
+    // successfully installed document.
+    chunk_rows[0] = 99;
+    const rejected = engine.installGeneratedMap(chunk_rows, &path_rows);
+    try std.testing.expectEqual(engine.generated.Failure.chunk_version, rejected.failure);
+    try std.testing.expect(chunks.chunkAt(0, 0).?.tiles[road_cell] != chunks.EMPTY_CELL);
 }
 
 test "transport pen previews after one anchor and keeps rail out of the road tile compiler" {
