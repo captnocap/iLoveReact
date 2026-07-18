@@ -3,7 +3,7 @@
   "at": "2026-07-18T18:03:18.451Z",
   "origin": "codex:019f744e",
   "text": "alright well lets go for it then and catch up to the lingo as if we dont and as time passes it gets worse and worse",
-  "status": "review",
+  "status": "done",
   "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
   "captureMode": "hook",
   "events": [
@@ -26,6 +26,13 @@
       "kind": "state",
       "from": "doing",
       "to": "review"
+    },
+    {
+      "at": "2026-07-18T18:43:32.890Z",
+      "actor": "user",
+      "kind": "state",
+      "from": "review",
+      "to": "done"
     }
   ],
   "resolution": "Adopted the Zig 0.16 expression dialect across active first-party code: removed all 464 deprecated @intFromFloat calls, collapsed direct integer rounding forms, removed 425 @floatFromInt wrappers only where the full integer type is exactly representable, retained precision- and clamp-sensitive conversions, documented the inference rules, and added a compiler-contract test plus an enforcement gate. The editor, binaries, tests, and lane-0 gates are green.",
