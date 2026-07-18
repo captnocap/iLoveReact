@@ -1,0 +1,36 @@
+{
+  "id": "req_3197",
+  "at": "2026-07-18T18:03:18.451Z",
+  "origin": "codex:019f744e",
+  "text": "alright well lets go for it then and catch up to the lingo as if we dont and as time passes it gets worse and worse",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T18:04:12.576Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T18:12:00.477Z",
+      "actor": "codex",
+      "kind": "note",
+      "text": "Audited active first-party Zig: found 463 @intFromFloat callsites in 87 files. Mechanical semantic-preserving replacement is complete; direct typed floor/ceil/round/trunc and exact small-int coercion cleanup is in progress, with a gate and compiler-contract test being added."
+    },
+    {
+      "at": "2026-07-18T18:27:04.493Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Adopted the Zig 0.16 expression dialect across active first-party code: removed all 464 deprecated @intFromFloat calls, collapsed direct integer rounding forms, removed 425 @floatFromInt wrappers only where the full integer type is exactly representable, retained precision- and clamp-sensitive conversions, documented the inference rules, and added a compiler-contract test plus an enforcement gate. The editor, binaries, tests, and lane-0 gates are green.",
+  "shas": [
+    "bde769724"
+  ],
+  "resolvedAt": "2026-07-18T18:27:04.493Z"
+}
