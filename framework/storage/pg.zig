@@ -29,6 +29,7 @@
 //! share tree lives.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const pg = @import("pg");
 
 pub const PgError = error{
@@ -53,7 +54,7 @@ var slots: [max_handles]Slot = blk: {
     break :blk s;
 };
 
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var gpa = std.heap.DebugAllocator(.{}){};
 var gpa_ready = false;
 
 fn allocator() std.mem.Allocator {
@@ -119,15 +120,15 @@ fn bundleRoot(a: std.mem.Allocator) ?[]const u8 {
 }
 
 fn resolveBundleRoot(a: std.mem.Allocator) ?[]u8 {
-    if (std.posix.getenv("RJIT_PG_BUNDLE")) |env_root| {
+    if (host_io.getenv("RJIT_PG_BUNDLE")) |env_root| {
         const probe = std.fs.path.join(a, &.{ env_root, "bin", "postgres" }) catch return null;
         defer a.free(probe);
-        if (std.fs.cwd().access(probe, .{})) {
+        if (std.Io.Dir.cwd().access(host_io.io(), probe, .{})) {
             return a.dupe(u8, env_root) catch null;
         } else |_| {}
     }
 
-    const exe_path = std.fs.selfExePathAlloc(a) catch return null;
+    const exe_path = std.process.executablePathAlloc(host_io.io(), a) catch return null;
     defer a.free(exe_path);
     const exe_dir = std.fs.path.dirname(exe_path) orelse return null;
 
@@ -138,7 +139,7 @@ fn resolveBundleRoot(a: std.mem.Allocator) ?[]u8 {
             continue;
         };
         defer a.free(probe);
-        if (std.fs.cwd().access(probe, .{})) {
+        if (std.Io.Dir.cwd().access(host_io.io(), probe, .{})) {
             return root;
         } else |_| {
             a.free(root);
@@ -150,7 +151,7 @@ fn resolveBundleRoot(a: std.mem.Allocator) ?[]u8 {
 fn findInDirs(a: std.mem.Allocator, dirs: []const []const u8, name: []const u8) ?[]u8 {
     for (dirs) |dir| {
         const path = std.fs.path.join(a, &.{ dir, name }) catch continue;
-        if (std.fs.cwd().access(path, .{})) {
+        if (std.Io.Dir.cwd().access(host_io.io(), path, .{})) {
             return path;
         } else |_| {
             a.free(path);
@@ -162,7 +163,7 @@ fn findInDirs(a: std.mem.Allocator, dirs: []const []const u8, name: []const u8) 
 fn findPgBin(a: std.mem.Allocator, name: []const u8) ?[]u8 {
     if (bundleRoot(a)) |root| {
         const path = std.fs.path.join(a, &.{ root, "bin", name }) catch return null;
-        if (std.fs.cwd().access(path, .{})) return path else |_| a.free(path);
+        if (std.Io.Dir.cwd().access(host_io.io(), path, .{})) return path else |_| a.free(path);
     }
     return findInDirs(a, &system_pg_bin_dirs, name);
 }
@@ -170,10 +171,10 @@ fn findPgBin(a: std.mem.Allocator, name: []const u8) ?[]u8 {
 fn findShareDir(a: std.mem.Allocator) ?[]u8 {
     if (bundleRoot(a)) |root| {
         const path = std.fs.path.join(a, &.{ root, "share", "postgresql" }) catch return null;
-        if (std.fs.cwd().access(path, .{})) return path else |_| a.free(path);
+        if (std.Io.Dir.cwd().access(host_io.io(), path, .{})) return path else |_| a.free(path);
     }
     for (system_pg_share_dirs) |dir| {
-        if (std.fs.cwd().access(dir, .{})) {
+        if (std.Io.Dir.cwd().access(host_io.io(), dir, .{})) {
             return a.dupe(u8, dir) catch null;
         } else |_| {}
     }
@@ -186,7 +187,7 @@ const EmbedPaths = struct {
     sock_path: []u8,
 
     fn resolve(a: std.mem.Allocator) !EmbedPaths {
-        const home = std.posix.getenv("HOME") orelse return error.ConnectFailed;
+        const home = host_io.getenv("HOME") orelse return error.ConnectFailed;
         return .{
             .data_dir = try std.fmt.allocPrint(a, "{s}/{s}", .{ home, default_data_subpath }),
             .sock_dir = try std.fmt.allocPrint(a, "{s}/{s}", .{ home, default_socket_subpath }),
@@ -201,8 +202,12 @@ const EmbedPaths = struct {
     }
 };
 
-fn pgChildEnv(a: std.mem.Allocator) !std.process.EnvMap {
-    var env_map = std.process.getEnvMap(a) catch return error.ConnectFailed;
+fn pgChildEnv(a: std.mem.Allocator) !std.process.Environ.Map {
+    var env_map = std.process.Environ.Map.init(a);
+    env_map.putPosixBlock(host_io.environ().block.view()) catch {
+        env_map.deinit();
+        return error.ConnectFailed;
+    };
     if (findShareDir(a)) |share| {
         defer a.free(share);
         env_map.put("PGSHAREDIR", share) catch {
@@ -220,9 +225,9 @@ fn slotFor(handle: usize) ?*Slot {
 }
 
 fn dataDirInitialized(data_dir: []const u8) bool {
-    var d = std.fs.cwd().openDir(data_dir, .{}) catch return false;
-    defer d.close();
-    d.access("PG_VERSION", .{}) catch return false;
+    var d = std.Io.Dir.cwd().openDir(host_io.io(), data_dir, .{}) catch return false;
+    defer d.close(host_io.io());
+    d.access(host_io.io(), "PG_VERSION", .{}) catch return false;
     return true;
 }
 
@@ -230,7 +235,7 @@ fn dataDirInitialized(data_dir: []const u8) bool {
 /// `dataDirInitialized` already returns true.
 fn runInitdb(a: std.mem.Allocator, data_dir: []const u8) !void {
     if (dataDirInitialized(data_dir)) return;
-    std.fs.cwd().makePath(data_dir) catch {};
+    std.Io.Dir.cwd().createDirPath(host_io.io(), data_dir) catch {};
 
     const initdb = findPgBin(a, "initdb") orelse return error.ConnectFailed;
     defer a.free(initdb);
@@ -240,15 +245,17 @@ fn runInitdb(a: std.mem.Allocator, data_dir: []const u8) !void {
         "-E",   "UTF8", "--locale=C", "--no-sync",
     };
 
-    var child = std.process.Child.init(&argv, a);
     var env_map = try pgChildEnv(a);
     defer env_map.deinit();
-    child.env_map = &env_map;
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Inherit;
-    const term = child.spawnAndWait() catch return error.ConnectFailed;
+    var child = std.process.spawn(host_io.io(), .{
+        .argv = &argv,
+        .environ_map = &env_map,
+        .stdout = .ignore,
+        .stderr = .inherit,
+    }) catch return error.ConnectFailed;
+    const term = child.wait(host_io.io()) catch return error.ConnectFailed;
     switch (term) {
-        .Exited => |c| if (c != 0) return error.ConnectFailed,
+        .exited => |c| if (c != 0) return error.ConnectFailed,
         else => return error.ConnectFailed,
     }
 }
@@ -260,14 +267,14 @@ fn runInitdb(a: std.mem.Allocator, data_dir: []const u8) !void {
 fn waitForReady(a: std.mem.Allocator, sock_path: []const u8, max_seconds: u32) !*pg.Pool {
     var elapsed: u32 = 0;
     while (elapsed < max_seconds) : (elapsed += 1) {
-        if (pg.Pool.init(a, .{
+        if (pg.Pool.init(host_io.io(), a, .{
             .size = 16,
             .connect = .{ .host = sock_path },
             .auth = .{ .username = default_user, .database = default_database },
         })) |pool| {
             return pool;
         } else |_| {}
-        std.Thread.sleep(1 * std.time.ns_per_s);
+        host_io.sleep(1 * std.time.ns_per_s);
     }
     return error.ConnectFailed;
 }
@@ -327,7 +334,7 @@ fn connectDefault(a: std.mem.Allocator) !*pg.Pool {
     const paths = try EmbedPaths.resolve(a);
     defer paths.deinit(a);
 
-    if (pg.Pool.init(a, .{
+    if (pg.Pool.init(host_io.io(), a, .{
         .size = POOL_SIZE,
         .connect = .{ .host = paths.sock_path },
         .auth = .{ .username = default_user, .database = default_database },
@@ -342,19 +349,19 @@ fn connectDefault(a: std.mem.Allocator) !*pg.Pool {
 
 fn connectUri(a: std.mem.Allocator, uri: []const u8) !*pg.Pool {
     const parsed = std.Uri.parse(uri) catch return error.ConnectFailed;
-    return pg.Pool.initUri(a, parsed, .{ .size = POOL_SIZE, .timeout = 10_000 }) catch return error.ConnectFailed;
+    return pg.Pool.initUri(host_io.io(), a, parsed, .{ .size = POOL_SIZE, .timeout = 10_000 }) catch return error.ConnectFailed;
 }
 
 fn spawnEmbeddedPostgres(a: std.mem.Allocator, paths: EmbedPaths) !void {
-    std.fs.cwd().access(paths.data_dir, .{}) catch return error.ConnectFailed;
-    std.fs.cwd().makePath(paths.sock_dir) catch {};
+    std.Io.Dir.cwd().access(host_io.io(), paths.data_dir, .{}) catch return error.ConnectFailed;
+    std.Io.Dir.cwd().createDirPath(host_io.io(), paths.sock_dir) catch {};
 
     // Only clear a stale postmaster.pid whose PID is dead. NEVER touch
     // the socket files — we'd strand a live cluster.
     const pid_file = std.fs.path.join(a, &.{ paths.data_dir, "postmaster.pid" }) catch return error.OutOfMemory;
     defer a.free(pid_file);
     if (!postmasterPidIsLive(pid_file)) {
-        std.fs.cwd().deleteFile(pid_file) catch {};
+        std.Io.Dir.cwd().deleteFile(host_io.io(), pid_file) catch {};
     }
 
     const postgres_bin = findPgBin(a, "postgres") orelse return error.ConnectFailed;
@@ -368,30 +375,32 @@ fn spawnEmbeddedPostgres(a: std.mem.Allocator, paths: EmbedPaths) !void {
         "-c",        "max_connections=300",
     };
 
-    var child = std.process.Child.init(&argv, a);
     var env_map = try pgChildEnv(a);
     defer env_map.deinit();
-    child.env_map = &env_map;
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Ignore;
-    child.stdin_behavior = .Ignore;
-    try child.spawn();
+    const child = try std.process.spawn(host_io.io(), .{
+        .argv = &argv,
+        .environ_map = &env_map,
+        .stdout = .ignore,
+        .stderr = .ignore,
+        .stdin = .ignore,
+    });
+    if (child.id == null) return error.ConnectFailed;
 }
 
 /// Returns true if `postmaster.pid` exists AND its first line (the PID)
 /// matches a running process. Used to avoid clobbering a live cluster
 /// that another process (e.g. the user) is using.
 fn postmasterPidIsLive(pid_file: []const u8) bool {
-    const f = std.fs.cwd().openFile(pid_file, .{}) catch return false;
-    defer f.close();
+    const f = std.Io.Dir.cwd().openFile(host_io.io(), pid_file, .{}) catch return false;
+    defer f.close(host_io.io());
     var buf: [32]u8 = undefined;
-    const n = f.read(&buf) catch return false;
+    const n = f.readPositionalAll(host_io.io(), &buf, 0) catch return false;
     var line_end: usize = 0;
     while (line_end < n and buf[line_end] != '\n') : (line_end += 1) {}
     const pid_str = std.mem.trim(u8, buf[0..line_end], " \t\r");
     const pid = std.fmt.parseInt(i32, pid_str, 10) catch return false;
     // kill(pid, 0) probes for existence without delivering a signal.
-    std.posix.kill(pid, 0) catch return false;
+    std.posix.kill(pid, @enumFromInt(0)) catch return false;
     return true;
 }
 
@@ -449,13 +458,24 @@ pub fn queryJson(
     return buf.toOwnedSlice();
 }
 
+fn managedPrint(buf: *std.array_list.Managed(u8), comptime format: []const u8, args: anytype) !void {
+    const alloc = buf.allocator;
+    var list = buf.moveToUnmanaged();
+    var writer: std.Io.Writer.Allocating = .fromArrayList(alloc, &list);
+    defer {
+        var restored = writer.toArrayList();
+        buf.* = restored.toManaged(alloc);
+    }
+    try writer.writer.print(format, args);
+}
+
 fn emitColumnValue(buf: *std.array_list.Managed(u8), row: anytype, ci: usize) !void {
     // Try a few common pg.zig column types in order. Whatever first decodes
     // wins. If everything fails, emit null. pg.zig returns errors when the
     // requested type doesn't match — that's how we narrow the actual type.
     if (row.get(?i64, ci)) |maybe| {
         if (maybe) |v| {
-            try buf.writer().print("{d}", .{v});
+            try managedPrint(buf, "{d}", .{v});
             return;
         }
         try buf.appendSlice("null");
@@ -463,7 +483,7 @@ fn emitColumnValue(buf: *std.array_list.Managed(u8), row: anytype, ci: usize) !v
     } else |_| {}
     if (row.get(?f64, ci)) |maybe| {
         if (maybe) |v| {
-            try buf.writer().print("{d}", .{v});
+            try managedPrint(buf, "{d}", .{v});
             return;
         }
         try buf.appendSlice("null");
@@ -497,7 +517,7 @@ fn jsonEscape(buf: *std.array_list.Managed(u8), s: []const u8) !void {
         '\n' => try buf.appendSlice("\\n"),
         '\r' => try buf.appendSlice("\\r"),
         '\t' => try buf.appendSlice("\\t"),
-        0x00...0x08, 0x0B, 0x0C, 0x0E...0x1F => try buf.writer().print("\\u{x:0>4}", .{c}),
+        0x00...0x08, 0x0B, 0x0C, 0x0E...0x1F => try managedPrint(buf, "\\u{x:0>4}", .{c}),
         else => try buf.append(c),
     };
 }

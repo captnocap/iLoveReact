@@ -22,6 +22,7 @@
 // tick while recording, on the same 0..10000 peak-dBFS scale voice uses.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const c = @import("../c.zig").imports;
 const v8_runtime = @import("../v8_runtime.zig");
 
@@ -228,8 +229,8 @@ pub fn tick(_: u32) void {
 // ── WAV writer (16-bit PCM mono) ──────────────────────────────────────
 
 fn writeWav(out_path: []const u8, samples: []const f32) !bool {
-    var file = std.fs.cwd().createFile(out_path, .{ .truncate = true }) catch return false;
-    defer file.close();
+    var file = std.Io.Dir.cwd().createFile(host_io.io(), out_path, .{ .truncate = true }) catch return false;
+    defer file.close(host_io.io());
 
     const channels: u16 = @intCast(CHANNELS);
     const bits_per_sample: u16 = 16;
@@ -254,7 +255,7 @@ fn writeWav(out_path: []const u8, samples: []const f32) !bool {
     @memcpy(header[36..40], "data");
     std.mem.writeInt(u32, header[40..44], data_size, .little);
 
-    file.writeAll(&header) catch return false;
+    file.writeStreamingAll(host_io.io(), &header) catch return false;
 
     // Convert f32 → i16 in small chunks so we don't allocate a parallel
     // buffer the size of the recording.
@@ -268,7 +269,7 @@ fn writeWav(out_path: []const u8, samples: []const f32) !bool {
             scratch[k] = @intFromFloat(clamped * 32767.0);
         }
         const bytes = std.mem.sliceAsBytes(scratch[0..n]);
-        file.writeAll(bytes) catch return false;
+        file.writeStreamingAll(host_io.io(), bytes) catch return false;
         i += n;
     }
 

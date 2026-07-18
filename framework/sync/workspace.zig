@@ -21,6 +21,7 @@
 //!   PING / PONG\n         — liveness, no payload
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 
 const FRAME_LEN_BYTES = 4;
 const MAX_HEADER_LEN = 4 * 1024;       // sanity bound
@@ -69,12 +70,10 @@ pub fn writeSetFromFile(
     rel: []const u8,
     local_path: []const u8,
 ) !void {
-    const fd = try std.posix.open(local_path, .{ .ACCMODE = .RDONLY }, 0);
-    defer std.posix.close(fd);
-    const st = try std.posix.fstat(fd);
-    if (st.size < 0) return error.NegativeFileSize;
-    const size: u64 = @intCast(st.size);
-    try writeFileFrame(writer, "SET", rel, fd, size);
+    const file = try std.Io.Dir.cwd().openFile(host_io.io(), local_path, .{});
+    defer file.close(host_io.io());
+    const st = try file.stat(host_io.io());
+    try writeFileFrame(writer, "SET", rel, file.handle, st.size);
 }
 
 /// Build a workspace tar (via `git ls-files | tar`) and ship it as a
@@ -181,7 +180,7 @@ fn buildTarBytes(allocator: std.mem.Allocator, cwd: []const u8) ![]u8 {
 fn existsUnder(cwd: []const u8, rel: []const u8) bool {
     var pathbuf: [4096]u8 = undefined;
     const full = std.fmt.bufPrint(&pathbuf, "{s}/{s}", .{ cwd, rel }) catch return false;
-    std.fs.accessAbsolute(full, .{}) catch return false;
+    std.Io.Dir.accessAbsolute(host_io.io(), full, .{}) catch return false;
     return true;
 }
 
@@ -190,17 +189,18 @@ fn runCapture(
     argv: []const []const u8,
     stdin_bytes: ?[]const u8,
 ) ![]u8 {
-    var child = std.process.Child.init(argv, allocator);
-    child.stdin_behavior = if (stdin_bytes != null) .Pipe else .Ignore;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Ignore;
-    try child.spawn();
+    var child = try std.process.spawn(host_io.io(), .{
+        .argv = argv,
+        .stdin = if (stdin_bytes != null) .pipe else .ignore,
+        .stdout = .pipe,
+        .stderr = .ignore,
+    });
 
     // Feed stdin in a separate "thread of control" if provided.
     if (stdin_bytes) |bytes| {
         var stdin = child.stdin.?;
-        stdin.writeAll(bytes) catch {};
-        stdin.close();
+        stdin.writeStreamingAll(host_io.io(), bytes) catch {};
+        stdin.close(host_io.io());
         child.stdin = null;
     }
 
@@ -209,16 +209,16 @@ fn runCapture(
 
     var read_buf: [64 * 1024]u8 = undefined;
     while (true) {
-        const n = child.stdout.?.read(&read_buf) catch break;
+        const n = child.stdout.?.readStreaming(host_io.io(), &.{&read_buf}) catch break;
         if (n == 0) break;
         try stdout_buf.appendSlice(allocator, read_buf[0..n]);
     }
 
-    const term = try child.wait();
+    const term = try child.wait(host_io.io());
     // tar can exit 1 if some files vanished mid-archive; accept if we
     // got bytes out.
     switch (term) {
-        .Exited => |code| {
+        .exited => |code| {
             if (code != 0 and stdout_buf.items.len == 0) return error.ChildFailed;
         },
         else => return error.ChildAbnormalExit,
@@ -241,7 +241,7 @@ pub const InboundParser = struct {
         return .{
             .allocator = allocator,
             .root = root,
-            .buf = .{},
+            .buf = .empty,
         };
     }
 
@@ -263,7 +263,7 @@ pub const InboundParser = struct {
             }
             if (self.buf.items.len < FRAME_LEN_BYTES + hlen) return;
 
-            const header = std.mem.trimRight(u8, self.buf.items[FRAME_LEN_BYTES .. FRAME_LEN_BYTES + hlen], "\n");
+            const header = std.mem.trimEnd(u8, self.buf.items[FRAME_LEN_BYTES .. FRAME_LEN_BYTES + hlen], "\n");
             const payload_size = parsePayloadSize(header);
             if (payload_size > MAX_INLINE_PAYLOAD) {
                 self.buf.clearRetainingCapacity();
@@ -318,10 +318,10 @@ pub const InboundParser = struct {
         var pathbuf: [4096]u8 = undefined;
         const full = self.fullPath(rel, &pathbuf) orelse return;
         if (std.mem.lastIndexOfScalar(u8, full, '/')) |idx| {
-            std.fs.makeDirAbsolute(full[0..idx]) catch |e| switch (e) {
+            std.Io.Dir.createDirAbsolute(host_io.io(), full[0..idx], .default_dir) catch |e| switch (e) {
                 error.PathAlreadyExists => {},
                 else => {
-                    std.fs.cwd().makePath(full[0..idx]) catch {};
+                    std.Io.Dir.cwd().createDirPath(host_io.io(), full[0..idx]) catch {};
                 },
             };
         }
@@ -331,14 +331,14 @@ pub const InboundParser = struct {
         // other's temps.
         var tmpbuf: [4096 + 32]u8 = undefined;
         const tmp = std.fmt.bufPrint(&tmpbuf, "{s}.cwsync-{d}.tmp", .{ full, std.os.linux.getpid() }) catch return;
-        const f = std.fs.createFileAbsolute(tmp, .{ .truncate = true }) catch return;
-        defer f.close();
-        f.writeAll(payload) catch {
-            std.fs.deleteFileAbsolute(tmp) catch {};
+        const f = std.Io.Dir.createFileAbsolute(host_io.io(), tmp, .{ .truncate = true }) catch return;
+        defer f.close(host_io.io());
+        f.writeStreamingAll(host_io.io(), payload) catch {
+            std.Io.Dir.deleteFileAbsolute(host_io.io(), tmp) catch {};
             return;
         };
-        std.fs.renameAbsolute(tmp, full) catch {
-            std.fs.deleteFileAbsolute(tmp) catch {};
+        std.Io.Dir.renameAbsolute(tmp, full, host_io.io()) catch {
+            std.Io.Dir.deleteFileAbsolute(host_io.io(), tmp) catch {};
         };
     }
 
@@ -347,15 +347,15 @@ pub const InboundParser = struct {
         const full = self.fullPath(rel, &pathbuf) orelse return;
         // Try as file first; if it was a directory, try rmdir (best-
         // effort — non-empty dirs stay).
-        std.fs.deleteFileAbsolute(full) catch {
-            std.fs.deleteDirAbsolute(full) catch {};
+        std.Io.Dir.deleteFileAbsolute(host_io.io(), full) catch {
+            std.Io.Dir.deleteDirAbsolute(host_io.io(), full) catch {};
         };
     }
 
     fn makeDir(self: *InboundParser, rel: []const u8) void {
         var pathbuf: [4096]u8 = undefined;
         const full = self.fullPath(rel, &pathbuf) orelse return;
-        std.fs.cwd().makePath(full) catch {};
+        std.Io.Dir.cwd().createDirPath(host_io.io(), full) catch {};
     }
 };
 

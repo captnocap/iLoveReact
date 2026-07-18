@@ -4,6 +4,7 @@
 //! MCP config and advanced flags deferred — expand as the cockpit needs them.
 
 const std = @import("std");
+const host_io = @import("../../host_io.zig");
 const options = @import("options.zig");
 
 /// Locate the claude binary. Checks opts.cli_path first, then searches PATH.
@@ -11,12 +12,12 @@ const options = @import("options.zig");
 pub fn findBinary(allocator: std.mem.Allocator, cli_path: ?[]const u8) ![]const u8 {
     if (cli_path) |p| return allocator.dupe(u8, p);
 
-    const path_env = std.posix.getenv("PATH") orelse return error.BinaryNotFound;
+    const path_env = host_io.getenv("PATH") orelse return error.BinaryNotFound;
 
     var it = std.mem.tokenizeScalar(u8, path_env, std.fs.path.delimiter);
     while (it.next()) |dir| {
         const full = try std.fs.path.join(allocator, &.{ dir, "claude" });
-        std.fs.accessAbsolute(full, .{}) catch {
+        std.Io.Dir.accessAbsolute(host_io.io(), full, .{}) catch {
             allocator.free(full);
             continue;
         };
@@ -33,7 +34,7 @@ pub fn buildSessionArgv(
     binary: []const u8,
     opts: options.SessionOptions,
 ) ![]const []const u8 {
-    var list: std.ArrayList([]const u8) = .{};
+    var list: std.ArrayList([]const u8) = .empty;
     errdefer {
         for (list.items) |s| allocator.free(s);
         list.deinit(allocator);

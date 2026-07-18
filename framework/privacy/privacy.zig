@@ -117,15 +117,17 @@ pub fn sha256Hash(data: []const u8) [32]u8 {
 
 /// SHA-256 hash a file. Returns hex-encoded digest.
 pub fn hashFile(path: []const u8, out_hex: []u8) !void {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().openFile(host_io.io(), path, .{});
+    defer file.close(host_io.io());
 
     var h = Sha256.init(.{});
     var buf: [8192]u8 = undefined;
+    var offset: u64 = 0;
     while (true) {
-        const n = try file.read(&buf);
+        const n = try file.readPositionalAll(host_io.io(), &buf, offset);
         if (n == 0) break;
         h.update(buf[0..n]);
+        offset += @intCast(n);
     }
     const digest = h.finalResult();
     crmod.bytesToHex(&digest, out_hex[0..64]);
@@ -141,48 +143,50 @@ pub fn secureDelete(path: []const u8, passes: u32) !void {
     const n_passes = if (passes == 0) 3 else passes;
 
     // Get file size
-    const stat = std.fs.cwd().statFile(path) catch {
+    const stat = std.Io.Dir.cwd().statFile(host_io.io(), path, .{}) catch {
         // If stat fails, just try to delete
-        std.fs.cwd().deleteFile(path) catch {};
+        std.Io.Dir.cwd().deleteFile(host_io.io(), path) catch {};
         return;
     };
     const size = stat.size;
 
     if (size > 0) {
-        const file = try std.fs.cwd().openFile(path, .{ .mode = .write_only });
-        defer file.close();
+        const file = try std.Io.Dir.cwd().openFile(host_io.io(), path, .{ .mode = .write_only });
+        defer file.close(host_io.io());
 
         var buf: [4096]u8 = undefined;
 
         for (0..n_passes) |pass| {
-            try file.seekTo(0);
             var remaining = size;
+            var offset: u64 = 0;
             while (remaining > 0) {
                 const chunk: usize = @min(buf.len, @as(usize, @intCast(remaining)));
                 if (pass % 2 == 0) {
-                    crypto.random.bytes(buf[0..chunk]);
+                    host_io.io().random(buf[0..chunk]);
                 } else {
                     @memset(buf[0..chunk], 0xFF);
                 }
-                _ = try file.write(buf[0..chunk]);
+                try file.writePositionalAll(host_io.io(), buf[0..chunk], offset);
                 remaining -= @intCast(chunk);
+                offset += @intCast(chunk);
             }
-            try file.sync();
+            try file.sync(host_io.io());
         }
 
         // Final zero pass
-        try file.seekTo(0);
         @memset(&buf, 0);
         var remaining = size;
+        var offset: u64 = 0;
         while (remaining > 0) {
             const chunk: usize = @min(buf.len, @as(usize, @intCast(remaining)));
-            _ = try file.write(buf[0..chunk]);
+            try file.writePositionalAll(host_io.io(), buf[0..chunk], offset);
             remaining -= @intCast(chunk);
+            offset += @intCast(chunk);
         }
-        try file.sync();
+        try file.sync(host_io.io());
     }
 
-    try std.fs.cwd().deleteFile(path);
+    try std.Io.Dir.cwd().deleteFile(host_io.io(), path);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -200,12 +204,12 @@ pub fn encryptFile(
     key: *const [32]u8,
 ) !void {
     // Read input
-    const data = try std.fs.cwd().readFileAlloc(alloc, input_path, 64 * 1024 * 1024);
+    const data = try std.Io.Dir.cwd().readFileAlloc(host_io.io(), input_path, alloc, .limited(64 * 1024 * 1024));
     defer alloc.free(data);
 
     // Generate nonce
     var nonce: [24]u8 = undefined;
-    crypto.random.bytes(&nonce);
+    host_io.io().random(&nonce);
 
     // Encrypt
     const ct = try alloc.alloc(u8, data.len);
@@ -214,13 +218,13 @@ pub fn encryptFile(
     XChaCha20Poly1305.encrypt(ct, &tag, data, "", nonce, key.*);
 
     // Write output: magic(4) | version(1) | nonce(24) | tag(16) | ciphertext
-    const out = try std.fs.cwd().createFile(output_path, .{});
-    defer out.close();
-    try out.writeAll(&file_magic);
-    try out.writeAll(&[_]u8{file_version});
-    try out.writeAll(&nonce);
-    try out.writeAll(&tag);
-    try out.writeAll(ct);
+    const out = try std.Io.Dir.cwd().createFile(host_io.io(), output_path, .{});
+    defer out.close(host_io.io());
+    try out.writeStreamingAll(host_io.io(), &file_magic);
+    try out.writeStreamingAll(host_io.io(), &[_]u8{file_version});
+    try out.writeStreamingAll(host_io.io(), &nonce);
+    try out.writeStreamingAll(host_io.io(), &tag);
+    try out.writeStreamingAll(host_io.io(), ct);
 }
 
 /// Decrypt a file. Reads the format written by encryptFile.
@@ -230,7 +234,7 @@ pub fn decryptFile(
     output_path: []const u8,
     key: *const [32]u8,
 ) !void {
-    const raw = try std.fs.cwd().readFileAlloc(alloc, input_path, 64 * 1024 * 1024);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(host_io.io(), input_path, alloc, .limited(64 * 1024 * 1024));
     defer alloc.free(raw);
 
     // Parse header: magic(4) + version(1) + nonce(24) + tag(16) = 45 bytes
@@ -246,9 +250,9 @@ pub fn decryptFile(
     defer alloc.free(pt);
     XChaCha20Poly1305.decrypt(pt, ct, tag, "", nonce, key.*) catch return error.DecryptionFailed;
 
-    const out = try std.fs.cwd().createFile(output_path, .{});
-    defer out.close();
-    try out.writeAll(pt);
+    const out = try std.Io.Dir.cwd().createFile(host_io.io(), output_path, .{});
+    defer out.close(host_io.io());
+    try out.writeStreamingAll(host_io.io(), pt);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -411,7 +415,7 @@ pub const NoiseSession = struct {
 /// Returns the initiator session + ephemeral public key (handshake message).
 pub fn noiseInitiate(responder_pub: [32]u8) !struct { session: NoiseSession, handshake: [32]u8 } {
     // Generate ephemeral X25519 key pair
-    const eph_secret = X25519.KeyPair.generate();
+    const eph_secret = X25519.KeyPair.generate(host_io.io());
 
     // DH(ephemeral_private, remote_static_public)
     const shared = try X25519.scalarmult(eph_secret.secret_key, responder_pub);
@@ -480,13 +484,19 @@ pub fn tokenize(value: []const u8, salt: []const u8) [64]u8 {
 // ════════════════════════════════════════════════════════════════════════
 
 fn runCommand(alloc: std.mem.Allocator, argv: []const []const u8) ![]u8 {
-    const result = try std.process.Child.run(.{
-        .allocator = alloc,
+    const result = try std.process.run(alloc, host_io.io(), .{
         .argv = argv,
-        .max_output_bytes = 1024 * 1024,
+        .stdout_limit = .limited(1024 * 1024),
+        .stderr_limit = .limited(1024 * 1024),
     });
     alloc.free(result.stderr);
     return result.stdout;
+}
+
+fn randomU64() u64 {
+    var bytes: [8]u8 = undefined;
+    host_io.io().random(&bytes);
+    return std.mem.readInt(u64, &bytes, .little);
 }
 
 fn commandExists(alloc: std.mem.Allocator, name: []const u8) bool {
@@ -504,14 +514,14 @@ pub fn gpgEncrypt(alloc: std.mem.Allocator, plaintext: []const u8, recipient: []
 
     // Write plaintext to temp file
     var tmp_path_buf: [64]u8 = undefined;
-    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "/tmp/tsz-gpg-{x}", .{std.crypto.random.int(u64)});
+    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "/tmp/tsz-gpg-{x}", .{randomU64()});
 
     {
-        const f = try std.fs.cwd().createFile(tmp_path, .{});
-        defer f.close();
-        try f.writeAll(plaintext);
+        const f = try std.Io.Dir.cwd().createFile(host_io.io(), tmp_path, .{});
+        defer f.close(host_io.io());
+        try f.writeStreamingAll(host_io.io(), plaintext);
     }
-    defer std.fs.cwd().deleteFile(tmp_path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
 
     const out_path_str = try std.fmt.allocPrint(alloc, "{s}.gpg", .{tmp_path});
     defer alloc.free(out_path_str);
@@ -522,8 +532,8 @@ pub fn gpgEncrypt(alloc: std.mem.Allocator, plaintext: []const u8, recipient: []
     }) catch return error.GpgFailed;
     alloc.free(result);
 
-    const encrypted = std.fs.cwd().readFileAlloc(alloc, out_path_str, 1024 * 1024) catch return error.GpgFailed;
-    std.fs.cwd().deleteFile(out_path_str) catch {};
+    const encrypted = std.Io.Dir.cwd().readFileAlloc(host_io.io(), out_path_str, alloc, .limited(1024 * 1024)) catch return error.GpgFailed;
+    std.Io.Dir.cwd().deleteFile(host_io.io(), out_path_str) catch {};
     return encrypted;
 }
 
@@ -531,14 +541,14 @@ pub fn gpgDecrypt(alloc: std.mem.Allocator, ciphertext: []const u8) ![]u8 {
     if (!commandExists(alloc, "gpg")) return error.GpgNotInstalled;
 
     var tmp_path_buf: [64]u8 = undefined;
-    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "/tmp/tsz-gpg-{x}", .{std.crypto.random.int(u64)});
+    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "/tmp/tsz-gpg-{x}", .{randomU64()});
 
     {
-        const f = try std.fs.cwd().createFile(tmp_path, .{});
-        defer f.close();
-        try f.writeAll(ciphertext);
+        const f = try std.Io.Dir.cwd().createFile(host_io.io(), tmp_path, .{});
+        defer f.close(host_io.io());
+        try f.writeStreamingAll(host_io.io(), ciphertext);
     }
-    defer std.fs.cwd().deleteFile(tmp_path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
 
     return runCommand(alloc, &.{ "gpg", "--batch", "--yes", "--decrypt", tmp_path });
 }
@@ -547,14 +557,14 @@ pub fn gpgSign(alloc: std.mem.Allocator, message: []const u8) ![]u8 {
     if (!commandExists(alloc, "gpg")) return error.GpgNotInstalled;
 
     var tmp_path_buf: [64]u8 = undefined;
-    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "/tmp/tsz-gpg-{x}", .{std.crypto.random.int(u64)});
+    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "/tmp/tsz-gpg-{x}", .{randomU64()});
 
     {
-        const f = try std.fs.cwd().createFile(tmp_path, .{});
-        defer f.close();
-        try f.writeAll(message);
+        const f = try std.Io.Dir.cwd().createFile(host_io.io(), tmp_path, .{});
+        defer f.close(host_io.io());
+        try f.writeStreamingAll(host_io.io(), message);
     }
-    defer std.fs.cwd().deleteFile(tmp_path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
 
     const result = runCommand(alloc, &.{ "gpg", "--batch", "--yes", "--armor", "--clearsign", tmp_path }) catch return error.GpgFailed;
     alloc.free(result);
@@ -562,8 +572,8 @@ pub fn gpgSign(alloc: std.mem.Allocator, message: []const u8) ![]u8 {
     const asc_path = try std.fmt.allocPrint(alloc, "{s}.asc", .{tmp_path});
     defer alloc.free(asc_path);
 
-    const signed = std.fs.cwd().readFileAlloc(alloc, asc_path, 1024 * 1024) catch return error.GpgFailed;
-    std.fs.cwd().deleteFile(asc_path) catch {};
+    const signed = std.Io.Dir.cwd().readFileAlloc(host_io.io(), asc_path, alloc, .limited(1024 * 1024)) catch return error.GpgFailed;
+    std.Io.Dir.cwd().deleteFile(host_io.io(), asc_path) catch {};
     return signed;
 }
 
@@ -678,7 +688,7 @@ pub fn xchachaDecryptWith(
 
 pub fn randomBytesWith(backend: Backend, out: []u8) void {
     switch (backend) {
-        .std => crypto.random.bytes(out),
+        .std => host_io.io().random(out),
         .sodium => sodium.randomBytes(out),
     }
 }
@@ -718,13 +728,13 @@ pub fn hashDirectory(
         entries.deinit(alloc);
     }
 
-    var dir = try std.fs.cwd().openDir(dir_path, .{ .iterate = true });
-    defer dir.close();
+    var dir = try std.Io.Dir.cwd().openDir(host_io.io(), dir_path, .{ .iterate = true });
+    defer dir.close(host_io.io());
 
     if (recursive) {
         var walker = try dir.walk(alloc);
         defer walker.deinit();
-        while (try walker.next()) |entry| {
+        while (try walker.next(host_io.io())) |entry| {
             if (entry.kind != .file) continue;
             const full = try std.fmt.allocPrint(alloc, "{s}/{s}", .{ dir_path, entry.path });
             errdefer alloc.free(full);
@@ -734,7 +744,7 @@ pub fn hashDirectory(
         }
     } else {
         var it = dir.iterate();
-        while (try it.next()) |entry| {
+        while (try it.next(host_io.io())) |entry| {
             if (entry.kind != .file) continue;
             const full = try std.fmt.allocPrint(alloc, "{s}/{s}", .{ dir_path, entry.name });
             errdefer alloc.free(full);
@@ -844,22 +854,23 @@ pub fn gpgVerify(alloc: std.mem.Allocator, signed_message: []const u8) !bool {
     if (!commandExists(alloc, "gpg")) return error.GpgNotInstalled;
 
     var tmp_path_buf: [64]u8 = undefined;
-    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "/tmp/tsz-gpg-{x}", .{std.crypto.random.int(u64)});
+    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "/tmp/tsz-gpg-{x}", .{randomU64()});
 
     {
-        const f = try std.fs.cwd().createFile(tmp_path, .{});
-        defer f.close();
-        try f.writeAll(signed_message);
+        const f = try std.Io.Dir.cwd().createFile(host_io.io(), tmp_path, .{});
+        defer f.close(host_io.io());
+        try f.writeStreamingAll(host_io.io(), signed_message);
     }
-    defer std.fs.cwd().deleteFile(tmp_path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
 
-    var child = std.process.Child.init(&.{ "gpg", "--batch", "--verify", tmp_path }, alloc);
-    child.stdout_behavior = .Ignore;
-    child.stderr_behavior = .Ignore;
-    try child.spawn();
-    const term = try child.wait();
+    var child = try std.process.spawn(host_io.io(), .{
+        .argv = &.{ "gpg", "--batch", "--verify", tmp_path },
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    const term = try child.wait(host_io.io());
     return switch (term) {
-        .Exited => |code| code == 0,
+        .exited => |code| code == 0,
         else => false,
     };
 }
@@ -873,14 +884,14 @@ pub fn gpgImportKey(alloc: std.mem.Allocator, armored_key: []const u8) ![]u8 {
     if (!commandExists(alloc, "gpg")) return error.GpgNotInstalled;
 
     var tmp_path_buf: [64]u8 = undefined;
-    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "/tmp/tsz-gpg-{x}.asc", .{std.crypto.random.int(u64)});
+    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "/tmp/tsz-gpg-{x}.asc", .{randomU64()});
 
     {
-        const f = try std.fs.cwd().createFile(tmp_path, .{});
-        defer f.close();
-        try f.writeAll(armored_key);
+        const f = try std.Io.Dir.cwd().createFile(host_io.io(), tmp_path, .{});
+        defer f.close(host_io.io());
+        try f.writeStreamingAll(host_io.io(), armored_key);
     }
-    defer std.fs.cwd().deleteFile(tmp_path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), tmp_path) catch {};
 
     return runCommand(alloc, &.{ "gpg", "--batch", "--import", tmp_path });
 }
@@ -965,7 +976,7 @@ var g_noise_alloc: std.mem.Allocator = std.heap.c_allocator;
 
 fn noiseRegistry() *std.ArrayList(NoiseRegistryEntry) {
     if (g_noise_registry == null) {
-        g_noise_registry = .{};
+        g_noise_registry = .empty;
     }
     return &g_noise_registry.?;
 }
@@ -990,7 +1001,7 @@ pub fn noiseInitiateSession(responder_pub: [32]u8) !NoiseInitiateResult {
     try noiseRegistry().append(g_noise_alloc, .{
         .id = id,
         .session = result.session,
-        .seen_hashes = .{},
+        .seen_hashes = .empty,
     });
     return .{ .session_id = id, .handshake = result.handshake };
 }
@@ -1002,7 +1013,7 @@ pub fn noiseRespondSession(static_secret: [32]u8, initiator_ephemeral: [32]u8) !
     try noiseRegistry().append(g_noise_alloc, .{
         .id = id,
         .session = session,
-        .seen_hashes = .{},
+        .seen_hashes = .empty,
     });
     return id;
 }
@@ -1110,7 +1121,7 @@ pub fn shamirSplit(
     var byte_idx: usize = 0;
     while (byte_idx < secret.len) : (byte_idx += 1) {
         coeffs[0] = secret[byte_idx];
-        crypto.random.bytes(coeffs[1..]);
+        host_io.io().random(coeffs[1..]);
         for (shares) |sh| sh.bytes[byte_idx] = evalPoly(coeffs, sh.index);
     }
     return shares;
@@ -1155,13 +1166,13 @@ pub const Envelope = struct {
 
 pub fn envelopeEncrypt(a: std.mem.Allocator, data: []const u8, kek: [32]u8) !Envelope {
     var dek: [32]u8 = undefined;
-    crypto.random.bytes(&dek);
+    host_io.io().random(&dek);
     defer crypto.secureZero(u8, &dek);
 
     var data_nonce: [24]u8 = undefined;
     var dek_nonce: [24]u8 = undefined;
-    crypto.random.bytes(&data_nonce);
-    crypto.random.bytes(&dek_nonce);
+    host_io.io().random(&data_nonce);
+    host_io.io().random(&dek_nonce);
 
     const ct = try a.alloc(u8, data.len + 16);
     var data_tag: [16]u8 = undefined;
@@ -1299,9 +1310,15 @@ const audit_alloc = std.heap.c_allocator;
 
 const ZERO_HASH: [64]u8 = [_]u8{'0'} ** 64;
 
+fn listPrint(alloc: std.mem.Allocator, buf: *std.ArrayList(u8), comptime format: []const u8, args: anytype) !void {
+    var writer: std.Io.Writer.Allocating = .fromArrayList(alloc, buf);
+    defer buf.* = writer.toArrayList();
+    try writer.writer.print(format, args);
+}
+
 fn buildAuditMsg(buf: *std.ArrayList(u8), prev_hex: [64]u8, idx: u32, ts: i64, event: []const u8, data_json: []const u8) !void {
     try buf.appendSlice(audit_alloc, &prev_hex);
-    try std.fmt.format(buf.writer(audit_alloc),
+    try listPrint(audit_alloc, buf,
         "{{\"index\":{d},\"timestamp\":{d},\"event\":", .{ idx, ts });
     try jsonQuoteString(audit_alloc, buf, event);
     try buf.appendSlice(audit_alloc, ",\"data\":");
@@ -1389,7 +1406,7 @@ pub fn auditEntriesJson(a: std.mem.Allocator, from: u32, to_inclusive: u32) ![]u
         const e = g_audit.entries.items[i];
         if (!first) try buf.append(a, ',');
         first = false;
-        try std.fmt.format(buf.writer(a),
+        try listPrint(a, &buf,
             "{{\"index\":{d},\"timestamp\":{d},\"event\":", .{ e.index, e.timestamp });
         try jsonQuoteString(a, &buf, e.event);
         try buf.appendSlice(a, ",\"data\":");
@@ -1713,7 +1730,7 @@ test "whitespace steg single-char carrier unchanged" {
 
 test "Noise-NK handshake and bidirectional messaging" {
     // Generate responder's static key pair
-    const responder_kp = X25519.KeyPair.generate();
+    const responder_kp = X25519.KeyPair.generate(host_io.io());
 
     // Initiator starts handshake
     const init_result = try noiseInitiate(responder_kp.public_key);
@@ -1744,8 +1761,8 @@ test "Noise-NK handshake and bidirectional messaging" {
 }
 
 test "Noise-NK wrong responder key fails" {
-    const good_kp = X25519.KeyPair.generate();
-    const bad_kp = X25519.KeyPair.generate();
+    const good_kp = X25519.KeyPair.generate(host_io.io());
+    const bad_kp = X25519.KeyPair.generate(host_io.io());
 
     const init_result = try noiseInitiate(good_kp.public_key);
     var init_session = init_result.session;
@@ -1764,7 +1781,7 @@ test "Noise-NK wrong responder key fails" {
 }
 
 test "Noise-NK session close invalidates send" {
-    const kp = X25519.KeyPair.generate();
+    const kp = X25519.KeyPair.generate(host_io.io());
     const init_result = try noiseInitiate(kp.public_key);
     var session = init_result.session;
     session.close();
@@ -1775,7 +1792,7 @@ test "Noise-NK session close invalidates send" {
 }
 
 test "Noise-NK different sessions produce different ciphertext" {
-    const kp = X25519.KeyPair.generate();
+    const kp = X25519.KeyPair.generate(host_io.io());
 
     const r1 = try noiseInitiate(kp.public_key);
     var s1 = r1.session;
@@ -1812,18 +1829,18 @@ test "file encrypt/decrypt round trip" {
 
     // Write test file
     {
-        const f = try std.fs.cwd().createFile("/tmp/tsz-crypto-test-plain", .{});
-        defer f.close();
-        try f.writeAll(test_data);
+        const f = try std.Io.Dir.cwd().createFile(host_io.io(), "/tmp/tsz-crypto-test-plain", .{});
+        defer f.close(host_io.io());
+        try f.writeStreamingAll(host_io.io(), test_data);
     }
-    defer std.fs.cwd().deleteFile("/tmp/tsz-crypto-test-plain") catch {};
-    defer std.fs.cwd().deleteFile("/tmp/tsz-crypto-test-enc") catch {};
-    defer std.fs.cwd().deleteFile("/tmp/tsz-crypto-test-dec") catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), "/tmp/tsz-crypto-test-plain") catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), "/tmp/tsz-crypto-test-enc") catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), "/tmp/tsz-crypto-test-dec") catch {};
 
     try encryptFile(alloc, "/tmp/tsz-crypto-test-plain", "/tmp/tsz-crypto-test-enc", &key);
     try decryptFile(alloc, "/tmp/tsz-crypto-test-enc", "/tmp/tsz-crypto-test-dec", &key);
 
-    const recovered = try std.fs.cwd().readFileAlloc(alloc, "/tmp/tsz-crypto-test-dec", 1024);
+    const recovered = try std.Io.Dir.cwd().readFileAlloc(host_io.io(), "/tmp/tsz-crypto-test-dec", alloc, .limited(1024));
     defer alloc.free(recovered);
     try std.testing.expectEqualStrings(test_data, recovered);
 }
@@ -1834,12 +1851,12 @@ test "file decrypt rejects wrong key" {
     const key_b = [_]u8{0x99} ** 32;
 
     {
-        const f = try std.fs.cwd().createFile("/tmp/tsz-crypto-test-wrongkey", .{});
-        defer f.close();
-        try f.writeAll("secret data");
+        const f = try std.Io.Dir.cwd().createFile(host_io.io(), "/tmp/tsz-crypto-test-wrongkey", .{});
+        defer f.close(host_io.io());
+        try f.writeStreamingAll(host_io.io(), "secret data");
     }
-    defer std.fs.cwd().deleteFile("/tmp/tsz-crypto-test-wrongkey") catch {};
-    defer std.fs.cwd().deleteFile("/tmp/tsz-crypto-test-wrongkey-enc") catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), "/tmp/tsz-crypto-test-wrongkey") catch {};
+    defer std.Io.Dir.cwd().deleteFile(host_io.io(), "/tmp/tsz-crypto-test-wrongkey-enc") catch {};
 
     try encryptFile(alloc, "/tmp/tsz-crypto-test-wrongkey", "/tmp/tsz-crypto-test-wrongkey-enc", &key_a);
 

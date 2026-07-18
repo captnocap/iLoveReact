@@ -14,7 +14,8 @@
 //! structured turn, status, tool, and replay events directly.
 
 const std = @import("std");
-const posix = std.posix;
+const host_io = @import("../host_io.zig");
+const posix = @import("../net/sysx.zig");
 const ReadBuffer = @import("claude_sdk/buffer.zig").ReadBuffer;
 
 pub const VERSION = "0.1.0";
@@ -187,13 +188,13 @@ pub const Session = struct {
         var argv = try buildArgv(allocator, options);
         defer argv.deinit(allocator);
 
-        var child = std.process.Child.init(argv.items, allocator);
-        child.cwd = options.cwd;
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = if (options.inherit_stderr) .Inherit else .Ignore;
-
-        child.spawn() catch return error.SpawnFailed;
+        const child = std.process.spawn(host_io.io(), .{
+            .argv = argv.items,
+            .cwd = if (options.cwd) |c| .{ .path = c } else .inherit,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = if (options.inherit_stderr) .inherit else .ignore,
+        }) catch return error.SpawnFailed;
         if (child.stdout) |stdout| {
             setNonBlocking(stdout.handle) catch {};
         }
@@ -209,10 +210,10 @@ pub const Session = struct {
     pub fn deinit(self: *Session) void {
         if (!self.closed) {
             if (self.child.stdin) |stdin| {
-                stdin.close();
+                stdin.close(host_io.io());
                 self.child.stdin = null;
             }
-            _ = self.child.kill() catch {};
+            self.child.kill(host_io.io());
             self.closed = true;
         }
         for (self.pending_inbound.items) |*owned| owned.deinit();
@@ -225,10 +226,10 @@ pub const Session = struct {
         if (self.closed) return;
         self.closed = true;
         if (self.child.stdin) |stdin| {
-            stdin.close();
+            stdin.close(host_io.io());
             self.child.stdin = null;
         }
-        _ = self.child.wait() catch {};
+        _ = self.child.wait(host_io.io()) catch {};
     }
 
     pub fn initialize(self: *Session, options: InitializeOptions) !InitializeResult {
@@ -303,7 +304,7 @@ pub const Session = struct {
             if (n == 0) {
                 self.closed = true;
                 if (self.child.stdin) |stdin| {
-                    stdin.close();
+                    stdin.close(host_io.io());
                     self.child.stdin = null;
                 }
                 return null;
@@ -337,7 +338,7 @@ pub const Session = struct {
                 }
             }
             if (self.closed) return error.SessionClosed;
-            std.Thread.sleep(1 * std.time.ns_per_ms);
+            host_io.sleep(1 * std.time.ns_per_ms);
         }
     }
 
@@ -458,7 +459,7 @@ pub const Session = struct {
     fn writeLine(self: *Session, line: []const u8) !void {
         if (self.closed) return error.SessionClosed;
         const stdin = self.child.stdin orelse return error.SessionClosed;
-        stdin.writeAll(line) catch return error.WriteError;
+        stdin.writeStreamingAll(host_io.io(), line) catch return error.WriteError;
     }
 
     fn requireOk(self: *Session, response: *const Response) !void {
@@ -676,8 +677,9 @@ fn idValueToText(allocator: std.mem.Allocator, value: std.json.Value) ![]const u
 }
 
 fn emptyObject(allocator: std.mem.Allocator) std.json.Value {
+    _ = allocator;
     return .{
-        .object = std.json.ObjectMap.init(allocator),
+        .object = std.json.ObjectMap.empty,
     };
 }
 

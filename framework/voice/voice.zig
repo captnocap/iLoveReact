@@ -221,11 +221,10 @@ pub fn setPreviewStrideMs(ms: i32) void {
 }
 
 pub fn recordingDevicesJson(out: []u8) []const u8 {
-    var stream = std.io.fixedBufferStream(out);
-    const w = stream.writer();
+    var w = std.Io.Writer.fixed(out);
     var count: c_int = 0;
     const devices = c.SDL_GetAudioRecordingDevices(&count);
-    w.writeAll("[") catch return out[0..stream.pos];
+    w.writeAll("[") catch return w.buffered();
     if (devices) |ids| {
         defer c.SDL_free(ids);
         var i: c_int = 0;
@@ -235,12 +234,12 @@ pub fn recordingDevicesJson(out: []u8) []const u8 {
             const name_ptr = c.SDL_GetAudioDeviceName(id);
             const name = if (name_ptr) |p| std.mem.span(p) else "";
             w.print("{{\"id\":{d},\"name\":\"", .{id}) catch break;
-            writeJsonEscaped(w, name) catch break;
+            writeJsonEscaped(&w, name) catch break;
             w.writeAll("\"}") catch break;
         }
     }
     w.writeAll("]") catch {};
-    return out[0..stream.pos];
+    return w.buffered();
 }
 
 /// Playback (output) device enumeration. Sibling to recordingDevicesJson
@@ -249,11 +248,10 @@ pub fn recordingDevicesJson(out: []u8) []const u8 {
 /// source on the recording side. SDL3 just hands us the playback list;
 /// the pairing happens in cart code.
 pub fn playbackDevicesJson(out: []u8) []const u8 {
-    var stream = std.io.fixedBufferStream(out);
-    const w = stream.writer();
+    var w = std.Io.Writer.fixed(out);
     var count: c_int = 0;
     const devices = c.SDL_GetAudioPlaybackDevices(&count);
-    w.writeAll("[") catch return out[0..stream.pos];
+    w.writeAll("[") catch return w.buffered();
     if (devices) |ids| {
         defer c.SDL_free(ids);
         var i: c_int = 0;
@@ -263,12 +261,12 @@ pub fn playbackDevicesJson(out: []u8) []const u8 {
             const name_ptr = c.SDL_GetAudioDeviceName(id);
             const name = if (name_ptr) |p| std.mem.span(p) else "";
             w.print("{{\"id\":{d},\"name\":\"", .{id}) catch break;
-            writeJsonEscaped(w, name) catch break;
+            writeJsonEscaped(&w, name) catch break;
             w.writeAll("\"}") catch break;
         }
     }
     w.writeAll("]") catch {};
-    return out[0..stream.pos];
+    return w.buffered();
 }
 
 // ── Tick — drain SDL stream, run VAD, fire events ─────────────────────

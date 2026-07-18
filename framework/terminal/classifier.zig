@@ -467,12 +467,12 @@ fn contains(text: []const u8, needle: []const u8) bool {
 }
 
 fn startsTrimmed(text: []const u8, prefix: []const u8) bool {
-    const trimmed = std.mem.trimLeft(u8, text, " \t");
+    const trimmed = std.mem.trimStart(u8, text, " \t");
     return std.mem.startsWith(u8, trimmed, prefix);
 }
 
 fn startsCI(text: []const u8, prefix: []const u8) bool {
-    const trimmed = std.mem.trimLeft(u8, text, " \t");
+    const trimmed = std.mem.trimStart(u8, text, " \t");
     if (trimmed.len < prefix.len) return false;
     return std.mem.startsWith(u8, trimmed, prefix);
 }
@@ -490,7 +490,7 @@ fn isSepLine(s: []const u8) bool {
 }
 
 fn matchPrompt(text: []const u8) bool {
-    const t = std.mem.trimLeft(u8, text, " \t");
+    const t = std.mem.trimStart(u8, text, " \t");
     // $ command or > command
     if (t.len >= 2 and (t[0] == '$' or t[0] == '>') and t[1] == ' ') return true;
     // # command (root prompt)
@@ -501,13 +501,13 @@ fn matchPrompt(text: []const u8) bool {
 }
 
 fn matchNumberedOption(s: []const u8) bool {
-    var t = std.mem.trimLeft(u8, s, " \t>");
+    var t = std.mem.trimStart(u8, s, " \t>");
     if (t.len < 3) return false;
     // Skip UTF-8 cursor indicators: ❯ (\xe2\x9d\xaf) and › (\xe2\x80\xba)
     const cursors = [_][]const u8{ "\xe2\x9d\xaf", "\xe2\x80\xba" };
     for (cursors) |cur| {
         if (std.mem.startsWith(u8, t, cur)) {
-            t = std.mem.trimLeft(u8, t[cur.len..], " ");
+            t = std.mem.trimStart(u8, t[cur.len..], " ");
             break;
         }
     }

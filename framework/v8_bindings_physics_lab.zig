@@ -27,6 +27,12 @@ const c = @import("engine.zig").c;
 
 const alloc = std.heap.c_allocator;
 
+fn listPrint(buf: *std.ArrayList(u8), comptime format: []const u8, args: anytype) !void {
+    var writer: std.Io.Writer.Allocating = .fromArrayList(alloc, buf);
+    defer buf.* = writer.toArrayList();
+    try writer.writer.print(format, args);
+}
+
 const Vec3 = struct { x: f32, y: f32, z: f32 };
 const ItemDef = struct {
     r: f32,
@@ -705,7 +711,7 @@ fn hostStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnString(info, "");
         return;
     };
-    out.writer(alloc).print("{d:.4},{d},{d:.2},{d:.4},{d:.4},{d:.4},{d:.4},{d:.4},{d},{d},{d},{d:.2}", .{
+    listPrint(&out, "{d:.4},{d},{d:.2},{d:.4},{d:.4},{d:.4},{d:.4},{d:.4},{d},{d},{d},{d:.2}", .{
         g_t,
         g_contacts,
         g_peak_contacts,
@@ -723,7 +729,7 @@ fn hostStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     for (g_balls[0..g_ball_count]) |ball| {
-        out.writer(alloc).print(",{d:.4},{d:.4},{d:.4},{d:.4},{d},{d:.4},{d:.4},{d:.4},{d:.4}", .{
+        listPrint(&out, ",{d:.4},{d:.4},{d:.4},{d:.4},{d},{d:.4},{d:.4},{d:.4},{d:.4}", .{
             ball.x,
             ball.y,
             ball.z,

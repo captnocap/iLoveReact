@@ -16,7 +16,8 @@
 //!   }
 
 const std = @import("std");
-const posix = std.posix;
+const host_io = @import("../../host_io.zig");
+const posix = @import("../../net/sysx.zig");
 
 const options = @import("options.zig");
 const types = @import("types.zig");
@@ -43,27 +44,27 @@ pub const Session = struct {
         // own the slice data until spawn returns successfully. Free after.
         defer argv_mod.freeArgv(allocator, argv);
 
-        var child = std.process.Child.init(argv, allocator);
-        child.cwd = opts.cwd;
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = if (opts.inherit_stderr) .Inherit else .Ignore;
-
         // When config_dir is set, fork the parent's env, override
-        // CLAUDE_CONFIG_DIR, and hand it to the child. The map must
-        // outlive child.spawn() but can be torn down right after —
-        // spawn() copies env into the new process before returning.
-        var env_overlay: ?std.process.EnvMap = null;
+        // CLAUDE_CONFIG_DIR, and hand it to the child. The map must outlive
+        // spawn() but can be torn down right after — spawn() copies env
+        // into the new process before returning.
+        var env_overlay: ?std.process.Environ.Map = null;
         defer if (env_overlay) |*m| m.deinit();
         if (opts.config_dir) |cd| {
-            var em = try std.process.getEnvMap(allocator);
+            var em = try host_io.environ().createMap(allocator);
             errdefer em.deinit();
             try em.put("CLAUDE_CONFIG_DIR", cd);
             env_overlay = em;
-            child.env_map = &env_overlay.?;
         }
 
-        child.spawn() catch |err| {
+        const child = std.process.spawn(host_io.io(), .{
+            .argv = argv,
+            .cwd = .{ .path = opts.cwd },
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = if (opts.inherit_stderr) .inherit else .ignore,
+            .environ_map = if (env_overlay) |*m| m else null,
+        }) catch |err| {
             std.log.err("claude_sdk: spawn failed: {s}", .{@errorName(err)});
             return error.SpawnFailed;
         };
@@ -96,10 +97,10 @@ pub const Session = struct {
         try appendJsonString(self.allocator, &buf, prompt);
         try buf.appendSlice(self.allocator, "},\"parent_tool_use_id\":null}\n");
 
-        stdin.writeAll(buf.items) catch |err| {
+        stdin.writeStreamingAll(host_io.io(), buf.items) catch |err| {
             std.log.err("claude_sdk: stdin writeAll failed: {s}", .{@errorName(err)});
             self.closed = true;
-            stdin.close();
+            stdin.close(host_io.io());
             self.child.stdin = null;
             return error.WriteError;
         };
@@ -133,7 +134,7 @@ pub const Session = struct {
             if (n == 0) {
                 self.closed = true;
                 if (self.child.stdin) |stdin| {
-                    stdin.close();
+                    stdin.close(host_io.io());
                     self.child.stdin = null;
                 }
                 return null; // EOF — subprocess exited
@@ -148,21 +149,21 @@ pub const Session = struct {
         self.closed = true;
 
         if (self.child.stdin) |stdin| {
-            stdin.close();
+            stdin.close(host_io.io());
             self.child.stdin = null;
         }
 
-        _ = self.child.wait() catch {};
+        _ = self.child.wait(host_io.io()) catch {};
     }
 
     /// Force-kill if still running and release internal buffers.
     pub fn deinit(self: *Session) void {
         if (!self.closed) {
             if (self.child.stdin) |stdin| {
-                stdin.close();
+                stdin.close(host_io.io());
                 self.child.stdin = null;
             }
-            _ = self.child.kill() catch {};
+            self.child.kill(host_io.io());
             self.closed = true;
         }
         self.line_buf.deinit();

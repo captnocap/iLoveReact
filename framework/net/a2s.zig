@@ -181,6 +181,11 @@ const Cursor = struct {
     }
 };
 
+fn appendFormatted(out: *std.ArrayList(u8), alloc: std.mem.Allocator, comptime fmt: []const u8, args: anytype) !void {
+    var buf: [256]u8 = undefined;
+    try out.appendSlice(alloc, try std.fmt.bufPrint(&buf, fmt, args));
+}
+
 fn jsonStr(out: *std.ArrayList(u8), alloc: std.mem.Allocator, s: []const u8) !void {
     try out.append(alloc, '"');
     for (s) |c| {
@@ -228,7 +233,7 @@ fn buildInfoJson(bytes: []const u8, alloc: std.mem.Allocator) ![]u8 {
         try jsonStr(&out, alloc, folder);
         try out.appendSlice(alloc, ",\"game\":");
         try jsonStr(&out, alloc, game);
-        try out.writer(alloc).print(",\"players\":{d},\"maxPlayers\":{d},\"protocol\":{d}", .{ players, max_players, protocol });
+        try appendFormatted(&out, alloc, ",\"players\":{d},\"maxPlayers\":{d},\"protocol\":{d}", .{ players, max_players, protocol });
     } else {
         // Source / Source 2
         const protocol = cur.byte();
@@ -246,7 +251,7 @@ fn buildInfoJson(bytes: []const u8, alloc: std.mem.Allocator) ![]u8 {
         const vac = cur.byte();
         const version = cur.cstring();
         try out.appendSlice(alloc, "\"format\":\"source\",\"protocol\":");
-        try out.writer(alloc).print("{d}", .{protocol});
+        try appendFormatted(&out, alloc, "{d}", .{protocol});
         try out.appendSlice(alloc, ",\"name\":");
         try jsonStr(&out, alloc, name);
         try out.appendSlice(alloc, ",\"map\":");
@@ -255,7 +260,7 @@ fn buildInfoJson(bytes: []const u8, alloc: std.mem.Allocator) ![]u8 {
         try jsonStr(&out, alloc, folder);
         try out.appendSlice(alloc, ",\"game\":");
         try jsonStr(&out, alloc, game);
-        try out.writer(alloc).print(",\"steamAppId\":{d},\"players\":{d},\"maxPlayers\":{d},\"bots\":{d},\"serverType\":{d},\"environment\":{d},\"visibility\":{d},\"vac\":{d}", .{ app_id, players, max_players, bots, server_type, env, visibility, vac });
+        try appendFormatted(&out, alloc, ",\"steamAppId\":{d},\"players\":{d},\"maxPlayers\":{d},\"bots\":{d},\"serverType\":{d},\"environment\":{d},\"visibility\":{d},\"vac\":{d}", .{ app_id, players, max_players, bots, server_type, env, visibility, vac });
         try out.appendSlice(alloc, ",\"version\":");
         try jsonStr(&out, alloc, version);
     }
@@ -276,9 +281,9 @@ fn buildPlayersJson(bytes: []const u8, alloc: std.mem.Allocator) ![]u8 {
         const name = cur.cstring();
         const score = cur.signedLong();
         const duration = cur.float();
-        try out.writer(alloc).print("{{\"index\":{d},\"name\":", .{idx});
+        try appendFormatted(&out, alloc, "{{\"index\":{d},\"name\":", .{idx});
         try jsonStr(&out, alloc, name);
-        try out.writer(alloc).print(",\"score\":{d},\"duration\":{d:.3}}}", .{ score, duration });
+        try appendFormatted(&out, alloc, ",\"score\":{d},\"duration\":{d:.3}}}", .{ score, duration });
     }
     try out.append(alloc, ']');
     return try out.toOwnedSlice(alloc);

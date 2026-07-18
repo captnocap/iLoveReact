@@ -1,4 +1,5 @@
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8rt = @import("v8_runtime.zig");
 
@@ -111,10 +112,16 @@ fn jsonEscape(out: *std.ArrayList(u8), alloc: std.mem.Allocator, s: []const u8) 
         '\n' => try out.appendSlice(alloc, "\\n"),
         '\r' => try out.appendSlice(alloc, "\\r"),
         '\t' => try out.appendSlice(alloc, "\\t"),
-        0...8, 11, 12, 14...31 => try out.writer(alloc).print("\\u{x:0>4}", .{ch}),
+        0...8, 11, 12, 14...31 => try listPrint(alloc, out, "\\u{x:0>4}", .{ch}),
         else => try out.append(alloc, ch),
     };
     try out.append(alloc, '"');
+}
+
+fn listPrint(alloc: std.mem.Allocator, out: *std.ArrayList(u8), comptime format: []const u8, args: anytype) !void {
+    var writer: std.Io.Writer.Allocating = .fromArrayList(alloc, out);
+    defer out.* = writer.toArrayList();
+    try writer.writer.print(format, args);
 }
 
 const HttpReq = struct {
@@ -170,7 +177,7 @@ fn httpSyncViaClient(req: HttpReq) ![]u8 {
         else if (std.ascii.eqlIgnoreCase(req.method, "HEAD")) .HEAD
         else .GET;
 
-    var client: std.http.Client = .{ .allocator = alloc };
+    var client: std.http.Client = .{ .allocator = alloc, .io = host_io.io() };
     defer client.deinit();
 
     var extra_headers: std.ArrayList(std.http.Header) = .empty;
@@ -224,7 +231,7 @@ fn httpSyncViaClient(req: HttpReq) ![]u8 {
     // Build JSON with status, headers, body
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
-    try out.writer(alloc).print("{{\"status\":{d},\"headers\":{{", .{status});
+    try listPrint(alloc, &out, "{{\"status\":{d},\"headers\":{{", .{status});
     var first_hdr = true;
     var hit = std.http.HeaderIterator.init(response.head.bytes);
     while (hit.next()) |hdr| {
@@ -271,13 +278,13 @@ fn parsePageReq(parsed: *const std.json.Parsed(std.json.Value)) ?[]const u8 {
 fn buildPageRespJson(resp: *const net_http.Response, alloc: std.mem.Allocator) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
-    try out.writer(alloc).print("{{\"status\":{d},\"finalUrl\":", .{resp.status});
+    try listPrint(alloc, &out, "{{\"status\":{d},\"finalUrl\":", .{resp.status});
     try jsonEscape(&out, alloc, resp.finalUrlSlice());
     try out.appendSlice(alloc, ",\"contentType\":");
     try jsonEscape(&out, alloc, resp.contentTypeSlice());
     try out.appendSlice(alloc, ",\"body\":");
     try jsonEscape(&out, alloc, resp.bodySlice());
-    try out.writer(alloc).print(",\"truncated\":{s}", .{if (resp.truncated) "true" else "false"});
+    try listPrint(alloc, &out, ",\"truncated\":{s}", .{if (resp.truncated) "true" else "false"});
     if (resp.response_type == .err) {
         try out.appendSlice(alloc, ",\"error\":");
         try jsonEscape(&out, alloc, resp.errorSlice());
@@ -289,7 +296,7 @@ fn buildPageRespJson(resp: *const net_http.Response, alloc: std.mem.Allocator) !
 fn buildHttpRespJson(resp: *const net_http.Response, alloc: std.mem.Allocator) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(alloc);
-    try out.writer(alloc).print("{{\"status\":{d},\"headers\":{{}},\"body\":", .{resp.status});
+    try listPrint(alloc, &out, "{{\"status\":{d},\"headers\":{{}},\"body\":", .{resp.status});
     try jsonEscape(&out, alloc, resp.bodySlice());
     if (resp.response_type == .err) {
         try out.appendSlice(alloc, ",\"error\":");
@@ -326,7 +333,7 @@ fn hostFetch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     defer std.heap.page_allocator.free(url);
 
     const alloc = std.heap.page_allocator;
-    var client: std.http.Client = .{ .allocator = alloc };
+    var client: std.http.Client = .{ .allocator = alloc, .io = host_io.io() };
     defer client.deinit();
 
     var body_alloc = std.Io.Writer.Allocating.init(alloc);

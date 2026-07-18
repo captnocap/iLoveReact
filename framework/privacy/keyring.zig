@@ -134,17 +134,17 @@ fn writeKeyringFile(path: []const u8, password: []const u8, json_blob: []const u
     defer alloc.free(ct);
     _ = try sodium.xchachaEncrypt(ct, json_blob, "", &file_nonce, &kek);
 
-    const f = try std.fs.cwd().createFile(path, .{ .truncate = true });
-    defer f.close();
-    try f.writeAll(&file_magic);
-    try f.writeAll(&[_]u8{file_version});
-    try f.writeAll(&file_salt);
-    try f.writeAll(&file_nonce);
-    try f.writeAll(ct);
+    const f = try std.Io.Dir.cwd().createFile(host_io.io(), path, .{ .truncate = true });
+    defer f.close(host_io.io());
+    try f.writeStreamingAll(host_io.io(), &file_magic);
+    try f.writeStreamingAll(host_io.io(), &[_]u8{file_version});
+    try f.writeStreamingAll(host_io.io(), &file_salt);
+    try f.writeStreamingAll(host_io.io(), &file_nonce);
+    try f.writeStreamingAll(host_io.io(), ct);
 }
 
 fn readKeyringFile(alloc: std.mem.Allocator, path: []const u8, password: []const u8) ![]u8 {
-    const raw = try std.fs.cwd().readFileAlloc(alloc, path, 16 * 1024 * 1024);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, alloc, .limited(16 * 1024 * 1024));
     defer alloc.free(raw);
     if (raw.len < 4 + 1 + 16 + 24 + 16) return error.InvalidKeyring;
     if (!std.mem.eql(u8, raw[0..4], &file_magic)) return error.InvalidKeyring;
@@ -185,6 +185,12 @@ fn jsonAppendString(alloc: std.mem.Allocator, out: *std.ArrayList(u8), s: []cons
         else => try out.append(alloc, b),
     };
     try out.append(alloc, '"');
+}
+
+fn listPrint(alloc: std.mem.Allocator, buf: *std.ArrayList(u8), comptime format: []const u8, args: anytype) !void {
+    var writer: std.Io.Writer.Allocating = .fromArrayList(alloc, buf);
+    defer buf.* = writer.toArrayList();
+    try writer.writer.print(format, args);
 }
 
 fn jsonAppendBytesAsHex(alloc: std.mem.Allocator, out: *std.ArrayList(u8), bytes: []const u8) !void {
@@ -231,9 +237,9 @@ fn serializeEntries(alloc: std.mem.Allocator, entries: []const KeyEntry) ![]u8 {
         try jsonAppendBytesAsHex(alloc, &buf, &e.public_key);
         try buf.appendSlice(alloc, ",\"encryptedPrivateKey\":");
         try jsonAppendBase64(alloc, &buf, e.encrypted_private);
-        try std.fmt.format(buf.writer(alloc), ",\"created\":{d}", .{e.created});
-        if (e.expires) |exp| try std.fmt.format(buf.writer(alloc), ",\"expires\":{d}", .{exp});
-        if (e.revoked) |r| try std.fmt.format(buf.writer(alloc), ",\"revoked\":{d}", .{r});
+        try listPrint(alloc, &buf, ",\"created\":{d}", .{e.created});
+        if (e.expires) |exp| try listPrint(alloc, &buf, ",\"expires\":{d}", .{exp});
+        if (e.revoked) |r| try listPrint(alloc, &buf, ",\"revoked\":{d}", .{r});
         if (e.revoke_reason) |r| {
             try buf.appendSlice(alloc, ",\"revokeReason\":");
             try jsonAppendString(alloc, &buf, r);
@@ -340,7 +346,7 @@ pub fn create(alloc: std.mem.Allocator, path: []const u8, master_password: []con
     var ring: Keyring = .{
         .path = try alloc.dupe(u8, path),
         .master_password = try alloc.dupe(u8, master_password),
-        .entries = .{},
+        .entries = .empty,
         .alloc = alloc,
     };
     errdefer ring.deinit();

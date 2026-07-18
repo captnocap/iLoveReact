@@ -310,7 +310,7 @@ pub const Session = struct {
         while (true) {
             const newline_idx = std.mem.indexOfScalarPos(u8, self.sse_buffer.items, self.sse_offset, '\n') orelse return;
             const raw = self.sse_buffer.items[self.sse_offset..newline_idx];
-            const line = std.mem.trimRight(u8, raw, "\r");
+            const line = std.mem.trimEnd(u8, raw, "\r");
             self.sse_offset = newline_idx + 1;
 
             if (!std.mem.startsWith(u8, line, "data: ")) continue;

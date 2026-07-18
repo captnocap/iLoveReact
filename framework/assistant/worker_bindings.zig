@@ -22,6 +22,7 @@
 //! ingest function — handled in a follow-on phase.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const v8 = @import("v8");
 const v8rt = @import("../v8_runtime.zig");
 
@@ -47,18 +48,18 @@ const CodexSession = struct {
     thread: codex_sdk.Thread,
 
     pending: std.ArrayList([]u8) = .empty,
-    pending_mutex: std.Thread.Mutex = .{},
-    pending_signal: std.Thread.ResetEvent = .{},
+    pending_mutex: host_io.Mutex = .{},
+    pending_signal: std.Io.Event = .unset,
 
     inbox: std.ArrayList(codex_sdk.Notification) = .empty,
-    inbox_mutex: std.Thread.Mutex = .{},
+    inbox_mutex: host_io.Mutex = .{},
 
     worker: ?std.Thread = null,
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     pub fn destroy(self: *CodexSession) void {
         self.stop.store(true, .seq_cst);
-        self.pending_signal.set();
+        self.pending_signal.set(host_io.io());
         if (self.worker) |t| {
             t.join();
             self.worker = null;
@@ -86,7 +87,7 @@ const CodexSession = struct {
         self.pending_mutex.lock();
         defer self.pending_mutex.unlock();
         try self.pending.append(self.allocator, dup);
-        self.pending_signal.set();
+        self.pending_signal.set(host_io.io());
     }
 
     pub fn drainInbox(self: *CodexSession) ![]codex_sdk.Notification {
@@ -97,7 +98,7 @@ const CodexSession = struct {
 
     fn workerEntry(self: *CodexSession) void {
         while (!self.stop.load(.seq_cst)) {
-            self.pending_signal.wait();
+            self.pending_signal.waitUncancelable(host_io.io());
             self.pending_signal.reset();
 
             while (!self.stop.load(.seq_cst)) {
@@ -150,10 +151,10 @@ const ClaudeSession = struct {
     inner: claude_sdk.Session,
 
     pending: std.ArrayList([]u8) = .empty,
-    pending_mutex: std.Thread.Mutex = .{},
+    pending_mutex: host_io.Mutex = .{},
 
     inbox: std.ArrayList(claude_sdk.OwnedMessage) = .empty,
-    inbox_mutex: std.Thread.Mutex = .{},
+    inbox_mutex: host_io.Mutex = .{},
 
     worker: ?std.Thread = null,
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -219,7 +220,7 @@ const ClaudeSession = struct {
                 self.inner.send(text) catch {};
                 any = true;
             }
-            if (!any) std.Thread.sleep(2 * std.time.ns_per_ms);
+            if (!any) host_io.sleep(2 * std.time.ns_per_ms);
         }
     }
 };
@@ -229,10 +230,10 @@ const KimiSession = struct {
     inner: kimi_wire_sdk.Session,
 
     pending: std.ArrayList([]u8) = .empty,
-    pending_mutex: std.Thread.Mutex = .{},
+    pending_mutex: host_io.Mutex = .{},
 
     inbox: std.ArrayList(kimi_wire_sdk.OwnedInbound) = .empty,
-    inbox_mutex: std.Thread.Mutex = .{},
+    inbox_mutex: host_io.Mutex = .{},
 
     worker: ?std.Thread = null,
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -305,7 +306,7 @@ const KimiSession = struct {
                 token.deinit();
                 any = true;
             }
-            if (!any) std.Thread.sleep(2 * std.time.ns_per_ms);
+            if (!any) host_io.sleep(2 * std.time.ns_per_ms);
         }
     }
 };
@@ -315,10 +316,10 @@ const LocalAiSession = struct {
     inner: *local_ai_runtime.Session,
 
     pending: std.ArrayList([]u8) = .empty,
-    pending_mutex: std.Thread.Mutex = .{},
+    pending_mutex: host_io.Mutex = .{},
 
     inbox: std.ArrayList(local_ai_runtime.OwnedEvent) = .empty,
-    inbox_mutex: std.Thread.Mutex = .{},
+    inbox_mutex: host_io.Mutex = .{},
 
     worker: ?std.Thread = null,
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -387,7 +388,7 @@ const LocalAiSession = struct {
                 self.inner.submit(.{ .text = text, .max_tokens = self.max_tokens }) catch {};
                 any = true;
             }
-            if (!any) std.Thread.sleep(2 * std.time.ns_per_ms);
+            if (!any) host_io.sleep(2 * std.time.ns_per_ms);
         }
     }
 };

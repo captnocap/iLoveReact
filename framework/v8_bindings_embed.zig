@@ -38,7 +38,7 @@ var g_shared_path: []u8 = &.{};
 var g_query_ctx: ?embed.WorkerCtx = null;
 var g_ingest: ?*embed.IngestSession = null;
 
-var g_alloc_state = std.heap.GeneralPurposeAllocator(.{}){};
+var g_alloc_state = std.heap.DebugAllocator(.{}){};
 
 fn allocator() std.mem.Allocator {
     return g_alloc_state.allocator();
@@ -77,11 +77,22 @@ fn setString(info: v8.FunctionCallbackInfo, s: []const u8) void {
 
 // ── JSON helpers ───────────────────────────────────────────────────────
 
+fn managedPrint(buf: *std.array_list.Managed(u8), comptime format: []const u8, args: anytype) !void {
+    const alloc = buf.allocator;
+    var list = buf.moveToUnmanaged();
+    var writer: std.Io.Writer.Allocating = .fromArrayList(alloc, &list);
+    defer {
+        var restored = writer.toArrayList();
+        buf.* = restored.toManaged(alloc);
+    }
+    try writer.writer.print(format, args);
+}
+
 fn writeFloatArrayJson(buf: *std.array_list.Managed(u8), v: []const f32) !void {
     try buf.append('[');
     for (v, 0..) |x, i| {
         if (i > 0) try buf.append(',');
-        try buf.writer().print("{d}", .{x});
+        try managedPrint(buf, "{d}", .{x});
     }
     try buf.append(']');
 }
@@ -94,7 +105,7 @@ fn writeJsonStringEscaped(buf: *std.array_list.Managed(u8), s: []const u8) !void
         '\n' => try buf.appendSlice("\\n"),
         '\r' => try buf.appendSlice("\\r"),
         '\t' => try buf.appendSlice("\\t"),
-        0x00...0x08, 0x0B, 0x0C, 0x0E...0x1F => try buf.writer().print("\\u{x:0>4}", .{ch}),
+        0x00...0x08, 0x0B, 0x0C, 0x0E...0x1F => try managedPrint(buf, "\\u{x:0>4}", .{ch}),
         else => try buf.append(ch),
     };
     try buf.append('"');
@@ -337,7 +348,7 @@ fn hostRerank(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
             return;
         };
         const s = g_reranker.?.score(a, query, doc) catch 0.0;
-        buf.writer().print("{d}", .{s}) catch {
+        managedPrint(&buf, "{d}", .{s}) catch {
             setString(info, "[]");
             return;
         };
@@ -582,7 +593,7 @@ fn hostStoreSearch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
             setString(info, "[]");
             return;
         };
-        buf.writer().print(",\"chunk_index\":{d},\"text_preview\":", .{h.chunk_index}) catch {
+        managedPrint(&buf, ",\"chunk_index\":{d},\"text_preview\":", .{h.chunk_index}) catch {
             setString(info, "[]");
             return;
         };
@@ -598,7 +609,7 @@ fn hostStoreSearch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
             setString(info, "[]");
             return;
         };
-        buf.writer().print(",\"dense_score\":{d}}}", .{h.dense_score}) catch {
+        managedPrint(&buf, ",\"dense_score\":{d}}}", .{h.dense_score}) catch {
             setString(info, "[]");
             return;
         };
@@ -824,7 +835,7 @@ fn hostIngestProgress(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     const snap = g_ingest.?.snapshot();
     var buf = std.array_list.Managed(u8).init(a);
     defer buf.deinit();
-    buf.writer().print(
+    managedPrint(&buf,
         "{{\"running\":true,\"files_total\":{d},\"files_done\":{d},\"chunks_done\":{d},\"embed_ms_sum\":{d},\"done\":{},\"cancelled\":{},\"current_file\":",
         .{ snap.files_total, snap.files_done, snap.chunks_done, snap.embed_ms_sum, snap.done, snap.cancelled },
     ) catch {

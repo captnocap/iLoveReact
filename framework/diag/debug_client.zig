@@ -10,6 +10,7 @@
 //! Used by the Tools inspector to attach to running .tsz apps.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("log.zig");
 const ipc = @import("../net/ipc.zig");
 const app_crypto = @import("../privacy/crypto.zig");
@@ -80,7 +81,7 @@ pub fn connect(port: u16, server_pubkey_hex: []const u8) bool {
     if (server_pubkey_hex.len != 64) return false;
 
     _ = app_crypto.hexToBytes(server_pubkey_hex, &server_pubkey) catch return false;
-    our_keypair = X25519.KeyPair.generate();
+    our_keypair = X25519.KeyPair.generate(host_io.io());
 
     var c = ipc.Client.connect(port) catch return false;
 
@@ -414,4 +415,3 @@ fn ap(buf: []u8, pos: *usize, s: []const u8) void {
 fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
-

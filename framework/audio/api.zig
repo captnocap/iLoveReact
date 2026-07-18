@@ -1,6 +1,7 @@
 //! Audio subsystem — public API, beat scheduling, and command processing.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const log = @import("../diag/log.zig");
 const types = @import("types.zig");
 const state = @import("state.zig");
@@ -457,7 +458,7 @@ fn findChunk(data: []const u8, name: *const [4]u8) ?[]const u8 {
 }
 
 fn decodeWavToMonoF32(path: []const u8) ?SampleData {
-    const bytes = std.fs.cwd().readFileAlloc(std.heap.c_allocator, path, 256 * 1024 * 1024) catch return null;
+    const bytes = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, std.heap.c_allocator, .limited(256 * 1024 * 1024)) catch return null;
     defer std.heap.c_allocator.free(bytes);
 
     const fmt = findChunk(bytes, "fmt ") orelse return null;

@@ -3470,7 +3470,7 @@ fn readBundleFromDisk() ![]u8 {
 }
 
 fn bundleMtimeOrZero() i128 {
-    const s = std.Io.Dir.cwd().statFile(host_io.io(), DEV_BUNDLE_PATH) catch return 0;
+    const s = std.Io.Dir.cwd().statFile(host_io.io(), DEV_BUNDLE_PATH, .{}) catch return 0;
     return @intCast(s.mtime.toNanoseconds());
 }
 

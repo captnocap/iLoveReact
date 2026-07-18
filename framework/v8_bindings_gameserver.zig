@@ -242,6 +242,12 @@ fn hostA2sClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 var g_rcon_ev: [1]rcon_mod.Event = undefined;
 var g_a2s_ev: [1]a2s_mod.Event = undefined;
 
+fn listPrint(buf: *std.ArrayList(u8), comptime format: []const u8, args: anytype) !void {
+    var writer: std.Io.Writer.Allocating = .fromArrayList(alloc, buf);
+    defer buf.* = writer.toArrayList();
+    try writer.writer.print(format, args);
+}
+
 pub fn tickDrain() void {
     var i: usize = 0;
     while (i < g_rcon.items.len) {
@@ -262,7 +268,7 @@ pub fn tickDrain() void {
                 .response => |r| {
                     var payload: std.ArrayList(u8) = .empty;
                     defer payload.deinit(alloc);
-                    payload.writer(alloc).print("{{\"requestId\":{d},\"body\":", .{r.request_id}) catch {
+                    listPrint(&payload, "{{\"requestId\":{d},\"body\":", .{r.request_id}) catch {
                         alloc.free(r.body);
                         continue;
                     };

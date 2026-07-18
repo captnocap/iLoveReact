@@ -157,10 +157,10 @@ const c = struct {
 pub var embed_log_mem: bool = true;
 
 fn readProcVmRssKb() i64 {
-    const file = std.fs.openFileAbsolute("/proc/self/status", .{}) catch return -1;
-    defer file.close();
+    const file = std.Io.Dir.openFileAbsolute(host_io.io(), "/proc/self/status", .{}) catch return -1;
+    defer file.close(host_io.io());
     var buf: [4096]u8 = undefined;
-    const n = file.read(&buf) catch return -1;
+    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return -1;
     const text = buf[0..n];
     const tag = "VmRSS:";
     const at = std.mem.indexOf(u8, text, tag) orelse return -1;
@@ -179,10 +179,10 @@ fn readAmdGpuVramUsedKb() i64 {
     while (card < 8) : (card += 1) {
         var pbuf: [128]u8 = undefined;
         const path = std.fmt.bufPrint(&pbuf, "/sys/class/drm/card{d}/device/mem_info_vram_used", .{card}) catch return -1;
-        const file = std.fs.openFileAbsolute(path, .{}) catch continue;
-        defer file.close();
+        const file = std.Io.Dir.openFileAbsolute(host_io.io(), path, .{}) catch continue;
+        defer file.close(host_io.io());
         var buf: [64]u8 = undefined;
-        const n = file.read(&buf) catch return -1;
+        const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return -1;
         var len = n;
         while (len > 0 and (buf[len - 1] == '\n' or buf[len - 1] == ' ')) len -= 1;
         const bytes = std.fmt.parseInt(i64, buf[0..len], 10) catch return -1;
@@ -203,6 +203,22 @@ pub fn logMem(phase: []const u8, chunk_idx: usize, n_tokens: usize) void {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
+
+fn managedPrint(buf: *std.array_list.Managed(u8), comptime format: []const u8, args: anytype) !void {
+    const allocator = buf.allocator;
+    var list = buf.moveToUnmanaged();
+    var writer: std.Io.Writer.Allocating = .fromArrayList(allocator, &list);
+    defer {
+        var restored = writer.toArrayList();
+        buf.* = restored.toManaged(allocator);
+    }
+    try writer.writer.print(format, args);
+}
+
+fn readOpenFileAlloc(file: std.Io.File, allocator: std.mem.Allocator, limit: usize) ![]u8 {
+    var reader = file.reader(host_io.io(), &.{});
+    return reader.interface.allocRemaining(allocator, .limited(limit));
+}
 
 pub fn shaHex(input: []const u8) [64]u8 {
     var hash: [32]u8 = undefined;
@@ -747,7 +763,7 @@ pub const Store = struct {
         try arr_buf.appendSlice("[");
         for (vector, 0..) |v, i| {
             if (i > 0) try arr_buf.append(',');
-            try arr_buf.writer().print("{d}", .{v});
+            try managedPrint(&arr_buf, "{d}", .{v});
         }
         try arr_buf.appendSlice("]");
 
@@ -807,7 +823,7 @@ pub const Store = struct {
         try arr_buf.appendSlice("[");
         for (vector, 0..) |v, i| {
             if (i > 0) try arr_buf.append(',');
-            try arr_buf.writer().print("{d}", .{v});
+            try managedPrint(&arr_buf, "{d}", .{v});
         }
         try arr_buf.appendSlice("]");
 
@@ -1180,11 +1196,11 @@ pub fn findFiles(
         out.deinit();
     }
 
-    var dir = try std.fs.openDirAbsolute(root, .{ .iterate = true });
-    defer dir.close();
+    var dir = try std.Io.Dir.openDirAbsolute(host_io.io(), root, .{ .iterate = true });
+    defer dir.close(host_io.io());
     var walker = try dir.walk(allocator);
     defer walker.deinit();
-    while (try walker.next()) |entry| {
+    while (try walker.next(host_io.io())) |entry| {
         if (entry.kind != .file) continue;
         if (shouldSkipPath(entry.path, user_excludes)) continue;
         if (!isEmbeddableExt(entry.basename)) continue;
@@ -1255,11 +1271,11 @@ fn parseClaudeJsonl(allocator: std.mem.Allocator, path: []const u8) !std.array_l
         out.deinit();
     }
 
-    const file = try std.fs.openFileAbsolute(path, .{});
-    defer file.close();
-    const stat = try file.stat();
+    const file = try std.Io.Dir.openFileAbsolute(host_io.io(), path, .{});
+    defer file.close(host_io.io());
+    const stat = try file.stat(host_io.io());
     if (stat.size > 200 * 1024 * 1024) return error.FileTooLarge;
-    const data = try file.readToEndAlloc(allocator, @intCast(stat.size));
+    const data = try readOpenFileAlloc(file, allocator, @intCast(stat.size));
     defer allocator.free(data);
 
     var line_iter = std.mem.tokenizeScalar(u8, data, '\n');
@@ -1385,11 +1401,11 @@ fn parseCodexJsonl(allocator: std.mem.Allocator, path: []const u8) !std.array_li
         for (out.items) |*e| freeEvent(allocator, e);
         out.deinit();
     }
-    const file = try std.fs.openFileAbsolute(path, .{});
-    defer file.close();
-    const stat = try file.stat();
+    const file = try std.Io.Dir.openFileAbsolute(host_io.io(), path, .{});
+    defer file.close(host_io.io());
+    const stat = try file.stat(host_io.io());
     if (stat.size > 200 * 1024 * 1024) return error.FileTooLarge;
-    const data = try file.readToEndAlloc(allocator, @intCast(stat.size));
+    const data = try readOpenFileAlloc(file, allocator, @intCast(stat.size));
     defer allocator.free(data);
     var line_iter = std.mem.tokenizeScalar(u8, data, '\n');
     while (line_iter.next()) |line| {
@@ -1487,11 +1503,11 @@ fn parseKimiContextJsonl(allocator: std.mem.Allocator, path: []const u8) !std.ar
         for (out.items) |*e| freeEvent(allocator, e);
         out.deinit();
     }
-    const file = try std.fs.openFileAbsolute(path, .{});
-    defer file.close();
-    const stat = try file.stat();
+    const file = try std.Io.Dir.openFileAbsolute(host_io.io(), path, .{});
+    defer file.close(host_io.io());
+    const stat = try file.stat(host_io.io());
     if (stat.size > 200 * 1024 * 1024) return error.FileTooLarge;
-    const data = try file.readToEndAlloc(allocator, @intCast(stat.size));
+    const data = try readOpenFileAlloc(file, allocator, @intCast(stat.size));
     defer allocator.free(data);
     var line_iter = std.mem.tokenizeScalar(u8, data, '\n');
     while (line_iter.next()) |line| {
@@ -1592,7 +1608,7 @@ fn buildChunk(
     for (events, 0..) |e, i| {
         if (i > 0) try roles.append(',');
         try roles.appendSlice(e.role);
-        try display.writer().print("[{s} {s}] {s}\n", .{ e.timestamp, e.role, e.body });
+        try managedPrint(&display, "[{s} {s}] {s}\n", .{ e.timestamp, e.role, e.body });
         if (std.mem.eql(u8, e.role, "tool_call")) {
             const sp = std.mem.indexOfScalar(u8, e.body, ' ') orelse e.body.len;
             if (tools.items.len > 0) try tools.append(',');
@@ -1670,18 +1686,18 @@ pub fn findClaudeJsonls(allocator: std.mem.Allocator, base_dir: []const u8) ![][
     const projects_dir = try std.fmt.allocPrint(allocator, "{s}/projects", .{base_dir});
     defer allocator.free(projects_dir);
 
-    var pdir = std.fs.openDirAbsolute(projects_dir, .{ .iterate = true }) catch return out.toOwnedSlice();
-    defer pdir.close();
+    var pdir = std.Io.Dir.openDirAbsolute(host_io.io(), projects_dir, .{ .iterate = true }) catch return out.toOwnedSlice();
+    defer pdir.close(host_io.io());
     var pit = pdir.iterate();
-    while (try pit.next()) |proj_entry| {
+    while (try pit.next(host_io.io())) |proj_entry| {
         if (proj_entry.kind != .directory) continue;
         const proj_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ projects_dir, proj_entry.name });
         defer allocator.free(proj_path);
 
-        var jdir = std.fs.openDirAbsolute(proj_path, .{ .iterate = true }) catch continue;
-        defer jdir.close();
+        var jdir = std.Io.Dir.openDirAbsolute(host_io.io(), proj_path, .{ .iterate = true }) catch continue;
+        defer jdir.close(host_io.io());
         var jit = jdir.iterate();
-        while (try jit.next()) |je| {
+        while (try jit.next(host_io.io())) |je| {
             if (je.kind != .file) continue;
             if (!std.mem.endsWith(u8, je.name, ".jsonl")) continue;
             const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ proj_path, je.name });
@@ -1700,11 +1716,11 @@ pub fn findCodexJsonls(allocator: std.mem.Allocator, base: []const u8) ![][]u8 {
         for (out.items) |p| allocator.free(p);
         out.deinit();
     }
-    var dir = std.fs.openDirAbsolute(root, .{ .iterate = true }) catch return out.toOwnedSlice();
-    defer dir.close();
+    var dir = std.Io.Dir.openDirAbsolute(host_io.io(), root, .{ .iterate = true }) catch return out.toOwnedSlice();
+    defer dir.close(host_io.io());
     var walker = try dir.walk(allocator);
     defer walker.deinit();
-    while (try walker.next()) |entry| {
+    while (try walker.next(host_io.io())) |entry| {
         if (entry.kind != .file) continue;
         if (!std.mem.endsWith(u8, entry.basename, ".jsonl")) continue;
         const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ root, entry.path });
@@ -1722,11 +1738,11 @@ pub fn findKimiContexts(allocator: std.mem.Allocator, base: []const u8) ![][]u8 
         for (out.items) |p| allocator.free(p);
         out.deinit();
     }
-    var dir = std.fs.openDirAbsolute(root, .{ .iterate = true }) catch return out.toOwnedSlice();
-    defer dir.close();
+    var dir = std.Io.Dir.openDirAbsolute(host_io.io(), root, .{ .iterate = true }) catch return out.toOwnedSlice();
+    defer dir.close(host_io.io());
     var walker = try dir.walk(allocator);
     defer walker.deinit();
-    while (try walker.next()) |entry| {
+    while (try walker.next(host_io.io())) |entry| {
         if (entry.kind != .file) continue;
         if (!std.mem.eql(u8, entry.basename, "context.jsonl")) continue;
         const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ root, entry.path });
@@ -1748,18 +1764,18 @@ pub fn findMemoryMarkdowns(allocator: std.mem.Allocator, home: []const u8) ![][]
         const projects_dir = try std.fmt.allocPrint(allocator, "{s}/{s}/projects", .{ home, account });
         defer allocator.free(projects_dir);
 
-        var pdir = std.fs.openDirAbsolute(projects_dir, .{ .iterate = true }) catch continue;
-        defer pdir.close();
+        var pdir = std.Io.Dir.openDirAbsolute(host_io.io(), projects_dir, .{ .iterate = true }) catch continue;
+        defer pdir.close(host_io.io());
         var pit = pdir.iterate();
-        while (try pit.next()) |proj_e| {
+        while (try pit.next(host_io.io())) |proj_e| {
             if (proj_e.kind != .directory) continue;
             const memdir_path = try std.fmt.allocPrint(allocator, "{s}/{s}/memory", .{ projects_dir, proj_e.name });
             defer allocator.free(memdir_path);
 
-            var mdir = std.fs.openDirAbsolute(memdir_path, .{ .iterate = true }) catch continue;
-            defer mdir.close();
+            var mdir = std.Io.Dir.openDirAbsolute(host_io.io(), memdir_path, .{ .iterate = true }) catch continue;
+            defer mdir.close(host_io.io());
             var mit = mdir.iterate();
-            while (try mit.next()) |me| {
+            while (try mit.next(host_io.io())) |me| {
                 if (me.kind != .file) continue;
                 if (!std.mem.endsWith(u8, me.name, ".md")) continue;
                 const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ memdir_path, me.name });
@@ -1990,12 +2006,12 @@ pub fn probeStructuredKeys(
     max_keys: usize,
     max_samples_per_key: usize,
 ) ![]u8 {
-    const file = std.fs.openFileAbsolute(path, .{}) catch return allocator.dupe(u8, "");
-    defer file.close();
-    const stat = file.stat() catch return allocator.dupe(u8, "");
+    const file = std.Io.Dir.openFileAbsolute(host_io.io(), path, .{}) catch return allocator.dupe(u8, "");
+    defer file.close(host_io.io());
+    const stat = file.stat(host_io.io()) catch return allocator.dupe(u8, "");
     if (stat.size == 0) return allocator.dupe(u8, "{\"sampleCount\":0,\"keys\":[]}");
     const cap: usize = @min(@as(usize, @intCast(stat.size)), 16 * 1024 * 1024);
-    const data = try file.readToEndAlloc(allocator, cap);
+    const data = try readOpenFileAlloc(file, allocator, cap);
     defer allocator.free(data);
 
     var key_paths = std.array_list.Managed([]u8).init(allocator);
@@ -2039,12 +2055,12 @@ pub fn probeStructuredKeys(
     // helper. Keep this compact: no pretty-printing.
     var out = std.array_list.Managed(u8).init(allocator);
     errdefer out.deinit();
-    try out.writer().print("{{\"sampleCount\":{d},\"keys\":[", .{n_lines});
+    try managedPrint(&out, "{{\"sampleCount\":{d},\"keys\":[", .{n_lines});
     for (key_paths.items, 0..) |p, i| {
         if (i > 0) try out.append(',');
         try out.appendSlice("{\"path\":");
         try appendJsonString(&out, p);
-        try out.writer().print(",\"occurrences\":{d},\"samples\":[", .{occurrences.items[i]});
+        try managedPrint(&out, ",\"occurrences\":{d},\"samples\":[", .{occurrences.items[i]});
         const sl = samples.items[i].items;
         for (sl, 0..) |s, j| {
             if (j > 0) try out.append(',');
@@ -2168,8 +2184,8 @@ const Job = struct {
 };
 
 const JobQueue = struct {
-    mutex: std.Thread.Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    mutex: host_io.Mutex = .{},
+    cond: std.Io.Condition = .init,
     jobs: std.array_list.Managed(Job),
     closed: bool = false,
     allocator: std.mem.Allocator,
@@ -2190,7 +2206,7 @@ const JobQueue = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         try self.jobs.append(job);
-        self.cond.signal();
+        self.cond.signal(host_io.io());
     }
 
     fn pop(self: *JobQueue) ?Job {
@@ -2198,7 +2214,7 @@ const JobQueue = struct {
         defer self.mutex.unlock();
         while (self.jobs.items.len == 0) {
             if (self.closed) return null;
-            self.cond.wait(&self.mutex);
+            self.cond.waitUncancelable(host_io.io(), &self.mutex.inner);
         }
         return self.jobs.orderedRemove(0);
     }
@@ -2207,7 +2223,7 @@ const JobQueue = struct {
         self.mutex.lock();
         defer self.mutex.unlock();
         self.closed = true;
-        self.cond.broadcast();
+        self.cond.broadcast(host_io.io());
     }
 };
 
@@ -2238,7 +2254,7 @@ pub const IngestSession = struct {
     threads: []std.Thread,
     cancel_flag: std.atomic.Value(bool),
     done_flag: std.atomic.Value(bool),
-    cur_mutex: std.Thread.Mutex,
+    cur_mutex: host_io.Mutex,
     cur_buf: [256]u8,
     cur_len: usize,
     err_buf: [256]u8,
@@ -2562,12 +2578,12 @@ fn processCode(
     const rel = relTo(job.path, job.repo_root);
     const lang = detectLang(rel);
 
-    const file = std.fs.openFileAbsolute(job.path, .{}) catch return;
-    defer file.close();
-    const stat = file.stat() catch return;
+    const file = std.Io.Dir.openFileAbsolute(host_io.io(), job.path, .{}) catch return;
+    defer file.close(host_io.io());
+    const stat = file.stat(host_io.io()) catch return;
     if (stat.size == 0) return;
     if (stat.size > max_file_bytes) return;
-    const content = file.readToEndAlloc(allocator, @intCast(stat.size)) catch return;
+    const content = readOpenFileAlloc(file, allocator, @intCast(stat.size)) catch return;
 
     var lines = std.array_list.Managed([]const u8).init(allocator);
     defer lines.deinit();
@@ -2596,7 +2612,7 @@ fn processCode(
             const end = @min(i + window_lines, lines.items.len);
             var body = std.array_list.Managed(u8).init(allocator);
             defer body.deinit();
-            try body.writer().print("// File: {s}\n// Lang: {s}\n// Lines: {d}-{d}\n\n", .{ rel, lang, i + 1, end });
+            try managedPrint(&body, "// File: {s}\n// Lang: {s}\n// Lines: {d}-{d}\n\n", .{ rel, lang, i + 1, end });
             for (lines.items[i..end], 0..) |line, j| {
                 if (j > 0) try body.append('\n');
                 try body.appendSlice(line);
@@ -2658,11 +2674,11 @@ pub fn findStructuredFiles(
         for (out.items) |p| allocator.free(p);
         out.deinit();
     }
-    var dir = try std.fs.openDirAbsolute(root, .{ .iterate = true });
-    defer dir.close();
+    var dir = try std.Io.Dir.openDirAbsolute(host_io.io(), root, .{ .iterate = true });
+    defer dir.close(host_io.io());
     var walker = try dir.walk(allocator);
     defer walker.deinit();
-    while (try walker.next()) |entry| {
+    while (try walker.next(host_io.io())) |entry| {
         if (entry.kind != .file) continue;
         if (shouldSkipPath(entry.path, user_excludes)) continue;
         const lower = entry.basename;
@@ -2699,12 +2715,12 @@ fn processConversationMapped(
     const session_id = try std.fmt.allocPrint(allocator, "conversation-history/{s}", .{basename});
     defer allocator.free(session_id);
 
-    const file = std.fs.openFileAbsolute(job.path, .{}) catch return;
-    defer file.close();
-    const stat = file.stat() catch return;
+    const file = std.Io.Dir.openFileAbsolute(host_io.io(), job.path, .{}) catch return;
+    defer file.close(host_io.io());
+    const stat = file.stat(host_io.io()) catch return;
     if (stat.size == 0) return;
     if (stat.size > 200 * 1024 * 1024) return;
-    const data = file.readToEndAlloc(allocator, @intCast(stat.size)) catch return;
+    const data = readOpenFileAlloc(file, allocator, @intCast(stat.size)) catch return;
     defer allocator.free(data);
 
     // Build event list by walking the file as records. JSONL is the
@@ -2829,12 +2845,12 @@ fn processKnowledgeMapped(
     if (session.mapping.content.len == 0) return;
 
     const basename = std.fs.path.basename(job.path);
-    const file = std.fs.openFileAbsolute(job.path, .{}) catch return;
-    defer file.close();
-    const stat = file.stat() catch return;
+    const file = std.Io.Dir.openFileAbsolute(host_io.io(), job.path, .{}) catch return;
+    defer file.close(host_io.io());
+    const stat = file.stat(host_io.io()) catch return;
     if (stat.size == 0) return;
     if (stat.size > 200 * 1024 * 1024) return;
-    const data = file.readToEndAlloc(allocator, @intCast(stat.size)) catch return;
+    const data = readOpenFileAlloc(file, allocator, @intCast(stat.size)) catch return;
     defer allocator.free(data);
 
     var record_index: usize = 0;

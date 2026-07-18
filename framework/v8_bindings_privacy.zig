@@ -69,6 +69,12 @@ fn returnNumber(info: v8.FunctionCallbackInfo, n: f64) void {
     info.getReturnValue().set(iso.initNumber(n).toValue());
 }
 
+fn listPrint(buf: *std.ArrayList(u8), comptime format: []const u8, args: anytype) !void {
+    var writer: std.Io.Writer.Allocating = .fromArrayList(alloc, buf);
+    defer buf.* = writer.toArrayList();
+    try writer.writer.print(format, args);
+}
+
 fn b64Encode(bytes: []const u8) ![]u8 {
     const sz = b64e.calcSize(bytes.len);
     const out = try alloc.alloc(u8, sz);
@@ -348,7 +354,7 @@ var g_secbufs: ?std.ArrayList(SecBufEntry) = null;
 var g_secbuf_next_id: u32 = 1;
 
 fn secbufRegistry() *std.ArrayList(SecBufEntry) {
-    if (g_secbufs == null) g_secbufs = .{};
+    if (g_secbufs == null) g_secbufs = .empty;
     return &g_secbufs.?;
 }
 
@@ -757,7 +763,7 @@ var g_keyrings: ?std.ArrayList(KeyringEntry) = null;
 var g_keyring_next_id: u32 = 1;
 
 fn keyringRegistry() *std.ArrayList(KeyringEntry) {
-    if (g_keyrings == null) g_keyrings = .{};
+    if (g_keyrings == null) g_keyrings = .empty;
     return &g_keyrings.?;
 }
 
@@ -866,9 +872,9 @@ fn keyEntryToJson(buf: *std.ArrayList(u8), e: *const keyring.KeyEntry) !void {
         try buf.appendSlice(alloc, l);
         try buf.append(alloc, '"');
     }
-    try std.fmt.format(buf.writer(alloc), ",\"created\":{d}", .{e.created});
-    if (e.expires) |x| try std.fmt.format(buf.writer(alloc), ",\"expires\":{d}", .{x});
-    if (e.revoked) |r| try std.fmt.format(buf.writer(alloc), ",\"revoked\":{d}", .{r});
+    try listPrint(buf, ",\"created\":{d}", .{e.created});
+    if (e.expires) |x| try listPrint(buf, ",\"expires\":{d}", .{x});
+    if (e.revoked) |r| try listPrint(buf, ",\"revoked\":{d}", .{r});
     if (e.rotated_to) |rt| {
         try buf.appendSlice(alloc, ",\"rotatedTo\":\"");
         const rt_hex = try hexEncodeAlloc(&rt);
@@ -986,7 +992,7 @@ fn privPiiDetect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
             .ssn => "ssn",
             .credit_card => "credit_card",
         };
-        std.fmt.format(buf.writer(alloc),
+        listPrint(&buf,
             \\{{"type":"{s}","start":{d},"end":{d}}}
         , .{ type_str, m.start, m.end }) catch return returnEmpty(info);
     }
@@ -1043,7 +1049,7 @@ fn privShamirSplit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         if (i > 0) buf.append(alloc, ',') catch return returnEmpty(info);
         const enc = b64Encode(sh.bytes) catch return returnEmpty(info);
         defer alloc.free(enc);
-        std.fmt.format(buf.writer(alloc),
+        listPrint(&buf,
             \\{{"index":{d},"data":"{s}"}}
         , .{ sh.index, enc }) catch return returnEmpty(info);
     }
@@ -1130,7 +1136,7 @@ fn privEnvelopeEncrypt(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
-    std.fmt.format(buf.writer(alloc),
+    listPrint(&buf,
         \\{{"encryptedDEK":"{s}","dekNonce":"{s}","ciphertext":"{s}","dataNonce":"{s}","algorithm":"xchacha20-poly1305"}}
     , .{ edek, dn, ct, dan }) catch return returnEmpty(info);
     returnString(info, buf.items);
@@ -1239,7 +1245,7 @@ fn privAuditAppend(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     const e = privacy.auditAppend(event, data_json) catch return returnEmpty(info);
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
-    std.fmt.format(buf.writer(alloc),
+    listPrint(&buf,
         "{{\"index\":{d},\"timestamp\":{d},\"event\":", .{ e.index, e.timestamp }) catch return returnEmpty(info);
     // event re-quoted from the dup'd copy
     var qbuf: std.ArrayList(u8) = .empty;
@@ -1272,7 +1278,7 @@ fn privAuditVerify(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     const r = privacy.auditVerify();
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
-    std.fmt.format(buf.writer(alloc),
+    listPrint(&buf,
         \\{{"valid":{s},"entries":{d},"brokenAt":{d}}}
     , .{ if (r.valid) "true" else "false", r.entries, r.broken_at }) catch return returnEmpty(info);
     returnString(info, buf.items);
@@ -1338,7 +1344,7 @@ fn privPolicyErasure(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     const r = privacy.policyRightToErasure(user_id);
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
-    std.fmt.format(buf.writer(alloc),
+    listPrint(&buf,
         \\{{"recordsFound":{d},"recordsDeleted":{d}}}
     , .{ r.records_found, r.records_deleted }) catch return returnEmpty(info);
     returnString(info, buf.items);
@@ -1355,7 +1361,7 @@ fn privCheckAlgo(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const r = privacy.checkAlgorithmStrength(algo);
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
-    std.fmt.format(buf.writer(alloc),
+    listPrint(&buf,
         \\{{"strength":"{s}","deprecated":{s},"recommendation":"{s}"}}
     , .{
         privacy.strengthString(r.strength),

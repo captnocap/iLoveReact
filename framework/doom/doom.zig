@@ -37,7 +37,7 @@ const KeyEvent = packed struct(u32) { code: u8, pressed: u8, _pad: u16 = 0 };
 var queue: [QUEUE_CAP]KeyEvent = undefined;
 var queue_head: usize = 0; // read
 var queue_tail: usize = 0; // write
-var queue_mu: std.Thread.Mutex = .{};
+var queue_mu: host_io.Mutex = .{};
 
 pub fn pushKey(code: u8, pressed: bool) void {
     queue_mu.lock();
@@ -131,7 +131,7 @@ export fn DG_DrawFrame() void {
 }
 
 export fn DG_SleepMs(ms: u32) void {
-    std.Thread.sleep(@as(u64, ms) * std.time.ns_per_ms);
+    host_io.sleep(@as(u64, ms) * std.time.ns_per_ms);
 }
 
 export fn DG_GetTicksMs() u32 {

@@ -138,23 +138,21 @@ pub fn nextEvent() ?MidiEvent {
 }
 
 pub fn devicesJson(out: []u8) []const u8 {
-    var stream = std.io.fixedBufferStream(out);
-    const w = stream.writer();
-    w.writeAll("[") catch return out[0..stream.pos];
+    var w = std.Io.Writer.fixed(out);
+    w.writeAll("[") catch return w.buffered();
     for (0..S.device_count) |i| {
         const d = S.devices[i];
         if (i > 0) w.writeAll(",") catch break;
         w.print("{{\"id\":\"{s}\",\"name\":\"", .{d.id[0..d.id_len]}) catch break;
-        writeJsonEscaped(w, d.name[0..d.name_len]) catch break;
+        writeJsonEscaped(&w, d.name[0..d.name_len]) catch break;
         w.print("\",\"connected\":{s}}}", .{if (d.connected) "true" else "false"}) catch break;
     }
     w.writeAll("]") catch {};
-    return out[0..stream.pos];
+    return w.buffered();
 }
 
 pub fn eventJson(ev: MidiEvent, out: []u8) []const u8 {
-    var stream = std.io.fixedBufferStream(out);
-    const w = stream.writer();
+    var w = std.Io.Writer.fixed(out);
     const typ = switch (ev.kind) {
         .note_on => "note_on",
         .note_off => "note_off",
@@ -172,7 +170,7 @@ pub fn eventJson(ev: MidiEvent, out: []u8) []const u8 {
         ev.channel,
         ev.device[0..ev.device_len],
     }) catch {};
-    return out[0..stream.pos];
+    return w.buffered();
 }
 
 fn linuxStart() bool {
@@ -309,7 +307,8 @@ fn scanDevices() void {
             const port_name = std.mem.span(snd_seq_port_info_get_name(port_buf.ptr));
             var d = &S.devices[S.device_count];
             d.* = .{ .active = true, .client = client_id, .port = port };
-            d.id_len = @intCast((std.fmt.bufPrint(&d.id, "{d}:{d}", .{ client_id, port }) catch "").len);
+            const id_text: []const u8 = std.fmt.bufPrint(&d.id, "{d}:{d}", .{ client_id, port }) catch "";
+            d.id_len = @intCast(id_text.len);
             d.name_len = writeDeviceName(&d.name, client_name, port_name);
             d.connected = snd_seq_connect_from(seq, S.port_id, client_id, port) >= 0;
             S.device_count += 1;

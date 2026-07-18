@@ -22,6 +22,8 @@
 //!   if (result.final_response) |text| log.print("{s}\n", .{text});
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
+const sysx = @import("../net/sysx.zig");
 const log = @import("../diag/log.zig");
 
 pub const VERSION = "0.1.0";
@@ -262,13 +264,13 @@ pub const AppServerClient = struct {
             try argv_list.appendSlice(self.allocator, &.{ "app-server", "--listen", "stdio://" });
         }
 
-        var child = std.process.Child.init(argv_list.items, self.allocator);
-        child.cwd = self.config.cwd;
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = if (self.config.inherit_stderr) .Inherit else .Ignore;
-
-        try child.spawn();
+        const child = try std.process.spawn(host_io.io(), .{
+            .argv = argv_list.items,
+            .cwd = if (self.config.cwd) |c| .{ .path = c } else .inherit,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = if (self.config.inherit_stderr) .inherit else .ignore,
+        });
         self.child = child;
     }
 
@@ -279,12 +281,12 @@ pub const AppServerClient = struct {
         self.child = null;
 
         if (child.stdin) |stdin| {
-            stdin.close();
+            stdin.close(host_io.io());
             child.stdin = null;
         }
 
-        _ = child.kill() catch {};
-        _ = child.wait() catch {};
+        child.kill(host_io.io());
+        _ = child.wait(host_io.io()) catch {};
     }
 
     pub fn initialize(self: *AppServerClient) !InitializeResponse {
@@ -433,7 +435,7 @@ pub const AppServerClient = struct {
         try buf.appendSlice(self.allocator, params_json);
         try buf.appendSlice(self.allocator, "}\n");
 
-        try stdin.writeAll(buf.items);
+        try stdin.writeStreamingAll(host_io.io(), buf.items);
     }
 
     fn readMessage(self: *AppServerClient) !OwnedJson {
@@ -443,15 +445,23 @@ pub const AppServerClient = struct {
         // has readUntilDelimiterOrEofAlloc. The newer File.Reader requires a
         // pre-allocated buffer and exposes a different API; the codex SDK is
         // single-line-JSON-RPC and the old reader does the right thing here.
-        const line = try stdout.deprecatedReader().readUntilDelimiterOrEofAlloc(
-            self.allocator,
-            '\n',
-            self.config.max_line_bytes,
-        );
-        if (line == null) return error.TransportClosed;
-        defer self.allocator.free(line.?);
+        // Manual line accumulate over the pipe fd (0.16 dropped the legacy
+        // GenericReader; behavior-identical to readUntilDelimiterOrEofAlloc).
+        var line: std.ArrayList(u8) = .empty;
+        defer line.deinit(self.allocator);
+        while (true) {
+            var byte: [1]u8 = undefined;
+            const n = sysx.read(stdout.handle, &byte) catch return error.TransportClosed;
+            if (n == 0) {
+                if (line.items.len == 0) return error.TransportClosed;
+                break;
+            }
+            if (byte[0] == '\n') break;
+            if (line.items.len >= self.config.max_line_bytes) return error.TransportClosed;
+            try line.append(self.allocator, byte[0]);
+        }
 
-        return parseOwnedJson(self.allocator, line.?);
+        return parseOwnedJson(self.allocator, line.items);
     }
 
     fn respondToServerRequest(self: *AppServerClient, root: std.json.ObjectMap) !void {
@@ -472,7 +482,7 @@ pub const AppServerClient = struct {
         try buf.appendSlice(self.allocator, ",\"result\":");
         try buf.appendSlice(self.allocator, response_json);
         try buf.appendSlice(self.allocator, "}\n");
-        try stdin.writeAll(buf.items);
+        try stdin.writeStreamingAll(host_io.io(), buf.items);
     }
 
     fn setLastRpcError(self: *AppServerClient, value: std.json.Value) !void {
@@ -756,9 +766,9 @@ fn parseOwnedJson(allocator: std.mem.Allocator, text: []const u8) !OwnedJson {
 }
 
 fn notificationFromOwnedJson(message: OwnedJson, method: []const u8) !Notification {
-    var owned = message;
+    const owned = message;
     const root = asObject(owned.value) orelse return error.InvalidResponse;
-    const params = root.get("params") orelse std.json.Value{ .object = std.json.ObjectMap.init(owned.arena.allocator()) };
+    const params = root.get("params") orelse std.json.Value{ .object = std.json.ObjectMap.empty };
     return .{
         .arena = owned.arena,
         .method = method,

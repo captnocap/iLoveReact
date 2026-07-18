@@ -82,23 +82,23 @@ pub const Recorder = struct {
 
     /// Save recording to a file.
     pub fn save(self: *const Recorder, path: []const u8) bool {
-        const file = std.fs.cwd().createFile(path, .{}) catch return false;
-        defer file.close();
+        const file = std.Io.Dir.cwd().createFile(host_io.io(), path, .{}) catch return false;
+        defer file.close(host_io.io());
 
         // Header
-        file.writeAll(MAGIC) catch return false;
-        file.writeAll(&[1]u8{VERSION}) catch return false;
-        file.writeAll(std.mem.asBytes(&std.mem.nativeToLittle(u16, self.rows))) catch return false;
-        file.writeAll(std.mem.asBytes(&std.mem.nativeToLittle(u16, self.cols))) catch return false;
-        file.writeAll(std.mem.asBytes(&std.mem.nativeToLittle(u32, self.frame_count))) catch return false;
+        file.writeStreamingAll(host_io.io(), MAGIC) catch return false;
+        file.writeStreamingAll(host_io.io(), &[1]u8{VERSION}) catch return false;
+        file.writeStreamingAll(host_io.io(), std.mem.asBytes(&std.mem.nativeToLittle(u16, self.rows))) catch return false;
+        file.writeStreamingAll(host_io.io(), std.mem.asBytes(&std.mem.nativeToLittle(u16, self.cols))) catch return false;
+        file.writeStreamingAll(host_io.io(), std.mem.asBytes(&std.mem.nativeToLittle(u32, self.frame_count))) catch return false;
 
         // Frames
         var i: u32 = 0;
         while (i < self.frame_count) : (i += 1) {
             const f = self.frames[i];
-            file.writeAll(std.mem.asBytes(&std.mem.nativeToLittle(u64, f.timestamp_us))) catch return false;
-            file.writeAll(std.mem.asBytes(&std.mem.nativeToLittle(u32, f.data_len))) catch return false;
-            file.writeAll(self.data_buf[f.data_offset .. f.data_offset + f.data_len]) catch return false;
+            file.writeStreamingAll(host_io.io(), std.mem.asBytes(&std.mem.nativeToLittle(u64, f.timestamp_us))) catch return false;
+            file.writeStreamingAll(host_io.io(), std.mem.asBytes(&std.mem.nativeToLittle(u32, f.data_len))) catch return false;
+            file.writeStreamingAll(host_io.io(), self.data_buf[f.data_offset .. f.data_offset + f.data_len]) catch return false;
         }
         return true;
     }
