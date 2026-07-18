@@ -15,6 +15,7 @@
 //!   http.destroy();
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
 // ── Configuration ────────────────────────────────────────────────────────
@@ -179,9 +180,11 @@ pub fn request(id: u32, opts: RequestOpts) bool {
 /// Returns a fully populated Response including final_url and content_type.
 pub fn fetchSync(opts: RequestOpts) Response {
     const alloc = std.heap.page_allocator;
-    var client: std.http.Client = .{ .allocator = alloc };
+    var client: std.http.Client = .{ .allocator = alloc, .io = host_io.io() };
     defer client.deinit();
-    client.initDefaultProxies(alloc) catch {};
+    if (host_io.environ().createMap(alloc)) |*env_map| {
+        client.initDefaultProxies(alloc, env_map) catch {};
+    } else |_| {}
 
     var req = Request{};
     req.id = 0;
@@ -237,7 +240,7 @@ pub fn destroy() void {
             // Queue full — drain responses to make room
             var discard: [16]Response = undefined;
             _ = response_queue.drain(&discard);
-            std.Thread.sleep(1_000_000); // 1ms
+            host_io.sleep(1_000_000); // 1ms
         }
     }
     // Join all threads
@@ -252,15 +255,17 @@ pub fn destroy() void {
 
 fn workerMain() void {
     const alloc = std.heap.page_allocator;
-    var client: std.http.Client = .{ .allocator = alloc };
+    var client: std.http.Client = .{ .allocator = alloc, .io = host_io.io() };
     defer client.deinit();
-    client.initDefaultProxies(alloc) catch {};
+    if (host_io.environ().createMap(alloc)) |*env_map| {
+        client.initDefaultProxies(alloc, env_map) catch {};
+    } else |_| {}
 
     while (true) {
         const req = blk: {
             while (true) {
                 if (request_queue.pop()) |r| break :blk r;
-                std.Thread.sleep(1_000_000); // 1ms
+                host_io.sleep(1_000_000); // 1ms
             }
         };
 
@@ -283,7 +288,7 @@ fn workerMain() void {
         };
         // Retry push until response is queued (don't drop responses)
         while (!response_queue.push(resp)) {
-            std.Thread.sleep(1_000_000); // 1ms backoff
+            host_io.sleep(1_000_000); // 1ms backoff
         }
     }
 }
@@ -447,7 +452,7 @@ fn streamRequestOnClient(client: *std.http.Client, req: *const Request, status_o
             @memcpy(chunk.body[0..to_copy], buf[off .. off + to_copy]);
             chunk.body_len = to_copy;
             while (!response_queue.push(chunk)) {
-                std.Thread.sleep(1_000_000); // 1ms backoff if queue full
+                host_io.sleep(1_000_000); // 1ms backoff if queue full
             }
             off += to_copy;
         }
@@ -458,12 +463,12 @@ fn streamRequestOnClient(client: *std.http.Client, req: *const Request, status_o
 
 const DownloadWriter = struct {
     req_id: u32,
-    file: std.fs.File,
+    file: std.Io.File,
     bytes_written: usize = 0,
     last_emit_ms: i64 = 0,
     interface: std.Io.Writer,
 
-    pub fn init(req_id: u32, file: std.fs.File) DownloadWriter {
+    pub fn init(req_id: u32, file: std.Io.File) DownloadWriter {
         return .{
             .req_id = req_id,
             .file = file,
@@ -483,11 +488,11 @@ const DownloadWriter = struct {
         var s: usize = 0;
         while (s < splat) : (s += 1) {
             for (data) |slice| {
-                self.file.writeAll(slice) catch return error.WriteFailed;
+                self.file.writeStreamingAll(host_io.io(), slice) catch return error.WriteFailed;
                 total += slice.len;
                 self.bytes_written += slice.len;
 
-                const now_ms = std.time.milliTimestamp();
+                const now_ms = host_io.milliTimestamp();
                 if (now_ms - self.last_emit_ms >= 100) {
                     self.last_emit_ms = now_ms;
                     var pr = Response{};
@@ -528,11 +533,11 @@ fn executeStreamOrDownload(client: *std.http.Client, req: *const Request) void {
             done.error_len = elen;
         }
         while (!response_queue.push(done)) {
-            std.Thread.sleep(1_000_000);
+            host_io.sleep(1_000_000);
         }
     } else {
         // Download mode
-        const file = std.fs.cwd().createFile(req.download_path[0..req.download_path_len], .{}) catch |err| {
+        const file = std.Io.Dir.cwd().createFile(host_io.io(), req.download_path[0..req.download_path_len], .{}) catch |err| {
             var done = Response{};
             done.id = req.id;
             done.response_type = .err;
@@ -541,11 +546,11 @@ fn executeStreamOrDownload(client: *std.http.Client, req: *const Request) void {
             @memcpy(done.error_msg[0..elen], msg[0..elen]);
             done.error_len = elen;
             while (!response_queue.push(done)) {
-                std.Thread.sleep(1_000_000);
+                host_io.sleep(1_000_000);
             }
             return;
         };
-        defer file.close();
+        defer file.close(host_io.io());
 
         var dl_writer = DownloadWriter.init(req.id, file);
         const result = client.fetch(.{
@@ -571,7 +576,7 @@ fn executeStreamOrDownload(client: *std.http.Client, req: *const Request) void {
             done.error_len = elen;
         }
         while (!response_queue.push(done)) {
-            std.Thread.sleep(1_000_000);
+            host_io.sleep(1_000_000);
         }
     }
 }
