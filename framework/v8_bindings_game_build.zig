@@ -109,7 +109,7 @@ var raycast_out: [10]f32 = undefined;
 fn pieceFromPacked(block: []const f32) build.PlacedBuildPiece {
     var idx: usize = 0;
     if (block[0] > 0) {
-        const raw: usize = @intFromFloat(block[0]);
+        const raw: usize = @trunc(block[0]);
         idx = if (raw >= build.BUILD_CATALOG.len) build.BUILD_CATALOG.len - 1 else raw;
     }
     return .{
@@ -136,7 +136,7 @@ fn hostRaycast(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const in_ptr: [*]const f32 = @ptrCast(@alignCast(bytes.ptr));
     const input = in_ptr[0 .. bytes.len / @sizeOf(f32)];
 
-    var count: usize = @intFromFloat(@max(@as(f32, 0), input[7]));
+    var count: usize = @trunc(@max(@as(f32, 0), input[7]));
     if (count > MAX_PIECES) count = MAX_PIECES;
     if (input.len < RAYCAST_HEADER + count * PIECE_STRIDE) {
         setReturnNull(info);
@@ -182,7 +182,7 @@ fn hostValidate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     var idx: usize = 0;
     if (cat_f > 0) {
-        const raw: usize = @intFromFloat(cat_f);
+        const raw: usize = @trunc(cat_f);
         idx = if (raw >= build.BUILD_CATALOG.len) build.BUILD_CATALOG.len - 1 else raw;
     }
     const x: f32 = @floatCast(argToF64(info, 1) orelse 0);
@@ -190,7 +190,7 @@ fn hostValidate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const z: f32 = @floatCast(argToF64(info, 3) orelse 0);
     const yaw: f32 = @floatCast(argToF64(info, 4) orelse 0);
     const edit_i = argToF64(info, 5) orelse -1;
-    const edit: ?build.WallEdit = if (edit_i < 0) null else @enumFromInt(@as(usize, @intFromFloat(edit_i)));
+    const edit: ?build.WallEdit = if (edit_i < 0) null else @enumFromInt(@as(usize, @trunc(edit_i)));
 
     const placement = build.PlacedBuildPiece{
         .id = "",
@@ -218,7 +218,7 @@ fn hostCatalogCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 // MATERIAL_LOOK (cart/hmsc-int/editors/build/pieceShapes.ts) so the readback and
 // the JS fallback mirror agree. Gameplay truth stays in the tags.
 inline fn u8f(v: u8) f32 {
-    return @as(f32, @floatFromInt(v)) / 255.0;
+    return @as(f32, v) / 255.0;
 }
 fn materialRgb(m: build.BuildMaterial) [3]f32 {
     return switch (m) {

@@ -85,8 +85,8 @@ pub fn setPendingPlayerModel(verts_bytes: []const u8, table_bytes: []const u8) v
     var r: usize = 0;
     while (r < rows) : (r += 1) {
         const row = table[r * 8 ..][0..8];
-        const start: usize = @intFromFloat(@max(0.0, row[0]));
-        const count: usize = @intFromFloat(@max(0.0, row[1]));
+        const start: usize = @trunc(@max(0.0, row[0]));
+        const count: usize = @trunc(@max(0.0, row[1]));
         if (count == 0) continue;
         const lo = start * 8 * 4;
         const hi = (start + count) * 8 * 4;
@@ -174,8 +174,8 @@ pub fn setPendingPlayerAnimation(bytes: []const u8) void {
     defer alloc.free(data);
     @memcpy(std.mem.sliceAsBytes(data), bytes[0 .. float_count * 4]);
 
-    const node_count: usize = @intFromFloat(@max(0.0, data[0]));
-    const clip_count: usize = @intFromFloat(@max(0.0, data[1]));
+    const node_count: usize = @trunc(@max(0.0, data[0]));
+    const clip_count: usize = @trunc(@max(0.0, data[1]));
     if (node_count == 0 or clip_count == 0) return;
 
     var clips: std.ArrayListUnmanaged(constructor.PlayerAnimationClip) = .empty;
@@ -183,10 +183,10 @@ pub fn setPendingPlayerAnimation(bytes: []const u8) void {
     var ci: usize = 0;
     decode: while (ci < clip_count) : (ci += 1) {
         if (at + 4 > data.len) break;
-        const id: u32 = @intFromFloat(@max(0.0, data[at]));
+        const id: u32 = @trunc(@max(0.0, data[at]));
         const duration = data[at + 1];
         const looping = data[at + 2] != 0;
-        const key_count: usize = @intFromFloat(@max(0.0, data[at + 3]));
+        const key_count: usize = @trunc(@max(0.0, data[at + 3]));
         at += 4;
         var keys: std.ArrayListUnmanaged(constructor.PlayerAnimationKeyframe) = .empty;
         var ki: usize = 0;

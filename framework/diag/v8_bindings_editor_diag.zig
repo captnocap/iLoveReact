@@ -60,7 +60,7 @@ fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
 fn argToU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     const f = argToF64(info, idx) orelse return null;
     if (f < 0) return null;
-    return @intFromFloat(f);
+    return @trunc(f);
 }
 
 fn setReturnString(info: v8.FunctionCallbackInfo, text: []const u8) void {

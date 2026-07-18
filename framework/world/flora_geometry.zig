@@ -186,7 +186,9 @@ fn addConifer(mesh: *WrappedMesh, species: foliage.WrappedSpecies) void {
             0;
         const y = cfg.canopy_start + (cfg.canopy_end - cfg.canopy_start) * t;
         const profile = std.math.pow(f32, 1.0 - t, cfg.profile_power);
-        const tier_wobble = 0.94 + 0.06 * @sin(@as(f32, @floatFromInt(tier)) * 2.17 + @as(f32, @floatFromInt(@intFromEnum(species))));
+        const tier_f: f32 = @floatFromInt(tier);
+        const species_f: f32 = @intFromEnum(species);
+        const tier_wobble = 0.94 + 0.06 * @sin(tier_f * 2.17 + species_f);
         const reach = (cfg.tip_reach + (cfg.base_reach - cfg.tip_reach) * profile) * tier_wobble;
         var arm: usize = 0;
         while (arm < cfg.arms) : (arm += 1) {

@@ -147,7 +147,7 @@ fn jsValueOrEmptyString(iso: v8.Isolate, s: []const u8) v8.Value {
 
 fn getFpsCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setNumberReturn(info, @floatFromInt(frame_telemetry.telemetry_fps));
+    setNumberReturn(info, frame_telemetry.telemetry_fps);
 }
 
 fn getLayoutUsCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -868,7 +868,7 @@ fn getThreadsJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         return;
     }
     const pid_f = argF64(info, 0, 0);
-    const pid: u32 = @intFromFloat(pid_f);
+    const pid: u32 = @trunc(pid_f);
     var list: std.ArrayList(u8) = .empty;
     defer list.deinit(alloc);
     list.append(alloc, '[') catch {
@@ -934,7 +934,7 @@ fn getCoreCountCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         count += 1;
     }
     if (count == 0) count = 1;
-    setNumberReturn(info, @floatFromInt(count));
+    setNumberReturn(info, count);
 }
 
 fn hotGetCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

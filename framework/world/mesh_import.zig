@@ -249,7 +249,7 @@ fn jInt(v: ?std.json.Value) ?i64 {
     const val = v orelse return null;
     return switch (val) {
         .integer => |i| i,
-        .float => |f| @intFromFloat(f),
+        .float => |f| @trunc(f),
         else => null,
     };
 }
@@ -325,10 +325,10 @@ fn readAccessor(root: std.json.Value, index: i64) ?Accessor {
 
 fn readComponent(bin: []const u8, at: u32, component_type: i64) ?f32 {
     return switch (component_type) {
-        5120 => @floatFromInt(@as(i8, @bitCast(bin[at]))),
-        5121 => @floatFromInt(bin[at]),
-        5122 => @floatFromInt(std.mem.readInt(i16, bin[at..][0..2], .little)),
-        5123 => @floatFromInt(std.mem.readInt(u16, bin[at..][0..2], .little)),
+        5120 => @as(f32, @as(i8, @bitCast(bin[at]))),
+        5121 => @as(f32, bin[at]),
+        5122 => @as(f32, std.mem.readInt(i16, bin[at..][0..2], .little)),
+        5123 => @as(f32, std.mem.readInt(u16, bin[at..][0..2], .little)),
         5125 => @floatFromInt(std.mem.readInt(u32, bin[at..][0..4], .little)),
         5126 => @bitCast(std.mem.readInt(u32, bin[at..][0..4], .little)),
         else => null,
@@ -722,7 +722,7 @@ pub fn decimateExpanded(alloc: std.mem.Allocator, verts: []const f32, vert_count
         const z = verts[i * 8 + 2];
         const cellOf = struct {
             fn f(val: f32, base: f32, scale: f32, r: u32) u64 {
-                var c: i64 = @intFromFloat((val - base) * scale);
+                var c: i64 = @trunc((val - base) * scale);
                 if (c < 0) c = 0;
                 if (c >= r) c = @as(i64, r) - 1;
                 return @intCast(c);
@@ -751,7 +751,8 @@ pub fn decimateExpanded(alloc: std.mem.Allocator, verts: []const f32, vert_count
     const centroids = try alloc.alloc([3]f32, sum.items.len);
     defer alloc.free(centroids);
     for (sum.items, cnt.items, 0..) |s, c, ci| {
-        const inv_c: f64 = 1.0 / @as(f64, @floatFromInt(c));
+        const count_f: f64 = c;
+        const inv_c = 1.0 / count_f;
         centroids[ci] = .{ @floatCast(s[0] * inv_c), @floatCast(s[1] * inv_c), @floatCast(s[2] * inv_c) };
     }
 

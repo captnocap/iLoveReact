@@ -117,7 +117,7 @@ fn sqlOpenCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setNumberReturn(info, 0);
         return;
     };
-    setNumberReturn(info, @floatFromInt(id));
+    setNumberReturn(info, id);
 }
 
 fn sqlCloseCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -336,7 +336,7 @@ fn sqlChangesCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setNumberReturn(info, 0);
         return;
     };
-    setNumberReturn(info, @floatFromInt(db_ptr.changes()));
+    setNumberReturn(info, db_ptr.changes());
 }
 
 pub fn registerSqlite(_: anytype) void {

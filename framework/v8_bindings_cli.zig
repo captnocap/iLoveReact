@@ -52,7 +52,7 @@ fn argF64(info: v8.FunctionCallbackInfo, idx: u32, default: f64) f64 {
 }
 
 fn argI32(info: v8.FunctionCallbackInfo, idx: u32, default: i32) i32 {
-    return @intFromFloat(argF64(info, idx, @floatFromInt(default)));
+    return @trunc(argF64(info, idx, default));
 }
 
 fn setValue(info: v8.FunctionCallbackInfo, value: anytype) void {

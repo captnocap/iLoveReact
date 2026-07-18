@@ -129,7 +129,7 @@ pub fn seek(target_us: u64) void {
 /// Seek by fraction (0.0 = start, 1.0 = end).
 pub fn seekFraction(frac: f32) void {
     const f = m.clamp01(frac);
-    seek(@intFromFloat(f * @as(f32, @floatFromInt(duration_us))));
+    seek(@trunc(f * @as(f32, @floatFromInt(duration_us))));
 }
 
 /// Advance playback by dt seconds. Returns true if vterm was modified.
@@ -138,7 +138,7 @@ pub fn advance(dt: f32) bool {
     const r = rec orelse return false;
     dirty = false;
 
-    const delta_us: u64 = @intFromFloat(@max(0, dt * speed * 1_000_000.0));
+    const delta_us: u64 = @trunc(@max(0, dt * speed * 1_000_000.0));
     time_us += delta_us;
 
     // Apply all frames up to current time

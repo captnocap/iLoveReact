@@ -85,7 +85,7 @@ fn argToU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     if (idx >= info.length()) return null;
     const f = info.getArg(idx).toF64(info.getIsolate().getCurrentContext()) catch return null;
     if (f < 0) return null;
-    return @intFromFloat(f);
+    return @trunc(f);
 }
 
 fn setReturnNumber(info: v8.FunctionCallbackInfo, value: f64) void {

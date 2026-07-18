@@ -614,14 +614,14 @@ fn stepPhysics(camera_yaw: f32, dt: f32) u32 {
 fn hostReset(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const count_f = argToF64(info, 0) orelse 5;
-    const count: usize = if (count_f > 0) @intFromFloat(@min(count_f, @as(f64, @floatFromInt(MAX_BALLS)))) else 5;
+    const count: usize = if (count_f > 0) @trunc(@min(count_f, @as(f64, @floatFromInt(MAX_BALLS)))) else 5;
     reset(v8_runtime.hostContext(info.getIsolate()).io, count);
 }
 
 fn hostBurst(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const count_f = argToF64(info, 0) orelse 4;
-    const count: usize = if (count_f > 0) @intFromFloat(@min(count_f, @as(f64, @floatFromInt(MAX_BALLS)))) else 4;
+    const count: usize = if (count_f > 0) @trunc(@min(count_f, @as(f64, @floatFromInt(MAX_BALLS)))) else 4;
     var i: usize = 0;
     while (i < count and g_ball_count < MAX_BALLS) : (i += 1) addBall(g_t + @as(f32, @floatFromInt(i)) * 0.19 + @as(f32, @floatFromInt(g_spawn_seq)) * 0.011);
 }
@@ -683,7 +683,7 @@ fn writeSnapshot(host_us: f32) []f32 {
         at += 1;
         g_snapshot[at] = ball.r;
         at += 1;
-        g_snapshot[at] = @floatFromInt(ball.item);
+        g_snapshot[at] = ball.item;
         at += 1;
         g_snapshot[at] = ball.rx;
         at += 1;

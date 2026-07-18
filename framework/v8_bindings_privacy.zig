@@ -41,7 +41,7 @@ fn argI64(info: v8.FunctionCallbackInfo, idx: u32) ?i64 {
     if (idx >= info.length()) return null;
     const ctx = info.getIsolate().getCurrentContext();
     const f = info.getArg(idx).toF64(ctx) catch return null;
-    return @intFromFloat(f);
+    return @trunc(f);
 }
 
 fn argBool(info: v8.FunctionCallbackInfo, idx: u32) bool {
@@ -389,7 +389,7 @@ fn privSecbufAlloc(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         buf.deinit(alloc);
         return returnNumber(info, 0);
     };
-    returnNumber(info, @floatFromInt(id));
+    returnNumber(info, id);
 }
 
 fn privSecbufRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -773,7 +773,7 @@ fn privNoiseRespond(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     const msg_arr: [32]u8 = msg_bytes[0..32].*;
 
     const id = privacy.noiseRespondSession(priv_arr, msg_arr) catch return returnNumber(info, 0);
-    returnNumber(info, @floatFromInt(id));
+    returnNumber(info, id);
 }
 
 fn privNoiseSend(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -860,7 +860,7 @@ fn privKeyringCreate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
         ring.deinit();
         return returnNumber(info, 0);
     };
-    returnNumber(info, @floatFromInt(id));
+    returnNumber(info, id);
 }
 
 fn privKeyringOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -879,7 +879,7 @@ fn privKeyringOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         ring.deinit();
         return returnNumber(info, 0);
     };
-    returnNumber(info, @floatFromInt(id));
+    returnNumber(info, id);
 }
 
 fn privKeyringClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

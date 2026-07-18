@@ -117,7 +117,7 @@ pub fn updateHover(mx: f32, my: f32) void {
     if (mx >= menu_x and mx < menu_x + menu_w and my >= menu_y and my < menu_y + menu_h) {
         const local_y = my - menu_y - PAD_V;
         if (local_y >= 0) {
-            const idx: usize = @intFromFloat(local_y / ITEM_H);
+            const idx: usize = @trunc(local_y / ITEM_H);
             if (idx < items_ptr.len) {
                 hover_idx = idx;
                 return;
@@ -136,7 +136,7 @@ pub fn handleClick(context: ?*anyopaque, mx: f32, my: f32) bool {
     if (menu_w > 0 and mx >= menu_x and mx < menu_x + menu_w and my >= menu_y and my < menu_y + menu_h) {
         const local_y = my - menu_y - PAD_V;
         if (local_y >= 0) {
-            const idx: usize = @intFromFloat(local_y / ITEM_H);
+            const idx: usize = @trunc(local_y / ITEM_H);
             if (idx < items_ptr.len) {
                 const handler = items_ptr[idx].handler;
                 hide();
@@ -208,7 +208,7 @@ pub fn paintOverlay(measure_fn: layout.MeasureTextFn, win_w: f32, win_h: f32) vo
         }
 
         // Label text — vertically centered in item row
-        _ = gpu.drawTextWrapped(item.label, tx + PAD_H, iy + (ITEM_H - @as(f32, @floatFromInt(FONT_SIZE))) / 2, FONT_SIZE, box_w - PAD_H * 2, TX_R, TX_G, TX_B, TX_A, 0);
+        _ = gpu.drawTextWrapped(item.label, tx + PAD_H, iy + (ITEM_H - FONT_SIZE) / 2, FONT_SIZE, box_w - PAD_H * 2, TX_R, TX_G, TX_B, TX_A, 0);
 
         i += 1;
     }

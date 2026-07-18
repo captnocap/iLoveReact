@@ -117,15 +117,15 @@ fn resampleRgba(src: []const u8, sw: u32, sh: u32, dst: []u8, dw: u32, dh: u32) 
         const sy = (@as(f32, @floatFromInt(dy)) + 0.5) * fsh / @as(f32, @floatFromInt(dh)) - 0.5;
         const sy0f = @floor(sy);
         const wy = sy - sy0f;
-        const y0: u32 = @intFromFloat(@max(0.0, @min(fsh - 1.0, sy0f)));
-        const y1: u32 = @intFromFloat(@max(0.0, @min(fsh - 1.0, sy0f + 1.0)));
+        const y0: u32 = @trunc(@max(0.0, @min(fsh - 1.0, sy0f)));
+        const y1: u32 = @trunc(@max(0.0, @min(fsh - 1.0, sy0f + 1.0)));
         var dx: u32 = 0;
         while (dx < dw) : (dx += 1) {
             const sx = (@as(f32, @floatFromInt(dx)) + 0.5) * fsw / @as(f32, @floatFromInt(dw)) - 0.5;
             const sx0f = @floor(sx);
             const wx = sx - sx0f;
-            const x0: u32 = @intFromFloat(@max(0.0, @min(fsw - 1.0, sx0f)));
-            const x1: u32 = @intFromFloat(@max(0.0, @min(fsw - 1.0, sx0f + 1.0)));
+            const x0: u32 = @trunc(@max(0.0, @min(fsw - 1.0, sx0f)));
+            const x1: u32 = @trunc(@max(0.0, @min(fsw - 1.0, sx0f + 1.0)));
             // index math in usize — a big source (sw*sh*4) overflows u32.
             const swz: usize = sw;
             const p00 = (@as(usize, y0) * swz + x0) * 4;
@@ -135,9 +135,9 @@ fn resampleRgba(src: []const u8, sw: u32, sh: u32, dst: []u8, dw: u32, dh: u32) 
             const di = (@as(usize, dy) * @as(usize, dw) + dx) * 4;
             var ch: u32 = 0;
             while (ch < 4) : (ch += 1) {
-                const top = @as(f32, @floatFromInt(src[p00 + ch])) * (1.0 - wx) + @as(f32, @floatFromInt(src[p10 + ch])) * wx;
-                const bot = @as(f32, @floatFromInt(src[p01 + ch])) * (1.0 - wx) + @as(f32, @floatFromInt(src[p11 + ch])) * wx;
-                dst[di + ch] = @intFromFloat(@max(0.0, @min(255.0, top * (1.0 - wy) + bot * wy)));
+                const top = src[p00 + ch] * (1.0 - wx) + src[p10 + ch] * wx;
+                const bot = src[p01 + ch] * (1.0 - wx) + src[p11 + ch] * wx;
+                dst[di + ch] = @trunc(@max(0.0, @min(255.0, top * (1.0 - wy) + bot * wy)));
             }
         }
     }
@@ -184,8 +184,8 @@ fn load(io: std.Io, environ: *const std.process.Environ.Map, src: []const u8) ?*
     if (pw > MAX_TEXTURE_DIM or ph > MAX_TEXTURE_DIM) {
         const limit_f: f32 = @floatFromInt(MAX_TEXTURE_DIM);
         const scale = @min(limit_f / @as(f32, @floatFromInt(pw)), limit_f / @as(f32, @floatFromInt(ph)));
-        const nw: u32 = @max(1, @as(u32, @intFromFloat(@as(f32, @floatFromInt(pw)) * scale)));
-        const nh: u32 = @max(1, @as(u32, @intFromFloat(@as(f32, @floatFromInt(ph)) * scale)));
+        const nw: u32 = @max(1, @as(u32, @trunc(@as(f32, @floatFromInt(pw)) * scale)));
+        const nh: u32 = @max(1, @as(u32, @trunc(@as(f32, @floatFromInt(ph)) * scale)));
         const nbuf = alloc.alloc(u8, @as(usize, nw) * @as(usize, nh) * 4) catch return null;
         resampleRgba(pixels_slice, pw, ph, nbuf, nw, nh);
         log.print("[image_cache] downscaled oversized image {d}x{d} -> {d}x{d} (GPU limit {d})\n", .{ pw, ph, nw, nh, MAX_TEXTURE_DIM });

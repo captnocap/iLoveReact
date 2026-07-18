@@ -200,11 +200,11 @@ pub const SHAPE_BOX_OPEN_RUN_BOTH: f32 = 16; // cube without local +/-x faces
 pub const SHAPE_WRAPPED_FIRST: f32 = 17; // contiguous whole-flora shapes, WrappedSpecies order
 
 pub fn wrappedShapeId(species: foliage.WrappedSpecies) f32 {
-    return SHAPE_WRAPPED_FIRST + @as(f32, @floatFromInt(@intFromEnum(species)));
+    return SHAPE_WRAPPED_FIRST + @as(f32, @intFromEnum(species));
 }
 
 pub fn wrappedSpeciesForShape(shape: f32) ?foliage.WrappedSpecies {
-    const rounded: i32 = @intFromFloat(@round(shape - SHAPE_WRAPPED_FIRST));
+    const rounded: i32 = @round(shape - SHAPE_WRAPPED_FIRST);
     if (rounded < 0 or rounded >= foliage.WRAPPED_SPECIES_COUNT) return null;
     if (@abs(shape - wrappedShapeId(@enumFromInt(rounded))) >= 0.5) return null;
     return @enumFromInt(rounded);

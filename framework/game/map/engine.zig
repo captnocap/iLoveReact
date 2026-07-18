@@ -390,7 +390,7 @@ pub fn strokeMove(x: f32, z: f32) void {
         const dist = std.math.hypot(dx, dz);
         const step_m = @max(0.5, g_tool.radius_m * 0.5); // ≤ ½ disc, so stamps overlap
         const steps_f = @min(256, @max(1, @ceil(dist / step_m)));
-        const steps: u32 = @intFromFloat(steps_f);
+        const steps: u32 = @trunc(steps_f);
         var i: u32 = 1;
         while (i <= steps) : (i += 1) {
             const t = @as(f32, @floatFromInt(i)) / steps_f;
@@ -487,8 +487,8 @@ fn applySampleAt(x: f32, z: f32) void {
 // ── height sculpt (PaintCanvas stampHeightAtGraph:866) ────────────────────────
 
 fn stampHeightAt(x: f32, z: f32) void {
-    const gsx: i32 = @intFromFloat(@round(x / DOT_M));
-    const gsz: i32 = @intFromFloat(@round(z / DOT_M));
+    const gsx: i32 = @round(x / DOT_M);
+    const gsz: i32 = @round(z / DOT_M);
     if (!claimStamp(seenKey(1, gsx, gsz, 0, 0))) return;
     g_stats.stamps += 1;
 
@@ -503,7 +503,7 @@ fn stampHeightAt(x: f32, z: f32) void {
         // skip chunks the brush can't reach (cheap; avoids dirtying them) (:884)
         if (cix + rd < 0 or cix - rd > edge or ciz + rd < 0 or ciz - rd > edge) continue;
         var water_changed = false;
-        stamps.stampBrush(terrainFieldOf(ch, &water_changed), @intFromFloat(cix), @intFromFloat(ciz), .{
+        stamps.stampBrush(terrainFieldOf(ch, &water_changed), @trunc(cix), @trunc(ciz), .{
             .centerZ = g_tool.center_z,
             .radiusM = radiusM,
             .shape = g_tool.shape,
@@ -539,15 +539,15 @@ fn terrainFieldOf(ch: *chunks.Chunk, water_changed: *bool) stamps.FieldView {
 // until terrain tools re-level it.
 
 fn stampWaterAt(x: f32, z: f32) void {
-    const gsx: i32 = @intFromFloat(@round(x / DOT_M));
-    const gsz: i32 = @intFromFloat(@round(z / DOT_M));
+    const gsx: i32 = @round(x / DOT_M);
+    const gsz: i32 = @round(z / DOT_M);
     if (!claimStamp(seenKey(2, gsx, gsz, 0, 0))) return;
     g_stats.stamps += 1;
 
     const radiusM = @max(0.5, g_tool.radius_m);
     const depthM = @max(DOT_M, @abs(g_tool.center_z));
     const rd_f: f32 = @max(1, @ceil(radiusM / DOT_M));
-    const rd: i32 = @intFromFloat(rd_f);
+    const rd: i32 = @trunc(rd_f);
     const erase = g_tool.mode == .erase;
 
     // pass 1 — the stamp's water level: the lowest DRY ground the brush covers
@@ -556,8 +556,8 @@ fn stampWaterAt(x: f32, z: f32) void {
         for (chunks.slots()) |maybe| {
             const ch = maybe orelse continue;
             const local = chunks.localSampleF(ch, x, z);
-            const cix: i32 = @intFromFloat(@round(local[0]));
-            const ciz: i32 = @intFromFloat(@round(local[1]));
+            const cix: i32 = @round(local[0]);
+            const ciz: i32 = @round(local[1]);
             const edge: i32 = @intCast(chunks.SAMPLE_COLS - 1);
             if (cix + rd < 0 or cix - rd > edge or ciz + rd < 0 or ciz - rd > edge) continue;
             var dz: i32 = -rd;
@@ -583,8 +583,8 @@ fn stampWaterAt(x: f32, z: f32) void {
     for (chunks.slots()) |maybe| {
         const ch = maybe orelse continue;
         const local = chunks.localSampleF(ch, x, z);
-        const cix: i32 = @intFromFloat(@round(local[0]));
-        const ciz: i32 = @intFromFloat(@round(local[1]));
+        const cix: i32 = @round(local[0]);
+        const ciz: i32 = @round(local[1]);
         const edge: i32 = @intCast(chunks.SAMPLE_COLS - 1);
         if (cix + rd < 0 or cix - rd > edge or ciz + rd < 0 or ciz - rd > edge) continue;
         var wrote_water = false;
@@ -650,8 +650,8 @@ const SmoothSample = struct {
 var g_smooth_scratch: [65536]SmoothSample = undefined;
 
 fn stampSmoothAt(x: f32, z: f32) void {
-    const gsx: i32 = @intFromFloat(@round(x / DOT_M));
-    const gsz: i32 = @intFromFloat(@round(z / DOT_M));
+    const gsx: i32 = @round(x / DOT_M);
+    const gsz: i32 = @round(z / DOT_M);
     if (!claimStamp(seenKey(3, gsx, gsz, 0, 0))) return;
     g_stats.stamps += 1;
 
@@ -679,10 +679,10 @@ fn stampSmoothAt(x: f32, z: f32) void {
         const min_y_f = @max(0, @floor(ciz - rd));
         const max_y_f = @min(edge, @ceil(ciz + rd));
         if (min_x_f > max_x_f or min_y_f > max_y_f) continue;
-        var jy: usize = @intFromFloat(min_y_f);
-        const max_y: usize = @intFromFloat(max_y_f);
-        const min_x: usize = @intFromFloat(min_x_f);
-        const max_x: usize = @intFromFloat(max_x_f);
+        var jy: usize = @trunc(min_y_f);
+        const max_y: usize = @trunc(max_y_f);
+        const min_x: usize = @trunc(min_x_f);
+        const max_x: usize = @trunc(max_x_f);
         while (jy <= max_y) : (jy += 1) {
             var jx = min_x;
             while (jx <= max_x) : (jx += 1) {
@@ -763,12 +763,13 @@ fn finishRamp() void {
 }
 
 fn stampRampAt(x: f32, z: f32, opts: stamps.RampStampOpts) void {
+    const size_key = @round(opts.longM * 10) + @round(opts.wideM * 10) * 65536;
     const key = seenKey(
         4,
-        @intFromFloat(@round(x / DOT_M)),
-        @intFromFloat(@round(z / DOT_M)),
-        @intFromFloat(@round(opts.angleDeg)),
-        @intFromFloat(@round(opts.longM * 10) + @round(opts.wideM * 10) * 65536),
+        @round(x / DOT_M),
+        @round(z / DOT_M),
+        @round(opts.angleDeg),
+        @round(size_key),
     );
     if (!claimStamp(key)) return;
     g_stats.stamps += 1;
@@ -811,11 +812,13 @@ fn finishSlope() void {
 }
 
 fn stampSlopeSegmentAt(from: [2]f32, to: [2]f32, distanceStartM: f32, runM: f32) void {
+    const from_key = @round(from[0] / DOT_M) + @round(from[1] / DOT_M) * 65536;
+    const to_key = @round(to[0] / DOT_M) + @round(to[1] / DOT_M) * 65536;
     const key = seenKey(
         5,
-        @intFromFloat(@round(from[0] / DOT_M) + @round(from[1] / DOT_M) * 65536),
-        @intFromFloat(@round(to[0] / DOT_M) + @round(to[1] / DOT_M) * 65536),
-        @intFromFloat(@round(distanceStartM * 4)),
+        @round(from_key),
+        @round(to_key),
+        @round(distanceStartM * 4),
         0,
     );
     if (!claimStamp(key)) return;
@@ -850,7 +853,7 @@ fn stampCellsAt(x: f32, z: f32) void {
     const gtx = chunks.globalTile(x);
     const gtz = chunks.globalTile(z);
     const erase = g_tool.mode == .erase;
-    const r: i32 = @intFromFloat(@max(0, @round(g_tool.radius_m)));
+    const r: i32 = @trunc(@max(0, @round(g_tool.radius_m)));
     const reach = @as(f32, @floatFromInt(r)) + 0.5; // brush.ts forEachFootprintCell:22
     g_stats.stamps += 1;
 
@@ -913,8 +916,8 @@ pub fn heightAt(x: f32, z: f32) f32 {
     const half = chunks.CHUNK_METERS / 2;
     const sxf = (x + half) / DOT_M;
     const szf = (z + half) / DOT_M;
-    const sx0: i32 = @intFromFloat(@floor(sxf));
-    const sz0: i32 = @intFromFloat(@floor(szf));
+    const sx0: i32 = @floor(sxf);
+    const sz0: i32 = @floor(szf);
     const fx = sxf - @floor(sxf);
     const fz = szf - @floor(szf);
     const h00 = sampleAtGlobal(sx0, sz0);
@@ -1000,9 +1003,9 @@ fn floorSourceIndex(src: *const [chunks.SAMPLE_CELLS]f32, i: usize, j: usize) us
     const cols = chunks.SAMPLE_COLS;
     const res = FLOOR_RES;
     const s = @as(f32, @floatFromInt(cols - 1)) / @as(f32, @floatFromInt(res - 1));
-    const h: i32 = @max(1, @as(i32, @intFromFloat(@ceil(s / 2))));
-    const cyi: i32 = @intFromFloat(@round(@as(f32, @floatFromInt(j)) * s));
-    const cxi: i32 = @intFromFloat(@round(@as(f32, @floatFromInt(i)) * s));
+    const h: i32 = @max(1, @as(i32, @ceil(s / 2)));
+    const cyi: i32 = @round(@as(f32, @floatFromInt(j)) * s);
+    const cxi: i32 = @round(@as(f32, @floatFromInt(i)) * s);
     var best: f32 = 0;
     var best_idx = @as(usize, @intCast(cyi)) * cols + @as(usize, @intCast(cxi));
     var dy: i32 = -h;
@@ -1460,14 +1463,14 @@ var g_flora_spec_count: usize = 0;
 pub fn setFloraSpecs(vals: []const f32) void {
     g_flora_spec_count = @min(MAX_PALETTE, vals.len / 3);
     for (0..g_flora_spec_count) |i| {
-        const raw: u16 = @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(std.math.maxInt(u16))), vals[i * 3])));
+        const raw: u16 = @trunc(@max(0, @min(@as(f32, std.math.maxInt(u16)), vals[i * 3])));
         if (raw > MAX_FLORA_RECIPE_ID) {
             g_flora_specs[i] = .{ .spec = 0, .count = 0, .chance = 0 };
             continue;
         }
         g_flora_specs[i] = .{
             .spec = @intCast(raw),
-            .count = @intFromFloat(@max(0, @min(65535, vals[i * 3 + 1]))),
+            .count = @trunc(@max(0, @min(65535, vals[i * 3 + 1]))),
             .chance = @max(0, @min(1, vals[i * 3 + 2])),
         };
     }
@@ -2052,7 +2055,7 @@ test "ramp drag stamps the lerped grade between anchor and release" {
     const ch = chunks.chunkAt(0, 0).?;
     // the midpoint of the ramp carries the mid height
     const mid = chunks.localSampleF(ch, 0.5, 10.5);
-    const mid_z = ch.height[@as(usize, @intFromFloat(@round(mid[1]))) * chunks.SAMPLE_COLS + @as(usize, @intFromFloat(@round(mid[0])))];
+    const mid_z = ch.height[@as(usize, @round(mid[1])) * chunks.SAMPLE_COLS + @as(usize, @round(mid[0]))];
     try std.testing.expectApproxEqAbs(@as(f32, 4), mid_z, 0.25);
     try std.testing.expect(ch.dirty.height);
 }
@@ -2072,7 +2075,7 @@ test "slope stroke grades along the drawn path at stroke end" {
     const row: usize = 120;
     const at = struct {
         fn z(c: *chunks.Chunk, r: usize, x: f32) f32 {
-            const s: usize = @intFromFloat(@round((x + 60) / DOT_M));
+            const s: usize = @round((x + 60) / DOT_M);
             return c.height[r * chunks.SAMPLE_COLS + s];
         }
     };

@@ -189,7 +189,7 @@ pub const StampOpts = struct {
 /// union and painted height equals the set intensity (heightData.ts:89).
 pub fn stampBrush(f: FieldView, cix: i32, ciy: i32, opts: StampOpts) void {
     const radiusM = @max(DOT_M, opts.radiusM);
-    const rd: i32 = @max(1, @as(i32, @intFromFloat(@ceil(radiusM / DOT_M))));
+    const rd: i32 = @max(1, @as(i32, @ceil(radiusM / DOT_M)));
     const sign: f32 = if (opts.centerZ >= 0) 1 else -1;
     const peak = @abs(opts.centerZ);
     var dy: i32 = -rd;
@@ -244,10 +244,10 @@ pub fn stampRamp(f: FieldView, cix: f32, ciy: f32, opts: RampStampOpts) void {
     const rd = @ceil(std.math.hypot(hw, hl) / DOT_M) + 1;
     const z0 = clampHeight(opts.minZ);
     const z1 = clampHeight(opts.maxZ);
-    const min_x: usize = @intFromFloat(@max(0, @floor(cix - rd)));
-    const max_x: usize = @intFromFloat(@min(@as(f32, @floatFromInt(f.cols - 1)), @ceil(cix + rd)));
-    const min_y: usize = @intFromFloat(@max(0, @floor(ciy - rd)));
-    const max_y: usize = @intFromFloat(@min(@as(f32, @floatFromInt(f.rows - 1)), @ceil(ciy + rd)));
+    const min_x: usize = @trunc(@max(0, @floor(cix - rd)));
+    const max_x: usize = @trunc(@min(@as(f32, @floatFromInt(f.cols - 1)), @ceil(cix + rd)));
+    const min_y: usize = @trunc(@max(0, @floor(ciy - rd)));
+    const max_y: usize = @trunc(@min(@as(f32, @floatFromInt(f.rows - 1)), @ceil(ciy + rd)));
     if (min_x > max_x or min_y > max_y) return;
 
     var jy = min_y;
@@ -302,13 +302,13 @@ pub fn stampSlopeSegment(f: FieldView, ax: f32, ay: f32, bx: f32, by: f32, opts:
     const dy = by - ay;
     const len2 = dx * dx + dy * dy;
     const lenM = @sqrt(len2) * DOT_M;
-    const min_x: usize = @intFromFloat(@max(0, @floor(@min(ax, bx) - radius_samples - 1)));
+    const min_x: usize = @trunc(@max(0, @floor(@min(ax, bx) - radius_samples - 1)));
     const max_xf = @min(@as(f32, @floatFromInt(f.cols - 1)), @ceil(@max(ax, bx) + radius_samples + 1));
-    const min_y: usize = @intFromFloat(@max(0, @floor(@min(ay, by) - radius_samples - 1)));
+    const min_y: usize = @trunc(@max(0, @floor(@min(ay, by) - radius_samples - 1)));
     const max_yf = @min(@as(f32, @floatFromInt(f.rows - 1)), @ceil(@max(ay, by) + radius_samples + 1));
     if (max_xf < 0 or max_yf < 0) return false;
-    const max_x: usize = @intFromFloat(max_xf);
-    const max_y: usize = @intFromFloat(max_yf);
+    const max_x: usize = @trunc(max_xf);
+    const max_y: usize = @trunc(max_yf);
     var touched = false;
 
     var jy = min_y;

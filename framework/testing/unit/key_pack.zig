@@ -68,11 +68,11 @@ test "packed value stays exact in an f64 (the V8 bridge crossing)" {
     // JS decodes with arithmetic div/mod. Worst case: max mod + max sym.
     const pk = key_pack.pack(0xFFFFFFFF, 0xFFFF);
     const as_f64: f64 = @floatFromInt(pk);
-    const back: i64 = @intFromFloat(as_f64);
+    const back: i64 = @trunc(as_f64);
     try testing.expectEqual(pk, back);
     // And the JS-side arithmetic decode recovers both fields from the f64.
-    const js_sym: u32 = @intFromFloat(@mod(as_f64, 4294967296.0));
-    const js_mod: u16 = @intFromFloat(@floor(as_f64 / 4294967296.0));
+    const js_sym: u32 = @trunc(@mod(as_f64, 4294967296.0));
+    const js_mod: u16 = @floor(as_f64 / 4294967296.0);
     try testing.expectEqual(key_pack.symOf(pk), js_sym);
     try testing.expectEqual(key_pack.modOf(pk), js_mod);
 }

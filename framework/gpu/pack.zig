@@ -17,7 +17,7 @@ const std = @import("std");
 /// f32 [0,1] → unorm8. Out-of-range input clamps (a color channel outside
 /// [0,1] is already meaningless for 8-bit display output).
 pub inline fn unorm8(c: f32) u8 {
-    return @intFromFloat(@round(std.math.clamp(c, 0.0, 1.0) * 255.0));
+    return @round(std.math.clamp(c, 0.0, 1.0) * 255.0);
 }
 
 /// Pack an rgba color (4 × f32 [0,1]) into the unorm8x4 vertex-format row.
@@ -27,7 +27,7 @@ pub inline fn rgba8(r: f32, g: f32, b: f32, a: f32) [4]u8 {
 
 /// f32 [0,1] → unorm16 (atlas UVs, normalized sizes).
 pub inline fn unorm16(v: f32) u16 {
-    return @intFromFloat(@round(std.math.clamp(v, 0.0, 1.0) * 65535.0));
+    return @round(std.math.clamp(v, 0.0, 1.0) * 65535.0);
 }
 
 /// f32 → IEEE half (float16x* vertex formats). Full float range — NOT a
@@ -54,7 +54,7 @@ pub fn octEncodeSnorm16(nx: f32, ny: f32, nz: f32) [2]i16 {
     }
     const snorm = struct {
         fn q(v: f32) i16 {
-            return @intFromFloat(@round(std.math.clamp(v, -1.0, 1.0) * 32767.0));
+            return @round(std.math.clamp(v, -1.0, 1.0) * 32767.0);
         }
     };
     return .{ snorm.q(ox), snorm.q(oy) };

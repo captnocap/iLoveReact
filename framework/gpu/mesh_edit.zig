@@ -970,9 +970,9 @@ fn ensureFaceSel() bool {
 /// the AutoHashMap on the [3]i32 itself compares by value, so distinct positions never merge.
 fn weldKey(p: [3]f32) [3]i32 {
     return .{
-        @intFromFloat(@round(p[0] * WELD_Q)),
-        @intFromFloat(@round(p[1] * WELD_Q)),
-        @intFromFloat(@round(p[2] * WELD_Q)),
+        @round(p[0] * WELD_Q),
+        @round(p[1] * WELD_Q),
+        @round(p[2] * WELD_Q),
     };
 }
 
@@ -1341,9 +1341,9 @@ const MirrorKey = struct { part: u32, x: i32, y: i32, z: i32 };
 fn mirrorKey(part: u32, p: [3]f32) MirrorKey {
     return .{
         .part = part,
-        .x = @intFromFloat(@round(p[0] * MIRROR_Q)),
-        .y = @intFromFloat(@round(p[1] * MIRROR_Q)),
-        .z = @intFromFloat(@round(p[2] * MIRROR_Q)),
+        .x = @round(p[0] * MIRROR_Q),
+        .y = @round(p[1] * MIRROR_Q),
+        .z = @round(p[2] * MIRROR_Q),
     };
 }
 
@@ -1787,9 +1787,9 @@ fn blendSelect(base: [4]u8) [4]u8 {
     var out: [4]u8 = base;
     var c: usize = 0;
     while (c < 3) : (c += 1) {
-        const b: f32 = @floatFromInt(base[c]);
+        const b: f32 = base[c];
         const v = b * (1.0 - SELECT_MIX) + SELECT_RGB[c] * SELECT_MIX;
-        out[c] = @intFromFloat(std.math.clamp(v, 0, 255));
+        out[c] = @trunc(std.math.clamp(v, 0, 255));
     }
     out[3] = 255;
     return out;

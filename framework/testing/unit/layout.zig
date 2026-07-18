@@ -19,13 +19,15 @@ fn mockMeasure(
     _ = max_lines;
 
     const char_w: f32 = 6;
+    const font_size_f: f32 = font_size;
     const full_width = @as(f32, @floatFromInt(text.len)) * char_w;
-    const line_px = if (line_height > 0) line_height else @as(f32, @floatFromInt(font_size));
+    const line_px = if (line_height > 0) line_height else font_size_f;
 
     var width = full_width;
     var lines: usize = 1;
     if (!no_wrap and max_width > 0 and full_width > max_width) {
-        const chars_per_line = @max(1, @as(usize, @intFromFloat(@floor(max_width / char_w))));
+        const measured_chars: usize = @floor(max_width / char_w);
+        const chars_per_line = @max(1, measured_chars);
         lines = std.math.divCeil(usize, text.len, chars_per_line) catch unreachable;
         width = @min(full_width, max_width);
     }
@@ -33,7 +35,7 @@ fn mockMeasure(
     return .{
         .width = width,
         .height = height,
-        .ascent = @as(f32, @floatFromInt(font_size)) * 0.8,
+        .ascent = font_size_f * 0.8,
     };
 }
 

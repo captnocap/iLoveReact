@@ -238,7 +238,7 @@ fn getArray(v: std.json.Value) ?std.json.Array {
 fn getInt(v: std.json.Value) ?i64 {
     return switch (v) {
         .integer => |i| i,
-        .float => |f| @intFromFloat(f),
+        .float => |f| @trunc(f),
         else => null,
     };
 }

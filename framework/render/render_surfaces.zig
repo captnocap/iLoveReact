@@ -1451,8 +1451,8 @@ fn createFeed(io: std.Io, environ: *const std.process.Environ.Map, src: []const 
             // Virtual display (Xvfb) + XShm capture
             // Use node rect dimensions so the display matches the container exactly (no dead space).
             // If an explicit resolution was given, use that instead.
-            var rw: u32 = @max(320, @as(u32, @intFromFloat(node_w)));
-            var rh: u32 = @max(240, @as(u32, @intFromFloat(node_h)));
+            var rw: u32 = @max(320, @as(u32, @trunc(node_w)));
+            var rh: u32 = @max(240, @as(u32, @trunc(node_h)));
             if (parsed.resolution) |res| {
                 if (std.mem.indexOfScalar(u8, res, 'x')) |xi| {
                     rw = std.fmt.parseInt(u32, res[0..xi], 10) catch rw;

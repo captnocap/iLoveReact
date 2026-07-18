@@ -26,7 +26,7 @@ pub fn init(s: u64) void {
 
 /// Re-seed the PRNG (callable from .tsz via Random.seed).
 pub fn seed(s: f32) void {
-    rng = std.Random.Xoshiro256.init(@as(u64, @bitCast(@as(i64, @intFromFloat(s)))));
+    rng = std.Random.Xoshiro256.init(@as(u64, @bitCast(@as(i64, @trunc(s)))));
 }
 
 /// Random float in [0, 1).
@@ -41,8 +41,8 @@ pub fn range(min_val: f32, max_val: f32) f32 {
 
 /// Random integer in [min, max] inclusive.
 pub fn intRange(min_val: f32, max_val: f32) f32 {
-    const lo: i32 = @intFromFloat(min_val);
-    const hi: i32 = @intFromFloat(max_val);
+    const lo: i32 = @trunc(min_val);
+    const hi: i32 = @trunc(max_val);
     if (hi <= lo) return min_val;
     const span: u32 = @intCast(hi - lo + 1);
     const val = rng.random().intRangeAtMost(i32, lo, lo + @as(i32, @intCast(span - 1)));

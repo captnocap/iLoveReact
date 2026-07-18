@@ -273,7 +273,7 @@ var g_difficulty: f64 = 1.0;
 fn recomputeHeat() void {
     const w = &g_state.wallet;
     const usd = if (w.total_value_usd > 1000.0) w.total_value_usd else 1000.0;
-    const trades_f: f64 = @floatFromInt(w.total_trades);
+    const trades_f: f64 = w.total_trades;
     const usd_factor = std.math.log10(usd / 1000.0);
     const trade_factor = trades_f / 200.0;
     g_heat = @max(0.0, usd_factor + trade_factor * 0.5);
@@ -323,7 +323,7 @@ fn onTradeExecuted(token_id: u32, kind: u8, usd_amount: f64, impact: f64) void {
         const base_n: u32 = 1 + g_state.rng.prng.random().intRangeAtMost(u32, 0, 1);
         const n_bots: u32 = base_n + heat_bots;
         const total_capture_target = @min(impact * (0.25 + g_difficulty * 0.05), impact * 0.45);
-        const per_bot_size = total_capture_target / @as(f64, @floatFromInt(n_bots));
+        const per_bot_size = total_capture_target / n_bots;
         var i: u32 = 0;
         while (i < n_bots) : (i += 1) {
             const delay = 20 + g_state.rng.prng.random().intRangeAtMost(u32, 0, 230);
@@ -342,14 +342,14 @@ fn onTradeExecuted(token_id: u32, kind: u8, usd_amount: f64, impact: f64) void {
             const t = &g_state.tokens[token_id];
             const boost = @as(f32, @floatCast(@min(usd_amount / 5000.0, 6.0)));
             if (boost > t.rate_boost) t.rate_boost = boost;
-            const decay_ms: u32 = @intFromFloat(@min(usd_amount * 5.0, 60_000.0));
+            const decay_ms: u32 = @trunc(@min(usd_amount * 5.0, 60_000.0));
             t.boost_decay_at_ms = now32 + decay_ms;
         }
     }
 
     if (usd_amount > 50_000.0) {
         const base_followers: u32 = 3 + g_state.rng.prng.random().intRangeAtMost(u32, 0, 4);
-        const heat_followers: u32 = @intFromFloat(g_difficulty * 1.0);
+        const heat_followers: u32 = @trunc(g_difficulty * 1.0);
         const followers: u32 = base_followers + heat_followers;
         var i: u32 = 0;
         while (i < followers) : (i += 1) {
@@ -425,7 +425,7 @@ fn scheduleNextEvent(t: *Token, now_ms: u32) void {
         return;
     }
     const interval_s: f64 = -std.math.log(f64, std.math.e, u) / rate;
-    var interval_ms: u32 = @intFromFloat(@max(interval_s * 1000.0, 1.0));
+    var interval_ms: u32 = @trunc(@max(interval_s * 1000.0, 1.0));
     if (interval_ms > 60_000) interval_ms = 60_000;
     t.next_event_at_ms = now_ms + interval_ms;
 }
@@ -833,11 +833,12 @@ pub const TimeRow = struct {
 pub fn snapshot_time() TimeRow {
     ensureInit();
     const real: f64 = @floatFromInt(g_state.real_time_ms);
-    const day_ms_f: f64 = @floatFromInt(GAME_DAY_MS);
+    const day_ms_f: f64 = GAME_DAY_MS;
     const total_days = real / day_ms_f;
-    const day_n: u32 = 1 + @as(u32, @intFromFloat(@floor(total_days)));
+    const completed_days: u32 = @floor(total_days);
+    const day_n = 1 + completed_days;
     const frac_of_day = total_days - @floor(total_days);
-    const hour_n: u32 = @as(u32, @intFromFloat(frac_of_day * 24.0));
+    const hour_n: u32 = @trunc(frac_of_day * 24.0);
     return .{ .real_ms = real, .day = day_n, .hour = hour_n, .day_ms = GAME_DAY_MS };
 }
 
@@ -981,14 +982,14 @@ pub const RunIdRow = struct { run_id_hi: f64, run_id_lo: f64 };
 
 pub fn snapshot_run_id() RunIdRow {
     ensureInit();
-    const hi: u64 = (g_state.run_id >> 32) & 0xFFFFFFFF;
-    const lo: u64 = g_state.run_id & 0xFFFFFFFF;
-    return .{ .run_id_hi = @floatFromInt(hi), .run_id_lo = @floatFromInt(lo) };
+    const hi: u32 = @truncate(g_state.run_id >> 32);
+    const lo: u32 = @truncate(g_state.run_id);
+    return .{ .run_id_hi = hi, .run_id_lo = lo };
 }
 
 pub fn set_run_id(hi: f64, lo: f64) void {
-    const hi_u: u64 = @intFromFloat(@max(hi, 0));
-    const lo_u: u64 = @intFromFloat(@max(lo, 0));
+    const hi_u: u64 = @trunc(@max(hi, 0));
+    const lo_u: u64 = @trunc(@max(lo, 0));
     g_state.run_id = ((hi_u & 0xFFFFFFFF) << 32) | (lo_u & 0xFFFFFFFF);
 }
 

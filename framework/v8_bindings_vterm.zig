@@ -43,7 +43,7 @@ fn argF64(info: v8.FunctionCallbackInfo, idx: u32, default: f64) f64 {
 }
 
 fn argI32(info: v8.FunctionCallbackInfo, idx: u32, default: i32) i32 {
-    return @intFromFloat(argF64(info, idx, @floatFromInt(default)));
+    return @trunc(argF64(info, idx, default));
 }
 
 fn argU16(info: v8.FunctionCallbackInfo, idx: u32, default: u16) u16 {
@@ -224,7 +224,7 @@ fn hostVtermScroll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         const n: u16 = @intCast(@min(delta, 65535));
         vterm.scrollDownByName(name, n);
     }
-    setReturnNum(info, @floatFromInt(vterm.scrollOffsetByName(name)));
+    setReturnNum(info, vterm.scrollOffsetByName(name));
 }
 
 // ── __vterm_resize(name, rows, cols) ────────────────────────────────
@@ -247,7 +247,7 @@ fn hostVtermGetMouseMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         return;
     };
     defer std.heap.c_allocator.free(name);
-    setReturnNum(info, @floatFromInt(vterm.getMouseModeByName(name)));
+    setReturnNum(info, vterm.getMouseModeByName(name));
 }
 
 // ── __vterm_get_row(name, row) → encoded cell string ───────────────

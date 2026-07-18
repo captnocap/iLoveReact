@@ -594,8 +594,8 @@ fn termPixelToCell(tn: *Node, mx: f32, my: f32) struct { row: u16, col: u16 } {
     const local_x = @max(0, mx - r.x - padding);
     const local_y = @max(0, my - r.y - padding);
     return .{
-        .row = @intFromFloat(@min(@floor(local_y / cell_h), 255)),
-        .col = @intFromFloat(@min(@floor(local_x / cell_w), 255)),
+        .row = @trunc(@min(@floor(local_y / cell_h), 255)),
+        .col = @trunc(@min(@floor(local_x / cell_w), 255)),
     };
 }
 
@@ -1574,8 +1574,8 @@ fn updateChromeDrag() void {
     _ = c.SDL_GetGlobalMouseState(&gx, &gy);
     const dx = gx - g_chrome_drag_mouse_x;
     const dy = gy - g_chrome_drag_mouse_y;
-    const next_x: c_int = @intFromFloat(@round(@as(f32, @floatFromInt(g_chrome_drag_window_x)) + dx));
-    const next_y: c_int = @intFromFloat(@round(@as(f32, @floatFromInt(g_chrome_drag_window_y)) + dy));
+    const next_x: c_int = @round(@as(f32, @floatFromInt(g_chrome_drag_window_x)) + dx);
+    const next_y: c_int = @round(@as(f32, @floatFromInt(g_chrome_drag_window_y)) + dy);
     _ = c.SDL_SetWindowPosition(w, next_x, next_y);
 }
 
@@ -1757,7 +1757,7 @@ fn measureWidthOnly(t: []const u8, font_size: u16) f32 {
 }
 
 fn drawNodeTextCommon(node: *Node, text: []const u8, x: f32, y: f32, max_width: f32, max_lines: u16, color: Color) f32 {
-    const final_a = @as(f32, @floatFromInt(color.a)) / 255.0 * g_paint_opacity;
+    const final_a = @as(f32, color.a) / 255.0 * g_paint_opacity;
     gpu.resetInlineSlots();
     if (node.text_effect) |ename| {
         if (effects.getEffectFill(ename)) |info| {
@@ -1778,9 +1778,9 @@ fn drawNodeTextCommon(node: *Node, text: []const u8, x: f32, y: f32, max_width: 
         y,
         node.font_size,
         draw_width,
-        @as(f32, @floatFromInt(color.r)) / 255.0,
-        @as(f32, @floatFromInt(color.g)) / 255.0,
-        @as(f32, @floatFromInt(color.b)) / 255.0,
+        @as(f32, color.r) / 255.0,
+        @as(f32, color.g) / 255.0,
+        @as(f32, color.b) / 255.0,
         final_a,
         max_lines,
         node.letter_spacing,
@@ -1802,9 +1802,9 @@ fn drawNodeTextCommon(node: *Node, text: []const u8, x: f32, y: f32, max_width: 
             underline_y,
             text_w,
             1,
-            @as(f32, @floatFromInt(color.r)) / 255.0,
-            @as(f32, @floatFromInt(color.g)) / 255.0,
-            @as(f32, @floatFromInt(color.b)) / 255.0,
+            @as(f32, color.r) / 255.0,
+            @as(f32, color.g) / 255.0,
+            @as(f32, color.b) / 255.0,
             final_a * 0.6,
             0,
             0,
@@ -1944,10 +1944,10 @@ fn nodedumpWalk(node: *Node, count: *u32, depth: u32, limit: u32) void {
             depth,
             node.children.len,
             nodedumpTag(node),
-            @as(i32, @intFromFloat(r.x)),
-            @as(i32, @intFromFloat(r.y)),
-            @as(i32, @intFromFloat(r.w)),
-            @as(i32, @intFromFloat(r.h)),
+            @as(i32, @trunc(r.x)),
+            @as(i32, @trunc(r.y)),
+            @as(i32, @trunc(r.w)),
+            @as(i32, @trunc(r.h)),
             dbg_name,
             tbuf[0..text_len],
         });
@@ -1966,8 +1966,8 @@ fn nodedumpMaybeEmit(environ: *const std.process.Environ.Map, root: *Node, win_w
     g_nodedump_done = true;
     if (environ.get("REACTJIT_NODEDUMP") == null) return;
     log.print("[nodedump] window={d}x{d}\n", .{
-        @as(i32, @intFromFloat(win_w)),
-        @as(i32, @intFromFloat(win_h)),
+        @as(i32, @trunc(win_w)),
+        @as(i32, @trunc(win_h)),
     });
     var count: u32 = 0;
     nodedumpWalk(root, &count, 0, 500);
@@ -2126,10 +2126,10 @@ fn paintSlider(node: *Node) void {
         track_y,
         r.w,
         track_h,
-        @as(f32, @floatFromInt(tc.r)) / 255.0,
-        @as(f32, @floatFromInt(tc.g)) / 255.0,
-        @as(f32, @floatFromInt(tc.b)) / 255.0,
-        @as(f32, @floatFromInt(tc.a)) / 255.0 * g_paint_opacity,
+        @as(f32, tc.r) / 255.0,
+        @as(f32, tc.g) / 255.0,
+        @as(f32, tc.b) / 255.0,
+        @as(f32, tc.a) / 255.0 * g_paint_opacity,
         track_h * 0.5,
         0,
         0,
@@ -2145,10 +2145,10 @@ fn paintSlider(node: *Node) void {
         track_y,
         fill_w,
         track_h,
-        @as(f32, @floatFromInt(fc.r)) / 255.0,
-        @as(f32, @floatFromInt(fc.g)) / 255.0,
-        @as(f32, @floatFromInt(fc.b)) / 255.0,
-        @as(f32, @floatFromInt(fc.a)) / 255.0 * g_paint_opacity,
+        @as(f32, fc.r) / 255.0,
+        @as(f32, fc.g) / 255.0,
+        @as(f32, fc.b) / 255.0,
+        @as(f32, fc.a) / 255.0 * g_paint_opacity,
         track_h * 0.5,
         0,
         0,
@@ -2550,10 +2550,10 @@ fn paintNode(io: std.Io, environ: *const std.process.Environ.Map, node: *Node) v
     if (node.gcurve_data) |gd| {
         if (gd.len >= 6) {
             const fc = node.canvas_fill_color orelse Color.rgb(255, 255, 255);
-            const r = @as(f32, @floatFromInt(fc.r)) / 255.0;
-            const g = @as(f32, @floatFromInt(fc.g)) / 255.0;
-            const b = @as(f32, @floatFromInt(fc.b)) / 255.0;
-            const a = @as(f32, @floatFromInt(fc.a)) / 255.0 * g_paint_opacity * node.canvas_fill_opacity;
+            const r = @as(f32, fc.r) / 255.0;
+            const g = @as(f32, fc.g) / 255.0;
+            const b = @as(f32, fc.b) / 255.0;
+            const a = @as(f32, fc.a) / 255.0 * g_paint_opacity * node.canvas_fill_opacity;
             var i: usize = 0;
             while (i + 5 < gd.len) : (i += 6) {
                 gpu.gcurve_fill.drawGCurveFill(
@@ -2582,10 +2582,10 @@ fn paintNode(io: std.Io, environ: *const std.process.Environ.Map, node: *Node) v
         if (node.canvas_fill_color) |fc| {
             // Filled polygon — n points → n-2 triangles in a fan from v0.
             if (pts.len >= 6) {
-                const r = @as(f32, @floatFromInt(fc.r)) / 255.0;
-                const g = @as(f32, @floatFromInt(fc.g)) / 255.0;
-                const b = @as(f32, @floatFromInt(fc.b)) / 255.0;
-                const a = @as(f32, @floatFromInt(fc.a)) / 255.0 * g_paint_opacity * node.canvas_fill_opacity;
+                const r = @as(f32, fc.r) / 255.0;
+                const g = @as(f32, fc.g) / 255.0;
+                const b = @as(f32, fc.b) / 255.0;
+                const a = @as(f32, fc.a) / 255.0 * g_paint_opacity * node.canvas_fill_opacity;
                 const x0 = pts[0];
                 const y0 = pts[1];
                 var i: usize = 2;
@@ -2606,10 +2606,10 @@ fn paintNode(io: std.Io, environ: *const std.process.Environ.Map, node: *Node) v
             }
         } else if (pts.len >= 4) {
             const tc = node.text_color orelse Color.rgb(255, 255, 255);
-            const r = @as(f32, @floatFromInt(tc.r)) / 255.0;
-            const g = @as(f32, @floatFromInt(tc.g)) / 255.0;
-            const b = @as(f32, @floatFromInt(tc.b)) / 255.0;
-            const a = @as(f32, @floatFromInt(tc.a)) / 255.0 * g_paint_opacity * node.canvas_stroke_opacity;
+            const r = @as(f32, tc.r) / 255.0;
+            const g = @as(f32, tc.g) / 255.0;
+            const b = @as(f32, tc.b) / 255.0;
+            const a = @as(f32, tc.a) / 255.0 * g_paint_opacity * node.canvas_stroke_opacity;
             const sw = node.canvas_stroke_width;
             // segments mode → independent pairs (i += 4: p0p1, p2p3, …); strip
             // mode → connected (i += 2: p0p1, p1p2, …). One node, N disjoint
@@ -2650,10 +2650,10 @@ fn paintNode(io: std.Io, environ: *const std.process.Environ.Map, node: *Node) v
                 r.w,
                 r.h,
                 uv,
-                @as(f32, @floatFromInt(tc.r)) / 255.0,
-                @as(f32, @floatFromInt(tc.g)) / 255.0,
-                @as(f32, @floatFromInt(tc.b)) / 255.0,
-                @as(f32, @floatFromInt(tc.a)) / 255.0 * g_paint_opacity,
+                @as(f32, tc.r) / 255.0,
+                @as(f32, tc.g) / 255.0,
+                @as(f32, tc.b) / 255.0,
+                @as(f32, tc.a) / 255.0 * g_paint_opacity,
             );
             return;
         }
@@ -2956,10 +2956,10 @@ fn paintCanvasPath(node: *Node) callconv(.auto) void {
                 const s = grad.stops[si2];
                 stops_buf[si2] = .{
                     .offset = s.offset,
-                    .r = @as(f32, @floatFromInt(s.color.r)) / 255.0,
-                    .g = @as(f32, @floatFromInt(s.color.g)) / 255.0,
-                    .b = @as(f32, @floatFromInt(s.color.b)) / 255.0,
-                    .a = @as(f32, @floatFromInt(s.color.a)) / 255.0 * g_paint_opacity * node.canvas_fill_opacity,
+                    .r = @as(f32, s.color.r) / 255.0,
+                    .g = @as(f32, s.color.g) / 255.0,
+                    .b = @as(f32, s.color.b) / 255.0,
+                    .a = @as(f32, s.color.a) / 255.0 * g_paint_opacity * node.canvas_fill_opacity,
                 };
             }
             svg_path.drawFillLinearGradient(&fill_path, grad.x1, grad.y1, grad.x2, grad.y2, stops_buf[0..n]);
@@ -2967,20 +2967,20 @@ fn paintCanvasPath(node: *Node) callconv(.auto) void {
             const fill_path = svg_path.parsePath(d);
             svg_path.drawFill(
                 &fill_path,
-                @as(f32, @floatFromInt(fc.r)) / 255.0,
-                @as(f32, @floatFromInt(fc.g)) / 255.0,
-                @as(f32, @floatFromInt(fc.b)) / 255.0,
-                @as(f32, @floatFromInt(fc.a)) / 255.0 * g_paint_opacity * node.canvas_fill_opacity,
+                @as(f32, fc.r) / 255.0,
+                @as(f32, fc.g) / 255.0,
+                @as(f32, fc.b) / 255.0,
+                @as(f32, fc.a) / 255.0 * g_paint_opacity * node.canvas_fill_opacity,
             );
         }
         // Stroke pass (GPU-native SDF curves)
         const path = svg_path.parsePath(d);
         svg_path.drawStrokeCurves(
             &path,
-            @as(f32, @floatFromInt(tc.r)) / 255.0,
-            @as(f32, @floatFromInt(tc.g)) / 255.0,
-            @as(f32, @floatFromInt(tc.b)) / 255.0,
-            @as(f32, @floatFromInt(tc.a)) / 255.0 * g_paint_opacity * node.canvas_stroke_opacity,
+            @as(f32, tc.r) / 255.0,
+            @as(f32, tc.g) / 255.0,
+            @as(f32, tc.b) / 255.0,
+            @as(f32, tc.a) / 255.0 * g_paint_opacity * node.canvas_stroke_opacity,
             node.canvas_stroke_width,
             if (g_flow_enabled) node.canvas_flow_speed else 0,
             @as(u32, @truncate(c.SDL_GetTicks())),
@@ -2998,7 +2998,7 @@ fn paintRectBatch(node: *Node) void {
         // Flat-spec path: boxes are pure data (no child nodes, no layout).
         if (data.len < 1) return;
         const r = node.computed;
-        const total: usize = @intFromFloat(@max(0.0, data[0]));
+        const total: usize = @trunc(@max(0.0, data[0]));
         var i: usize = 0;
         while (i < total) : (i += 1) {
             const o = 1 + i * 14;
@@ -3048,19 +3048,19 @@ fn emitNodeRect(node: *Node) void {
                     r.y,
                     r.w,
                     r.h,
-                    @as(f32, @floatFromInt(bg.r)) / 255.0,
-                    @as(f32, @floatFromInt(bg.g)) / 255.0,
-                    @as(f32, @floatFromInt(bg.b)) / 255.0,
-                    @as(f32, @floatFromInt(bg.a)) / 255.0 * g_paint_opacity,
+                    @as(f32, bg.r) / 255.0,
+                    @as(f32, bg.g) / 255.0,
+                    @as(f32, bg.b) / 255.0,
+                    @as(f32, bg.a) / 255.0 * g_paint_opacity,
                     node.style.radiusTL(),
                     node.style.radiusTR(),
                     node.style.radiusBR(),
                     node.style.radiusBL(),
                     node.style.brdTop(),
-                    @as(f32, @floatFromInt(bc.r)) / 255.0,
-                    @as(f32, @floatFromInt(bc.g)) / 255.0,
-                    @as(f32, @floatFromInt(bc.b)) / 255.0,
-                    @as(f32, @floatFromInt(bc.a)) / 255.0 * g_paint_opacity,
+                    @as(f32, bc.r) / 255.0,
+                    @as(f32, bc.g) / 255.0,
+                    @as(f32, bc.b) / 255.0,
+                    @as(f32, bc.a) / 255.0 * g_paint_opacity,
                 );
             }
         } else if (node.style.border_color) |bc| {
@@ -3079,10 +3079,10 @@ fn emitNodeRect(node: *Node) void {
                     node.style.radiusBR(),
                     node.style.radiusBL(),
                     node.style.brdTop(),
-                    @as(f32, @floatFromInt(bc.r)) / 255.0,
-                    @as(f32, @floatFromInt(bc.g)) / 255.0,
-                    @as(f32, @floatFromInt(bc.b)) / 255.0,
-                    @as(f32, @floatFromInt(bc.a)) / 255.0 * g_paint_opacity,
+                    @as(f32, bc.r) / 255.0,
+                    @as(f32, bc.g) / 255.0,
+                    @as(f32, bc.b) / 255.0,
+                    @as(f32, bc.a) / 255.0 * g_paint_opacity,
                 );
             }
         }
@@ -3109,16 +3109,16 @@ noinline fn paintNodeVisuals(io: std.Io, environ: *const std.process.Environ.Map
     // Box shadow — draw BEFORE background so it appears behind
     if (node.style.shadow_color) |sc| {
         if (node.style.shadow_blur > 0) {
-            const sa = @as(f32, @floatFromInt(sc.a)) / 255.0 * g_paint_opacity;
-            const sr = @as(f32, @floatFromInt(sc.r)) / 255.0;
-            const sg = @as(f32, @floatFromInt(sc.g)) / 255.0;
-            const sb = @as(f32, @floatFromInt(sc.b)) / 255.0;
+            const sa = @as(f32, sc.a) / 255.0 * g_paint_opacity;
+            const sr = @as(f32, sc.r) / 255.0;
+            const sg = @as(f32, sc.g) / 255.0;
+            const sb = @as(f32, sc.b) / 255.0;
             const ox = node.style.shadow_offset_x;
             const oy = node.style.shadow_offset_y;
             const blur = node.style.shadow_blur;
             if (node.style.shadow_method == 1) {
                 // Multi-rect: N expanded rects with fading alpha (shadowMethod: 'rect')
-                var steps: u32 = @intFromFloat(@ceil(blur));
+                var steps: u32 = @ceil(blur);
                 if (steps > 16) steps = 16;
                 if (steps < 1) steps = 1;
                 const fsteps = @as(f32, @floatFromInt(steps));
@@ -3184,23 +3184,23 @@ noinline fn paintNodeVisuals(io: std.Io, environ: *const std.process.Environ.Map
                         r.y,
                         r.w,
                         r.h,
-                        @as(f32, @floatFromInt(bg.r)) / 255.0,
-                        @as(f32, @floatFromInt(bg.g)) / 255.0,
-                        @as(f32, @floatFromInt(bg.b)) / 255.0,
-                        @as(f32, @floatFromInt(bg.a)) / 255.0 * g_paint_opacity,
+                        @as(f32, bg.r) / 255.0,
+                        @as(f32, bg.g) / 255.0,
+                        @as(f32, bg.b) / 255.0,
+                        @as(f32, bg.a) / 255.0 * g_paint_opacity,
                         node.style.radiusTL(),
                         node.style.radiusTR(),
                         node.style.radiusBR(),
                         node.style.radiusBL(),
                         node.style.brdTop(),
-                        @as(f32, @floatFromInt(bc.r)) / 255.0,
-                        @as(f32, @floatFromInt(bc.g)) / 255.0,
-                        @as(f32, @floatFromInt(bc.b)) / 255.0,
-                        @as(f32, @floatFromInt(bc.a)) / 255.0 * g_paint_opacity,
-                        @as(f32, @floatFromInt(ge.r)) / 255.0,
-                        @as(f32, @floatFromInt(ge.g)) / 255.0,
-                        @as(f32, @floatFromInt(ge.b)) / 255.0,
-                        @as(f32, @floatFromInt(ge.a)) / 255.0 * g_paint_opacity,
+                        @as(f32, bc.r) / 255.0,
+                        @as(f32, bc.g) / 255.0,
+                        @as(f32, bc.b) / 255.0,
+                        @as(f32, bc.a) / 255.0 * g_paint_opacity,
+                        @as(f32, ge.r) / 255.0,
+                        @as(f32, ge.g) / 255.0,
+                        @as(f32, ge.b) / 255.0,
+                        @as(f32, ge.a) / 255.0 * g_paint_opacity,
                         dir,
                     );
                 } else {
@@ -3209,19 +3209,19 @@ noinline fn paintNodeVisuals(io: std.Io, environ: *const std.process.Environ.Map
                         r.y,
                         r.w,
                         r.h,
-                        @as(f32, @floatFromInt(bg.r)) / 255.0,
-                        @as(f32, @floatFromInt(bg.g)) / 255.0,
-                        @as(f32, @floatFromInt(bg.b)) / 255.0,
-                        @as(f32, @floatFromInt(bg.a)) / 255.0 * g_paint_opacity,
+                        @as(f32, bg.r) / 255.0,
+                        @as(f32, bg.g) / 255.0,
+                        @as(f32, bg.b) / 255.0,
+                        @as(f32, bg.a) / 255.0 * g_paint_opacity,
                         node.style.radiusTL(),
                         node.style.radiusTR(),
                         node.style.radiusBR(),
                         node.style.radiusBL(),
                         node.style.brdTop(),
-                        @as(f32, @floatFromInt(bc.r)) / 255.0,
-                        @as(f32, @floatFromInt(bc.g)) / 255.0,
-                        @as(f32, @floatFromInt(bc.b)) / 255.0,
-                        @as(f32, @floatFromInt(bc.a)) / 255.0 * g_paint_opacity,
+                        @as(f32, bc.r) / 255.0,
+                        @as(f32, bc.g) / 255.0,
+                        @as(f32, bc.b) / 255.0,
+                        @as(f32, bc.a) / 255.0 * g_paint_opacity,
                     );
                 }
             } else {
@@ -3230,19 +3230,19 @@ noinline fn paintNodeVisuals(io: std.Io, environ: *const std.process.Environ.Map
                     r.y,
                     r.w,
                     r.h,
-                    @as(f32, @floatFromInt(bg.r)) / 255.0,
-                    @as(f32, @floatFromInt(bg.g)) / 255.0,
-                    @as(f32, @floatFromInt(bg.b)) / 255.0,
-                    @as(f32, @floatFromInt(bg.a)) / 255.0 * g_paint_opacity,
+                    @as(f32, bg.r) / 255.0,
+                    @as(f32, bg.g) / 255.0,
+                    @as(f32, bg.b) / 255.0,
+                    @as(f32, bg.a) / 255.0 * g_paint_opacity,
                     node.style.radiusTL(),
                     node.style.radiusTR(),
                     node.style.radiusBR(),
                     node.style.radiusBL(),
                     node.style.brdTop(),
-                    @as(f32, @floatFromInt(bc.r)) / 255.0,
-                    @as(f32, @floatFromInt(bc.g)) / 255.0,
-                    @as(f32, @floatFromInt(bc.b)) / 255.0,
-                    @as(f32, @floatFromInt(bc.a)) / 255.0 * g_paint_opacity,
+                    @as(f32, bc.r) / 255.0,
+                    @as(f32, bc.g) / 255.0,
+                    @as(f32, bc.b) / 255.0,
+                    @as(f32, bc.a) / 255.0 * g_paint_opacity,
                 );
             }
         }
@@ -3272,10 +3272,10 @@ noinline fn paintNodeVisuals(io: std.Io, environ: *const std.process.Environ.Map
                 node.style.radiusBR(),
                 node.style.radiusBL(),
                 node.style.brdTop(),
-                @as(f32, @floatFromInt(bc.r)) / 255.0,
-                @as(f32, @floatFromInt(bc.g)) / 255.0,
-                @as(f32, @floatFromInt(bc.b)) / 255.0,
-                @as(f32, @floatFromInt(bc.a)) / 255.0 * g_paint_opacity,
+                @as(f32, bc.r) / 255.0,
+                @as(f32, bc.g) / 255.0,
+                @as(f32, bc.b) / 255.0,
+                @as(f32, bc.a) / 255.0 * g_paint_opacity,
             );
         }
     }
@@ -3327,10 +3327,10 @@ noinline fn paintNodeVisuals(io: std.Io, environ: *const std.process.Environ.Map
             }
         };
         var dctx = DashCtx{
-            .r = @as(f32, @floatFromInt(bc.r)) / 255.0,
-            .g = @as(f32, @floatFromInt(bc.g)) / 255.0,
-            .b = @as(f32, @floatFromInt(bc.b)) / 255.0,
-            .a = @as(f32, @floatFromInt(bc.a)) / 255.0 * g_paint_opacity,
+            .r = @as(f32, bc.r) / 255.0,
+            .g = @as(f32, bc.g) / 255.0,
+            .b = @as(f32, bc.b) / 255.0,
+            .a = @as(f32, bc.a) / 255.0 * g_paint_opacity,
             .w = stroke_w,
         };
         border_dash.emitDashedStroke(
@@ -3457,7 +3457,7 @@ fn paintInlineGlyphs(glyphs: []const layout.InlineGlyph, font_size: u16) void {
         const cx_path = (min_x + max_x) / 2;
         const cy_path = (min_y + max_y) / 2;
         const cx_slot = slot.x + slot_size / 2;
-        const cy_slot = slot.y + @as(f32, @floatFromInt(font_size)) / 2;
+        const cy_slot = slot.y + @as(f32, font_size) / 2;
         // Transform: translate path center to slot center, scale around slot center
         gpu.setTransform(cx_path, cy_path, cx_slot - cx_path * scale, cy_slot - cy_path * scale, scale);
         // Fill: effect texture or flat color
@@ -3473,12 +3473,12 @@ fn paintInlineGlyphs(glyphs: []const layout.InlineGlyph, font_size: u16) void {
         }
         if (!used_effect) {
             const fc = glyph.fill;
-            svg_path.drawFill(&path, @as(f32, @floatFromInt(fc.r)) / 255.0, @as(f32, @floatFromInt(fc.g)) / 255.0, @as(f32, @floatFromInt(fc.b)) / 255.0, @as(f32, @floatFromInt(fc.a)) / 255.0 * g_paint_opacity);
+            svg_path.drawFill(&path, @as(f32, fc.r) / 255.0, @as(f32, fc.g) / 255.0, @as(f32, fc.b) / 255.0, @as(f32, fc.a) / 255.0 * g_paint_opacity);
         }
         // Stroke
         if (glyph.stroke_width > 0 and glyph.stroke.a > 0) {
             const sc = glyph.stroke;
-            svg_path.drawStrokeCurves(&path, @as(f32, @floatFromInt(sc.r)) / 255.0, @as(f32, @floatFromInt(sc.g)) / 255.0, @as(f32, @floatFromInt(sc.b)) / 255.0, @as(f32, @floatFromInt(sc.a)) / 255.0 * g_paint_opacity, glyph.stroke_width, 0, 0);
+            svg_path.drawStrokeCurves(&path, @as(f32, sc.r) / 255.0, @as(f32, sc.g) / 255.0, @as(f32, sc.b) / 255.0, @as(f32, sc.a) / 255.0 * g_paint_opacity, glyph.stroke_width, 0, 0);
         }
         gpu.resetTransform();
     }
@@ -3563,7 +3563,7 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
         if (is_focused) {
             // Keep a small margin of context on either side of the caret so
             // it never sits flush against the clipping edge.
-            const margin: f32 = @min(max_w * 0.5, @as(f32, @floatFromInt(node.font_size)) * 0.4 + 2);
+            const margin: f32 = @min(max_w * 0.5, @as(f32, node.font_size) * 0.4 + 2);
             if (caret_tx - hscroll > max_w - margin) hscroll = caret_tx - max_w + margin;
             if (caret_tx - hscroll < margin) hscroll = caret_tx - margin;
         }
@@ -3609,8 +3609,8 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
                     if (visible_bottom <= 0) {
                         end_row = 0;
                     } else {
-                        start_row = if (visible_top > 0) @intFromFloat(@floor(visible_top)) else 0;
-                        end_row = @min(rows.len, @as(usize, @intFromFloat(@ceil(@max(visible_bottom, 0)))) + 1);
+                        start_row = if (visible_top > 0) @floor(visible_top) else 0;
+                        end_row = @min(rows.len, @as(usize, @ceil(@max(visible_bottom, 0))) + 1);
                     }
                 }
             }
@@ -3687,8 +3687,8 @@ noinline fn paintTerminal(node: *Node) void {
 
     const avail_w = r.w - padding * 2;
     const avail_h = r.h - padding * 2;
-    const cols: u16 = @intFromFloat(@max(1, @floor(avail_w / cell_w)));
-    const rows: u16 = @intFromFloat(@max(1, @floor(avail_h / cell_h)));
+    const cols: u16 = @trunc(@max(1, @floor(avail_w / cell_w)));
+    const rows: u16 = @trunc(@max(1, @floor(avail_h / cell_h)));
 
     // Auto-resize vterm to match layout (only if changed)
     const vt_rows = vterm_mod.getRowsByName(session);
@@ -3720,7 +3720,7 @@ noinline fn paintTerminal(node: *Node) void {
             const tok = classifier.getRowTokenByName(session, live_r);
             if (tok != .output and tok != .text) {
                 const ac = classifier.tokenColor(tok);
-                gpu.drawRect(r.x, cy, 2, cell_h, @as(f32, @floatFromInt(ac.r)) / 255.0, @as(f32, @floatFromInt(ac.g)) / 255.0, @as(f32, @floatFromInt(ac.b)) / 255.0, 0.9 * g_paint_opacity, 0, 0, 0, 0, 0, 0);
+                gpu.drawRect(r.x, cy, 2, cell_h, @as(f32, ac.r) / 255.0, @as(f32, ac.g) / 255.0, @as(f32, ac.b) / 255.0, 0.9 * g_paint_opacity, 0, 0, 0, 0, 0, 0);
             } else {
                 gpu.drawRect(r.x, cy + cell_h * 0.35, 2, cell_h * 0.3, 0.3, 0.33, 0.4, 0.25 * g_paint_opacity, 0, 0, 0, 0, 0, 0);
             }
@@ -3742,7 +3742,7 @@ noinline fn paintTerminal(node: *Node) void {
             // Background rect (non-default bg only)
             if (cell.bg) |bg| {
                 const actual_bg = if (cell.reverse) (cell.fg orelse @TypeOf(cell.fg.?){ .r = 204, .g = 204, .b = 204 }) else bg;
-                gpu.drawRect(cx, cy, cell_w * @as(f32, @floatFromInt(cell.width)), cell_h, @as(f32, @floatFromInt(actual_bg.r)) / 255.0, @as(f32, @floatFromInt(actual_bg.g)) / 255.0, @as(f32, @floatFromInt(actual_bg.b)) / 255.0, g_paint_opacity, 0, 0, 0, 0, 0, 0);
+                gpu.drawRect(cx, cy, cell_w * @as(f32, cell.width), cell_h, @as(f32, actual_bg.r) / 255.0, @as(f32, actual_bg.g) / 255.0, @as(f32, actual_bg.b) / 255.0, g_paint_opacity, 0, 0, 0, 0, 0, 0);
             }
 
             // Foreground glyph — semantic color for live rows, cell color for scrollback
@@ -3764,9 +3764,9 @@ noinline fn paintTerminal(node: *Node) void {
                     cx,
                     cy,
                     font_size,
-                    @as(f32, @floatFromInt(fg.r)) / 255.0,
-                    @as(f32, @floatFromInt(fg.g)) / 255.0,
-                    @as(f32, @floatFromInt(fg.b)) / 255.0,
+                    @as(f32, fg.r) / 255.0,
+                    @as(f32, fg.g) / 255.0,
+                    @as(f32, fg.b) / 255.0,
                     g_paint_opacity,
                 );
             }
@@ -3878,16 +3878,16 @@ noinline fn paintCanvasContainer(io: std.Io, environ: *const std.process.Environ
         const minor = node.canvas_grid_color orelse layout.Color.rgba(22, 29, 39, 255);
         const major = node.canvas_grid_color_major orelse minor;
         const major_every: i32 = @intCast(node.canvas_grid_major_every);
-        const mr: f32 = @as(f32, @floatFromInt(minor.r)) / 255.0;
-        const mg: f32 = @as(f32, @floatFromInt(minor.g)) / 255.0;
-        const mb: f32 = @as(f32, @floatFromInt(minor.b)) / 255.0;
-        const ma: f32 = @as(f32, @floatFromInt(minor.a)) / 255.0;
-        const Mr: f32 = @as(f32, @floatFromInt(major.r)) / 255.0;
-        const Mg: f32 = @as(f32, @floatFromInt(major.g)) / 255.0;
-        const Mb: f32 = @as(f32, @floatFromInt(major.b)) / 255.0;
-        const Ma: f32 = @as(f32, @floatFromInt(major.a)) / 255.0;
-        const i_start_x: i32 = @intFromFloat(@floor(gx_min / step));
-        const i_end_x: i32 = @intFromFloat(@ceil(gx_max / step));
+        const mr: f32 = @as(f32, minor.r) / 255.0;
+        const mg: f32 = @as(f32, minor.g) / 255.0;
+        const mb: f32 = @as(f32, minor.b) / 255.0;
+        const ma: f32 = @as(f32, minor.a) / 255.0;
+        const Mr: f32 = @as(f32, major.r) / 255.0;
+        const Mg: f32 = @as(f32, major.g) / 255.0;
+        const Mb: f32 = @as(f32, major.b) / 255.0;
+        const Ma: f32 = @as(f32, major.a) / 255.0;
+        const i_start_x: i32 = @floor(gx_min / step);
+        const i_end_x: i32 = @ceil(gx_max / step);
         var ix: i32 = i_start_x;
         while (ix <= i_end_x) : (ix += 1) {
             const gx: f32 = @as(f32, @floatFromInt(ix)) * step;
@@ -3898,8 +3898,8 @@ noinline fn paintCanvasContainer(io: std.Io, environ: *const std.process.Environ
             const ca = if (is_major) Ma else ma;
             gpu.drawRect(gx - half, gy_min, stroke_g, gy_max - gy_min, cr, cg, cb, ca, 0, 0, 0, 0, 0, 0);
         }
-        const i_start_y: i32 = @intFromFloat(@floor(gy_min / step));
-        const i_end_y: i32 = @intFromFloat(@ceil(gy_max / step));
+        const i_start_y: i32 = @floor(gy_min / step);
+        const i_end_y: i32 = @ceil(gy_max / step);
         var iy: i32 = i_start_y;
         while (iy <= i_end_y) : (iy += 1) {
             const gy: f32 = @as(f32, @floatFromInt(iy)) * step;
@@ -4382,8 +4382,8 @@ pub fn run(config_in: AppConfig) !void {
                     system_signals.notifyResize(config.host, win_w, win_h);
                     geometry.save(io, window);
                     layout.markLayoutDirty();
-                    g_resize_hud_w = @intFromFloat(win_w);
-                    g_resize_hud_h = @intFromFloat(win_h);
+                    g_resize_hud_w = @trunc(win_w);
+                    g_resize_hud_h = @trunc(win_h);
                     g_resize_hud_until_ms = c.SDL_GetTicks() + 500;
                 },
                 c.SDL_EVENT_WINDOW_MOVED => {
@@ -5493,7 +5493,7 @@ pub fn run(config_in: AppConfig) !void {
                             .gx = gx,
                             .gy = gy,
                             .canvas_hit = canvas_hit != null,
-                            .wheel_y = @intFromFloat(event.wheel.y),
+                            .wheel_y = @trunc(event.wheel.y),
                         };
                         forEachTerminalNode(config.root, &sctx, struct {
                             fn visit(s: *ScrollCtx, tn: *Node, sess: []const u8) void {
@@ -5851,7 +5851,7 @@ pub fn run(config_in: AppConfig) !void {
                 const cx = (win_w - cw) / 2;
                 const cy = (win_h - ch) / 2;
                 const tx = cx + (cw - text_w) / 2;
-                const ty = cy + (ch - @as(f32, @floatFromInt(size_px))) / 2;
+                const ty = cy + (ch - @as(f32, size_px)) / 2;
                 gpu.drawRect(cx, cy, cw, ch, 0.10, 0.12, 0.16, 0.85 * alpha, 10, 1, 1, 1, 1, 0.30 * alpha);
                 gpu.drawTextLine(label, tx, ty, size_px, 0.92, 0.94, 0.97, alpha);
             }

@@ -226,7 +226,7 @@ fn hostLoadFileToBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
         setReturnNumber(info, 0);
         return;
     };
-    setReturnNumber(info, @floatFromInt(next_id));
+    setReturnNumber(info, next_id);
 }
 
 fn hostUploadFloatBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -253,7 +253,7 @@ fn hostUploadFloatBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         setReturnNumber(info, 0);
         return;
     };
-    setReturnNumber(info, @floatFromInt(next_id));
+    setReturnNumber(info, next_id);
 }
 
 /// __scene3d_patch_dyn(slotId, float32Verts, vertCount) → bool. Imperative
@@ -659,7 +659,7 @@ fn hostMeshEditPick(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     const additive = (argToI32(info, 2) orelse 0) != 0;
     const n = scene3d.meshEditPick(x, y, additive);
     state.markDirty();
-    setReturnNumber(info, @floatFromInt(n));
+    setReturnNumber(info, n);
 }
 
 /// __mesh_edit_clear() — drop the current selection (and its face tint).
@@ -681,7 +681,7 @@ fn hostMeshEditBox(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     const additive = (argToI32(info, 4) orelse 0) != 0;
     const n = scene3d.meshEditBox(x0, y0, x1, y1, additive);
     state.markDirty();
-    setReturnNumber(info, @floatFromInt(n));
+    setReturnNumber(info, n);
 }
 
 /// __mesh_edit_capture(on) — hand the model-editor input loop to the HOST (modelview).
@@ -939,7 +939,7 @@ fn hostMeshGroupFaceCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const lo: u32 = @intCast(@max(0, argToI32(info, 0) orelse 0));
     const hi: u32 = @intCast(@max(0, argToI32(info, 1) orelse 0));
-    setReturnNumber(info, @floatFromInt(scene3d.meshGroupFaceCount(lo, hi)));
+    setReturnNumber(info, scene3d.meshGroupFaceCount(lo, hi));
 }
 
 /// __mesh_surviving_groups(lo, hi) → "g0,g1,…" of the authored groups in the range that still
@@ -1363,7 +1363,7 @@ fn hostMeshEditSelectGroupRange(info_c: ?*const v8.c.FunctionCallbackInfo) callc
     const additive = (argToI32(info, 2) orelse 0) != 0;
     const n = scene3d.meshEditSelectGroupRange(lo, hi, additive);
     state.markDirty();
-    setReturnNumber(info, @floatFromInt(n));
+    setReturnNumber(info, n);
 }
 
 /// __mesh_edit_scope(lo, hi). Restrict editing to the group range [lo, hi) — the outliner
@@ -1620,7 +1620,7 @@ fn hostModelPaintGroupRange(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(
     const b: u8 = @intCast(std.math.clamp(argToI32(info, 4) orelse 0, 0, 255));
     const n = scene3d.meshPaintGroupRange(lo, hi, r, g, b);
     state.markDirty();
-    setReturnNumber(info, @floatFromInt(n));
+    setReturnNumber(info, n);
 }
 
 /// __mesh_edit_select_face(idx, additive) → bool. Select a face by index (no raycast) —
@@ -1678,7 +1678,7 @@ fn hostMeshSymmetryReport(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
         return;
     };
     var buf: [96]u8 = undefined;
-    const json = std.fmt.bufPrint(&buf, "{{\"center\":{d:.4},\"unmatched\":{d},\"total\":{d}}}", .{ rep[0], @as(u32, @intFromFloat(rep[1])), @as(u32, @intFromFloat(rep[2])) }) catch {
+    const json = std.fmt.bufPrint(&buf, "{{\"center\":{d:.4},\"unmatched\":{d},\"total\":{d}}}", .{ rep[0], @as(u32, @trunc(rep[1])), @as(u32, @trunc(rep[2])) }) catch {
         setReturnString(info, "");
         return;
     };
@@ -1863,7 +1863,7 @@ fn hostModelPaintFace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 /// __model_face_count() → number of triangles in the active paint target (0 if none).
 fn hostModelFaceCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNumber(info, @floatFromInt(scene3d.paintFaceCount()));
+    setReturnNumber(info, scene3d.paintFaceCount());
 }
 
 /// __model_paint_mode(mode) → sets the free-form face-safety mode (0 = clip, 1 = lock).
@@ -1878,7 +1878,7 @@ fn hostModelPaintStrokeBegin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const x: f32 = @floatCast(argToF64(info, 0) orelse 0);
     const y: f32 = @floatCast(argToF64(info, 1) orelse 0);
-    setReturnNumber(info, @floatFromInt(scene3d.paintStrokeBegin(x, y)));
+    setReturnNumber(info, scene3d.paintStrokeBegin(x, y));
 }
 
 /// __model_paint_stamp(x, y, r, g, b, radius, flow[, kind, hardness, angleDeg, aspect,
@@ -1980,12 +1980,12 @@ fn hostModelSetPaintDetail(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     const px = argToI32(info, 0) orelse 1;
     const applied = scene3d.setPaintDetail(px);
     state.markDirty();
-    setReturnNumber(info, @floatFromInt(applied));
+    setReturnNumber(info, applied);
 }
 
 fn returnEstimateJson(info: v8.FunctionCallbackInfo, est: scene3d.PaintEstimate) void {
     var buf: [96]u8 = undefined;
-    const json = std.fmt.bufPrint(&buf, "{{\"w\":{d},\"h\":{d},\"density\":{d}}}", .{ est.w, est.h, @max(1, @as(u32, @intFromFloat(@round(est.density)))) }) catch {
+    const json = std.fmt.bufPrint(&buf, "{{\"w\":{d},\"h\":{d},\"density\":{d}}}", .{ est.w, est.h, @max(1, @as(u32, @round(est.density))) }) catch {
         setReturnString(info, "");
         return;
     };
@@ -2015,7 +2015,7 @@ fn hostModelSetPaintFit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     const texels = argToI32(info, 0) orelse 1024;
     const applied = scene3d.setPaintFit(texels);
     state.markDirty();
-    setReturnNumber(info, @floatFromInt(applied));
+    setReturnNumber(info, applied);
 }
 
 /// __model_paint_fit_estimate(texels) → JSON {"w":W,"h":H,"density":D} — what a
@@ -2104,7 +2104,7 @@ fn hostModelPaintSample(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
         return;
     };
     const packed_rgb: u32 = (@as(u32, rgb[0]) << 16) | (@as(u32, rgb[1]) << 8) | rgb[2];
-    setReturnNumber(info, @floatFromInt(packed_rgb));
+    setReturnNumber(info, packed_rgb);
 }
 
 /// __model_atlas_palette(n) → JSON [[r,g,b],...] — the current painting's n dominant
@@ -2416,7 +2416,7 @@ fn hostAnimRegister(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     const start_offset_ms: i64 = blk: {
         if (info.length() < 7) break :blk 0;
         const v = argToF64(info, 6) orelse break :blk 0;
-        break :blk @intFromFloat(v);
+        break :blk @trunc(v);
     };
 
     const curve = animations.CurveType.fromString(curve_name);
@@ -2436,14 +2436,14 @@ fn hostAnimRegister(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         now_ms,
         start_offset_ms,
     );
-    setReturnNumber(info, @floatFromInt(id));
+    setReturnNumber(info, id);
 }
 
 fn hostAnimUnregister(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 1) return;
     const id_f = argToF64(info, 0) orelse return;
-    const id: u32 = @intFromFloat(id_f);
+    const id: u32 = @trunc(id_f);
     animations.unregister(id);
 }
 
@@ -2475,7 +2475,7 @@ fn hostGetMouseDown(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 /// Live SDL_Keymod state for pointer payloads, including left/right variants.
 fn hostGetMouseMods(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNumber(info, @floatFromInt(c.SDL_GetModState()));
+    setReturnNumber(info, c.SDL_GetModState());
 }
 
 /// Which device last drove the pointer: 0 = mouse, 1 = pen (Wacom/tablet).
@@ -2483,7 +2483,7 @@ fn hostGetMouseMods(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 /// the useIFTTT `system:pointerDevice` signal (engine.zig notePointerDevice).
 fn hostGetPointerDevice(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNumber(info, @floatFromInt(@intFromEnum(mouse_state.g_pointer_device)));
+    setReturnNumber(info, @intFromEnum(mouse_state.g_pointer_device));
 }
 
 /// Live pen pressure 0..1 (SDL_PEN_AXIS_PRESSURE; 0 when the pen is lifted).
@@ -2504,7 +2504,7 @@ fn hostGetMouseRightDown(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
 fn hostGetMouseButtons(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const mask = c.SDL_GetMouseState(null, null);
-    setReturnNumber(info, @floatFromInt(mask));
+    setReturnNumber(info, mask);
 }
 
 fn hostMouseCapture(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -2616,7 +2616,7 @@ fn hostPollInputSubmit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     const evt = input.consumeLastSubmit() orelse return;
     const ctx = infoCtx(info);
     const obj = newObject(info);
-    objectSetNumber(obj, ctx, "id", @floatFromInt(evt.id));
+    objectSetNumber(obj, ctx, "id", evt.id);
     objectSetString(obj, ctx, "text", evt.text);
     info.getReturnValue().set(obj);
 }
@@ -2953,7 +2953,7 @@ fn hostFswatchAdd(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnNumber(info, -1);
         return;
     };
-    setReturnNumber(info, @floatFromInt(id));
+    setReturnNumber(info, id);
 }
 
 fn hostFswatchRemove(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

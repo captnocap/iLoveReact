@@ -138,7 +138,7 @@ fn argU32(info: v8.FunctionCallbackInfo, idx: u32) u32 {
     const ctx = info.getIsolate().getCurrentContext();
     const v = info.getArg(idx).toF64(ctx) catch return 0;
     if (!(v > 0)) return 0;
-    return @intFromFloat(v);
+    return @trunc(v);
 }
 
 /// __paintable_brush_rgba(id, cx, cy, r, cr, cg, cb, kind, angle, aspect,

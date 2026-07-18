@@ -99,20 +99,20 @@ fn hostSetGrid(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         @floatCast(argToF64(info, 0) orelse 0),
         @floatCast(argToF64(info, 1) orelse 0),
         @floatCast(argToF64(info, 2) orelse 1),
-        @intFromFloat(@max(0.0, argToF64(info, 3) orelse 0)),
-        @intFromFloat(@max(0.0, argToF64(info, 4) orelse 0)),
+        @trunc(@max(0.0, argToF64(info, 3) orelse 0)),
+        @trunc(@max(0.0, argToF64(info, 4) orelse 0)),
         kinds,
     ) orelse {
         setReturnNull(info);
         return;
     };
-    setReturnF64(info, @floatFromInt(gen));
+    setReturnF64(info, gen);
 }
 
 fn hostUpdateCells(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const w: i64 = @intFromFloat(argToF64(info, 2) orelse 0);
-    const h: i64 = @intFromFloat(argToF64(info, 3) orelse 0);
+    const w: i64 = @trunc(@as(f64, argToF64(info, 2) orelse 0));
+    const h: i64 = @trunc(@as(f64, argToF64(info, 3) orelse 0));
     const bytes = argBytes(info, 4) orelse {
         setReturnNull(info);
         return;
@@ -123,14 +123,14 @@ fn hostUpdateCells(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         return;
     }
     const gen = game_pathing.patchCells(
-        @intFromFloat(argToF64(info, 0) orelse 0),
-        @intFromFloat(argToF64(info, 1) orelse 0),
+        @trunc(@as(f64, argToF64(info, 0) orelse 0)),
+        @trunc(@as(f64, argToF64(info, 1) orelse 0)),
         w,
         h,
         kinds,
         0,
     );
-    setReturnF64(info, @floatFromInt(gen));
+    setReturnF64(info, gen);
 }
 
 fn hostFillRect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -140,14 +140,14 @@ fn hostFillRect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     const gen = game_pathing.patchCells(
-        @intFromFloat(argToF64(info, 0) orelse 0),
-        @intFromFloat(argToF64(info, 1) orelse 0),
-        @intFromFloat(argToF64(info, 2) orelse 1),
-        @intFromFloat(argToF64(info, 3) orelse 1),
+        @trunc(@as(f64, argToF64(info, 0) orelse 0)),
+        @trunc(@as(f64, argToF64(info, 1) orelse 0)),
+        @trunc(@as(f64, argToF64(info, 2) orelse 1)),
+        @trunc(@as(f64, argToF64(info, 3) orelse 1)),
         null,
-        @intFromFloat(@max(0.0, @min(kind_f, @as(f64, game_pathing.MAX_KINDS - 1)))),
+        @trunc(@max(0.0, @min(kind_f, @as(f64, game_pathing.MAX_KINDS - 1)))),
     );
-    setReturnF64(info, @floatFromInt(gen));
+    setReturnF64(info, gen);
 }
 
 fn hostSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -162,7 +162,7 @@ fn hostSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     const costs = std.mem.bytesAsSlice(f32, bytes[0 .. (bytes.len / 4) * 4]);
     const ok = game_pathing.setProfile(
-        @intFromFloat(@max(0.0, id_f)),
+        @trunc(@max(0.0, id_f)),
         @floatCast(argToF64(info, 1) orelse 0),
         @floatCast(argToF64(info, 2) orelse 1),
         @floatCast(argToF64(info, 3) orelse 1),
@@ -181,7 +181,7 @@ fn hostSetFlows(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnNull(info);
         return;
     };
-    setReturnF64(info, @floatFromInt(game_pathing.setFlows(bytes)));
+    setReturnF64(info, game_pathing.setFlows(bytes));
 }
 
 fn hostSetKindClasses(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -190,12 +190,12 @@ fn hostSetKindClasses(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         setReturnNull(info);
         return;
     };
-    setReturnF64(info, @floatFromInt(game_pathing.setKindClasses(bytes)));
+    setReturnF64(info, game_pathing.setKindClasses(bytes));
 }
 
 fn hostFind(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const id: usize = @intFromFloat(@max(0.0, argToF64(info, 0) orelse 0));
+    const id: usize = @trunc(@max(0.0, argToF64(info, 0) orelse 0));
     const out = game_pathing.find(
         id,
         @floatCast(argToF64(info, 1) orelse 0),
@@ -211,7 +211,7 @@ fn hostFind(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostGeneration(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnF64(info, @floatFromInt(game_pathing.generation()));
+    setReturnF64(info, game_pathing.generation());
 }
 
 // Registrar-owned plan scratch — the same host-owned-buffer contract as

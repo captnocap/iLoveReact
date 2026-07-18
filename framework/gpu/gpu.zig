@@ -677,10 +677,10 @@ pub fn pushScissor(x: f32, y: f32, w: f32, h: f32) void {
     // on which direction the rounding error falls.
     const fx = if (x > 0) @floor(x) else 0;
     const fy = if (y > 0) @floor(y) else 0;
-    var sx: u32 = @intFromFloat(fx);
-    var sy: u32 = @intFromFloat(fy);
-    var sw: u32 = if (w > 0) @intFromFloat(@ceil(x - fx + w)) else 0;
-    var sh: u32 = if (h > 0) @intFromFloat(@ceil(y - fy + h)) else 0;
+    var sx: u32 = @trunc(fx);
+    var sy: u32 = @trunc(fy);
+    var sw: u32 = if (w > 0) @ceil(x - fx + w) else 0;
+    var sh: u32 = if (h > 0) @ceil(y - fy + h) else 0;
 
     // Intersect with parent scissor
     if (g_scissor_depth > 0) {
@@ -863,7 +863,7 @@ fn staticScale(v: f32) f32 {
 
 fn staticDim(v: f32, scale_f: f32) u32 {
     if (v <= 0) return 0;
-    return @intFromFloat(@max(@as(f32, 1), @ceil(v * staticScale(scale_f))));
+    return @trunc(@max(@as(f32, 1), @ceil(v * staticScale(scale_f))));
 }
 
 fn findStaticEntry(hash: u64, key_len: usize) ?usize {
@@ -1055,7 +1055,7 @@ pub fn frameCounter() u64 {
 fn staticSurfaceIntroProgress(entry: *const StaticSurfaceEntry, intro_frames: u16) f32 {
     if (intro_frames == 0) return 1;
     const age: f32 = @floatFromInt(g_frame_counter -| entry.ready_frame);
-    const total: f32 = @floatFromInt(intro_frames);
+    const total: f32 = intro_frames;
     const t = @min(1.0, (age + 1.0) / @max(1.0, total));
     return 1.0 - std.math.pow(f32, 1.0 - t, 3.0);
 }

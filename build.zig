@@ -957,6 +957,20 @@ pub fn build(b: *std.Build) void {
     const luajit_runtime_test_step = b.step("test-luajit-runtime", "Run the LuaJIT runtime integration test");
     luajit_runtime_test_step.dependOn(&run_luajit_runtime_test.step);
 
+    // ── Zig 0.16 compiler-contract tests ───────────────────────────
+    const zig016_idioms_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/zig016_idioms.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const zig016_idioms_test = b.addTest(.{
+        .name = "zig016-idioms-test",
+        .root_module = zig016_idioms_test_mod,
+    });
+    const run_zig016_idioms_test = b.addRunArtifact(zig016_idioms_test);
+    const zig016_idioms_test_step = b.step("test-zig016-idioms", "Run Zig 0.16 language-idiom tests");
+    zig016_idioms_test_step.dependOn(&run_zig016_idioms_test.step);
+
     // ── Layout unit tests ──────────────────────────────────────────
     // Exercises the flex resolver in framework/layout.zig with concrete
     // expected rects. Hook to verify behavior after layout refactors.

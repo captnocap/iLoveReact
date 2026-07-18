@@ -219,8 +219,8 @@ pub fn set(node: *Node, property: Property, new_value: AnimValue, config: Transi
                 .current = current_value,
                 .kind = .timing,
                 .elapsed = 0,
-                .duration = @as(f32, @floatFromInt(config.duration_ms)) / 1000.0,
-                .delay = @as(f32, @floatFromInt(config.delay_ms)) / 1000.0,
+                .duration = @as(f32, config.duration_ms) / 1000.0,
+                .delay = @as(f32, config.delay_ms) / 1000.0,
                 .easing = config.easing,
             };
             // Write back from-value so visual doesn't jump
@@ -256,7 +256,7 @@ pub fn setSpring(node: *Node, property: Property, new_value: AnimValue, config: 
                 .current = current_value,
                 .kind = .spring,
                 .elapsed = 0,
-                .delay = @as(f32, @floatFromInt(config.delay_ms)) / 1000.0,
+                .delay = @as(f32, config.delay_ms) / 1000.0,
                 .velocity = 0,
                 .progress = 0,
                 .stiffness = config.stiffness,
@@ -417,10 +417,10 @@ fn lerpColor(a: Color, b: Color, t: f32) Color {
 }
 
 fn lerpU8(a: u8, b: u8, t: f32) u8 {
-    const fa: f32 = @floatFromInt(a);
-    const fb: f32 = @floatFromInt(b);
+    const fa: f32 = a;
+    const fb: f32 = b;
     const result = m.lerp(fa, fb, t);
-    return @intFromFloat(m.clamp(result, 0, 255));
+    return @trunc(m.clamp(result, 0, 255));
 }
 
 // ============================================================================
@@ -447,8 +447,8 @@ fn retarget(idx: usize, new_target: AnimValue, config: TransitionConfig) void {
     slots[idx].from = slots[idx].current;
     slots[idx].to = new_target;
     slots[idx].elapsed = 0;
-    slots[idx].duration = @as(f32, @floatFromInt(config.duration_ms)) / 1000.0;
-    slots[idx].delay = @as(f32, @floatFromInt(config.delay_ms)) / 1000.0;
+    slots[idx].duration = @as(f32, config.duration_ms) / 1000.0;
+    slots[idx].delay = @as(f32, config.delay_ms) / 1000.0;
     slots[idx].easing = config.easing;
     slots[idx].kind = .timing;
 }
@@ -457,7 +457,7 @@ fn retargetSpring(idx: usize, new_target: AnimValue, config: SpringConfig) void 
     slots[idx].from = slots[idx].current;
     slots[idx].to = new_target;
     slots[idx].elapsed = 0;
-    slots[idx].delay = @as(f32, @floatFromInt(config.delay_ms)) / 1000.0;
+    slots[idx].delay = @as(f32, config.delay_ms) / 1000.0;
     slots[idx].velocity = 0;
     slots[idx].progress = 0;
     slots[idx].stiffness = config.stiffness;

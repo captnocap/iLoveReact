@@ -63,6 +63,30 @@ layers were deleted. Do not recreate them.
   pumps, with bounded queues for frame-friendly drains.
 - Randomness: `io.random(buffer)`; key-generation APIs receive `io`.
 
+## Language idioms added in 0.16
+
+- Unary float builtins (`@sqrt`, `@sin`, `@cos`, `@tan`, `@exp`, `@log`,
+  and their variants) now forward their result type into their operand. Prefer
+  `const root: f32 = @sqrt(@floatFromInt(value));` over wrapping the integer
+  conversion in `@as(f32, ...)` solely to supply that type.
+- `@floor`, `@ceil`, `@round`, and `@trunc` can produce an integer directly
+  from the result type. `@intFromFloat` is deprecated: write
+  `const index: usize = @floor(position);` or
+  `const value: i32 = @trunc(input);`, without nesting the two builtins.
+- Small integer types coerce to a float when every value of the integer type is
+  exactly representable by that float. Use the coercion for cases such as
+  `u16` to `f32` and `u32` to `f64`; retain `@floatFromInt` for wider sources
+  such as `usize` to `f32` or `u64` to `f64`. The coercion still needs a float
+  result context: when an arithmetic expression does not provide one, anchor
+  the operand with `@as(f32, small_integer)` instead of restoring
+  `@floatFromInt`.
+- Construct integer and tuple types with the 0.16 builtins `@Int` and `@Tuple`,
+  and spell the enum-literal type as `@EnumLiteral()`. Do not use the deprecated
+  `std.meta.Int` / `std.meta.Tuple` helpers, the removed `@Type` builtin, or the
+  old `@TypeOf(.enum_literal)` spelling. Dynamic type reification uses
+  `@Pointer`, `@Fn`, `@Struct`, `@Union`, and `@Enum`; arrays, optionals, error
+  unions, and opaque types use their native type syntax.
+
 `std.fs.path` helpers and `std.fs.max_path_bytes` are namespace-only helpers;
 they do not perform I/O and do not need a capability.
 

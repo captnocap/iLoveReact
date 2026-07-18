@@ -463,10 +463,10 @@ fn computeRmsX100(frame: *const [FRAME_SAMPLES]i16) i32 {
         if (a > peak) peak = a;
     }
     if (peak == 0) return 0;
-    const peak_norm: f64 = @as(f64, @floatFromInt(peak)) / 32768.0;
+    const peak_norm = @as(f64, peak) / 32768.0;
     const dbfs: f64 = 20.0 * std.math.log10(peak_norm);
     if (dbfs <= FLOOR_DB) return 0;
     if (dbfs >= 0.0) return 10000;
     const scaled: f64 = ((dbfs - FLOOR_DB) / -FLOOR_DB) * 10000.0;
-    return @intFromFloat(scaled);
+    return @trunc(scaled);
 }

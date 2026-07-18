@@ -266,7 +266,7 @@ fn writeWav(io: std.Io, out_path: []const u8, samples: []const f32) !bool {
         for (0..n) |k| {
             const v = samples[i + k];
             const clamped: f32 = @max(-1.0, @min(1.0, v));
-            scratch[k] = @intFromFloat(clamped * 32767.0);
+            scratch[k] = @trunc(clamped * 32767.0);
         }
         const bytes = std.mem.sliceAsBytes(scratch[0..n]);
         file.writeStreamingAll(io, bytes) catch return false;
@@ -288,5 +288,5 @@ fn peakToDbfsX100(peak: f32) i32 {
     if (dbfs <= FLOOR_DB) return 0;
     if (dbfs >= 0.0) return 10000;
     const scaled: f64 = ((dbfs - FLOOR_DB) / -FLOOR_DB) * 10000.0;
-    return @intFromFloat(scaled);
+    return @trunc(scaled);
 }

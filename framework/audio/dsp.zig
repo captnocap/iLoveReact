@@ -131,8 +131,8 @@ pub fn initModulePorts(m: *Module) void {
         .sequencer => {
             addPort(m, "clock_in", .control, .in_);
             addPort(m, "gate_out", .control, .out);
-            addParam(m, "steps", .int, 1, @floatFromInt(MAX_SEQUENCER_STEPS), 16);
-            addParam(m, "tracks", .int, 1, @floatFromInt(MAX_SEQUENCER_TRACKS), 4);
+            addParam(m, "steps", .int, 1, MAX_SEQUENCER_STEPS, 16);
+            addParam(m, "tracks", .int, 1, MAX_SEQUENCER_TRACKS, 4);
             addParam(m, "bpm", .float, 20, 300, 120);
             addParam(m, "running", .bool_, 0, 1, 1);
         },
@@ -141,7 +141,7 @@ pub fn initModulePorts(m: *Module) void {
             addPort(m, "gate_in", .control, .in_);
             addParam(m, "gain", .float, 0, 2, 1);
             addParam(m, "loop", .bool_, 0, 1, 0);
-            addParam(m, "slot", .int, 1, @floatFromInt(MAX_SAMPLER_SLOTS), 1);
+            addParam(m, "slot", .int, 1, MAX_SAMPLER_SLOTS, 1);
         },
         .custom => {},
         .synth => {
@@ -190,13 +190,13 @@ fn addParam(m: *Module, name: []const u8, param_type: ParamType, min: f64, max: 
 
 fn processOscillator(m: *Module, num_samples: u32) void {
     const out_buf = m.ports[0].buffer; // audio_out
-    const wf: Waveform = @enumFromInt(@as(u8, @intFromFloat(m.params[0].value)));
+    const wf: Waveform = @enumFromInt(@as(u8, @trunc(m.params[0].value)));
     var freq = m.params[1].value; // frequency
     const detune = m.params[2].value;
     const gain = m.params[3].value;
     const fm_amt = m.params[4].value;
     var phase = m.phase;
-    const inv_sr = 1.0 / @as(f64, @floatFromInt(SAMPLE_RATE));
+    const inv_sr = 1.0 / @as(f64, SAMPLE_RATE);
 
     // Detune: cents → multiplier
     const detune_mult = std.math.pow(f64, 2.0, detune / 1200.0);
@@ -234,8 +234,8 @@ fn generateSample(phase: f64, wf: Waveform) f64 {
         .triangle => 4.0 * @abs(phase - @floor(phase + 0.5)) - 1.0,
         .noise => blk: {
             // Simple LCG noise
-            const x = @as(u32, @truncate(@as(u64, @bitCast(@as(i64, @intFromFloat(phase * 2147483647.0))))));
-            break :blk @as(f64, @floatFromInt(@as(i32, @bitCast(x *% 1103515245 +% 12345)))) / 2147483647.0;
+            const x = @as(u32, @truncate(@as(u64, @bitCast(@as(i64, @trunc(phase * 2147483647.0))))));
+            break :blk @as(f64, @as(i32, @bitCast(x *% 1103515245 +% 12345))) / 2147483647.0;
         },
     };
 }
@@ -247,11 +247,11 @@ fn wrapPhase(v: f64) f64 {
 
 fn nextNoise(seed: *u32) f64 {
     seed.* = seed.* *% 1664525 +% 1013904223;
-    return (@as(f64, @floatFromInt(seed.* >> 1)) / 1073741824.0) - 1.0;
+    return (@as(f64, seed.* >> 1) / 1073741824.0) - 1.0;
 }
 
 fn seedUnit(seed: u32) f64 {
-    return @as(f64, @floatFromInt(seed & 0x00ffffff)) / 16777215.0;
+    return @as(f64, seed & 0x00ffffff) / 16777215.0;
 }
 
 fn clamp01(v: f64) f64 {
@@ -297,7 +297,7 @@ fn processFilter(m: *Module, num_samples: u32) void {
     }
 
     // SVF goes unstable as cutoff approaches Nyquist — cap well below it.
-    const sr_f: f64 = @floatFromInt(SAMPLE_RATE);
+    const sr_f: f64 = SAMPLE_RATE;
     cutoff = std.math.clamp(cutoff, 20.0, sr_f * 0.45);
 
     // Simple 2-pole resonant filter (SVF approximation)
@@ -311,7 +311,7 @@ fn processFilter(m: *Module, num_samples: u32) void {
         y1 += f_norm * hp;
         y2 += f_norm * (y1 - y2);
         // mode: 0=lp, 1=hp, 2=bp
-        const mode: u8 = @intFromFloat(m.params[2].value);
+        const mode: u8 = @trunc(m.params[2].value);
         out_buf[i] = @floatCast(switch (mode) {
             0 => y2, // lowpass
             1 => hp, // highpass
@@ -368,7 +368,7 @@ fn processEnvelope(m: *Module, num_samples: u32) void {
     const release = m.params[3].value;
     var stage = m.envelope_stage;
     var level = m.envelope_level;
-    const inv_sr = 1.0 / @as(f64, @floatFromInt(SAMPLE_RATE));
+    const inv_sr = 1.0 / @as(f64, SAMPLE_RATE);
 
     // Gate on/off detection
     if (gate_val > 0.5 and stage == 0) stage = 1; // attack
@@ -410,9 +410,9 @@ fn processLfo(m: *Module, num_samples: u32) void {
     const out_buf = m.ports[0].buffer;
     const rate = m.params[0].value;
     const depth = m.params[1].value;
-    const wf: Waveform = @enumFromInt(@as(u8, @intFromFloat(m.params[2].value)));
+    const wf: Waveform = @enumFromInt(@as(u8, @trunc(m.params[2].value)));
     var phase = m.phase;
-    const inv_sr = 1.0 / @as(f64, @floatFromInt(SAMPLE_RATE));
+    const inv_sr = 1.0 / @as(f64, SAMPLE_RATE);
 
     for (0..num_samples) |i| {
         const sample = generateSample(phase, wf) * depth;
@@ -445,9 +445,9 @@ fn processDelay(m: *Module, num_samples: u32) void {
     }
     const dbuf = m.delay_buffer.?;
 
-    const delay_samples: u32 = @intFromFloat(@min(
-        @as(f64, @floatFromInt(MAX_DELAY_SAMPLES - 1)),
-        delay_time * @as(f64, @floatFromInt(SAMPLE_RATE)),
+    const delay_samples: u32 = @trunc(@min(
+        @as(f64, MAX_DELAY_SAMPLES - 1),
+        delay_time * SAMPLE_RATE,
     ));
     if (delay_samples == 0) {
         @memcpy(out_buf[0..num_samples], in_buf[0..num_samples]);
@@ -467,7 +467,7 @@ fn processDelay(m: *Module, num_samples: u32) void {
 }
 
 fn clockDivisionBeats(raw: f64) f64 {
-    const idx: u8 = @intFromFloat(@max(0.0, @min(5.0, raw)));
+    const idx: u8 = @trunc(@max(0.0, @min(5.0, raw)));
     return switch (idx) {
         0 => 1.0, // 1/4
         1 => 0.5, // 1/8
@@ -479,8 +479,9 @@ fn clockDivisionBeats(raw: f64) f64 {
 }
 
 pub fn clockMidiPulsesPerTick(raw: f64) u32 {
-    const pulses = @max(1.0, @round(clockDivisionBeats(raw) * 24.0));
-    return @intFromFloat(@min(96.0, pulses));
+    const rounded: u32 = @round(clockDivisionBeats(raw) * 24.0);
+    const pulses = @max(1, rounded);
+    return @min(96, pulses);
 }
 
 pub fn queueClockTick(m: *Module) void {
@@ -509,7 +510,7 @@ fn processClock(m: *Module, num_samples: u32) void {
         const division = clockDivisionBeats(m.params[1].value);
         const swing = @max(0.0, @min(1.0, m.params[2].value));
         const ticks_per_second = @max(0.001, (bpm / 60.0) / division);
-        const samples_per_tick = @as(f64, @floatFromInt(SAMPLE_RATE)) / ticks_per_second;
+        const samples_per_tick = @as(f64, SAMPLE_RATE) / ticks_per_second;
 
         const start_sample_pos = m.clock_sample_pos;
         var sample_pos = start_sample_pos;
@@ -526,7 +527,7 @@ fn processClock(m: *Module, num_samples: u32) void {
             }
             sample_pos += 1.0;
         }
-        m.clock_sample_pos = start_sample_pos + @as(f64, @floatFromInt(num_samples));
+        m.clock_sample_pos = start_sample_pos + num_samples;
         if (ticked) m.clock_tick_count = tick_count;
     }
 
@@ -536,8 +537,8 @@ fn processClock(m: *Module, num_samples: u32) void {
 }
 
 fn sequencerFireTick(m: *Module) void {
-    const steps: u32 = @intFromFloat(@max(1.0, @min(@as(f64, @floatFromInt(MAX_SEQUENCER_STEPS)), m.params[0].value)));
-    const tracks: u32 = @intFromFloat(@max(1.0, @min(@as(f64, @floatFromInt(MAX_SEQUENCER_TRACKS)), m.params[1].value)));
+    const steps: u32 = @trunc(@max(1.0, @min(@as(f64, MAX_SEQUENCER_STEPS), m.params[0].value)));
+    const tracks: u32 = @trunc(@max(1.0, @min(@as(f64, MAX_SEQUENCER_TRACKS), m.params[1].value)));
 
     for (0..MAX_SEQUENCER_TRACKS) |track| {
         if (m.sequencer_prev_active[track]) {
@@ -578,7 +579,7 @@ fn processSequencer(m: *Module, num_samples: u32) void {
         const bpm = if (state.g_engine.tempo_count > 0) state.g_engine.current_tempo else m.params[2].value;
         const ticks_per_second = @max(0.001, bpm / 60.0 * 4.0);
         var phase = m.phase;
-        const inc = ticks_per_second / @as(f64, @floatFromInt(SAMPLE_RATE));
+        const inc = ticks_per_second / SAMPLE_RATE;
         for (0..num_samples) |_| {
             phase += inc;
             if (phase >= 1.0) {
@@ -605,7 +606,7 @@ fn samplerSelectedSlot(m: *const Module) u8 {
     if (m.param_count <= 2) return 0;
     const raw = m.params[2].value;
     if (raw != raw) return 0;
-    const one_based: i32 = @intFromFloat(@max(1.0, @min(@as(f64, @floatFromInt(MAX_SAMPLER_SLOTS)), raw)));
+    const one_based: i32 = @trunc(@max(1.0, @min(@as(f64, MAX_SAMPLER_SLOTS), raw)));
     return @intCast(one_based - 1);
 }
 
@@ -623,8 +624,8 @@ fn startSamplerVoice(m: *Module, slot: u8, note: i32, velocity: f64) void {
     }
     const idx = voice_idx orelse 0;
     const sample = api.sampleById(sample_id) orelse return;
-    const pitch = std.math.pow(f64, 2.0, (@as(f64, @floatFromInt(note - SAMPLER_PITCH_NOTE))) / 12.0);
-    const rate = pitch * (@as(f64, @floatFromInt(sample.sample_rate)) / @as(f64, @floatFromInt(SAMPLE_RATE)));
+    const pitch = std.math.pow(f64, 2.0, @as(f64, note - SAMPLER_PITCH_NOTE) / 12.0);
+    const rate = pitch * (@as(f64, sample.sample_rate) / SAMPLE_RATE);
     m.sampler_voice_active[idx] = true;
     m.sampler_voice_slot[idx] = slot;
     m.sampler_voice_note[idx] = note;
@@ -692,7 +693,7 @@ fn processSampler(m: *Module, num_samples: u32) void {
                 }
             }
 
-            const idx: usize = @intFromFloat(@floor(pos));
+            const idx: usize = @floor(pos);
             const next_idx = if (idx + 1 < frame_count) idx + 1 else idx;
             const frac: f32 = @floatCast(pos - @floor(pos));
             const s0 = frames[idx];
@@ -716,7 +717,7 @@ fn processSynth(m: *Module, num_samples: u32) void {
         return;
     }
 
-    const voice: u8 = @intFromFloat(@min(4.0, @max(0.0, m.params[0].value)));
+    const voice: u8 = @trunc(@min(4.0, @max(0.0, m.params[0].value)));
     const tone_param = @min(1.0, @max(0.0, m.params[1].value));
     const decay_param = @max(0.01, m.params[2].value);
     const color_param = @min(1.0, @max(0.0, m.params[3].value));
@@ -737,8 +738,8 @@ fn processSynth(m: *Module, num_samples: u32) void {
     const color = clamp01(color_param + var_bi * 0.22 + (trig_vel - 0.65) * 0.16);
     const drive = clamp01(drive_param + (trig_vel - 0.5) * 0.25 + @abs(var_bi) * 0.12);
     const decay = @max(0.01, decay_param * (0.78 + trig_vel * 0.34 + variant * 0.18));
-    const decay_coeff = std.math.exp(-1.0 / (decay * @as(f64, @floatFromInt(SAMPLE_RATE))));
-    const dt = 1.0 / @as(f64, @floatFromInt(SAMPLE_RATE));
+    const decay_coeff = std.math.exp(-1.0 / (decay * SAMPLE_RATE));
+    const dt = 1.0 / @as(f64, SAMPLE_RATE);
 
     var phase = m.phase;
     var phase2 = m.phase2;
@@ -967,7 +968,7 @@ fn inputHasConnection(module_id: u32, port: u8) bool {
 }
 
 pub fn triggerModuleNote(m: *Module, note: i32, velocity: f64) void {
-    const note_freq = 440.0 * std.math.pow(f64, 2.0, (@as(f64, @floatFromInt(note)) - 69.0) / 12.0);
+    const note_freq = 440.0 * std.math.pow(f64, 2.0, (@as(f64, note) - 69.0) / 12.0);
     switch (m.module_type) {
         .oscillator => {
             if (m.param_count > 1) m.params[1].value = note_freq;
@@ -995,4 +996,3 @@ pub fn releaseModuleNote(m: *Module, note: i32) void {
     if (m.module_type == .sampler) stopSamplerLoopingVoices(m, note);
     m.envelope_stage = 4;
 }
-

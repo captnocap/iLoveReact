@@ -68,14 +68,14 @@ pub const EffectContext = struct {
     /// Coords are f32 since for-loop vars get float-casted for math compatibility.
     pub fn setPixel(self: *EffectContext, x: f32, y: f32, r: f32, g: f32, b: f32, a: f32) void {
         if (x < 0 or y < 0) return;
-        const ux: u32 = @intFromFloat(x);
-        const uy: u32 = @intFromFloat(y);
+        const ux: u32 = @trunc(x);
+        const uy: u32 = @trunc(y);
         if (ux >= self.width or uy >= self.height) return;
         const idx = @as(usize, uy) * @as(usize, self.stride) + @as(usize, ux) * 4;
-        self.buf[idx] = @intFromFloat(std.math.clamp(r, 0, 1) * 255);
-        self.buf[idx + 1] = @intFromFloat(std.math.clamp(g, 0, 1) * 255);
-        self.buf[idx + 2] = @intFromFloat(std.math.clamp(b, 0, 1) * 255);
-        self.buf[idx + 3] = @intFromFloat(std.math.clamp(a, 0, 1) * 255);
+        self.buf[idx] = @trunc(std.math.clamp(r, 0, 1) * 255);
+        self.buf[idx + 1] = @trunc(std.math.clamp(g, 0, 1) * 255);
+        self.buf[idx + 2] = @trunc(std.math.clamp(b, 0, 1) * 255);
+        self.buf[idx + 3] = @trunc(std.math.clamp(a, 0, 1) * 255);
     }
 
     /// Write a pixel with integer RGBA 0..255.
@@ -91,15 +91,15 @@ pub const EffectContext = struct {
     /// Read a pixel at (x, y) → [r, g, b, a] as floats 0..1.
     pub fn getPixel(self: *const EffectContext, x: f32, y: f32) [4]f32 {
         if (x < 0 or y < 0) return .{ 0, 0, 0, 0 };
-        const ux: u32 = @intFromFloat(x);
-        const uy: u32 = @intFromFloat(y);
+        const ux: u32 = @trunc(x);
+        const uy: u32 = @trunc(y);
         if (ux >= self.width or uy >= self.height) return .{ 0, 0, 0, 0 };
         const idx = @as(usize, uy) * @as(usize, self.stride) + @as(usize, ux) * 4;
         return .{
-            @as(f32, @floatFromInt(self.buf[idx])) / 255.0,
-            @as(f32, @floatFromInt(self.buf[idx + 1])) / 255.0,
-            @as(f32, @floatFromInt(self.buf[idx + 2])) / 255.0,
-            @as(f32, @floatFromInt(self.buf[idx + 3])) / 255.0,
+            @as(f32, self.buf[idx]) / 255.0,
+            @as(f32, self.buf[idx + 1]) / 255.0,
+            @as(f32, self.buf[idx + 2]) / 255.0,
+            @as(f32, self.buf[idx + 3]) / 255.0,
         };
     }
 
@@ -109,16 +109,16 @@ pub const EffectContext = struct {
     pub fn getSource(self: *const EffectContext, x: f32, y: f32) [4]f32 {
         const src = self.source orelse return .{ 0, 0, 0, 0 };
         if (x < 0 or y < 0) return .{ 0, 0, 0, 0 };
-        const ux: u32 = @intFromFloat(x);
-        const uy: u32 = @intFromFloat(y);
+        const ux: u32 = @trunc(x);
+        const uy: u32 = @trunc(y);
         if (ux >= self.source_width or uy >= self.source_height) return .{ 0, 0, 0, 0 };
         const src_stride = self.source_width * 4;
         const idx = @as(usize, uy) * @as(usize, src_stride) + @as(usize, ux) * 4;
         return .{
-            @as(f32, @floatFromInt(src[idx])) / 255.0,
-            @as(f32, @floatFromInt(src[idx + 1])) / 255.0,
-            @as(f32, @floatFromInt(src[idx + 2])) / 255.0,
-            @as(f32, @floatFromInt(src[idx + 3])) / 255.0,
+            @as(f32, src[idx]) / 255.0,
+            @as(f32, src[idx + 1]) / 255.0,
+            @as(f32, src[idx + 2]) / 255.0,
+            @as(f32, src[idx + 3]) / 255.0,
         };
     }
 
@@ -127,43 +127,43 @@ pub const EffectContext = struct {
     pub fn getSourceAlpha(self: *const EffectContext, x: f32, y: f32) f32 {
         const src = self.source orelse return 0;
         if (x < 0 or y < 0) return 0;
-        const ux: u32 = @intFromFloat(x);
-        const uy: u32 = @intFromFloat(y);
+        const ux: u32 = @trunc(x);
+        const uy: u32 = @trunc(y);
         if (ux >= self.source_width or uy >= self.source_height) return 0;
         const src_stride = self.source_width * 4;
         const idx = @as(usize, uy) * @as(usize, src_stride) + @as(usize, ux) * 4;
-        return @as(f32, @floatFromInt(src[idx + 3])) / 255.0;
+        return @as(f32, src[idx + 3]) / 255.0;
     }
 
     /// Read the RGB of a source pixel (mask mode only). Returns [r, g, b] as 0..1.
     pub fn getSourceR(self: *const EffectContext, x: f32, y: f32) f32 {
         const src = self.source orelse return 0;
         if (x < 0 or y < 0) return 0;
-        const ux: u32 = @intFromFloat(x);
-        const uy: u32 = @intFromFloat(y);
+        const ux: u32 = @trunc(x);
+        const uy: u32 = @trunc(y);
         if (ux >= self.source_width or uy >= self.source_height) return 0;
         const idx = @as(usize, uy) * @as(usize, self.source_width * 4) + @as(usize, ux) * 4;
-        return @as(f32, @floatFromInt(src[idx])) / 255.0;
+        return @as(f32, src[idx]) / 255.0;
     }
 
     pub fn getSourceG(self: *const EffectContext, x: f32, y: f32) f32 {
         const src = self.source orelse return 0;
         if (x < 0 or y < 0) return 0;
-        const ux: u32 = @intFromFloat(x);
-        const uy: u32 = @intFromFloat(y);
+        const ux: u32 = @trunc(x);
+        const uy: u32 = @trunc(y);
         if (ux >= self.source_width or uy >= self.source_height) return 0;
         const idx = @as(usize, uy) * @as(usize, self.source_width * 4) + @as(usize, ux) * 4;
-        return @as(f32, @floatFromInt(src[idx + 1])) / 255.0;
+        return @as(f32, src[idx + 1]) / 255.0;
     }
 
     pub fn getSourceB(self: *const EffectContext, x: f32, y: f32) f32 {
         const src = self.source orelse return 0;
         if (x < 0 or y < 0) return 0;
-        const ux: u32 = @intFromFloat(x);
-        const uy: u32 = @intFromFloat(y);
+        const ux: u32 = @trunc(x);
+        const uy: u32 = @trunc(y);
         if (ux >= self.source_width or uy >= self.source_height) return 0;
         const idx = @as(usize, uy) * @as(usize, self.source_width * 4) + @as(usize, ux) * 4;
-        return @as(f32, @floatFromInt(src[idx + 2])) / 255.0;
+        return @as(f32, src[idx + 2]) / 255.0;
     }
 
     /// Clear entire buffer to transparent black.
@@ -173,10 +173,10 @@ pub const EffectContext = struct {
 
     /// Clear entire buffer to a specific RGBA color (floats 0..1).
     pub fn clearColor(self: *EffectContext, r: f32, g: f32, b: f32, a: f32) void {
-        const rb: u8 = @intFromFloat(std.math.clamp(r, 0, 1) * 255);
-        const gb: u8 = @intFromFloat(std.math.clamp(g, 0, 1) * 255);
-        const bb: u8 = @intFromFloat(std.math.clamp(b, 0, 1) * 255);
-        const ab: u8 = @intFromFloat(std.math.clamp(a, 0, 1) * 255);
+        const rb: u8 = @trunc(std.math.clamp(r, 0, 1) * 255);
+        const gb: u8 = @trunc(std.math.clamp(g, 0, 1) * 255);
+        const bb: u8 = @trunc(std.math.clamp(b, 0, 1) * 255);
+        const ab: u8 = @trunc(std.math.clamp(a, 0, 1) * 255);
         const total = @as(usize, self.height) * @as(usize, self.stride);
         var i: usize = 0;
         while (i < total) : (i += 4) {
@@ -189,10 +189,10 @@ pub const EffectContext = struct {
 
     /// Fill a rectangle with RGBA color (floats 0..1).
     pub fn fillRect(self: *EffectContext, rx: u32, ry: u32, rw: u32, rh: u32, r: f32, g: f32, b: f32, a: f32) void {
-        const rb: u8 = @intFromFloat(std.math.clamp(r, 0, 1) * 255);
-        const gb: u8 = @intFromFloat(std.math.clamp(g, 0, 1) * 255);
-        const bb: u8 = @intFromFloat(std.math.clamp(b, 0, 1) * 255);
-        const ab: u8 = @intFromFloat(std.math.clamp(a, 0, 1) * 255);
+        const rb: u8 = @trunc(std.math.clamp(r, 0, 1) * 255);
+        const gb: u8 = @trunc(std.math.clamp(g, 0, 1) * 255);
+        const bb: u8 = @trunc(std.math.clamp(b, 0, 1) * 255);
+        const ab: u8 = @trunc(std.math.clamp(a, 0, 1) * 255);
         const x_end = @min(rx + rw, self.width);
         const y_end = @min(ry + rh, self.height);
         var py = ry;
@@ -214,14 +214,14 @@ pub const EffectContext = struct {
         const idx = @as(usize, y) * @as(usize, self.stride) + @as(usize, x) * 4;
         const sa = std.math.clamp(a, 0, 1);
         const inv_a = 1.0 - sa;
-        const dr = @as(f32, @floatFromInt(self.buf[idx])) / 255.0;
-        const dg = @as(f32, @floatFromInt(self.buf[idx + 1])) / 255.0;
-        const db = @as(f32, @floatFromInt(self.buf[idx + 2])) / 255.0;
-        const da = @as(f32, @floatFromInt(self.buf[idx + 3])) / 255.0;
-        self.buf[idx] = @intFromFloat(std.math.clamp(r * sa + dr * inv_a, 0, 1) * 255);
-        self.buf[idx + 1] = @intFromFloat(std.math.clamp(g * sa + dg * inv_a, 0, 1) * 255);
-        self.buf[idx + 2] = @intFromFloat(std.math.clamp(b * sa + db * inv_a, 0, 1) * 255);
-        self.buf[idx + 3] = @intFromFloat(std.math.clamp(sa + da * inv_a, 0, 1) * 255);
+        const dr = @as(f32, self.buf[idx]) / 255.0;
+        const dg = @as(f32, self.buf[idx + 1]) / 255.0;
+        const db = @as(f32, self.buf[idx + 2]) / 255.0;
+        const da = @as(f32, self.buf[idx + 3]) / 255.0;
+        self.buf[idx] = @trunc(std.math.clamp(r * sa + dr * inv_a, 0, 1) * 255);
+        self.buf[idx + 1] = @trunc(std.math.clamp(g * sa + dg * inv_a, 0, 1) * 255);
+        self.buf[idx + 2] = @trunc(std.math.clamp(b * sa + db * inv_a, 0, 1) * 255);
+        self.buf[idx + 3] = @trunc(std.math.clamp(sa + da * inv_a, 0, 1) * 255);
     }
 
     /// Fade entire buffer — multiply all alpha values by `factor` (0..1).
@@ -230,8 +230,8 @@ pub const EffectContext = struct {
         const total = @as(usize, self.height) * @as(usize, self.stride);
         var i: usize = 3; // start at first alpha byte
         while (i < total) : (i += 4) {
-            const old_a: f32 = @floatFromInt(self.buf[i]);
-            self.buf[i] = @intFromFloat(old_a * std.math.clamp(factor, 0, 1));
+            const old_a: f32 = self.buf[i];
+            self.buf[i] = @trunc(old_a * std.math.clamp(factor, 0, 1));
         }
     }
 
@@ -302,7 +302,7 @@ pub const EffectContext = struct {
         while (py <= cy + ri) : (py += 1) {
             if (py < 0 or py >= @as(i32, @intCast(self.height))) continue;
             const dy = py - cy;
-            const half_w: i32 = @intFromFloat(@sqrt(@as(f32, @floatFromInt(ri * ri - dy * dy))));
+            const half_w: i32 = @trunc(@sqrt(@floatFromInt(ri * ri - dy * dy)));
             var px = @max(0, cx - half_w);
             const x_end = @min(@as(i32, @intCast(self.width)), cx + half_w + 1);
             while (px < x_end) : (px += 1) {
@@ -325,7 +325,7 @@ pub const EffectContext = struct {
     pub fn hsvToRgb(h_in: f32, s: f32, v: f32) [3]f32 {
         if (s <= 0) return .{ v, v, v };
         const h = @mod(h_in, 1.0) * 6.0;
-        const sector = @as(u32, @intFromFloat(@floor(h)));
+        const sector = @as(u32, @floor(h));
         const f = h - @as(f32, @floatFromInt(sector));
         const p = v * (1.0 - s);
         const q = v * (1.0 - s * f);

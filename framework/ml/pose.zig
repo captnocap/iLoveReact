@@ -243,17 +243,17 @@ pub fn estimateRgba(
         @as(f32, @floatFromInt(INPUT_SIZE)) / @as(f32, @floatFromInt(width)),
         @as(f32, @floatFromInt(INPUT_SIZE)) / @as(f32, @floatFromInt(height)),
     );
-    const fit_w: usize = @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(width)) * scale)));
-    const fit_h: usize = @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(height)) * scale)));
+    const fit_w: usize = @max(1, @as(usize, @trunc(@as(f32, @floatFromInt(width)) * scale)));
+    const fit_h: usize = @max(1, @as(usize, @trunc(@as(f32, @floatFromInt(height)) * scale)));
     var tensor = page_alloc.alloc(i32, INPUT_SIZE * INPUT_SIZE * 3) catch return null;
     defer page_alloc.free(tensor);
     @memset(tensor, 0);
     var ty: usize = 0;
     while (ty < fit_h) : (ty += 1) {
-        const sy: usize = @min(@as(usize, height - 1), @as(usize, @intFromFloat(@as(f32, @floatFromInt(ty)) / scale)));
+        const sy: usize = @min(@as(usize, height - 1), @as(usize, @trunc(@as(f32, @floatFromInt(ty)) / scale)));
         var tx: usize = 0;
         while (tx < fit_w) : (tx += 1) {
-            const sx: usize = @min(@as(usize, width - 1), @as(usize, @intFromFloat(@as(f32, @floatFromInt(tx)) / scale)));
+            const sx: usize = @min(@as(usize, width - 1), @as(usize, @trunc(@as(f32, @floatFromInt(tx)) / scale)));
             const src_at = (sy * @as(usize, width) + sx) * 4;
             const dst_at = (ty * INPUT_SIZE + tx) * 3;
             tensor[dst_at + 0] = rgba[src_at + 0];

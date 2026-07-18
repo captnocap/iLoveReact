@@ -188,11 +188,11 @@ pub fn openNeighbors(cx: i32, cz: i32, out: *[4][2]i32) usize {
 // (the shared-border duplication that keeps strokes seam-free, PaintCanvas:861).
 
 pub fn globalTile(x: f32) i32 {
-    return @intFromFloat(@floor(x + CHUNK_METERS / 2));
+    return @floor(x + CHUNK_METERS / 2);
 }
 
 pub fn globalSample(x: f32) i32 {
-    return @intFromFloat(@round((x + CHUNK_METERS / 2) / DOT_M));
+    return @round((x + CHUNK_METERS / 2) / DOT_M);
 }
 
 pub fn chunkOfGlobalTile(gt: i32) i32 {

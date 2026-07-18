@@ -249,8 +249,8 @@ fn buildImpl(
     while (attempts < 16) : (attempts += 1) {
         for (raws.items) |*r| {
             // ≥1 texel per island axis — a sliver face still gets somewhere to paint.
-            r.w = @max(1, @as(u32, @intFromFloat(@ceil(r.w_m * density))));
-            r.h = @max(1, @as(u32, @intFromFloat(@ceil(r.h_m * density))));
+            r.w = @max(1, @as(u32, @ceil(r.w_m * density)));
+            r.h = @max(1, @as(u32, @ceil(r.h_m * density)));
         }
         // Deterministic order: tallest first (reference sort), first_tri tie-break.
         const order = alloc.alloc(u32, n_islands) catch return null;
@@ -272,7 +272,9 @@ fn buildImpl(
             total_area += @as(u64, r.w + PAD_TEXELS) * @as(u64, r.h + PAD_TEXELS);
             widest = @max(widest, r.w + PAD_TEXELS);
         }
-        const row_width: u32 = @max(widest, @as(u32, @intFromFloat(@ceil(@sqrt(@as(f64, @floatFromInt(total_area)))))));
+        const total_area_f: f64 = @floatFromInt(total_area);
+        const square_side: f64 = @sqrt(total_area_f);
+        const row_width: u32 = @max(widest, @as(u32, @ceil(square_side)));
         var cx: u32 = 0;
         var cy: u32 = 0;
         var row_h: u32 = 0;

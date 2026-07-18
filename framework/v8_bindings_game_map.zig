@@ -115,7 +115,7 @@ fn argChunkCoords(info: v8.FunctionCallbackInfo) ?[2]i32 {
     const cx = argToF64(info, 0) orelse return null;
     const cz = argToF64(info, 1) orelse return null;
     if (!std.math.isFinite(cx) or !std.math.isFinite(cz)) return null;
-    return .{ @intFromFloat(cx), @intFromFloat(cz) };
+    return .{ @trunc(cx), @trunc(cz) };
 }
 
 fn argBool(info: v8.FunctionCallbackInfo, idx: u32, default: bool) bool {
@@ -204,7 +204,7 @@ fn enumFromF32(comptime E: type, raw: f32) E {
     const count = @typeInfo(E).@"enum".fields.len;
     var v: usize = 0;
     if (raw > 0) {
-        const cast: usize = @intFromFloat(raw);
+        const cast: usize = @trunc(raw);
         v = if (cast >= count) count - 1 else cast;
     }
     return @enumFromInt(v);
@@ -230,11 +230,11 @@ fn hostSetTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         .ramp_long = p[10],
         .ramp_angle_deg = p[11],
         .smooth_strength = p[12],
-        .kind_idx = @intFromFloat(@max(-1, p[13])),
-        .flora_kind_idx = @intFromFloat(@max(-1, p[14])),
-        .flora_lane = @intFromFloat(@max(0, @min(2, p[15]))),
-        .zone_idx = @intFromFloat(@max(-1, p[16])),
-        .bind_idx = if (p.len >= TOOL_FLOATS) @intFromFloat(@max(-1, p[17])) else chunks.EMPTY_CELL,
+        .kind_idx = @trunc(@max(-1, p[13])),
+        .flora_kind_idx = @trunc(@max(-1, p[14])),
+        .flora_lane = @trunc(@max(0, @min(2, p[15]))),
+        .zone_idx = @trunc(@max(-1, p[16])),
+        .bind_idx = if (p.len >= TOOL_FLOATS) @trunc(@max(-1, p[17])) else chunks.EMPTY_CELL,
     });
 }
 
@@ -308,7 +308,7 @@ fn hostDropZone(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const io = v8_runtime.hostContext(info.getIsolate()).io;
     const idx = argToF64(info, 0) orelse return;
     if (idx < 0 or !std.math.isFinite(idx)) return;
-    const zone_idx: i16 = @intFromFloat(@min(idx, @as(f64, @floatFromInt(std.math.maxInt(i16)))));
+    const zone_idx: i16 = @trunc(@min(idx, @as(f64, std.math.maxInt(i16))));
     const record = argBool(info, 1, true);
     if (record) engine.beginMapHistory(.zone_drop);
     chunks.dropZoneIndex(zone_idx);
@@ -333,8 +333,8 @@ fn hostSetFloraSpecs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 fn hostRoadSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     engine.setRoadProfile(.{
-        .lanesF = @intFromFloat(@max(0, argToF64(info, 0) orelse 1)),
-        .lanesB = @intFromFloat(@max(0, argToF64(info, 1) orelse 1)),
+        .lanesF = @trunc(@max(0.0, argToF64(info, 0) orelse 1.0)),
+        .lanesB = @trunc(@max(0.0, argToF64(info, 1) orelse 1.0)),
         .sidewalks = (argToF64(info, 2) orelse 1) != 0,
     });
 }
@@ -345,13 +345,13 @@ fn hostRoadSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 fn hostPathSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const raw_kind = argToF64(info, 0) orelse 0;
-    const kind_index: u8 = @intFromFloat(std.math.clamp(raw_kind, 0, 2));
+    const kind_index: u8 = @trunc(std.math.clamp(raw_kind, 0, 2));
     const kind: engine.transport.Kind = @enumFromInt(kind_index);
-    const tracks: i32 = @intFromFloat(@max(1, argToF64(info, 4) orelse 1));
+    const tracks: i32 = @trunc(@max(1.0, argToF64(info, 4) orelse 1.0));
     const profile: engine.transport.Profile = switch (kind) {
         .road => .{ .road = .{
-            .lanesF = @intFromFloat(@max(0, argToF64(info, 1) orelse 1)),
-            .lanesB = @intFromFloat(@max(0, argToF64(info, 2) orelse 1)),
+            .lanesF = @trunc(@max(0.0, argToF64(info, 1) orelse 1.0)),
+            .lanesB = @trunc(@max(0.0, argToF64(info, 2) orelse 1.0)),
             .sidewalks = (argToF64(info, 3) orelse 1) != 0,
         } },
         .light_rail => .{ .light_rail = .{ .tracks = tracks } },
@@ -365,7 +365,7 @@ fn hostPathSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 fn hostPathSetTool(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const raw = argToF64(info, 0) orelse 0;
-    const index: u8 = @intFromFloat(std.math.clamp(raw, 0, 1));
+    const index: u8 = @trunc(std.math.clamp(raw, 0, 1));
     engine.setPathAuthoringTool(@enumFromInt(index));
 }
 
@@ -374,7 +374,7 @@ fn hostPathSetLevel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const raw = argToF64(info, 0) orelse 0;
     if (!std.math.isFinite(raw)) return;
-    engine.setPathLevel(@intFromFloat(raw));
+    engine.setPathLevel(@trunc(raw));
 }
 
 // __map_road_set_kinds(f32[8]) — RoadCellKind → content tile index, in enum
@@ -385,7 +385,7 @@ fn hostRoadSetKinds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     const vals = argF32Slice(info, 0);
     if (vals.len < engine.roads.ROAD_CELL_KIND_COUNT) return;
     var indices: [engine.roads.ROAD_CELL_KIND_COUNT]i16 = undefined;
-    for (&indices, 0..) |*slot, i| slot.* = @intFromFloat(@max(-1, vals[i]));
+    for (&indices, 0..) |*slot, i| slot.* = @trunc(@max(-1, vals[i]));
     engine.roads.setKindIndices(indices);
 }
 
@@ -393,7 +393,7 @@ fn hostRoadSetKinds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 fn hostRoadCommit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const io = v8_runtime.hostContext(info.getIsolate()).io;
-    setReturnF64(info, @floatFromInt(engine.roadCommit(io) orelse 0));
+    setReturnF64(info, engine.roadCommit(io) orelse 0);
 }
 
 fn hostPathCommit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -423,7 +423,7 @@ fn hostRoadDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnF64(info, 0);
         return;
     }
-    setReturnF64(info, if (engine.roadDelete(io, @intFromFloat(id))) 1 else 0);
+    setReturnF64(info, if (engine.roadDelete(io, @trunc(id))) 1 else 0);
 }
 
 fn hostPathDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -438,7 +438,7 @@ fn hostPathControlDelete(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         setReturnF64(info, 0);
         return;
     }
-    setReturnF64(info, if (engine.pathControlDelete(io, @intFromFloat(id))) 1 else 0);
+    setReturnF64(info, if (engine.pathControlDelete(io, @trunc(id))) 1 else 0);
 }
 
 // __map_road_stats() -> [strokeCount, draftPoints, planTruncated]
@@ -466,9 +466,9 @@ fn hostPathStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     path_stats_out[2] = @floatFromInt(engine.transport.railCount());
     path_stats_out[3] = @floatFromInt(engine.transport.draftPointCount());
     path_stats_out[4] = if (engine.road_plan_truncated or engine.road_ribbon_truncated) 1 else 0;
-    path_stats_out[5] = if (engine.transport.draftKind()) |kind| @floatFromInt(@intFromEnum(kind)) else -1;
+    path_stats_out[5] = if (engine.transport.draftKind()) |kind| @intFromEnum(kind) else -1;
     path_stats_out[6] = if (validation.valid) 1 else 0;
-    path_stats_out[7] = @floatFromInt(@intFromEnum(validation.reason));
+    path_stats_out[7] = @intFromEnum(validation.reason);
     path_stats_out[8] = if (std.math.isFinite(validation.min_curve_m)) validation.min_curve_m else -1;
     path_stats_out[9] = @floatFromInt(engine.transport.lastPathId());
     path_stats_out[10] = engine.transport.draftCurveRadius();
@@ -484,7 +484,7 @@ fn hostPathStats(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         path_stats_out[15] = -1;
         path_stats_out[16] = 0;
     }
-    path_stats_out[17] = @floatFromInt(@intFromEnum(engine.pathAuthoringTool()));
+    path_stats_out[17] = @intFromEnum(engine.pathAuthoringTool());
     path_stats_out[18] = @floatFromInt(engine.pathLevel());
     setReturnF32Buffer(info, path_stats_out[0..]);
 }
@@ -506,7 +506,7 @@ fn hostMapHistory(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn setMapHistoryResult(info: v8.FunctionCallbackInfo, result: engine.MapHistoryResult) void {
     map_history_result_out[0] = if (result.ok) 1 else 0;
-    map_history_result_out[1] = @floatFromInt(@intFromEnum(result.kind));
+    map_history_result_out[1] = @intFromEnum(result.kind);
     map_history_result_out[2] = @floatFromInt(result.stats.undo);
     map_history_result_out[3] = @floatFromInt(result.stats.redo);
     map_history_result_out[4] = @floatFromInt(result.stats.dropped);
@@ -559,7 +559,7 @@ var map_event_buf: [engine.AUTHORING_EVENT_CAP]engine.AuthoringEvent = undefined
 var map_event_out: [1 + engine.AUTHORING_EVENT_CAP * MAP_EVENT_FLOATS]f32 = undefined;
 
 fn eventKind(e: engine.AuthoringEvent) f32 {
-    return @floatFromInt(@intFromEnum(e.kind));
+    return @intFromEnum(e.kind);
 }
 
 fn hostEventDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -569,11 +569,11 @@ fn hostEventDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     for (map_event_buf[0..n], 0..) |e, i| {
         const base = 1 + i * MAP_EVENT_FLOATS;
         map_event_out[base + 0] = eventKind(e);
-        map_event_out[base + 1] = @floatFromInt(@intFromEnum(e.tool.channel));
-        map_event_out[base + 2] = @floatFromInt(@intFromEnum(e.tool.mode));
-        map_event_out[base + 3] = @floatFromInt(@intFromEnum(e.tool.terrain_tool));
-        map_event_out[base + 4] = @floatFromInt(@intFromEnum(e.tool.shape));
-        map_event_out[base + 5] = @floatFromInt(@intFromEnum(e.tool.profile));
+        map_event_out[base + 1] = @intFromEnum(e.tool.channel);
+        map_event_out[base + 2] = @intFromEnum(e.tool.mode);
+        map_event_out[base + 3] = @intFromEnum(e.tool.terrain_tool);
+        map_event_out[base + 4] = @intFromEnum(e.tool.shape);
+        map_event_out[base + 5] = @intFromEnum(e.tool.profile);
         map_event_out[base + 6] = e.tool.radius_m;
         map_event_out[base + 7] = e.tool.center_z;
         map_event_out[base + 8] = e.tool.ramp_min;
@@ -582,11 +582,11 @@ fn hostEventDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         map_event_out[base + 11] = e.tool.ramp_long;
         map_event_out[base + 12] = e.tool.ramp_angle_deg;
         map_event_out[base + 13] = e.tool.smooth_strength;
-        map_event_out[base + 14] = @floatFromInt(e.tool.kind_idx);
-        map_event_out[base + 15] = @floatFromInt(e.tool.bind_idx);
-        map_event_out[base + 16] = @floatFromInt(e.tool.flora_kind_idx);
-        map_event_out[base + 17] = @floatFromInt(e.tool.flora_lane);
-        map_event_out[base + 18] = @floatFromInt(e.tool.zone_idx);
+        map_event_out[base + 14] = e.tool.kind_idx;
+        map_event_out[base + 15] = e.tool.bind_idx;
+        map_event_out[base + 16] = e.tool.flora_kind_idx;
+        map_event_out[base + 17] = e.tool.flora_lane;
+        map_event_out[base + 18] = e.tool.zone_idx;
         map_event_out[base + 19] = e.start_x;
         map_event_out[base + 20] = e.start_z;
         map_event_out[base + 21] = e.end_x;
@@ -756,7 +756,7 @@ fn hostReadCells(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     const channel = argToF64(info, 2) orelse 0;
-    const src: []const i16 = switch (@as(u8, if (channel > 0 and channel < 6) @intFromFloat(channel) else 0)) {
+    const src: []const i16 = switch (@as(u8, if (channel > 0 and channel < 6) @trunc(channel) else 0)) {
         1 => chunk.zones[0..],
         2 => chunk.flora[0][0..],
         3 => chunk.flora[1][0..],
@@ -764,7 +764,7 @@ fn hostReadCells(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         5 => chunk.materials[0..],
         else => chunk.tiles[0..],
     };
-    for (src, 0..) |v, i| cell_scratch[i] = @floatFromInt(v);
+    for (src, 0..) |v, i| cell_scratch[i] = v;
     setReturnF32Buffer(info, cell_scratch[0..]);
 }
 

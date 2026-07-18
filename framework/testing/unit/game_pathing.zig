@@ -94,7 +94,7 @@ const Route = struct { count: usize, xs: [64]f32, zs: [64]f32, generation: f32 }
 
 fn findRoute(profile: usize, sx: f32, sz: f32, gx: f32, gz: f32) Route {
     const buf = pathing.find(profile, sx, sz, gx, gz).?;
-    var r = Route{ .count = @intFromFloat(buf[1]), .xs = undefined, .zs = undefined, .generation = buf[0] };
+    var r = Route{ .count = @trunc(buf[1]), .xs = undefined, .zs = undefined, .generation = buf[0] };
     std.debug.assert(r.count <= 64);
     for (0..r.count) |i| {
         r.xs[i] = buf[2 + i * 2];

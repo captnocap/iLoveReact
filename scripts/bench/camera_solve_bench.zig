@@ -78,7 +78,7 @@ fn cinematic(facing: f64, t: f64) Solved {
     const fwd = V3{ @sin(f), 0, @cos(f) };
     const right = V3{ @cos(f), 0, -@sin(f) };
     const dwell: f64 = 2.6;
-    const n: i64 = @intFromFloat(@floor(t / dwell));
+    const n: i64 = @floor(t / dwell);
     const idx = pickIndex(n, SHOTS.len, 7);
     const s = SHOTS[idx];
     const a = s[0];

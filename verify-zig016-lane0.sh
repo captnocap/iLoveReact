@@ -31,4 +31,28 @@ if [ -n "$missing" ]; then
   exit 1
 fi
 echo "PASS every baseline build step remains available"
+
+# Keep first-party Zig on the 0.16 language surface. Third-party, archived,
+# read-only, and generated trees are intentionally outside this audit.
+idiom_hits=$(rg -n \
+  -e '@intFromFloat[[:space:]]*\(' \
+  -e 'std\.meta\.(Int|Tuple)[[:space:]]*\(' \
+  -e '@Type[[:space:]]*\(' \
+  -e '@TypeOf[[:space:]]*\([[:space:]]*\.[[:alpha:]_][[:alnum:]_]*[[:space:]]*\)' \
+  --glob '*.zig' \
+  --glob '!archive/**' \
+  --glob '!love2d/**' \
+  --glob '!tsz/**' \
+  --glob '!deps/**' \
+  --glob '!zig-pkg/**' \
+  --glob '!.zig-cache/**' \
+  --glob '!zig-cache/**' \
+  --glob '!zig-out/**' \
+  . || true)
+if [ -n "$idiom_hits" ]; then
+  echo "FAIL removed/deprecated Zig language forms remain:"
+  echo "$idiom_hits" | head -20
+  exit 1
+fi
+echo "PASS active first-party Zig uses 0.16 language forms"
 exit 0

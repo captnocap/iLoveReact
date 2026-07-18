@@ -23,7 +23,7 @@ pub fn init() MarketState {
 
 pub fn tickMarket(m: *MarketState, rng: *Rng) void {
     m.trend_age_ticks += 1;
-    const flip_chance: f64 = 0.0008 + @as(f64, @floatFromInt(m.trend_age_ticks)) * 0.000002;
+    const flip_chance = 0.0008 + @as(f64, m.trend_age_ticks) * 0.000002;
     if (rng.float() < flip_chance) {
         const r = rng.float();
         m.btc_trend = if (r < 0.4) .bull else if (r < 0.75) .crab else .bear;

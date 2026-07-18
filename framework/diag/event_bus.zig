@@ -639,7 +639,7 @@ pub fn emitFromLog(level: std.log.Level, scope: []const u8, msg: []const u8) u64
 
 pub fn fromStdLog(
     comptime level: std.log.Level,
-    comptime scope: @TypeOf(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {

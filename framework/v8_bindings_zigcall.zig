@@ -83,8 +83,8 @@ fn argFromV8(
         .int => |i| blk: {
             const f = try val.toF64(ctx);
             break :blk switch (i.signedness) {
-                .signed => @intFromFloat(f),
-                .unsigned => @intFromFloat(@max(f, 0)),
+                .signed => @trunc(f),
+                .unsigned => @trunc(@max(f, 0)),
             };
         },
         .float => @floatCast(try val.toF64(ctx)),
@@ -108,7 +108,7 @@ fn argFromV8(
             const arr_obj = val.castTo(v8.Object);
             const len_key = v8.String.initUtf8(iso, "length");
             const len_v = try arr_obj.getValue(ctx, len_key);
-            const len_n: usize = @intFromFloat(try len_v.toF64(ctx));
+            const len_n: usize = @trunc(try len_v.toF64(ctx));
             const buf = try allocator.alloc(p.child, len_n);
             errdefer allocator.free(buf);
             var i: u32 = 0;

@@ -207,13 +207,13 @@ fn sampleTextEffect(screen_x: f32, screen_y: f32) ?[3]f32 {
     var vy = @mod(screen_y, hf);
     if (ux < 0) ux += wf;
     if (vy < 0) vy += hf;
-    const ui: u32 = @min(@as(u32, @intFromFloat(ux)), w - 1);
-    const vi: u32 = @min(@as(u32, @intFromFloat(vy)), h - 1);
+    const ui: u32 = @min(@as(u32, @trunc(ux)), w - 1);
+    const vi: u32 = @min(@as(u32, @trunc(vy)), h - 1);
     const idx = (vi * w + ui) * 4;
     return .{
-        @as(f32, @floatFromInt(pixels[idx])) / 255.0,
-        @as(f32, @floatFromInt(pixels[idx + 1])) / 255.0,
-        @as(f32, @floatFromInt(pixels[idx + 2])) / 255.0,
+        @as(f32, pixels[idx]) / 255.0,
+        @as(f32, pixels[idx + 1]) / 255.0,
+        @as(f32, pixels[idx + 2]) / 255.0,
     };
 }
 
@@ -508,9 +508,9 @@ pub fn drawTextLine(text: []const u8, x: f32, y: f32, size_px: u16, cr: f32, cg:
 
     // When canvas transform OR a node CSS transform with scale is active,
     // rasterize the atlas at the effective size for crisp glyphs.
-    const effective_size = @as(f32, @floatFromInt(size_px)) * s * matrix_scale;
+    const effective_size = size_px * s * matrix_scale;
     const render_size: u16 = if (has_transform or node_active)
-        @intFromFloat(@max(4, @min(200, @round(effective_size))))
+        @trunc(@max(4, @min(200, @round(effective_size))))
     else
         size_px;
     recordTextTrace(text, size_px, render_size);
@@ -548,7 +548,7 @@ pub fn drawTextLine(text: []const u8, x: f32, y: f32, size_px: u16, cr: f32, cg:
         const sentinel_len = inlineGlyphSentinelLen(text, i);
         if (sentinel_len > 0) {
             if (g_inline_slot_count < MAX_RECORDED_SLOTS) {
-                const slot_size: f32 = @floatFromInt(size_px);
+                const slot_size: f32 = size_px;
                 g_inline_slots[g_inline_slot_count] = .{
                     .x = pen_x,
                     .y = start_y,
@@ -557,7 +557,7 @@ pub fn drawTextLine(text: []const u8, x: f32, y: f32, size_px: u16, cr: f32, cg:
                 };
                 g_inline_slot_count += 1;
             }
-            pen_x += @floatFromInt(size_px);
+            pen_x += size_px;
             pen_x += g_letter_spacing;
             i += sentinel_len;
             continue;
@@ -605,7 +605,7 @@ pub fn drawTextLine(text: []const u8, x: f32, y: f32, size_px: u16, cr: f32, cg:
             // missing character leaves a roughly correct-width gap instead of
             // silently overlapping the next glyph. Matches getCharAdvance's
             // fallback so measurement and paint agree.
-            pen_x += @as(f32, @floatFromInt(size_px)) * 0.5 * inv_ms;
+            pen_x += @as(f32, size_px) * 0.5 * inv_ms;
             pen_x += g_letter_spacing;
         }
         i += ch.len;
@@ -621,7 +621,7 @@ pub fn measureTextLineWidth(text: []const u8, size_px: u16) f32 {
     while (i < text.len) {
         const sentinel_len = inlineGlyphSentinelLen(text, i);
         if (sentinel_len > 0) {
-            width += @floatFromInt(size_px);
+            width += size_px;
             i += sentinel_len;
             continue;
         }
@@ -634,7 +634,7 @@ pub fn measureTextLineWidth(text: []const u8, size_px: u16) f32 {
         if (cacheGlyph(ch.codepoint, size_px)) |glyph| {
             width += glyph.advance;
         } else {
-            width += @as(f32, @floatFromInt(size_px)) * 0.5;
+            width += @as(f32, size_px) * 0.5;
         }
         i += ch.len;
     }
@@ -645,15 +645,15 @@ pub fn drawColorTextRow(spans: []const node_layout.ColorTextSpan, x: f32, y: f32
     var pen_x = x;
     for (spans) |span| {
         const color = span.color;
-        const alpha = (@as(f32, @floatFromInt(color.a)) / 255.0) * opacity;
+        const alpha = (@as(f32, color.a) / 255.0) * opacity;
         drawTextLine(
             span.text,
             pen_x,
             y,
             size_px,
-            @as(f32, @floatFromInt(color.r)) / 255.0,
-            @as(f32, @floatFromInt(color.g)) / 255.0,
-            @as(f32, @floatFromInt(color.b)) / 255.0,
+            @as(f32, color.r) / 255.0,
+            @as(f32, color.g) / 255.0,
+            @as(f32, color.b) / 255.0,
             alpha,
         );
         // Step to the next colored span exactly as drawTextLine stepped this
@@ -733,7 +733,7 @@ pub fn walkLines(
             const sentinel_len = inlineGlyphSentinelLen(text, i);
             if (sentinel_len > 0) {
                 if (word_chars > 0) word_width += ls;
-                word_width += @as(f32, @floatFromInt(size_px));
+                word_width += size_px;
                 word_chars += 1;
                 i += sentinel_len;
                 continue;
@@ -786,7 +786,7 @@ pub fn subLineAdvance(text: []const u8, size_px: u16) f32 {
     while (i < text.len) {
         const sentinel_len = inlineGlyphSentinelLen(text, i);
         if (sentinel_len > 0) {
-            pen_x += @as(f32, @floatFromInt(size_px));
+            pen_x += size_px;
             pen_x += g_letter_spacing;
             i += sentinel_len;
             continue;
@@ -799,7 +799,7 @@ pub fn subLineAdvance(text: []const u8, size_px: u16) f32 {
         if (cacheGlyph(ch.codepoint, size_px)) |glyph| {
             pen_x += glyph.advance;
         } else {
-            pen_x += @as(f32, @floatFromInt(size_px)) * 0.5;
+            pen_x += @as(f32, size_px) * 0.5;
         }
         pen_x += g_letter_spacing;
         i += ch.len;
@@ -823,7 +823,7 @@ pub fn byteIndexAtPos(
     const face = activeFace(size_px);
     const natural_line_h: f32 = @as(f32, @floatFromInt(face.*.size.*.metrics.height)) / 64.0;
     const line_h: f32 = if (g_line_height_override > 0) g_line_height_override else natural_line_h;
-    const target_line: usize = if (target_y < 0) 0 else @intFromFloat(target_y / line_h);
+    const target_line: usize = if (target_y < 0) 0 else @trunc(target_y / line_h);
 
     const Ctx = struct {
         text: []const u8,
@@ -874,7 +874,7 @@ fn closestByteOnSlice(text: []const u8, size_px: u16, target_x: f32) usize {
         var step: usize = 0;
         const sentinel_len = inlineGlyphSentinelLen(text, i);
         if (sentinel_len > 0) {
-            advance = @as(f32, @floatFromInt(size_px));
+            advance = size_px;
             step = sentinel_len;
         } else {
             const ch = decodeUtf8(text[i..]);
@@ -885,7 +885,7 @@ fn closestByteOnSlice(text: []const u8, size_px: u16, target_x: f32) usize {
             if (cacheGlyph(ch.codepoint, size_px)) |glyph| {
                 advance = glyph.advance;
             } else {
-                advance = @as(f32, @floatFromInt(size_px)) * 0.5;
+                advance = @as(f32, size_px) * 0.5;
             }
             step = ch.len;
         }
@@ -1007,7 +1007,7 @@ pub fn getCharRightOverhang(codepoint: u32, size_px: u16) f32 {
 
 /// Get the line height (ascent + descent) for a given font size.
 pub fn getLineHeight(size_px: u16) f32 {
-    if (g_ft_face == null) return @floatFromInt(size_px);
+    if (g_ft_face == null) return size_px;
     const face = activeFace(size_px);
     // Use FreeType's metrics.height (ascent + descent + line gap) to match
     // TextEngine.lineMetrics(). The old formula (ascender - descender + 2.0)
@@ -1018,13 +1018,13 @@ pub fn getLineHeight(size_px: u16) f32 {
 
 /// Get the advance width of 'M' (monospace cell width) for a given font size.
 pub fn getCharWidth(size_px: u16) f32 {
-    if (g_ft_face == null) return @as(f32, @floatFromInt(size_px)) * 0.6;
+    if (g_ft_face == null) return @as(f32, size_px) * 0.6;
     const face = activeFace(size_px);
     // Load 'M' glyph to get its advance width
     if (c.FT_Load_Char(face, 'M', c.FT_LOAD_DEFAULT) == 0) {
         return @as(f32, @floatFromInt(face.*.glyph.*.advance.x)) / 64.0;
     }
-    return @as(f32, @floatFromInt(size_px)) * 0.6; // fallback
+    return @as(f32, size_px) * 0.6; // fallback
 }
 
 /// Draw a single glyph at exact pixel position (for terminal cell-grid rendering).
@@ -1040,7 +1040,7 @@ pub fn drawGlyphAt(char_buf: []const u8, x: f32, y: f32, size_px: u16, cr: f32, 
     const s = transform.scale;
     const has_transform = transform.active;
     const render_size: u16 = if (has_transform)
-        @intFromFloat(@max(4, @min(200, @round(@as(f32, @floatFromInt(size_px)) * s))))
+        @trunc(@max(4, @min(200, @round(size_px * s))))
     else
         size_px;
 

@@ -157,8 +157,8 @@ pub const World = struct {
     }
 
     fn chunkIndexOf(self: *const World, x: f32, z: f32) usize {
-        const cx = clampCell(@as(i64, @intFromFloat(@floor((x - self.min_x) / self.cell))), self.cols);
-        const cz = clampCell(@as(i64, @intFromFloat(@floor((z - self.min_z) / self.cell))), self.rows);
+        const cx = clampCell(@as(i64, @floor((x - self.min_x) / self.cell)), self.cols);
+        const cz = clampCell(@as(i64, @floor((z - self.min_z) / self.cell)), self.rows);
         return cz * @as(usize, self.cols) + cx;
     }
 
@@ -377,8 +377,10 @@ pub fn build(
     var rows: u32 = 1;
     if (extent.any) {
         while (true) {
-            cols = @intFromFloat(@floor((extent.max_x - extent.min_x) / cell) + 1);
-            rows = @intFromFloat(@floor((extent.max_z - extent.min_z) / cell) + 1);
+            const cols_f = @floor((extent.max_x - extent.min_x) / cell) + 1;
+            const rows_f = @floor((extent.max_z - extent.min_z) / cell) + 1;
+            cols = @floor(cols_f);
+            rows = @floor(rows_f);
             cols = @max(1, cols);
             rows = @max(1, rows);
             if (@as(u64, cols) * @as(u64, rows) <= (1 << 20)) break;
@@ -517,8 +519,8 @@ fn countNonEmpty(ranges: []const Range) usize {
 }
 
 fn chunkIndex(x: f32, z: f32, min_x: f32, min_z: f32, cell: f32, cols: u32, rows: u32) usize {
-    const cx = clampCell(@as(i64, @intFromFloat(@floor((x - min_x) / cell))), cols);
-    const cz = clampCell(@as(i64, @intFromFloat(@floor((z - min_z) / cell))), rows);
+    const cx = clampCell(@as(i64, @floor((x - min_x) / cell)), cols);
+    const cz = clampCell(@as(i64, @floor((z - min_z) / cell)), rows);
     return cz * @as(usize, cols) + cx;
 }
 

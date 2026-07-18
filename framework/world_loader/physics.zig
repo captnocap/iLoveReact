@@ -163,9 +163,9 @@ pub fn meshPropIslands(allocator: std.mem.Allocator, mesh: constructor.MeshPropM
     while (vi < vc) : (vi += 1) {
         const b = vi * 8;
         const key = [3]i64{
-            @intFromFloat(@round(mesh.vertices[b] * 1000.0)),
-            @intFromFloat(@round(mesh.vertices[b + 1] * 1000.0)),
-            @intFromFloat(@round(mesh.vertices[b + 2] * 1000.0)),
+            @round(mesh.vertices[b] * 1000.0),
+            @round(mesh.vertices[b + 1] * 1000.0),
+            @round(mesh.vertices[b + 2] * 1000.0),
         };
         const gop = try weld.getOrPut(key);
         if (!gop.found_existing) {
@@ -234,8 +234,8 @@ pub fn registerRampHeightfield(insts: []const f32, row: usize, stride: usize, sl
     const rise = @abs(insts[b + scale_base + 1]);
     const depth = @abs(insts[b + scale_base + 2]);
     if (width <= 0.001 or rise <= 0.001 or depth <= 0.001) return false;
-    const cols: usize = @max(2, @as(usize, @intFromFloat(@round(width / RAMP_HEIGHTFIELD_CELL_METERS))) + 1);
-    const rows: usize = @max(2, @as(usize, @intFromFloat(@round(depth / RAMP_HEIGHTFIELD_CELL_METERS))) + 1);
+    const cols: usize = @max(2, @as(usize, @round(width / RAMP_HEIGHTFIELD_CELL_METERS)) + 1);
+    const rows: usize = @max(2, @as(usize, @round(depth / RAMP_HEIGHTFIELD_CELL_METERS)) + 1);
     const count = cols * rows;
     if (count > game_physics.HF_MAX_SAMPLES) return false;
     var samples: [game_physics.HF_MAX_SAMPLES]f32 = [_]f32{0} ** game_physics.HF_MAX_SAMPLES;
@@ -613,8 +613,8 @@ pub const SpatialGrid = struct {
     }
 
     pub fn cellXZ(self: SpatialGrid, x: f32, z: f32) struct { cx: i32, cz: i32 } {
-        const cx = clampCell(@as(i32, @intFromFloat(@floor((x - self.min_x) / self.cell))), self.cols);
-        const cz = clampCell(@as(i32, @intFromFloat(@floor((z - self.min_z) / self.cell))), self.rows);
+        const cx = clampCell(@as(i32, @floor((x - self.min_x) / self.cell)), self.cols);
+        const cz = clampCell(@as(i32, @floor((z - self.min_z) / self.cell)), self.rows);
         return .{ .cx = cx, .cz = cz };
     }
 };
@@ -627,8 +627,8 @@ pub fn instIsSpanning(insts: []const f32, row: usize, stride: usize, cell: f32) 
 
 pub fn gridCellIndex(insts: []const f32, row: usize, stride: usize, min_x: f32, min_z: f32, cell: f32, cols: i32, rows: i32) usize {
     const b = row * stride;
-    const cx = clampCell(@as(i32, @intFromFloat(@floor((insts[b + 0] - min_x) / cell))), cols);
-    const cz = clampCell(@as(i32, @intFromFloat(@floor((insts[b + 2] - min_z) / cell))), rows);
+    const cx = clampCell(@as(i32, @floor((insts[b + 0] - min_x) / cell)), cols);
+    const cz = clampCell(@as(i32, @floor((insts[b + 2] - min_z) / cell)), rows);
     return @intCast(cz * cols + cx);
 }
 
@@ -648,8 +648,8 @@ pub fn buildSpatialGrid(allocator: std.mem.Allocator, insts: []const f32, inst_c
         min_z = @min(min_z, insts[b + 2]);
         max_z = @max(max_z, insts[b + 2]);
     }
-    const cols = @max(1, @as(i32, @intFromFloat(@floor((max_x - min_x) / cell))) + 1);
-    const rows = @max(1, @as(i32, @intFromFloat(@floor((max_z - min_z) / cell))) + 1);
+    const cols = @max(1, @as(i32, @floor((max_x - min_x) / cell)) + 1);
+    const rows = @max(1, @as(i32, @floor((max_z - min_z) / cell)) + 1);
     const ncells: usize = @intCast(@as(i64, cols) * @as(i64, rows));
 
     var starts = try allocator.alloc(u32, ncells + 1);
@@ -749,7 +749,7 @@ pub fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: 
     player.grounded = out[7] > 0.5;
     // Commit the stepped bodies back — gravity, bounce, the player kick, and
     // sphere-sphere shoves all came from the one host step.
-    const stepped = @min(bodies.len, @as(usize, @intFromFloat(@max(0, out[8]))));
+    const stepped = @min(bodies.len, @as(usize, @trunc(@max(0, out[8]))));
     for (bodies[0..stepped], 0..) |*b, i| {
         const at = game_physics.OUTPUT_HEADER_FLOATS + i * game_physics.ENTITY_FLOATS;
         b.x = out[at];
@@ -779,8 +779,8 @@ pub fn sceneTerrainTopAt(fields: []const constructor.HeightfieldMesh, x: f32, z:
         if (x < origin_x or z < origin_z or x > origin_x + field.width or z > origin_z + field.depth) continue;
         const max_col: f32 = @floatFromInt(field.cols - 1);
         const max_row: f32 = @floatFromInt(field.rows - 1);
-        const col: usize = @intFromFloat(@round(std.math.clamp((x - origin_x) / field.cell, 0, max_col)));
-        const row: usize = @intFromFloat(@round(std.math.clamp((z - origin_z) / field.cell, 0, max_row)));
+        const col: usize = @round(std.math.clamp((x - origin_x) / field.cell, 0, max_col));
+        const row: usize = @round(std.math.clamp((z - origin_z) / field.cell, 0, max_row));
         const idx = row * @as(usize, field.cols) + col;
         if (idx >= field.heights.len) continue;
         const top = field.base_y + field.heights[idx];

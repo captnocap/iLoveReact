@@ -450,8 +450,8 @@ fn resolveEffectSize(request_w: f32, request_h: f32, pixel_budget: u32) ?EffectS
 
     const safe_w: f32 = @max(1.0, request_w);
     const safe_h: f32 = @max(1.0, request_h);
-    const requested_w: u32 = @as(u32, @intFromFloat(safe_w));
-    const requested_h: u32 = @as(u32, @intFromFloat(safe_h));
+    const requested_w: u32 = @as(u32, @trunc(safe_w));
+    const requested_h: u32 = @as(u32, @trunc(safe_h));
     const dim_limit: f32 = @floatFromInt(MAX_EFFECT_DIM);
     const pixel_budget_f: f32 = @floatFromInt(pixel_budget);
 
@@ -464,8 +464,8 @@ fn resolveEffectSize(request_w: f32, request_h: f32, pixel_budget: u32) ?EffectS
         scale = @min(scale, @sqrt(pixel_budget_f / requested_pixels));
     }
 
-    var width: u32 = @min(MAX_EFFECT_DIM, @as(u32, @intFromFloat(@max(1.0, safe_w * scale))));
-    var height: u32 = @min(MAX_EFFECT_DIM, @as(u32, @intFromFloat(@max(1.0, safe_h * scale))));
+    var width: u32 = @min(MAX_EFFECT_DIM, @as(u32, @trunc(@max(1.0, safe_w * scale))));
+    var height: u32 = @min(MAX_EFFECT_DIM, @as(u32, @trunc(@max(1.0, safe_h * scale))));
     while (@as(u64, width) * @as(u64, height) > pixel_budget) {
         if (width >= height and width > 1) {
             width -= 1;

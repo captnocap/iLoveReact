@@ -437,7 +437,7 @@ fn parseChunkRow(a: std.mem.Allocator, json: []const u8, out_vec: *[]f32) !RowPa
             const v = o.get(k) orelse return 0;
             return switch (v) {
                 .integer => |i| @intCast(i),
-                .float => |f| @intFromFloat(f),
+                .float => |f| @trunc(f),
                 else => 0,
             };
         }

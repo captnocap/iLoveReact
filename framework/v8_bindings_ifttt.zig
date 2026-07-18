@@ -61,11 +61,11 @@ fn prefixedKey(alloc: std.mem.Allocator, raw: []const u8) ?[]u8 {
 fn argU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     const f = argF64(info, idx) orelse return null;
     if (f < 0) return null;
-    return @intFromFloat(f);
+    return @trunc(f);
 }
 
 fn setRetU32(info: v8.FunctionCallbackInfo, v: u32) void {
-    info.getReturnValue().set(v8.Number.init(info.getIsolate(), @floatFromInt(v)));
+    info.getReturnValue().set(v8.Number.init(info.getIsolate(), v));
 }
 
 fn setRetF64(info: v8.FunctionCallbackInfo, v: f64) void {

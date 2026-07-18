@@ -74,7 +74,7 @@ pub fn stepTickers(self: anytype, dt: f32) void {
         var count: u32 = 0;
         if (n_cols > 0) {
             const offset = self.ticker_seconds * board.scroll_cols_per_sec;
-            const base: i64 = @intFromFloat(@floor(offset));
+            const base: i64 = @floor(offset);
             const frac = offset - @floor(offset);
             const half_w = -board.face_left; // face_left is negative
             const max_dots: u32 = @intCast(buf.len / INSTANCE_STRIDE);

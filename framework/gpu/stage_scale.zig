@@ -41,7 +41,7 @@ pub const reference_marks = [_]Mark{
 };
 
 pub fn minorTickCount() u32 {
-    return @intFromFloat(Tuning.ruler_height_meters / Tuning.ruler_minor_tick_meters);
+    return @trunc(Tuning.ruler_height_meters / Tuning.ruler_minor_tick_meters);
 }
 
 pub fn tickMeters(index: u32) f32 {
@@ -49,7 +49,7 @@ pub fn tickMeters(index: u32) f32 {
 }
 
 pub fn isMajorTick(index: u32) bool {
-    const ticks_per_major: u32 = @intFromFloat(Tuning.ruler_major_tick_meters / Tuning.ruler_minor_tick_meters);
+    const ticks_per_major: u32 = @trunc(Tuning.ruler_major_tick_meters / Tuning.ruler_minor_tick_meters);
     return index % ticks_per_major == 0;
 }
 

@@ -42,7 +42,7 @@ pub fn streamRadiusFromEnv(environ: *const std.process.Environ.Map) f32 {
 
 pub fn colorChannelByte(v: f32) u8 {
     const scaled = clamp(v, 0, 1) * 255.0;
-    return @intFromFloat(@round(scaled));
+    return @round(scaled);
 }
 
 pub fn cutoutStencilGridSize(data: []const f32) ?struct { w: usize, h: usize } {
@@ -50,8 +50,8 @@ pub fn cutoutStencilGridSize(data: []const f32) ?struct { w: usize, h: usize } {
     const wf = data[0];
     const hf = data[1];
     if (wf < 1 or hf < 1 or wf > 512 or hf > 512) return null;
-    const w: usize = @intFromFloat(@round(wf));
-    const h: usize = @intFromFloat(@round(hf));
+    const w: usize = @round(wf);
+    const h: usize = @round(hf);
     if (w == 0 or h == 0 or w * h > CUTOUT_STENCIL_MAX_CELLS) return null;
     if (@abs(wf - @as(f32, @floatFromInt(w))) > 0.01) return null;
     if (@abs(hf - @as(f32, @floatFromInt(h))) > 0.01) return null;

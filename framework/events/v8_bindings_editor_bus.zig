@@ -111,7 +111,7 @@ fn hostEmit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn hostSince(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const after_f: f64 = argToF64(info, 0) orelse 0;
-    const after: i64 = if (after_f < 0) 0 else @intFromFloat(after_f);
+    const after: i64 = if (after_f < 0) 0 else @trunc(after_f);
     const json = editor_bus.since(alloc, after) catch {
         setReturnString(info, "[]");
         return;

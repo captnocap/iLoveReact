@@ -17,7 +17,7 @@ fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
 
 fn argToNodeId(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     const node_f = argToF64(info, idx) orelse return null;
-    return @intFromFloat(@max(0.0, node_f));
+    return @trunc(@max(0.0, node_f));
 }
 
 fn argToStringAlloc(info: v8.FunctionCallbackInfo, idx: u32) ?[]u8 {
@@ -271,8 +271,8 @@ fn hostSetLiveMaterial(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         setReturnString(info, "error:BadNodeId");
         return;
     };
-    const hash: u32 = @intFromFloat(argToF64(info, 1) orelse 0);
-    const kind: u32 = @intFromFloat(argToF64(info, 2) orelse 0);
+    const hash: u32 = @trunc(@as(f64, argToF64(info, 1) orelse 0));
+    const kind: u32 = @trunc(@as(f64, argToF64(info, 2) orelse 0));
     const wgsl = argToStringAlloc(info, 3) orelse {
         setReturnString(info, "error:BadWgsl");
         return;
@@ -505,8 +505,8 @@ fn hostWindowOpen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer std.heap.c_allocator.free(store_dir);
-    const width: u32 = if (argToF64(info, 2)) |w| @intFromFloat(@max(0.0, w)) else 1280;
-    const height: u32 = if (argToF64(info, 3)) |h| @intFromFloat(@max(0.0, h)) else 800;
+    const width: u32 = if (argToF64(info, 2)) |w| @trunc(@max(0.0, w)) else 1280;
+    const height: u32 = if (argToF64(info, 3)) |h| @trunc(@max(0.0, h)) else 800;
 
     const host = v8_runtime.hostContext(info.getIsolate());
     world_window.open(host.io, host.environ, game_file, store_dir, width, height) catch |e| {

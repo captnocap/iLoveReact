@@ -135,8 +135,8 @@ fn faceCentroidTexel(lay: *const paint_islands.Layout, face: u32) [2]u32 {
     const c = triTexelCorners(lay, face);
     const gx = (c[0][0] + c[1][0] + c[2][0]) / 3.0;
     const gy = (c[0][1] + c[1][1] + c[2][1]) / 3.0;
-    const tx: u32 = @intFromFloat(std.math.clamp(@floor(gx), 0, @as(f32, @floatFromInt(g_atlas_w - 1))));
-    const ty: u32 = @intFromFloat(std.math.clamp(@floor(gy), 0, @as(f32, @floatFromInt(g_atlas_h - 1))));
+    const tx: u32 = @trunc(std.math.clamp(@floor(gx), 0, @as(f32, @floatFromInt(g_atlas_w - 1))));
+    const ty: u32 = @trunc(std.math.clamp(@floor(gy), 0, @as(f32, @floatFromInt(g_atlas_h - 1))));
     return .{ tx, ty };
 }
 
@@ -201,10 +201,10 @@ fn faceTexelBounds(lay: *const paint_islands.Layout, face: u32, expand: f32) [4]
         return .{ ct[0], ct[1], ct[0], ct[1] };
     }
     return .{
-        @intFromFloat(@max(0, @floor(min_x))),
-        @intFromFloat(@max(0, @floor(min_y))),
-        @intFromFloat(@max(0, @floor(max_x))),
-        @intFromFloat(@max(0, @floor(max_y))),
+        @trunc(@max(0, @floor(min_x))),
+        @trunc(@max(0, @floor(min_y))),
+        @trunc(@max(0, @floor(max_x))),
+        @trunc(@max(0, @floor(max_y))),
     };
 }
 
@@ -559,7 +559,7 @@ fn hsvPastel(h: f32) [4]u8 {
     // (req_2543). Still light (high v) so overpainting stays legible on top.
     const s: f32 = 0.5;
     const v: f32 = 0.92;
-    const i = @as(u32, @intFromFloat(h * 6.0)) % 6;
+    const i = @as(u32, @trunc(h * 6.0)) % 6;
     const f = h * 6.0 - @floor(h * 6.0);
     const p = v * (1.0 - s);
     const q = v * (1.0 - s * f);
@@ -575,7 +575,7 @@ fn hsvPastel(h: f32) [4]u8 {
         4 => { r = t; g = p; },
         else => { g = p; b = q; },
     }
-    return .{ @as(u8, @intFromFloat(r * 255.0)), @as(u8, @intFromFloat(g * 255.0)), @as(u8, @intFromFloat(b * 255.0)), 255 };
+    return .{ @as(u8, @trunc(r * 255.0)), @as(u8, @trunc(g * 255.0)), @as(u8, @trunc(b * 255.0)), 255 };
 }
 
 fn templateColor(island_idx: u32) [4]u8 {
@@ -759,9 +759,9 @@ pub fn tintFacePatch(face: u32, tint: [4]u8, amt: f32) void {
             if (!pointInTri(c, fx + 0.5, fy + 0.5, TINT_EPS)) continue;
             const d = (@as(usize, r[1] + py) * g_atlas_w + r[0] + px) * 4;
             inline for (0..3) |ch| {
-                const base: f32 = @floatFromInt(buf[d + ch]);
-                const tc: f32 = @floatFromInt(tint[ch]);
-                buf[d + ch] = @intFromFloat(std.math.clamp(base + (tc - base) * a, 0.0, 255.0));
+                const base: f32 = buf[d + ch];
+                const tc: f32 = tint[ch];
+                buf[d + ch] = @trunc(std.math.clamp(base + (tc - base) * a, 0.0, 255.0));
             }
         }
     }
@@ -816,8 +816,8 @@ pub fn sampleTexel(face: u32, cu: f32, cv: f32) ?[4]u8 {
     const c = triTexelCorners(lay, face);
     const fx = c[0][0] + cu * (c[1][0] - c[0][0]) + cv * (c[2][0] - c[0][0]);
     const fy = c[0][1] + cu * (c[1][1] - c[0][1]) + cv * (c[2][1] - c[0][1]);
-    const tx: u32 = @intFromFloat(std.math.clamp(@floor(fx), 0, @as(f32, @floatFromInt(g_atlas_w - 1))));
-    const ty: u32 = @intFromFloat(std.math.clamp(@floor(fy), 0, @as(f32, @floatFromInt(g_atlas_h - 1))));
+    const tx: u32 = @trunc(std.math.clamp(@floor(fx), 0, @as(f32, @floatFromInt(g_atlas_w - 1))));
+    const ty: u32 = @trunc(std.math.clamp(@floor(fy), 0, @as(f32, @floatFromInt(g_atlas_h - 1))));
     const i = (@as(usize, ty) * g_atlas_w + tx) * 4;
     return .{ buf[i], buf[i + 1], buf[i + 2], buf[i + 3] };
 }
@@ -1171,8 +1171,8 @@ fn sampleMat(u: f32, v: f32) [4]u8 {
     const src = g_mat_rgba orelse return .{ 255, 255, 255, 255 };
     const fu = u - @floor(u);
     const fv = v - @floor(v);
-    const sx = @min(@as(u32, @intFromFloat(fu * @as(f32, @floatFromInt(g_mat_w)))), g_mat_w - 1);
-    const sy = @min(@as(u32, @intFromFloat(fv * @as(f32, @floatFromInt(g_mat_h)))), g_mat_h - 1);
+    const sx = @min(@as(u32, @trunc(fu * @as(f32, @floatFromInt(g_mat_w)))), g_mat_w - 1);
+    const sy = @min(@as(u32, @trunc(fv * @as(f32, @floatFromInt(g_mat_h)))), g_mat_h - 1);
     const si = (@as(usize, sy) * g_mat_w + sx) * 4;
     return .{ src[si], src[si + 1], src[si + 2], src[si + 3] };
 }
@@ -1373,9 +1373,9 @@ fn brushCoverage(spec: BrushShape, dx: f32, dy: f32, r_raw: f32, flow: f32, wx: 
 /// gives stained glass, not un-glassed (req_2928).
 fn blendTexel(buf: []u8, d: usize, ink: [4]u8, amt: f32) void {
     inline for (0..3) |c| {
-        const base: f32 = @floatFromInt(buf[d + c]);
-        const tc: f32 = @floatFromInt(ink[c]);
-        buf[d + c] = @intFromFloat(std.math.clamp(base + (tc - base) * amt, 0.0, 255.0));
+        const base: f32 = buf[d + c];
+        const tc: f32 = ink[c];
+        buf[d + c] = @trunc(std.math.clamp(base + (tc - base) * amt, 0.0, 255.0));
     }
 }
 
@@ -1445,10 +1445,10 @@ fn stampInner(face: u32, cu: f32, cv: f32, radius: f32, rgba: [4]u8, mat: bool, 
     const x1f = @min(@ceil(cx + rb), @as(f32, @floatFromInt(isl.x + isl.w)) - 1.0);
     const y1f = @min(@ceil(cy + rb), @as(f32, @floatFromInt(isl.y + isl.h)) - 1.0);
     if (x1f < x0f or y1f < y0f) return;
-    const x0: u32 = @intFromFloat(@max(0, x0f));
-    const y0: u32 = @intFromFloat(@max(0, y0f));
-    const x1: u32 = @intFromFloat(@max(0, x1f));
-    const y1: u32 = @intFromFloat(@max(0, y1f));
+    const x0: u32 = @trunc(@max(0, x0f));
+    const y0: u32 = @trunc(@max(0, y0f));
+    const x1: u32 = @trunc(@max(0, x1f));
+    const y1: u32 = @trunc(@max(0, y1f));
 
     var ty = y0;
     while (ty <= y1) : (ty += 1) {
@@ -1560,8 +1560,8 @@ const MAX_ATLAS_DIM: u32 = 8192;
 
 /// The APPLIED density (texels/meter) — ≤ the request when the limits clamped it.
 pub fn detail() u32 {
-    if (g_layout) |lay| return @max(1, @as(u32, @intFromFloat(@round(lay.density))));
-    return @max(1, @as(u32, @intFromFloat(@round(g_density_req))));
+    if (g_layout) |lay| return @max(1, @as(u32, @round(lay.density)));
+    return @max(1, @as(u32, @round(g_density_req)));
 }
 
 /// Set the paint density (texels/meter, any value ≥1 — no snapping: the FIT path and

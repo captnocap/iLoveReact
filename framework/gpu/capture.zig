@@ -406,10 +406,10 @@ fn findNodeByTarget(node: *Node, target: []const u8) ?Rect {
 fn nodeRect(node: *Node) Rect {
     const r = node.computed;
     return .{
-        .x = @intFromFloat(@max(0, r.x)),
-        .y = @intFromFloat(@max(0, r.y)),
-        .w = @intFromFloat(@max(1, r.w)),
-        .h = @intFromFloat(@max(1, r.h)),
+        .x = @trunc(@max(0, r.x)),
+        .y = @trunc(@max(0, r.y)),
+        .w = @trunc(@max(1, r.w)),
+        .h = @trunc(@max(1, r.h)),
     };
 }
 

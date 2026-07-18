@@ -74,8 +74,8 @@ pub fn paintGroundY(floor: ?[]const f32, chunk: *const map_chunks.Chunk, wx: f32
     const max_i: f32 = @floatFromInt(res - 1);
     const gx = @max(0, @min(max_i, (wx - chunk.minX()) / cell));
     const gz = @max(0, @min(max_i, (wz - chunk.minZ()) / cell));
-    const x0: usize = @intFromFloat(@floor(gx));
-    const z0: usize = @intFromFloat(@floor(gz));
+    const x0: usize = @floor(gx);
+    const z0: usize = @floor(gz);
     const x1 = @min(x0 + 1, res - 1);
     const z1 = @min(z0 + 1, res - 1);
     const tx = gx - @floor(gx);
@@ -272,8 +272,8 @@ pub fn snapGroundY(floor: *const [map_paint.FLOOR_CELLS]f32, min_x: f32, min_z: 
     const max_i: f32 = @floatFromInt(res - 1);
     const gx = @max(0, @min(max_i, (wx - min_x) / cell));
     const gz = @max(0, @min(max_i, (wz - min_z) / cell));
-    const x0: usize = @intFromFloat(@floor(gx));
-    const z0: usize = @intFromFloat(@floor(gz));
+    const x0: usize = @floor(gx);
+    const z0: usize = @floor(gz);
     const x1 = @min(x0 + 1, res - 1);
     const z1 = @min(z0 + 1, res - 1);
     const tx = gx - @floor(gx);

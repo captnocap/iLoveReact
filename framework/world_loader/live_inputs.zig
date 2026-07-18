@@ -200,9 +200,9 @@ pub fn liveMeshHash(key: []const u8) u32 {
 // instance it replaces. The live ref and the baked instance carry the SAME authored x/z/yaw
 // (a re-skin doesn't move the prop), so quantizing to mm / 0.01° matches them exactly.
 pub fn meshPosKey(mesh_index: usize, x: f32, z: f32, yaw: f32) u64 {
-    const xi: i64 = @intFromFloat(@round(x * 1000.0));
-    const zi: i64 = @intFromFloat(@round(z * 1000.0));
-    const yi: i64 = @intFromFloat(@round(yaw * 100.0));
+    const xi: i64 = @round(x * 1000.0);
+    const zi: i64 = @round(z * 1000.0);
+    const yi: i64 = @round(yaw * 100.0);
     var h: u64 = 1469598103934665603;
     h = (h ^ @as(u64, @intCast(mesh_index & 0xffff))) *% 1099511628211;
     h = (h ^ @as(u64, @bitCast(xi))) *% 1099511628211;

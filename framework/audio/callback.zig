@@ -163,7 +163,7 @@ pub fn audioCallback(userdata: ?*anyopaque, stream: ?*sdl.SDL_AudioStream, addit
 
     _ = state.g_engine.callback_count.fetchAdd(1, .monotonic);
     if (state.g_engine.transport_playing) {
-        const seconds = @as(f64, @floatFromInt(num_samples)) / @as(f64, @floatFromInt(SAMPLE_RATE));
+        const seconds = @as(f64, num_samples) / SAMPLE_RATE;
         state.g_engine.transport_measure += (state.g_engine.current_tempo / 60.0) * seconds / BEATS_PER_MEASURE;
     }
     const elapsed_us = t0.durationTo(std.Io.Clock.now(.awake, io)).toMicroseconds();

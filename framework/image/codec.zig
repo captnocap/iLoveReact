@@ -257,12 +257,14 @@ pub fn computeDims(sw: u32, sh: u32, rs: ResizeSpec) Dims {
     } else switch (rs.fit) {
         .fill => out = .{ .w = @max(1, tw.?), .h = @max(1, th.?) },
         .inside, .outside => {
-            const sx = @as(f64, @floatFromInt(tw.?)) / @as(f64, @floatFromInt(sw));
-            const sy = @as(f64, @floatFromInt(th.?)) / @as(f64, @floatFromInt(sh));
+            const sx = @as(f64, tw.?) / sw;
+            const sy = @as(f64, th.?) / sh;
             const scale = if (rs.fit == .inside) @min(sx, sy) else @max(sx, sy);
+            const scaled_w: u32 = @round(@as(f64, sw) * scale);
+            const scaled_h: u32 = @round(@as(f64, sh) * scale);
             out = .{
-                .w = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(sw)) * scale)))),
-                .h = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(sh)) * scale)))),
+                .w = @max(1, scaled_w),
+                .h = @max(1, scaled_h),
             };
         },
     }

@@ -516,8 +516,8 @@ fn screenToFb(idx: usize, mx: f32, my: f32) struct { x: u16, y: u16 } {
     if (r.w <= 0 or r.h <= 0) return .{ .x = 0, .y = 0 };
     const nx = std.math.clamp((mx - r.x) / r.w, 0, 1);
     const ny = std.math.clamp((my - r.y) / r.h, 0, 1);
-    const fx: u16 = @intFromFloat(@min(@as(f32, @floatFromInt(rects.fb_w)) - 1, nx * @as(f32, @floatFromInt(rects.fb_w))));
-    const fy: u16 = @intFromFloat(@min(@as(f32, @floatFromInt(rects.fb_h)) - 1, ny * @as(f32, @floatFromInt(rects.fb_h))));
+    const fx: u16 = @trunc(@min(@as(f32, @floatFromInt(rects.fb_w)) - 1, nx * @as(f32, @floatFromInt(rects.fb_w))));
+    const fy: u16 = @trunc(@min(@as(f32, @floatFromInt(rects.fb_h)) - 1, ny * @as(f32, @floatFromInt(rects.fb_h))));
     return .{ .x = fx, .y = fy };
 }
 

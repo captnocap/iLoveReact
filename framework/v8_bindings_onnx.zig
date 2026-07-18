@@ -176,7 +176,7 @@ fn parseOpts(json: []const u8) segment.RefineOpts {
             if (std.mem.eql(u8, key, "threshold")) {
                 opts.threshold = num;
             } else if (std.mem.eql(u8, key, "maskIdx")) {
-                const n: i32 = @intFromFloat(num);
+                const n: i32 = @trunc(num);
                 opts.mask_idx = if (n < 0) 0 else if (n > 2) 2 else @intCast(n);
             }
         } else {

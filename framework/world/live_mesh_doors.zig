@@ -18,7 +18,7 @@ fn mix(h: u64, value: u64) u64 {
 }
 
 fn quantized(value: f32, scale: f32) i64 {
-    return @intFromFloat(@round(value * scale));
+    return @round(value * scale);
 }
 
 /// Stable live-door identity. Position is millimetre-quantized and yaw to

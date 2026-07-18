@@ -125,28 +125,28 @@ test "analytic road rows and visual undercoat ride the compact ground stream" {
     defer std.testing.allocator.free(data);
     const written = engine.encodeGroundData(chunk, data);
     try std.testing.expect(written <= data.len);
-    const tile_pal: usize = @intFromFloat(data[2]);
-    const flora_pal: usize = @intFromFloat(data[3]);
-    const zone_pal: usize = @intFromFloat(data[4]);
-    const bindings: usize = @intFromFloat(data[5]);
+    const tile_pal: usize = @trunc(data[2]);
+    const flora_pal: usize = @trunc(data[3]);
+    const zone_pal: usize = @trunc(data[4]);
+    const bindings: usize = @trunc(data[5]);
     const material_base = 6 + (tile_pal + flora_pal + zone_pal) * 3 + bindings * engine.BINDING_FLOATS + chunks.TILE_CELLS;
     const ribbon_base = material_base + chunks.TILE_CELLS;
     const markingAt = struct {
         fn read(stream: []const f32, base: usize, gx: usize, gz: usize) u8 {
-            const ref_value: i32 = @intFromFloat(stream[base + gz * chunks.TILE_COLS + gx]);
+            const ref_value: i32 = @trunc(stream[base + gz * chunks.TILE_COLS + gx]);
             const lower = @mod(ref_value, engine.GROUND_UNDERCOAT_REF_STRIDE);
             return @intCast(@divFloor(lower, engine.GROUND_MATERIAL_REF_STRIDE));
         }
     }.read;
     const undercoatAt = struct {
         fn read(stream: []const f32, base: usize, gx: usize, gz: usize) i32 {
-            const ref_value: i32 = @intFromFloat(stream[base + gz * chunks.TILE_COLS + gx]);
+            const ref_value: i32 = @trunc(stream[base + gz * chunks.TILE_COLS + gx]);
             return @divFloor(ref_value, engine.GROUND_UNDERCOAT_REF_STRIDE);
         }
     }.read;
     const bindingAt = struct {
         fn read(stream: []const f32, base: usize, gx: usize, gz: usize) i32 {
-            const ref_value: i32 = @intFromFloat(stream[base + gz * chunks.TILE_COLS + gx]);
+            const ref_value: i32 = @trunc(stream[base + gz * chunks.TILE_COLS + gx]);
             const lower = @mod(ref_value, engine.GROUND_UNDERCOAT_REF_STRIDE);
             return @mod(lower, engine.GROUND_MATERIAL_REF_STRIDE) - 1;
         }
@@ -162,7 +162,7 @@ test "analytic road rows and visual undercoat ride the compact ground stream" {
     try std.testing.expectEqual(@as(i32, 6), undercoatAt(data, material_base, 60, 66)); // tile kind 4 + token bias
     try std.testing.expectEqual(@as(i32, 0), bindingAt(data, material_base, 60, 66)); // exact prior material binding
 
-    const ribbon_count: usize = @intFromFloat(data[ribbon_base]);
+    const ribbon_count: usize = @trunc(data[ribbon_base]);
     try std.testing.expectEqual(@as(usize, 1), ribbon_count);
     try std.testing.expectEqual(ribbon_base + engine.GROUND_RIBBON_HEADER_FLOATS + ribbon_count * roads.RIBBON_SEGMENT_FLOATS, written);
     try std.testing.expectApproxEqAbs(@as(f32, 40), data[ribbon_base + 1], 0.001);

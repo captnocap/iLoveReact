@@ -28,7 +28,7 @@ pub fn mix(a: u32) u32 {
 /// hash → uniform [0,1) — twin of scatter.ts `unit`. Computed in f64 to match the
 /// JS double pipeline exactly; the caller narrows the final transform to f32.
 pub fn unit(h: u32) f64 {
-    return @as(f64, @floatFromInt(h >> 8)) / @as(f64, 0x1000000);
+    return (h >> 8) / @as(f64, 0x1000000);
 }
 
 inline fn lerp(a: f64, b: f64, t: f64) f64 {
@@ -297,7 +297,7 @@ pub fn flowerRow(cfg: *const FlowerConfig, wx: f64, wz: f64, top: f64, c: f64, c
     const stem_height = lerp(cfg.height_min, cfg.height_max, unit(h3));
     const canopy_height = cfg.grass_height_max - radius * cfg.tip_tuck;
     const py = top + @max(cfg.grass_height_min, @min(stem_height, canopy_height));
-    const ci: usize = @intFromFloat(@floor(unit(mix(h3 ^ 0x91)) * 4.0));
+    const ci: usize = @floor(unit(mix(h3 ^ 0x91)) * 4.0);
     const color = cfg.palette[@min(ci, 3)];
     const yaw = unit(mix(h2 ^ 0x51)) * 360.0;
     return .{
@@ -355,11 +355,12 @@ pub fn palmCrown(cfg: *const PalmConfig, wx: f64, wz: f64, top: f64, c: f64, cel
     const h2 = mix(h1 ^ 0x7feb352d);
     const h3 = mix(h2 ^ 0x846ca68b);
     const trunk_h = lerp(cfg.trunk_h_min, cfg.trunk_h_max, unit(h0));
-    const outer: u32 = @intFromFloat(@round(lerp(cfg.fronds_min, cfg.fronds_max, unit(h2))));
+    const outer: u32 = @round(lerp(cfg.fronds_min, cfg.fronds_max, unit(h2)));
     const frond_len = lerp(cfg.frond_len_min, cfg.frond_len_max, unit(h3));
     const px = wx + (unit(mix(h0 ^ 0xa5)) - 0.5) * c * 0.7;
     const pz = wz + (unit(mix(h1 ^ 0xa5)) - 0.5) * c * 0.7;
-    const inner_raw: i64 = @intFromFloat(@round(@as(f64, @floatFromInt(outer)) * 0.6));
+    const outer_f: f64 = outer;
+    const inner_raw: i64 = @round(outer_f * 0.6);
     return .{
         .px = px,
         .pz = pz,
@@ -384,9 +385,11 @@ pub fn palmFrondRow(crown: *const PalmCrown, k: u32) [STRIDE]f32 {
     const ring_len: f64 = if (outer) crown.frond_len else crown.frond_len * 0.62;
     const pitch_base: f64 = if (outer) 40 else 18;
     const i: u32 = if (outer) k else k - crown.outer;
-    const yaw = (@as(f64, @floatFromInt(i)) / @as(f64, @floatFromInt(ring_count))) * 360.0 + @as(f64, @floatFromInt(i % 2)) * 14.0;
-    const pitch = pitch_base + @as(f64, @floatFromInt(i % 3)) * 12.0;
-    const len = ring_len * (0.8 + 0.2 * (@as(f64, @floatFromInt((i * 7) % 5)) / 4.0));
+    const i_f: f64 = i;
+    const ring_count_f: f64 = ring_count;
+    const yaw = (i_f / ring_count_f) * 360.0 + @as(f64, i % 2) * 14.0;
+    const pitch = pitch_base + @as(f64, i % 3) * 12.0;
+    const len = ring_len * (0.8 + 0.2 * @as(f64, (i * 7) % 5) / 4.0);
     const wide = len * 0.55;
     return .{
         @floatCast(crown.px),      @floatCast(ring_top_y),    @floatCast(crown.pz),

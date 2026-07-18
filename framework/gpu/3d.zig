@@ -1586,7 +1586,7 @@ pub fn meshSymmetryReport(axis: u8) ?[3]f32 {
     defer uniq.deinit(std.heap.c_allocator);
     const gq = struct {
         fn f(x: f32) i32 {
-            return @intFromFloat(@round(x / 1e-3));
+            return @round(x / 1e-3);
         }
     }.f;
     var i: usize = 0;
@@ -8314,8 +8314,8 @@ pub fn update(_: f32) void {
 pub fn render(io: std.Io, environ: *const std.process.Environ.Map, node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
     if (!g_initialized) init(environ);
     if (!g_initialized) return false;
-    const iw: u32 = @intFromFloat(@max(1, w));
-    const ih: u32 = @intFromFloat(@max(1, h));
+    const iw: u32 = @trunc(@max(1, w));
+    const ih: u32 = @trunc(@max(1, h));
     const slot = acquireRt(iw, ih) orelse return false;
 
     // render() runs during the paint WALK and only RECORDS the scene. The
@@ -8388,8 +8388,8 @@ pub const DetachedTarget = struct {
 pub fn renderDetached(io: std.Io, environ: *const std.process.Environ.Map, target: *DetachedTarget, node: *Node, w: f32, h: f32) ?*wgpu.TextureView {
     if (!g_initialized) init(environ);
     if (!g_initialized) return null;
-    const iw: u32 = @intFromFloat(@max(1, w));
-    const ih: u32 = @intFromFloat(@max(1, h));
+    const iw: u32 = @trunc(@max(1, w));
+    const ih: u32 = @trunc(@max(1, h));
     const slot = ensureRt(&target.slot, iw, ih) orelse return null;
     // Detached targets are their own window/surface — the scene fills it, origin (0,0).
     drawScene(io, environ, node, slot, 0, 0, w, h);
@@ -8438,7 +8438,7 @@ fn drawSky(io: std.Io, pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.
 /// instead of overflowing the u16 cast.
 fn quantAngleU16(deg: f32) u16 {
     const m = deg - @floor(deg / 360.0) * 360.0;
-    const v: u32 = @intFromFloat(@round(m * (65536.0 / 360.0)));
+    const v: u32 = @round(m * (65536.0 / 360.0));
     return @intCast(v & 0xFFFF);
 }
 
@@ -8464,7 +8464,7 @@ fn makeSlimInstance(px: f32, py: f32, pz: f32, pitch: f32, yaw: f32, wide: f32, 
     const scl = struct {
         fn q(m: f32) u16 {
             const u = std.math.clamp(m / SLIM_SCALE_MAX, 0.0, 1.0);
-            return @intFromFloat(@round(u * 65535.0));
+            return @round(u * 65535.0);
         }
     };
     return SlimInstance{
@@ -8772,9 +8772,9 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     var clear_color: [3]f32 = .{ 0.05, 0.05, 0.08 };
     if (scene_node.style.background_color) |bg| {
         clear_color = .{
-            @as(f32, @floatFromInt(bg.r)) / 255.0,
-            @as(f32, @floatFromInt(bg.g)) / 255.0,
-            @as(f32, @floatFromInt(bg.b)) / 255.0,
+            @as(f32, bg.r) / 255.0,
+            @as(f32, bg.g) / 255.0,
+            @as(f32, bg.b) / 255.0,
         };
     }
     // <Scene3D.Skybox> is a child View carrying scene3d_skybox + the sky_*
@@ -9502,7 +9502,7 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
                                     if (dist > FOLIAGE_LOD_NEAR_M) {
                                         const t = @min(1.0, (dist - FOLIAGE_LOD_NEAR_M) / (FOLIAGE_LOD_FAR_M - FOLIAGE_LOD_NEAR_M));
                                         const density = 1.0 - t * (1.0 - FOLIAGE_LOD_FLOOR);
-                                        const thinned: u32 = @intFromFloat(@ceil(@as(f32, @floatFromInt(scount)) * density));
+                                        const thinned: u32 = @ceil(@as(f32, @floatFromInt(scount)) * density);
                                         if (thinned < scount) {
                                             scount = @max(1, thinned);
                                             partial = true;

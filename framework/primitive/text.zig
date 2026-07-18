@@ -248,12 +248,12 @@ pub const TextEngine = struct {
                 const line_w = self.measureLineWidth(line, size_px, letter_spacing);
                 line_x = if (text_align == .center) x + (max_width - line_w) / 2.0 else x + max_width - line_w;
             }
-            gpu_text.drawTextLine(line, line_x, y + line_h * @as(f32, @floatFromInt(li)), size_px, @as(f32, @floatFromInt(color.r)) / 255.0, @as(f32, @floatFromInt(color.g)) / 255.0, @as(f32, @floatFromInt(color.b)) / 255.0, @as(f32, @floatFromInt(color.a)) / 255.0);
+            gpu_text.drawTextLine(line, line_x, y + line_h * @as(f32, @floatFromInt(li)), size_px, @as(f32, color.r) / 255.0, @as(f32, color.g) / 255.0, @as(f32, color.b) / 255.0, @as(f32, color.a) / 255.0);
         }
     }
 
     pub fn drawText(_: *TextEngine, text: []const u8, x: f32, y: f32, size_px: u16, color: layout.Color) void {
-        gpu_text.drawTextLine(text, x, y, size_px, @as(f32, @floatFromInt(color.r)) / 255.0, @as(f32, @floatFromInt(color.g)) / 255.0, @as(f32, @floatFromInt(color.b)) / 255.0, @as(f32, @floatFromInt(color.a)) / 255.0);
+        gpu_text.drawTextLine(text, x, y, size_px, @as(f32, color.r) / 255.0, @as(f32, color.g) / 255.0, @as(f32, color.b) / 255.0, @as(f32, color.a) / 255.0);
     }
 
     /// Canonical wrap-and-paint that takes RGBA float colors and returns the
@@ -382,7 +382,7 @@ pub const TextEngine = struct {
                 const sentinel_len = inlineGlyphSentinelLen(text, i);
                 if (sentinel_len > 0) {
                     if (word_chars > 0) word_width += letter_spacing;
-                    word_width += @floatFromInt(size_px);
+                    word_width += size_px;
                     word_chars += 1;
                     i += sentinel_len;
                     continue;
@@ -414,7 +414,7 @@ pub const TextEngine = struct {
             // re-runs wordWrap inside it routinely produces 0.1–2px overflow
             // on words that visually fit fine; splitting those at char level
             // creates ugly single-char orphans (e.g. "enter" → "ente" + "r").
-            const CHAR_SPLIT_MIN_OVERFLOW: f32 = @as(f32, @floatFromInt(size_px)) * 0.6;
+            const CHAR_SPLIT_MIN_OVERFLOW = @as(f32, size_px) * 0.6;
             if (max_width > 0 and word_width > max_width + CHAR_SPLIT_MIN_OVERFLOW) {
                 // Single word too wide for the line — fall back to char-level
                 // wrap (mirrors framework/gpu/text.zig:drawSelectionRects so
@@ -433,7 +433,7 @@ pub const TextEngine = struct {
                     var ch_len: usize = 0;
                     const sl = inlineGlyphSentinelLen(text, j);
                     if (sl > 0) {
-                        ch_w = @floatFromInt(size_px);
+                        ch_w = size_px;
                         ch_len = sl;
                     } else {
                         const ch = decodeUtf8(text[j..]);
@@ -496,7 +496,7 @@ pub const TextEngine = struct {
             // Inline glyph sentinel — occupies fontSize×fontSize square
             const sentinel_len = inlineGlyphSentinelLen(text, i);
             if (sentinel_len > 0) {
-                width += @floatFromInt(size_px);
+                width += size_px;
                 char_count += 1;
                 last_overhang = 0;
                 i += sentinel_len;
@@ -565,9 +565,9 @@ pub const TextEngine = struct {
             .text_ptr = @intFromPtr(text.ptr),
             .text_len = text.len,
             .size_px = size_px,
-            .max_width_i = @intFromFloat(max_width * 10),
-            .letter_spacing_i = @intFromFloat(letter_spacing * 10),
-            .line_height_i = @intFromFloat(line_height_override * 10),
+            .max_width_i = @trunc(max_width * 10),
+            .letter_spacing_i = @trunc(letter_spacing * 10),
+            .line_height_i = @trunc(line_height_override * 10),
             .max_lines = max_lines,
             .bold = bold,
         };
@@ -620,7 +620,7 @@ pub const TextEngine = struct {
             while (i < text.len and text[i] != ' ' and text[i] != '\n') {
                 const sentinel_len = inlineGlyphSentinelLen(text, i);
                 if (sentinel_len > 0) {
-                    word_w += @floatFromInt(size_px);
+                    word_w += size_px;
                     char_count += 1;
                     i += sentinel_len;
                     continue;
@@ -657,7 +657,7 @@ pub const TextEngine = struct {
         while (i < text.len) {
             const sentinel_len = inlineGlyphSentinelLen(text, i);
             if (sentinel_len > 0) {
-                var adv: f32 = @floatFromInt(size_px);
+                var adv: f32 = size_px;
                 if (char_count > 0) adv += letter_spacing;
                 if (pen + adv > avail) break;
                 pen += adv;
@@ -721,7 +721,7 @@ pub const TextEngine = struct {
         // Determine which wrapped line was clicked
         var line_idx: usize = 0;
         if (effective_lh > 0) {
-            const li = @as(usize, @intFromFloat(@max(0, local_y) / effective_lh));
+            const li: usize = @trunc(@max(0, local_y) / effective_lh);
             line_idx = @min(li, if (wrap.count > 0) wrap.count - 1 else 0);
         }
 
@@ -750,7 +750,7 @@ pub const TextEngine = struct {
         while (i < line.len) {
             const sentinel_len = inlineGlyphSentinelLen(line, i);
             const adv: f32 = if (sentinel_len > 0)
-                @floatFromInt(size_px)
+                size_px
             else
                 self.cpAdvance(decodeUtf8(line[i..]).codepoint, size_px);
 
@@ -832,7 +832,7 @@ pub const TextEngine = struct {
         while (i < line.len and i < target) {
             const sentinel_len = inlineGlyphSentinelLen(line, i);
             if (sentinel_len > 0) {
-                pen_x += @as(f32, @floatFromInt(size_px)) + letter_spacing;
+                pen_x += size_px + letter_spacing;
                 i += sentinel_len;
                 continue;
             }

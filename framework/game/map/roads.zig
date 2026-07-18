@@ -329,12 +329,12 @@ fn rasterizeCenterline(arena: std.mem.Allocator, points: []const RoadPoint) ![]C
         const b = points[i + 1];
         const dir = segmentDir(a, b) orelse continue;
         const span = @max(@abs(b.gx - a.gx), @abs(b.gz - a.gz));
-        const steps: usize = @max(1, @as(usize, @intFromFloat(@ceil(span * 4))));
+        const steps: usize = @max(1, @as(usize, @ceil(span * 4)));
         var s: usize = 0;
         while (s <= steps) : (s += 1) {
             const t = @as(f32, @floatFromInt(s)) / @as(f32, @floatFromInt(@max(1, steps)));
-            const gx: i32 = @intFromFloat(@round(a.gx + (b.gx - a.gx) * t));
-            const gz: i32 = @intFromFloat(@round(a.gz + (b.gz - a.gz) * t));
+            const gx: i32 = @round(a.gx + (b.gx - a.gx) * t);
+            const gz: i32 = @round(a.gz + (b.gz - a.gz) * t);
             const key = cellKeyOf(gx, gz);
             const gop = try seen.getOrPut(arena, key);
             if (gop.found_existing) continue;
@@ -728,7 +728,7 @@ fn approachForSide(side: JunctionSide) ApproachDir {
 
 /// Stable junction id from its box center (ts:439).
 pub fn junctionKey(centerGx: f32, centerGz: f32) u64 {
-    return cellKeyOf(@intFromFloat(@round(centerGx)), @intFromFloat(@round(centerGz)));
+    return cellKeyOf(@round(centerGx), @round(centerGz));
 }
 
 /// Derive every junction box and its arms from the authored strokes (ts:445).

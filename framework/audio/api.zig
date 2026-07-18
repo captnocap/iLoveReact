@@ -237,12 +237,12 @@ fn secondsToMeasures(seconds: f64) f64 {
 
 fn measuresToSampleFrames(measures: f64, sample_rate: u32) f64 {
     const seconds = @max(0.0, measures) * (60.0 * BEATS_PER_MEASURE) / DEFAULT_TEMPO;
-    return seconds * @as(f64, @floatFromInt(sample_rate));
+    return seconds * sample_rate;
 }
 
 fn sampleDurationMeasures(sample_id: u32) f64 {
     const sample = sampleById(sample_id) orelse return 0;
-    return secondsToMeasures(@as(f64, @floatFromInt(sample.frame_count)) / @as(f64, @floatFromInt(sample.sample_rate)));
+    return secondsToMeasures(@as(f64, sample.frame_count) / sample.sample_rate);
 }
 
 fn resolveSoundInfo(sound: u32) SoundInfo {
@@ -486,16 +486,16 @@ fn decodeWavToMonoF32(io: std.Io, path: []const u8) ?SampleData {
             const offset = frame * bytes_per_frame + @as(usize, ch) * bytes_per_sample;
             const sample = switch (audio_format) {
                 1 => switch (bits_per_sample) {
-                    8 => (@as(f64, @floatFromInt(pcm[offset])) - 128.0) / 128.0,
-                    16 => @as(f64, @floatFromInt(std.mem.readInt(i16, pcm[offset .. offset + 2][0..2], .little))) / 32768.0,
+                    8 => (@as(f64, pcm[offset]) - 128.0) / 128.0,
+                    16 => @as(f64, std.mem.readInt(i16, pcm[offset .. offset + 2][0..2], .little)) / 32768.0,
                     24 => blk: {
                         var v: i32 = @as(i32, pcm[offset]) |
                             (@as(i32, pcm[offset + 1]) << 8) |
                             (@as(i32, pcm[offset + 2]) << 16);
                         if ((v & 0x800000) != 0) v |= ~@as(i32, 0xFFFFFF);
-                        break :blk @as(f64, @floatFromInt(v)) / 8388608.0;
+                        break :blk @as(f64, v) / 8388608.0;
                     },
-                    32 => @as(f64, @floatFromInt(std.mem.readInt(i32, pcm[offset .. offset + 4][0..4], .little))) / 2147483648.0,
+                    32 => @as(f64, std.mem.readInt(i32, pcm[offset .. offset + 4][0..4], .little)) / 2147483648.0,
                     else => return null,
                 },
                 3 => switch (bits_per_sample) {
@@ -506,7 +506,7 @@ fn decodeWavToMonoF32(io: std.Io, path: []const u8) ?SampleData {
             };
             sum += sample;
         }
-        out[frame] = @floatCast(@max(-1.0, @min(1.0, sum / @as(f64, @floatFromInt(channels)))));
+        out[frame] = @floatCast(@max(-1.0, @min(1.0, sum / channels)));
     }
 
     return .{
@@ -600,7 +600,7 @@ fn clearTrackRange(track_raw: i32, start_raw: f64, end_raw: f64, has_range: bool
         if (!p.active or p.track != track) continue;
         var remove = !has_range;
         if (has_range) {
-            const pattern_end = p.start_measure + (@as(f64, @floatFromInt(p.beat_len)) / @max(1.0, p.steps_per_measure));
+            const pattern_end = p.start_measure + (p.beat_len / @max(1.0, p.steps_per_measure));
             remove = rangesOverlap(p.start_measure, pattern_end, start, end);
         }
         if (remove) {
@@ -668,7 +668,7 @@ fn stepRandom01(track: i32, step: u32) f64 {
     x = (x ^ (x >> 16)) *% 2246822519;
     x = (x ^ (x >> 13)) *% 3266489917;
     x ^= x >> 16;
-    return @as(f64, @floatFromInt(x)) / 4294967295.0;
+    return @as(f64, x) / 4294967295.0;
 }
 
 fn resetTimelineCursors() void {
@@ -681,7 +681,7 @@ fn resetTimelineCursors() void {
             continue;
         }
         const elapsed = (measure - p.start_measure) * @max(1.0, p.steps_per_measure);
-        var next_step: u32 = @intFromFloat(@floor(elapsed));
+        var next_step: u32 = @floor(elapsed);
         if (next_step > p.beat_len) next_step = p.beat_len;
         p.next_step = next_step;
     }
@@ -739,7 +739,7 @@ fn applyMakeBeat(cmd: Command) void {
     var next_step: u32 = 0;
     if (state.g_engine.transport_measure > start_measure) {
         const elapsed = (state.g_engine.transport_measure - start_measure) * steps_per_measure;
-        if (elapsed > 0) next_step = @intFromFloat(@floor(elapsed));
+        if (elapsed > 0) next_step = @floor(elapsed);
         if (next_step > cmd.beat_len) next_step = cmd.beat_len;
     }
 
@@ -814,11 +814,11 @@ fn triggerBeatVoice(module_id: u32, sound: u32, slice_start: f64, duration: ?f64
             return;
         }
         const voice = resolveSoundVoice(sound);
-        if (m.param_count > 0) m.params[0].value = @floatFromInt(voice);
+        if (m.param_count > 0) m.params[0].value = voice;
         if (m.param_count > 2) {
             m.params[2].value = if (duration) |d| generatedSoundDecaySecondsForDuration(sound, d) else generatedSoundDecaySecondsForSound(sound);
         }
-        const note_freq = 440.0 * std.math.pow(f64, 2.0, (@as(f64, @floatFromInt(defaultMidiForVoice(voice))) - 69.0) / 12.0);
+        const note_freq = 440.0 * std.math.pow(f64, 2.0, (@as(f64, defaultMidiForVoice(voice)) - 69.0) / 12.0);
         m.base_freq = note_freq;
         const slice_measure = apiMeasureToTransport(info.slice_start + (apiMeasureToTransport(slice_start) / @max(0.01, info.stretch)));
         m.trigger_time = slice_measure * BEATS_PER_MEASURE * 60.0 / @max(1.0, state.g_engine.current_tempo);
@@ -846,12 +846,12 @@ fn triggerSampleSound(track_raw: i32, sound: u32, slice_start: f64, duration: ?f
     const stretch = @max(0.01, info.stretch);
     const effective_start = info.slice_start + ((sanitizeSlicePosition(slice_start) - 1.0) / stretch);
     const source_pos = measuresToSampleFrames(effective_start - 1.0, sample.sample_rate);
-    const source_end = @as(f64, @floatFromInt(sample.frame_count));
+    const source_end: f64 = sample.frame_count;
     if (source_pos >= source_end) return;
     const requested_duration = @max(0.0, duration orelse info.duration);
     const output_frames = @min(
         measuresToSampleFrames(requested_duration, SAMPLE_RATE),
-        @max(0.0, (source_end - source_pos) / (@as(f64, @floatFromInt(sample.sample_rate)) / @as(f64, @floatFromInt(SAMPLE_RATE)) / stretch)),
+        @max(0.0, (source_end - source_pos) / (@as(f64, sample.sample_rate) / SAMPLE_RATE / stretch)),
     );
     if (output_frames <= 0) return;
 
@@ -860,7 +860,7 @@ fn triggerSampleSound(track_raw: i32, sound: u32, slice_start: f64, duration: ?f
         .track = sanitizeTrack(track_raw),
         .sample_id = info.sample_id,
         .pos = source_pos,
-        .rate = @as(f64, @floatFromInt(sample.sample_rate)) / @as(f64, @floatFromInt(SAMPLE_RATE)) / stretch,
+        .rate = @as(f64, sample.sample_rate) / SAMPLE_RATE / stretch,
         .remaining_frames = output_frames,
         .gain = @floatCast(vel),
     };
@@ -891,7 +891,7 @@ pub fn mixSampleVoices(num_samples: u32) void {
                 v.active = false;
                 break;
             }
-            const idx: usize = @intFromFloat(@floor(v.pos));
+            const idx: usize = @floor(v.pos);
             const next_idx = if (idx + 1 < frame_count) idx + 1 else idx;
             const frac: f32 = @floatCast(v.pos - @floor(v.pos));
             const s0 = frames[idx];
@@ -937,7 +937,7 @@ pub fn scheduleBeatPatterns() void {
         while (p.next_step < p.beat_len) {
             const meta_idx: ?usize = if (p.next_step < MAX_PATTERN_STEP_META) @intCast(p.next_step) else null;
             const step_offset = if (meta_idx) |mi| @as(f64, @floatCast(p.offsets[mi])) else 0;
-            const step_measure = p.start_measure + ((@as(f64, @floatFromInt(p.next_step)) + step_offset) / p.steps_per_measure);
+            const step_measure = p.start_measure + ((p.next_step + step_offset) / p.steps_per_measure);
             if (measure + 0.000001 < step_measure) break;
 
             const ch = beat[p.next_step];

@@ -455,7 +455,7 @@ fn addCameraOcclusionHit(owner: f32, max_hits: usize, entry_t: f32, segment_len:
         g_camera_occlusion[2] = target_distance;
         g_camera_occlusion[3] = owner;
     }
-    var count: usize = @intFromFloat(g_camera_occlusion[1]);
+    var count: usize = @trunc(g_camera_occlusion[1]);
     var i: usize = 0;
     while (i < count) : (i += 1) {
         if (g_camera_occlusion[4 + i] == owner) return;
@@ -576,8 +576,8 @@ fn scanCameraOcclusion(
 /// dialect as `cameraOcclusion`.
 pub fn configureCameraOcclusion(input: []const f32) bool {
     if (input.len < 2) return false;
-    const rect_count: usize = @intFromFloat(@max(@as(f32, 0), input[0]));
-    const oriented_count: usize = @intFromFloat(@max(@as(f32, 0), input[1]));
+    const rect_count: usize = @trunc(@max(@as(f32, 0), input[0]));
+    const oriented_count: usize = @trunc(@max(@as(f32, 0), input[1]));
     if (rect_count > MAX_RECTS or oriented_count > MAX_ORIENTED) return false;
     const rect_base = 2;
     const oriented_base = rect_base + rect_count * CAMERA_OCCLUSION_RECT_FLOATS;
@@ -1032,7 +1032,7 @@ pub fn cameraOcclusionHeightfields(
     // terrain rises to within `margin` of the segment caps the eye there. Smooth
     // terrain won't slip between ~0.5 m samples; the count is clamped [8, 64].
     const steps_f = @max(@as(f32, 8), @min(@as(f32, 64), segment_len / 0.5));
-    const steps: usize = @intFromFloat(steps_f);
+    const steps: usize = @trunc(steps_f);
     var i: usize = 1;
     while (i <= steps) : (i += 1) {
         const s = @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(steps)); // 0 at pivot → 1 at eye
@@ -1087,9 +1087,9 @@ pub fn cameraOcclusion(input: []const f32) ?[]f32 {
     const tx = input[3];
     const ty = input[4];
     const tz = input[5];
-    const rect_count: usize = @intFromFloat(@max(@as(f32, 0), input[6]));
-    const oriented_count: usize = @intFromFloat(@max(@as(f32, 0), input[7]));
-    const requested_hits: usize = @intFromFloat(@max(@as(f32, 0), input[8]));
+    const rect_count: usize = @trunc(@max(@as(f32, 0), input[6]));
+    const oriented_count: usize = @trunc(@max(@as(f32, 0), input[7]));
+    const requested_hits: usize = @trunc(@max(@as(f32, 0), input[8]));
     const sweep_radius = if (std.math.isFinite(input[9])) @max(@as(f32, 0), input[9]) else 0;
     const max_hits = @min(MAX_CAMERA_OCCLUSION_HITS, if (requested_hits == 0) MAX_CAMERA_OCCLUSION_HITS else requested_hits);
     if (rect_count > MAX_RECTS or oriented_count > MAX_ORIENTED) return null;
@@ -1180,8 +1180,8 @@ fn rawHeight(hf: *const Heightfield, x: f32, z: f32) ?f32 {
     if (fx < 0 or fz < 0) return null;
     const fxi = @floor(fx);
     const fzi = @floor(fz);
-    const ix: usize = @intFromFloat(fxi);
-    const iz: usize = @intFromFloat(fzi);
+    const ix: usize = @trunc(fxi);
+    const iz: usize = @trunc(fzi);
     if (ix + 1 >= hf.cols or iz + 1 >= hf.rows) return null;
     const tx = fx - fxi;
     const tz = fz - fzi;
@@ -1556,9 +1556,9 @@ pub fn step(input: []const f32) ?[]f32 {
     var pvx = input[8];
     var pvy = input[9];
     var pvz = input[10];
-    const entity_count = @min(MAX_ENTITIES, @as(usize, @intFromFloat(@max(0, input[12]))));
-    const rect_count = @min(MAX_RECTS, @as(usize, @intFromFloat(@max(0, input[13]))));
-    const oriented_count = @min(MAX_ORIENTED, @as(usize, @intFromFloat(@max(0, input[24]))));
+    const entity_count = @min(MAX_ENTITIES, @as(usize, @trunc(@max(0, input[12]))));
+    const rect_count = @min(MAX_RECTS, @as(usize, @trunc(@max(0, input[13]))));
+    const oriented_count = @min(MAX_ORIENTED, @as(usize, @trunc(@max(0, input[24]))));
     const gravity = @max(0, input[14]);
     const jump_speed = @max(0, input[15]);
     const player_radius = @max(0.05, input[16]);

@@ -261,8 +261,8 @@ fn preprocessToTensor(
 ) !struct { tensor: []f32, fit_w: u32, fit_h: u32 } {
     const longest: f32 = @floatFromInt(@max(src_w, src_h));
     const scale: f32 = @as(f32, @floatFromInt(SAM_INPUT_SIZE)) / longest;
-    const fit_w: u32 = @intFromFloat(@as(f32, @floatFromInt(src_w)) * scale + 0.5);
-    const fit_h: u32 = @intFromFloat(@as(f32, @floatFromInt(src_h)) * scale + 0.5);
+    const fit_w: u32 = @trunc(@as(f32, @floatFromInt(src_w)) * scale + 0.5);
+    const fit_h: u32 = @trunc(@as(f32, @floatFromInt(src_h)) * scale + 0.5);
 
     // Output tensor: [1,3,1024,1024] float32 = 12MB. Pre-zeroed for padding.
     const tensor_len: usize = 3 * SAM_INPUT_SIZE * SAM_INPUT_SIZE;
@@ -287,7 +287,7 @@ fn preprocessToTensor(
     while (dy < fit_h) : (dy += 1) {
         const fy: f32 = (@as(f32, @floatFromInt(dy)) + 0.5) * sy_step - 0.5;
         const y0_f: f32 = @floor(fy);
-        const y0: i32 = @intFromFloat(y0_f);
+        const y0: i32 = @trunc(y0_f);
         const ty: f32 = fy - y0_f;
         const y0c: u32 = @intCast(std.math.clamp(y0, 0, @as(i32, @intCast(src_h)) - 1));
         const y1c: u32 = @intCast(std.math.clamp(y0 + 1, 0, @as(i32, @intCast(src_h)) - 1));
@@ -296,7 +296,7 @@ fn preprocessToTensor(
         while (dx < fit_w) : (dx += 1) {
             const fx: f32 = (@as(f32, @floatFromInt(dx)) + 0.5) * sx_step - 0.5;
             const x0_f: f32 = @floor(fx);
-            const x0: i32 = @intFromFloat(x0_f);
+            const x0: i32 = @trunc(x0_f);
             const tx: f32 = fx - x0_f;
             const x0c: u32 = @intCast(std.math.clamp(x0, 0, @as(i32, @intCast(src_w)) - 1));
             const x1c: u32 = @intCast(std.math.clamp(x0 + 1, 0, @as(i32, @intCast(src_w)) - 1));
@@ -308,10 +308,10 @@ fn preprocessToTensor(
             const p11 = (y1c * src_w + x1c) * 3;
 
             inline for (0..3) |chan| {
-                const v00: f32 = @floatFromInt(src_rgb[p00 + chan]);
-                const v01: f32 = @floatFromInt(src_rgb[p01 + chan]);
-                const v10: f32 = @floatFromInt(src_rgb[p10 + chan]);
-                const v11: f32 = @floatFromInt(src_rgb[p11 + chan]);
+                const v00: f32 = src_rgb[p00 + chan];
+                const v01: f32 = src_rgb[p01 + chan];
+                const v10: f32 = src_rgb[p10 + chan];
+                const v11: f32 = src_rgb[p11 + chan];
                 const top = v00 * (1 - tx) + v01 * tx;
                 const bot = v10 * (1 - tx) + v11 * tx;
                 const raw = top * (1 - ty) + bot * ty;
@@ -607,8 +607,8 @@ fn postprocessMask(
     const input_size_f: f32 = @floatFromInt(SAM_INPUT_SIZE);
     const crop_w_f: f32 = (@as(f32, @floatFromInt(fit_w)) / input_size_f) * dec_size_f;
     const crop_h_f: f32 = (@as(f32, @floatFromInt(fit_h)) / input_size_f) * dec_size_f;
-    const crop_w: u32 = @intFromFloat(@floor(crop_w_f));
-    const crop_h: u32 = @intFromFloat(@floor(crop_h_f));
+    const crop_w: u32 = @floor(crop_w_f);
+    const crop_h: u32 = @floor(crop_h_f);
     if (crop_w == 0 or crop_h == 0) return null;
 
     const out = alloc.alloc(u8, @as(usize, src_w) * @as(usize, src_h)) catch return null;
@@ -617,14 +617,14 @@ fn postprocessMask(
     var dy: u32 = 0;
     while (dy < src_h) : (dy += 1) {
         const sy_f: f32 = @as(f32, @floatFromInt(dy)) * sy_step;
-        var sy: u32 = @intFromFloat(sy_f);
+        var sy: u32 = @trunc(sy_f);
         if (sy >= crop_h) sy = crop_h - 1;
         const row_base: usize = sy * SAM_DEC_OUT_SIZE;
         const out_row_base: usize = dy * src_w;
         var dx: u32 = 0;
         while (dx < src_w) : (dx += 1) {
             const sx_f: f32 = @as(f32, @floatFromInt(dx)) * sx_step;
-            var sx: u32 = @intFromFloat(sx_f);
+            var sx: u32 = @trunc(sx_f);
             if (sx >= crop_w) sx = crop_w - 1;
             // Logit > threshold → foreground (mask convention: 1=in selection).
             // threshold=0 is SAM's natural cutoff; positive shrinks the

@@ -411,7 +411,7 @@ pub fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, in
         // Round the shape id to a slot; anything outside the known shapes (incl.
         // grass/bush, which are never skinned) falls back to the box slot.
         const sid = instanceShapeId(insts, row, stride);
-        var slot: usize = @intFromFloat(@max(0, @min(@as(f32, MATERIAL_SHAPE_SLOTS - 1), @round(sid))));
+        var slot: usize = @trunc(@max(0, @min(@as(f32, MATERIAL_SHAPE_SLOTS - 1), @round(sid))));
         if (slot >= MATERIAL_SHAPE_SLOTS) slot = 0;
         // WALLHIDE req_2053: a TEXTURED wall (skinned wall face) is still a wall —
         // stamp it so hide-walls collapses it too. The batch shape comes from the

@@ -241,7 +241,7 @@ pub fn jsonFloat(v: std.json.Value) ?f32 {
 pub fn jsonInt(v: std.json.Value) ?i64 {
     return switch (v) {
         .integer => |i| i,
-        .float => |f| @intFromFloat(f),
+        .float => |f| @trunc(f),
         else => null,
     };
 }
@@ -343,7 +343,7 @@ fn parseRgb(s: []const u8) ?Color {
         // CSS alpha is 0..1; rgb channels are 0..255.
         const scaled = if (idx == 3) v * 255.0 else v;
         const clamped = @max(@min(scaled, 255.0), 0.0);
-        parts[idx] = @intFromFloat(clamped);
+        parts[idx] = @trunc(clamped);
     }
     return Color.rgba(parts[0], parts[1], parts[2], parts[3]);
 }
@@ -885,7 +885,7 @@ pub fn applyStyleEntry(
         return true;
     }
     if (eq(u8, key, "tweenTranslateXCurve")) {
-        if (jsonFloat(val)) |f| node.style.tween_translate_x_curve = @intFromFloat(@max(0, @min(255, f)));
+        if (jsonFloat(val)) |f| node.style.tween_translate_x_curve = @trunc(@max(0, @min(255, f)));
         return true;
     }
     if (eq(u8, key, "tweenTranslateYFrom")) {
@@ -901,7 +901,7 @@ pub fn applyStyleEntry(
         return true;
     }
     if (eq(u8, key, "tweenTranslateYCurve")) {
-        if (jsonFloat(val)) |f| node.style.tween_translate_y_curve = @intFromFloat(@max(0, @min(255, f)));
+        if (jsonFloat(val)) |f| node.style.tween_translate_y_curve = @trunc(@max(0, @min(255, f)));
         return true;
     }
 

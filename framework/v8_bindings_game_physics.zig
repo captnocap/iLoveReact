@@ -251,7 +251,7 @@ fn hostCameraOcclusionHits(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
         @floatCast(argToF64(info, 4) orelse 0),
         @floatCast(argToF64(info, 5) orelse 0),
         @floatCast(argToF64(info, 6) orelse 0),
-        @intFromFloat(@max(0.0, argToF64(info, 7) orelse 0)),
+        @trunc(@max(0.0, argToF64(info, 7) orelse 0)),
     ) orelse {
         setReturnNull(info);
         return;
@@ -273,12 +273,12 @@ fn hostRegisterHeightfield(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     // mountain/hill/painted field passes 0s (axis-aligned); a rotated building's
     // floor passes its yaw + centre so the collider turns with the model.
     _ = game_physics.registerHeightfield(.{
-        .id = @intFromFloat(@max(0.0, id_f)),
+        .id = @trunc(@max(0.0, id_f)),
         .origin_x = @floatCast(argToF64(info, 1) orelse 0),
         .origin_z = @floatCast(argToF64(info, 2) orelse 0),
         .cell = @floatCast(argToF64(info, 3) orelse 1),
-        .cols = @intFromFloat(@max(0.0, argToF64(info, 4) orelse 0)),
-        .rows = @intFromFloat(@max(0.0, argToF64(info, 5) orelse 0)),
+        .cols = @trunc(@max(0.0, argToF64(info, 4) orelse 0)),
+        .rows = @trunc(@max(0.0, argToF64(info, 5) orelse 0)),
         .base_y = @floatCast(argToF64(info, 6) orelse 0),
         .walk_cos = @floatCast(argToF64(info, 7) orelse 1),
         .yaw = @floatCast(argToF64(info, 9) orelse 0),

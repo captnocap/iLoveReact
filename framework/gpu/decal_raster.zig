@@ -158,17 +158,17 @@ fn ensureFont() ?*TextEngine {
 
 /// src-over one pixel: color (r,g,b,a 0-255) at `coverage` (0-1) onto out[i..].
 fn blend(out: []u8, i: usize, color: [4]u8, coverage: f32) void {
-    const a = (@as(f32, @floatFromInt(color[3])) / 255.0) * std.math.clamp(coverage, 0, 1);
+    const a = (@as(f32, color[3]) / 255.0) * std.math.clamp(coverage, 0, 1);
     if (a <= 0) return;
     const inv = 1 - a;
-    const dr: f32 = @floatFromInt(out[i + 0]);
-    const dg: f32 = @floatFromInt(out[i + 1]);
-    const db: f32 = @floatFromInt(out[i + 2]);
-    const da: f32 = @as(f32, @floatFromInt(out[i + 3])) / 255.0;
-    out[i + 0] = @intFromFloat(std.math.clamp(@as(f32, @floatFromInt(color[0])) * a + dr * inv, 0, 255));
-    out[i + 1] = @intFromFloat(std.math.clamp(@as(f32, @floatFromInt(color[1])) * a + dg * inv, 0, 255));
-    out[i + 2] = @intFromFloat(std.math.clamp(@as(f32, @floatFromInt(color[2])) * a + db * inv, 0, 255));
-    out[i + 3] = @intFromFloat(std.math.clamp((a + da * inv) * 255.0, 0, 255));
+    const dr: f32 = out[i + 0];
+    const dg: f32 = out[i + 1];
+    const db: f32 = out[i + 2];
+    const da = @as(f32, out[i + 3]) / 255.0;
+    out[i + 0] = @trunc(std.math.clamp(color[0] * a + dr * inv, 0, 255));
+    out[i + 1] = @trunc(std.math.clamp(color[1] * a + dg * inv, 0, 255));
+    out[i + 2] = @trunc(std.math.clamp(color[2] * a + db * inv, 0, 255));
+    out[i + 3] = @trunc(std.math.clamp((a + da * inv) * 255.0, 0, 255));
 }
 
 /// Signed distance from point (px,py) to a rounded rect centered at
@@ -188,14 +188,14 @@ fn fillRect(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, fill: [
     const cy = y + h / 2;
     const hx = w / 2;
     const hy = h / 2;
-    const x0: i64 = @intFromFloat(@floor(x - 1));
-    const y0: i64 = @intFromFloat(@floor(y - 1));
-    const x1: i64 = @intFromFloat(@ceil(x + w + 1));
-    const y1: i64 = @intFromFloat(@ceil(y + h + 1));
+    const x0: i64 = @floor(x - 1);
+    const y0: i64 = @floor(y - 1);
+    const x1: i64 = @ceil(x + w + 1);
+    const y1: i64 = @ceil(y + h + 1);
     var fill_c = fill;
-    fill_c[3] = @intFromFloat(@as(f32, @floatFromInt(fill[3])) * std.math.clamp(opacity, 0, 1));
+    fill_c[3] = @trunc(fill[3] * std.math.clamp(opacity, 0, 1));
     var border_c = border;
-    border_c[3] = @intFromFloat(@as(f32, @floatFromInt(border[3])) * std.math.clamp(opacity, 0, 1));
+    border_c[3] = @trunc(border[3] * std.math.clamp(opacity, 0, 1));
     const has_border = border_w > 0 and border_c[3] > 0;
 
     var yy = @max(y0, 0);
@@ -233,7 +233,7 @@ fn drawTextNode(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, col
     if (c.FT_Set_Pixel_Sizes(face, 0, font_px) != 0) return;
 
     var color = color_in;
-    color[3] = @intFromFloat(@as(f32, @floatFromInt(color_in[3])) * std.math.clamp(opacity, 0, 1));
+    color[3] = @trunc(color_in[3] * std.math.clamp(opacity, 0, 1));
 
     const view = std.unicode.Utf8View.init(text) catch return;
 
@@ -271,8 +271,8 @@ fn drawTextNode(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, col
             const bw: u32 = @intCast(bitmap.width);
             const bh: u32 = @intCast(bitmap.rows);
             const pitch: usize = @intCast(bitmap.pitch);
-            const gx0: i64 = @as(i64, @intFromFloat(@floor(pen_x))) + @as(i64, glyph.*.bitmap_left);
-            const gy0: i64 = @as(i64, @intFromFloat(@floor(baseline))) - @as(i64, glyph.*.bitmap_top);
+            const gx0: i64 = @as(i64, @floor(pen_x)) + @as(i64, glyph.*.bitmap_left);
+            const gy0: i64 = @as(i64, @floor(baseline)) - @as(i64, glyph.*.bitmap_top);
             var row: u32 = 0;
             while (row < bh) : (row += 1) {
                 const oy = gy0 + row;
@@ -284,7 +284,7 @@ fn drawTextNode(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, col
                     const cov = bitmap.buffer[row * pitch + col];
                     if (cov == 0) continue;
                     const i: usize = (@as(usize, @intCast(oy)) * @as(usize, ow) + @as(usize, @intCast(ox))) * 4;
-                    blend(out, i, color, @as(f32, @floatFromInt(cov)) / 255.0);
+                    blend(out, i, color, @as(f32, cov) / 255.0);
                 }
             }
         }
@@ -321,10 +321,10 @@ fn drawImageNode(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, ra
     const cy = y + h / 2;
     const hx = w / 2;
     const hy = h / 2;
-    const x0: i64 = @intFromFloat(@floor(x - 1));
-    const y0: i64 = @intFromFloat(@floor(y - 1));
-    const x1: i64 = @intFromFloat(@ceil(x + w + 1));
-    const y1: i64 = @intFromFloat(@ceil(y + h + 1));
+    const x0: i64 = @floor(x - 1);
+    const y0: i64 = @floor(y - 1);
+    const x1: i64 = @ceil(x + w + 1);
+    const y1: i64 = @ceil(y + h + 1);
     const op = std.math.clamp(opacity, 0, 1);
 
     var yy = @max(y0, 0);
@@ -342,25 +342,25 @@ fn drawImageNode(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f32, ra
             const v = std.math.clamp((py - y) / h, 0, 1);
             const fx = u * @as(f32, @floatFromInt(sw - 1));
             const fy = v * @as(f32, @floatFromInt(sh - 1));
-            const ix0: usize = @intFromFloat(@floor(fx));
-            const iy0: usize = @intFromFloat(@floor(fy));
+            const ix0: usize = @floor(fx);
+            const iy0: usize = @floor(fy);
             const ix1 = @min(ix0 + 1, sw - 1);
             const iy1 = @min(iy0 + 1, sh - 1);
             const tx = fx - @floor(fx);
             const ty = fy - @floor(fy);
             var sample: [4]f32 = undefined;
             inline for (0..4) |k| {
-                const p00: f32 = @floatFromInt(pix[(iy0 * sw + ix0) * 4 + k]);
-                const p10: f32 = @floatFromInt(pix[(iy0 * sw + ix1) * 4 + k]);
-                const p01: f32 = @floatFromInt(pix[(iy1 * sw + ix0) * 4 + k]);
-                const p11: f32 = @floatFromInt(pix[(iy1 * sw + ix1) * 4 + k]);
+                const p00: f32 = pix[(iy0 * sw + ix0) * 4 + k];
+                const p10: f32 = pix[(iy0 * sw + ix1) * 4 + k];
+                const p01: f32 = pix[(iy1 * sw + ix0) * 4 + k];
+                const p11: f32 = pix[(iy1 * sw + ix1) * 4 + k];
                 sample[k] = (p00 * (1 - tx) + p10 * tx) * (1 - ty) + (p01 * (1 - tx) + p11 * tx) * ty;
             }
             const color = [4]u8{
-                @intFromFloat(std.math.clamp(sample[0], 0, 255)),
-                @intFromFloat(std.math.clamp(sample[1], 0, 255)),
-                @intFromFloat(std.math.clamp(sample[2], 0, 255)),
-                @intFromFloat(std.math.clamp(sample[3] * op, 0, 255)),
+                @trunc(std.math.clamp(sample[0], 0, 255)),
+                @trunc(std.math.clamp(sample[1], 0, 255)),
+                @trunc(std.math.clamp(sample[2], 0, 255)),
+                @trunc(std.math.clamp(sample[3] * op, 0, 255)),
             };
             const i: usize = (@as(usize, @intCast(yy)) * @as(usize, ow) + @as(usize, @intCast(xx))) * 4;
             blend(out, i, color, coverage);
@@ -380,19 +380,19 @@ fn drawMissingChecker(out: []u8, ow: u32, oh: u32, x: f32, y: f32, w: f32, h: f3
     const magenta = [4]u8{ 255, 0, 220, 255 };
     const black = [4]u8{ 0, 0, 0, 255 };
     const op = std.math.clamp(opacity, 0, 1);
-    const x0: i64 = @intFromFloat(@floor(x));
-    const y0: i64 = @intFromFloat(@floor(y));
-    const x1: i64 = @intFromFloat(@ceil(x + w));
-    const y1: i64 = @intFromFloat(@ceil(y + h));
+    const x0: i64 = @floor(x);
+    const y0: i64 = @floor(y);
+    const x1: i64 = @ceil(x + w);
+    const y1: i64 = @ceil(y + h);
     var yy = @max(y0, 0);
     while (yy < @min(y1, @as(i64, @intCast(oh)))) : (yy += 1) {
         var xx = @max(x0, 0);
         while (xx < @min(x1, @as(i64, @intCast(ow)))) : (xx += 1) {
-            const cxi: i64 = @intFromFloat(@floor((@as(f32, @floatFromInt(xx)) - x) / cell));
-            const cyi: i64 = @intFromFloat(@floor((@as(f32, @floatFromInt(yy)) - y) / cell));
+            const cxi: i64 = @floor((@as(f32, @floatFromInt(xx)) - x) / cell);
+            const cyi: i64 = @floor((@as(f32, @floatFromInt(yy)) - y) / cell);
             const checker = @mod(cxi + cyi, 2) == 0;
             var color = if (checker) magenta else black;
-            color[3] = @intFromFloat(std.math.clamp(@as(f32, @floatFromInt(color[3])) * op, 0, 255));
+            color[3] = @trunc(std.math.clamp(color[3] * op, 0, 255));
             const i: usize = (@as(usize, @intCast(yy)) * @as(usize, ow) + @as(usize, @intCast(xx))) * 4;
             blend(out, i, color, 1.0);
         }
@@ -409,7 +409,7 @@ const Seg = struct { ax: f32, ay: f32, bx: f32, by: f32 };
 
 fn withGlowAlpha(col: [4]u8, a: f32) [4]u8 {
     var o = col;
-    o[3] = @intFromFloat(std.math.clamp(@as(f32, @floatFromInt(col[3])) * std.math.clamp(a, 0, 1), 0, 255));
+    o[3] = @trunc(std.math.clamp(col[3] * std.math.clamp(a, 0, 1), 0, 255));
     return o;
 }
 
@@ -417,10 +417,10 @@ fn withGlowAlpha(col: [4]u8, a: f32) [4]u8 {
 /// over-blend slightly — which reads as a brighter neon joint, the look we want.
 fn strokeSeg(out: []u8, ow: u32, oh: u32, ax: f32, ay: f32, bx: f32, by: f32, half: f32, color: [4]u8) void {
     if (half <= 0 or color[3] == 0) return;
-    const x0: i64 = @intFromFloat(@floor(@min(ax, bx) - half - 1));
-    const y0: i64 = @intFromFloat(@floor(@min(ay, by) - half - 1));
-    const x1: i64 = @intFromFloat(@ceil(@max(ax, bx) + half + 1));
-    const y1: i64 = @intFromFloat(@ceil(@max(ay, by) + half + 1));
+    const x0: i64 = @floor(@min(ax, bx) - half - 1);
+    const y0: i64 = @floor(@min(ay, by) - half - 1);
+    const x1: i64 = @ceil(@max(ax, bx) + half + 1);
+    const y1: i64 = @ceil(@max(ay, by) + half + 1);
     const dx = bx - ax;
     const dy = by - ay;
     const len2 = dx * dx + dy * dy;
@@ -677,7 +677,7 @@ fn drawNeonPath(
     const c_glow_outer = withGlowAlpha(glow, ga * 0.4);
     const c_glow_inner = withGlowAlpha(glow, ga * 0.7);
     const c_core = withGlowAlpha(stroke, op);
-    const c_hot = [4]u8{ 255, 255, 255, @intFromFloat(std.math.clamp(0.85 * 255.0 * op, 0, 255)) };
+    const c_hot = [4]u8{ 255, 255, 255, @trunc(std.math.clamp(0.85 * 255.0 * op, 0, 255)) };
     // pass order: outer glow → inner glow → core → hot center (back to front)
     for (segs.items) |g| strokeSeg(out, ow, oh, g.ax, g.ay, g.bx, g.by, glow_outer_half, c_glow_outer);
     for (segs.items) |g| strokeSeg(out, ow, oh, g.ax, g.ay, g.bx, g.by, glow_inner_half, c_glow_inner);
@@ -704,8 +704,8 @@ pub fn rasterize(allocator: std.mem.Allocator, doc: []const u8, images: []const 
     // Uniform scale: rasterize at doc resolution, capped — glyph fidelity
     // needs uniform s (DecalSurface's min-axis font scaling, exact here).
     const s = @min(1.0, RASTER_MAX_SIDE / @as(f32, @floatFromInt(@max(doc_w, doc_h))));
-    const ow: u32 = @intFromFloat(@max(1, @round(@as(f32, @floatFromInt(doc_w)) * s)));
-    const oh: u32 = @intFromFloat(@max(1, @round(@as(f32, @floatFromInt(doc_h)) * s)));
+    const ow: u32 = @trunc(@max(1, @round(@as(f32, @floatFromInt(doc_w)) * s)));
+    const oh: u32 = @trunc(@max(1, @round(@as(f32, @floatFromInt(doc_h)) * s)));
 
     const out = allocator.alloc(u8, @as(usize, ow) * @as(usize, oh) * 4) catch return null;
     errdefer allocator.free(out);
@@ -744,7 +744,7 @@ pub fn rasterize(allocator: std.mem.Allocator, doc: []const u8, images: []const 
                 const len = r.u16v() orelse return fail(allocator, out);
                 if (len > MAX_TEXT_BYTES) return fail(allocator, out);
                 const text = r.slice(len) orelse return fail(allocator, out);
-                const px: u16 = @intFromFloat(std.math.clamp(@round(font_size * s), 1, 512));
+                const px: u16 = @trunc(std.math.clamp(@round(font_size * s), 1, 512));
                 drawTextNode(out, ow, oh, x, y, w, h, color, px, weight, align_b, letter_spacing, text, opacity);
             },
             NODE_IMAGE => {

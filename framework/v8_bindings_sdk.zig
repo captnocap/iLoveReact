@@ -165,7 +165,7 @@ fn parseHttpReq(parsed: *const std.json.Parsed(std.json.Value)) ?HttpReq {
     const timeout_ms: u32 = if (root.object.get("timeoutMs")) |tv|
         switch (tv) {
             .integer => |i| @intCast(@max(0, i)),
-            .float => |f| @intFromFloat(@max(0.0, f)),
+            .float => |f| @trunc(@max(0.0, f)),
             else => 30_000,
         }
     else
@@ -580,7 +580,7 @@ fn hostBrowseSetPort(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     const cx = callbackCtx(info);
     const port_f = jsF64Arg(info, 0) orelse return setReturnUndefined(info, cx.iso);
     if (port_f > 0 and port_f < 65536) {
-        browse_bridge.setPort(@intFromFloat(port_f));
+        browse_bridge.setPort(@trunc(port_f));
     }
     setReturnUndefined(info, cx.iso);
 }
@@ -641,8 +641,8 @@ fn hostPlayState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setBoolProp(cx.iso, cx.ctx, obj, "playing", s.playing);
     setNumProp(cx.iso, cx.ctx, obj, "time_us", @floatFromInt(s.time_us));
     setNumProp(cx.iso, cx.ctx, obj, "duration_us", @floatFromInt(s.duration_us));
-    setNumProp(cx.iso, cx.ctx, obj, "frame", @floatFromInt(s.frame));
-    setNumProp(cx.iso, cx.ctx, obj, "total_frames", @floatFromInt(s.total_frames));
+    setNumProp(cx.iso, cx.ctx, obj, "frame", s.frame);
+    setNumProp(cx.iso, cx.ctx, obj, "total_frames", s.total_frames);
     setNumProp(cx.iso, cx.ctx, obj, "speed", s.speed);
     setBoolProp(cx.iso, cx.ctx, obj, "at_end", s.at_end);
     setBoolProp(cx.iso, cx.ctx, obj, "at_start", s.at_start);
@@ -692,7 +692,7 @@ fn hostRecFrameCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     const rec = vterm_mod.getRecorder() orelse {
         return setReturnNum(info, callbackCtx(info).iso, 0);
     };
-    setReturnNum(info, callbackCtx(info).iso, @floatFromInt(rec.frame_count));
+    setReturnNum(info, callbackCtx(info).iso, rec.frame_count);
 }
 
 fn hostIpcConnect(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -773,8 +773,8 @@ fn hostIpcTreeNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     if (idx < 0) return setReturnUndefined(info, cx.iso);
     const node = debug_client.getTreeNode(@intCast(idx)) orelse return setReturnUndefined(info, cx.iso);
     const obj = v8.Object.init(cx.iso);
-    setNumProp(cx.iso, cx.ctx, obj, "index", @floatFromInt(node.index));
-    setNumProp(cx.iso, cx.ctx, obj, "depth", @floatFromInt(node.depth));
+    setNumProp(cx.iso, cx.ctx, obj, "index", node.index);
+    setNumProp(cx.iso, cx.ctx, obj, "depth", node.depth);
     setStrProp(cx.iso, cx.ctx, obj, "tag", node.tag[0..node.tag_len]);
     info.getReturnValue().set(obj.toValue());
 }
@@ -792,17 +792,17 @@ fn hostIpcPerf(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const p = debug_client.getPerf();
     if (!p.valid) return setReturnUndefined(info, cx.iso);
     const obj = v8.Object.init(cx.iso);
-    setNumProp(cx.iso, cx.ctx, obj, "fps", @floatFromInt(p.fps));
-    setNumProp(cx.iso, cx.ctx, obj, "layout_us", @floatFromInt(p.layout_us));
-    setNumProp(cx.iso, cx.ctx, obj, "paint_us", @floatFromInt(p.paint_us));
-    setNumProp(cx.iso, cx.ctx, obj, "gpu_us", @floatFromInt(p.gpu_us));
-    setNumProp(cx.iso, cx.ctx, obj, "frame_total_us", @floatFromInt(p.frame_total_us));
-    setNumProp(cx.iso, cx.ctx, obj, "rects", @floatFromInt(p.rects));
-    setNumProp(cx.iso, cx.ctx, obj, "glyphs", @floatFromInt(p.glyphs));
-    setNumProp(cx.iso, cx.ctx, obj, "total_nodes", @floatFromInt(p.total_nodes));
-    setNumProp(cx.iso, cx.ctx, obj, "visible_nodes", @floatFromInt(p.visible_nodes));
-    setNumProp(cx.iso, cx.ctx, obj, "window_w", @floatFromInt(p.window_w));
-    setNumProp(cx.iso, cx.ctx, obj, "window_h", @floatFromInt(p.window_h));
+    setNumProp(cx.iso, cx.ctx, obj, "fps", p.fps);
+    setNumProp(cx.iso, cx.ctx, obj, "layout_us", p.layout_us);
+    setNumProp(cx.iso, cx.ctx, obj, "paint_us", p.paint_us);
+    setNumProp(cx.iso, cx.ctx, obj, "gpu_us", p.gpu_us);
+    setNumProp(cx.iso, cx.ctx, obj, "frame_total_us", p.frame_total_us);
+    setNumProp(cx.iso, cx.ctx, obj, "rects", p.rects);
+    setNumProp(cx.iso, cx.ctx, obj, "glyphs", p.glyphs);
+    setNumProp(cx.iso, cx.ctx, obj, "total_nodes", p.total_nodes);
+    setNumProp(cx.iso, cx.ctx, obj, "visible_nodes", p.visible_nodes);
+    setNumProp(cx.iso, cx.ctx, obj, "window_w", p.window_w);
+    setNumProp(cx.iso, cx.ctx, obj, "window_h", p.window_h);
     info.getReturnValue().set(obj.toValue());
 }
 
@@ -817,17 +817,17 @@ fn hostSemState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const cx = callbackCtx(info);
     const s = semantic.getState();
     const obj = v8.Object.init(cx.iso);
-    setNumProp(cx.iso, cx.ctx, obj, "mode", @floatFromInt(@intFromEnum(s.mode)));
+    setNumProp(cx.iso, cx.ctx, obj, "mode", @intFromEnum(s.mode));
     setBoolProp(cx.iso, cx.ctx, obj, "streaming", s.streaming);
-    setNumProp(cx.iso, cx.ctx, obj, "streaming_kind", @floatFromInt(@intFromEnum(s.streaming_kind)));
+    setNumProp(cx.iso, cx.ctx, obj, "streaming_kind", @intFromEnum(s.streaming_kind));
     setBoolProp(cx.iso, cx.ctx, obj, "awaiting_input", s.awaiting_input);
     setBoolProp(cx.iso, cx.ctx, obj, "awaiting_decision", s.awaiting_decision);
     setBoolProp(cx.iso, cx.ctx, obj, "modal_open", s.modal_open);
     setBoolProp(cx.iso, cx.ctx, obj, "interrupt_pending", s.interrupt_pending);
-    setNumProp(cx.iso, cx.ctx, obj, "turn_count", @floatFromInt(s.turn_count));
-    setNumProp(cx.iso, cx.ctx, obj, "current_turn_id", @floatFromInt(s.current_turn_id));
-    setNumProp(cx.iso, cx.ctx, obj, "node_count", @floatFromInt(s.node_count));
-    setNumProp(cx.iso, cx.ctx, obj, "group_count", @floatFromInt(s.group_count));
+    setNumProp(cx.iso, cx.ctx, obj, "turn_count", s.turn_count);
+    setNumProp(cx.iso, cx.ctx, obj, "current_turn_id", s.current_turn_id);
+    setNumProp(cx.iso, cx.ctx, obj, "node_count", s.node_count);
+    setNumProp(cx.iso, cx.ctx, obj, "group_count", s.group_count);
     setStrProp(cx.iso, cx.ctx, obj, "mode_name", @tagName(s.mode));
     setStrProp(cx.iso, cx.ctx, obj, "streaming_kind_name", @tagName(s.streaming_kind));
     info.getReturnValue().set(obj.toValue());
@@ -835,7 +835,7 @@ fn hostSemState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostSemNodeCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNum(info, callbackCtx(info).iso, @floatFromInt(semantic.nodeCount()));
+    setReturnNum(info, callbackCtx(info).iso, semantic.nodeCount());
 }
 
 fn hostSemNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -850,12 +850,12 @@ fn hostSemNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setStrProp(cx.iso, cx.ctx, obj, "role", @tagName(node.role));
     setStrProp(cx.iso, cx.ctx, obj, "lane", @tagName(node.lane));
     setStrProp(cx.iso, cx.ctx, obj, "scope", @tagName(node.scope));
-    setNumProp(cx.iso, cx.ctx, obj, "turn_id", @floatFromInt(node.turn_id));
-    setNumProp(cx.iso, cx.ctx, obj, "group_id", @floatFromInt(node.group_id));
-    setNumProp(cx.iso, cx.ctx, obj, "row_start", @floatFromInt(node.row_start));
-    setNumProp(cx.iso, cx.ctx, obj, "row_end", @floatFromInt(node.row_end));
-    setNumProp(cx.iso, cx.ctx, obj, "row_count", @floatFromInt(node.row_count));
-    setNumProp(cx.iso, cx.ctx, obj, "children_count", @floatFromInt(node.children_count));
+    setNumProp(cx.iso, cx.ctx, obj, "turn_id", node.turn_id);
+    setNumProp(cx.iso, cx.ctx, obj, "group_id", node.group_id);
+    setNumProp(cx.iso, cx.ctx, obj, "row_start", node.row_start);
+    setNumProp(cx.iso, cx.ctx, obj, "row_end", node.row_end);
+    setNumProp(cx.iso, cx.ctx, obj, "row_count", node.row_count);
+    setNumProp(cx.iso, cx.ctx, obj, "children_count", node.children_count);
     setBoolProp(cx.iso, cx.ctx, obj, "active", node.active);
     if (node.row_count > 0) {
         const text = vterm_mod.getRowText(node.row_start);
@@ -866,7 +866,7 @@ fn hostSemNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostSemCacheCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNum(info, callbackCtx(info).iso, @floatFromInt(semantic.cacheCount()));
+    setReturnNum(info, callbackCtx(info).iso, semantic.cacheCount());
 }
 
 fn hostSemCacheEntry(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -877,10 +877,10 @@ fn hostSemCacheEntry(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     if (idx < 0) return setReturnUndefined(info, cx.iso);
     const entry = semantic.getCacheEntry(@intCast(idx)) orelse return setReturnUndefined(info, cx.iso);
     const obj = v8.Object.init(cx.iso);
-    setNumProp(cx.iso, cx.ctx, obj, "row", @floatFromInt(entry.row));
+    setNumProp(cx.iso, cx.ctx, obj, "row", entry.row);
     setStrProp(cx.iso, cx.ctx, obj, "kind", @tagName(entry.kind));
-    setNumProp(cx.iso, cx.ctx, obj, "turn_id", @floatFromInt(entry.turn_id));
-    setNumProp(cx.iso, cx.ctx, obj, "group_id", @floatFromInt(entry.group_id));
+    setNumProp(cx.iso, cx.ctx, obj, "turn_id", entry.turn_id);
+    setNumProp(cx.iso, cx.ctx, obj, "group_id", entry.group_id);
     setStrProp(cx.iso, cx.ctx, obj, "text", vterm_mod.getRowText(entry.row));
     info.getReturnValue().set(obj.toValue());
 }
@@ -931,7 +931,7 @@ fn hostSemHasDiff(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostSemFrame(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNum(info, callbackCtx(info).iso, @floatFromInt(semantic.getFrame()));
+    setReturnNum(info, callbackCtx(info).iso, semantic.getFrame());
 }
 
 fn hostSemExport(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -943,10 +943,10 @@ fn hostSemExport(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     while (i < count) : (i += 1) {
         const entry = semantic.getCacheEntry(i) orelse continue;
         const obj = v8.Object.init(cx.iso);
-        setNumProp(cx.iso, cx.ctx, obj, "row", @floatFromInt(entry.row));
+        setNumProp(cx.iso, cx.ctx, obj, "row", entry.row);
         setStrProp(cx.iso, cx.ctx, obj, "kind", @tagName(entry.kind));
-        setNumProp(cx.iso, cx.ctx, obj, "turn_id", @floatFromInt(entry.turn_id));
-        setNumProp(cx.iso, cx.ctx, obj, "group_id", @floatFromInt(entry.group_id));
+        setNumProp(cx.iso, cx.ctx, obj, "turn_id", entry.turn_id);
+        setNumProp(cx.iso, cx.ctx, obj, "group_id", entry.group_id);
         setStrProp(cx.iso, cx.ctx, obj, "text", vterm_mod.getRowText(entry.row));
         const tc = classifier.tokenColor(entry.kind);
         var hex_buf: [8]u8 = undefined;
@@ -969,7 +969,7 @@ fn hostSemSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         .json => "json",
     };
     setStrProp(cx.iso, cx.ctx, root, "classifier", cls_name);
-    setNumProp(cx.iso, cx.ctx, root, "frame", @floatFromInt(semantic.getFrame()));
+    setNumProp(cx.iso, cx.ctx, root, "frame", semantic.getFrame());
 
     const s = semantic.getState();
     const st = v8.Object.init(cx.iso);
@@ -980,10 +980,10 @@ fn hostSemSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     setBoolProp(cx.iso, cx.ctx, st, "awaiting_decision", s.awaiting_decision);
     setBoolProp(cx.iso, cx.ctx, st, "modal_open", s.modal_open);
     setBoolProp(cx.iso, cx.ctx, st, "interrupt_pending", s.interrupt_pending);
-    setNumProp(cx.iso, cx.ctx, st, "turn_count", @floatFromInt(s.turn_count));
-    setNumProp(cx.iso, cx.ctx, st, "current_turn_id", @floatFromInt(s.current_turn_id));
-    setNumProp(cx.iso, cx.ctx, st, "node_count", @floatFromInt(s.node_count));
-    setNumProp(cx.iso, cx.ctx, st, "group_count", @floatFromInt(s.group_count));
+    setNumProp(cx.iso, cx.ctx, st, "turn_count", s.turn_count);
+    setNumProp(cx.iso, cx.ctx, st, "current_turn_id", s.current_turn_id);
+    setNumProp(cx.iso, cx.ctx, st, "node_count", s.node_count);
+    setNumProp(cx.iso, cx.ctx, st, "group_count", s.group_count);
     _ = root.setValue(cx.ctx, v8.String.initUtf8(cx.iso, "state"), st.toValue());
 
     const count = semantic.cacheCount();
@@ -992,12 +992,12 @@ fn hostSemSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     while (i < count) : (i += 1) {
         const entry = semantic.getCacheEntry(i) orelse continue;
         const obj = v8.Object.init(cx.iso);
-        setNumProp(cx.iso, cx.ctx, obj, "row", @floatFromInt(entry.row));
+        setNumProp(cx.iso, cx.ctx, obj, "row", entry.row);
         setStrProp(cx.iso, cx.ctx, obj, "kind", @tagName(entry.kind));
         setStrProp(cx.iso, cx.ctx, obj, "role", @tagName(semantic.roleOf(entry.kind)));
         setStrProp(cx.iso, cx.ctx, obj, "lane", @tagName(semantic.laneOf(entry.kind)));
-        setNumProp(cx.iso, cx.ctx, obj, "turn_id", @floatFromInt(entry.turn_id));
-        setNumProp(cx.iso, cx.ctx, obj, "group_id", @floatFromInt(entry.group_id));
+        setNumProp(cx.iso, cx.ctx, obj, "turn_id", entry.turn_id);
+        setNumProp(cx.iso, cx.ctx, obj, "group_id", entry.group_id);
         setStrProp(cx.iso, cx.ctx, obj, "text", vterm_mod.getRowText(entry.row));
         const tc = classifier.tokenColor(entry.kind);
         var hb: [8]u8 = undefined;
@@ -1008,8 +1008,8 @@ fn hostSemSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     _ = root.setValue(cx.ctx, v8.String.initUtf8(cx.iso, "rows"), rows.castTo(v8.Object).toValue());
 
     const g = v8.Object.init(cx.iso);
-    setNumProp(cx.iso, cx.ctx, g, "node_count", @floatFromInt(semantic.nodeCount()));
-    setNumProp(cx.iso, cx.ctx, g, "turn_count", @floatFromInt(s.turn_count));
+    setNumProp(cx.iso, cx.ctx, g, "node_count", semantic.nodeCount());
+    setNumProp(cx.iso, cx.ctx, g, "turn_count", s.turn_count);
     var tree_buf: [4096]u8 = undefined;
     setStrProp(cx.iso, cx.ctx, g, "tree", semantic.formatTree(&tree_buf));
     _ = root.setValue(cx.ctx, v8.String.initUtf8(cx.iso, "graph"), g.toValue());
@@ -1031,7 +1031,7 @@ fn hostSemSetRowToken(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 
 fn hostSemVtermRows(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNum(info, callbackCtx(info).iso, @floatFromInt(vterm_mod.getRows()));
+    setReturnNum(info, callbackCtx(info).iso, vterm_mod.getRows());
 }
 
 fn hostSemBuildGraph(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

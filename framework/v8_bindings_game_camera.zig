@@ -55,7 +55,7 @@ fn argToStringAlloc(info: v8.FunctionCallbackInfo, idx: u32) ?[]u8 {
 
 fn argToNodeId(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     const node_f = argToF64(info, idx) orelse return null;
-    return @intFromFloat(@max(0.0, node_f));
+    return @trunc(@max(0.0, node_f));
 }
 
 fn setReturnNull(info: v8.FunctionCallbackInfo) void {
@@ -139,7 +139,7 @@ fn hostBindFirst(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         if (node.scene3d_camera) {
             game_camera.bindNode(entry.key_ptr.*);
             game_camera.probeHostBind("__game_camera_bind_first", entry.key_ptr.*, true);
-            setReturnF64(info, @floatFromInt(entry.key_ptr.*));
+            setReturnF64(info, entry.key_ptr.*);
             return;
         }
     }
@@ -392,7 +392,7 @@ fn hostSetSmoothingNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
 
 fn hostActiveNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnF64(info, @floatFromInt(game_camera.activeNodeId()));
+    setReturnF64(info, game_camera.activeNodeId());
 }
 
 fn hostProbeSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

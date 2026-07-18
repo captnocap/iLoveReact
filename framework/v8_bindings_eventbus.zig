@@ -37,7 +37,7 @@ fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
 fn argToU32(info: v8.FunctionCallbackInfo, idx: u32) ?u32 {
     const f = argToF64(info, idx) orelse return null;
     if (f < 0) return null;
-    return @intFromFloat(f);
+    return @trunc(f);
 }
 
 fn setReturnNumber(info: v8.FunctionCallbackInfo, value: f64) void {
@@ -86,7 +86,7 @@ fn hostBusEmitChild(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     const source = argToStringAlloc(info, 1) orelse return setReturnNumber(info, 0);
     defer alloc.free(source);
     const parent_f = argToF64(info, 2) orelse return setReturnNumber(info, 0);
-    const parent_id: ?u64 = if (parent_f <= 0) null else @intFromFloat(parent_f);
+    const parent_id: ?u64 = if (parent_f <= 0) null else @trunc(parent_f);
     const payload = argToStringAlloc(info, 3) orelse {
         const id = event_bus.emit(event_type, source, parent_id, "{}");
         return setReturnNumber(info, @floatFromInt(id));

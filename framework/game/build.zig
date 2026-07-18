@@ -516,7 +516,7 @@ fn normalizeYaw(yawDegrees: f32) f32 {
 /// yaw snapped onto a quarter turn, or null when genuinely free-angled (placed.ts).
 fn quarterTurns(yawDegrees: f32) ?i32 {
     const yaw = normalizeYaw(yawDegrees);
-    const quarter = @mod(@as(i32, @intFromFloat(@round(yaw / 90.0))), 4);
+    const quarter = @mod(@as(i32, @round(yaw / 90.0)), 4);
     if (@abs(yaw - @as(f32, @floatFromInt(quarter)) * 90.0) < 1e-6 or @abs(yaw - 360.0) < 1e-6) return quarter;
     return null;
 }

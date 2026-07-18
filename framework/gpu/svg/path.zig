@@ -158,7 +158,7 @@ fn flattenArc(sp: *Subpath, x1: f32, y1: f32, rx_in: f32, ry_in: f32, x_rot_deg:
     if (sweep and dtheta < 0) dtheta += 2.0 * math.pi;
 
     // Step 5: split into ≤90° segments, each approximated by cubic bezier
-    const n_segs: u32 = @intFromFloat(@ceil(@abs(dtheta) / (math.pi / 2.0)));
+    const n_segs: u32 = @ceil(@abs(dtheta) / (math.pi / 2.0));
     const seg_angle = dtheta / @as(f32, @floatFromInt(n_segs));
     const alpha = 4.0 * @tan(seg_angle / 4.0) / 3.0;
 
@@ -235,7 +235,7 @@ fn recordArcCubics(path: *Path, x1: f32, y1: f32, rx_in: f32, ry_in: f32, x_rot_
     if (!sweep and dtheta > 0) dtheta -= 2.0 * math.pi;
     if (sweep and dtheta < 0) dtheta += 2.0 * math.pi;
 
-    const n_segs: u32 = @intFromFloat(@ceil(@abs(dtheta) / (math.pi / 2.0)));
+    const n_segs: u32 = @ceil(@abs(dtheta) / (math.pi / 2.0));
     const seg_angle = dtheta / @as(f32, @floatFromInt(n_segs));
     const alpha = 4.0 * @tan(seg_angle / 4.0) / 3.0;
 
@@ -920,17 +920,17 @@ fn sampleEffect(
     // Map graph-space → pixel coords
     const u = (gx - bb_x) / bb_w;
     const v = (gy - bb_y) / bb_h;
-    const px_i: i32 = @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(pw)) - 1, u * @as(f32, @floatFromInt(pw)))));
-    const py_i: i32 = @intFromFloat(@max(0, @min(@as(f32, @floatFromInt(ph)) - 1, v * @as(f32, @floatFromInt(ph)))));
+    const px_i: i32 = @trunc(@max(0, @min(@as(f32, @floatFromInt(pw)) - 1, u * @as(f32, @floatFromInt(pw)))));
+    const py_i: i32 = @trunc(@max(0, @min(@as(f32, @floatFromInt(ph)) - 1, v * @as(f32, @floatFromInt(ph)))));
     const px: u32 = @intCast(px_i);
     const py: u32 = @intCast(py_i);
     const idx: usize = @as(usize, py) * @as(usize, pw) * 4 + @as(usize, px) * 4;
     // Effect pixel buffer is RGBA8 in CPU memory.
     return .{
-        @as(f32, @floatFromInt(pixels[idx])) / 255.0,
-        @as(f32, @floatFromInt(pixels[idx + 1])) / 255.0,
-        @as(f32, @floatFromInt(pixels[idx + 2])) / 255.0,
-        @as(f32, @floatFromInt(pixels[idx + 3])) / 255.0,
+        @as(f32, pixels[idx]) / 255.0,
+        @as(f32, pixels[idx + 1]) / 255.0,
+        @as(f32, pixels[idx + 2]) / 255.0,
+        @as(f32, pixels[idx + 3]) / 255.0,
     };
 }
 

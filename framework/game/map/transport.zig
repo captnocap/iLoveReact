@@ -330,7 +330,7 @@ pub fn curvePoints(points: []const Point, radius_m: f32, out: []Point) usize {
         const p2 = Point{ .gx = vertex.gx + u2x * r, .gz = vertex.gz + u2z * r };
         const p1_elevation = vertex.elevation_m - (vertex.elevation_m - a.elevation_m) * (r / d1);
         const p2_elevation = vertex.elevation_m + (b.elevation_m - vertex.elevation_m) * (r / d2);
-        const wanted: usize = @intFromFloat(@ceil(r * TUNING.curve_samples_per_meter));
+        const wanted: usize = @ceil(r * TUNING.curve_samples_per_meter);
         const samples = std.math.clamp(wanted, 4, TUNING.max_curve_samples_per_corner);
         var sample: usize = 0;
         while (sample <= samples and count < out.len) : (sample += 1) {

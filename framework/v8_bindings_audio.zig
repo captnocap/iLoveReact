@@ -483,7 +483,7 @@ fn hostAudioCreateAudioStretch(info_c: ?*const v8.c.FunctionCallbackInfo) callco
     };
     defer std.heap.c_allocator.free(sound_spec);
     const stretch_factor = argToF64(info, 1) orelse 1.0;
-    setReturnNumber(info, @floatFromInt(api.createAudioStretch(sound_spec, stretch_factor)));
+    setReturnNumber(info, api.createAudioStretch(sound_spec, stretch_factor));
 }
 
 fn hostAudioCreateAudioSlice(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -495,7 +495,7 @@ fn hostAudioCreateAudioSlice(info_c: ?*const v8.c.FunctionCallbackInfo) callconv
     defer std.heap.c_allocator.free(sound_spec);
     const slice_start = argToF64(info, 1) orelse 1.0;
     const slice_end = argToF64(info, 2) orelse slice_start;
-    setReturnNumber(info, @floatFromInt(api.createAudioSlice(sound_spec, slice_start, slice_end)));
+    setReturnNumber(info, api.createAudioSlice(sound_spec, slice_start, slice_end));
 }
 
 fn hostAudioLoadSound(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -506,7 +506,7 @@ fn hostAudioLoadSound(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     };
     defer std.heap.c_allocator.free(path);
     const io = v8_runtime.hostContext(info.getIsolate()).io;
-    setReturnNumber(info, @floatFromInt(api.loadSound(io, path)));
+    setReturnNumber(info, api.loadSound(io, path));
 }
 
 fn hostAudioLoadSample(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -604,12 +604,12 @@ fn hostAudioResume(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
 
 fn hostAudioGetModuleCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNumber(info, @floatFromInt(api.getModuleCount()));
+    setReturnNumber(info, api.getModuleCount());
 }
 
 fn hostAudioGetConnectionCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNumber(info, @floatFromInt(api.getConnectionCount()));
+    setReturnNumber(info, api.getConnectionCount());
 }
 
 fn hostAudioGetCallbackCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -624,12 +624,12 @@ fn hostAudioGetCallbackUs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
 
 fn hostAudioGetSampleRate(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNumber(info, @floatFromInt(types.SAMPLE_RATE));
+    setReturnNumber(info, types.SAMPLE_RATE);
 }
 
 fn hostAudioGetBufferSize(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNumber(info, @floatFromInt(types.BUFFER_SIZE));
+    setReturnNumber(info, types.BUFFER_SIZE);
 }
 
 fn hostAudioGetPeakLevel(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -664,7 +664,7 @@ fn hostAudioGetParamCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
         setReturnNumber(info, 0);
         return;
     }
-    setReturnNumber(info, @floatFromInt(api.getParamCount(@intCast(id))));
+    setReturnNumber(info, api.getParamCount(@intCast(id)));
 }
 
 fn hostAudioGetPortCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -677,7 +677,7 @@ fn hostAudioGetPortCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
         setReturnNumber(info, 0);
         return;
     }
-    setReturnNumber(info, @floatFromInt(api.getPortCount(@intCast(id))));
+    setReturnNumber(info, api.getPortCount(@intCast(id)));
 }
 
 fn hostAudioGetModuleType(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -690,7 +690,7 @@ fn hostAudioGetModuleType(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
         setReturnNumber(info, -1);
         return;
     }
-    setReturnNumber(info, @floatFromInt(api.getModuleType(@intCast(id))));
+    setReturnNumber(info, api.getModuleType(@intCast(id)));
 }
 
 fn hostAudioGetParamMin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

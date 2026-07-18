@@ -13,7 +13,7 @@ cd "$repo_root" || exit 1
 fails=0
 for s in $(
   grep -oE '^\s*test-[a-z0-9-]+' zig-out/steps-baseline.txt | tr -d ' ' | grep -v '^test-luajit-runtime$'
-  printf '%s\n' test-assistant-io test-pty-io
+  printf '%s\n' test-assistant-io test-pty-io test-zig016-idioms
 ); do
   out=$("$zig_bin" build "$s" 2>&1)
   if [ $? -eq 0 ]; then

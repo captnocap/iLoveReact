@@ -1326,10 +1326,10 @@ fn rasterizePolygonCpu(e: *Paintable, op: Op) void {
         if (y < yMinF) yMinF = y;
         if (y > yMaxF) yMaxF = y;
     }
-    const xMin: i32 = @max(0, @as(i32, @intFromFloat(@floor(xMinF))));
-    const xMax: i32 = @min(@as(i32, @intCast(w)) - 1, @as(i32, @intFromFloat(@ceil(xMaxF))));
-    const yMin: i32 = @max(0, @as(i32, @intFromFloat(@floor(yMinF))));
-    const yMax: i32 = @min(@as(i32, @intCast(h)) - 1, @as(i32, @intFromFloat(@ceil(yMaxF))));
+    const xMin: i32 = @max(0, @as(i32, @floor(xMinF)));
+    const xMax: i32 = @min(@as(i32, @intCast(w)) - 1, @as(i32, @ceil(xMaxF)));
+    const yMin: i32 = @max(0, @as(i32, @floor(yMinF)));
+    const yMax: i32 = @min(@as(i32, @intCast(h)) - 1, @as(i32, @ceil(yMaxF)));
     if (xMax < xMin or yMax < yMin) return;
 
     // We need the EXISTING pixels for the bbox region first so we can write
@@ -1374,13 +1374,13 @@ fn rasterizePolygonCpu(e: *Paintable, op: Op) void {
         std.mem.sort(f32, inters[0..nInters], {}, std.sort.asc(f32));
         var k: usize = 0;
         while (k + 1 < nInters) : (k += 2) {
-            const x0i: i32 = @max(xMin, @as(i32, @intFromFloat(@floor(inters[k]))));
-            const x1i: i32 = @min(xMax, @as(i32, @intFromFloat(@ceil(inters[k + 1]))));
+            const x0i: i32 = @max(xMin, @as(i32, @floor(inters[k])));
+            const x1i: i32 = @min(xMax, @as(i32, @ceil(inters[k + 1])));
             const row_start: usize = @as(usize, @intCast(y - yMin)) * bw;
             var xx: i32 = x0i;
             while (xx <= x1i) : (xx += 1) {
                 const bx: usize = @as(usize, @intCast(xx - xMin));
-                const px_val: u8 = @intFromFloat(std.math.clamp(op.value * 255.0, 0.0, 255.0));
+                const px_val: u8 = @trunc(std.math.clamp(op.value * 255.0, 0.0, 255.0));
                 buf[row_start + bx] = px_val;
             }
         }

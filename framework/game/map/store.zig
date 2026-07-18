@@ -78,7 +78,7 @@ fn rleWriteCells(sink: *Sink, cells: []const i16) void {
 
 fn quantize(z: f32) i16 {
     const q = @round(z * HEIGHT_Q);
-    return @intFromFloat(@max(-32768, @min(32767, q)));
+    return @trunc(@max(-32768, @min(32767, q)));
 }
 
 fn rleWriteQuantized(sink: *Sink, samples: []const f32, scratch: []i16) void {
@@ -100,7 +100,7 @@ const Source = struct {
             return 0;
         }
         const v = std.mem.readInt(
-            std.meta.Int(.unsigned, size * 8),
+            @Int(.unsigned, size * 8),
             self.buf[self.n..][0..size],
             .little,
         );
@@ -157,7 +157,7 @@ fn rleReadCells(src: *Source, cells: []i16) void {
 fn rleReadQuantized(src: *Source, samples: []f32, scratch: []i16) void {
     rleReadCells(src, scratch[0..samples.len]);
     if (src.bad) return;
-    for (samples, 0..) |*z, i| z.* = @as(f32, @floatFromInt(scratch[i])) / HEIGHT_Q;
+    for (samples, 0..) |*z, i| z.* = scratch[i] / HEIGHT_Q;
 }
 
 // ── the base-grid view (roads resolved back to the paint beneath) ─────────────

@@ -39,7 +39,7 @@ pub fn snap(min: f32, max: f32, step: f32, raw: f32) f32 {
 /// cell), never per pixel.
 pub fn hoverBucket(value: f32, step: f32) i64 {
     const s = if (step > 0) step else 1.0;
-    return @intFromFloat(@floor(value / s));
+    return @floor(value / s);
 }
 
 /// The representative value dispatched for a bucket (its left edge).

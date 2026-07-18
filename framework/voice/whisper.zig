@@ -239,7 +239,7 @@ fn runJob(state: *State, job: Job) void {
         return;
     };
     defer state.allocator.free(f32_buf);
-    for (pcm, 0..) |s, i| f32_buf[i] = @as(f32, @floatFromInt(s)) / 32768.0;
+    for (pcm, 0..) |s, i| f32_buf[i] = @as(f32, s) / 32768.0;
 
     var params = wh.whisper_full_default_params(wh.WHISPER_SAMPLING_GREEDY);
     params.print_realtime = false;

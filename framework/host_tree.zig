@@ -443,7 +443,7 @@ pub fn inheritTypography(parent_id: u32, child_id: u32) void {
 pub fn jsonInt(v: std.json.Value) ?i64 {
     return switch (v) {
         .integer => |i| i,
-        .float => |f| @as(i64, @intFromFloat(f)),
+        .float => |f| @trunc(f),
         else => null,
     };
 }

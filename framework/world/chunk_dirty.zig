@@ -166,10 +166,10 @@ pub fn chunkMaxTile(c: i32) i32 {
 /// meters. Inclusive on both ends (the max meter sample's tile is touched).
 pub fn boundsMetersToTileRect(b: cache.BoundsMeters, tile_meters: f32) TileRect {
     return .{
-        .min_tx = @intFromFloat(@floor(b.min_x / tile_meters)),
-        .min_tz = @intFromFloat(@floor(b.min_z / tile_meters)),
-        .max_tx = @intFromFloat(@floor(b.max_x / tile_meters)),
-        .max_tz = @intFromFloat(@floor(b.max_z / tile_meters)),
+        .min_tx = @floor(b.min_x / tile_meters),
+        .min_tz = @floor(b.min_z / tile_meters),
+        .max_tx = @floor(b.max_x / tile_meters),
+        .max_tz = @floor(b.max_z / tile_meters),
     };
 }
 

@@ -695,7 +695,7 @@ fn paintNodeImpl(
     if (node.style.background_color) |col| {
         const is_hov = (hovered != null and hovered.? == node);
         const paint_col = if (is_hov) brightenColor(col) else col;
-        const a: u8 = @intFromFloat(@as(f32, @floatFromInt(paint_col.a)) * effective_opacity);
+        const a: u8 = @trunc(paint_col.a * effective_opacity);
         _ = c.SDL_SetRenderDrawColor(rend, paint_col.r, paint_col.g, paint_col.b, a);
         var rect = c.SDL_FRect{ .x = fx, .y = fy, .w = fw, .h = fh };
         _ = c.SDL_RenderFillRect(rend, &rect);
@@ -708,7 +708,7 @@ fn paintNodeImpl(
     const bl = node.style.brdLeft();
     if (bt > 0 or br_w > 0 or bb_w > 0 or bl > 0) {
         const bc = node.style.border_color orelse Color.rgb(255, 255, 255);
-        const ba: u8 = @intFromFloat(@as(f32, @floatFromInt(bc.a)) * effective_opacity);
+        const ba: u8 = @trunc(bc.a * effective_opacity);
         _ = c.SDL_SetRenderDrawColor(rend, bc.r, bc.g, bc.b, ba);
         if (bt > 0) {
             var top_r = c.SDL_FRect{ .x = fx, .y = fy, .w = fw, .h = bt };
@@ -737,7 +737,7 @@ fn paintNodeImpl(
             const pr = node.style.padRight();
             const text_max_w = r.w - pl - pr;
             var color_with_opacity = tc;
-            color_with_opacity.a = @intFromFloat(@as(f32, @floatFromInt(tc.a)) * effective_opacity);
+            color_with_opacity.a = @trunc(tc.a * effective_opacity);
             drawSdlTextWrapped(
                 rend,
                 te,
@@ -811,7 +811,7 @@ fn decodeUtf8Sdl(bytes: []const u8) struct { cp: u32, len: usize } {
 
 fn glyphAdvance(te: *TextEngine, cp: u32, size_px: u16) f32 {
     const face = selectFace(te, cp, size_px);
-    if (c.FT_Load_Char(face, cp, c.FT_LOAD_DEFAULT) != 0) return @as(f32, @floatFromInt(size_px)) * 0.5;
+    if (c.FT_Load_Char(face, cp, c.FT_LOAD_DEFAULT) != 0) return @as(f32, size_px) * 0.5;
     return @as(f32, @floatFromInt(face.*.glyph.*.advance.x)) / 64.0;
 }
 

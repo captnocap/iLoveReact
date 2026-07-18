@@ -760,7 +760,7 @@ fn jsonFloat(v: std.json.Value) ?f32 {
 fn jsonInt(v: std.json.Value) ?i64 {
     return switch (v) {
         .integer => |i| i,
-        .float => |f| @intFromFloat(f),
+        .float => |f| @trunc(f),
         else => null,
     };
 }
@@ -891,7 +891,7 @@ fn parseRgb(s: []const u8) ?Color {
         // CSS alpha is 0..1; rgb channels are 0..255.
         const scaled = if (idx == 3) v * 255.0 else v;
         const clamped = @max(@min(scaled, 255.0), 0.0);
-        parts[idx] = @intFromFloat(clamped);
+        parts[idx] = @trunc(clamped);
     }
     return Color.rgba(parts[0], parts[1], parts[2], parts[3]);
 }
@@ -957,7 +957,7 @@ fn parseLinearGradient(v: std.json.Value) ?layout.LinearGradient {
         if (sv.object.get("opacity")) |op_v| {
             if (jsonFloat(op_v)) |op| {
                 const clamped: f32 = if (op < 0) 0 else if (op > 1) 1 else op;
-                color.a = @intFromFloat(@as(f32, @floatFromInt(color.a)) * clamped);
+                color.a = @trunc(@as(f32, color.a) * clamped);
             }
         }
         buf[n] = .{ .offset = offset, .color = color };
@@ -1241,7 +1241,7 @@ fn applyStyleEntry(node: *Node, key: []const u8, val: std.json.Value, is_update:
     } else if (eq(u8, key, "tweenTranslateXDurMs")) {
         if (jsonFloat(val)) |f| node.style.tween_translate_x_dur_ms = f;
     } else if (eq(u8, key, "tweenTranslateXCurve")) {
-        if (jsonFloat(val)) |f| node.style.tween_translate_x_curve = @intFromFloat(@max(0, @min(255, f)));
+        if (jsonFloat(val)) |f| node.style.tween_translate_x_curve = @trunc(@max(0, @min(255, f)));
     } else if (eq(u8, key, "tweenTranslateYFrom")) {
         if (jsonFloat(val)) |f| node.style.tween_translate_y_from = f;
     } else if (eq(u8, key, "tweenTranslateYTo")) {
@@ -1249,7 +1249,7 @@ fn applyStyleEntry(node: *Node, key: []const u8, val: std.json.Value, is_update:
     } else if (eq(u8, key, "tweenTranslateYDurMs")) {
         if (jsonFloat(val)) |f| node.style.tween_translate_y_dur_ms = f;
     } else if (eq(u8, key, "tweenTranslateYCurve")) {
-        if (jsonFloat(val)) |f| node.style.tween_translate_y_curve = @intFromFloat(@max(0, @min(255, f)));
+        if (jsonFloat(val)) |f| node.style.tween_translate_y_curve = @trunc(@max(0, @min(255, f)));
     } else if (eq(u8, key, "borderRadius")) {
         if (jsonFloat(val)) |f| node.style.border_radius = f;
     } else if (eq(u8, key, "borderTopLeftRadius")) {
@@ -1628,7 +1628,7 @@ fn openHostWindowForNode(io: std.Io, environ: *const std.process.Environ.Map, id
     }
 
     const duration_ms: u32 = if (propFloat(p, "duration")) |sec|
-        @intFromFloat(@max(0, sec) * 1000.0)
+        @trunc(@max(0, sec) * 1000.0)
     else
         5000;
 
@@ -1875,7 +1875,7 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             // until the hook cleanup releases the handle.
             const handle: u32 = switch (v) {
                 .integer => @intCast(@max(0, v.integer)),
-                .float => @intFromFloat(@max(0.0, v.float)),
+                .float => @trunc(@max(0.0, v.float)),
                 else => 0,
             };
             if (handle != 0) {
@@ -2474,7 +2474,7 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (v == .string) node.canvas_grid_color_major = parseColor(v.string);
         } else if (std.mem.eql(u8, k, "gridMajorEvery")) {
             if (jsonFloat(v)) |f| {
-                const i: i64 = @intFromFloat(@max(0, @min(f, 255)));
+                const i: i64 = @trunc(@max(0, @min(f, 255)));
                 node.canvas_grid_major_every = @intCast(i);
             }
         }
@@ -2539,12 +2539,12 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             }
         } else if (std.mem.eql(u8, k, "paintableW")) {
             if (jsonFloat(v)) |f| {
-                const iw: i64 = @intFromFloat(@max(0, f));
+                const iw: i64 = @trunc(@max(0, f));
                 node.paintable_w = @intCast(iw);
             }
         } else if (std.mem.eql(u8, k, "paintableH")) {
             if (jsonFloat(v)) |f| {
-                const ih: i64 = @intFromFloat(@max(0, f));
+                const ih: i64 = @trunc(@max(0, f));
                 node.paintable_h = @intCast(ih);
             }
         } else if (std.mem.eql(u8, k, "paintableRGBA")) {

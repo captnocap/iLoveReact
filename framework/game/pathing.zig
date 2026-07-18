@@ -178,10 +178,10 @@ inline fn cellCost(prof: *const Profile, idx: u32) ?f32 {
 }
 
 fn worldToCellX(wx: f32) i32 {
-    return @intFromFloat(@floor((wx - g_origin_x) / g_cell));
+    return @floor((wx - g_origin_x) / g_cell);
 }
 fn worldToCellZ(wz: f32) i32 {
-    return @intFromFloat(@floor((wz - g_origin_z) / g_cell));
+    return @floor((wz - g_origin_z) / g_cell);
 }
 
 // ── world publication ────────────────────────────────────────────────────────
@@ -817,8 +817,8 @@ const PlanView = struct {
 
 fn viewPlan(packed_plan: []const f64) ?PlanView {
     if (packed_plan.len < PLAN_HEADER) return null;
-    const n: usize = @intFromFloat(@max(0.0, packed_plan[3]));
-    const nphases: usize = @intFromFloat(@max(0.0, packed_plan[4]));
+    const n: usize = @trunc(@max(0.0, packed_plan[3]));
+    const nphases: usize = @trunc(@max(0.0, packed_plan[4]));
     if (n > MAX_PLAN_POINTS or nphases > MAX_PLAN_PHASES) return null;
     if (packed_plan.len < PLAN_HEADER + n * 3 + nphases * PHASE_FLOATS) return null;
     return .{

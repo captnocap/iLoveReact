@@ -72,8 +72,8 @@ fn grad3d(hash: u32, x: f32, y: f32, z: f32) f32 {
 pub fn noise2d(x_in: f32, y_in: f32, seed: f32) f32 {
     const x = x_in + seed * 31.7;
     const y = y_in + seed * 17.3;
-    const xi: u32 = @intCast(@as(i32, @intFromFloat(@floor(x))) & 255);
-    const yi: u32 = @intCast(@as(i32, @intFromFloat(@floor(y))) & 255);
+    const xi: u32 = @intCast(@as(i32, @floor(x)) & 255);
+    const yi: u32 = @intCast(@as(i32, @floor(y)) & 255);
     const xf = x - @floor(x);
     const yf = y - @floor(y);
     const u = utils.smootherstepCurve(xf);
@@ -91,9 +91,9 @@ pub fn noise3d(x_in: f32, y_in: f32, z_in: f32, seed: f32) f32 {
     const x = x_in + seed * 31.7;
     const y = y_in + seed * 17.3;
     const z = z_in + seed * 23.1;
-    const xi: u32 = @intCast(@as(i32, @intFromFloat(@floor(x))) & 255);
-    const yi: u32 = @intCast(@as(i32, @intFromFloat(@floor(y))) & 255);
-    const zi: u32 = @intCast(@as(i32, @intFromFloat(@floor(z))) & 255);
+    const xi: u32 = @intCast(@as(i32, @floor(x)) & 255);
+    const yi: u32 = @intCast(@as(i32, @floor(y)) & 255);
+    const zi: u32 = @intCast(@as(i32, @floor(z)) & 255);
     const xf = x - @floor(x);
     const yf = y - @floor(y);
     const zf = z - @floor(z);
