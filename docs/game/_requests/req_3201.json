@@ -1,0 +1,31 @@
+{
+  "id": "req_3201",
+  "at": "2026-07-18T18:49:03.173Z",
+  "origin": "codex:019f744e",
+  "text": "one thing your gonna run into that is probably a problem is that the map generation assumes that the world can rotate buildings t o any degree but building pieces live on a 90 degree axis as far as im concerned so there would need to be real adjustments to parity that behavior",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T18:49:16.739Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T19:22:29.756Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Adjusted building-site generation to the editor's 3-metre, quarter-turn piece grammar. Every site center is module-snapped, yaw is restricted to 0/90/180/270, the rotated footprint is recomputed after snapping, and the final footprint is rejected when wet, protected, overlapping, or too close to native-parity curved transport geometry.",
+  "shas": [
+    "a64ea1f9a",
+    "479ca95b6"
+  ],
+  "resolvedAt": "2026-07-18T19:22:29.756Z"
+}

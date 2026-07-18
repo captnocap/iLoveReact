@@ -1,0 +1,31 @@
+{
+  "id": "req_3202",
+  "at": "2026-07-18T18:50:33.150Z",
+  "origin": "codex:019f744e",
+  "text": "also, the one thing to note here is, that building placement is to come in as just floor pieces, and il make some of the core building types and then from there we can generate from their types rather than trying to do it the other way",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T18:51:18.718Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T19:22:29.765Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Building placement now emits one canonical 3x3 concrete floor anchor per accepted semantic site rather than attempting to synthesize buildings. Each anchor carries strict generator provenance including intended use, footprint, suggested floor limit, and frontage path so future authored building types can replace anchors without rerunning or reverse-engineering the city plan.",
+  "shas": [
+    "a64ea1f9a",
+    "479ca95b6"
+  ],
+  "resolvedAt": "2026-07-18T19:22:29.764Z"
+}
