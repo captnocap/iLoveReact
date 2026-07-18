@@ -10,6 +10,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+# HARD RULE: THIS REPO IS ON ZIG 0.16 — READ THE API NOTES BEFORE "FIXING" STD CALLS
+
+The framework migrated to **Zig 0.16.0** (from 0.15.2) on 2026-07-18. 0.16 shipped
+April 2026, after every current model's training cutoff, so your instinct for "correct"
+`std` usage is the OLD 0.15 API and will silently REVERT the migration. Before touching any
+`std.fs` / `std.time` / `std.Thread` / `std.posix` / `std.net` / `std.process` / `std.crypto`
+call, **read `framework/ZIG_016_API_NOTES.md`** and confirm against the real std source at
+`tools/zig/zig`'s `lib/std/`. Key facts: I/O is an injected `std.Io` capability now, reached
+via `framework/host_io.zig` (`host_io.io()` + 0.15-shaped shims); `framework/net/**`
+(`sysx.zig`, `netx.zig`, `http.zig`) is an EXEMPT layer carrying 0.15 shims on purpose —
+never migrate it to `std.Io.net`. Toolchain lives at `tools/zig/zig` → 0.16. Full history:
+`docs/ZIG_016_MIGRATION.md`.
+
+---
+
 # HARD RULE: DO NOT CHMOD, UNLOCK, OR MODIFY FROZEN DIRECTORIES
 
 The following directories are READ-ONLY and FROZEN:
