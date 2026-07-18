@@ -6,6 +6,7 @@
 const std = @import("std");
 const foliage = @import("../world/foliage.zig");
 const game_physics = @import("../game/physics.zig");
+const terrain_grid = @import("../gpu/terrain_grid.zig");
 
 // Resolution of each materialized shader's 1-tile texture (the shader's canvas
 // is exactly one 1m tile; the face sampler REPEATS it across the surface).
@@ -27,11 +28,17 @@ pub const SHAPE_BOX: f32 = 0;
 pub const SHAPE_RAMP: f32 = 1;
 pub const SHAPE_CYLINDER8: f32 = 2;
 
-// MAPPAINT req_2473: live-painted terrain mirror. One render node + one
-// collider slot per painted chunk; the collider ids claim the TOP of the
+// MAPPAINT req_2473: live-painted terrain residency. One render node + one
+// collider slot per resident chunk; the collider ids claim the TOP of the
 // game_physics heightfield table so baked scene fields (counting up from 0)
-// never collide with them.
-pub const MAX_PAINT_SLOTS: usize = 64;
+// never collide with them. Document chunks beyond this working set are selected
+// nearest-first and recycle slots as the author moves.
+pub const MAX_PAINT_SLOTS: usize = terrain_grid.MAX_RESIDENT_CHUNKS;
+comptime {
+    if (MAX_PAINT_SLOTS > game_physics.MAX_HEIGHTFIELDS) {
+        @compileError("paint residency exceeds the physics heightfield id space");
+    }
+}
 pub const PAINT_COLLIDER_BASE: usize = game_physics.MAX_HEIGHTFIELDS - MAX_PAINT_SLOTS;
 /// The default THPS-style brush beam: a translucent column over the brush footprint.
 pub const PAINT_BEAM_HEIGHT_METERS: f32 = 42;

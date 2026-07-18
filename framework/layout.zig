@@ -543,6 +543,10 @@ pub const Node = struct {
     // stream bound as the formula's storage buffer D. Crisp at any zoom, no bake.
     scene3d_ground_formula: ?[]const u8 = null, // WGSL defining fn hf_ground_rgb(uv)->vec3f
     scene3d_ground_data: ?[]const f32 = null, // D ref stream (cols,rows,pal,palette…,cells…,ribbon)
+    // Monotonic content identity for scene3d_ground_data. The GPU keeps each
+    // resident D buffer across frames and uploads only when this value or the
+    // backing slice changes; live paint increments it after height/look edits.
+    scene3d_ground_data_version: u64 = 0,
     // @reactjit/geometries registry mesh. A geometry generator (TS) produced these
     // interleaved verts [px,py,pz,nx,ny,nz,u,v]×count; gpu/3d.zig interns them by
     // `scene3d_geom_key` (id+paramHash) into a RETAINED GPU buffer and redraws the

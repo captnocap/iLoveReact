@@ -1451,9 +1451,43 @@ pub fn build(b: *std.Build) void {
         .root_module = world_loader_paint_revision_test_mod,
     });
     const run_world_loader_paint_revision_test = b.addRunArtifact(world_loader_paint_revision_test);
+    const terrain_grid_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/gpu/terrain_grid.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const terrain_grid_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/terrain_grid.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    terrain_grid_test_mod.addImport("terrain_grid", terrain_grid_mod_for_tests);
+    const terrain_grid_test = b.addTest(.{
+        .name = "terrain-grid-test",
+        .root_module = terrain_grid_test_mod,
+    });
+    const run_terrain_grid_test = b.addRunArtifact(terrain_grid_test);
+    const world_loader_paint_residency_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/world_loader/paint_residency.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const world_loader_paint_residency_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_loader_paint_residency.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    world_loader_paint_residency_test_mod.addImport("world_loader_paint_residency", world_loader_paint_residency_mod_for_tests);
+    const world_loader_paint_residency_test = b.addTest(.{
+        .name = "world-loader-paint-residency-test",
+        .root_module = world_loader_paint_residency_test_mod,
+    });
+    const run_world_loader_paint_residency_test = b.addRunArtifact(world_loader_paint_residency_test);
     const world_loader_geometry_test_step = b.step("test-world-loader", "Run split world-loader geometry and map-revision tests");
     world_loader_geometry_test_step.dependOn(&run_world_loader_geometry_test.step);
     world_loader_geometry_test_step.dependOn(&run_world_loader_paint_revision_test.step);
+    world_loader_geometry_test_step.dependOn(&run_terrain_grid_test.step);
+    world_loader_geometry_test_step.dependOn(&run_world_loader_paint_residency_test.step);
 
     // ── Game camera behavior tests (V23, P4) ───────────────────────
     // Exercises framework/game/camera.zig: Orbit/Aim fidelity against

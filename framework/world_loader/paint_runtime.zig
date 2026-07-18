@@ -9,9 +9,11 @@ const game_physics = @import("../game/physics.zig");
 const map_paint = @import("../game/map/engine.zig");
 const map_chunks = @import("../game/map/chunks.zig");
 const map_transport = @import("../game/map/transport.zig");
+const terrain_grid = @import("../gpu/terrain_grid.zig");
 const config = @import("config.zig");
 const paint_surface = @import("paint_surface.zig");
 const paint_revision = @import("paint_revision.zig");
+const paint_residency = @import("paint_residency.zig");
 const transport_render = @import("transport_render.zig");
 const foliage_preview = @import("foliage_preview.zig");
 const Node = layout.Node;
@@ -62,6 +64,23 @@ fn reconcileMapRevision(runtime: anytype) bool {
     runtime.foliage_want = true;
     runtime.foliage_want_log = false;
     return true;
+}
+
+/// Release one physical terrain slot while retaining its owned buffers for the
+/// next resident chunk. Geometry keys are physical-slot keyed, so replacement
+/// overwrites the same GPU cache entry instead of leaking one per coordinate.
+fn retirePaintSlot(runtime: anytype, ground_first: usize, slot: usize) void {
+    runtime.kid_list.items[ground_first + slot].scene3d_mesh = false;
+    if (runtime.paint_water_kids_first) |water_first| {
+        runtime.kid_list.items[water_first + slot].scene3d_mesh = false;
+    }
+    game_physics.unregisterHeightfield(PAINT_COLLIDER_BASE + slot);
+    runtime.paint_slot_used[slot] = false;
+    runtime.paint_slot_chunk[slot] = .{ 0, 0 };
+}
+
+fn documentSlotIndex(coord: [2]i32) usize {
+    return @as(usize, @intCast(coord[1])) * map_chunks.SLOT_COLS + @as(usize, @intCast(coord[0]));
 }
 
 pub fn paintGizmoColor(tool: map_paint.Tool) [3]f32 {
@@ -217,15 +236,47 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
     } else {
         map_paint.clearPathHover();
     }
-    // Capture the height dirty bit before the chunk mirror clears it. Rail and
-    // preview boxes then follow sculpted terrain without becoming frame work.
+    // Select the bounded live working set by author attention, never document
+    // order. Capture consumer dirtiness for the WHOLE document first: chunks
+    // outside the current render/collider set still feed transport and foliage.
     var path_terrain_dirty = map_replaced;
-
-    // painted-chunk mirror: assign slots, re-bake dirty heights, refresh colliders
     var foliage_stale = map_replaced;
+    const residency_anchor = paintPreviewAnchor(runtime);
+    var resident_meta: [MAX_PAINT_SLOTS]paint_residency.Candidate = undefined;
+    var resident_chunks: [MAX_PAINT_SLOTS]*map_chunks.Chunk = undefined;
+    var resident_mask: [map_chunks.SLOT_COUNT]bool = @splat(false);
+    var resident_count: usize = 0;
     for (map_chunks.slots()) |maybe| {
         const chunk = maybe orelse continue;
         path_terrain_dirty = path_terrain_dirty or chunk.dirty.height;
+        foliage_stale = foliage_stale or chunk.dirty.flora or chunk.dirty.height;
+        const center_x = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS;
+        const center_z = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS;
+        const proposed = paint_residency.candidate(chunk.cx, chunk.cz, center_x, center_z, residency_anchor);
+        if (paint_residency.offer(resident_meta[0..], &resident_count, proposed)) |at| {
+            resident_chunks[at] = chunk;
+        }
+    }
+    for (resident_meta[0..resident_count]) |entry| resident_mask[documentSlotIndex(entry.coord)] = true;
+    if (map_chunks.chunkCount() > MAX_PAINT_SLOTS) {
+        if (!runtime.paint_drop_warned) {
+            runtime.paint_drop_warned = true;
+            log.print("[paint] {d} document chunks use a {d}-slot nearest-attention residency window; slots recycle as the camera/brush moves\n", .{ map_chunks.chunkCount(), MAX_PAINT_SLOTS });
+        }
+    } else {
+        runtime.paint_drop_warned = false;
+    }
+
+    // Evict coordinates that left the attention set before assigning new ones.
+    for (0..MAX_PAINT_SLOTS) |i| {
+        if (runtime.paint_slot_used[i] and !resident_mask[documentSlotIndex(runtime.paint_slot_chunk[i])]) {
+            retirePaintSlot(runtime, first, i);
+        }
+    }
+
+    // Painted-chunk mirror: assign physical slots, refresh dirty height/data,
+    // and register the matching near-set colliders.
+    for (resident_chunks[0..resident_count]) |chunk| {
         var slot: ?usize = null;
         var free_slot: ?usize = null;
         for (0..MAX_PAINT_SLOTS) |i| {
@@ -240,13 +291,7 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
         }
         const fresh = slot == null;
         if (fresh) {
-            slot = free_slot orelse {
-                if (!runtime.paint_drop_warned) {
-                    runtime.paint_drop_warned = true;
-                    log.print("[paint] LIVE MIRROR FULL: >{d} painted chunks — chunk ({d},{d}) not mirrored\n", .{ MAX_PAINT_SLOTS, chunk.cx, chunk.cz });
-                }
-                continue;
-            };
+            slot = free_slot orelse continue; // selection and slot caps are identical
         }
         const i = slot.?;
         const height_dirty = fresh or chunk.dirty.height;
@@ -256,13 +301,11 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
         // so this pointer-swap pass can migrate live nodes without a frame ever
         // reading freed memory (SIGSEGV req_2492).
         const live_formula = map_paint.groundFormula();
-        const formula_stale = if (live_formula) |f|
-            (node_has_formula: {
-                const nf = runtime.kid_list.items[first + i].scene3d_ground_formula orelse break :node_has_formula true;
-                break :node_has_formula nf.ptr != f.ptr;
-            })
-        else
-            runtime.kid_list.items[first + i].scene3d_ground_formula != null;
+        const render_formula = live_formula orelse terrain_grid.FALLBACK_FORMULA;
+        const formula_stale = node_has_formula: {
+            const nf = runtime.kid_list.items[first + i].scene3d_ground_formula orelse break :node_has_formula true;
+            break :node_has_formula nf.ptr != render_formula.ptr;
+        };
         const tiles_dirty = fresh or chunk.dirty.tiles or chunk.dirty.flora or chunk.dirty.zones or (runtime.paint_slot_used[i] and formula_stale);
         // the water surface is bed + depth, so a re-dug bed moves the water too
         const water_dirty = height_dirty or chunk.dirty.water;
@@ -274,6 +317,7 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
         const half_span = map_chunks.CHUNK_METERS / 2;
         const node = &runtime.kid_list.items[first + i];
         if (fresh) {
+            const prior_ground_data_version = node.scene3d_ground_data_version;
             // one-time placement: the chunk is CENTERED at (cx·120, cz·120)
             node.* = .{
                 .scene3d_hf_cols = @intCast(map_paint.FLOOR_RES),
@@ -284,6 +328,10 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
                 .scene3d_pos_x = @as(f32, @floatFromInt(chunk.cx)) * map_chunks.CHUNK_METERS,
                 .scene3d_pos_y = 0,
                 .scene3d_pos_z = @as(f32, @floatFromInt(chunk.cz)) * map_chunks.CHUNK_METERS,
+                // Physical slots outlive coordinate claims. Preserve the
+                // monotonic identity so a recycled CPU pointer cannot alias a
+                // previous GPU upload after whole-map replacement.
+                .scene3d_ground_data_version = prior_ground_data_version,
             };
             runtime.paint_slot_used[i] = true;
             runtime.paint_slot_chunk[i] = .{ chunk.cx, chunk.cz };
@@ -299,7 +347,7 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
             chunk.dirty.height = false;
             runtime.paint_slot_ver[i] += 1;
             if (runtime.paint_slot_key[i]) |old| runtime.allocator.free(old);
-            const key = std.fmt.allocPrint(runtime.allocator, "~hf~paint-{d}-{d}~{d}", .{ chunk.cx, chunk.cz, runtime.paint_slot_ver[i] }) catch continue;
+            const key = std.fmt.allocPrint(runtime.allocator, "~hf~paint-slot-{d}~{d}", .{ i, runtime.paint_slot_ver[i] }) catch continue;
             runtime.paint_slot_key[i] = key;
 
             var max_abs: f32 = 0;
@@ -327,39 +375,59 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
         // node's slice every frame, so no geometry re-key is needed — painting a
         // tile shows next frame. Falls back to the flat editor tint until the
         // cart pushes a formula (__map_set_ground_look).
+        var ground_data_changed = false;
         if (tiles_dirty) {
             chunk.dirty.tiles = false;
             chunk.dirty.flora = false;
             chunk.dirty.zones = false;
-            if (live_formula) |formula| {
-                const need = map_paint.groundDataFloats();
-                var ground = runtime.paint_slot_ground[i];
-                if (ground == null or ground.?.len < need) {
-                    if (ground) |old| runtime.allocator.free(old);
-                    ground = runtime.allocator.alloc(f32, need) catch null;
-                    runtime.paint_slot_ground[i] = ground;
-                }
-                if (ground) |buf| {
-                    const used = map_paint.encodeGroundData(chunk, buf);
-                    node.scene3d_ground_formula = formula;
-                    node.scene3d_ground_data = buf[0..used];
-                    // whitened: the ground pipeline multiplies inst_color in
-                    node.scene3d_color_r = 1;
-                    node.scene3d_color_g = 1;
-                    node.scene3d_color_b = 1;
-                }
-            } else {
-                // the look was cleared — drop the stale pointers, fall to tint
-                node.scene3d_ground_formula = null;
-                node.scene3d_ground_data = null;
+            const need = if (live_formula != null) map_paint.groundDataFloats() else 0;
+            const alloc_need = if (need <= terrain_grid.FORMULA_FLOAT_CAP) terrain_grid.TOTAL_FLOATS else need;
+            var ground = runtime.paint_slot_ground[i];
+            if (ground == null or ground.?.len < alloc_need) {
+                if (ground) |old| runtime.allocator.free(old);
+                ground = runtime.allocator.alloc(f32, alloc_need) catch null;
+                if (ground) |buf| @memset(buf, 0);
+                runtime.paint_slot_ground[i] = ground;
+            }
+            if (ground) |buf| {
+                const used = if (live_formula != null) map_paint.encodeGroundData(chunk, buf) else 0;
+                node.scene3d_ground_formula = render_formula;
+                node.scene3d_ground_data = buf[0..used];
+                ground_data_changed = true;
+                // A real look supplies full RGB. The built-in formula is white
+                // and preserves the old bare-terrain tint through inst_color.
+                node.scene3d_color_r = if (live_formula != null) 1 else 0.42;
+                node.scene3d_color_g = if (live_formula != null) 1 else 0.52;
+                node.scene3d_color_b = if (live_formula != null) 1 else 0.34;
             }
         }
-        if (node.scene3d_ground_formula == null) {
-            // bare-terrain tint (no formula pushed / nothing painted yet)
-            node.scene3d_color_r = 0.42;
-            node.scene3d_color_g = 0.52;
-            node.scene3d_color_b = 0.34;
+
+        // Formula-painted ground uses one immutable GPU topology. Its current
+        // 121-grid heights ride a fixed trailer on D, so sculpting updates data
+        // rather than allocating another 86k-vertex dynamic mesh. A future D
+        // prefix larger than the reserved cap remains on the legacy mesh path
+        // until its wire layout is deliberately revised.
+        if (height_dirty or tiles_dirty) {
+            if (runtime.paint_slot_ground[i]) |ground| {
+                if (runtime.paint_slot_floor[i]) |floor| {
+                    const formula_floats = if (live_formula != null) map_paint.groundDataFloats() else 0;
+                    const cell = map_chunks.CHUNK_METERS / @as(f32, @floatFromInt(map_paint.FLOOR_RES - 1));
+                    if (terrain_grid.append(
+                        ground,
+                        formula_floats,
+                        floor,
+                        @intCast(map_paint.FLOOR_RES),
+                        @intCast(map_paint.FLOOR_RES),
+                        cell,
+                        cell,
+                    )) {
+                        node.scene3d_ground_data = ground[0..terrain_grid.TOTAL_FLOATS];
+                        ground_data_changed = true;
+                    }
+                }
+            }
         }
+        if (ground_data_changed) node.scene3d_ground_data_version +%= 1;
 
         // the water channel: a second "~water~"-pipeline node over the same
         // footprint — shore-culled depths + bed+depth surface, dry cells tucked
@@ -390,7 +458,7 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
             } else {
                 runtime.paint_slot_water_ver[i] += 1;
                 if (runtime.paint_slot_water_key[i]) |old| runtime.allocator.free(old);
-                const wkey = std.fmt.allocPrint(runtime.allocator, "~hf~paint-water-{d}-{d}~{d}", .{ chunk.cx, chunk.cz, runtime.paint_slot_water_ver[i] }) catch continue;
+                const wkey = std.fmt.allocPrint(runtime.allocator, "~hf~paint-water-slot-{d}~{d}", .{ i, runtime.paint_slot_water_ver[i] }) catch continue;
                 runtime.paint_slot_water_key[i] = wkey;
                 var wmax: f32 = 0;
                 for (surface) |v| wmax = @max(wmax, @abs(v));
@@ -414,6 +482,17 @@ pub fn applyPaintLayer(runtime: anytype, io: std.Io) void {
                     .scene3d_color_a = 1,
                 };
             }
+        }
+    }
+
+    // Non-resident chunks have no live node to refresh. Their authored arrays
+    // are already current (and autosaved); when one enters the working set,
+    // `fresh` rebuilds every channel unconditionally. Drain the shared dirty
+    // flags now so distant edits trigger transport/foliage once, not every frame.
+    for (map_chunks.slots()) |maybe| {
+        const chunk = maybe orelse continue;
+        if (!resident_mask[documentSlotIndex(.{ chunk.cx, chunk.cz })]) {
+            chunk.dirty = .{};
         }
     }
 

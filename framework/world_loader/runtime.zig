@@ -282,14 +282,13 @@ pub const Runtime = struct {
     stream_logged: bool = false,
     stream_drop_warned: bool = false,
     last_aspect: f32 = @as(f32, WIN_W) / @as(f32, WIN_H),
-    // MAPPAINT req_2473: the live-painted terrain mirror. paint_kids_first is a
-    // MAX_PAINT_SLOTS run of reserved nodes in the stable prefix (one per painted
-    // chunk); each used slot owns a 121×121 downsampled floor buffer + a versioned
-    // "~hf~paint-…" geom key, re-baked only when the chunk's height channel is
-    // dirty (the once-per-frame coalescing the JS painter did with usePaintedField,
-    // now host-side). paint_beam_kid is the translucent brush-beam column. The
-    // last_* rect is the pane placement renderEmbedded saw — the screen→ray
-    // mapping paintPointer needs.
+    // MAPPAINT req_2473: the live-painted terrain working set. paint_kids_first
+    // is a MAX_PAINT_SLOTS run of physical nodes selected nearest to the brush /
+    // camera target. Slots recycle when a larger document moves past them. Each
+    // owns a 121×121 floor/collider buffer; formula-painted ground renders that
+    // grid through gpu/terrain_grid's shared topology, while bare fallback and
+    // water keep physical-slot-keyed "~hf~" geometry. paint_beam_kid is the
+    // translucent brush gizmo; last_* records the pane for pointer ray mapping.
     paint_kids_first: ?usize = null,
     paint_beam_kid: ?usize = null,
     /// req_2924: committed rail and the current road/rail ghost are native
@@ -310,8 +309,8 @@ pub const Runtime = struct {
     paint_slot_ver: [MAX_PAINT_SLOTS]u32 = @splat(0),
     paint_slot_key: [MAX_PAINT_SLOTS]?[]u8 = @splat(null),
     paint_slot_floor: [MAX_PAINT_SLOTS]?[]f32 = @splat(null),
-    /// owned per-slot ground-formula D stream (tile channel), re-encoded on a
-    /// dirty tiles channel — the 3d.zig ground pipeline re-reads it every frame
+    /// Owned per-slot ground-formula D stream plus fixed-offset height trailer.
+    /// Data versioning lets 3d.zig keep an unchanged resident GPU upload.
     paint_slot_ground: [MAX_PAINT_SLOTS]?[]f32 = @splat(null),
     /// the water channel's mirror (chunkFloor.ts floorToWaterBody port): per-slot
     /// shore-culled depths + surface heights feeding a second "~water~" node

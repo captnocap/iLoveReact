@@ -12,6 +12,7 @@
 const std = @import("std");
 const gamefile = @import("gamefile.zig");
 const live_mesh_doors = @import("live_mesh_doors.zig");
+const terrain_grid = @import("../gpu/terrain_grid.zig");
 const mapfile = gamefile.mapfile;
 // stb_image — decode the cooked-prop paint PNG at load (req_1544, MESH_PROPS v4),
 // the same decoder the decal raster uses (gpu/decal_raster.zig). The bake passes
@@ -1458,10 +1459,19 @@ fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]He
         var ground_data: ?[]f32 = null;
         errdefer if (ground_data) |d| allocator.free(d);
         if (gd_len > 0) {
-            const gd = try allocator.alloc(f32, gd_len);
+            const shared_grid = version >= 3 and formula_src.len > 0 and
+                terrain_grid.canAppend(gd_len, heights, cols, rows);
+            const data_len = if (shared_grid) terrain_grid.TOTAL_FLOATS else gd_len;
+            const gd = try allocator.alloc(f32, data_len);
+            if (shared_grid) @memset(gd, 0);
             var k: usize = 0;
             while (k < gd_len) : (k += 1) gd[k] = readF32(data, at + k * 4);
             at += ground_bytes;
+            if (shared_grid) {
+                const cell_x = width / @as(f32, @floatFromInt(cols - 1));
+                const cell_z = depth / @as(f32, @floatFromInt(rows - 1));
+                std.debug.assert(terrain_grid.append(gd, gd_len, heights, cols, rows, cell_x, cell_z));
+            }
             ground_data = gd;
         }
 

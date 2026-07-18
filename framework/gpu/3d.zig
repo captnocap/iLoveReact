@@ -9,6 +9,7 @@ const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const bu = @import("buffer_upload.zig");
 const shaders = @import("shaders.zig");
+const terrain_grid = @import("terrain_grid.zig");
 const core = @import("gpu.zig");
 const images = @import("images.zig");
 const build_options = @import("build_options");
@@ -6574,20 +6575,23 @@ var g_frond_pipeline: ?*wgpu.RenderPipeline = null;
 // per-chunk storage buffer holding D. No baked texture — crisp at any zoom.
 var g_ground_pipeline: ?*wgpu.RenderPipeline = null;
 var g_ground_formula_hash: u64 = 0; // formula the live pipeline was built from; rebuild on change
-var g_ground_bgl: ?*wgpu.BindGroupLayout = null; // group1: read-only storage D
-const GROUND_POOL = 128; // distinct D buffers (≈ max simultaneously-drawn ground chunks).
-// Was 16 — a city's worth of painted chunks (one ground mesh each) blew past it and
-// every chunk past the 16th was silently dropped, so roads vanished / stopped at a
-// chunk seam (PERTILEROAD-0814). 128 × 20000 f32 ≈ 10 MB of pooled storage buffers.
-// Cap per chunk, sized to the map engine's D layout v3 worst case (req_2697):
-// 6 header + 3 palettes × 256 × 3 rgb (2304) + 256 bindings × 4 (1024) +
-// 120×120 packed cells (14400) + 120×120 per-cell materials (14400) = 32134.
-// The old 20000 cap silently cut the material tail — paint took on exactly the
-// first band of a chunk and stopped at a perfect line. 128 × 34000 f32 ≈ 17 MB.
-const GROUND_DATA_FLOATS = 34000;
+var g_ground_bgl: ?*wgpu.BindGroupLayout = null; // group1: vertex+fragment read-only D
+const GROUND_POOL = terrain_grid.MAX_RESIDENT_CHUNKS;
+// D carries the formula prefix plus a fixed-offset 121×121 height trailer. The
+// vertex stage reads the trailer; the fragment stage continues to read the
+// unchanged formula prefix.
+const GROUND_DATA_FLOATS = terrain_grid.TOTAL_FLOATS;
 var g_ground_truncate_warned: bool = false;
 var g_ground_data_buf: [GROUND_POOL]?*wgpu.Buffer = [_]?*wgpu.Buffer{null} ** GROUND_POOL;
 var g_ground_data_bg: [GROUND_POOL]?*wgpu.BindGroup = [_]?*wgpu.BindGroup{null} ** GROUND_POOL;
+var g_ground_data_ptr: [GROUND_POOL]usize = @splat(0);
+var g_ground_data_version: [GROUND_POOL]u64 = @splat(0);
+var g_ground_data_len: [GROUND_POOL]usize = @splat(0);
+// One immutable topology serves every formula-painted terrain chunk. Per-chunk
+// height and normal values are fetched from D in the vertex shader, so ground
+// never consumes the bump-only arbitrary dynamic-mesh arena.
+var g_ground_grid_vbuf: ?*wgpu.Buffer = null;
+var g_ground_grid_vert_count: u32 = 0;
 // DEDICATED per-instance buffer for the ground-formula pass (GROUNDSTARVE-0622,
 // req_1659). The ground pass used to write its model instances into the SHARED
 // per-frame g_instance_buf at the running inst_top cursor — AFTER the dynamic
@@ -6598,7 +6602,7 @@ var g_ground_data_bg: [GROUND_POOL]?*wgpu.BindGroup = [_]?*wgpu.BindGroup{null} 
 // the cap and VANISHED (view-dependent: look away from the trees and the ground came
 // back). The ground you stand on must always draw (mirrors the loader registering
 // floor colliders first), so it gets its OWN small buffer — one InstanceData per
-// drawn chunk, never contending with foliage. GROUND_POOL * 80 B ≈ 10 KB.
+// drawn chunk, never contending with foliage. GROUND_POOL * 32 B = 4 KB.
 var g_ground_inst_buf: ?*wgpu.Buffer = null;
 var g_vertex_buffer: ?*wgpu.Buffer = null;
 var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
@@ -7047,7 +7051,7 @@ pub fn init(environ: *const std.process.Environ.Map) void {
         .entry_count = 1,
         .entries = @ptrCast(&wgpu.BindGroupLayoutEntry{
             .binding = 0,
-            .visibility = wgpu.ShaderStages.fragment,
+            .visibility = wgpu.ShaderStages.vertex | wgpu.ShaderStages.fragment,
             .buffer = .{ .type = .read_only_storage, .has_dynamic_offset = 0, .min_binding_size = 0 },
         }),
     }) orelse return;
@@ -7083,6 +7087,10 @@ pub fn init(environ: *const std.process.Environ.Map) void {
         .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
         .mapped_at_creation = 0,
     });
+    initGroundGridTopology(device);
+    g_ground_data_ptr = @splat(0);
+    g_ground_data_version = @splat(0);
+    g_ground_data_len = @splat(0);
 
     const layouts = [_]?*wgpu.BindGroupLayout{ g_bind_group_layout.?, g_tex_bind_group_layout.? };
     const pipeline_layout = device.createPipelineLayout(&.{
@@ -7416,6 +7424,19 @@ pub fn deinit() void {
     if (g_slim_inst_buf) |b| b.release();
     if (g_slim_static_buf) |b| b.release();
     if (g_ground_inst_buf) |b| b.release();
+    if (g_ground_grid_vbuf) |b| b.release();
+    for (0..GROUND_POOL) |i| {
+        if (g_ground_data_bg[i]) |bg| bg.release();
+        if (g_ground_data_buf[i]) |b| b.release();
+        g_ground_data_bg[i] = null;
+        g_ground_data_buf[i] = null;
+    }
+    if (g_ground_pipeline) |p| p.release();
+    if (g_ground_bgl) |l| l.release();
+    g_ground_pipeline = null;
+    g_ground_bgl = null;
+    g_ground_grid_vbuf = null;
+    g_ground_grid_vert_count = 0;
     if (g_vertex_buffer) |b| b.release();
     if (g_pipeline) |p| p.release();
     if (g_grass_pipeline) |p| p.release();
@@ -7471,6 +7492,12 @@ pub fn resetForReload() void {
     g_static_retain_warned = false;
     g_frame_pool_warned = false;
     for (&g_dyn_slots) |*s| s.* = .{};
+    // Ground D buffers persist across reload just like retained geometry. New
+    // runtime allocations may reuse an old pointer/version/length tuple, so the
+    // upload memo must not let stale material or height data survive remount.
+    g_ground_data_ptr = @splat(0);
+    g_ground_data_version = @splat(0);
+    g_ground_data_len = @splat(0);
     // The geo cache (above) was cleared, so any stashed-but-not-yet-interned host
     // mesh would re-intern fine — but free the host copies so a reload doesn't leak
     // them, and so a re-drop re-parses cleanly.
@@ -8268,6 +8295,43 @@ fn hfGen(hs_in: []const f32, cols: usize, rows: usize, width: f32, depth: f32, b
     }
 
     return @intCast(n);
+}
+
+/// Materialize the one immutable 121×121 topology used by formula-painted
+/// terrain. A unit-high source grid forces hfGen to include the perimeter skirt:
+/// shader-side y=1 vertices fetch real heights, while y=0 skirt bottoms remain
+/// at the chunk base. X/Z are unit-spaced sample coordinates and are scaled by
+/// the per-chunk cell sizes in the vertex shader.
+fn initGroundGridTopology(device: *wgpu.Device) void {
+    const queue = core.getQueue() orelse return;
+    const source = std.heap.c_allocator.alloc(f32, terrain_grid.SAMPLE_COUNT) catch return;
+    defer std.heap.c_allocator.free(source);
+    @memset(source, 1);
+    const span: f32 = @floatFromInt(terrain_grid.SAMPLE_COLS - 1);
+    const count = hfGen(
+        source,
+        terrain_grid.SAMPLE_COLS,
+        terrain_grid.SAMPLE_ROWS,
+        span,
+        span,
+        0,
+        .{},
+        0,
+        null,
+    );
+    if (count != terrain_grid.TOPOLOGY_VERTEX_COUNT) {
+        log.print("[r3d-ground] ERROR: shared terrain topology emitted {d} vertices, expected {d}\n", .{ count, terrain_grid.TOPOLOGY_VERTEX_COUNT });
+        return;
+    }
+    const buffer = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("r3d_ground_shared_grid"),
+        .size = @as(u64, count) * @sizeOf(Vertex),
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    }) orelse return;
+    bu.writeTypedBuffer(queue, buffer, 0, Vertex, g_hf_scratch[0..count]);
+    g_ground_grid_vbuf = buffer;
+    g_ground_grid_vert_count = count;
 }
 
 /// Resolve a "~hf~<slotId>~<version>" key: generate the heightfield mesh from the
@@ -9258,6 +9322,7 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
     // opaque pass binding each chunk's D ref stream (the data-shape ground).
     var gidx: [GROUND_POOL]u32 = undefined;
     var gslot: [GROUND_POOL]GeoSlice = undefined;
+    var gshared: [GROUND_POOL]bool = undefined;
     var gcount: usize = 0;
     var dbg_ground_seen: u32 = 0; // ground-formula meshes SEEN (uncapped) vs gcount collected
 
@@ -9281,7 +9346,14 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
         const key = child.scene3d_geom_key orelse continue;
 
         var maybe_slot: ?GeoSlice = null;
-        if (std.mem.startsWith(u8, key, "~hf~")) {
+        const shared_ground = child.scene3d_ground_formula != null and
+            terrain_grid.hasTrailer(child.scene3d_ground_data) and
+            g_ground_grid_vbuf != null and g_ground_grid_vert_count > 0;
+        if (shared_ground) {
+            // Formula-painted terrain is a data grid. Every chunk draws the one
+            // immutable topology; its D binding supplies current heights.
+            maybe_slot = .{ .offset = 0, .count = g_ground_grid_vert_count };
+        } else if (std.mem.startsWith(u8, key, "~hf~")) {
             // Host-generated heightfield: JS ships only the cols×rows height grid;
             // the host bakes the mesh verts into the slot (topology is fixed, only y
             // moves). Far cheaper across the bridge than re-shipping ~86k verts/sculpt.
@@ -9333,6 +9405,7 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
             if (gcount < GROUND_POOL) {
                 gidx[gcount] = ci;
                 gslot[gcount] = maybe_slot.?;
+                gshared[gcount] = shared_ground;
                 gcount += 1;
                 collected_logical += 1;
             }
@@ -9704,23 +9777,39 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
                 const child = &scene_node.children[gidx[gp_i]];
                 const pool = gp_i; // gcount <= GROUND_POOL → one distinct D buffer per draw
                 if (g_ground_data_buf[pool] == null or g_ground_data_bg[pool] == null) continue;
-                if (child.scene3d_ground_data) |d| {
-                    const n = @min(d.len, GROUND_DATA_FLOATS);
-                    // Truncation is LOUD (req_2697): a D stream past the pooled buffer
-                    // cap renders as "paint works up to a perfect line, then defaults" —
-                    // never let that hunt start silently again. Grow GROUND_DATA_FLOATS
-                    // when the map engine's layout grows.
-                    if (d.len > GROUND_DATA_FLOATS and !g_ground_truncate_warned) {
-                        g_ground_truncate_warned = true;
-                        log.print("[r3d-ground] ERROR: ground D stream is {d} floats but the pooled buffer caps at {d} — the tail (per-cell materials) is CUT and painted looks stop at a hard line. Raise GROUND_DATA_FLOATS in 3d.zig.\n", .{ d.len, GROUND_DATA_FLOATS });
-                    }
-                    // req_0842: this upload once computed its size as `n * @sizeOf(f32)`
-                    // WITHOUT a wide cast — for n=14528 that overflowed to 25344 instead
-                    // of 58112, truncating the write so cells past ~6336 read 0 = water =
-                    // concrete, and painted roads rendered as concrete past a chunk seam.
-                    // writeTypedBuffer derives the byte size in u64 from the slice itself,
-                    // so the class of bug can't recur (req_0871).
+                const d = child.scene3d_ground_data orelse continue;
+                const n = @min(d.len, GROUND_DATA_FLOATS);
+                // Truncation is LOUD (req_2697): a D stream past the pooled buffer
+                // cap renders as "paint works up to a perfect line, then defaults" —
+                // never let that hunt start silently again. Revise terrain_grid's
+                // wire layout deliberately when the formula prefix grows.
+                if (d.len > GROUND_DATA_FLOATS and !g_ground_truncate_warned) {
+                    g_ground_truncate_warned = true;
+                    log.print("[r3d-ground] ERROR: ground D stream is {d} floats but the shared terrain wire caps at {d}; rendering is truncated\n", .{ d.len, GROUND_DATA_FLOATS });
+                }
+                const data_ptr = @intFromPtr(d.ptr);
+                if (g_ground_data_ptr[pool] != data_ptr or
+                    g_ground_data_version[pool] != child.scene3d_ground_data_version or
+                    g_ground_data_len[pool] != d.len)
+                {
+                    // writeTypedBuffer derives its byte count as u64, preserving
+                    // the req_0842 overflow fix. Stable chunks now upload once,
+                    // rather than re-shipping ~190 KiB every frame.
                     bu.writeTypedBuffer(queue, g_ground_data_buf[pool].?, 0, f32, d[0..n]);
+                    if (!terrain_grid.hasTrailer(d)) {
+                        // Pool entries follow draw order, so a legacy formula can
+                        // inherit a previous shared-grid marker unless we clear it.
+                        const no_marker: f32 = 0;
+                        bu.writeValue(
+                            queue,
+                            g_ground_data_buf[pool].?,
+                            terrain_grid.MARKER_OFFSET * @sizeOf(f32),
+                            &no_marker,
+                        );
+                    }
+                    g_ground_data_ptr[pool] = data_ptr;
+                    g_ground_data_version[pool] = child.scene3d_ground_data_version;
+                    g_ground_data_len[pool] = d.len;
                 }
                 const gi_off: u64 = @as(u64, @intCast(gp_i)) * @sizeOf(InstanceData);
                 var gi_data = makeInstance(
@@ -9741,7 +9830,11 @@ fn drawScene(io: std.Io, environ: *const std.process.Environ.Map, scene_node: *N
                 bu.writeValue(queue, g_ground_inst_buf.?, gi_off, &gi_data);
                 pass.setBindGroup(1, g_ground_data_bg[pool].?, 0, null);
                 const geo_bytes: u64 = @as(u64, gslot[gp_i].count) * @sizeOf(Vertex);
-                pass.setVertexBuffer(0, g_retained_vbuf.?, gslot[gp_i].offset, geo_bytes);
+                if (gshared[gp_i]) {
+                    pass.setVertexBuffer(0, g_ground_grid_vbuf.?, 0, geo_bytes);
+                } else {
+                    pass.setVertexBuffer(0, g_retained_vbuf.?, gslot[gp_i].offset, geo_bytes);
+                }
                 pass.setVertexBuffer(1, g_ground_inst_buf.?, gi_off, @sizeOf(InstanceData));
                 pass.draw(gslot[gp_i].count, 1, 0, 0);
                 dbg_ground_drawn += 1;

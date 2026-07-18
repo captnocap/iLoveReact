@@ -5,6 +5,8 @@
 //! Glyph atlas text rendering with per-glyph color tinting.
 //! SDF quadratic bezier curves with anti-aliased strokes.
 
+const terrain_grid = @import("terrain_grid.zig");
+
 /// Rect pipeline: instanced fullscreen quads with SDF rounded-rect fragment shader.
 /// Each instance is one rectangle with position, size, colors, border-radius, border.
 pub const rect_wgsl =
@@ -1671,6 +1673,39 @@ pub const scene3d_ground_prefix = oct_decode_wgsl ++
     \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
     \\@group(1) @binding(0) var<storage, read> D: array<f32>;
     \\
+++ "const HF_GRID_COLS: u32 = " ++ terrain_grid.WGSL_SAMPLE_COLS ++ ";\n" ++
+    "const HF_GRID_HEIGHT_OFFSET: u32 = " ++ terrain_grid.WGSL_HEIGHT_OFFSET ++ ";\n" ++
+    "const HF_GRID_CELL_X_OFFSET: u32 = " ++ terrain_grid.WGSL_CELL_X_OFFSET ++ ";\n" ++
+    "const HF_GRID_CELL_Z_OFFSET: u32 = " ++ terrain_grid.WGSL_CELL_Z_OFFSET ++ ";\n" ++
+    "const HF_GRID_MARKER_OFFSET: u32 = " ++ terrain_grid.WGSL_MARKER_OFFSET ++ ";\n" ++
+    "const HF_GRID_MARKER: u32 = " ++ terrain_grid.WGSL_TRAILER_MARKER ++ ";\n" ++
+    \\fn hf_grid_active() -> bool {
+    \\    return bitcast<u32>(D[HF_GRID_MARKER_OFFSET]) == HF_GRID_MARKER;
+    \\}
+    \\fn hf_grid_coord(local_pos: vec3f) -> vec2i {
+    \\    let half = f32(HF_GRID_COLS - 1u) * 0.5;
+    \\    let last = f32(HF_GRID_COLS - 1u);
+    \\    let ix = i32(clamp(round(local_pos.x + half), 0.0, last));
+    \\    let iz = i32(clamp(round(local_pos.z + half), 0.0, last));
+    \\    return vec2i(ix, iz);
+    \\}
+    \\fn hf_grid_height(coord: vec2i) -> f32 {
+    \\    let last = i32(HF_GRID_COLS - 1u);
+    \\    let ix = u32(clamp(coord.x, 0, last));
+    \\    let iz = u32(clamp(coord.y, 0, last));
+    \\    return D[HF_GRID_HEIGHT_OFFSET + iz * HF_GRID_COLS + ix];
+    \\}
+    \\fn hf_grid_normal(coord: vec2i) -> vec3f {
+    \\    let dx = max(abs(D[HF_GRID_CELL_X_OFFSET]), 0.000001);
+    \\    let dz = max(abs(D[HF_GRID_CELL_Z_OFFSET]), 0.000001);
+    \\    let hl = hf_grid_height(coord + vec2i(-1, 0));
+    \\    let hr = hf_grid_height(coord + vec2i(1, 0));
+    \\    let hu = hf_grid_height(coord + vec2i(0, -1));
+    \\    let hd = hf_grid_height(coord + vec2i(0, 1));
+    \\    return normalize(vec3f(-(hr - hl) / (2.0 * dx), 1.0, -(hd - hu) / (2.0 * dz)));
+    \\}
+    \\
+++
     \\struct VertexInput {
     \\    @location(0) position: vec3f,
     \\    @location(1) noct: vec2f, // snorm16x2 octahedral normal (oct_decode)
@@ -1707,11 +1742,32 @@ pub const scene3d_ground_prefix = oct_decode_wgsl ++
     \\@vertex
     \\fn vs_main(in: VertexInput) -> VertexOutput {
     \\    var out: VertexOutput;
+    \\    var local_position = in.position;
+    \\    var local_normal = oct_decode(in.noct);
+    \\    if (hf_grid_active()) {
+    \\        let coord = hf_grid_coord(in.position);
+    \\        local_position.x *= D[HF_GRID_CELL_X_OFFSET];
+    \\        local_position.z *= D[HF_GRID_CELL_Z_OFFSET];
+    \\        let grid_height = hf_grid_height(coord);
+    \\        // The immutable topology is authored at y=1 for surface/top-skirt
+    \\        // vertices and y=0 for skirt bottoms. Heights replace only the
+    \\        // former; outward skirt normals remain topology data.
+    \\        if (in.position.y > 0.5) {
+    \\            local_position.y = grid_height;
+    \\        } else {
+    \\            // hfGen omitted skirts wholly below base. Collapse those
+    \\            // bottoms to the negative surface instead of reversing them.
+    \\            local_position.y = min(0.0, grid_height);
+    \\        }
+    \\        if (local_normal.y > 0.5) {
+    \\            local_normal = hf_grid_normal(coord);
+    \\        }
+    \\    }
     \\    let model = rebuild_model(in.inst_pos, in.inst_euler, in.inst_scale);
-    \\    let world = model * vec4f(in.position, 1.0);
+    \\    let world = model * vec4f(local_position, 1.0);
     \\    out.clip_pos = S.vp * world;
     \\    out.world_pos = world.xyz;
-    \\    out.world_normal = normalize((model * vec4f(oct_decode(in.noct), 0.0)).xyz);
+    \\    out.world_normal = normalize((model * vec4f(local_normal, 0.0)).xyz);
     \\    out.uv = in.uv;
     \\    out.inst_color = in.inst_color;
     \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
