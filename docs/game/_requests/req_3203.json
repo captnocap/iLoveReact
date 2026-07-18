@@ -1,0 +1,30 @@
+{
+  "id": "req_3203",
+  "at": "2026-07-18T21:48:13.170Z",
+  "origin": "codex:019f744e",
+  "text": "nice this did do something! im finding at some point the ground just suddenly disappears. basically somewhere in the x 950 y 34 z 99 area it is blank ground but then something like x 611 y 10 z 389 is showing ground",
+  "status": "review",
+  "sessionId": "019f744e-16b7-7372-ace7-b0401ad67c46",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-07-18T21:48:28.470Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-07-18T22:26:28.467Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Confirmed the reported coordinate is valid chunk (8,1) data; disappearance came from the 64-chunk live mirror and a bump-only dynamic terrain arena that held only about 53 full grids. Formula-painted terrain now draws one shared 121x121 topology with per-chunk height/material data, including the bare-look startup path, while a 128-slot nearest-attention residency set recycles physical render/collider slots beyond that working set. Stable ground streams upload only when versioned data changes, and hot reload clears that memo. Added Zig contracts for the grid trailer and residency policy; WGSL validation, focused map/world-loader tests, ReleaseFast editor build, and the full Zig 0.16 editor gate are green. User visual and 60-second spikewatch verification remain the review gate.",
+  "shas": [
+    "37b5aadc4"
+  ],
+  "resolvedAt": "2026-07-18T22:26:28.467Z"
+}
