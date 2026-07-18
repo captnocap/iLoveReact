@@ -60,7 +60,7 @@ pub fn init() void {
     const path_z: [*:0]const u8 = @ptrCast(g_sock_path_buf[0..g_sock_path_len]);
 
     // Remove stale socket
-    _ = std.fs.cwd().deleteFile(g_sock_path_buf[0..g_sock_path_len]) catch {};
+    _ = std.Io.Dir.cwd().deleteFile(g_sock_path_buf[0..g_sock_path_len]) catch {};
 
     // Create unix socket
     const fd = posix.socket(posix.AF.UNIX, posix.SOCK.STREAM | posix.SOCK.NONBLOCK | posix.SOCK.CLOEXEC, 0) catch |err| {
@@ -103,7 +103,7 @@ pub fn deinit() void {
         g_server_fd = null;
     }
     if (g_sock_path_len > 0) {
-        _ = std.fs.cwd().deleteFile(g_sock_path_buf[0..g_sock_path_len]) catch {};
+        _ = std.Io.Dir.cwd().deleteFile(g_sock_path_buf[0..g_sock_path_len]) catch {};
     }
     g_initialized = false;
 }
@@ -448,7 +448,7 @@ fn extractInt(json: []const u8, key: []const u8) i32 {
     const after_key = json[key_pos + key.len ..];
     // Skip :
     const colon = std.mem.indexOf(u8, after_key, ":") orelse return 0;
-    const val_start = std.mem.trimLeft(u8, after_key[colon + 1 ..], " ");
+    const val_start = std.mem.trimStart(u8, after_key[colon + 1 ..], " ");
     // Parse digits
     var end: usize = 0;
     if (end < val_start.len and val_start[end] == '-') end += 1;

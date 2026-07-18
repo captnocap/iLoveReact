@@ -18,6 +18,7 @@
 //!   server.close();
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const netx = @import("netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
@@ -340,13 +341,13 @@ pub const HttpServer = struct {
         @memcpy(fs_path[root_len .. root_len + slen], suffix_to_use);
 
         // Read file
-        const file = std.fs.openFileAbsolute(fs_path[0 .. root_len + slen], .{}) catch {
+        const file = std.Io.Dir.openFileAbsolute(host_io.io(), fs_path[0 .. root_len + slen], .{}) catch {
             self.respondDirect(client, 404, "Not Found");
             return;
         };
-        defer file.close();
+        defer file.close(host_io.io());
         var body: [MAX_RESP]u8 = undefined;
-        const file_len = file.readAll(&body) catch {
+        const file_len = file.readPositionalAll(host_io.io(), &body, 0) catch {
             self.respondDirect(client, 500, "Read Error");
             return;
         };

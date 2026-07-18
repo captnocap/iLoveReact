@@ -12,6 +12,7 @@
 //! _set_port and runtime/hooks/useBrowse.ts on the JS side.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const netx = @import("netx.zig");
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
 
@@ -87,7 +88,7 @@ pub fn destroy() void {
         if (request_queue.push(sentinel)) {
             sent += 1;
         } else {
-            std.Thread.sleep(1_000_000);
+            host_io.sleep(1_000_000);
         }
     }
     for (0..MAX_WORKERS) |i| {
@@ -102,7 +103,7 @@ fn workerMain() void {
         const req = blk: {
             while (true) {
                 if (request_queue.pop()) |item| break :blk item;
-                std.Thread.sleep(2_000_000);
+                host_io.sleep(2_000_000);
             }
         };
         if (req.shutdown) return;
@@ -111,7 +112,7 @@ fn workerMain() void {
 
         const resp = executeRequest(req.id, body);
         while (!response_queue.push(resp)) {
-            std.Thread.sleep(1_000_000);
+            host_io.sleep(1_000_000);
         }
     }
 }

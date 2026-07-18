@@ -70,6 +70,12 @@ pub fn argsFree(alloc: std.mem.Allocator, slice: []const [:0]u8) void {
     alloc.free(@as([]const [:0]const u8, slice));
 }
 
+/// 0.15-shaped blocking sleep (std.Thread.sleep was deleted in 0.16).
+/// Uncancelable: nothing here uses async Io.
+pub fn sleep(nanoseconds: u64) void {
+    std.Io.sleep(io(), std.Io.Duration.fromNanoseconds(@intCast(nanoseconds)), .awake) catch {};
+}
+
 // ---- 0.15-shaped shims over the 0.16 Io clock ----
 // Wall-clock timestamps, signatures identical to the deleted std.time fns so
 // call sites are a pure rename. If one of these ever shows up hot in the

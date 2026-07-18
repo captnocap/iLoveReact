@@ -12,6 +12,7 @@
 //!   server.close();
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const netx = @import("netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): this file is part of the hand-rolled
 // nonblocking readiness loop and stays on raw posix-shaped syscalls via sysx
@@ -563,7 +564,7 @@ fn writeAllNonBlocking(stream: netx.Stream, data: []const u8) !void {
             if (err == error.WouldBlock) {
                 retries += 1;
                 if (retries > 1000) return err; // give up after ~100ms
-                std.Thread.sleep(100_000); // 100us
+                host_io.sleep(100_000); // 100us
                 continue;
             }
             return err;

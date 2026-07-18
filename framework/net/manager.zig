@@ -17,6 +17,7 @@
 //!   net.destroy();
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): readiness-loop layer, raw
 // posix-shaped syscalls via sysx. Do NOT migrate to std.Io.net.
 const sysx = @import("sysx.zig");
@@ -81,7 +82,7 @@ const Connection = struct {
     connect_done: bool = false,
     connect_ok: bool = false,
     generation: u32 = 0,
-    mutex: std.Thread.Mutex = .{},
+    mutex: host_io.Mutex = .{},
     // Connection params
     url: [MAX_URL]u8 = undefined,
     url_len: usize = 0,
@@ -280,7 +281,7 @@ pub fn destroy() void {
     // Best-effort wait for in-flight threads (max 5s)
     var wait_count: u32 = 0;
     while (@atomicLoad(u32, &active_workers, .seq_cst) > 0 and wait_count < 5000) : (wait_count += 1) {
-        std.Thread.sleep(1_000_000); // 1ms
+        host_io.sleep(1_000_000); // 1ms
     }
     initialized = false;
 }

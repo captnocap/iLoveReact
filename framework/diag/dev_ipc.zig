@@ -160,7 +160,7 @@ fn handleClient(client_fd: sysx.socket_t) !void {
         if (byte[0] == '\n') break;
     }
     if (header_len == 0 or header_buf[header_len - 1] != '\n') return error.BadHeader;
-    const header = std.mem.trimRight(u8, header_buf[0..header_len], "\r\n");
+    const header = std.mem.trimEnd(u8, header_buf[0..header_len], "\r\n");
 
     // Parse: "PUSH <name> <length>", "INFO", "NOTICE <length>", or diagnostics.
     var it = std.mem.tokenizeScalar(u8, header, ' ');

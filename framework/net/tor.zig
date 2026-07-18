@@ -13,6 +13,7 @@
 //!   tor.stop();
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const netx = @import("netx.zig");
 // ZIG_016_MIGRATION §6 exemption (door b): readiness-loop layer, raw
 // posix-shaped syscalls via sysx. Do NOT migrate to std.Io.net.
@@ -63,20 +64,20 @@ pub fn start(opts: TorOpts) !void {
     config_dir_len = dir.len;
 
     // Create directories
-    std.fs.makeDirAbsolute(dir) catch |err| {
+    std.Io.Dir.createDirAbsolute(host_io.io(), dir, .default_dir) catch |err| {
         if (err != error.PathAlreadyExists) {
             // Try creating parent first
             var parent_buf: [MAX_PATH]u8 = undefined;
             const parent = try std.fmt.bufPrint(&parent_buf, "{s}/.cache/reactjit-tor", .{home});
-            std.fs.makeDirAbsolute(parent) catch {};
-            std.fs.makeDirAbsolute(dir) catch {};
+            std.Io.Dir.makeDirAbsolute(host_io.io(), parent) catch {};
+            std.Io.Dir.createDirAbsolute(host_io.io(), dir, .default_dir) catch {};
         }
     };
 
     // Create hidden service directory
     var hs_dir_buf: [MAX_PATH]u8 = undefined;
     const hs_dir = try std.fmt.bufPrint(&hs_dir_buf, "{s}/hidden_service", .{dir});
-    std.fs.makeDirAbsolute(hs_dir) catch {};
+    std.Io.Dir.makeDirAbsolute(host_io.io(), hs_dir) catch {};
 
     // Generate torrc
     var torrc_path_buf: [MAX_PATH]u8 = undefined;
@@ -99,7 +100,7 @@ pub fn start(opts: TorOpts) !void {
     // Create data directory
     var data_dir_buf: [MAX_PATH]u8 = undefined;
     const data_dir = try std.fmt.bufPrint(&data_dir_buf, "{s}/data", .{dir});
-    std.fs.makeDirAbsolute(data_dir) catch {};
+    std.Io.Dir.makeDirAbsolute(host_io.io(), data_dir) catch {};
 
     // Spawn Tor process
     var child = std.process.Child.init(&[_][]const u8{ "tor", "-f", torrc_path }, std.heap.page_allocator);
@@ -123,11 +124,11 @@ pub fn getHostname() ?[]const u8 {
     var path_buf: [MAX_PATH]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/hidden_service/hostname", .{config_dir[0..config_dir_len]}) catch return null;
 
-    const file = std.fs.openFileAbsolute(path, .{}) catch return null;
-    defer file.close();
+    const file = std.Io.Dir.openFileAbsolute(host_io.io(), path, .{}) catch return null;
+    defer file.close(host_io.io());
 
     var buf: [MAX_HOSTNAME]u8 = undefined;
-    const n = file.readAll(&buf) catch return null;
+    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return null;
     if (n == 0) return null;
 
     // Strip trailing whitespace
@@ -159,8 +160,8 @@ pub fn isRunning() bool {
 pub fn stop() void {
     if (!running) return;
     if (pid) |*child| {
-        _ = child.kill() catch {};
-        _ = child.wait() catch {};
+        child.kill(host_io.io());
+        _ = child.wait(host_io.io()) catch {};
     }
     pid = null;
     running = false;

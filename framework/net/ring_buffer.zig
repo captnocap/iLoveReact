@@ -7,6 +7,7 @@
 //! mutex is correct and simple — contention is negligible at 60fps.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 
 pub fn RingBuffer(comptime T: type, comptime N: usize) type {
     return struct {
@@ -16,7 +17,7 @@ pub fn RingBuffer(comptime T: type, comptime N: usize) type {
         head: usize = 0,
         tail: usize = 0,
         count: usize = 0,
-        mutex: std.Thread.Mutex = .{},
+        mutex: host_io.Mutex = .{},
 
         /// Push an item. Returns false if full (caller should retry or drop).
         pub fn push(self: *Self, item: T) bool {

@@ -83,8 +83,8 @@ pub const WebSocket = struct {
 
         // Send HTTP upgrade request
         var writer_buf: [4096]u8 = undefined;
-        var stream_writer = stream.writer(&writer_buf);
-        const writer = &stream_writer.interface;
+        var stream_writer = std.Io.Writer.fixed(&writer_buf);
+        const writer = &stream_writer;
         try writer.print(
             "GET {s} HTTP/1.1\r\n" ++
                 "Host: {s}:{d}\r\n" ++
@@ -94,7 +94,7 @@ pub const WebSocket = struct {
                 "Sec-WebSocket-Key: {s}\r\n\r\n",
             .{ path, host, port, sec_key },
         );
-        try writer.flush();
+        try stream.writeAll(stream_writer.buffered());
 
         // Set socket to non-blocking for update() polling
         setNonBlocking(stream);
@@ -335,8 +335,8 @@ pub const WebSocket = struct {
 
     fn writeFrame(self: *WebSocket, opcode: Opcode, payload: []const u8) !void {
         var writer_buf: [4096]u8 = undefined;
-        var stream_writer = self.stream.writer(&writer_buf);
-        const writer = &stream_writer.interface;
+        var stream_writer = std.Io.Writer.fixed(&writer_buf);
+        const writer = &stream_writer;
 
         // FIN + opcode
         try writer.writeByte(0x80 | @as(u8, @intFromEnum(opcode)));
@@ -368,7 +368,7 @@ pub const WebSocket = struct {
             masked[i] = payload[i] ^ mask_key[i % 4];
         }
         try writer.writeAll(masked[0..len]);
-        try writer.flush();
+        try self.stream.writeAll(stream_writer.buffered());
     }
 };
 

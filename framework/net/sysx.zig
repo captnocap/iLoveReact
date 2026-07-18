@@ -39,11 +39,17 @@ pub const TCP = posix.TCP;
 pub const F = posix.F;
 pub const PATH_MAX = posix.PATH_MAX;
 pub const iovec_const = posix.iovec_const;
+pub const iovec = posix.iovec;
+pub const addrinfo = posix.addrinfo;
+pub const SetSockOptError = posix.SetSockOptError;
+const IOV_MAX = std.os.linux.IOV_MAX;
 pub const FD_CLOEXEC = posix.FD_CLOEXEC;
 pub const O = posix.O;
 pub const AT = posix.AT;
 pub const pid_t = posix.pid_t;
 pub const mode_t = posix.mode_t;
+pub const ReadError = posix.ReadError;
+pub const msghdr_const = posix.msghdr_const;
 pub const termios = posix.termios;
 pub const Sigaction = posix.Sigaction;
 pub const SIG = posix.SIG;
@@ -204,6 +210,130 @@ pub fn openZ(file_path: [*:0]const u8, flags: O, perm: mode_t) OpenError!fd_t {
     }
 }
 
+
+pub fn readv(fd: fd_t, iov: []const iovec) ReadError!usize {
+    if (native_os == .windows) {
+        // TODO improve this to use ReadFileScatter
+        if (iov.len == 0) return 0;
+        const first = iov[0];
+        return read(fd, first.base[0..first.len]);
+    }
+    if (native_os == .wasi and !builtin.link_libc) {
+        var nread: usize = undefined;
+        switch (wasi.fd_read(fd, iov.ptr, iov.len, &nread)) {
+            .SUCCESS => return nread,
+            .INTR => unreachable,
+            .INVAL => unreachable,
+            .FAULT => unreachable,
+            .AGAIN => unreachable, // currently not support in WASI
+            .BADF => return error.NotOpenForReading, // can be a race condition
+            .IO => return error.InputOutput,
+            .ISDIR => return error.IsDir,
+            .NOBUFS => return error.SystemResources,
+            .NOMEM => return error.SystemResources,
+            .NOTCONN => return error.SocketNotConnected,
+            .CONNRESET => return error.ConnectionResetByPeer,
+            .TIMEDOUT => return error.ConnectionTimedOut,
+            .NOTCAPABLE => return error.AccessDenied,
+            else => |err| return unexpectedErrno(err),
+        }
+    }
+
+    while (true) {
+        const rc = system.readv(fd, iov.ptr, @min(iov.len, IOV_MAX));
+        switch (errno(rc)) {
+            .SUCCESS => return @intCast(rc),
+            .INTR => continue,
+            .INVAL => unreachable,
+            .FAULT => unreachable,
+            .SRCH => return error.ProcessNotFound,
+            .AGAIN => return error.WouldBlock,
+            .BADF => return error.NotOpenForReading, // can be a race condition
+            .IO => return error.InputOutput,
+            .ISDIR => return error.IsDir,
+            .NOBUFS => return error.SystemResources,
+            .NOMEM => return error.SystemResources,
+            .NOTCONN => return error.SocketNotConnected,
+            .CONNRESET => return error.ConnectionResetByPeer,
+            .TIMEDOUT => return error.ConnectionTimedOut,
+            else => |err| return unexpectedErrno(err),
+        }
+    }
+}
+
+pub fn writev(fd: fd_t, iov: []const iovec_const) WriteError!usize {
+    if (native_os == .windows) {
+        // TODO improve this to use WriteFileScatter
+        if (iov.len == 0) return 0;
+        const first = iov[0];
+        return write(fd, first.base[0..first.len]);
+    }
+    if (native_os == .wasi and !builtin.link_libc) {
+        var nwritten: usize = undefined;
+        switch (wasi.fd_write(fd, iov.ptr, iov.len, &nwritten)) {
+            .SUCCESS => return nwritten,
+            .INTR => unreachable,
+            .INVAL => unreachable,
+            .FAULT => unreachable,
+            .AGAIN => unreachable,
+            .BADF => return error.NotOpenForWriting, // can be a race condition.
+            .DESTADDRREQ => unreachable, // `connect` was never called.
+            .DQUOT => return error.DiskQuota,
+            .FBIG => return error.FileTooBig,
+            .IO => return error.InputOutput,
+            .NOSPC => return error.NoSpaceLeft,
+            .PERM => return error.PermissionDenied,
+            .PIPE => return error.BrokenPipe,
+            .NOTCAPABLE => return error.AccessDenied,
+            else => |err| return unexpectedErrno(err),
+        }
+    }
+
+    while (true) {
+        const rc = system.writev(fd, iov.ptr, @min(iov.len, IOV_MAX));
+        switch (errno(rc)) {
+            .SUCCESS => return @intCast(rc),
+            .INTR => continue,
+            .INVAL => return error.InvalidArgument,
+            .FAULT => unreachable,
+            .SRCH => return error.ProcessNotFound,
+            .AGAIN => return error.WouldBlock,
+            .BADF => return error.NotOpenForWriting, // Can be a race condition.
+            .DESTADDRREQ => unreachable, // `connect` was never called.
+            .DQUOT => return error.DiskQuota,
+            .FBIG => return error.FileTooBig,
+            .IO => return error.InputOutput,
+            .NOSPC => return error.NoSpaceLeft,
+            .PERM => return error.PermissionDenied,
+            .PIPE => return error.BrokenPipe,
+            .CONNRESET => return error.ConnectionResetByPeer,
+            .BUSY => return error.DeviceBusy,
+            else => |err| return unexpectedErrno(err),
+        }
+    }
+}
+
+
+/// 0.16 dropped posix.fchmodat; the raw linux syscall survives. uds passes a
+/// path SLICE (0.15 posix.fchmodat took a slice) — null-terminate here.
+pub const FChmodAtError = error{ AccessDenied, NameTooLong, FileNotFound, SymLinkLoop, ReadOnlyFileSystem, NotDir, InvalidUtf8, BadPathName, Unexpected };
+pub fn fchmodat(dirfd: fd_t, path: []const u8, mode: mode_t, flags: u32) FChmodAtError!void {
+    var buf: [std.posix.PATH_MAX - 1:0]u8 = undefined;
+    if (path.len >= buf.len) return error.NameTooLong;
+    @memcpy(buf[0..path.len], path);
+    buf[path.len] = 0;
+    const rc = std.os.linux.fchmodat2(dirfd, &buf, mode, flags);
+    return switch (std.posix.errno(rc)) {
+        .SUCCESS => {},
+        .ACCES => error.AccessDenied,
+        .NAMETOOLONG => error.NameTooLong,
+        .NOENT => error.FileNotFound,
+        .LOOP => error.SymLinkLoop,
+        .ROFS => error.ReadOnlyFileSystem,
+        .NOTDIR => error.NotDir,
+        else => error.Unexpected,
+    };
+}
 
 /// 0.16 deleted std.posix.getenv; libc is always linked here.
 pub fn getenv(name: []const u8) ?[]const u8 {
