@@ -43,6 +43,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const host_io = @import("host_io.zig");
 const chunks = @import("game/map/chunks.zig");
 const engine = @import("game/map/engine.zig");
 const stamps = @import("game/map/stamps.zig");
@@ -630,8 +631,8 @@ fn hostSaveFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnF64(info, 0);
         return;
     }
-    if (std.fs.path.dirname(path)) |dir| std.fs.cwd().makePath(dir) catch {};
-    std.fs.cwd().writeFile(.{ .sub_path = path, .data = buf[0..n] }) catch {
+    if (std.fs.path.dirname(path)) |dir| std.Io.Dir.cwd().createDirPath(host_io.io(), dir) catch {};
+    std.Io.Dir.cwd().writeFile(host_io.io(), .{ .sub_path = path, .data = buf[0..n] }) catch {
         setReturnF64(info, 0);
         return;
     };
@@ -651,13 +652,13 @@ fn hostInspectFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         return;
     };
     defer alloc.free(path);
-    var file = std.fs.cwd().openFile(path, .{}) catch {
+    var file = std.Io.Dir.cwd().openFile(host_io.io(), path, .{}) catch {
         setReturnNull(info);
         return;
     };
-    defer file.close();
+    defer file.close(host_io.io());
     var prefix: [engine.store.INSPECT_PREFIX_BYTES]u8 = undefined;
-    const read = file.readAll(prefix[0..]) catch {
+    const read = file.readPositionalAll(host_io.io(), prefix[0..], 0) catch {
         setReturnNull(info);
         return;
     };
@@ -697,7 +698,7 @@ fn hostLoadFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     defer alloc.free(path);
-    const bytes = std.fs.cwd().readFileAlloc(alloc, path, MAX_MAP_FILE_BYTES) catch {
+    const bytes = std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, alloc, .limited(MAX_MAP_FILE_BYTES)) catch {
         setReturnF64(info, 0);
         return;
     };

@@ -4,6 +4,7 @@
 //! thread alone publishes completed row sets into retained scene nodes.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const layout = @import("../layout.zig");
 const foliage = @import("../world/foliage.zig");
 const map_paint = @import("../game/map/engine.zig");
@@ -179,7 +180,7 @@ pub const FoliageSnapSlot = struct {
 /// renderer displays one set while the worker fills the other.
 pub const FoliageRowSet = struct {
     rows: [PAINT_FOLIAGE_FAMILY_COUNT]?[]f32 = @splat(null),
-    segs: [PAINT_FOLIAGE_FAMILY_COUNT]std.ArrayListUnmanaged(layout.InstanceSegment) = @splat(.{}),
+    segs: [PAINT_FOLIAGE_FAMILY_COUNT]std.ArrayListUnmanaged(layout.InstanceSegment) = @splat(.empty),
 };
 
 pub const FoliageJob = struct {
@@ -205,34 +206,34 @@ pub const FoliageResult = struct {
 /// when fully idle, so snapshot/row-set ownership never overlaps between
 /// the main thread and the worker.
 pub const FoliageMailbox = struct {
-    mutex: std.Thread.Mutex = .{},
-    cond: std.Thread.Condition = .{},
+    mutex: std.Io.Mutex = .init,
+    cond: std.Io.Condition = .init,
     pending: ?FoliageJob = null,
     result: ?FoliageResult = null,
     working: bool = false,
     shutdown: bool = false,
 
     pub fn idle(self: *FoliageMailbox) bool {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(host_io.io());
+        defer self.mutex.unlock(host_io.io());
         return self.pending == null and !self.working and self.result == null;
     }
 
     pub fn submit(self: *FoliageMailbox, job: FoliageJob) bool {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(host_io.io());
+        defer self.mutex.unlock(host_io.io());
         if (self.shutdown) return false;
         if (self.pending != null or self.working or self.result != null) return false;
         self.pending = job;
-        self.cond.signal();
+        self.cond.signal(host_io.io());
         return true;
     }
 
     /// Worker-only blocking take. `null` means shutdown.
     pub fn waitTake(self: *FoliageMailbox) ?FoliageJob {
-        self.mutex.lock();
-        defer self.mutex.unlock();
-        while (self.pending == null and !self.shutdown) self.cond.wait(&self.mutex);
+        self.mutex.lockUncancelable(host_io.io());
+        defer self.mutex.unlock(host_io.io());
+        while (self.pending == null and !self.shutdown) self.cond.waitUncancelable(host_io.io(), &self.mutex);
         if (self.shutdown) return null;
         const job = self.pending.?;
         self.pending = null;
@@ -241,25 +242,25 @@ pub const FoliageMailbox = struct {
     }
 
     pub fn publish(self: *FoliageMailbox, result: FoliageResult) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(host_io.io());
+        defer self.mutex.unlock(host_io.io());
         self.working = false;
         if (!self.shutdown) self.result = result;
     }
 
     pub fn poll(self: *FoliageMailbox) ?FoliageResult {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(host_io.io());
+        defer self.mutex.unlock(host_io.io());
         const out = self.result;
         self.result = null;
         return out;
     }
 
     pub fn stop(self: *FoliageMailbox) void {
-        self.mutex.lock();
+        self.mutex.lockUncancelable(host_io.io());
         self.shutdown = true;
-        self.cond.signal();
-        self.mutex.unlock();
+        self.cond.signal(host_io.io());
+        self.mutex.unlock(host_io.io());
     }
 };
 

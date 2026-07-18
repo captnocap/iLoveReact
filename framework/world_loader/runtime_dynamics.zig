@@ -3,6 +3,7 @@
 //! Operations are generic over the retained Runtime shape to keep ownership in runtime.zig.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 const constructor = @import("../world/constructor.zig");
@@ -181,7 +182,7 @@ pub fn stepTraffic(self: anytype, dt: f32) void {
     // [traffic-diag req_2056] RJIT_TRAFFICLOG=1 prints the emit counts + vehicle 0's
     // first box row (world pos/scale/color) ONCE, mid-capture — proves the per-frame
     // transform produces sane, colored, sized instances.
-    if (self.frame == 5 and std.posix.getenv("RJIT_TRAFFICLOG") != null) {
+    if (self.frame == 5 and host_io.getenv("RJIT_TRAFFICLOG") != null) {
         log.print("[traffic] frame5 emit box={d} cyl={d} sph={d}\n", .{ box_n, cyl_n, sph_n });
         if (box_n > 0) {
             const o: usize = 0;

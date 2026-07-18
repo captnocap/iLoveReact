@@ -6,6 +6,11 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const host_io = struct {
+    fn io() std.Io {
+        return std.Io.Threaded.global_single_threaded.io();
+    }
+};
 
 pub const ProcStatus = struct {
     rss_bytes: u64 = 0,
@@ -105,9 +110,9 @@ pub fn parseMemInfo(text: []const u8) MemInfo {
 
 fn readFileInto(comptime path: []const u8, buf: []u8) ?[]const u8 {
     if (comptime builtin.os.tag != .linux) return null;
-    var file = std.fs.openFileAbsolute(path, .{}) catch return null;
-    defer file.close();
-    const n = file.read(buf) catch return null;
+    var file = std.Io.Dir.openFileAbsolute(host_io.io(), path, .{}) catch return null;
+    defer file.close(host_io.io());
+    const n = file.readStreaming(host_io.io(), &.{buf}) catch return null;
     return buf[0..n];
 }
 

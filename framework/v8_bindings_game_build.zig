@@ -251,8 +251,7 @@ var catalog_json_buf: [24576]u8 = undefined;
 
 fn hostCatalogRows(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    var stream = std.io.fixedBufferStream(&catalog_json_buf);
-    const w = stream.writer();
+    var w = std.Io.Writer.fixed(&catalog_json_buf);
     w.writeByte('[') catch return setReturnString(info, "[]");
     for (build.BUILD_CATALOG, 0..) |e, i| {
         if (i != 0) w.writeByte(',') catch return setReturnString(info, "[]");
@@ -276,7 +275,7 @@ fn hostCatalogRows(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         }) catch return setReturnString(info, "[]");
     }
     w.writeByte(']') catch return setReturnString(info, "[]");
-    setReturnString(info, stream.getWritten());
+    setReturnString(info, w.buffered());
 }
 
 pub fn registerGameBuild(_: anytype) void {

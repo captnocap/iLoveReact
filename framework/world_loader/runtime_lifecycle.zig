@@ -3,6 +3,7 @@
 //! Operations are generic over the retained Runtime shape to keep ownership in runtime.zig.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const material_tex = @import("../gpu/material_tex.zig");
 const decal_raster = @import("../gpu/decal_raster.zig");
 const layout = @import("../layout.zig");
@@ -44,11 +45,11 @@ pub fn initInPlace(self: anytype, allocator: std.mem.Allocator, path: []const u8
     };
     defer allocator.free(bytes);
 
-    var store = std.fs.cwd().makeOpenPath(store_dir, .{}) catch |err| {
+    var store = std.Io.Dir.cwd().createDirPathOpen(host_io.io(), store_dir, .{}) catch |err| {
         log.print("[loader] cannot open content store {s}: {any}\n", .{ store_dir, err });
         return err;
     };
-    defer store.close();
+    defer store.close(host_io.io());
 
     const scene = constructor.construct(allocator, bytes, store) catch |err| {
         log.print("[loader] construct FAILED: {any}\n", .{err});
@@ -64,7 +65,7 @@ pub fn initInPlace(self: anytype, allocator: std.mem.Allocator, path: []const u8
     // WALLHIDE req_2053: RJIT_HIDE_WALLS=1 seeds the editor's "disable walls" so a headless
     // `rjit game shot` exercises the collapse (the door is otherwise only called from the
     // editor build pane). Diagnostic knob in the RJIT_STREAM / RJIT_COLLIDERLOG family.
-    if (std.posix.getenv("RJIT_HIDE_WALLS")) |v| {
+    if (host_io.getenv("RJIT_HIDE_WALLS")) |v| {
         if (v.len > 0 and v[0] == '1') {
             setHideWalls(node_id, true);
             log.print("[loader] RJIT_HIDE_WALLS=1 — walls collapsed (interior-edit view)\n", .{});

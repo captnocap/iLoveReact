@@ -16,6 +16,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const log = @import("../diag/log.zig");
+const host_io = @import("../host_io.zig");
+const sysx = @import("../net/sysx.zig");
 
 const is_macos = builtin.os.tag == .macos;
 
@@ -51,8 +53,8 @@ const FD_CLOEXEC: c_int = 1;
 fn cloexecPipe(fds: *[2]c_int) c_int {
     if (is_macos) {
         if (pipe(fds) != 0) return -1;
-        _ = std.posix.fcntl(fds[0], std.posix.F.SETFD, FD_CLOEXEC) catch {};
-        _ = std.posix.fcntl(fds[1], std.posix.F.SETFD, FD_CLOEXEC) catch {};
+        _ = sysx.fcntl(fds[0], sysx.F.SETFD, @intCast(FD_CLOEXEC)) catch {};
+        _ = sysx.fcntl(fds[1], sysx.F.SETFD, @intCast(FD_CLOEXEC)) catch {};
         return 0;
     } else {
         return pipe2(fds, O_CLOEXEC);
@@ -124,7 +126,7 @@ pub const Process = struct {
                 for (0..200) |_| {
                     ret = waitpid(self.pid, &status, WNOHANG);
                     if (ret != 0) break;
-                    std.Thread.sleep(1 * std.time.ns_per_ms);
+                    std.Io.sleep(host_io.io(), .fromNanoseconds(std.time.ns_per_ms), .awake) catch return;
                 }
                 if (ret == 0) {
                     // Force kill
@@ -334,12 +336,12 @@ pub fn spawnPiped(opts: PipedSpawnOptions) !PipedProcess {
     }
     if (opts.pipe_stdout) {
         _ = close(out_pipe[1]);
-        _ = std.posix.fcntl(out_pipe[0], std.posix.F.SETFL, O_NONBLOCK) catch 0;
+        _ = sysx.fcntl(out_pipe[0], sysx.F.SETFL, @intCast(O_NONBLOCK)) catch 0;
         result.stdout_fd = out_pipe[0];
     }
     if (opts.pipe_stderr) {
         _ = close(err_pipe[1]);
-        _ = std.posix.fcntl(err_pipe[0], std.posix.F.SETFL, O_NONBLOCK) catch 0;
+        _ = sysx.fcntl(err_pipe[0], sysx.F.SETFL, @intCast(O_NONBLOCK)) catch 0;
         result.stderr_fd = err_pipe[0];
     }
     return result;
@@ -431,7 +433,7 @@ pub fn killAll() void {
     }
 
     // Brief wait
-    std.Thread.sleep(200 * std.time.ns_per_ms);
+    std.Io.sleep(host_io.io(), .fromNanoseconds(200 * std.time.ns_per_ms), .awake) catch return;
 
     // SIGKILL survivors
     for (0..reg_count) |i| {
@@ -453,7 +455,7 @@ pub fn cleanup() void {
     const path = registryPath() orelse return;
     // Use std.fs since we just need to delete a file
     const slice = registry_path_buf[0..registry_path_len];
-    std.fs.deleteFileAbsolute(slice) catch {};
+    std.Io.Dir.deleteFileAbsolute(host_io.io(), slice) catch {};
     _ = path;
 }
 

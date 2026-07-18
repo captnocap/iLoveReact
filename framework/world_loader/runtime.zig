@@ -110,7 +110,7 @@ pub const Runtime = struct {
     // geom keys ("{meshKey}:base" / ":slot-N", the SAME keys the baked slotted draw interns)
     // are built ONCE and cached here, keyed by (meshHash<<32 | slotCode), never re-allocPrinted
     // per frame. Freed at teardown.
-    live_slot_keys: std.AutoHashMapUnmanaged(u64, []u8) = .{},
+    live_slot_keys: std.AutoHashMapUnmanaged(u64, []u8) = .empty,
     // Per cooked/imported mesh: its connected-component collision islands (req_1624),
     // computed once and shared by the static + windowed collider builds.
     mesh_prop_islands: []const []MeshIsland = &.{},
@@ -152,7 +152,7 @@ pub const Runtime = struct {
     /// these parallel slices preserve transient state across live-ref rebuilds.
     live_cooked_doors: []CookedDoor = &.{},
     live_cooked_door_states: []live_mesh_doors.State = &.{},
-    live_cooked_door_by_identity: std.AutoHashMapUnmanaged(u64, usize) = .{},
+    live_cooked_door_by_identity: std.AutoHashMapUnmanaged(u64, usize) = .empty,
     /// Live LED tickers (req_0893 #3): one MUTABLE instances node per ticker,
     /// whose lit-LED instance data we rebuild each frame as the scroll offset
     /// advances (the elevator-car live-node pattern, instanced). Buffers are
@@ -195,7 +195,7 @@ pub const Runtime = struct {
     // "once one X exists, the next is a reference to it" — instanced rendering). The
     // editor pushes (meshKeyHash, x,y,z,yaw) per placement; applyLiveMeshProps appends a
     // mesh-prop draw node per ref each frame, resolving the hash to a loaded mesh. No bake.
-    mesh_by_hash: std.AutoHashMapUnmanaged(u32, usize) = .{},
+    mesh_by_hash: std.AutoHashMapUnmanaged(u32, usize) = .empty,
     mesh_hash_built: bool = false,
     // FULLRES req_1909/1911/1912: the editor's "fat & loaded" residency. The /editor route
     // pushes the WHOLE cooked-asset catalog (a MESH_PROPS lump, meshes only) so every compiled
@@ -204,18 +204,18 @@ pub const Runtime = struct {
     // meshForHash resolves a live ref against baked first, then this resident set. Decoded once
     // per pushed generation (applyResidentMeshes), owned, freed on replace/unmount.
     resident: ?constructor.MeshProps = null,
-    resident_by_hash: std.AutoHashMapUnmanaged(u32, usize) = .{},
+    resident_by_hash: std.AutoHashMapUnmanaged(u32, usize) = .empty,
     applied_resident_gen: u64 = 0,
     // Live editor face-skins (LIVESKIN req_1843): a procedural skin the editor pushes is
     // materialized once into a "live-mat:<hash>" tile; this maps its hash → that owned key
     // string (presence = already materialized). A live mesh ref carrying mat_hash wears it.
-    live_mat_keys: std.AutoHashMapUnmanaged(u32, []u8) = .{},
+    live_mat_keys: std.AutoHashMapUnmanaged(u32, []u8) = .empty,
     // RESKIN req_1845: a re-skinned EXISTING prop renders live with its new skin, but its
     // STALE baked copy must hide or the two z-fight. Each baked mesh-prop instance's node
     // range is keyed by world position; a live ref coincident with it hides that range for
     // the frame. hidden_baked tracks what we hid so the next frame restores it first.
-    baked_by_pos: std.AutoHashMapUnmanaged(u64, BakedRange) = .{},
-    hidden_baked: std.ArrayListUnmanaged(BakedRange) = .{},
+    baked_by_pos: std.AutoHashMapUnmanaged(u64, BakedRange) = .empty,
+    hidden_baked: std.ArrayListUnmanaged(BakedRange) = .empty,
     // DIRTYRECT req_1891/1892: erase the baked geometry a moved/deleted piece left
     // behind WITHOUT a rebake (the editor pushes the old-footprint rects). baked_mesh_list
     // is every baked mesh-prop's world pos + node range (so a rect can hide the ones inside
@@ -223,8 +223,8 @@ pub const Runtime = struct {
     // collapsed BOX row's original scale so a changed rect set restores it first; the box
     // batches re-upload in place via the node version. applied_erase_gen tracks the last
     // pushed rect generation so the GPU re-upload happens once per edit, not per frame.
-    baked_mesh_list: std.ArrayListUnmanaged(BakedMeshPos) = .{},
-    erased_rows: std.ArrayListUnmanaged(ErasedRow) = .{},
+    baked_mesh_list: std.ArrayListUnmanaged(BakedMeshPos) = .empty,
+    erased_rows: std.ArrayListUnmanaged(ErasedRow) = .empty,
     applied_erase_gen: u64 = 0,
     // DIRTYRECT (streaming): bumped when a stream family's rows are collapsed; refreshStreamNodes
     // stamps it as each streamed static node's instance version so the edited families re-upload.
@@ -235,13 +235,13 @@ pub const Runtime = struct {
     // *_gen counters re-run the collapse only when the toggle flips OR an erase pass restored a row
     // a wall pass had hidden (so the two never fight). The GPU cost (re-upload) is paid once per flip.
     hide_walls: bool = false,
-    wall_collapsed_rows: std.ArrayListUnmanaged(ErasedRow) = .{},
+    wall_collapsed_rows: std.ArrayListUnmanaged(ErasedRow) = .empty,
     applied_wall_gen: u64 = 0,
     wall_seen_erase_gen: u64 = 0,
     // LIVEBLDSKIN req_1849: per-frame instance rows for live procedurally-skinned building-
     // piece faces (textured cubes outset to cover the baked face-slab). Pre-sized each frame
     // so the node slices into it stay stable while kid_list grows.
-    skin_box_buf: std.ArrayListUnmanaged(f32) = .{},
+    skin_box_buf: std.ArrayListUnmanaged(f32) = .empty,
     // Node count of the permanent (non-streaming, non-live-mesh) prefix — captured in
     // build(). The non-streaming path truncates back to here before re-appending the live
     // mesh nodes each frame (streaming truncates to stream_tail_start in refreshStreamNodes).
@@ -294,8 +294,8 @@ pub const Runtime = struct {
     /// terrain move; preview rows only when the snapped hover/draft changes.
     transport_committed_kid: ?usize = null,
     transport_preview_kid: ?usize = null,
-    transport_committed_rows: std.ArrayListUnmanaged(f32) = .{},
-    transport_preview_rows: std.ArrayListUnmanaged(f32) = .{},
+    transport_committed_rows: std.ArrayListUnmanaged(f32) = .empty,
+    transport_preview_rows: std.ArrayListUnmanaged(f32) = .empty,
     transport_committed_revision: u64 = 0,
     transport_draft_revision: u64 = 0,
     transport_preview_active: bool = false,

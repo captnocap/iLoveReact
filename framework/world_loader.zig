@@ -23,6 +23,11 @@
 //!     ZIGOS_SCREENSHOT_FRAMES=8 ./zig-out/bin/world_loader [game-file.b64]
 
 const std = @import("std");
+const host_io = struct {
+    fn getenv(name: [:0]const u8) ?[]const u8 {
+        return if (std.c.getenv(name.ptr)) |p| std.mem.span(p) else null;
+    }
+};
 const c = @import("c.zig").imports;
 const wgpu = @import("wgpu");
 const gpu = @import("gpu/gpu.zig");
@@ -182,7 +187,7 @@ pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32,
     // [live-diag req_1812] RJIT_LIVE_PROBE=1: inject ONE bright box at the camera's look
     // target so a headless shot proves whether the live overlay RENDERS at all (isolates
     // the Zig draw path from the JS push). Only when nothing real is set for this node.
-    if (std.posix.getenv("RJIT_LIVE_PROBE") != null) {
+    if (host_io.getenv("RJIT_LIVE_PROBE") != null) {
         const cur = pendingLiveFor(node.id);
         if (cur == null or cur.?.count == 0) {
             const lk = runtime.camera.ext_look;
@@ -316,7 +321,7 @@ pub fn main(init: std.process.Init) !void {
     }
     defer c.SDL_Quit();
 
-    const headless = std.posix.getenv("ZIGOS_HEADLESS") != null;
+    const headless = host_io.getenv("ZIGOS_HEADLESS") != null;
     const flags: u64 = if (headless) c.SDL_WINDOW_HIDDEN else 0;
     const window = c.SDL_CreateWindow("world_loader", WIN_W, WIN_H, flags) orelse {
         log.print("[loader] SDL_CreateWindow failed\n", .{});

@@ -23,6 +23,7 @@
 
 const std = @import("std");
 const onnx = @import("onnx.zig");
+const host_io = @import("../host_io.zig");
 // Use onnx.c (shared cimport) so OrtApi/OrtValue/etc match the types
 // returned by onnx.api() and other helpers. A second @cImport here would
 // generate distinct-but-identical Zig types and break every cross-module
@@ -106,7 +107,7 @@ fn freeHandle(id: u32, alloc: std.mem.Allocator) void {
 /// the encoder doesn't exist (user needs to download). Caller frees both
 /// returned slices.
 fn modelPaths(alloc: std.mem.Allocator) ?struct { enc: []u8, dec: []u8 } {
-    const home = std.posix.getenv("HOME") orelse return null;
+    const home = host_io.getenv("HOME") orelse return null;
     const dir = std.fmt.allocPrint(alloc, "{s}/.reactjit/models", .{home}) catch return null;
     defer alloc.free(dir);
     const enc = std.fmt.allocPrint(alloc, "{s}/slimsam_encoder.onnx", .{dir}) catch return null;
@@ -115,7 +116,7 @@ fn modelPaths(alloc: std.mem.Allocator) ?struct { enc: []u8, dec: []u8 } {
         return null;
     };
     // Sanity check at least encoder exists.
-    std.fs.cwd().access(enc, .{}) catch {
+    std.Io.Dir.cwd().access(host_io.io(), enc, .{}) catch {
         alloc.free(enc);
         alloc.free(dec);
         return null;

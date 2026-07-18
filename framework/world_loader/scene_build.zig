@@ -3,6 +3,7 @@
 //! Operations are generic over the retained Runtime shape to keep ownership in runtime.zig.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 const constructor = @import("../world/constructor.zig");
@@ -259,7 +260,7 @@ pub fn build(self: anytype) !void {
     var spawn = chooseSpawn(self.insts, self.inst_count, self.piece_count, self.stride, bounds);
     // [traffic-diag req_2056] RJIT_TRAFFIC_SPAWN=1 drops the player onto the
     // first baked vehicle's route so a headless shot frames moving traffic.
-    if (std.posix.getenv("RJIT_TRAFFIC_SPAWN") != null) {
+    if (host_io.getenv("RJIT_TRAFFIC_SPAWN") != null) {
         if (self.scene.traffic) |tr| {
             if (tr.vehicles.len > 0 and tr.vehicles[0].route.len >= 2) {
                 const veh = tr.vehicles[0];
@@ -955,7 +956,7 @@ pub fn build(self: anytype) !void {
             }
         }
         self.traffic_path_count = pi;
-        self.traffic_paths_on = std.posix.getenv("RJIT_TRAFFICPATHS") != null;
+        self.traffic_paths_on = host_io.getenv("RJIT_TRAFFICPATHS") != null;
         self.traffic_path_node = self.kid_list.items.len;
         try self.kid_list.append(self.allocator, .{
             .scene3d_mesh = true,

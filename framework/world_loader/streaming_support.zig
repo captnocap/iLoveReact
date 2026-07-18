@@ -3,6 +3,7 @@
 //! Contains partitioning tunables and immutable row/range records, not runtime ownership.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const constructor = @import("../world/constructor.zig");
 const material_tex = @import("../gpu/material_tex.zig");
 const config = @import("config.zig");
@@ -28,14 +29,14 @@ pub const CUTOUT_STENCIL_MARKER = "D[10u + cy * igw + cx]";
 pub const StreamMode = enum { off, auto, force };
 
 pub fn streamModeFromEnv() StreamMode {
-    const s = std.posix.getenv("RJIT_STREAM") orelse return .auto;
+    const s = host_io.getenv("RJIT_STREAM") orelse return .auto;
     if (s.len == 0) return .auto;
     if (std.mem.eql(u8, s, "0") or std.ascii.eqlIgnoreCase(s, "off")) return .off;
     return .force;
 }
 
 pub fn streamRadiusFromEnv() f32 {
-    const s = std.posix.getenv("RJIT_STREAM_RADIUS") orelse return STREAM_DETAIL_RADIUS_METERS;
+    const s = host_io.getenv("RJIT_STREAM_RADIUS") orelse return STREAM_DETAIL_RADIUS_METERS;
     const v = std.fmt.parseFloat(f32, s) catch return STREAM_DETAIL_RADIUS_METERS;
     return clamp(v, 64.0, 4096.0);
 }

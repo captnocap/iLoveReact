@@ -25,6 +25,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const host_io = @import("host_io.zig");
 const codec = @import("image/codec.zig");
 const quantize = @import("image/quantize.zig");
 
@@ -309,9 +310,9 @@ fn writeFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         const path = argStringAlloc(info, 0) orelse break :blk false;
         defer alloc.free(path);
         const bytes = argView(info, 1) orelse break :blk false;
-        const f = std.fs.cwd().createFile(path, .{ .truncate = true }) catch break :blk false;
-        defer f.close();
-        f.writeAll(bytes) catch break :blk false;
+        const f = std.Io.Dir.cwd().createFile(host_io.io(), path, .{ .truncate = true }) catch break :blk false;
+        defer f.close(host_io.io());
+        f.writeStreamingAll(host_io.io(), bytes) catch break :blk false;
         break :blk true;
     };
     info.getReturnValue().set(v8.Boolean.init(info.getIsolate(), ok));

@@ -1,6 +1,7 @@
 //! Game-file input compatibility boundary.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const RJMP_MAGIC = @import("config.zig").RJMP_MAGIC;
 
 pub fn loadGameFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
@@ -8,7 +9,7 @@ pub fn loadGameFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     // procedural scale lab (`rjit game play --massive --blocks N`), where the
     // instance buffer alone can run to hundreds of MB — we want the test to probe
     // the GPU/physics limit, not an artificial I/O wall.
-    const raw = try std.fs.cwd().readFileAlloc(allocator, path, 256 << 20);
+    const raw = try std.Io.Dir.cwd().readFileAlloc(host_io.io(), path, allocator, .limited(256 << 20));
     if (raw.len >= 4 and std.mem.readInt(u32, raw[0..4], .little) == RJMP_MAGIC) return raw;
     defer allocator.free(raw);
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");

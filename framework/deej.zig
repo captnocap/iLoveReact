@@ -19,6 +19,8 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const host_io = @import("host_io.zig");
+const sysx = @import("net/sysx.zig");
 
 const MAX_SLIDERS: usize = 16;
 const MAX_EVENTS: usize = 128;
@@ -102,7 +104,7 @@ pub fn poll() u32 {
     const fd = S.fd orelse return queuedCount();
     var buf: [512]u8 = undefined;
     while (true) {
-        const n = std.posix.read(fd, &buf) catch |e| switch (e) {
+        const n = sysx.read(fd, &buf) catch |e| switch (e) {
             error.WouldBlock => break,
             else => {
                 disconnect();
@@ -128,7 +130,7 @@ pub fn eventJson(ev: DeejEvent, buf: []u8) []const u8 {
 }
 
 pub fn stateJson(buf: []u8) []const u8 {
-    var w = std.io.Writer.fixed(buf);
+    var w = std.Io.Writer.fixed(buf);
     w.print("{{\"connected\":{},\"port\":\"{s}\",\"count\":{d},\"values\":[", .{
         S.fd != null, S.port[0..S.port_len], S.count,
     }) catch return "{}";
@@ -145,7 +147,7 @@ pub fn stateJson(buf: []u8) []const u8 {
 // ── internals ──────────────────────────────────────────────
 
 fn disconnect() void {
-    if (S.fd) |fd| std.posix.close(fd);
+    if (S.fd) |fd| sysx.close(fd);
     S.fd = null;
     S.line_len = 0;
     S.seen_line = false;
@@ -153,7 +155,7 @@ fn disconnect() void {
 
 fn tryOpen() bool {
     if (S.explicit_len > 0) return openPort(S.explicit[0..S.explicit_len]);
-    if (std.posix.getenv("RJIT_DEEJ_PORT")) |env_port| {
+    if (host_io.getenv("RJIT_DEEJ_PORT")) |env_port| {
         if (env_port.len > 0) return openPort(env_port);
     }
     const candidates = [_][]const u8{
@@ -168,9 +170,9 @@ fn tryOpen() bool {
 
 fn openPort(path: []const u8) bool {
     if (path.len >= MAX_PORT) return false;
-    const fd = std.posix.open(path, .{ .ACCMODE = .RDONLY, .NONBLOCK = true, .NOCTTY = true }, 0) catch return false;
+    const fd = sysx.open(path, .{ .ACCMODE = .RDONLY, .NONBLOCK = true, .NOCTTY = true }, 0) catch return false;
     if (!configureSerial(fd, S.baud)) {
-        std.posix.close(fd);
+        sysx.close(fd);
         return false;
     }
     S.fd = fd;
@@ -196,7 +198,7 @@ fn speedFor(baud: u32) std.posix.speed_t {
 /// tcgetattr fails on anything else, which is what makes the autodetect
 /// scan safe.
 fn configureSerial(fd: std.posix.fd_t, baud: u32) bool {
-    var tio = std.posix.tcgetattr(fd) catch return false;
+    var tio = sysx.tcgetattr(fd) catch return false;
     const spd = speedFor(baud);
     tio.iflag = .{};
     tio.oflag = .{};
@@ -215,7 +217,7 @@ fn configureSerial(fd: std.posix.fd_t, baud: u32) bool {
     tio.cc[@intFromEnum(std.os.linux.V.TIME)] = 0;
     tio.ispeed = spd;
     tio.ospeed = spd;
-    std.posix.tcsetattr(fd, .NOW, tio) catch return false;
+    sysx.tcsetattr(fd, .NOW, tio) catch return false;
     return true;
 }
 

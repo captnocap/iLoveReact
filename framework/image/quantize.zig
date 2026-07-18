@@ -80,7 +80,7 @@ pub fn quantize(alloc: std.mem.Allocator, rgba: []const u8, w: u32, h: u32, max_
         n_opaque += 1;
     }
 
-    var palette = std.ArrayListUnmanaged([3]u8){};
+    var palette: std.ArrayListUnmanaged([3]u8) = .empty;
     errdefer palette.deinit(alloc);
 
     if (n_opaque == 0) {
@@ -93,7 +93,7 @@ pub fn quantize(alloc: std.mem.Allocator, rgba: []const u8, w: u32, h: u32, max_
     const work = opaque_px[0..n_opaque];
 
     // Median cut: repeatedly split the box with the widest channel range.
-    var boxes = std.ArrayListUnmanaged(Box){};
+    var boxes: std.ArrayListUnmanaged(Box) = .empty;
     defer boxes.deinit(alloc);
     try boxes.append(alloc, .{ .start = 0, .len = n_opaque });
     while (boxes.items.len < max_colors) {

@@ -4,6 +4,7 @@
 //! reconcile one slot into an explicit runtime at the frame boundary.
 
 const std = @import("std");
+const host_io = @import("../host_io.zig");
 const constructor = @import("../world/constructor.zig");
 const game_physics = @import("../game/physics.zig");
 const instance_collider_policy = @import("../world/instance_collider_policy.zig");
@@ -267,7 +268,7 @@ fn setLiveMeshPropsWire(node_id: u32, bytes: []const u8, header_bytes: usize) vo
     // buffer with a cursor into an ArrayList instead of a fixed divide. A malformed tail
     // (header runs past the buffer) just stops the walk — never reads out of bounds.
     const v2 = header_bytes == LIVE_MESH_HEADER_BYTES_V2;
-    var built: std.ArrayListUnmanaged(LiveMeshRef) = .{};
+    var built: std.ArrayListUnmanaged(LiveMeshRef) = .empty;
     var off: usize = 0;
     while (off + header_bytes <= bytes.len) {
         const mat_count = std.mem.bytesToValue(u32, bytes[off + header_bytes - 4 ..][0..4]);
@@ -324,7 +325,7 @@ pub const LiveMat = struct { hash: u32, kind: u32, wgsl: []u8, data: []f32, opac
 pub const PendingLiveMats = struct {
     node_id: u32 = 0,
     set: bool = false,
-    mats: std.ArrayListUnmanaged(LiveMat) = .{},
+    mats: std.ArrayListUnmanaged(LiveMat) = .empty,
 };
 var g_pending_live_mats: [MAX_EMBEDDED_LOADERS]PendingLiveMats = [_]PendingLiveMats{.{}} ** MAX_EMBEDDED_LOADERS;
 
@@ -672,7 +673,7 @@ pub fn applyPendingLive(runtime: anytype) void {
     runtime.live_gen = p.gen;
     // [live-diag req_1812] RJIT_LIVELOG=1: prove the overlay applies + dump the first row,
     // so an invisible placed piece is diagnosed (0 rows? off-screen? zero scale?).
-    if (std.posix.getenv("RJIT_LIVELOG") != null) {
+    if (host_io.getenv("RJIT_LIVELOG") != null) {
         if (p.count > 0) {
             log.print("[live] kid={d} count={d} gen={d} row0 pos=({d:.1},{d:.1},{d:.1}) scale=({d:.1},{d:.1},{d:.1}) col=({d:.2},{d:.2},{d:.2})\n", .{
                 kid, p.count, p.gen, p.rows[0], p.rows[1], p.rows[2], p.rows[6], p.rows[7], p.rows[8], p.rows[9], p.rows[10], p.rows[11],
@@ -892,7 +893,7 @@ pub fn applyLiveColliders(runtime: anytype, comptime live_scene: type) void {
     // Successful rebuilds are routine projection traffic, not warnings. Keep
     // the detail behind the same opt-in diagnostic used by the live overlay;
     // allocation failures and clipping remain unconditionally loud above.
-    if (std.posix.getenv("RJIT_LIVELOG") != null) {
+    if (host_io.getenv("RJIT_LIVELOG") != null) {
         log.print("[live] colliders folded: {d} base + {d} live rects, {d} base + {d} live oriented, {d} live door(s)\n", .{ runtime.base_rect_count, live_rect_count, runtime.base_oriented_count, live_oriented_count, runtime.live_cooked_doors.len });
     }
 }

@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const constructor = @import("../world/constructor.zig");
+const host_io = @import("../host_io.zig");
 const geometry = @import("geometry.zig");
 const log = std.debug;
 const buildCube = geometry.buildCube;
@@ -81,7 +82,7 @@ pub fn setPendingPlayerModel(verts_bytes: []const u8, table_bytes: []const u8) v
     defer alloc.free(table);
     @memcpy(std.mem.sliceAsBytes(table), table_bytes[0 .. rows * 8 * 4]);
 
-    var groups = std.ArrayListUnmanaged(constructor.PlayerModelGroup){};
+    var groups: std.ArrayListUnmanaged(constructor.PlayerModelGroup) = .empty;
     var r: usize = 0;
     while (r < rows) : (r += 1) {
         const row = table[r * 8 ..][0..8];
@@ -178,7 +179,7 @@ pub fn setPendingPlayerAnimation(bytes: []const u8) void {
     const clip_count: usize = @intFromFloat(@max(0.0, data[1]));
     if (node_count == 0 or clip_count == 0) return;
 
-    var clips = std.ArrayListUnmanaged(constructor.PlayerAnimationClip){};
+    var clips: std.ArrayListUnmanaged(constructor.PlayerAnimationClip) = .empty;
     var at: usize = 2;
     var ci: usize = 0;
     decode: while (ci < clip_count) : (ci += 1) {
@@ -188,7 +189,7 @@ pub fn setPendingPlayerAnimation(bytes: []const u8) void {
         const looping = data[at + 2] != 0;
         const key_count: usize = @intFromFloat(@max(0.0, data[at + 3]));
         at += 4;
-        var keys = std.ArrayListUnmanaged(constructor.PlayerAnimationKeyframe){};
+        var keys: std.ArrayListUnmanaged(constructor.PlayerAnimationKeyframe) = .empty;
         var ki: usize = 0;
         while (ki < key_count) : (ki += 1) {
             if (at + 1 + node_count * 9 > data.len) {
@@ -279,7 +280,7 @@ pub fn pendingPlayerAnimationCopy(allocator: std.mem.Allocator, model_len: usize
 var g_force_gait: ?bool = null;
 pub fn forceGaitEnv() bool {
     if (g_force_gait) |v| return v;
-    const s = std.posix.getenv("RJIT_FORCE_GAIT");
+    const s = host_io.getenv("RJIT_FORCE_GAIT");
     const v = s != null and s.?.len > 0 and s.?[0] == '1';
     g_force_gait = v;
     return v;

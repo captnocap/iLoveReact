@@ -184,7 +184,7 @@ pub fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_
     errdefer frond.deinit(allocator);
     var palmtrunks: std.ArrayList(f32) = .empty;
     errdefer palmtrunks.deinit(allocator);
-    var wrapped: [foliage.WRAPPED_SPECIES_COUNT]std.ArrayList(f32) = @splat(.{});
+    var wrapped: [foliage.WRAPPED_SPECIES_COUNT]std.ArrayList(f32) = @splat(.empty);
     errdefer for (&wrapped) |*rows| rows.deinit(allocator);
     var box_count: u32 = 0;
     var box_open_run_min_count: u32 = 0;
@@ -400,7 +400,7 @@ pub fn buildMaterialBatches(allocator: std.mem.Allocator, insts: []const f32, in
     // One row list per (material, shape) — lists[mat * SLOTS + shape].
     var lists = try allocator.alloc(std.ArrayList(f32), mat_count * MATERIAL_SHAPE_SLOTS);
     defer allocator.free(lists);
-    for (lists) |*l| l.* = .{};
+    for (lists) |*l| l.* = .empty;
     defer for (lists) |*l| l.deinit(allocator);
 
     var row: usize = 0;

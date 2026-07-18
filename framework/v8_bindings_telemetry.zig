@@ -1,4 +1,5 @@
 const std = @import("std");
+const host_io = @import("host_io.zig");
 const v8 = @import("v8");
 const v8rt = @import("v8_runtime.zig");
 // Frame telemetry counters — were housed in qjs_runtime.zig, now in
@@ -131,7 +132,11 @@ fn appendJsonEscaped(out: *std.ArrayList(u8), alloc: std.mem.Allocator, s: []con
         '\n' => try out.appendSlice(alloc, "\\n"),
         '\r' => try out.appendSlice(alloc, "\\r"),
         '\t' => try out.appendSlice(alloc, "\\t"),
-        0...8, 11, 12, 14...31 => try out.writer(alloc).print("\\u{x:0>4}", .{ch}),
+        0...8, 11, 12, 14...31 => {
+            var escaped_buf: [6]u8 = undefined;
+            const escaped = try std.fmt.bufPrint(&escaped_buf, "\\u{x:0>4}", .{ch});
+            try out.appendSlice(alloc, escaped);
+        },
         else => try out.append(alloc, ch),
     };
     try out.append(alloc, '"');
@@ -739,11 +744,11 @@ fn ptyCwdCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
                 return;
             };
             var cwd_buf: [4096]u8 = undefined;
-            const cwd = std.posix.readlink(path, &cwd_buf) catch {
+            const cwd_len = std.Io.Dir.readLinkAbsolute(host_io.io(), path, &cwd_buf) catch {
                 setStringReturn(info, "");
                 return;
             };
-            setStringReturn(info, cwd);
+            setStringReturn(info, cwd_buf[0..cwd_len]);
             return;
         }
     }
@@ -753,9 +758,9 @@ fn ptyCwdCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 fn readProcField(pid: u32, field: []const u8, buf: []u8) ![]const u8 {
     var path_buf: [256]u8 = undefined;
     const path = try std.fmt.bufPrintZ(&path_buf, "/proc/{d}/{s}", .{ pid, field });
-    var file = std.fs.openFileAbsoluteZ(path, .{}) catch return error.NotFound;
-    defer file.close();
-    const n = file.readAll(buf) catch return error.NotFound;
+    var file = std.Io.Dir.openFileAbsolute(host_io.io(), path, .{}) catch return error.NotFound;
+    defer file.close(host_io.io());
+    const n = file.readPositionalAll(host_io.io(), buf, 0) catch return error.NotFound;
     var slice = buf[0..n];
     while (slice.len > 0 and (slice[slice.len - 1] == '\n' or slice[slice.len - 1] == 0)) {
         slice = slice[0 .. slice.len - 1];
@@ -775,15 +780,15 @@ fn getProcessesJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
         return;
     };
 
-    var proc_dir = std.fs.openDirAbsolute("/proc", .{ .iterate = true }) catch {
+    var proc_dir = std.Io.Dir.openDirAbsolute(host_io.io(), "/proc", .{ .iterate = true }) catch {
         setStringReturn(info, "[]");
         return;
     };
-    defer proc_dir.close();
+    defer proc_dir.close(host_io.io());
 
     var it = proc_dir.iterate();
     var first = true;
-    while (it.next() catch null) |entry| {
+    while (it.next(host_io.io()) catch null) |entry| {
         if (entry.kind != .directory) continue;
         const pid = std.fmt.parseInt(u32, entry.name, 10) catch continue;
 
@@ -792,17 +797,19 @@ fn getProcessesJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 
         var task_path_buf: [256]u8 = undefined;
         const task_path = std.fmt.bufPrintZ(&task_path_buf, "/proc/{d}/task", .{pid}) catch continue;
-        var task_dir = std.fs.openDirAbsoluteZ(task_path, .{ .iterate = true }) catch continue;
-        defer task_dir.close();
+        var task_dir = std.Io.Dir.openDirAbsolute(host_io.io(), task_path, .{ .iterate = true }) catch continue;
+        defer task_dir.close(host_io.io());
         var nthreads: u32 = 0;
         var tit = task_dir.iterate();
-        while (tit.next() catch null) |tentry| {
+        while (tit.next(host_io.io()) catch null) |tentry| {
             if (tentry.kind == .directory) nthreads += 1;
         }
 
         if (!first) list.append(alloc, ',') catch break;
         first = false;
-        list.writer(alloc).print("{{\"pid\":{d},\"nthreads\":{d},\"name\":", .{ pid, nthreads }) catch break;
+        var prefix_buf: [64]u8 = undefined;
+        const prefix = std.fmt.bufPrint(&prefix_buf, "{{\"pid\":{d},\"nthreads\":{d},\"name\":", .{ pid, nthreads }) catch break;
+        list.appendSlice(alloc, prefix) catch break;
         appendJsonEscaped(&list, alloc, name) catch break;
         list.append(alloc, '}') catch break;
     }
@@ -816,10 +823,10 @@ const ThreadStat = struct { core: i32 = -1, cputime: u64 = 0 };
 fn readThreadStat(pid: u32, tid: u32) ThreadStat {
     var stat_path_buf: [256]u8 = undefined;
     const stat_path = std.fmt.bufPrintZ(&stat_path_buf, "/proc/{d}/task/{d}/stat", .{ pid, tid }) catch return .{};
-    var file = std.fs.openFileAbsoluteZ(stat_path, .{}) catch return .{};
-    defer file.close();
+    var file = std.Io.Dir.openFileAbsolute(host_io.io(), stat_path, .{}) catch return .{};
+    defer file.close(host_io.io());
     var buf: [1024]u8 = undefined;
-    const n = file.readAll(&buf) catch return .{};
+    const n = file.readPositionalAll(host_io.io(), &buf, 0) catch return .{};
     const data = buf[0..n];
     const rparen = std.mem.lastIndexOfScalar(u8, data, ')') orelse return .{};
     var rest = data[rparen + 1 ..];
@@ -866,23 +873,23 @@ fn getThreadsJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         setStringReturn(info, "[]");
         return;
     };
-    var task_dir = std.fs.openDirAbsoluteZ(task_path, .{ .iterate = true }) catch {
+    var task_dir = std.Io.Dir.openDirAbsolute(host_io.io(), task_path, .{ .iterate = true }) catch {
         setStringReturn(info, "[]");
         return;
     };
-    defer task_dir.close();
+    defer task_dir.close(host_io.io());
 
     var it = task_dir.iterate();
     var first = true;
-    while (it.next() catch null) |entry| {
+    while (it.next(host_io.io()) catch null) |entry| {
         if (entry.kind != .directory) continue;
         const tid = std.fmt.parseInt(u32, entry.name, 10) catch continue;
         var comm_path_buf: [256]u8 = undefined;
         const comm_path = std.fmt.bufPrintZ(&comm_path_buf, "/proc/{d}/task/{d}/comm", .{ pid, tid }) catch continue;
-        var file = std.fs.openFileAbsoluteZ(comm_path, .{}) catch continue;
-        defer file.close();
+        var file = std.Io.Dir.openFileAbsolute(host_io.io(), comm_path, .{}) catch continue;
+        defer file.close(host_io.io());
         var name_buf: [256]u8 = undefined;
-        const n = file.readAll(&name_buf) catch continue;
+        const n = file.readPositionalAll(host_io.io(), &name_buf, 0) catch continue;
         var name = name_buf[0..n];
         while (name.len > 0 and (name[name.len - 1] == '\n' or name[name.len - 1] == 0)) {
             name = name[0 .. name.len - 1];
@@ -890,7 +897,9 @@ fn getThreadsJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         const tstat = readThreadStat(pid, tid);
         if (!first) list.append(alloc, ',') catch break;
         first = false;
-        list.writer(alloc).print("{{\"tid\":{d},\"core\":{d},\"cpu\":{d},\"name\":", .{ tid, tstat.core, tstat.cputime }) catch break;
+        var prefix_buf: [96]u8 = undefined;
+        const prefix = std.fmt.bufPrint(&prefix_buf, "{{\"tid\":{d},\"core\":{d},\"cpu\":{d},\"name\":", .{ tid, tstat.core, tstat.cputime }) catch break;
+        list.appendSlice(alloc, prefix) catch break;
         appendJsonEscaped(&list, alloc, name) catch break;
         list.append(alloc, '}') catch break;
     }
@@ -902,13 +911,13 @@ fn getThreadsJsonCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 fn getCoreCountCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     var count: u32 = 0;
-    var cpu_dir = std.fs.openDirAbsolute("/sys/devices/system/cpu", .{ .iterate = true }) catch {
+    var cpu_dir = std.Io.Dir.openDirAbsolute(host_io.io(), "/sys/devices/system/cpu", .{ .iterate = true }) catch {
         setNumberReturn(info, 1);
         return;
     };
-    defer cpu_dir.close();
+    defer cpu_dir.close(host_io.io());
     var it = cpu_dir.iterate();
-    while (it.next() catch null) |entry| {
+    while (it.next(host_io.io()) catch null) |entry| {
         if (entry.kind != .directory) continue;
         if (entry.name.len < 4) continue;
         if (!std.mem.startsWith(u8, entry.name, "cpu")) continue;

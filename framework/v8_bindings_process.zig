@@ -439,10 +439,10 @@ fn parseFirstU64(line: []const u8) u64 {
 fn systemMemTotal() u64 {
     if (g_mem_total > 0) return g_mem_total;
     if (comptime builtin.os.tag != .linux) return 0;
-    var file = std.fs.openFileAbsolute("/proc/meminfo", .{}) catch return 0;
-    defer file.close();
+    var file = std.Io.Dir.openFileAbsolute(host_io.io(), "/proc/meminfo", .{}) catch return 0;
+    defer file.close(host_io.io());
     var buf: [4096]u8 = undefined;
-    const n = file.read(&buf) catch return 0;
+    const n = file.readStreaming(host_io.io(), &.{&buf}) catch return 0;
     var line_iter = std.mem.splitScalar(u8, buf[0..n], '\n');
     while (line_iter.next()) |line| {
         if (std.mem.startsWith(u8, line, "MemTotal:")) {
@@ -465,10 +465,10 @@ fn readProcSample(pid: c_int) ?ProcSample {
     var rss: u64 = 0;
     var vsize: u64 = 0;
     {
-        var file = std.fs.openFileAbsolute(status_path, .{}) catch return null;
-        defer file.close();
+        var file = std.Io.Dir.openFileAbsolute(host_io.io(), status_path, .{}) catch return null;
+        defer file.close(host_io.io());
         var buf: [8192]u8 = undefined;
-        const n = file.read(&buf) catch return null;
+        const n = file.readStreaming(host_io.io(), &.{&buf}) catch return null;
         var line_iter = std.mem.splitScalar(u8, buf[0..n], '\n');
         while (line_iter.next()) |line| {
             if (std.mem.startsWith(u8, line, "VmRSS:")) rss = parseFirstU64(line) * 1024 else if (std.mem.startsWith(u8, line, "VmSize:")) vsize = parseFirstU64(line) * 1024;
@@ -482,10 +482,10 @@ fn readProcSample(pid: c_int) ?ProcSample {
     var utime: u64 = 0;
     var stime: u64 = 0;
     {
-        var file = std.fs.openFileAbsolute(stat_path, .{}) catch return null;
-        defer file.close();
+        var file = std.Io.Dir.openFileAbsolute(host_io.io(), stat_path, .{}) catch return null;
+        defer file.close(host_io.io());
         var buf: [4096]u8 = undefined;
-        const n = file.read(&buf) catch return null;
+        const n = file.readStreaming(host_io.io(), &.{&buf}) catch return null;
         const slice = buf[0..n];
         const close_paren = std.mem.lastIndexOfScalar(u8, slice, ')') orelse return null;
         var p = close_paren + 1;

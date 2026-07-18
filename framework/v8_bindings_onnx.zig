@@ -23,6 +23,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const host_io = @import("host_io.zig");
 const onnx = @import("ml/onnx.zig");
 const segment = @import("ml/segment.zig");
 const pose = @import("ml/pose.zig");
@@ -190,15 +191,15 @@ fn parseOpts(json: []const u8) segment.RefineOpts {
 /// as single-byte UTF-8 — the cart's JS side knows how to read this format
 /// (same encoding as cart/cutout/magick.ts:encodeMaskPGM).
 fn writeMaskPGM(path: []const u8, mask: []const u8, w: u32, h: u32) bool {
-    std.fs.cwd().makePath(std.fs.path.dirname(path) orelse ".") catch {};
-    var file = std.fs.cwd().createFile(path, .{ .truncate = true }) catch return false;
-    defer file.close();
+    std.Io.Dir.cwd().createDirPath(host_io.io(), std.fs.path.dirname(path) orelse ".") catch {};
+    var file = std.Io.Dir.cwd().createFile(host_io.io(), path, .{ .truncate = true }) catch return false;
+    defer file.close(host_io.io());
     var hdr_buf: [64]u8 = undefined;
     const hdr = std.fmt.bufPrint(&hdr_buf, "P5\n{d} {d}\n1\n", .{ w, h }) catch return false;
-    file.writeAll(hdr) catch return false;
+    file.writeStreamingAll(host_io.io(), hdr) catch return false;
     // segment.refineSegment returns 1=in-selection (erased), 0=keep. Our
     // P5 maxval=1 convention is identical — write the bytes as-is.
-    file.writeAll(mask) catch return false;
+    file.writeStreamingAll(host_io.io(), mask) catch return false;
     return true;
 }
 

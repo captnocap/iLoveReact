@@ -19,6 +19,10 @@ const mapfile = gamefile.mapfile;
 // codec; decoding here, in the game host that links stb, is the path that works.
 const c = @import("../c.zig").imports;
 
+fn io() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
+
 pub const Error = gamefile.Error || error{
     NoMapTiles,
     UnsupportedTileEncoding,
@@ -2080,10 +2084,10 @@ fn streamReferences(stream: gamefile.Stream, key: u32) bool {
     return false;
 }
 
-fn readInstalledAsset(allocator: std.mem.Allocator, file: gamefile.GameFile, store_dir: std.fs.Dir, key: u32) Error!?[]u8 {
+fn readInstalledAsset(allocator: std.mem.Allocator, file: gamefile.GameFile, store_dir: std.Io.Dir, key: u32) Error!?[]u8 {
     const hash = file.assetHashForKey(key) orelse return null;
     const hex = std.fmt.bytesToHex(hash, .lower);
-    return store_dir.readFileAlloc(allocator, hex[0..], 64 << 20) catch return Error.MissingAsset;
+    return store_dir.readFileAlloc(io(), hex[0..], allocator, .limited(64 << 20)) catch return Error.MissingAsset;
 }
 
 /// A BLANK scene — the paint-first editor's empty canvas (BLANKBOOT req_2490).
@@ -2130,7 +2134,7 @@ pub fn blankScene() Scene {
 /// against `store_dir`, then decode the map stream's tile grid. The asset
 /// vocabulary is installed/verified as a side effect (the gate must pass before
 /// anything is composed).
-pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std.fs.Dir) Error!Scene {
+pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std.Io.Dir) Error!Scene {
     const file = try gamefile.readGameFile(allocator, bytes);
     defer file.deinit(allocator);
 
